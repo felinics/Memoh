@@ -7,24 +7,26 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/runtimefence"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // agentStepCommitter bridges Twilight's complete-step barrier to history
 // persistence. It is intentionally enabled only for admitted, fenced turns;
 // legacy calls and replacement flows keep their terminal-snapshot behavior.
 type agentStepCommitter struct {
-	service   *Service
-	req       ChatRequest
-	rc        resolvedContext
-	persister messagepkg.AgentStepPersister
+	service         *Service
+	req             ChatRequest
+	rc              resolvedContext
+	persister       messagepkg.AgentStepPersister
+	reasoningTiming *reasoningTimingTracker
 
 	mu                   sync.Mutex
 	turnRequestMessageID string
 	persisted            []messagepkg.Message
+	memoryPersisted      []messagepkg.Message
 	messages             []ModelMessage
 	nextStep             int // In-process ordering guard, not a durable replay cursor.
 	commitErr            error
@@ -72,6 +74,11 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		return errors.New("agent step is missing")
 	}
 	messages := sdkMessagesToModelMessages(step.Messages)
+	timingState := "completed"
+	if interrupted {
+		timingState = "interrupted"
+	}
+	reasoningTiming := c.reasoningTiming.take(timingState)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -98,7 +105,11 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	// Outbound assets are linked once after the stream closes; including the
 	// collector in every step would attach the same accumulated assets again.
 	storeReq.OutboundAssetCollector = nil
-	opts := storeRoundOptions{AllowPendingToolCalls: step.DeferredToolApproval != nil}
+	opts := storeRoundOptions{
+		AllowPendingToolCalls: step.DeferredToolApproval != nil,
+		ContextLifecycle:      c.rc.runConfig.ContextLifecycle,
+		ReasoningTiming:       reasoningTiming,
+	}
 	if interrupted {
 		opts.MessageMetadataByIndex = make(map[int]map[string]any)
 		for i, message := range messages {
@@ -107,6 +118,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 			}
 		}
 	}
+	opts = opts.withContextLifecycleMetadata(c.service.logger, storeReq, messages)
 	inputs, err := c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 	if err != nil {
 		return fail(err)
@@ -120,6 +132,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	if err != nil {
 		return fail(err)
 	}
+	c.rc.runConfig.ContextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
 	c.nextStep++
 	for _, message := range persisted {
 		if strings.EqualFold(strings.TrimSpace(message.Role), "user") {
@@ -130,6 +143,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	if !interrupted {
 		// Unfinished reasoning/text is history context, not a fact source for
 		// asynchronous long-term memory extraction.
+		c.memoryPersisted = append(c.memoryPersisted, persisted...)
 		c.messages = append(c.messages, messages...)
 	}
 	return nil
@@ -155,6 +169,7 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	}
 	c.finalized = true
 	persisted := append([]messagepkg.Message(nil), c.persisted...)
+	memoryPersisted := append([]messagepkg.Message(nil), c.memoryPersisted...)
 	messages := append([]ModelMessage(nil), c.messages...)
 	c.mu.Unlock()
 	if len(persisted) == 0 {
@@ -167,8 +182,8 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	if c.req.OutboundAssetCollector != nil {
 		c.service.LinkOutboundAssets(ctx, c.req.BotID, c.req.ThreadID, outboundAssetRefsToMessageRefs(c.req.OutboundAssetCollector()))
 	}
-	if !c.req.SkipMemoryExtraction {
-		go c.service.storeMemory(ctx, c.req, messages, roundSourceRefs(c.req, persisted))
+	if !c.req.SkipMemoryExtraction && len(memoryPersisted) == len(messages) && len(memoryPersisted) > 0 {
+		go c.service.storeMemory(ctx, c.req, memoryPersisted)
 	}
 	if inputTokens > 0 {
 		go c.service.maybeCompact(ctx, c.req, c.rc, inputTokens)

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // fakeLedger is an in-memory ledger with the same guarantees the PostgreSQL
@@ -188,9 +188,17 @@ func (f *fakeLedger) Finalize(_ context.Context, params ledger.FinalizeParams) (
 	if !ok || run.FencingToken != params.FencingToken || run.State.Terminal() {
 		return ledger.Run{}, false, nil
 	}
-	run.State = params.State
-	run.ErrorCode = params.ErrorCode
-	run.ErrorMessage = params.ErrorMessage
+	state := params.State
+	errorCode := params.ErrorCode
+	errorMessage := params.ErrorMessage
+	if state == ledger.StateLost && !run.AbortRequestedAt.IsZero() {
+		state = ledger.StateAborted
+		errorCode = ""
+		errorMessage = ""
+	}
+	run.State = state
+	run.ErrorCode = errorCode
+	run.ErrorMessage = errorMessage
 	f.finalized = append(f.finalized, params)
 	return *run, true, nil
 }

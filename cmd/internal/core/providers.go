@@ -19,82 +19,81 @@ import (
 	"go.uber.org/fx"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/acl"
-	acpprofileadapter "github.com/memohai/memoh/internal/agent/adapter/acpprofile"
-	acpsessionadapter "github.com/memohai/memoh/internal/agent/adapter/acpsession"
-	channelcontactadapter "github.com/memohai/memoh/internal/agent/adapter/channelcontact"
-	channelidentityadapter "github.com/memohai/memoh/internal/agent/adapter/channelidentity"
-	channelmessagingadapter "github.com/memohai/memoh/internal/agent/adapter/channelmessaging"
-	channelthreadadapter "github.com/memohai/memoh/internal/agent/adapter/channelthread"
-	"github.com/memohai/memoh/internal/agent/application"
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	agentpayload "github.com/memohai/memoh/internal/agent/event/payload"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/agent/turn"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/botbackup"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/connectors"
-	ctr "github.com/memohai/memoh/internal/container"
-	containerprovider "github.com/memohai/memoh/internal/container/provider"
-	"github.com/memohai/memoh/internal/contextview"
-	"github.com/memohai/memoh/internal/db"
-	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
-	hookspkg "github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/logger"
-	"github.com/memohai/memoh/internal/mcp"
-	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
-	"github.com/memohai/memoh/internal/media"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
-	memmem0 "github.com/memohai/memoh/internal/memory/adapters/mem0"
-	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
-	"github.com/memohai/memoh/internal/memory/memllm"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
-	"github.com/memohai/memoh/internal/memory/wikistore"
-	"github.com/memohai/memoh/internal/messaging"
-	"github.com/memohai/memoh/internal/models"
-	netctl "github.com/memohai/memoh/internal/network"
-	netoverlay "github.com/memohai/memoh/internal/network/overlay"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/providertemplates"
-	"github.com/memohai/memoh/internal/registry"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/storage/providers/containerfs"
-	"github.com/memohai/memoh/internal/storage/providers/fallback"
-	"github.com/memohai/memoh/internal/storage/providers/localfs"
-	"github.com/memohai/memoh/internal/team"
-	"github.com/memohai/memoh/internal/userruntime"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/workdir"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/acl"
+	acpprofileadapter "github.com/felinics/memoh/internal/agent/adapter/acpprofile"
+	acpsessionadapter "github.com/felinics/memoh/internal/agent/adapter/acpsession"
+	channelcontactadapter "github.com/felinics/memoh/internal/agent/adapter/channelcontact"
+	channelidentityadapter "github.com/felinics/memoh/internal/agent/adapter/channelidentity"
+	channelmessagingadapter "github.com/felinics/memoh/internal/agent/adapter/channelmessaging"
+	channelthreadadapter "github.com/felinics/memoh/internal/agent/adapter/channelthread"
+	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	agentpayload "github.com/felinics/memoh/internal/agent/event/payload"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/turn"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/boot"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/botbackup"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/connectors"
+	ctr "github.com/felinics/memoh/internal/container"
+	containerprovider "github.com/felinics/memoh/internal/container/provider"
+	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/db"
+	pgvectordb "github.com/felinics/memoh/internal/db/pgvector"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	"github.com/felinics/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/handlers"
+	hookspkg "github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/logger"
+	"github.com/felinics/memoh/internal/mcp"
+	mcpfederation "github.com/felinics/memoh/internal/mcp/sources/federation"
+	"github.com/felinics/memoh/internal/media"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
+	memmem0 "github.com/felinics/memoh/internal/memory/adapters/mem0"
+	memopenviking "github.com/felinics/memoh/internal/memory/adapters/openviking"
+	"github.com/felinics/memoh/internal/memory/memllm"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
+	"github.com/felinics/memoh/internal/memory/wikistore"
+	"github.com/felinics/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/models"
+	netctl "github.com/felinics/memoh/internal/network"
+	netoverlay "github.com/felinics/memoh/internal/network/overlay"
+	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/providertemplates"
+	"github.com/felinics/memoh/internal/registry"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/storage/providers/containerfs"
+	"github.com/felinics/memoh/internal/storage/providers/fallback"
+	"github.com/felinics/memoh/internal/storage/providers/localfs"
+	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/userruntime"
+	videopkg "github.com/felinics/memoh/internal/video"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -231,6 +230,24 @@ func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore) 
 	return accounts.NewService(log, accountStore)
 }
 
+func provideSettingsService(
+	log *slog.Logger,
+	queries dbstore.Queries,
+	aclService *acl.Service,
+	networkService *netctl.Service,
+	modelsService *models.Service,
+	botAgentsService *botagents.Service,
+) *settings.Service {
+	service := settings.NewService(log, queries, aclService, networkService)
+	service.SetReasoningOptionsResolver(modelsService)
+	service.SetBotAgents(botAgentsService)
+	return service
+}
+
+func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries) *botagents.Service {
+	return botagents.NewService(log, queries)
+}
+
 // provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
 // so FX can inject nil-safe into providers that may run without a wiki store.
 func provideWikiStore(postgresStore *postgresstore.Store) (*wikistore.Store, error) {
@@ -317,14 +334,8 @@ func (p nativeWorkspaceBridgeProvider) MCPClient(ctx context.Context, botID stri
 	return p.manager.NativeMCPClient(ctx, botID)
 }
 
-func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProvider {
-	return pluginspkg.BridgeProvider{Provider: provider}
-}
-
-func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
-	service := hookspkg.NewService(log, provider)
-	service.SetPluginService(pluginService)
-	return service
+func provideHooksService(log *slog.Logger, provider bridge.Provider) *hookspkg.Service {
+	return hookspkg.NewService(log, provider)
 }
 
 func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, remote *workspace.RemoteWorkspaceService) (*workspace.Manager, error) {
@@ -403,10 +414,6 @@ func provideScheduleTriggerer(service *application.Service) schedule.Triggerer {
 	return application.NewScheduleGateway(service)
 }
 
-func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer {
-	return application.NewHeartbeatGateway(service)
-}
-
 type sessionCreatorAdapter struct {
 	svc      *sessionpkg.Service
 	workdirs *workdir.Service
@@ -430,6 +437,7 @@ func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessio
 func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec schedule.SessionSpec) (string, error) {
 	input := sessionpkg.CreateInput{
 		BotID:           spec.BotID,
+		BotAgentID:      spec.BotAgentID,
 		Type:            sessionpkg.TypeSchedule,
 		Title:           spec.Title,
 		CreatedByUserID: spec.OwnerUserID,
@@ -463,10 +471,6 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 	return sess.ID, nil
 }
 
-func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
-}
-
 func provideScheduleSessionCreator(sessionService *sessionpkg.Service, workdirService *workdir.Service) schedule.SessionCreator {
 	return &sessionCreatorAdapter{svc: sessionService, workdirs: workdirService}
 }
@@ -478,6 +482,7 @@ func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hooks
 		Logger:             log,
 		Limits:             agentLimitsFromConfig(cfg.Agent),
 		ContextViewApplier: contextview.ProviderRunConfigApplier(log),
+		LoopReselectMode:   agentLoopReselectModeFromConfig(log, cfg.Agent),
 	})
 }
 
@@ -487,6 +492,14 @@ func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
 		cfg.ToolOutputMaxLines,
 		cfg.SystemFilesMaxBytes,
 	)
+}
+
+func agentLoopReselectModeFromConfig(log *slog.Logger, cfg config.AgentConfig) native.LoopReselectMode {
+	mode, recognized := cfg.EffectiveContextLoopReselectMode()
+	if !recognized {
+		log.Warn("unrecognized agent.context_loop_reselect value; defaulting to active", slog.String("value", cfg.ContextLoopReselect))
+	}
+	return native.LoopReselectMode(mode)
 }
 
 func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
@@ -518,12 +531,18 @@ func injectBotConnectorLifecycle(botService *bots.Service, connectorService *con
 	botService.SetConnectorLifecycle(connectorService)
 }
 
+func injectBotContainerLifecycle(botService *bots.Service, manager *workspace.Manager) {
+	botService.SetContainerLifecycle(manager)
+}
+
 func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
+	pool.SetSessionRuntime(sessionRuntime)
+	pool.SetSessionStateStore(acpsessionadapter.NewStateStore(queries))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
@@ -542,8 +561,9 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service) *application.Service {
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, cfg config.Config) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
+	service.SetContextAbsoluteMaxTokens(cfg.Agent.EffectiveContextAbsoluteMaxTokens())
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
 	// Every turn entry point goes through admission, so a service without it can
 	// start nothing: this is the thread's single-run guarantee, not an add-on.
@@ -598,10 +618,9 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
-	h.SetPluginService(pluginService)
 	return h
 }
 
@@ -775,12 +794,16 @@ func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.
 	return media.NewService(log, storageProvider)
 }
 
-func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPCodexOAuthHandler {
-	return handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.ACPCodexOAuthHandler {
+	handler := handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
+	handler.SetRuntimeResetService(acpPool)
+	return handler
 }
 
-func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPClaudeCodeOAuthHandler {
-	return handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.ACPClaudeCodeOAuthHandler {
+	handler := handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
+	handler.SetRuntimeResetService(acpPool)
+	return handler
 }
 
 func provideAudioRegistry() *audiopkg.Registry {
@@ -878,12 +901,8 @@ func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 	})
 }
 
-func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			return heartbeatService.Bootstrap(ctx)
-		},
-	})
+func injectScheduleBotAgents(scheduleService *schedule.Service, botAgentsService *botagents.Service) {
+	scheduleService.SetBotAgents(botAgentsService)
 }
 
 func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {

@@ -13,9 +13,10 @@
       </h2>
     </section>
 
-    <SettingsSection>
+    <SettingsSection :title="isGenericACP ? t('bots.settings.acpLaunchSection') : undefined">
       <div class="space-y-5 p-4">
         <SegmentedControl
+          v-if="!isGenericACP"
           :model-value="agent.setup_mode"
           :items="setupModeItems"
           :aria-label="$t('bots.settings.acpSetupMode')"
@@ -23,140 +24,196 @@
           @update:model-value="(mode) => setSetupMode(String(mode))"
         />
 
-        <template v-if="agent.setup_mode !== 'self'">
-          <div
-            v-if="isCodex && agent.setup_mode === 'oauth'"
-            class="space-y-3"
-          >
-            <div
-              class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <p
-                class="min-w-0 flex-1 text-sm"
-                :class="codexOAuthTextClass()"
-              >
-                {{ codexOAuthStatusText() }}
-              </p>
-              <div class="flex shrink-0 flex-wrap items-center gap-2">
-                <Button
-                  v-if="codexDevicePending"
-                  type="button"
-                  variant="ghost"
-                  @click="handleCancelCodexDeviceAuthorization"
-                >
-                  {{ $t('common.cancel') }}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  :disabled="codexAuthorizing"
-                  :loading="authorizingCodexOAuth"
-                  @click="handleAuthorize"
-                >
-                  {{ $t('bots.settings.acpOAuthAuthorizeCodex') }}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  :disabled="codexAuthorizing"
-                  :loading="authorizingCodexDevice"
-                  @click="handleAuthorizeDevice"
-                >
-                  {{ $t('bots.settings.acpCodexDeviceAuthorize') }}
-                </Button>
-              </div>
-            </div>
+        <!-- OAuth 模式下这里可能一个托管字段都不剩(Codex),空的字段栈会白占一格
+             space-y —— 有字段才渲染。 -->
+        <AcpManagedFields
+          v-if="agent.setup_mode !== 'self' && visibleManagedFields.length > 0"
+          :profile="profile"
+          :managed="agent.managed"
+          :fields="visibleManagedFields"
+          settings-mode
+          @field-commit="commitForm"
+        />
 
-            <div
-              v-if="codexDevicePanelSession"
-              class="space-y-3 rounded-md bg-accent p-3"
-            >
-              <p class="text-sm text-muted-foreground">
-                {{ $t('bots.settings.acpCodexDeviceHint') }}
-              </p>
-              <div
-                v-if="codexDeviceVerificationReady"
-                class="space-y-1"
-              >
-                <div class="text-sm font-medium">
-                  {{ $t('provider.oauth.deviceVerificationUri') }}
-                </div>
-                <code class="block break-all rounded-md bg-background px-2 py-1 text-sm select-all">{{ codexDevicePanelSession?.verification_url }}</code>
-              </div>
-              <div
-                v-if="codexDeviceVerificationReady"
-                class="space-y-1"
-              >
-                <div class="text-sm font-medium">
-                  {{ $t('provider.oauth.deviceUserCode') }}
-                </div>
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <code class="block min-w-0 flex-1 rounded-md bg-background px-2 py-1 font-mono text-sm select-all">{{ codexDevicePanelSession?.user_code }}</code>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    class="shrink-0"
-                    @click="handleOpenCodexDeviceVerification"
-                  >
-                    <Copy class="size-4" />
-                    {{ $t('bots.settings.acpCodexDeviceCopyOpen') }}
-                  </Button>
-                </div>
-              </div>
-              <div
-                v-if="codexDevicePanelSession?.expires_at"
-                class="text-xs text-muted-foreground"
-              >
-                {{ $t('provider.oauth.deviceExpiresAt') }}: {{ codexDevicePanelSession.expires_at }}
-              </div>
-              <InlineLoadingRow
-                v-if="codexDevicePending"
-                size="md"
-              >
-                {{ $t('provider.oauth.status.pendingDevice') }}
-              </InlineLoadingRow>
-              <p
-                v-else-if="codexDevicePanelSession?.status === 'error' && codexDevicePanelSession.error"
-                class="text-sm text-destructive"
-              >
-                {{ codexDevicePanelSession.error }}
-              </p>
-              <p
-                v-else-if="codexDevicePanelSession?.status === 'expired'"
-                class="text-sm text-destructive"
-              >
-                {{ $t('bots.settings.acpCodexDeviceExpired') }}
-              </p>
-            </div>
+        <div
+          v-if="credentialTestVisible"
+          class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p
+            class="min-w-0 flex-1 break-words text-sm"
+            :class="credentialTestError ? 'text-destructive' : 'text-muted-foreground'"
+          >
+            {{ credentialTestText }}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            :disabled="!credentialTestReady"
+            :loading="testingCredentials"
+            @click="runCredentialTest"
+          >
+            {{ $t('provider.testConnection') }}
+          </Button>
+        </div>
+
+        <p
+          v-else-if="agent.setup_mode === 'self'"
+          class="break-words text-sm text-muted-foreground"
+        >
+          {{ selfModeHint }}
+        </p>
+        <Button
+          v-if="isHermesSelfConfirmVisible"
+          size="sm"
+          class="mt-3"
+          @click="confirmSelfMode"
+        >
+          {{ $t('bots.settings.acpHermesSelfModeConfirm') }}
+        </Button>
+      </div>
+    </SettingsSection>
+
+    <!-- 账号:与 providers 页的 OAuth 卡片同形 —— 一行账号状态 + 行内动作,等待
+         输码时才在卡片内追加居中的验证码块。授权轮询在后台静默完成。 -->
+    <SettingsSection
+      v-if="oauthSectionVisible"
+      :title="$t('provider.oauth.sectionTitle')"
+    >
+      <!-- AutoHeight:验证码块出现/收起时让卡片平滑生长,不硬切。 -->
+      <AutoHeight>
+        <template v-if="isCodex">
+          <!-- 首次加载:借行高稳住卡片,状态到达时不跳动。
+               ui-allow-shape: skeleton borrowing the row height, not a data row. -->
+          <div
+            v-if="codexOAuthStatusLoading && !codexOAuthStatus"
+            class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+          >
+            <Spinner class="size-5 text-muted-foreground" />
           </div>
 
-          <div
-            v-if="isClaude && agent.setup_mode === 'oauth'"
-            class="space-y-4"
-          >
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p
-                class="min-w-0 flex-1 text-sm"
-                :class="claudeOAuthTextClass()"
-              >
-                {{ claudeOAuthStatusText() }}
-              </p>
+          <!-- 无法把授权写进当前工作区:说明原因,没有可给的动作。 -->
+          <SettingsRow
+            v-else-if="codexOAuthStatus && !codexOAuthStatus.configured"
+            :label="$t('bots.settings.acpCodexAccount')"
+            :description="$t('bots.settings.acpOAuthUnavailable')"
+          />
+
+          <template v-else>
+            <SettingsRow
+              :label="$t('bots.settings.acpCodexAccount')"
+              :description="codexAccountDescription"
+            >
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
                 class="shrink-0"
+                :disabled="authorizingCodexDevice"
+                :loading="authorizingCodexDevice"
+                loading-mode="manual"
+                @click="codexDevicePending ? handleCancelCodexDeviceAuthorization() : handleAuthorizeDevice()"
+              >
+                <!-- 三态 label:连接 → 连接中…(按下变长,给等待一个视觉挽留点)
+                     → 取消(码到手收短)。已连接时说"重新连接",因为按下会换掉
+                     现有账号,而不是首次接上。 -->
+                <LabelSwap :active="codexButtonState">
+                  <template #connect>
+                    <KeyRound />
+                    {{ $t('provider.oauth.connect') }}
+                  </template>
+                  <template #reconnect>
+                    <KeyRound />
+                    {{ $t('bots.settings.acpOAuthReconnect') }}
+                  </template>
+                  <template #connecting>
+                    <Spinner />
+                    {{ $t('provider.oauth.connecting') }}
+                  </template>
+                  <template #cancel>
+                    {{ $t('common.cancel') }}
+                  </template>
+                </LabelSwap>
+              </Button>
+            </SettingsRow>
+
+            <!-- 输码时刻交给 owner;这层 wrapper 只负责它在卡片里的定位。 -->
+            <div
+              v-if="codexDevicePanelSession"
+              class="mx-4 border-b border-border py-6 last:border-b-0"
+            >
+              <DeviceCodePanel
+                :code="codexDevicePanelSession.user_code"
+                :verification-uri="codexDevicePanelSession.verification_url"
+                :expires-at="codexDevicePanelSession.expires_at ?? ''"
+                :hint="$t('bots.settings.acpCodexDeviceHint')"
+                :retry-loading="authorizingCodexDevice"
+                :copy-and-open-label="$t('deviceCode.copyAndOpen')"
+                :retry-label="$t('deviceCode.retry')"
+                :expired-label="$t('deviceCode.codeExpired')"
+                :expires-in-label="(time: string) => $t('deviceCode.expiresIn', { time })"
+                :copy-failed-message="$t('deviceCode.copyFailed')"
+                @retry="handleAuthorizeDevice"
+              />
+            </div>
+          </template>
+        </template>
+
+        <template v-else-if="isClaude">
+          <!-- ui-allow-shape: skeleton borrowing the row height, not a data row. -->
+          <div
+            v-if="claudeOAuthStatusLoading && !claudeOAuthStatus"
+            class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
+          >
+            <Spinner class="size-5 text-muted-foreground" />
+          </div>
+
+          <SettingsRow
+            v-else-if="claudeOAuthStatus && !claudeOAuthStatus.configured"
+            :label="$t('bots.settings.acpClaudeAccount')"
+            :description="$t('bots.settings.acpClaudeOAuthUnavailable')"
+          />
+
+          <template v-else>
+            <SettingsRow
+              :label="$t('bots.settings.acpClaudeAccount')"
+              :description="claudeAccountDescription"
+            >
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                class="shrink-0"
+                :disabled="authorizingClaudeOAuth"
                 :loading="authorizingClaudeOAuth"
+                loading-mode="manual"
                 @click="handleAuthorizeClaude"
               >
-                {{ $t('bots.settings.acpOAuthAuthorizeClaudeCode') }}
+                <LabelSwap :active="claudeButtonState">
+                  <template #connect>
+                    <KeyRound />
+                    {{ $t('provider.oauth.connect') }}
+                  </template>
+                  <template #reconnect>
+                    <KeyRound />
+                    {{ $t('bots.settings.acpOAuthReconnect') }}
+                  </template>
+                  <template #connecting>
+                    <Spinner />
+                    {{ $t('provider.oauth.connecting') }}
+                  </template>
+                </LabelSwap>
               </Button>
-            </div>
+            </SettingsRow>
 
+            <!-- Claude 走的是"授权页给码、回来粘贴"——不是设备码,所以是行内工具块
+                 (说明 + 输入行)的 py-4 档,不是英雄面板的 py-6。 -->
             <div
-              v-if="claudeOAuthSessionId && !claudeOAuthStatus?.has_token"
-              class="space-y-2"
+              v-if="claudeExchangeVisible"
+              class="mx-4 space-y-2.5 border-b border-border py-4 last:border-b-0"
             >
-              <p class="text-sm text-muted-foreground">
+              <p class="text-body text-muted-foreground">
                 {{ $t('bots.settings.acpClaudeOAuthCodeHint') }}
               </p>
               <div class="flex flex-col gap-2 sm:flex-row">
@@ -175,55 +232,9 @@
                 </Button>
               </div>
             </div>
-          </div>
-
-          <AcpManagedFields
-            :profile="profile"
-            :managed="agent.managed"
-            :fields="visibleManagedFields"
-            settings-mode
-            @field-commit="commitForm"
-          />
-
-          <div
-            v-if="credentialTestVisible"
-            class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <p
-              class="min-w-0 flex-1 break-words text-sm"
-              :class="credentialTestError ? 'text-destructive' : 'text-muted-foreground'"
-            >
-              {{ credentialTestText }}
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              class="shrink-0"
-              :disabled="!credentialTestReady"
-              :loading="testingCredentials"
-              @click="runCredentialTest"
-            >
-              {{ $t('provider.testConnection') }}
-            </Button>
-          </div>
+          </template>
         </template>
-
-        <p
-          v-else
-          class="break-words text-sm text-muted-foreground"
-        >
-          {{ selfModeHint }}
-        </p>
-        <Button
-          v-if="isHermesSelfConfirmVisible"
-          size="sm"
-          class="mt-3"
-          @click="confirmSelfMode"
-        >
-          {{ $t('bots.settings.acpHermesSelfModeConfirm') }}
-        </Button>
-      </div>
+      </AutoHeight>
     </SettingsSection>
   </div>
 </template>
@@ -231,14 +242,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { InlineLoadingRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
 import { useQueryCache } from '@pinia/colada'
 import {
+  AutoHeight,
   Button,
+  DeviceCodePanel,
   Input,
+  LabelSwap,
   SegmentedControl,
+  SettingsRow,
+  SettingsSection,
+  Spinner,
+  toast,
 } from '@felinic/ui'
-import { Copy } from 'lucide-vue-next'
+import { KeyRound } from 'lucide-vue-next'
 import {
   postBotsByBotIdAcpAgentsByAgentIdCredentialsTest,
   type AcpprofilePublicProfile,
@@ -252,6 +269,7 @@ import {
   ensureACPAgentForm,
   ensureHermesManagedDefaults,
   findMissingRequiredManagedField,
+  isACPAgent,
   isClaudeCodeAgent,
   isCodexAgent,
   normalizeACPAgentID,
@@ -261,7 +279,6 @@ import {
 import { filterSettingsVisibleManagedFields } from '@/utils/acp/setup-fields'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatProbeError } from '@/utils/probe-error'
-import { oauthStatusTextKey } from '@/utils/oauth/status-text'
 import AcpManagedFields from './acp-managed-fields.vue'
 
 const props = defineProps<{
@@ -281,18 +298,14 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
-const { copyText } = useClipboard()
 const claudeOAuthCode = ref('')
 const { setupModeItems } = useAcpSetupModeItems(() => props.profile)
 const {
   codexStatus: codexOAuthStatus,
   codexStatusLoading: codexOAuthStatusLoading,
-  authorizingCodex: authorizingCodexOAuth,
   authorizingCodexDevice,
-  codexAuthorizing,
   codexDeviceSession,
   codexDevicePending,
-  codexDeviceVerificationReady,
   claudeStatus: claudeOAuthStatus,
   claudeStatusLoading: claudeOAuthStatusLoading,
   authorizingClaude: authorizingClaudeOAuth,
@@ -300,16 +313,15 @@ const {
   claudeSessionId: claudeOAuthSessionId,
   loadCodexStatus: loadOAuthStatus,
   loadClaudeStatus: loadClaudeOAuthStatus,
-  authorizeCodex,
   authorizeCodexDevice,
   cancelCodexDeviceAuthorization,
   clearCodexDeviceAuthorization,
-  openCodexDeviceVerification,
   authorizeClaude,
   exchangeClaude,
 } = useACPOAuth(() => props.botId)
 
 const agent = computed<ACPAgentForm>(() => ensureACPAgentForm(props.form, props.profile))
+const isGenericACP = computed(() => isACPAgent(props.profile.id))
 const isCodex = computed(() => isCodexAgent(props.profile.id))
 const isClaude = computed(() => isClaudeCodeAgent(props.profile.id))
 const isHermes = computed(() => normalizeACPAgentID(props.profile.id) === 'hermes')
@@ -365,6 +377,11 @@ watch([() => props.botId, () => props.profile.id, () => agent.value.setup_mode],
   credentialTestError.value = ''
 })
 
+// 只有走托管 OAuth 的两个 agent、且当前就在 OAuth 模式时,账号卡片才有存在意义。
+const oauthSectionVisible = computed(() =>
+  (isCodex.value || isClaude.value) && agent.value.setup_mode === 'oauth',
+)
+
 function commitForm() {
   if (agent.value.enabled && findMissingRequiredManagedField(props.profile, agent.value.managed, agent.value.setup_mode)) {
     return
@@ -392,16 +409,47 @@ const currentCodexDeviceSession = computed(() => {
   const session = codexDeviceSession.value
   return session?.bot_id === props.botId ? session : null
 })
+
+// 面板只在码还能用(或刚过期、可就地重取)时露出;error/cancelled 由行内状态和
+// toast 交代,留一张废码在页面上只会误导。
 const codexDevicePanelSession = computed(() => {
   const session = currentCodexDeviceSession.value
-  if (!session || session.has_token || session.status === 'success') return null
-  return session
+  if (!session || session.has_token) return null
+  const usable = session.status === 'pending' || session.status === 'writing' || session.status === 'expired'
+  return usable ? session : null
 })
 
-const codexOAuthPending = computed(() => codexAuthorizing.value)
-const claudeOAuthPending = computed(() => {
-  if (authorizingClaudeOAuth.value || exchangingClaudeOAuth.value) return true
-  return Boolean(claudeOAuthSessionId.value && !claudeOAuthStatus.value?.has_token)
+const claudeExchangeVisible = computed(() =>
+  Boolean(claudeOAuthSessionId.value) && !claudeOAuthStatus.value?.has_token,
+)
+
+const codexButtonState = computed(() => {
+  if (authorizingCodexDevice.value) return 'connecting'
+  if (codexDevicePending.value) return 'cancel'
+  return codexOAuthStatus.value?.has_token ? 'reconnect' : 'connect'
+})
+
+const claudeButtonState = computed(() => {
+  if (authorizingClaudeOAuth.value) return 'connecting'
+  return claudeOAuthStatus.value?.has_token ? 'reconnect' : 'connect'
+})
+
+// 行描述就是这张卡片的全部状态出口:失败/过期/等待/已连接/未连接各说一句。
+const codexAccountDescription = computed(() => {
+  const session = currentCodexDeviceSession.value
+  if (session?.status === 'error') return session.error || t('bots.settings.acpCodexDeviceFailed')
+  if (session?.status === 'expired') return t('bots.settings.acpCodexDeviceExpired')
+  if (codexDevicePending.value) return t('provider.oauth.status.pendingDevice')
+  if (codexOAuthStatus.value?.has_token) return t('provider.oauth.status.authorizedCurrent')
+  if (codexOAuthStatusLoading.value) return t('provider.oauth.status.checking')
+  return t('bots.settings.acpCodexConnectHint')
+})
+
+const claudeAccountDescription = computed(() => {
+  if (claudeOAuthStatus.value?.has_token) return t('provider.oauth.status.authorizedCurrent')
+  if (claudeExchangeVisible.value) return t('provider.oauth.status.oauthing')
+  if (claudeOAuthStatusLoading.value) return t('provider.oauth.status.checking')
+  return t('bots.settings.acpClaudeConnectHint')
 })
 
 watch([() => props.botId, () => props.profile.id, () => agent.value.setup_mode], () => {
@@ -432,39 +480,6 @@ watch(() => codexDeviceSession.value?.status, (status, previousStatus) => {
   }
 })
 
-function codexOAuthStatusText(): string {
-  if (currentCodexDeviceSession.value?.status === 'expired') return t('bots.settings.acpCodexDeviceExpired')
-  if (currentCodexDeviceSession.value?.status === 'error') return t('bots.settings.acpCodexDeviceFailed')
-  if (codexDevicePending.value) return t('provider.oauth.status.pendingDevice')
-  return t(oauthStatusTextKey({
-    loading: codexOAuthStatusLoading.value,
-    authorizing: authorizingCodexOAuth.value || authorizingCodexDevice.value,
-    status: codexOAuthStatus.value,
-    unavailableKey: 'bots.settings.acpOAuthUnavailable',
-  }))
-}
-
-function codexOAuthTextClass(): string {
-  return codexOAuthStatusLoading.value || codexOAuthPending.value || codexOAuthStatus.value?.has_token
-    ? 'text-muted-foreground'
-    : 'text-destructive'
-}
-
-function claudeOAuthStatusText(): string {
-  return t(oauthStatusTextKey({
-    loading: claudeOAuthStatusLoading.value,
-    authorizing: claudeOAuthPending.value,
-    status: claudeOAuthStatus.value,
-    unavailableKey: 'bots.settings.acpClaudeOAuthUnavailable',
-  }))
-}
-
-function claudeOAuthTextClass(): string {
-  return claudeOAuthStatusLoading.value || claudeOAuthPending.value || claudeOAuthStatus.value?.has_token
-    ? 'text-muted-foreground'
-    : 'text-destructive'
-}
-
 function invalidateOAuthQueries() {
   void queryCache.invalidateQueries({ key: ['bot', props.botId] })
   void queryCache.invalidateQueries({ key: getBotsQueryKey() })
@@ -477,36 +492,12 @@ function markCodexOAuthAuthorized() {
   invalidateOAuthQueries()
 }
 
-async function handleAuthorize() {
-  if (!props.botId) return
-  const botId = props.botId
-  agent.value.setup_mode = 'oauth'
-  const ok = await authorizeCodex({ timeoutMs: 300_000 })
-  if (ok && botId === props.botId) {
-    markCodexOAuthAuthorized()
-    toast.success(t('provider.oauth.authorizeSuccess'))
-  } else if (botId === props.botId) {
-    toast.error(t('provider.oauth.authorizeFailed'))
-  }
-}
-
 async function handleAuthorizeDevice() {
   if (!props.botId) return
   agent.value.setup_mode = 'oauth'
   const ok = await authorizeCodexDevice()
   if (!ok) {
     toast.error(t('provider.oauth.authorizeFailed'))
-  }
-}
-
-async function handleOpenCodexDeviceVerification() {
-  const result = await openCodexDeviceVerification(copyText)
-  if (result === 'opened') {
-    toast.success(t('common.copied'))
-  } else if (result === 'popup_blocked') {
-    toast.error(t('bots.settings.acpCodexDevicePopupBlocked'))
-  } else {
-    toast.error(t('provider.oauth.copyFailed'))
   }
 }
 

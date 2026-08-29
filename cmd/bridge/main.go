@@ -16,9 +16,9 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/memohai/memoh/internal/logger"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
-	"github.com/memohai/memoh/internal/workspace/bridgesvc"
+	"github.com/felinics/memoh/internal/logger"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridgesvc"
 )
 
 const (

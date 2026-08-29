@@ -3,7 +3,7 @@ package application
 import (
 	"encoding/json"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // ChatRequest is the application-layer input used while orchestrating a chat
@@ -21,7 +21,7 @@ type ChatRequest struct {
 	// run. They travel with the request so the persisted user turn lands under
 	// the id the client was handed at run_accepted, instead of the history layer
 	// minting a second one (SR-TURN-001). Empty means no admission decided the
-	// turn — channel inbound, schedules, heartbeats — and history allocates it.
+	// turn — channel inbound and schedules — and history allocates it.
 	TurnID                    string                `json:"-"`
 	TurnPosition              *int64                `json:"-"`
 	Token                     string                `json:"-"`

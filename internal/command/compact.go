@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 // errCompactNoModel is a sentinel returned by buildCompactConfig when neither

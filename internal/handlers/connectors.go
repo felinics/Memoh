@@ -5,14 +5,14 @@ import (
 	"net/http"
 	"strings"
 
+	connectsdk "github.com/felinics/connect-it/sdk/go"
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
-	connectsdk "github.com/memohai/connect-it/sdk/go"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/connectors"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/connectors"
 )
 
 type ConnectorsHandler struct {

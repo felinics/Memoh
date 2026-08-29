@@ -3,7 +3,7 @@ package command
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 // HintVerb names the shape of a typeable affordance when rendering the
@@ -237,7 +237,7 @@ func trailerForChoices(cv *ChoicesView, t *i18n.Localizer) string {
 
 	// Homogeneity by (Resource, Action). A homogeneous choice set is either a
 	// pick (args are plain enum values like "low") or a flag-bearing toggle
-	// (args have leading dashes like "--heartbeat_enabled true").
+	// (args have leading dashes like "--acl_default_effect deny").
 	resource := actionable[0].Resource
 	action := actionable[0].Action
 	homogeneous := true

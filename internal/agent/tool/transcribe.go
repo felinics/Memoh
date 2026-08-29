@@ -14,14 +14,13 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/attachment"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/settings"
 )
-
-const mediaDataPrefix = "/data/media/"
 
 type TranscriptionProvider struct {
 	logger   *slog.Logger
@@ -70,11 +69,11 @@ func (p *TranscriptionProvider) Tools(ctx context.Context, session SessionContex
 	sess := session
 	return []sdk.Tool{{
 		Name:        ToolTranscribeAudio().String(),
-		Description: "Transcribe an audio or voice message into text. Use this when the user sent a voice message and you need to understand its contents. Accepts a bot media path such as /data/media/... or a direct URL.",
+		Description: "Transcribe an audio or voice message into text. Use this when the user sent a voice message and you need to understand its contents. Accepts a bot media path such as /data/.memoh/media/... or a direct URL.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "Audio file path from the message context, usually under /data/media/..."},
+				"path":        map[string]any{"type": "string", "description": "Audio file path from the message context, usually under /data/.memoh/media/..."},
 				"url":         map[string]any{"type": "string", "description": "Direct audio URL when a path is unavailable"},
 				"language":    map[string]any{"type": "string", "description": "Optional language hint"},
 				"prompt":      map[string]any{"type": "string", "description": "Optional transcription prompt"},
@@ -169,8 +168,8 @@ func (p *TranscriptionProvider) loadAudio(ctx context.Context, botID, pathValue,
 }
 
 func (p *TranscriptionProvider) loadAudioFromPath(ctx context.Context, botID, pathValue, contentTypeOverride string) ([]byte, string, string, error) {
-	storageKey := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(pathValue), mediaDataPrefix))
-	if storageKey == "" || storageKey == strings.TrimSpace(pathValue) {
+	storageKey := attachment.ExtractStorageKey(pathValue)
+	if storageKey == "" {
 		return nil, "", "", fmt.Errorf("unsupported media path: %s", pathValue)
 	}
 	asset, err := p.media.GetByStorageKey(ctx, botID, storageKey)

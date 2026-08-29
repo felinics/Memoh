@@ -5,6 +5,7 @@ import {
   cloneUserInputState,
   createInvocationId,
   isOptimisticTurn,
+  messageIdentityId,
   mergeApprovalState,
   normalizeForwardRef,
   normalizeReplyRef,
@@ -12,7 +13,6 @@ import {
   normalizeTimestamp,
   pickRawString,
   pickString,
-  serverMessageId,
   skillActivationTextFromRaw,
   sortChatMessages,
   structuredToolResult,
@@ -168,9 +168,9 @@ describe('requested skills', () => {
 })
 
 describe('ids', () => {
-  it('serverMessageId prefers serverId', () => {
-    expect(serverMessageId(userTurn({ serverId: ' s1 ' } as Partial<ChatUserTurn>))).toBe('s1')
-    expect(serverMessageId(userTurn())).toBe('u1')
+  it('messageIdentityId prefers serverId but can use a render id', () => {
+    expect(messageIdentityId(userTurn({ serverId: ' s1 ' } as Partial<ChatUserTurn>))).toBe('s1')
+    expect(messageIdentityId(userTurn())).toBe('u1')
   })
 
   it('createInvocationId yields distinct non-empty ids', () => {

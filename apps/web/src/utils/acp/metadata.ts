@@ -82,6 +82,21 @@ export function withACPMetadata(metadata: Record<string, unknown> | undefined, a
   return nextMetadata
 }
 
+// Agent creation must only touch the selected profile. Re-serializing every
+// profile would turn defaults or stale client state for an unrelated Agent
+// into an explicit server update and can make that unrelated config fail
+// validation before the new BotAgent row is created.
+export function withEnabledACPAgentMetadataIfConfigured(
+  metadata: Record<string, unknown> | undefined,
+  profile: AcpprofilePublicProfile,
+): Record<string, unknown> | undefined {
+  const form = readACPConfig(metadata, [profile])
+  const agent = ensureACPAgentForm(form, profile)
+  if (findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode)) return undefined
+  agent.enabled = true
+  return withACPMetadata(metadata, form, [profile])
+}
+
 export function findMissingRequiredACPField(value: ACPForm, profiles: AcpprofilePublicProfile[]): MissingACPRequiredField | null {
   // Validation is per-agent and skips `self` mode below. Managed api_key and
   // oauth modes apply the profile's credential requirements consistently.
@@ -221,9 +236,12 @@ export function fieldsFromProfile(profile: AcpprofilePublicProfile, source: Reco
   return values
 }
 
+// 首项即默认:setup_modes 的顺序由后端 profile 定义,它既是分段控件的显示顺序,
+// 也是默认选中项 —— 一处真相。前端不再另立「有 api_key 就选 api_key」的偏好,
+// 那条规则会让后端把某个模式提到首位的意图只兑现一半(排序变了、默认没变)。
 export function defaultSetupMode(profile: AcpprofilePublicProfile): string {
-  const mode = profile.setup_modes?.includes('api_key') ? 'api_key' : (profile.setup_modes?.[0] ?? 'api_key')
-  return normalizeSetupMode(mode)
+  const modes = (profile.setup_modes ?? []).filter(Boolean)
+  return normalizeSetupMode(modes[0] ?? 'api_key')
 }
 
 export function normalizeACPAgentID(value: unknown): string {

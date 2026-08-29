@@ -12,11 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	memohdb "github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/team"
+	memohdb "github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/team"
 )
 
 func TestUserRuntimeCredentialLifecyclePostgresPath(t *testing.T) {
@@ -100,7 +100,7 @@ func TestUserRuntimeActivationMigrationPreservesExistingCredentials(t *testing.T
 	ctx := context.Background()
 	dsn := teamMigrationDSN(t)
 	pool := freshMigratedDB(t)
-	stepDown(t, dsn, 1)
+	stepDown(t, dsn, countMigrationsFrom(t, "0133_user_runtime_activation_lifecycle.up.sql"))
 
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestRemoteMountDefaultMigrationPreservesExistingChoices(t *testing.T) {
 	ctx := context.Background()
 	dsn := teamMigrationDSN(t)
 	pool := freshMigratedDB(t)
-	stepDown(t, dsn, 2)
+	stepDown(t, dsn, countMigrationsFrom(t, "0132_remote_mount_default_allow.up.sql"))
 
 	conn, err := pool.Acquire(ctx)
 	if err != nil {

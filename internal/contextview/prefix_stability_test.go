@@ -3,12 +3,13 @@ package contextview
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func prefixSystemFrags() []contextfrag.ContextFrag {
@@ -106,41 +107,33 @@ func TestApplyProviderRunConfigImageOnlyCurrentMovesStableMessageBoundary(t *tes
 	}
 }
 
-func TestApplyProviderRunConfigMemoryAndHookIsolation(t *testing.T) {
+func TestApplyProviderRunConfigHookContextSystemIsolation(t *testing.T) {
 	t.Parallel()
-	build := func(memory, hook string) agentpkg.RunConfig {
+	build := func(hook string) agentpkg.RunConfig {
 		frags := prefixSystemFrags()
-		if hook != "" {
-			hookFrags, err := (&HookContextCollector{}).Collect(context.Background(), CollectRequest{Config: HookContextConfig{Text: hook}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			frags = append(frags, hookFrags...)
-		}
 		frags = append(frags, stableHistoryMessageFrag("history", sdk.UserMessage("history")))
-		if memory != "" {
-			memoryFrags, err := (&MemoryContextCollector{}).Collect(context.Background(), CollectRequest{Config: MemoryContextConfig{Text: memory}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			frags = append(frags, memoryFrags...)
+		hookFrags, err := (&HookContextCollector{}).Collect(context.Background(), CollectRequest{Config: HookContextConfig{Text: hook}})
+		if err != nil {
+			t.Fatal(err)
 		}
+		frags = append(frags, hookFrags...)
 		frags = append(frags, currentMessageFrag("current", "question"))
 		return agentpkg.RunConfig{ContextSourceFrags: frags}
 	}
-	first := ApplyProviderRunConfig(context.Background(), nil, build("memory one", "hook one"))
-	second := ApplyProviderRunConfig(context.Background(), nil, build("memory two", "hook two"))
-	if first.ContextCachePlan.StablePrefixHash != second.ContextCachePlan.StablePrefixHash {
-		t.Fatalf("stable hashes = %q, %q", first.ContextCachePlan.StablePrefixHash, second.ContextCachePlan.StablePrefixHash)
+	first := ApplyProviderRunConfig(context.Background(), nil, build("hook one"))
+	repeated := ApplyProviderRunConfig(context.Background(), nil, build("hook one"))
+	changed := ApplyProviderRunConfig(context.Background(), nil, build("hook two"))
+	if first.System != repeated.System || !reflect.DeepEqual(first.Messages, repeated.Messages) {
+		t.Fatalf("identical hook fixtures are not byte-stable: first=%#v repeated=%#v", first, repeated)
 	}
-	if first.System == second.System {
-		t.Fatal("legacy prompt hook bytes must remain in System")
+	if first.System != changed.System {
+		t.Fatalf("changing hook text changed system bytes: first=%q changed=%q", first.System, changed.System)
 	}
-	if first.Messages[1].Content[0].(sdk.TextPart).Text != "memory one" || second.Messages[1].Content[0].(sdk.TextPart).Text != "memory two" {
-		t.Fatalf("messages = %#v / %#v", first.Messages, second.Messages)
+	if strings.Contains(first.System, "hook one") || strings.Contains(changed.System, "hook two") {
+		t.Fatalf("hook text leaked into System: first=%q changed=%q", first.System, changed.System)
 	}
-	if first.ContextCachePlan.StableMessageCount != 0 {
-		t.Fatalf("stable message count = %d, want volatile hook to end prefix", first.ContextCachePlan.StableMessageCount)
+	if messageText(t, first.Messages[1]) != "hook one" || messageText(t, changed.Messages[1]) != "hook two" {
+		t.Fatalf("hook messages = %#v / %#v", first.Messages, changed.Messages)
 	}
 }
 

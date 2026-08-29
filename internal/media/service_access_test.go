@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/memohai/memoh/internal/storage"
+	"github.com/felinics/memoh/internal/storage"
 )
 
 type accessPathEnsuringProvider struct {
@@ -33,7 +33,7 @@ func (p *accessPathEnsuringProvider) EnsureAccessPath(_ context.Context, key str
 func TestServiceEnsureAccessPathUsesMaterializingProvider(t *testing.T) {
 	t.Parallel()
 
-	provider := &accessPathEnsuringProvider{path: " /data/media/aa/asset.pdf "}
+	provider := &accessPathEnsuringProvider{path: " /data/.memoh/media/aa/asset.pdf "}
 	service := NewService(nil, provider)
 	got, err := service.EnsureAccessPath(context.Background(), Asset{
 		BotID:      "bot-1",
@@ -42,7 +42,7 @@ func TestServiceEnsureAccessPathUsesMaterializingProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureAccessPath() error = %v", err)
 	}
-	if got != "/data/media/aa/asset.pdf" {
+	if got != "/data/.memoh/media/aa/asset.pdf" {
 		t.Fatalf("EnsureAccessPath() = %q", got)
 	}
 	if provider.ensuredKey != "bot-1/aa/asset.pdf" {

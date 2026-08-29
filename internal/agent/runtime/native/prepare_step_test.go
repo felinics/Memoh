@@ -1,14 +1,15 @@
 package native
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestWrapPrepareStepWithForkSnapshotDoesNotRewriteToolResults(t *testing.T) {
@@ -37,7 +38,7 @@ func TestWrapPrepareStepWithForkSnapshotDoesNotRewriteToolResults(t *testing.T) 
 	}
 
 	snapshot := agenttools.NewMessageSnapshot(nil)
-	prepareStep := wrapPrepareStepWithForkSnapshot(nil, snapshot)
+	prepareStep := wrapPrepareStepWithForkSnapshot(context.Background(), nil, snapshot)
 	params := &sdk.GenerateParams{Messages: messages}
 	got := prepareStep(params)
 	if got != params {

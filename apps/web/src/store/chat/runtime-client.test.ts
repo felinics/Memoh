@@ -39,6 +39,8 @@ function createHarness() {
   const client = createRuntimeClient({
     send: message => sent.push(message),
     onProjection,
+    // Keep delivery synchronous so the existing per-event assertions hold.
+    scheduleFrame: callback => callback(),
   })
   return { client, sent, onProjection }
 }
@@ -162,5 +164,44 @@ describe('runtime client', () => {
 
     expect(sent.at(-1)).toEqual({ type: 'runtime_unsubscribe', session_id: 'session-1' })
     expect(onProjection).not.toHaveBeenCalled()
+  })
+
+  it('coalesces a burst of deltas into one notification per frame', () => {
+    const sent: WSClientMessage[] = []
+    const onProjection = vi.fn()
+    const frames: Array<() => void> = []
+    const client = createRuntimeClient({
+      send: message => sent.push(message),
+      onProjection,
+      scheduleFrame: (callback) => {
+        frames.push(callback)
+      },
+    })
+    client.subscribe('session-1')
+    client.onConnected()
+    client.handleEvent(snapshot())
+    expect(onProjection).toHaveBeenCalledTimes(1)
+
+    // snapshot() lands at seq 3; the burst chains off it.
+    client.handleEvent(delta(4))
+    client.handleEvent(delta(5))
+    client.handleEvent(delta(6))
+    // Nothing is delivered until the frame runs — the burst accumulates.
+    expect(onProjection).toHaveBeenCalledTimes(1)
+    expect(frames).toHaveLength(1)
+
+    frames[0]!()
+    expect(onProjection).toHaveBeenCalledTimes(2)
+    const change = onProjection.mock.calls[1]![1]
+    expect(change.event.type).toBe('runtime_delta')
+    expect(change.previous.seq).toBe(3)
+    expect(change.current.seq).toBe(6)
+    expect(client.projection('session-1')?.seq).toBe(6)
+
+    // A later delta starts a fresh batch and schedules exactly one new frame.
+    client.handleEvent(delta(7))
+    expect(frames).toHaveLength(2)
+    frames[1]!()
+    expect(onProjection).toHaveBeenCalledTimes(3)
   })
 })

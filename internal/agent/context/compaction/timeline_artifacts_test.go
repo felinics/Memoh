@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func TestTimelineArtifactsProjectsFrontier(t *testing.T) {

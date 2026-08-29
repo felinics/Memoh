@@ -101,4 +101,7 @@ jobs:
       - name: Test PostgreSQL query and compaction lifecycle paths
         env:
           TEST_POSTGRES_DSN: postgres://memoh:memoh123@127.0.0.1:5432/memoh_test?sslmode=disable
-        run: go test -tags=integration -count=1 ./internal/db ./internal/chat/message
+        # internal/chat/thread owns the fork query, whose CTEs cut history by
+        # turn position. Nothing else executes it: `go test ./...` runs without
+        # a DSN and skips, and the fencing job filters by test name.
+        run: go test -tags=integration -count=1 ./internal/db ./internal/chat/message ./internal/chat/thread

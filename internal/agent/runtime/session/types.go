@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 const (
@@ -38,7 +39,11 @@ const (
 	CommandSteer                = "steer_current_run"
 	CommandToolApprovalResponse = "tool_approval_response"
 	CommandUserInputResponse    = "user_input_response"
+	CommandHistoryReset         = "history_reset"
 	CommandResult               = "command_result"
+
+	ResetScopeSession = "session"
+	ResetScopeBot     = "bot"
 )
 
 var (
@@ -51,6 +56,9 @@ var (
 	ErrDecisionNotFound        = errors.New("runtime decision was not found")
 	ErrManagerClosed           = errors.New("session runtime manager is closed")
 	ErrRunOwnershipLost        = errors.New("runtime run ownership was lost")
+	ErrHistoryResetInProgress  = errors.New("session history reset is in progress")
+	ErrHistoryResetUnavailable = errors.New("session history reset coordination is unavailable")
+	ErrHistoryResetLeaseLost   = runtimefence.ErrResetLeaseLost
 )
 
 type Key struct {
@@ -78,6 +86,70 @@ type RunRef struct {
 	FencingToken int64 `json:"fencing_token,omitempty"`
 }
 
+// ResetScope identifies the canonical history protected by a reset lease.
+// SessionID is empty for a bot-wide reset.
+type ResetScope struct {
+	BotID     string `json:"bot_id"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+func (s ResetScope) normalized() ResetScope {
+	s.BotID = strings.TrimSpace(s.BotID)
+	s.SessionID = strings.TrimSpace(s.SessionID)
+	return s
+}
+
+func (s ResetScope) kind() string {
+	if strings.TrimSpace(s.SessionID) == "" {
+		return ResetScopeBot
+	}
+	return ResetScopeSession
+}
+
+func (s ResetScope) valid() bool {
+	s = s.normalized()
+	return s.BotID != ""
+}
+
+// ResetLease is the live-backend half of the reset fence. The same token is
+// used in PostgreSQL so renewal and release are successor-safe on both sides.
+type ResetLease struct {
+	Scope     ResetScope `json:"scope"`
+	Token     string     `json:"token"`
+	ExpiresAt time.Time  `json:"expires_at"`
+}
+
+func (l ResetLease) valid() bool {
+	return l.Scope.valid() && strings.TrimSpace(l.Token) != "" && !l.ExpiresAt.IsZero()
+}
+
+// effectiveResetLease is the single precedence rule every reset-lease reader
+// implements identically (the SQL readers in session_runtime_resets.sql mirror
+// it): a bot-scope query is blocked by the bot lease or by ANY active session
+// lease of that bot, because a bot-wide operation must not proceed while one
+// of the bot's sessions is mid-reset; a session-scope query is blocked by the
+// bot lease or by that exact session's lease. Callers pass only unexpired
+// leases. Session leases are scanned in slice order, so callers that need
+// determinism sort before calling.
+func effectiveResetLease(scope ResetScope, bot *ResetLease, sessions []ResetLease) (ResetLease, bool) {
+	if bot != nil {
+		return *bot, true
+	}
+	scope = scope.normalized()
+	if scope.SessionID == "" {
+		if len(sessions) > 0 {
+			return sessions[0], true
+		}
+		return ResetLease{}, false
+	}
+	for _, lease := range sessions {
+		if strings.TrimSpace(lease.Scope.SessionID) == scope.SessionID {
+			return lease, true
+		}
+	}
+	return ResetLease{}, false
+}
+
 // identityMatches compares everything that names a reservation, ignoring the
 // fencing token. Release and validation paths reconstruct a ref from live state
 // that does not carry the token, so requiring it to match would reject the
@@ -103,6 +175,19 @@ type RunHandle struct {
 	// handle rather than staying inside the runtime. It is zero for runs
 	// started through the pre-ledger entry points.
 	FencingToken int64
+}
+
+// TerminalRun is the authoritative durable outcome of one admitted run. It is
+// emitted only after the fenced session_runs transition has applied, or when a
+// replay observes that the same run is already terminal. State uses the durable
+// ledger vocabulary: completed, aborted, failed, or lost.
+type TerminalRun struct {
+	RunID        string
+	BotID        string
+	SessionID    string
+	FencingToken int64
+	State        string
+	ErrorCode    string
 }
 
 func (h RunHandle) normalized() RunHandle {
@@ -184,6 +269,7 @@ type CurrentRunView struct {
 	UpdatedAt           time.Time            `json:"updated_at"`
 	Messages            []chatview.UIMessage `json:"messages"`
 	RequestUserTurn     *chatview.UITurn     `json:"request_user_turn,omitempty"`
+	ErrorCode           string               `json:"error_code,omitempty"`
 	Error               string               `json:"error,omitempty"`
 	Steer               *SteerState          `json:"steer,omitempty"`
 	Operation           *RunOperationView    `json:"operation,omitempty"`
@@ -240,6 +326,7 @@ type RuntimeDelta struct {
 type CurrentRunPatch struct {
 	RunID               string      `json:"run_id"`
 	Status              *string     `json:"status,omitempty"`
+	ErrorCode           *string     `json:"error_code,omitempty"`
 	Error               *string     `json:"error,omitempty"`
 	Steer               *SteerState `json:"steer,omitempty"`
 	UpdatedAt           *time.Time  `json:"updated_at,omitempty"`
@@ -383,6 +470,24 @@ type DistributedBackend interface {
 	StoreCommandResult(ctx context.Context, result Command, ttl time.Duration) error
 	LoadCommandResult(ctx context.Context, commandID string) (Command, bool, error)
 }
+
+// HistoryResetBackend provides a tokenized, expiring live gate. Redis uses
+// key TTLs; MemoryBackend uses the same contract under its process mutex.
+type HistoryResetBackend interface {
+	AcquireHistoryReset(ctx context.Context, scope ResetScope, token string, ttl time.Duration) (ResetLease, bool, error)
+	RenewHistoryReset(ctx context.Context, lease ResetLease, ttl time.Duration) (ResetLease, bool, error)
+	ReleaseHistoryReset(ctx context.Context, lease ResetLease) (bool, error)
+	EffectiveHistoryReset(ctx context.Context, scope ResetScope) (ResetLease, bool, error)
+}
+
+type historyResetStartBackend interface {
+	StartRunIfNoHistoryReset(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error)
+}
+
+// HistoryResetHandler performs owner-local runtime teardown. Returning is the
+// acknowledgement boundary: the ACP pool must not return until Session.Close
+// and the owned process Close operation have completed.
+type HistoryResetHandler func(context.Context, ResetScope) error
 
 type startupHealthChecker interface {
 	CheckHealth(ctx context.Context) error

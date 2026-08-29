@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/agent/background"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func newStepPersistProvider(t *testing.T, agent SpawnAgent, admitter SubagentAdmitter) (*SpawnProvider, *fakeAgentMessageService) {
@@ -36,6 +36,88 @@ func newStepPersistProvider(t *testing.T, agent SpawnAgent, admitter SubagentAdm
 	return p, messageSvc
 }
 
+func TestSubagentAttemptDisposition(t *testing.T) {
+	explicitCancelCtx, explicitCancel := context.WithCancelCause(context.Background())
+	explicitCancel(context.Canceled)
+	customCause := errors.New("owning run failed")
+	customCancelCtx, customCancel := context.WithCancelCause(context.Background())
+	customCancel(customCause)
+
+	tests := []struct {
+		name            string
+		ctx             context.Context
+		err             error
+		stepPersisted   bool
+		attemptsRemain  bool
+		wantDisposition SpawnAttemptDisposition
+	}{
+		{
+			name:            "owning cancellation wins provider race",
+			ctx:             explicitCancelCtx,
+			err:             errors.New("api error 500: raced cancellation"),
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptAbort,
+		},
+		{
+			name:            "custom owning cause is failure",
+			ctx:             customCancelCtx,
+			err:             customCause,
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "watchdog retries while budget remains",
+			ctx:             context.Background(),
+			err:             ErrWatchdogTimedOut,
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptRetry,
+		},
+		{
+			name:            "safety deadline retries while budget remains",
+			ctx:             context.Background(),
+			err:             context.DeadlineExceeded,
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptRetry,
+		},
+		{
+			name:            "provider failure retries while budget remains",
+			ctx:             context.Background(),
+			err:             errors.New("provider returned 429"),
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptRetry,
+		},
+		{
+			name:            "persisted checkpoint forbids retry",
+			ctx:             context.Background(),
+			err:             ErrWatchdogTimedOut,
+			stepPersisted:   true,
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "exhausted budget is failure",
+			ctx:             context.Background(),
+			err:             ErrWatchdogTimedOut,
+			wantDisposition: SpawnAttemptFailure,
+		},
+		{
+			name:            "generic abort is failure",
+			ctx:             context.Background(),
+			err:             errors.New("agent run aborted"),
+			attemptsRemain:  true,
+			wantDisposition: SpawnAttemptFailure,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := subagentAttemptDisposition(tc.ctx, tc.err, tc.stepPersisted, tc.attemptsRemain)
+			if got != tc.wantDisposition {
+				t.Fatalf("disposition = %v, want %v", got, tc.wantDisposition)
+			}
+		})
+	}
+}
+
 // TestSubagentDoesNotRetryAfterPersistedStep: once a step has durably
 // committed, a retryable error must surface instead of restarting the turn —
 // the committed step may carry real side effects that a replay would repeat.
@@ -44,10 +126,14 @@ func TestSubagentDoesNotRetryAfterPersistedStep(t *testing.T) {
 
 	agent := &mockSpawnAgent{
 		generateFunc: func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
+			retryErr := errors.New("api error 500: provider fell over mid-run")
 			if cfg.OnStepPersisted != nil {
 				cfg.OnStepPersisted()
 			}
-			return nil, errors.New("api error 500: provider fell over mid-run")
+			if cfg.ResolveAttempt == nil || cfg.ResolveAttempt(retryErr) != SpawnAttemptFailure {
+				t.Errorf("persisted attempt disposition is not failure")
+			}
+			return nil, retryErr
 		},
 	}
 	p, _ := newStepPersistProvider(t, agent, &fakeSubagentAdmitter{})
@@ -65,7 +151,8 @@ func TestSubagentDoesNotRetryAfterPersistedStep(t *testing.T) {
 		t.Fatalf("status = %v, want failed", result["status"])
 	}
 	errText, _ := result["error"].(string)
-	if !strings.Contains(errText, "send a follow-up message to continue") {
+	if !strings.Contains(errText, "progress from this attempt is saved") ||
+		!strings.Contains(errText, "send a follow-up message to continue") {
 		t.Fatalf("error does not tell the parent how to continue: %q", errText)
 	}
 }
@@ -81,9 +168,16 @@ func TestSubagentStillRetriesBeforeAnyPersistedStep(t *testing.T) {
 			return nil, errors.New("api error 500: transient")
 		},
 	}
-	agent.generateFunc = func(_ context.Context, _ SpawnRunConfig, _ func()) (*SpawnResult, error) {
+	agent.generateFunc = func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
 		if agent.generateCount.Load() == 1 {
-			return nil, errors.New("api error 500: transient")
+			retryErr := errors.New("api error 500: transient")
+			if cfg.Attempt != 1 || cfg.MaxAttempts != subagentMaxRetries+1 {
+				t.Errorf("attempt metadata = %d/%d, want 1/%d", cfg.Attempt, cfg.MaxAttempts, subagentMaxRetries+1)
+			}
+			if cfg.ResolveAttempt == nil || cfg.ResolveAttempt(retryErr) != SpawnAttemptRetry {
+				t.Errorf("pre-commit attempt disposition is not retry")
+			}
+			return nil, retryErr
 		}
 		return &SpawnResult{Text: "recovered"}, nil
 	}
@@ -217,7 +311,7 @@ func newAbortableSubagentAdmitter() *abortableSubagentAdmitter {
 	}
 }
 
-func (f *abortableSubagentAdmitter) AdmitSubagentRun(ctx context.Context, _, threadID, invocationID string, _ []byte) (context.Context, SubagentAdmission, func(error), error) {
+func (f *abortableSubagentAdmitter) AdmitSubagentRun(ctx context.Context, _, threadID, invocationID string, _ []byte) (context.Context, SubagentAdmission, func(SubagentTerminal), error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	f.mu.Lock()
 	f.cancels[threadID] = cancel
@@ -227,7 +321,7 @@ func (f *abortableSubagentAdmitter) AdmitSubagentRun(ctx context.Context, _, thr
 		RunID:        "run-" + invocationID,
 		TurnID:       "turn-" + invocationID,
 		TurnPosition: 1,
-	}, func(error) {}, nil
+	}, func(SubagentTerminal) {}, nil
 }
 
 func (f *abortableSubagentAdmitter) abortRun(threadID string) bool {

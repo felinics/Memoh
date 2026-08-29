@@ -19,10 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	embeddeddb "github.com/memohai/memoh/db"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/team"
+	embeddeddb "github.com/felinics/memoh/db"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/team"
 )
 
 func sqlState(err error) string {
@@ -244,6 +244,34 @@ func TestCanonicalInitContainsFinalTeamMembershipSchema(t *testing.T) {
 	}
 	if !rls || !forced || policyCount != 4 {
 		t.Fatalf("canonical membership protection = rls:%v forced:%v policies:%d", rls, forced, policyCount)
+	}
+
+	var packageInstallations, pluginInstallations, pluginResources bool
+	if err := pool.QueryRow(ctx, `
+		SELECT to_regclass('public.bot_skill_package_installations') IS NOT NULL,
+		       to_regclass('public.bot_plugin_installations') IS NOT NULL,
+		       to_regclass('public.bot_plugin_resources') IS NOT NULL`).Scan(
+		&packageInstallations, &pluginInstallations, &pluginResources,
+	); err != nil {
+		t.Fatalf("inspect canonical extension relations: %v", err)
+	}
+	if !packageInstallations || pluginInstallations || pluginResources {
+		t.Fatalf(
+			"canonical extension relations = packages:%v plugin_installations:%v plugin_resources:%v",
+			packageInstallations, pluginInstallations, pluginResources,
+		)
+	}
+
+	var legacyMCPColumns int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM information_schema.columns
+		 WHERE table_schema = 'public' AND table_name = 'mcp_connections'
+		   AND column_name IN ('managed_by_plugin_installation_id', 'managed_resource_key', 'visible', 'metadata')`).Scan(&legacyMCPColumns); err != nil {
+		t.Fatalf("inspect canonical MCP columns: %v", err)
+	}
+	if legacyMCPColumns != 0 {
+		t.Fatalf("canonical MCP schema retains %d Plugin ownership columns", legacyMCPColumns)
 	}
 
 	var teamID string

@@ -11,9 +11,9 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/mcp"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 // createElicitationRequest accepts the v0.13.5 form shape plus the optional
@@ -104,7 +104,7 @@ func (c *clientCallbacks) CreateElicitation(ctx context.Context, request createE
 	// reconnects. The blocked JSON-RPC callback and its field mapping are
 	// process-local; cancellation, timeout, or runtime teardown invalidates the
 	// waiter rather than pretending the form can resume after a process restart.
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 	providerMetadata := map[string]any{
 		"source":     userinput.ProviderSourceACPElicitation,

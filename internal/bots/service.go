@@ -13,13 +13,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	tzutil "github.com/memohai/memoh/internal/timezone"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/acl"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
+	tzutil "github.com/felinics/memoh/internal/timezone"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // Service provides bot CRUD and membership management.
@@ -33,7 +34,8 @@ type Service struct {
 }
 
 const (
-	botLifecycleOperationTimeout = 5 * time.Minute
+	botLifecycleOperationTimeout   = 5 * time.Minute
+	botRuntimeConfigPublishTimeout = 30 * time.Second
 )
 
 var (
@@ -389,8 +391,27 @@ func (s *Service) UpdateReplacingMetadata(ctx context.Context, botID string, req
 	return s.updateWithParams(ctx, params)
 }
 
+// PublishRuntimeConfig invalidates the old runtime epoch before publishing
+// bot-scoped workspace files, then holds the reset parent lock for the whole
+// external write. Callers must first acquire a bot-scoped reset lease.
+func (s *Service) PublishRuntimeConfig(ctx context.Context, botID string, publish func(context.Context) error) error {
+	publishErr, guardErr := runtimefence.PublishBotRuntimeConfig(
+		ctx,
+		s.queries,
+		botID,
+		botRuntimeConfigPublishTimeout,
+		publish,
+	)
+	return errors.Join(guardErr, publishErr)
+}
+
 func (s *Service) updateWithParams(ctx context.Context, params sqlc.UpdateBotProfileParams) (Bot, error) {
-	row, err := s.queries.UpdateBotProfile(ctx, params)
+	var row sqlc.UpdateBotProfileRow
+	err := runtimefence.InResetTransaction(ctx, s.queries, params.ID.String(), "", func(queries dbstore.Queries) error {
+		var updateErr error
+		row, updateErr = queries.UpdateBotProfile(ctx, params)
+		return updateErr
+	})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
 			return Bot{}, ErrBotNameTaken
@@ -516,20 +537,20 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
-	row, err := s.queries.GetBotByID(ctx, botUUID)
+	err = runtimefence.InResetTransaction(ctx, s.queries, botID, "", func(queries dbstore.Queries) error {
+		row, err := queries.GetBotByID(ctx, botUUID)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(row.Status) == BotStatusDeleting {
+			return nil
+		}
+		return queries.UpdateBotStatus(ctx, sqlc.UpdateBotStatusParams{ID: botUUID, Status: BotStatusDeleting})
+	})
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(row.Status) == BotStatusDeleting {
-		return nil
-	}
-	if err := s.queries.UpdateBotStatus(ctx, sqlc.UpdateBotStatusParams{
-		ID:     botUUID,
-		Status: BotStatusDeleting,
-	}); err != nil {
-		return err
-	}
-	s.enqueueDeleteLifecycle(ctx, botID)
+	s.enqueueDeleteLifecycle(ctx, botUUID.String())
 	return nil
 }
 
@@ -600,59 +621,60 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 }
 
 func (s *Service) enqueueDeleteLifecycle(ctx context.Context, botID string) {
-	go func() {
-		lifecycleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), botLifecycleOperationTimeout)
-		defer cancel()
+	go s.runDeleteLifecycle(context.WithoutCancel(ctx), botID)
+}
 
-		// The revert must succeed even when the failing cleanup consumed the
-		// whole lifecycle budget: reverting on the exhausted context would
-		// strand the bot in status "deleting" with no retry path.
-		revertToReady := func() {
-			revertCtx, cancelRevert := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 15*time.Second)
-			defer cancelRevert()
-			if err := s.updateStatus(revertCtx, botID, BotStatusReady); err != nil {
-				s.logger.Error("revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
-			}
+func (s *Service) runDeleteLifecycle(ctx context.Context, botID string) {
+	lifecycleCtx, cancel := context.WithTimeout(ctx, botLifecycleOperationTimeout)
+	defer cancel()
+
+	// The revert must succeed even when the failing cleanup consumed the
+	// whole lifecycle budget: reverting on the exhausted context would
+	// strand the bot in status "deleting" with no retry path.
+	revertToReady := func() {
+		revertCtx, cancelRevert := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 15*time.Second)
+		defer cancelRevert()
+		if err := s.updateStatus(revertCtx, botID, BotStatusReady); err != nil {
+			s.logger.Error("revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
 		}
+	}
 
-		if s.connectorLifecycle != nil {
-			if err := s.connectorLifecycle.CleanupBotConnectors(lifecycleCtx, botID); err != nil {
-				s.logger.Error("bot connector cleanup failed",
-					slog.String("bot_id", botID),
-					slog.Any("error", err),
-				)
-				revertToReady()
-				return
-			}
-		}
-
-		if s.containerLifecycle != nil {
-			if err := s.containerLifecycle.CleanupBotContainer(lifecycleCtx, botID, false); err != nil {
-				s.logger.Error("bot container cleanup failed",
-					slog.String("bot_id", botID),
-					slog.Any("error", err),
-				)
-			}
-		}
-
-		botUUID, err := db.ParseUUID(botID)
-		if err != nil {
-			s.logger.Error("invalid bot id while finalizing delete",
+	if s.connectorLifecycle != nil {
+		if err := s.connectorLifecycle.CleanupBotConnectors(lifecycleCtx, botID); err != nil {
+			s.logger.Error("bot connector cleanup failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
 			revertToReady()
 			return
 		}
-		if err := s.queries.DeleteBotByID(lifecycleCtx, botUUID); err != nil {
-			s.logger.Error("failed to delete bot after cleanup",
+	}
+
+	if s.containerLifecycle != nil {
+		if err := s.containerLifecycle.CleanupBotContainer(lifecycleCtx, botID, false); err != nil {
+			s.logger.Error("bot container cleanup failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
-			revertToReady()
-			return
 		}
-	}()
+	}
+
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		s.logger.Error("invalid bot id while finalizing delete",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+		revertToReady()
+		return
+	}
+	if err := s.queries.DeleteBotByID(lifecycleCtx, botUUID); err != nil {
+		s.logger.Error("failed to delete bot after cleanup",
+			slog.String("bot_id", botID),
+			slog.Any("error", err),
+		)
+		revertToReady()
+	}
 }
 
 func (s *Service) updateStatus(ctx context.Context, botID, status string) error {
@@ -688,19 +710,19 @@ func asSQLCBot(v any) sqlc.Bot {
 	case sqlc.Bot:
 		return r
 	case sqlc.CreateBotRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.GetBotByIDRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.GetBotByNameRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.ListBotsByOwnerRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.ListAccessibleBotsRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.UpdateBotProfileRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.UpdateBotOwnerRow:
-		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, HeartbeatEnabled: r.HeartbeatEnabled, HeartbeatInterval: r.HeartbeatInterval, HeartbeatPrompt: r.HeartbeatPrompt, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, Language: r.Language, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	default:
 		return sqlc.Bot{}
 	}

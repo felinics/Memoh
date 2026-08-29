@@ -114,7 +114,9 @@ export interface ChatSendDeps {
   ) => Promise<ChatViewTarget>
   startSessionRuntime: (botId: string, sessionId: string) => void
   recordUserSent: (target: ChatViewTarget, sessionId: string, wasDraft: boolean) => void
-  ensureWebSocketConnected: (botId: string) => boolean
+  // True when a socket handle exists for the bot; the ws layer queues until
+  // open, so sends are not refused during the first-open handshake.
+  ensureWebSocket: (botId: string) => boolean
   trackAssistantStream: (input: TrackStreamInput) => Promise<void>
   sendWebSocketMessage: (botId: string, message: WSClientMessage) => boolean
   createdSessionIdForInvocation: (invocationId: string) => string
@@ -306,7 +308,7 @@ export function createChatSend(deps: ChatSendDeps) {
         transcript.appendToView(userTurn, assistantTurn)
       }
 
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
@@ -433,7 +435,7 @@ export function createChatSend(deps: ChatSendDeps) {
   }
 
   async function retryLatestAssistant(
-    messageId: string,
+    turnId: string,
     options: {
       target?: ChatViewTarget
       modelId?: string
@@ -445,16 +447,16 @@ export function createChatSend(deps: ChatSendDeps) {
     const botId = viewTarget.botId
     const targetSessionId = viewTarget.sessionId ?? ''
     const transcript = deps.transcriptForTarget(viewTarget)
-    const targetId = messageId.trim()
+    const targetTurnId = turnId.trim()
     if (
       !botId
       || !targetSessionId
-      || !targetId
+      || !targetTurnId
       || deps.chatReadOnlyFor(viewTarget)
       || deps.isChatViewStreaming(viewTarget)
       || transcript.loadingMessages.value
     ) return { ok: false, stage: 'startup' }
-    const target = transcript.findTurnByServerId(targetId)
+    const target = transcript.findTurnByTurnId(targetTurnId, 'assistant')
     if (!target || !transcript.isLatestVisibleAssistantTurn(target)) {
       return { ok: false, stage: 'startup' }
     }
@@ -468,7 +470,7 @@ export function createChatSend(deps: ChatSendDeps) {
     )
     const replacedTurns = transcript.replaceTailFromTurn(target, [assistantTurn])
     try {
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
@@ -481,7 +483,7 @@ export function createChatSend(deps: ChatSendDeps) {
         type: 'retry_message',
         invocation_id: invocationId,
         session_id: targetSessionId,
-        message_id: targetId,
+        turn_id: targetTurnId,
         model_id: options.modelId?.trim() || deps.overrideModelId.value || undefined,
         reasoning_effort: options.reasoningEffort?.trim()
           || deps.overrideReasoningEffort.value
@@ -516,7 +518,7 @@ export function createChatSend(deps: ChatSendDeps) {
   }
 
   async function editLatestUser(
-    messageId: string,
+    turnId: string,
     text: string,
     options: {
       target?: ChatViewTarget
@@ -530,17 +532,17 @@ export function createChatSend(deps: ChatSendDeps) {
     const botId = viewTarget.botId
     const targetSessionId = viewTarget.sessionId ?? ''
     const transcript = deps.transcriptForTarget(viewTarget)
-    const targetId = messageId.trim()
+    const targetTurnId = turnId.trim()
     if (
       !botId
       || !targetSessionId
-      || !targetId
+      || !targetTurnId
       || !trimmed
       || deps.chatReadOnlyFor(viewTarget)
       || deps.isChatViewStreaming(viewTarget)
       || transcript.loadingMessages.value
     ) return { ok: false, stage: 'startup' }
-    const target = transcript.findTurnByServerId(targetId)
+    const target = transcript.findTurnByTurnId(targetTurnId, 'user')
     if (!target || !transcript.isLatestVisibleUserTurn(target) || hasUserAttachments(target)) {
       return { ok: false, stage: 'startup' }
     }
@@ -555,7 +557,7 @@ export function createChatSend(deps: ChatSendDeps) {
     )
     const replacedTurns = transcript.replaceTailFromTurn(target, [userTurn, assistantTurn])
     try {
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
@@ -568,7 +570,7 @@ export function createChatSend(deps: ChatSendDeps) {
         type: 'edit_message',
         invocation_id: invocationId,
         session_id: targetSessionId,
-        message_id: targetId,
+        turn_id: targetTurnId,
         text: trimmed,
         model_id: options.modelId?.trim() || deps.overrideModelId.value || undefined,
         reasoning_effort: options.reasoningEffort?.trim()

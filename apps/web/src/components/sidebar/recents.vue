@@ -1,8 +1,11 @@
 <template>
-  <div class="flex min-h-0 flex-1 flex-col min-w-0 overflow-hidden">
+  <div class="flex min-w-0 flex-col">
     <!-- Unified Recents: one timeline for chats, ACP chats, and schedule
          runs (each row carries its own type mark — see session-item.vue).
-         The header folds the section, mirroring the Folders header above. -->
+         The header folds the section, mirroring the Folders header above.
+         Recents does not own a scrollport: it is the tail of the sessions
+         panel's single scroll container (passed in as `scrollEl`), so the
+         folders above it and this timeline scroll as one list. -->
     <div class="shrink-0 px-2 pb-0.5 pt-1">
       <TextButton
         :class="sectionHeaderClass"
@@ -16,76 +19,69 @@
       </TextButton>
     </div>
 
+    <!-- Cursor-paginated rows render as a plain list; load-more still uses a
+         bottom sentinel, now observed against the shared scrollport. -->
     <div
       v-show="!sectionCollapsed"
-      class="flex-1 relative min-h-0"
+      class="px-2"
     >
-      <!-- Native overflow scroll (not Reka ScrollArea): cursor-paginated rows
-           render as a plain list; load-more uses a bottom sentinel. -->
       <div
-        ref="scrollEl"
-        class="absolute inset-0 overflow-y-auto sidebar-scroll"
+        v-for="session in visibleSessions"
+        :key="session.id"
+        class="pb-[2px]"
       >
-        <div class="px-2 pr-3">
-          <div
-            v-for="session in visibleSessions"
-            :key="session.id"
-            class="pb-[2px]"
-          >
-            <SessionItem
-              :session="session"
-              :is-active="sessionId === session.id"
-              :streaming="chatStore.isSessionStreaming(currentBotId, session.id)"
-              @select="handleSelect"
-              @open-new-tab="handleOpenNewTab"
-              @rename="sessionDialogs?.openRename($event)"
-              @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
+        <SessionItem
+          :session="session"
+          :is-active="sessionId === session.id"
+          :streaming="chatStore.isSessionStreaming(currentBotId, session.id)"
+          @select="handleSelect"
+          @open-new-tab="handleOpenNewTab"
+          @rename="sessionDialogs?.openRename($event)"
+          @delete="sessionDialogs?.openDelete($event, { fallbackMode: 'recent' })"
+        />
+      </div>
+
+      <div
+        v-if="showSentinel"
+        ref="loadMoreSentinel"
+        data-testid="load-more-sentinel"
+        class="h-px w-full"
+      />
+
+      <template v-if="loadingMoreSessions">
+        <div
+          v-for="(widthClass, index) in loadMoreSkeletonRows"
+          :key="`load-more-${index}`"
+          class="pb-[2px]"
+        >
+          <div class="flex min-h-[2.125rem] items-center rounded-[9px] px-3">
+            <Skeleton
+              :class="[sessionSkeletonBarClass, widthClass]"
             />
           </div>
-
-          <div
-            v-if="showSentinel"
-            ref="loadMoreSentinel"
-            data-testid="load-more-sentinel"
-            class="h-px w-full"
-          />
-
-          <template v-if="loadingMoreSessions">
-            <div
-              v-for="(widthClass, index) in loadMoreSkeletonRows"
-              :key="`load-more-${index}`"
-              class="pb-[2px]"
-            >
-              <div class="flex min-h-[2.125rem] items-center rounded-[9px] px-[11px]">
-                <Skeleton
-                  :class="[sessionSkeletonBarClass, widthClass]"
-                />
-              </div>
-            </div>
-          </template>
-
-          <div
-            v-if="currentBotId && !loadingChats && visibleSessions.length === 0"
-            class="px-3 py-6 text-center text-xs text-muted-foreground"
-          >
-            {{ t('chat.noSessions') }}
-          </div>
-
-          <template v-if="loadingChats && visibleSessions.length === 0">
-            <div
-              v-for="(widthClass, index) in initialSkeletonRows"
-              :key="`initial-${index}`"
-              class="pb-[2px]"
-            >
-              <div class="flex min-h-[2.125rem] items-center rounded-[9px] px-[11px]">
-                <Skeleton
-                  :class="[sessionSkeletonBarClass, widthClass]"
-                />
-              </div>
-            </div>
-          </template>
         </div>
+      </template>
+
+      <div
+        v-if="currentBotId && !loadingChats && visibleSessions.length === 0"
+        class="px-3 py-6 text-center text-xs text-muted-foreground"
+      >
+        {{ t('chat.noSessions') }}
       </div>
+
+      <template v-if="loadingChats && visibleSessions.length === 0">
+        <div
+          v-for="(widthClass, index) in initialSkeletonRows"
+          :key="`initial-${index}`"
+          class="pb-[2px]"
+        >
+          <div class="flex min-h-[2.125rem] items-center rounded-[9px] px-3">
+            <Skeleton
+              :class="[sessionSkeletonBarClass, widthClass]"
+            />
+          </div>
+        </div>
+      </template>
     </div>
 
     <SessionDialogs ref="sessionDialogs" />
@@ -93,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, toRef, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
@@ -107,7 +103,12 @@ import { useSidebarInfiniteScroll } from './use-sidebar-infinite-scroll'
 import { TextButton, Skeleton } from '@felinic/ui'
 import SessionItem from './session-item.vue'
 import SessionDialogs from './session-dialogs.vue'
-import '@/styles/sidebar-scroll.css'
+
+// The sessions panel owns the scrollport shared with Folders; Recents pages
+// against it (sentinel root + reset-to-top) instead of nesting its own.
+const props = defineProps<{
+  scrollEl: HTMLElement | null
+}>()
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -175,7 +176,7 @@ const visibleSessions = computed(() => {
   return sortByRecency(unbound)
 })
 
-const scrollEl = ref<HTMLElement | null>(null)
+const scrollEl = toRef(props, 'scrollEl')
 const {
   loadMoreSentinel,
   showSentinel,

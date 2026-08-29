@@ -4,8 +4,8 @@ import (
 	"strings"
 	"sync"
 
-	agentevent "github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/channel"
+	agentevent "github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 type discussEventProjector struct {

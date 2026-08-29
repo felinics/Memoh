@@ -3,8 +3,8 @@ package handlers
 import (
 	"testing"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/bots"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
@@ -86,7 +86,7 @@ func TestScrubBotForResponseRemovesWorkspaceSetupError(t *testing.T) {
 		Metadata: map[string]any{
 			"workspace": map[string]any{
 				"backend":               "container",
-				"image":                 "ghcr.io/memohai/workspace:latest",
+				"image":                 "ghcr.io/felinics/workspace:latest",
 				"last_setup_error":      map[string]any{"message": "pull failed"},
 				"skill_discovery_roots": []any{"/data/skills"},
 			},
@@ -104,7 +104,7 @@ func TestScrubBotForResponseRemovesWorkspaceSetupError(t *testing.T) {
 	if got := workspace["backend"]; got != "container" {
 		t.Fatalf("workspace backend = %#v, want container", got)
 	}
-	if got := workspace["image"]; got != "ghcr.io/memohai/workspace:latest" {
+	if got := workspace["image"]; got != "ghcr.io/felinics/workspace:latest" {
 		t.Fatalf("workspace image = %#v, want preserved image", got)
 	}
 

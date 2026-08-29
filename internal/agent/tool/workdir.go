@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 // WorkdirLister is the slice of the workdir domain the tool needs.

@@ -10,10 +10,10 @@
   <p>Give every AI agent its own cloud computer. Open source.<br>
   Desktop, browser, network, and long-term memory — always on, even when your laptop is closed.</p>
   <div align="center">
-    <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
-    <img src="https://img.shields.io/github/stars/memohai/Memoh?style=social" alt="Stars" />
-    <img src="https://img.shields.io/github/forks/memohai/Memoh?style=social" alt="Forks" />
-    <a href="https://deepwiki.com/memohai/Memoh">
+    <img src="https://img.shields.io/github/package-json/v/felinics/Memoh" alt="Version" />
+    <img src="https://img.shields.io/github/stars/felinics/Memoh?style=social" alt="Stars" />
+    <img src="https://img.shields.io/github/forks/felinics/Memoh?style=social" alt="Forks" />
+    <a href="https://deepwiki.com/felinics/Memoh">
       <img src="https://deepwiki.com/badge.svg" alt="DeepWiki" />
     </a>
     <a href="https://t.me/memohai">
@@ -55,7 +55,7 @@ curl -fsSL https://memoh.sh | sh
 Manual deployment:
 
 ```bash
-git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/memohai/Memoh.git
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/felinics/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 # Edit config.toml
@@ -98,31 +98,30 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 - **Built-in memory**: Long-term memory across sessions and platforms, out of the box. Also supports [Mem0](https://mem0.ai), OpenViking.
 - **10+ channels**: Telegram, Discord, Lark, WeChat, QQ, Email, and more.
 - **MCP**: Connect external tool servers. Each bot manages its own connections.
-- **Plugins**: Install packaged skills, tools, and integrations to extend what bots can do.
 - **Agent Hosting**: Host external agents inside Memoh workspaces via ACP. Currently supports Codex and Claude Code, configured per bot.
 - **Browser Use**: Drive a browser inside the workspace.
 - **Computer Use**: Operate the workspace desktop for GUI workflows.
 - **Skills & Supermarket**: Modular skills, install curated templates from Supermarket, delegate to sub-agents.
-- **Automation**: Scheduled tasks and periodic heartbeat.
+- **Automation**: Scheduled tasks for recurring workflows.
 
 ## Sub-projects
 
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — A lightweight, idiomatic AI SDK for Go, inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP, and embeddings.
-- [**Connect It**](https://github.com/memohai/connect-it) — A self-hosted connector gateway that securely stores SaaS credentials and gives agents access to integrations through a single MCP endpoint.
-- [**UI**](https://github.com/memohai/ui) — A Vue 3 design system for AI agent management interfaces, including a component library, design tokens, and skills that teach agents how to use them.
+- [**Twilight AI**](https://github.com/felinics/twilight) — A lightweight, idiomatic AI SDK for Go, inspired by [Vercel AI SDK](https://sdk.vercel.ai/). Provider-agnostic (OpenAI, Anthropic, Google), with first-class streaming, tool calling, MCP, and embeddings.
+- [**Connect It**](https://github.com/felinics/connect-it) — A self-hosted connector gateway that securely stores SaaS credentials and gives agents access to integrations through a single MCP endpoint.
+- [**UI**](https://github.com/felinics/ui) — A Vue 3 design system for AI agent management interfaces, including a component library, design tokens, and skills that teach agents how to use them.
 
 ## Project Status
 
-![License](https://img.shields.io/github/license/memohai/Memoh) ![Last Commit](https://img.shields.io/github/last-commit/memohai/Memoh) ![Commit Activity](https://img.shields.io/github/commit-activity/m/memohai/Memoh) ![Issues](https://img.shields.io/github/issues/memohai/Memoh) ![Pull Requests](https://img.shields.io/github/issues-pr/memohai/Memoh)
+![License](https://img.shields.io/github/license/felinics/Memoh) ![Last Commit](https://img.shields.io/github/last-commit/felinics/Memoh) ![Commit Activity](https://img.shields.io/github/commit-activity/m/felinics/Memoh) ![Issues](https://img.shields.io/github/issues/felinics/Memoh) ![Pull Requests](https://img.shields.io/github/issues-pr/felinics/Memoh)
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://www.star-history.com/#memohai/Memoh&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=felinics/Memoh&type=date&legend=top-left)](https://star-history.dera.page/#felinics/Memoh&type=date&legend=top-left)
 
 ## Contributors
 
-<a href="https://github.com/memohai/Memoh/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=memohai/Memoh" />
+<a href="https://github.com/felinics/Memoh/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=felinics/Memoh" />
 </a>
 
 ## Community
@@ -130,7 +129,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for custom configuration and production setup
 - 🌐 [**Website**](https://memoh.ai)
 - 📚 [**Documentation**](https://docs.memoh.ai)
 - 💬 [**Telegram Group**](https://t.me/memohai)
-- 🛒 [**Supermarket**](https://github.com/memohai/supermarket)
+- 🛒 [**Supermarket**](https://github.com/felinics/supermarket)
 - 🤝 [**Cooperation**](mailto:business@memoh.net) — business@memoh.net
 
 ---

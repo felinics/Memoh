@@ -17,12 +17,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
-
-const mediaContainerRoot = "/data/media"
 
 // ---------- request / response types ----------
 
@@ -112,8 +111,7 @@ func resolveContainerPath(rawPath string) (string, error) {
 }
 
 func isContainerMediaPath(containerPath string) bool {
-	cleaned := path.Clean("/" + strings.ReplaceAll(strings.TrimSpace(containerPath), "\\", "/"))
-	return cleaned == mediaContainerRoot || strings.HasPrefix(cleaned, mediaContainerRoot+"/")
+	return attachment.IsMediaAccessPath(containerPath)
 }
 
 func isPathWithin(parentPath, childPath string) bool {

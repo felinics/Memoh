@@ -39,7 +39,7 @@ Default host ports are shifted away from the production compose stack: Web `1808
 ### Connect-It
 
 The dev Compose files pull the pinned multi-architecture image
-`ghcr.io/memohai/connect-it:0.1.1`; no Connect-It source checkout is required.
+`ghcr.io/felinics/connect-it:0.3.0`; no Connect-It source checkout is required.
 The image serves the API, MCP endpoint, and admin UI from one container.
 Connect-It uses the same `memoh` PostgreSQL database as Memoh, with
 its independently migrated tables isolated in the `connect_it` schema. The

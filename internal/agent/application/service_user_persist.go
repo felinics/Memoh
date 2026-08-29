@@ -2,11 +2,11 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // ApplyUserMessageHookAndPersistUserTurn applies the normal user-message hook
@@ -53,7 +53,7 @@ func (s *Service) persistUserTurn(ctx context.Context, req ChatRequest) (message
 		Content: newTextContent(persistedUserTurnText(req)),
 	}
 	modelMessage = normalizeUserMessageContent(modelMessage)
-	content, err := json.Marshal(modelMessage)
+	content, err := historyfrag.MarshalStoredModelMessage(modelMessage)
 	if err != nil {
 		return messagepkg.Message{}, err
 	}

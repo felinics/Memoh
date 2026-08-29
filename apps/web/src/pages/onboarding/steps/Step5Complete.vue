@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Plug, AudioLines, Globe, AlertTriangle } from 'lucide-vue-next'
 import { useOnboarding } from '@/composables/useOnboarding'
@@ -8,17 +8,15 @@ import StepExitShell from '../components/step-exit-shell.vue'
 import HintBox from '../components/hint-box.vue'
 import { safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from '../constants'
-import { onboardingRuntimeState } from '../state'
+import { readOnboardingBotResult } from '../session'
 
 const { t } = useI18n()
 const { complete, completing } = useOnboarding()
 
 const visible = ref(false)
 const exiting = ref(false)
-const hasConfiguredAI = computed(() => {
-  const result = onboardingRuntimeState.value.botResult
-  return !!result?.selectedModelId || !!result?.acpLaunchAgentId
-})
+const botResult = readOnboardingBotResult()
+const hasConfiguredAI = botResult?.modelConfigured === true || botResult?.acp?.oauthPending === false
 
 const cards = [
   { icon: Plug, titleKey: 'onboarding.complete.cards.im.title', descKey: 'onboarding.complete.cards.im.desc' },

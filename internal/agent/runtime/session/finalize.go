@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // finalizeLedgerRun records the run's terminal state durably, fenced by the
@@ -22,16 +22,16 @@ import (
 //
 // A zero fencing token means the run was started through a pre-ledger entry
 // point and has no durable row to transition, not that fencing was skipped.
-func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, message string) error {
+func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, errorCode, message string) (TerminalRun, error) {
 	if m.runs == nil || handle.FencingToken <= 0 {
-		return nil
+		return TerminalRun{}, nil
 	}
 	state := terminalLedgerState(status, message)
-	errorCode := ""
-	if state == ledger.StateFailed {
+	errorCode = strings.TrimSpace(errorCode)
+	if state == ledger.StateFailed && errorCode == "" {
 		errorCode = "runtime_run_failed"
 	}
-	_, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{
+	run, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{
 		RunID:        handle.RunID,
 		FencingToken: handle.FencingToken,
 		State:        state,
@@ -39,7 +39,7 @@ func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, statu
 		ErrorMessage: message,
 	})
 	if err != nil {
-		return fmt.Errorf("finalize runtime run: %w", err)
+		return TerminalRun{}, fmt.Errorf("finalize runtime run: %w", err)
 	}
 	if !applied {
 		// Already terminal, or superseded by a newer owner. Both mean this
@@ -48,8 +48,33 @@ func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, statu
 		m.logger.Debug("runtime run terminal write did not apply",
 			slog.String("run_id", handle.RunID),
 			slog.String("state", string(state)))
+		run, err = m.runs.Get(ctx, handle.RunID)
+		if err != nil {
+			return TerminalRun{}, fmt.Errorf("load authoritative runtime terminal: %w", err)
+		}
+		if !run.State.Terminal() {
+			return TerminalRun{}, ErrRunOwnershipLost
+		}
 	}
-	return nil
+	terminal := terminalRunFromLedger(run)
+	if run.RunID != handle.RunID || run.BotID != handle.BotID || run.SessionID != handle.SessionID {
+		return TerminalRun{}, ErrRunOwnershipLost
+	}
+	if run.FencingToken != handle.FencingToken {
+		return terminal, ErrRunOwnershipLost
+	}
+	return terminal, nil
+}
+
+func terminalRunFromLedger(run ledger.Run) TerminalRun {
+	return TerminalRun{
+		RunID:        run.RunID,
+		BotID:        run.BotID,
+		SessionID:    run.SessionID,
+		FencingToken: run.FencingToken,
+		State:        string(run.State),
+		ErrorCode:    run.ErrorCode,
+	}
 }
 
 // terminalLedgerState maps a live run status to its durable terminal state. The

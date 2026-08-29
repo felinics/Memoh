@@ -11,7 +11,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 func TestDiscordDescriptorAdvertisesRichText(t *testing.T) {

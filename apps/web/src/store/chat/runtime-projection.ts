@@ -121,21 +121,41 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
       id: `runtime:${turnId}:user`,
     })
   }
-  turns.push({
-    turn_id: turnId,
-    role: 'assistant',
-    id: `runtime:${turnId}:assistant`,
-    timestamp: run.started_at,
-    messages: run.messages.map(cloneUIMessage),
-  })
-  if (run.error && !run.messages.some(message => message.type === 'error')) {
-    turns[turns.length - 1] = {
-      ...turns[turns.length - 1]!,
+  // A settled run with no streamed content has nothing to project. Emitting the
+  // assistant shell here would let applyRuntimeTranscript's merge overwrite the
+  // settled database turn's blocks with this empty list: once the run ends the
+  // database history is authoritative, and idle snapshots arrive with
+  // messages:null (e.g. after a backend restart, whose ledger view carries no
+  // streamed blocks).
+  const projectsAssistantContent = isRuntimeRunActive(run.status)
+    || run.messages.length > 0
+    || Boolean(run.error_code)
+    || Boolean(run.error)
+  if (projectsAssistantContent) {
+    turns.push({
+      turn_id: turnId,
       role: 'assistant',
-      messages: [
-        ...run.messages.map(cloneUIMessage),
-        { id: nextMessageId(run.messages), type: 'error', content: run.error },
-      ],
+      id: `runtime:${turnId}:assistant`,
+      timestamp: run.started_at,
+      // Share message identity with the run view: consumers normalize into
+      // their own view blocks without mutating UIMessage input, so re-cloning
+      // every message per projection was pure O(all-content) waste.
+      messages: [...run.messages],
+    })
+    if ((run.error_code || run.error) && !run.messages.some(message => message.type === 'error')) {
+      turns[turns.length - 1] = {
+        ...turns[turns.length - 1]!,
+        role: 'assistant',
+        messages: [
+          ...run.messages,
+          {
+            id: nextMessageId(run.messages),
+            type: 'error',
+            code: run.error_code,
+            content: run.error ?? '',
+          },
+        ],
+      }
     }
   }
   return {
@@ -157,10 +177,17 @@ function applyRunPatch(
   run: RuntimeCurrentRunView | null,
   delta: RuntimeDelta,
 ): RuntimeCurrentRunView | null {
+  // Hot path (delta without a full view): shallow-copy the run and start from a
+  // fresh messages array — the patch loops below copy-on-write the specific
+  // messages they touch, so unchanged messages keep object identity and a text
+  // append costs O(delta) instead of O(all content). The previous per-delta
+  // cloneRunView made a stream of N deltas cost O(N x content), which is what
+  // melted the main thread when a backgrounded tab replayed its backlog.
+  // Full-view carriers still clone: that payload may be reused by the caller.
   let next = delta.current_run_view
     ? cloneRunView(delta.current_run_view)
     : run
-      ? cloneRunView(run)
+      ? { ...run, messages: [...(run.messages ?? [])] }
       : null
   if (!next) return null
   const patch = delta.run
@@ -168,6 +195,7 @@ function applyRunPatch(
     next = {
       ...next,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.error_code !== undefined ? { error_code: patch.error_code } : {}),
       ...(patch.error !== undefined ? { error: patch.error } : {}),
       ...(patch.steer !== undefined ? { steer: { ...patch.steer } } : {}),
       ...(patch.updated_at !== undefined ? { updated_at: patch.updated_at } : {}),
@@ -177,7 +205,7 @@ function applyRunPatch(
     }
   }
 
-  const messages = delta.reset_messages ? [] : next.messages.map(cloneUIMessage)
+  const messages = delta.reset_messages ? [] : next.messages
   for (const append of delta.message_appends ?? []) {
     const index = messages.findIndex(message => message.id === append.id && message.type === append.type)
     if (index < 0) {
@@ -215,6 +243,19 @@ function applyRunPatch(
   }
   messages.sort((left, right) => left.id - right.id)
   return { ...next, messages }
+}
+
+// Delta-only patch step, exported for the batching runtime client: accumulate
+// many deltas onto a run view cheaply, then build the transcript once.
+export function applyRuntimeRunPatch(
+  run: RuntimeCurrentRunView | null,
+  delta: RuntimeDelta,
+): RuntimeCurrentRunView | null {
+  return applyRunPatch(run, delta)
+}
+
+export function projectRuntimeTranscript(run: RuntimeCurrentRunView | null): RuntimeTranscriptSlice {
+  return transcriptForRun(run)
 }
 
 export function createEmptyRuntimeProjection(sessionId = ''): RuntimeProjectionState {

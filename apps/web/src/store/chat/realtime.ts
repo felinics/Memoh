@@ -131,15 +131,20 @@ export function createChatRealtimeController(
     }
   }
 
-  function ensureWebSocketConnected(botId: string): boolean {
+  // A live socket handle is enough, even mid-handshake or between reconnect
+  // attempts: the ws layer queues messages and flushes them on open, so a send
+  // only fails when no socket exists for the bot at all. Failing fast while
+  // the first-open handshake was still in flight used to sacrifice the user's
+  // first message with "WebSocket is not connected" (#1070).
+  function ensureWebSocket(botId: string): boolean {
     const bid = botId.trim()
     if (!bid) return false
     if (!activeWebSocket || activeWebSocketBotId !== bid) startWebSocket(bid)
-    return activeWebSocket?.connected === true
+    return activeWebSocket !== null
   }
 
   function sendWebSocketMessage(botId: string, message: WSClientMessage): boolean {
-    if (!ensureWebSocketConnected(botId)) return false
+    if (!ensureWebSocket(botId)) return false
     activeWebSocket!.send(message)
     return true
   }
@@ -258,7 +263,7 @@ export function createChatRealtimeController(
   return {
     startWebSocket,
     stopWebSocket,
-    ensureWebSocketConnected,
+    ensureWebSocket,
     sendWebSocketMessage,
     abortWebSocketRun,
     startSessionRuntime,

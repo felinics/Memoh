@@ -14,12 +14,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/agent/turn/turnpb"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	intrpc "github.com/memohai/memoh/internal/rpc"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	intrpc "github.com/felinics/memoh/internal/rpc"
 )
 
 func TestStartTurnRoundTrip(t *testing.T) {

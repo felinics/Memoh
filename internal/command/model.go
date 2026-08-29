@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func (h *Handler) buildModelGroup() *CommandGroup {
@@ -23,7 +23,7 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:  "current",
-		Usage: "current - Show current chat and heartbeat models",
+		Usage: "current - Show current chat model",
 		Handler: func(cc CommandContext) (string, error) {
 			if h.settingsService == nil {
 				return cc.T("cmd.model.unavailable"), nil
@@ -34,7 +34,6 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 			}
 			return formatKVTitled(cc.T("cmd.model.currentTitle"), []kv{
 				{cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, settingsResp.ChatModelID)},
-				{cc.T("cmd.settings.fieldHeartbeatModel"), h.resolveModelName(cc, settingsResp.HeartbeatModelID)},
 			}), nil
 		},
 	})
@@ -75,31 +74,6 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 				return "", err
 			}
 			return formatChangedValueT(cc, cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, before.ChatModelID), h.resolveModelName(cc, selectedID)), nil
-		},
-	})
-	g.Register(SubCommand{
-		Name:    "set-heartbeat",
-		Usage:   "set-heartbeat <model_id> | <provider_name> <model_name> - Set the heartbeat model",
-		IsWrite: true,
-		Handler: func(cc CommandContext) (string, error) {
-			if len(cc.Args) < 1 {
-				return cc.T("cmd.model.setHeartbeatUsage"), nil
-			}
-			if h.settingsService == nil {
-				return cc.T("cmd.model.unavailable"), nil
-			}
-			before, _ := h.getBotSettings(cc)
-			modelResp, err := h.findModelForSelection(cc, cc.Args)
-			if err != nil {
-				return "", err
-			}
-			_, err = h.settingsService.UpsertBot(cc.Ctx, cc.BotID, settings.UpsertRequest{
-				HeartbeatModelID: &modelResp.ID,
-			})
-			if err != nil {
-				return "", err
-			}
-			return formatChangedValueT(cc, cc.T("cmd.settings.fieldHeartbeatModel"), h.resolveModelName(cc, before.HeartbeatModelID), h.resolveModelName(cc, modelResp.ID)), nil
 		},
 	})
 	return g
@@ -223,19 +197,12 @@ func modelMarkers(modelID string, settingsResp settings.Settings) []string {
 	if modelID == settingsResp.ChatModelID {
 		markers = append(markers, "chat")
 	}
-	if modelID == settingsResp.HeartbeatModelID {
-		markers = append(markers, "heartbeat")
-	}
 	return markers
 }
 
 func modelSortRank(model models.GetResponse, settingsResp settings.Settings) int {
-	switch len(modelMarkers(model.ID, settingsResp)) {
-	case 2:
-		return 0
-	case 1:
+	if len(modelMarkers(model.ID, settingsResp)) > 0 {
 		return 1
-	default:
-		return 2
 	}
+	return 2
 }

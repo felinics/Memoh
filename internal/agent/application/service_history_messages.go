@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 // buildMessagesFromPipeline assembles chat context from the DCP pipeline's
@@ -28,7 +29,7 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		return nil
 	}
 
-	trs := s.loadTurnResponses(ctx, sessionID)
+	trs := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
 	artifacts := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
@@ -63,14 +64,20 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for
-// timeline composition. Failures degrade to uncompacted context.
+// timeline composition. A load failure degrades into the bounded admission
+// window — the pipeline trim below still caps the recomposed raw history —
+// and is surfaced with a stable key instead of passing silently (CM-ADM-003).
 func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID string) []timeline.CompactionArtifact {
 	if s.queries == nil {
 		return nil
 	}
 	artifacts, err := compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
 	if err != nil {
-		s.logger.Warn("load compaction artifacts failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		s.logger.Warn("context_admission_degraded",
+			slog.String("path", "pipeline_chat"),
+			slog.String("reason", "artifact_load_failed"),
+			slog.String("session_id", sessionID),
+			slog.Any("error", err))
 		return nil
 	}
 	return artifacts
@@ -120,13 +127,16 @@ func trimPipelineMessagesByTokens(log *slog.Logger, messages []ModelMessage, pin
 }
 
 // loadTurnResponses loads recent assistant/tool messages from bot_history_messages
-// for use as the TR stream in pipeline-based context assembly.
-func (s *Service) loadTurnResponses(ctx context.Context, sessionID string) []timeline.TurnResponseEntry {
+// for use as the TR stream in pipeline-based context assembly. The load is
+// byte-budgeted on the database side (CM-ADM-001): rows are admitted
+// newest-first within the context budget, so a dense 24-hour window can
+// never materialize more than the budget's worth of payload.
+func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, contextTokenBudget int) []timeline.TurnResponseEntry {
 	if s.messageService == nil {
 		return nil
 	}
 	since := time.Now().UTC().Add(-24 * time.Hour)
-	msgs, err := s.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+	msgs, err := s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, s.historyLoadMaxBytes(contextTokenBudget))
 	if err != nil {
 		s.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil
@@ -134,32 +144,153 @@ func (s *Service) loadTurnResponses(ctx context.Context, sessionID string) []tim
 	return timeline.DecodeTurnResponseEntries(msgs)
 }
 
+// historyLoadMaxBytes converts a token budget into the byte budget used for
+// database-side history admission; a missing budget falls back to the
+// absolute cap so no load path is ever unbounded.
+func (s *Service) historyLoadMaxBytes(contextTokenBudget int) int64 {
+	if contextTokenBudget <= 0 {
+		contextTokenBudget = s.contextAbsoluteMaxTokens()
+	}
+	return int64(contextTokenBudget) * contextfrag.EstimateBytesPerToken
+}
+
 // stripToolMessages removes bulky tool interactions from the context while
 // keeping ask_user calls and results. ask_user is conversation-visible: the
 // question and the user's answer are part of the chat semantics, not tool noise.
+//
+// It also caps how much reasoning goes back: only the most recent assistant
+// message keeps its reasoning blocks. Replayed reasoning otherwise grows without
+// bound — every turn carries every earlier turn's blocks, and encrypted ones are
+// several hundred bytes each — until long conversations pay for reasoning they
+// will never use again. Providers verify the thinking blocks of the latest
+// assistant message and filter older turns server-side, so the newest turn is
+// the only one that has to survive.
+//
+// The newest turn keeps its tool calls along with its reasoning. A thinking
+// block explains the call it was issued with; replaying it while dropping the
+// call shows the model its own decision to use a tool with no record that the
+// call happened. The results those calls produced are kept for the same reason.
 func stripToolMessages(messages []ModelMessage) []ModelMessage {
+	latestAssistant := lastAssistantIndex(messages)
+	keptToolCallIDs := map[string]struct{}{}
+	// Only a latest turn that actually replays reasoning needs its calls kept:
+	// with no thinking block there is nothing whose explanation would dangle,
+	// and the tool noise is worth dropping as before.
+	if latestAssistant >= 0 && hasReasoningContent(messages[latestAssistant]) {
+		keptToolCallIDs = toolCallIDsOf(messages[latestAssistant])
+	}
 	filtered := make([]ModelMessage, 0, len(messages))
-	for _, m := range messages {
+	for i, m := range messages {
 		role := strings.TrimSpace(m.Role)
 		if strings.EqualFold(role, "tool") {
-			if kept := keepAskUserToolResultMessage(m); kept != nil {
+			if kept := keepAskUserToolResultMessage(m, keptToolCallIDs); kept != nil {
 				filtered = append(filtered, *kept)
 			}
 			continue
 		}
-		// Remove assistant messages that only contain tool calls / reasoning with
-		// no visible text. Tool-call metadata may live either in ToolCalls or in
-		// structured content parts.
-		if strings.EqualFold(role, "assistant") && hasToolCallContent(m) {
-			stripped, ok := stripNonAskUserToolCalls(m)
-			if !ok {
-				continue
+		if strings.EqualFold(role, "assistant") {
+			// Remove assistant messages that only contain tool calls / reasoning
+			// with no visible text. Tool-call metadata may live either in
+			// ToolCalls or in structured content parts.
+			if hasToolCallContent(m) {
+				keepLatestTurn := i == latestAssistant && hasReasoningContent(m)
+				stripped, ok := stripNonAskUserToolCalls(m, keepLatestTurn)
+				if !ok {
+					continue
+				}
+				m = stripped
+			} else if i != latestAssistant {
+				// A plain conversational turn has no tool call to strip, but its
+				// reasoning still accumulates, so drop it here as well.
+				m = dropReasoning(m)
 			}
-			m = stripped
 		}
 		filtered = append(filtered, m)
 	}
 	return filtered
+}
+
+// hasReasoningContent reports whether an assistant message carries a reasoning
+// part, including an empty-text redacted one whose payload is all metadata.
+func hasReasoningContent(message ModelMessage) bool {
+	for _, part := range modelMessageToSDKMessage(message).Content {
+		if _, ok := part.(sdk.ReasoningPart); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// toolCallIDsOf reports the tool call IDs an assistant message issued, across
+// both the structured content parts and the legacy top-level ToolCalls field.
+// It is only consulted for a message whose calls are being kept, so that the
+// results pairing with them can be kept too.
+func toolCallIDsOf(message ModelMessage) map[string]struct{} {
+	ids := map[string]struct{}{}
+	for _, part := range modelMessageToSDKMessage(message).Content {
+		if call, ok := part.(sdk.ToolCallPart); ok {
+			if id := strings.TrimSpace(call.ToolCallID); id != "" {
+				ids[id] = struct{}{}
+			}
+		}
+	}
+	for _, call := range message.ToolCalls {
+		if id := strings.TrimSpace(call.ID); id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
+}
+
+// dropReasoning removes an assistant message's reasoning parts, leaving the rest
+// of its content untouched.
+//
+// A message whose only content is reasoning cannot simply lose it: an emptied
+// assistant message is dropped by sanitizeMessages and rejected by providers.
+// Keeping the opaque block instead would exempt exactly the shape an
+// interruption mid-thinking leaves behind — reasoning with no answer text is
+// still checkpointed — and that shape recurs, so the cap would not hold. The
+// thinking is projected to text instead: the turn stays alive and readable
+// while the block itself stops being replayed.
+func dropReasoning(message ModelMessage) ModelMessage {
+	parts := modelMessageToSDKMessage(message).Content
+	kept := make([]sdk.MessagePart, 0, len(parts))
+	var reasoning strings.Builder
+	dropped := false
+	for _, part := range parts {
+		if reasoningPart, ok := part.(sdk.ReasoningPart); ok {
+			dropped = true
+			reasoning.WriteString(reasoningPart.Text)
+			continue
+		}
+		kept = append(kept, part)
+	}
+	if !dropped {
+		return message
+	}
+	if len(kept) == 0 {
+		// Nothing but reasoning: an empty-text block (a redacted one carries its
+		// payload in metadata) leaves no text to project, so the message has to
+		// keep its original form rather than vanish.
+		if strings.TrimSpace(reasoning.String()) == "" {
+			return message
+		}
+		kept = append(kept, sdk.TextPart{Text: reasoning.String()})
+	}
+	stripped := modelMessageFromSDKParts(sdk.MessageRoleAssistant, kept, message.Usage)
+	stripped.ToolCalls = message.ToolCalls
+	return stripped
+}
+
+// lastAssistantIndex reports the index of the most recent assistant message, or
+// -1 when there is none.
+func lastAssistantIndex(messages []ModelMessage) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "assistant") {
+			return i
+		}
+	}
+	return -1
 }
 
 func hasToolCallContent(message ModelMessage) bool {
@@ -174,11 +305,14 @@ func hasToolCallContent(message ModelMessage) bool {
 	return false
 }
 
-func stripNonAskUserToolCalls(message ModelMessage) (ModelMessage, bool) {
-	legacyToolCalls := keepAskUserLegacyToolCalls(message.ToolCalls)
+func stripNonAskUserToolCalls(message ModelMessage, keepLatestTurn bool) (ModelMessage, bool) {
+	legacyToolCalls := message.ToolCalls
+	if !keepLatestTurn {
+		legacyToolCalls = keepAskUserLegacyToolCalls(message.ToolCalls)
+	}
 	text := strings.TrimSpace(message.TextContent())
 
-	keptParts := filterAssistantContextParts(modelMessageToSDKMessage(message).Content)
+	keptParts := filterAssistantContextParts(modelMessageToSDKMessage(message).Content, keepLatestTurn)
 	if len(keptParts) > 0 {
 		message = modelMessageFromSDKParts(sdk.MessageRoleAssistant, keptParts, message.Usage)
 		message.ToolCalls = legacyToolCalls
@@ -199,11 +333,18 @@ func stripNonAskUserToolCalls(message ModelMessage) (ModelMessage, bool) {
 	return message, true
 }
 
-func keepAskUserToolResultMessage(message ModelMessage) *ModelMessage {
+// keepAskUserToolResultMessage keeps a tool message when it carries an ask_user
+// answer, or a result pairing with a tool call that survived stripping. The
+// latter keeps the newest turn's tool exchange whole: the call is replayed, so
+// the result it produced has to be there too.
+func keepAskUserToolResultMessage(message ModelMessage, keptToolCallIDs map[string]struct{}) *ModelMessage {
 	if strings.EqualFold(strings.TrimSpace(message.Name), userinput.ToolNameAskUser) {
 		return &message
 	}
-	results := filterAskUserToolResults(modelMessageToSDKMessage(message).Content)
+	if _, ok := keptToolCallIDs[strings.TrimSpace(message.ToolCallID)]; ok && strings.TrimSpace(message.ToolCallID) != "" {
+		return &message
+	}
+	results := filterAskUserToolResults(modelMessageToSDKMessage(message).Content, keptToolCallIDs)
 	if len(results) == 0 {
 		return nil
 	}
@@ -224,7 +365,13 @@ func keepAskUserLegacyToolCalls(calls []ToolCall) []ToolCall {
 	return kept
 }
 
-func filterAssistantContextParts(parts []sdk.MessagePart) []sdk.MessagePart {
+// filterAssistantContextParts drops tool noise from an assistant message.
+// keepLatestTurn preserves the message's reasoning parts and the tool calls they
+// were issued with, which the caller sets for the latest assistant turn: its
+// thinking blocks are the ones a provider verifies, and they have to be replayed
+// whole, empty-text blocks included. The calls travel with them, since a
+// thinking block explains a call that must still be there to explain.
+func filterAssistantContextParts(parts []sdk.MessagePart, keepLatestTurn bool) []sdk.MessagePart {
 	if len(parts) == 0 {
 		return nil
 	}
@@ -232,10 +379,14 @@ func filterAssistantContextParts(parts []sdk.MessagePart) []sdk.MessagePart {
 	for _, part := range parts {
 		switch typed := part.(type) {
 		case sdk.ToolCallPart:
-			if strings.EqualFold(strings.TrimSpace(typed.ToolName), userinput.ToolNameAskUser) {
+			if keepLatestTurn || strings.EqualFold(strings.TrimSpace(typed.ToolName), userinput.ToolNameAskUser) {
 				kept = append(kept, typed)
 			}
-		case sdk.ToolResultPart, sdk.ReasoningPart:
+		case sdk.ReasoningPart:
+			if keepLatestTurn {
+				kept = append(kept, typed)
+			}
+		case sdk.ToolResultPart:
 			continue
 		case sdk.TextPart:
 			if strings.TrimSpace(typed.Text) != "" {
@@ -248,7 +399,9 @@ func filterAssistantContextParts(parts []sdk.MessagePart) []sdk.MessagePart {
 	return kept
 }
 
-func filterAskUserToolResults(parts []sdk.MessagePart) []sdk.MessagePart {
+// filterAskUserToolResults keeps ask_user results, plus results pairing with a
+// tool call that survived stripping so the newest turn's exchange stays whole.
+func filterAskUserToolResults(parts []sdk.MessagePart, keptToolCallIDs map[string]struct{}) []sdk.MessagePart {
 	if len(parts) == 0 {
 		return nil
 	}
@@ -260,6 +413,12 @@ func filterAskUserToolResults(parts []sdk.MessagePart) []sdk.MessagePart {
 		}
 		if strings.EqualFold(strings.TrimSpace(result.ToolName), userinput.ToolNameAskUser) {
 			kept = append(kept, result)
+			continue
+		}
+		if id := strings.TrimSpace(result.ToolCallID); id != "" {
+			if _, pairs := keptToolCallIDs[id]; pairs {
+				kept = append(kept, result)
+			}
 		}
 	}
 	return kept

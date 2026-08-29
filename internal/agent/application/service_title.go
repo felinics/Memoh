@@ -9,21 +9,20 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 const (
-	titlePromptMaxInputChars = 500
-	titleGenerateTimeout     = 60 * time.Second
+	titleGenerateTimeout = 60 * time.Second
 	// titleGenerateMaxTokens caps the title completion. Reasoning models burn
 	// budget on hidden thinking before answering, so the cap must clear their
 	// thinking plus a short title (provider defaults can be far smaller, which
@@ -41,6 +40,13 @@ const (
 // trailing question mark, while worked examples carry the target style.
 // Keep the "rules + examples" shape when editing, and keep example inputs
 // disjoint from real traffic so the model generalizes instead of copying.
+//
+// Deliberately no special case for meaningless input (a number, a sticker):
+// the model still returns *something* topic-ish for it, and an empty result
+// already falls back to the prompt-derived title — whereas a fixed
+// placeholder string (the previous rule returned "新对话") collides with the
+// UI's own untitled-session label and makes every such session
+// indistinguishable in the sidebar.
 const titleGenerationPrompt = `Generate a short title for this conversation, in the same language as the user's message.
 
 Rules:
@@ -52,7 +58,6 @@ Rules:
 - For two-entity topics in Chinese, use the "X与Y" form; in English, use "X and Y".
 - For Chinese titles, allowed suffixes when one is needed: 分析/解析/介绍/建议/疑问/困惑/误解/修复/控制/设计/差异 — pick by topic nature, or use no suffix. English titles use plain noun phrases.
 - No ending punctuation, no quotes.
-- If the message is meaningless (a number, a sticker, a single character), return exactly: 新对话
 - Return ONLY the title text.
 
 Examples of the rules (do not copy their content):
@@ -201,8 +206,60 @@ func shouldGenerateSessionTitle(sess session.Thread) bool {
 	return false
 }
 
+const (
+	// titlePromptOverheadTokens reserves budget for the fixed prompt text plus
+	// protocol framing when sizing the user message against the title model's
+	// context window. The prompt is ~400 tokens; the slack covers tokenizer
+	// variance.
+	titlePromptOverheadTokens = 512
+	// titleInputFallbackWindow bounds the user message when the model's
+	// context window is unknown (config absent). 8k is below virtually every
+	// chat model's real window, so the request stays accepted; without any
+	// bound a huge pasted message could overflow an unknown-but-small window
+	// and the provider would reject the whole title call, silently leaving
+	// the first-line fallback title in place.
+	titleInputFallbackWindow = 8192
+	// titleInputFloorRunes is the minimum sample kept even when the window
+	// cannot cover it (a window smaller than the output reservation). Sending
+	// something risks a rejection there, but sending nothing guarantees the
+	// fallback title wins.
+	titleInputFloorRunes = 1000
+)
+
+// boundTitleInput sizes the first user message against the title model's
+// context window so prompt + input + the titleGenerateMaxTokens reservation
+// always fits. Small-context title models exist (provider templates catalog
+// 4096/4097-token ones), and an oversized request is rejected outright —
+// which would leave the fallback title in place, defeating long-message
+// support exactly on the long messages it exists for.
+//
+// Messages within budget pass through whole (the common case). Over-budget
+// messages keep a head/tail sample — 2/3 head, 1/3 tail — because a pasted
+// log or document may state its subject at either end; a pure head cut was
+// the old 500-char bug. The rune budget assumes the worst case of ~1 token
+// per rune (CJK-heavy text); English over-reserves, which errs safe.
+func boundTitleInput(msg string, contextWindowTokens int) string {
+	if msg == "" {
+		return ""
+	}
+	if contextWindowTokens <= 0 {
+		contextWindowTokens = titleInputFallbackWindow
+	}
+	budget := contextWindowTokens - titleGenerateMaxTokens - titlePromptOverheadTokens
+	if budget < titleInputFloorRunes {
+		budget = titleInputFloorRunes
+	}
+	runes := []rune(msg)
+	if len(runes) <= budget {
+		return msg
+	}
+	head := budget * 2 / 3
+	tail := budget - head
+	return string(runes[:head]) + "\n…\n" + string(runes[len(runes)-tail:])
+}
+
 func (s *Service) generateTitle(ctx context.Context, userID string, model models.GetResponse, provider sqlc.Provider, userQuery string) string {
-	userSnippet := truncate(strings.TrimSpace(userQuery), titlePromptMaxInputChars)
+	userSnippet := boundTitleInput(strings.TrimSpace(userQuery), model.Config.ContextBudgetMaxTokens())
 	if userSnippet == "" {
 		return ""
 	}

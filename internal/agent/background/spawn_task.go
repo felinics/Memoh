@@ -146,8 +146,8 @@ func (m *Manager) MarkAgentTaskRunning(parentCtx context.Context, taskID string)
 	return ctx, true, nil
 }
 
-// CompleteAgentTask finalises a managed agent task unless it was killed before
-// completion.
+// CompleteAgentTask finalises a managed agent task. Running task cancellation
+// remains nonterminal until this call records the runtime's resolved outcome.
 func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 	m.mu.Lock()
 	task := m.tasks[taskID]
@@ -185,7 +185,11 @@ func (m *Manager) CompleteAgentTask(taskID string, result AgentTaskResult) {
 	task.mu.Unlock()
 
 	eventType := TaskEventCompleted
-	if status != TaskCompleted {
+	switch status {
+	case TaskKilled:
+		eventType = TaskEventKilled
+	case TaskCompleted:
+	default:
 		eventType = TaskEventFailed
 	}
 	m.emitTaskEvent(task, eventType, "", "")

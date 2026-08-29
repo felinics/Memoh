@@ -3,11 +3,10 @@ package command
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func (h *Handler) buildSettingsGroup() *CommandGroup {
@@ -48,23 +47,9 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 				case "--reasoning_effort":
 					i++
 					req.ReasoningEffort = &args[i]
-				case "--heartbeat_enabled":
-					i++
-					v := strings.ToLower(args[i]) == "true"
-					req.HeartbeatEnabled = &v
-				case "--heartbeat_interval":
-					i++
-					val, err := strconv.Atoi(args[i])
-					if err != nil {
-						return &Result{Text: cc.T("cmd.settings.invalidHeartbeatInterval", map[string]any{"value": args[i]})}, nil
-					}
-					req.HeartbeatInterval = &val
 				case "--chat_model_id":
 					i++
 					req.ChatModelID = &args[i]
-				case "--heartbeat_model_id":
-					i++
-					req.HeartbeatModelID = &args[i]
 				default:
 					return &Result{Text: cc.T("cmd.settings.unknownOption", map[string]any{"option": args[i], "usage": cc.T("cmd.settings.updateUsage")})}, nil
 				}
@@ -168,16 +153,12 @@ func commandLanguageResultFor(cc CommandContext, current, resource, action strin
 }
 
 // settingsResult renders the settings card (the same KV detail as before) and,
-// for button-capable channels, a set of one-tap controls: inline toggles for the
-// heartbeat/ACL (re-dispatch /settings update, which re-renders this card in
-// place) and drill-downs to the /reasoning and /model pickers. Reuses
+// for button-capable channels, a set of one-tap controls: an inline ACL toggle
+// (re-dispatch /settings update, which re-renders this card in place) and
+// drill-downs to the /reasoning and /model pickers. Reuses
 // settingsService.UpsertBot — no backend changes.
 func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result {
 	reasoning := formatReasoningLabel(cc, s)
-	heartbeat := cc.T("cmd.common.off")
-	if s.HeartbeatEnabled {
-		heartbeat = cc.T("cmd.settings.heartbeatOnEvery", map[string]any{"minutes": s.HeartbeatInterval})
-	}
 	// Teach the ACL enum in plain English on this orienting surface.
 	aclLine := strings.TrimSpace(s.AclDefaultEffect)
 	switch strings.ToLower(aclLine) {
@@ -188,10 +169,8 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 	}
 	card := formatKVTitled(cc.T("cmd.settings.title"), []kv{
 		{cc.T("cmd.settings.fieldReasoning"), reasoning},
-		{cc.T("cmd.settings.fieldHeartbeat"), heartbeat},
 		{cc.T("cmd.settings.fieldAclDefault"), aclLine},
 		{cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, s.ChatModelID)},
-		{cc.T("cmd.settings.fieldHeartbeatModel"), h.resolveModelName(cc, s.HeartbeatModelID)},
 		{cc.T("cmd.settings.fieldSearchProvider"), h.resolveSearchProviderName(cc, s.SearchProviderID)},
 		{cc.T("cmd.settings.fieldMemoryProvider"), h.resolveMemoryProviderName(cc, s.MemoryProviderID)},
 		{cc.T("cmd.settings.fieldCommandLanguage"), commandLanguageDisplay(cc, s.CommandUILanguage)},
@@ -202,14 +181,9 @@ func (h *Handler) settingsResult(cc CommandContext, s settings.Settings) *Result
 		aclNext = "allow"
 		aclAction = cc.T("cmd.settings.action.aclAllow")
 	}
-	heartbeatAction := cc.T("cmd.settings.action.enableHeartbeat")
-	if s.HeartbeatEnabled {
-		heartbeatAction = cc.T("cmd.settings.action.disableHeartbeat")
-	}
 	choices := []ListItem{
 		{Label: cc.T("cmd.settings.section.reasoning"), Action: &ItemAction{Resource: "reasoning", Action: "show"}},
 		{Label: cc.T("cmd.settings.section.models"), Action: &ItemAction{Resource: "model", Action: "list"}},
-		{Label: heartbeatAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", strconv.FormatBool(!s.HeartbeatEnabled)}}},
 		{Label: aclAction, Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--acl_default_effect", aclNext}}},
 		{Label: cc.T("cmd.settings.section.search"), Action: &ItemAction{Resource: "search", Action: "list"}},
 		{Label: cc.T("cmd.settings.section.memory"), Action: &ItemAction{Resource: "memory", Action: "list"}},

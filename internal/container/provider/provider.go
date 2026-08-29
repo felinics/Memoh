@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/memohai/memoh/internal/config"
-	containerapi "github.com/memohai/memoh/internal/container"
-	appleadapter "github.com/memohai/memoh/internal/container/apple"
-	containerdadapter "github.com/memohai/memoh/internal/container/containerd"
-	dockeradapter "github.com/memohai/memoh/internal/container/docker"
+	"github.com/felinics/memoh/internal/config"
+	containerapi "github.com/felinics/memoh/internal/container"
+	appleadapter "github.com/felinics/memoh/internal/container/apple"
+	containerdadapter "github.com/felinics/memoh/internal/container/containerd"
+	dockeradapter "github.com/felinics/memoh/internal/container/docker"
 )
 
 // ProvideService creates the appropriate Service based on the backend type.

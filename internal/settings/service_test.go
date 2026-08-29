@@ -1,15 +1,432 @@
 package settings
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/reasoning"
 )
+
+type stubReasoningOptionsResolver struct {
+	opts    reasoning.Options
+	err     error
+	calls   int
+	modelID string
+}
+
+func (r *stubReasoningOptionsResolver) ResolveReasoningOptions(_ context.Context, modelID string) (reasoning.Options, error) {
+	r.calls++
+	r.modelID = modelID
+	return r.opts, r.err
+}
+
+func TestApplyReasoningPolicy(t *testing.T) {
+	t.Parallel()
+
+	modelID := "00000000-0000-0000-0000-000000000701"
+	supported := reasoning.Options{
+		Supported:     true,
+		CanDisable:    false,
+		Efforts:       []string{reasoning.EffortLow, reasoning.EffortMedium, reasoning.EffortHigh},
+		DefaultEffort: reasoning.EffortMedium,
+	}
+
+	t.Run("explicit advertised tier is canonicalized", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: supported}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortLow}
+		requested := " HIGH "
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ReasoningEffort: &requested}); err != nil {
+			t.Fatal(err)
+		}
+		if current.ReasoningEffort != reasoning.EffortHigh {
+			t.Fatalf("reasoning effort = %q, want high", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("explicit off is rejected for always-on model", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: supported}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortHigh}
+		requested := "off"
+		err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ReasoningEffort: &requested})
+		var invalid *InvalidReasoningEffortError
+		if !errors.As(err, &invalid) || invalid.Effort != reasoning.EffortDisable {
+			t.Fatalf("error = %#v, want canonical invalid disable error", err)
+		}
+		if current.ReasoningEffort != reasoning.EffortHigh {
+			t.Fatalf("rejected write changed effort to %q", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("model switch reconciles stale tier", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: supported}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortXHigh}
+		newModelID := modelID
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ChatModelID: &newModelID}); err != nil {
+			t.Fatal(err)
+		}
+		if current.ReasoningEffort != reasoning.EffortMedium {
+			t.Fatalf("reasoning effort = %q, want model default medium", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("combined model payload reconciles stale explicit tier", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: supported}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortLow}
+		newModelID := modelID
+		requested := reasoning.EffortXHigh
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{
+			ChatModelID:     &newModelID,
+			ReasoningEffort: &requested,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if current.ReasoningEffort != reasoning.EffortMedium {
+			t.Fatalf("reasoning effort = %q, want model default medium", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("unsupported model preserves dormant preference", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortXHigh}
+		newModelID := modelID
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ChatModelID: &newModelID}); err != nil {
+			t.Fatal(err)
+		}
+		if current.ReasoningEffort != reasoning.EffortXHigh {
+			t.Fatalf("dormant preference = %q, want xhigh", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("always-on model preserves dormant preference", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: reasoning.Options{Supported: true}}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortXHigh}
+		newModelID := modelID
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ChatModelID: &newModelID}); err != nil {
+			t.Fatal(err)
+		}
+		if current.ReasoningEffort != reasoning.EffortXHigh {
+			t.Fatalf("dormant preference = %q, want xhigh", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("always-on model rejects an explicit tier", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{opts: reasoning.Options{Supported: true}}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortHigh}
+		requested := reasoning.EffortLow
+		err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ReasoningEffort: &requested})
+		var invalid *InvalidReasoningEffortError
+		if !errors.As(err, &invalid) || invalid.Effort != reasoning.EffortLow {
+			t.Fatalf("error = %#v, want invalid low error", err)
+		}
+		if current.ReasoningEffort != reasoning.EffortHigh {
+			t.Fatalf("rejected write changed effort to %q", current.ReasoningEffort)
+		}
+	})
+
+	t.Run("lookup failure fails closed", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{err: errors.New("SECRET provider failure")}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortLow}
+		requested := reasoning.EffortHigh
+		err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{ReasoningEffort: &requested})
+		if !errors.Is(err, ErrReasoningOptionsUnavailable) {
+			t.Fatalf("error = %v, want ErrReasoningOptionsUnavailable", err)
+		}
+	})
+
+	t.Run("unrelated write skips capability lookup", func(t *testing.T) {
+		resolver := &stubReasoningOptionsResolver{err: errors.New("must not be called")}
+		service := &Service{reasoningResolver: resolver}
+		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortLow}
+		language := "zh"
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{Language: &language}); err != nil {
+			t.Fatal(err)
+		}
+		if resolver.calls != 0 {
+			t.Fatalf("resolver called %d time(s)", resolver.calls)
+		}
+	})
+}
+
+type reasoningPolicyQueries struct {
+	dbstore.Queries
+	botID          pgtype.UUID
+	currentModelID pgtype.UUID
+	defaultAgentID pgtype.UUID
+	storedEffort   string
+	upsertCalls    int
+	lastUpsert     sqlc.UpsertBotSettingsParams
+	transactions   bool
+	botAgent       sqlc.BotAgent
+	events         []string
+}
+
+func (q *reasoningPolicyQueries) SupportsTransactions() bool { return q.transactions }
+
+func (q *reasoningPolicyQueries) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	q.events = append(q.events, "transaction")
+	return fn(q)
+}
+
+func (q *reasoningPolicyQueries) LockBotForAgentMutation(context.Context, pgtype.UUID) (pgtype.UUID, error) {
+	q.events = append(q.events, "lock-bot")
+	return q.botID, nil
+}
+
+func (q *reasoningPolicyQueries) GetBotAgentByID(context.Context, sqlc.GetBotAgentByIDParams) (sqlc.BotAgent, error) {
+	q.events = append(q.events, "get-agent")
+	return q.botAgent, nil
+}
+
+func (q *reasoningPolicyQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
+	return sqlc.GetBotByIDRow{
+		ID:              q.botID,
+		Language:        DefaultLanguage,
+		ReasoningEffort: q.storedEffort,
+		ChatModelID:     q.currentModelID,
+	}, nil
+}
+
+func (*reasoningPolicyQueries) GetBotOverlayConfig(context.Context, pgtype.UUID) (sqlc.GetBotOverlayConfigRow, error) {
+	return sqlc.GetBotOverlayConfigRow{}, nil
+}
+
+func (q *reasoningPolicyQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
+	return sqlc.GetSettingsByBotIDRow{
+		BotID:                  q.botID,
+		Language:               DefaultLanguage,
+		CommandUiLanguage:      DefaultCommandUILanguage,
+		ReasoningEffort:        q.storedEffort,
+		ChatModelID:            q.currentModelID,
+		DefaultBotAgentID:      q.defaultAgentID,
+		ChatRuntime:            ChatRuntimeModel,
+		ChatAcpProjectPath:     DefaultACPProjectPath,
+		ChatAcpProjectMode:     DefaultACPProjectMode,
+		ToolApprovalConfig:     []byte(`{}`),
+		CompactionThreshold:    0,
+		CompactionEnabled:      false,
+		PersistFullToolResults: false,
+	}, nil
+}
+
+func (*reasoningPolicyQueries) GetModelByID(_ context.Context, id pgtype.UUID) (sqlc.Model, error) {
+	return sqlc.Model{ID: id}, nil
+}
+
+func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.UpsertBotSettingsParams) (sqlc.UpsertBotSettingsRow, error) {
+	q.events = append(q.events, "upsert-settings")
+	q.upsertCalls++
+	q.lastUpsert = arg
+	modelID := q.currentModelID
+	if arg.ChatModelIDSet {
+		modelID = arg.ChatModelID
+	}
+	defaultAgentID := q.defaultAgentID
+	if arg.DefaultBotAgentIDSet {
+		defaultAgentID = arg.DefaultBotAgentID
+	}
+	return sqlc.UpsertBotSettingsRow{
+		BotID:               q.botID,
+		Language:            arg.Language,
+		CommandUiLanguage:   arg.CommandUiLanguage,
+		ReasoningEffort:     arg.ReasoningEffort,
+		CompactionEnabled:   arg.CompactionEnabled,
+		CompactionThreshold: arg.CompactionThreshold,
+		ChatModelID:         modelID,
+		DefaultBotAgentID:   defaultAgentID,
+		ChatRuntime:         arg.ChatRuntime,
+		ChatAcpAgentID:      arg.ChatAcpAgentID,
+		ChatAcpProjectPath:  arg.ChatAcpProjectPath,
+		ChatAcpProjectMode:  arg.ChatAcpProjectMode,
+		ToolApprovalConfig:  arg.ToolApprovalConfig,
+		OverlayConfig:       arg.OverlayConfig,
+	}, nil
+}
+
+func TestUpsertBotSettingsRechecksDefaultAgentAfterBotLock(t *testing.T) {
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000740"), Valid: true}
+	agentID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000741"), Valid: true}
+	params := sqlc.UpsertBotSettingsParams{
+		ID:                   botID,
+		DefaultBotAgentID:    agentID,
+		DefaultBotAgentIDSet: true,
+	}
+
+	t.Run("active agent is assigned", func(t *testing.T) {
+		queries := &reasoningPolicyQueries{
+			botID:        botID,
+			transactions: true,
+			botAgent:     sqlc.BotAgent{ID: agentID, BotID: botID, Enabled: true},
+		}
+		service := &Service{queries: queries}
+		if _, err := service.upsertBotSettings(context.Background(), params); err != nil {
+			t.Fatalf("upsertBotSettings() error = %v", err)
+		}
+		assertSettingsEvents(t, queries.events, []string{"transaction", "lock-bot", "get-agent", "upsert-settings"})
+	})
+
+	t.Run("agent disabled before lock release is rejected", func(t *testing.T) {
+		queries := &reasoningPolicyQueries{
+			botID:        botID,
+			transactions: true,
+			botAgent:     sqlc.BotAgent{ID: agentID, BotID: botID, Enabled: false},
+		}
+		service := &Service{queries: queries}
+		if _, err := service.upsertBotSettings(context.Background(), params); !errors.Is(err, botagents.ErrUnavailable) {
+			t.Fatalf("upsertBotSettings() error = %v, want %v", err, botagents.ErrUnavailable)
+		}
+		assertSettingsEvents(t, queries.events, []string{"transaction", "lock-bot", "get-agent"})
+	})
+}
+
+func assertSettingsEvents(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("events = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestUpsertBotLegacyNativeRuntimeClearsDefaultAgent(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000730"), Valid: true}
+	agentID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000731"), Valid: true}
+	queries := &reasoningPolicyQueries{
+		botID:          botID,
+		defaultAgentID: agentID,
+	}
+	service := NewService(slog.Default(), queries, nil, nil)
+	runtime := ChatRuntimeModel
+
+	got, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{
+		ChatRuntime: &runtime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !queries.lastUpsert.DefaultBotAgentIDSet {
+		t.Fatal("DefaultBotAgentIDSet = false, want true for legacy Native request")
+	}
+	if queries.lastUpsert.DefaultBotAgentID.Valid {
+		t.Fatalf("DefaultBotAgentID = %#v, want NULL", queries.lastUpsert.DefaultBotAgentID)
+	}
+	if got.DefaultBotAgentID != "" || got.ChatRuntime != ChatRuntimeModel {
+		t.Fatalf("settings = %#v, want Native without default Agent", got)
+	}
+}
+
+func TestUpsertBotUnrelatedWritePreservesDefaultAgentWithoutRevalidation(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000732"), Valid: true}
+	agentID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000733"), Valid: true}
+	queries := &reasoningPolicyQueries{
+		botID:          botID,
+		defaultAgentID: agentID,
+	}
+	// No Bot Agent service is installed on purpose: an unrelated write must not
+	// look up or validate the already persisted default Agent.
+	service := NewService(slog.Default(), queries, nil, nil)
+	language := "zh"
+
+	got, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{
+		Language: &language,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queries.lastUpsert.DefaultBotAgentIDSet {
+		t.Fatal("DefaultBotAgentIDSet = true, want existing binding preserved by partial update")
+	}
+	if got.DefaultBotAgentID != uuid.UUID(agentID.Bytes).String() {
+		t.Fatalf("DefaultBotAgentID = %q, want %q", got.DefaultBotAgentID, uuid.UUID(agentID.Bytes).String())
+	}
+}
+
+func TestUpsertBotReconcilesReasoningOnModelChange(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000710"), Valid: true}
+	oldModelID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000711"), Valid: true}
+	newModelID := uuid.MustParse("00000000-0000-0000-0000-000000000712")
+	queries := &reasoningPolicyQueries{
+		botID:          botID,
+		currentModelID: oldModelID,
+		storedEffort:   reasoning.EffortXHigh,
+	}
+	resolver := &stubReasoningOptionsResolver{opts: reasoning.Options{
+		Supported:     true,
+		Efforts:       []string{reasoning.EffortLow, reasoning.EffortMedium, reasoning.EffortHigh},
+		DefaultEffort: reasoning.EffortMedium,
+	}}
+	service := NewService(slog.Default(), queries, nil, nil)
+	service.SetReasoningOptionsResolver(resolver)
+	newModelIDString := newModelID.String()
+
+	if _, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{ChatModelID: &newModelIDString}); err != nil {
+		t.Fatal(err)
+	}
+	if queries.upsertCalls != 1 {
+		t.Fatalf("UpsertBotSettings calls = %d, want 1", queries.upsertCalls)
+	}
+	if queries.lastUpsert.ReasoningEffort != reasoning.EffortMedium {
+		t.Fatalf("persisted reasoning effort = %q, want medium", queries.lastUpsert.ReasoningEffort)
+	}
+	if resolver.modelID != newModelIDString {
+		t.Fatalf("resolved model = %q, want %q", resolver.modelID, newModelIDString)
+	}
+}
+
+func TestUpsertBotRejectsInvalidReasoningBeforePersistence(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000720"), Valid: true}
+	modelID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000721"), Valid: true}
+	queries := &reasoningPolicyQueries{
+		botID:          botID,
+		currentModelID: modelID,
+		storedEffort:   reasoning.EffortHigh,
+	}
+	service := NewService(slog.Default(), queries, nil, nil)
+	service.SetReasoningOptionsResolver(&stubReasoningOptionsResolver{opts: reasoning.Options{
+		Supported:     true,
+		CanDisable:    false,
+		Efforts:       []string{reasoning.EffortLow, reasoning.EffortHigh},
+		DefaultEffort: reasoning.EffortLow,
+	}})
+	requested := "off"
+
+	_, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{ReasoningEffort: &requested})
+	var invalid *InvalidReasoningEffortError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("error = %v, want InvalidReasoningEffortError", err)
+	}
+	if queries.upsertCalls != 0 {
+		t.Fatalf("invalid effort reached persistence %d time(s)", queries.upsertCalls)
+	}
+}
 
 func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 	t.Parallel()
@@ -17,8 +434,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 	row := sqlc.GetSettingsByBotIDRow{
 		Language:            "en",
 		ReasoningEffort:     "medium",
-		HeartbeatEnabled:    false,
-		HeartbeatInterval:   60,
 		CompactionEnabled:   false,
 		CompactionThreshold: 0,
 		ShowToolCallsInIm:   false,
@@ -35,7 +450,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMPropagates(t *testing.T) {
 	row := sqlc.GetSettingsByBotIDRow{
 		Language:          "en",
 		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
 		ShowToolCallsInIm: true,
 	}
 	got := normalizeBotSettingsReadRow(row)
@@ -52,7 +466,6 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 		Language:          "en",
 		CommandUiLanguage: "zh",
 		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
 	})
 	if got.CommandUILanguage != "zh" {
 		t.Fatalf("CommandUILanguage = %q, want zh", got.CommandUILanguage)
@@ -60,9 +473,8 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 
 	// Empty value defaults to "auto" (mirrors the DB column default).
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:          "en",
-		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
+		Language:        "en",
+		ReasoningEffort: "medium",
 	})
 	if def.CommandUILanguage != DefaultCommandUILanguage {
 		t.Fatalf("default CommandUILanguage = %q, want %q", def.CommandUILanguage, DefaultCommandUILanguage)
@@ -75,7 +487,6 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 	got := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
 		Language:           "en",
 		ReasoningEffort:    "medium",
-		HeartbeatInterval:  60,
 		ChatRuntime:        ChatRuntimeACPAgent,
 		ChatAcpAgentID:     pgtype.Text{String: "Codex", Valid: true},
 		ChatAcpProjectPath: "/data/app",
@@ -92,9 +503,8 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 	}
 
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:          "en",
-		ReasoningEffort:   "medium",
-		HeartbeatInterval: 60,
+		Language:        "en",
+		ReasoningEffort: "medium",
 	})
 	if def.ChatRuntime != ChatRuntimeModel || def.ChatACPProjectPath != DefaultACPProjectPath || def.ChatACPProjectMode != DefaultACPProjectMode {
 		t.Fatalf("default chat runtime fields = %#v", def)
@@ -182,7 +592,6 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 		"search_provider_id": omitted.SearchProviderID, "memory_provider_id": omitted.MemoryProviderID,
 		"tts_model_id": omitted.TtsModelID, "transcription_model_id": omitted.TranscriptionModelID,
 		"video_model_id": omitted.VideoModelID, "language": omitted.Language,
-		"heartbeat_model_id": omitted.HeartbeatModelID,
 	} {
 		if ptr != nil {
 			t.Fatalf("%s: omitted key must stay nil, got %q", name, *ptr)
@@ -190,29 +599,16 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 	}
 
 	var cleared UpsertRequest
-	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":"","language":"","heartbeat_model_id":""}`), &cleared); err != nil {
+	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":"","language":""}`), &cleared); err != nil {
 		t.Fatal(err)
 	}
 	for name, ptr := range map[string]*string{
 		"chat_model_id": cleared.ChatModelID, "search_provider_id": cleared.SearchProviderID,
 		"memory_provider_id": cleared.MemoryProviderID, "language": cleared.Language,
-		"heartbeat_model_id": cleared.HeartbeatModelID,
 	} {
 		if ptr == nil || *ptr != "" {
 			t.Fatalf("%s: explicit empty string must decode to a non-nil empty pointer", name)
 		}
-	}
-}
-
-func TestNormalizeBotSettingDefaultHeartbeatInterval(t *testing.T) {
-	t.Parallel()
-
-	got := normalizeBotSetting("en", "auto", "allow", "medium", false, 0, false, 0, pgtype.Int4{})
-	if got.HeartbeatInterval != DefaultHeartbeatInterval {
-		t.Fatalf("heartbeat interval = %d, want %d", got.HeartbeatInterval, DefaultHeartbeatInterval)
-	}
-	if got.HeartbeatInterval != 1440 {
-		t.Fatalf("heartbeat interval = %d, want 1440", got.HeartbeatInterval)
 	}
 }
 
@@ -285,10 +681,10 @@ func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 	t.Parallel()
 
 	for _, effort := range []string{"none", "low", "medium", "high", "xhigh"} {
-		if !isValidReasoningEffort(effort) {
-			t.Fatalf("isValidReasoningEffort(%q) = false, want true", effort)
+		if !hasReasoningEffortValue(effort) {
+			t.Fatalf("hasReasoningEffortValue(%q) = false, want true", effort)
 		}
-		got := normalizeBotSetting("en", "auto", "allow", effort, false, 60, false, 0, pgtype.Int4{})
+		got := normalizeBotSetting("en", "auto", "allow", effort, false, 0, pgtype.Int4{})
 		if got.ReasoningEffort != effort {
 			t.Fatalf("normalizeBotSetting effort = %q, want %q", got.ReasoningEffort, effort)
 		}

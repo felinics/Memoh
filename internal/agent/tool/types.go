@@ -9,10 +9,11 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/agent/tool/internal/toolset"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/tool/internal/toolset"
 )
 
 // SkillDetail holds the description and content of a loadable skill.
@@ -26,10 +27,10 @@ type SkillDetail struct {
 type StreamEventType string
 
 const (
-	StreamEventAttachment     StreamEventType = "attachment"
-	StreamEventReaction       StreamEventType = "reaction"
-	StreamEventSpeech         StreamEventType = "speech"
-	StreamEventSpawnHeartbeat StreamEventType = "spawn_heartbeat"
+	StreamEventAttachment    StreamEventType = "attachment"
+	StreamEventReaction      StreamEventType = "reaction"
+	StreamEventSpeech        StreamEventType = "speech"
+	StreamEventSpawnProgress StreamEventType = "spawn_progress"
 )
 
 // ToolStreamEvent is a side-effect event emitted by a tool targeting the
@@ -318,7 +319,12 @@ type SessionContext struct {
 	CurrentModelUUID     string
 	CurrentModelID       string
 	CurrentModelProvider string
-	ForkContext          *MessageSnapshot
+	// ReasoningStoredEffort and ReasoningRequestedEffort are the unresolved
+	// parent-turn inputs. A tool that selects another model must resolve them for
+	// that model rather than inheriting the parent's provider-specific decision.
+	ReasoningStoredEffort    string
+	ReasoningRequestedEffort string
+	ForkContext              *MessageSnapshot
 	// WorkspaceTargetID is the request-scoped default for file and command
 	// tools. An explicit tool target_id still takes precedence.
 	WorkspaceTargetID   string
@@ -326,11 +332,13 @@ type SessionContext struct {
 	WorkspaceTargetName string
 	// WorkdirPath is the session's immutable working directory. When set,
 	// relative tool paths resolve under it and exec defaults its cwd to it.
-	WorkdirPath      string
-	Skills           map[string]SkillDetail
-	TimezoneLocation *time.Location
-	Emitter          StreamEmitter
-	LiveStream       bool
+	WorkdirPath               string
+	Skills                    map[string]SkillDetail
+	TimezoneLocation          *time.Location
+	Emitter                   StreamEmitter
+	LiveStream                bool
+	ContextBudgetMaxTokens    int
+	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
 }
 
 // CanAskUser reports whether ask_user can be both shown to the model and
@@ -360,7 +368,7 @@ func (s SessionContext) IsSameConversation(platform, target string) bool {
 // so their usage guidance should ask for explicit platform/target instead.
 func (s SessionContext) CanOmitMessagingTarget() bool {
 	switch s.SessionType {
-	case sessionmode.Heartbeat, sessionmode.Schedule:
+	case sessionmode.Schedule:
 		return false
 	default:
 		return strings.TrimSpace(s.CurrentPlatform) != "" &&

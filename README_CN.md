@@ -10,10 +10,10 @@
   <p>给每个 AI Agent 一台云端电脑，开源<br>
   桌面、浏览器、网络与长期记忆 — 即使关上笔记本，Agent 也不会停</p>
   <div align="center">
-    <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
-    <img src="https://img.shields.io/github/stars/memohai/Memoh?style=social" alt="Stars" />
-    <img src="https://img.shields.io/github/forks/memohai/Memoh?style=social" alt="Forks" />
-    <a href="https://deepwiki.com/memohai/Memoh">
+    <img src="https://img.shields.io/github/package-json/v/felinics/Memoh" alt="Version" />
+    <img src="https://img.shields.io/github/stars/felinics/Memoh?style=social" alt="Stars" />
+    <img src="https://img.shields.io/github/forks/felinics/Memoh?style=social" alt="Forks" />
+    <a href="https://deepwiki.com/felinics/Memoh">
       <img src="https://deepwiki.com/badge.svg" alt="DeepWiki" />
     </a>
     <a href="https://t.me/memohai">
@@ -53,7 +53,7 @@ curl -fsSL https://memoh.sh | sh
 <summary><strong>更多部署选项</strong></summary>
 
 ```bash
-git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/memohai/Memoh.git
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/felinics/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 # 编辑 config.toml
@@ -95,31 +95,30 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 - **内置记忆**：跨会话、跨平台的长期记忆，开箱即用，也支持接入 [Mem0](https://mem0.ai)、OpenViking
 - **十余种渠道**：Telegram、Discord、飞书、微信、QQ、邮件等
 - **MCP**：接入外部工具服务，每个机器人独立管理连接
-- **插件**：安装打包好的技能、工具和集成，扩展机器人的能力
 - **Agent 托管**：通过 ACP 在 Memoh Workspace 内托管外部 Agent，目前支持 Codex 和 Claude Code，每个机器人独立配置
 - **Browser Use**：在 Workspace 内驱动浏览器
 - **Computer Use**：操作 Workspace 桌面，处理需要 GUI 的工作流
 - **技能与应用超市**：模块化技能，从超市安装模板，重活交给子智能体
-- **自动化**：定时任务与周期心跳
+- **自动化**：通过定时任务运行周期性工作流
 
 ## 为本项目拆出的子项目
 
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — 给 Go 用的轻量 AI SDK，风格参考 [Vercel AI SDK](https://sdk.vercel.ai/)
-- [**Connect It**](https://github.com/memohai/connect-it) — 自托管的连接器网关，安全保存 SaaS 凭据，并通过单个 MCP 端点让 Agent 使用各种集成
-- [**UI**](https://github.com/memohai/ui) — 面向 AI Agent 管理界面的 Vue 3 设计系统，包含组件库、设计令牌，以及指导 Agent 正确使用它们的技能
+- [**Twilight AI**](https://github.com/felinics/twilight) — 给 Go 用的轻量 AI SDK，风格参考 [Vercel AI SDK](https://sdk.vercel.ai/)
+- [**Connect It**](https://github.com/felinics/connect-it) — 自托管的连接器网关，安全保存 SaaS 凭据，并通过单个 MCP 端点让 Agent 使用各种集成
+- [**UI**](https://github.com/felinics/ui) — 面向 AI Agent 管理界面的 Vue 3 设计系统，包含组件库、设计令牌，以及指导 Agent 正确使用它们的技能
 
 ## 项目状态
 
-![License](https://img.shields.io/github/license/memohai/Memoh) ![Last Commit](https://img.shields.io/github/last-commit/memohai/Memoh) ![Commit Activity](https://img.shields.io/github/commit-activity/m/memohai/Memoh) ![Issues](https://img.shields.io/github/issues/memohai/Memoh) ![Pull Requests](https://img.shields.io/github/issues-pr/memohai/Memoh)
+![License](https://img.shields.io/github/license/felinics/Memoh) ![Last Commit](https://img.shields.io/github/last-commit/felinics/Memoh) ![Commit Activity](https://img.shields.io/github/commit-activity/m/felinics/Memoh) ![Issues](https://img.shields.io/github/issues/felinics/Memoh) ![Pull Requests](https://img.shields.io/github/issues-pr/felinics/Memoh)
 
 ## Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://www.star-history.com/#memohai/Memoh&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=felinics/Memoh&type=date&legend=top-left)](https://star-history.dera.page/#felinics/Memoh&type=date&legend=top-left)
 
 ## 贡献者
 
-<a href="https://github.com/memohai/Memoh/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=memohai/Memoh" />
+<a href="https://github.com/felinics/Memoh/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=felinics/Memoh" />
 </a>
 
 ## 社区
@@ -128,7 +127,7 @@ submodule，setup 也会为后续 pull 启用递归更新。如果从未安装�
 - 📚 [**文档**](https://docs.memoh.ai) — 安装、概念与指南
 - 🤝 [**合作**](mailto:business@memoh.net) — business@memoh.net
 - 💬 [**Telegram 群组**](https://t.me/memohai) — 交流与支持
-- 🛒 [**应用超市**](https://github.com/memohai/supermarket) — 整理好的技能与 MCP 模板
+- 🛒 [**应用超市**](https://github.com/felinics/supermarket) — 整理好的技能与 MCP 模板
 
 ---
 

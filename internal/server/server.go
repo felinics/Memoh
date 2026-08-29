@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"log/slog"
 	neturl "net/url"
 	"strings"
@@ -9,9 +10,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/channel/publicmedia"
-	"github.com/memohai/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/channel/publicmedia"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 type Server struct {
@@ -109,6 +110,9 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/assets/") {
 		return true
 	}
+	if isPublicSupermarketSkillIconPath(path) {
+		return true
+	}
 	if strings.HasPrefix(path, "/api/docs") {
 		return true
 	}
@@ -134,6 +138,15 @@ func shouldSkipJWT(path string) bool {
 		return true
 	}
 	return false
+}
+
+func isPublicSupermarketSkillIconPath(path string) bool {
+	digest, found := strings.CutPrefix(path, "/supermarket/artifacts/icon/")
+	if !found || len(digest) != 64 || strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
 }
 
 func shouldLimitPublicRequestBody(path string) bool {

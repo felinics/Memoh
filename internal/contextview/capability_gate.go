@@ -3,8 +3,8 @@ package contextview
 import (
 	"strings"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 const capabilityGateDropReason = "capability_gated"
@@ -132,7 +132,7 @@ func capabilitySafeFallbackConfig(
 ) agentpkg.RunConfig {
 	normalized := contextfrag.NormalizeContextRefs(sourceFrags)
 	kept, gated := filterUnavailableCapabilities(normalized, available)
-	cfg.System = renderSystemOnly(kept)
+	cfg.System = renderSystemOnly(withoutWorkspaceHookSystemSections(kept))
 	cfg.ContextToolUsage = ""
 	cfg.ContextToolUsageFrags = nil
 	cfg.ContextFrags = nonSystemFrags(cfg.ContextFrags)
@@ -150,6 +150,20 @@ func capabilitySafeFallbackConfig(
 		)
 	}
 	return cfg
+}
+
+func withoutWorkspaceHookSystemSections(frags []contextfrag.ContextFrag) []contextfrag.ContextFrag {
+	out := make([]contextfrag.ContextFrag, 0, len(frags))
+	for _, frag := range frags {
+		if frag.Slot == contextfrag.SlotSystem &&
+			frag.Kind == contextfrag.KindHookContext &&
+			frag.Trust == contextfrag.TrustWorkspace &&
+			frag.Provenance.Source == "hook_system_section" {
+			continue
+		}
+		out = append(out, frag)
+	}
+	return out
 }
 
 func renderSystemOnly(frags []contextfrag.ContextFrag) string {

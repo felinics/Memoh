@@ -17,34 +17,37 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	turnpkg "github.com/memohai/memoh/internal/agent/turn"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 const (
@@ -100,47 +103,56 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
-	agent              *native.Agent
-	modelsService      *models.Service
-	queries            dbstore.Queries
-	memoryRegistry     *memprovider.Registry
-	messageService     messagepkg.Service
-	settingsService    *settings.Service
-	accountService     *accounts.Service
-	sessionService     SessionService
-	acpPool            acpPrompter
-	compactionService  compactionRunner
-	eventPublisher     messageevent.Publisher
-	skillLoader        SkillLoader
-	assetLoader        gatewayAssetLoader
-	platformIdentities PlatformIdentitySource
-	botPermissions     botPermissionChecker
-	workspaceTargets   workspaceTargetResolver
-	workdirs           sessionWorkdirResolver
-	pipeline           *timeline.Pipeline
-	streamHTTPClient   *http.Client
-	bgManager          *background.Manager
-	toolApproval       *toolapproval.Service
-	userInput          userInputService
-	hookService        *hooks.Service
-	memoryContextMu    sync.Mutex
-	memoryContextCache *memprovider.MemoryContextCache
-	acpPromptMu        sync.Mutex
-	acpPromptHubs      map[string]*acpActivePromptHub
+	agent                  *native.Agent
+	modelsService          *models.Service
+	queries                dbstore.Queries
+	memoryRegistry         *memprovider.Registry
+	messageService         messagepkg.Service
+	settingsService        *settings.Service
+	accountService         *accounts.Service
+	sessionService         SessionService
+	acpPool                acpPrompter
+	compactionService      compactionRunner
+	eventPublisher         messageevent.Publisher
+	skillLoader            SkillLoader
+	assetLoader            gatewayAssetLoader
+	platformIdentities     PlatformIdentitySource
+	botPermissions         botPermissionChecker
+	workspaceTargets       workspaceTargetResolver
+	workdirs               sessionWorkdirResolver
+	pipeline               *timeline.Pipeline
+	streamHTTPClient       *http.Client
+	nonStreamingHTTPClient *http.Client
+	streamIdleTimeout      time.Duration
+	streamIdleTimeoutMax   time.Duration
+	bgManager              *background.Manager
+	toolApproval           *toolapproval.Service
+	userInput              userInputService
+	hookService            *hooks.Service
+	memoryContextMu        sync.Mutex
+	memoryContextCache     *memprovider.MemoryContextCache
+	acpPromptMu            sync.Mutex
+	acpPromptHubs          map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
-	continueUserInputFn func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
-	sessionCompactionMu sync.Mutex
-	sessionCompactions  map[string]*sessionCompactionGate
-	timeout             time.Duration
-	memorySearchTimeout time.Duration
-	clockLocation       *time.Location
-	logger              *slog.Logger
-	allowedTeam         string
-	sessionRuntime      turnAdmitter
-	decisionRuntime     *sessionruntime.Manager
-	publishTurnEvent    func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
-	turnHooks           *turnRuntimeHooks
+	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
+	sessionCompactionMu               sync.Mutex
+	sessionCompactions                map[string]*sessionCompactionGate
+	timeout                           time.Duration
+	memorySearchTimeout               time.Duration
+	contextAbsoluteCapTokens          int
+	clockLocation                     *time.Location
+	logger                            *slog.Logger
+	allowedTeam                       string
+	sessionRuntime                    turnAdmitter
+	decisionRuntime                   *sessionruntime.Manager
+	abortRuntime                      runtimeAbortController
+	contextLifecycles                 contextLifecycleStore
+	contextLifecyclePersistenceErrors atomic.Uint64
+	contextLifecycleCandidatesMu      sync.Mutex
+	contextLifecycleCandidates        map[contextLifecycleCandidateKey]contextLifecycleCandidate
+	publishTurnEvent                  func(context.Context, sessionruntime.RunHandle, native.StreamEvent) error
+	turnHooks                         *turnRuntimeHooks
 }
 
 // NewService creates an application service backed by the native agent.
@@ -161,38 +173,75 @@ func NewService(
 	if clockLocation == nil {
 		clockLocation = time.UTC
 	}
-	// HTTP client with timeouts for LLM provider streaming.
-	// - DialTimeout: fail fast on connection issues
-	// - ResponseHeaderTimeout: catch servers that accept TCP but never respond
-	// - Timeout: overall request lifetime cap (prevents stuck SSE body reads)
+	// Streaming requests keep transport establishment bounded, while the
+	// application idle watchdog owns first-byte and between-event silence. A
+	// client-wide or response-header deadline would otherwise preempt that
+	// policy and turn one intentional timeout into repeated transport retries.
+	streamTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
 	streamHTTPClient := &http.Client{
-		Timeout: 10 * time.Minute, // overall cap, matches the application timeout
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 30 * time.Second,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   10,
-			IdleConnTimeout:       90 * time.Second,
-		},
+		Transport: streamTransport,
+	}
+	nonStreamingTransport := streamTransport.Clone()
+	nonStreamingTransport.ResponseHeaderTimeout = 30 * time.Second
+	nonStreamingHTTPClient := &http.Client{
+		Transport: nonStreamingTransport,
+		Timeout:   10 * time.Minute,
 	}
 
 	return &Service{
-		agent:               a,
-		modelsService:       modelsService,
-		queries:             queries,
-		messageService:      messageService,
-		settingsService:     settingsService,
-		accountService:      accountService,
-		streamHTTPClient:    streamHTTPClient,
-		timeout:             timeout,
-		memorySearchTimeout: defaultMemorySearchTimeout,
-		clockLocation:       clockLocation,
-		logger:              log.With(slog.String("service", "agent/application")),
+		agent:                  a,
+		modelsService:          modelsService,
+		queries:                queries,
+		contextLifecycles:      queries,
+		messageService:         messageService,
+		settingsService:        settingsService,
+		accountService:         accountService,
+		streamHTTPClient:       streamHTTPClient,
+		nonStreamingHTTPClient: nonStreamingHTTPClient,
+		timeout:                timeout,
+		memorySearchTimeout:    defaultMemorySearchTimeout,
+		clockLocation:          clockLocation,
+		logger:                 log.With(slog.String("service", "agent/application")),
 	}
+}
+
+// SetContextAbsoluteMaxTokens sets the server-wide context admission cap
+// (CM-ADM-001). Zero keeps the shared default; the cap is never disabled.
+func (s *Service) SetContextAbsoluteMaxTokens(v int) {
+	s.contextAbsoluteCapTokens = v
+}
+
+// contextAbsoluteMaxTokens resolves the effective admission cap.
+func (s *Service) contextAbsoluteMaxTokens() int {
+	if s.contextAbsoluteCapTokens > 0 {
+		return s.contextAbsoluteCapTokens
+	}
+	return contextfrag.DefaultAbsoluteCapTokens
+}
+
+// effectiveContextTokenBudget derives the per-turn context budget as
+// min(model context window, absolute cap), falling back to the cap alone
+// when the model has no configured window. A missing window therefore
+// degrades to a smaller bounded context, never to an unbounded one.
+func (s *Service) effectiveContextTokenBudget(chatModel models.GetResponse) int {
+	budget := contextBudgetFromChatModel(chatModel)
+	capTokens := s.contextAbsoluteMaxTokens()
+	if budget <= 0 {
+		s.logger.Warn("context budget: model context window missing, applying absolute cap",
+			slog.String("model_id", chatModel.ID),
+			slog.Int("absolute_cap_tokens", capTokens))
+		return capTokens
+	}
+	return min(budget, capTokens)
 }
 
 // SetMemoryRegistry sets the provider registry for memory operations.
@@ -315,6 +364,42 @@ type resolvedContext struct {
 	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
+func runIDForChatRequest(admittedRunID string) string {
+	if runID := strings.TrimSpace(admittedRunID); runID != "" {
+		return runID
+	}
+	return uuid.NewString()
+}
+
+func contextBudgetFromChatModel(chatModel models.GetResponse) int {
+	return chatModel.Config.ContextBudgetMaxTokens()
+}
+
+func markRequiredHistoryMessageCurrent(cfg *native.RunConfig, requiredMessageID string) {
+	if cfg == nil {
+		return
+	}
+	cfg.ContextCurrentUserMessageIndex = nil
+	requiredMessageID = strings.TrimSpace(requiredMessageID)
+	if requiredMessageID == "" {
+		return
+	}
+	for index, sourceMessageID := range cfg.ForkContextSourceMessageIDs {
+		if strings.TrimSpace(sourceMessageID) != requiredMessageID {
+			continue
+		}
+		if index >= len(cfg.Messages) || cfg.Messages[index].Role != sdk.MessageRoleUser {
+			return
+		}
+		cfg.ContextCurrentUserMessageIndex = intPointer(index)
+		return
+	}
+}
+
+func defaultToolExchangePolicy() *contextfrag.ToolExchangePolicy {
+	return contextfrag.DefaultToolExchangePolicy()
+}
+
 // resolve builds the run context for one turn and returns the effective
 // request alongside it. Resolution fills in defaults the caller's copy does not
 // have — a direct turn on a subagent thread learns its session type, pinned
@@ -323,6 +408,10 @@ type resolvedContext struct {
 // request, not the one that went in. Query is deliberately untouched: callers
 // that persist a headerified user message still take it from resolvedContext.
 func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, ChatRequest, error) {
+	return s.resolveWithHTTPClient(ctx, req, nil)
+}
+
+func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, modelHTTPClient *http.Client) (resolvedContext, ChatRequest, error) {
 	modelQuery := modelQueryText(req)
 	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
 		return resolvedContext{}, req, errors.New("query or attachments is required")
@@ -353,6 +442,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		Model:             req.Model,
 		Provider:          req.Provider,
 		ReasoningEffort:   req.ReasoningEffort,
+		HTTPClient:        modelHTTPClient,
 	})
 	if err != nil {
 		s.logger.Error("resolve: buildBaseRunConfig failed",
@@ -367,6 +457,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		// surface (no nested spawns), same prompt mode.
 		runCfg.Identity.IsSubagent = true
 	}
+	runCfg.RunID = runIDForChatRequest(req.RunID)
 	memoryMsg := s.loadMemoryContextMessage(ctx, req)
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
 	if memoryMsg != nil {
@@ -388,10 +479,8 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		}
 	}
 
-	contextTokenBudget := 0
-	if chatModel.Config.ContextWindow != nil && *chatModel.Config.ContextWindow > 0 {
-		contextTokenBudget = *chatModel.Config.ContextWindow
-	}
+	contextTokenBudget := s.effectiveContextTokenBudget(chatModel)
+	runCfg.ContextBudgetMaxTokens = contextTokenBudget
 
 	var messages []ModelMessage
 	var historyRecords []historyfrag.HistoryRecord
@@ -460,6 +549,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		// exactly as parent-driven subagent tasks assemble it.
 		messages, currentMessageIndex = prependContextMessages(forkContext, messages, currentMessageIndex)
 	}
+	historyMessageCount := len(messages)
 	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
 		messages = append(messages, *notice)
 	}
@@ -474,11 +564,20 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	if !usePipeline && !req.ReusePersistedUserMessage {
 		messages = append(messages, reqMessages...)
 	}
+	trimmableMessages := normalizedContextPrefixLength(messages, historyMessageCount)
 	messages, currentMessageIndex, memoryMessageIndex = normalizeContextMessages(
 		messages,
 		currentMessageIndex,
 		memoryMessageIndex,
 	)
+	runCfg.ContextHistoryTokenEstimates = make([]int, len(messages))
+	for index := range messages {
+		runCfg.ContextHistoryTokenEstimates[index] = estimateMessageTokens(messages[index])
+	}
+	runCfg.ContextTrimmableMessages = min(trimmableMessages, len(messages))
+	if runCfg.ContextToolExchangePolicy == nil {
+		runCfg.ContextToolExchangePolicy = defaultToolExchangePolicy()
+	}
 
 	displayName := s.resolveDisplayName(ctx, req)
 	mergedAttachments := s.routeAndMergeAttachments(ctx, chatModel, req)
@@ -514,6 +613,8 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 	runCfg.ContextMemoryMessageIndex = memoryMessageIndex
 	if usePipeline {
 		runCfg.ContextCurrentUserMessageIndex = currentMessageIndex
+	} else if req.ReusePersistedUserMessage {
+		markRequiredHistoryMessageCurrent(&runCfg, req.RequiredHistoryMessageID)
 	}
 	// When using the pipeline the user message is already in the RC;
 	// don't send it to the LLM again. headerifiedQuery is still kept
@@ -605,11 +706,12 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 	}
-	rc, req, err := s.resolve(ctx, req)
+	rc, req, err := s.resolveWithHTTPClient(ctx, req, s.nonStreamingHTTPClient)
 	if err != nil {
 		return ChatResponse{}, err
 	}
 	req.Query = rc.query
+	req.RunID = rc.runConfig.RunID
 
 	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
@@ -619,8 +721,12 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 		cfg.OnStepCommitted = stepCommitter.commit
 	}
 	cfg = s.prepareRunConfig(ctx, cfg)
+	terminal := s.contextLifecycleTerminal(ctx, cfg)
+	var lifecycleCause error
+	defer func() { terminal(lifecycleCause) }()
 
 	result, err := s.agent.Generate(ctx, cfg)
+	lifecycleCause = err
 	if err != nil {
 		if stepCommitter != nil {
 			_ = stepCommitter.finish(ctx, rc.estimatedTokens)
@@ -636,16 +742,20 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			inputTokens = result.Usage.InputTokens
 		}
 		if err := stepCommitter.finish(ctx, inputTokens); err != nil {
+			lifecycleCause = err
 			return ChatResponse{}, err
 		}
 	} else {
 		roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 		if err := s.storeRoundWithOptions(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
-			SkipMemory: storeReq.SkipMemoryExtraction,
+			SkipMemory:       storeReq.SkipMemoryExtraction,
+			ContextLifecycle: cfg.ContextLifecycle,
 		}); err != nil {
+			lifecycleCause = err
 			return ChatResponse{}, err
 		}
 		if err := s.persistSessionWorkspaceTarget(ctx, storeReq); err != nil {
+			lifecycleCause = err
 			return ChatResponse{}, err
 		}
 		if result.Usage != nil {
@@ -677,6 +787,7 @@ type baseRunConfigParams struct {
 	Model             string
 	Provider          string
 	ReasoningEffort   string // caller-provided override (empty = use bot default)
+	HTTPClient        *http.Client
 }
 
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
@@ -716,11 +827,11 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	)
 
 	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
-	reasoningEffort := ""
-	if reasoningConfig != nil && reasoningConfig.Active {
-		reasoningEffort = reasoningConfig.Effort
-	}
 
+	modelHTTPClient := p.HTTPClient
+	if modelHTTPClient == nil {
+		modelHTTPClient = s.streamHTTPClient
+	}
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               chatModel.ModelID,
 		ClientType:            provider.ClientType,
@@ -728,8 +839,14 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		CodexAccountID:        creds.CodexAccountID,
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
-		HTTPClient:            s.streamHTTPClient,
+		HTTPClient:            modelHTTPClient,
 		ReasoningConfig:       reasoningConfig,
+		ReasoningDialect:      chatModel.Config.ReasoningDialect,
+		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,
+		ReasoningDefaultOn:    chatModel.Config.ReasoningDefaultOn,
+		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
+		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
+		ContextWindow:         contextBudgetFromChatModel(chatModel),
 	})
 
 	var agentSkills []native.SkillEntry
@@ -750,21 +867,19 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	}
 
 	cfg := native.RunConfig{
-		Model:                 sdkModel,
-		CurrentModelUUID:      chatModel.ID,
-		CurrentModelID:        chatModel.ModelID,
-		CurrentModelProvider:  provider.Name,
-		ReasoningEffort:       reasoningEffort,
-		ReasoningActive:       reasoningConfig != nil && reasoningConfig.Active,
-		ReasoningDisabled:     reasoningConfig != nil && reasoningConfig.Disabled,
-		ReasoningAdaptive:     reasoningConfig != nil && reasoningConfig.Adaptive,
-		ReasoningOffEffort:    offEffortOrEmpty(reasoningConfig),
-		ChatCompletionsCompat: chatCompletionsCompat,
-		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
-		SessionType:           p.SessionType,
-		SupportsImageInput:    supportsImageInputForModel(chatModel),
-		SupportsFileInput:     supportsFileInputForModel(chatModel),
-		SupportsToolCall:      chatModel.HasCompatibility(models.CompatToolCall),
+		Model:                    sdkModel,
+		CurrentModelUUID:         chatModel.ID,
+		CurrentModelID:           chatModel.ModelID,
+		CurrentModelProvider:     provider.Name,
+		ReasoningConfig:          reasoningConfig,
+		ReasoningStoredEffort:    strings.TrimSpace(botSettings.ReasoningEffort),
+		ReasoningRequestedEffort: strings.TrimSpace(p.ReasoningEffort),
+		ChatCompletionsCompat:    chatCompletionsCompat,
+		PromptCacheTTL:           providers.ProviderConfigString(provider, "prompt_cache_ttl"),
+		SessionType:              p.SessionType,
+		SupportsImageInput:       supportsImageInputForModel(chatModel),
+		SupportsFileInput:        supportsFileInputForModel(chatModel),
+		SupportsToolCall:         chatModel.HasCompatibility(models.CompatToolCall),
 		Identity: native.SessionContext{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -782,6 +897,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		Skills:            agentSkills,
 		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: s.bgManager,
+		ContextLifecycle:  contextfrag.NewLifecycleHolder(),
 		ContextScope: contextfrag.Scope{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -832,168 +948,19 @@ func supportsFileInputForModel(m models.GetResponse) bool {
 	return m.HasCompatibility(models.CompatFileInput)
 }
 
-const (
-	reasoningEffortAdaptive = "adaptive"
-	reasoningEffortDisable  = models.ReasoningEffortDisable
-)
-
-// resolveReasoningConfig makes the single reasoning decision for a call, driven
-// by the model's discovered thinking mode plus the user's settings/override.
-//
-//   - none:     no thinking; returns nil.
-//   - adaptive: on/off; when active, Anthropic-style providers use adaptive
-//     thinking plus the selected effort.
-//   - toggle:   on/off, with per-message override taking precedence over the
-//     bot's default.
+// resolveReasoningConfig makes the single reasoning decision for a call. The
+// decision itself lives in internal/reasoning, which also answers what a picker
+// may offer — the two share internals so the options a user sees and the value a
+// call sends cannot disagree.
 func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort, clientType string) *models.ReasoningConfig {
-	mode := chatModel.ResolveThinkingMode()
-	if mode == models.ThinkingModeNone {
-		return nil
-	}
-
-	effortLevels := effectiveReasoningEfforts(chatModel.Config.ReasoningEfforts, clientType)
-	offEffort := offEffortFor(effortLevels)
-	requested := strings.TrimSpace(requestedEffort)
-	adaptive := mode == models.ThinkingModeAdaptive
-	// Anthropic 4.6+ uses the effort/adaptive wire (no budget_tokens). Cloud
-	// variants (bedrock/vertex/azure/openrouter) are missing
-	// supports_adaptive_thinking in the LiteLLM registry but still advertise the
-	// 4.6+ effort tiers, so promote them to adaptive here. This keeps them off the
-	// legacy budget path, where budget_tokens is rejected with 400 on 4.7+.
-	if !adaptive && clientType == string(models.ClientTypeAnthropicMessages) && anthropicEffortEra(effortLevels) {
-		adaptive = true
-	}
-
-	switch {
-	case reasoningEffortDisabled(requested):
-		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
-	case requested == reasoningEffortAdaptive:
-		// Legacy "adaptive" override on a toggle model: treat as on (toggle has no
-		// adaptive concept; send a normal effort).
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
-	case requested != "":
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort(requested, botSettings, effortLevels), OffEffort: offEffort}
-	case reasoningEffortDisabled(botSettings.ReasoningEffort):
-		// The bot's stored effort is the only on/off source; "disable" is off.
-		return &models.ReasoningConfig{Disabled: true, OffEffort: offEffort}
-	default:
-		return &models.ReasoningConfig{Active: true, Adaptive: adaptive, Effort: pickEffort("", botSettings, effortLevels), OffEffort: offEffort}
-	}
-}
-
-// anthropicEffortEra reports whether an Anthropic model uses the 4.6+
-// effort/adaptive thinking mechanism rather than the legacy
-// thinking{type:"enabled", budget_tokens:N} path. Pre-4.6 Claude advertises only
-// the implicit low/medium/high base; 4.6+ adds at least one of none/minimal/
-// xhigh/max. Detecting any of those tiers catches the cloud-provider variants
-// that the registry leaves without supports_adaptive_thinking.
-func anthropicEffortEra(effortLevels []string) bool {
-	for _, e := range effortLevels {
-		switch e {
-		case models.ReasoningEffortNone, models.ReasoningEffortMinimal,
-			models.ReasoningEffortXHigh, models.ReasoningEffortMax:
-			return true
-		}
-	}
-	return false
-}
-
-// pickEffort resolves the effort to send when thinking is active: the
-// per-message override (if a concrete tier) wins, then the bot default, then
-// medium. Values outside the effective model+wire effort list are ignored so
-// stale settings or command/API overrides cannot send a known-invalid wire value.
-func pickEffort(requested string, botSettings settings.Settings, effortLevels []string) string {
-	if e := strings.TrimSpace(requested); e != "" && e != reasoningEffortAdaptive && e != reasoningEffortDisable {
-		if hasEffort(effortLevels, e) {
-			return e
-		}
-	}
-	if e := strings.TrimSpace(botSettings.ReasoningEffort); e != "" && hasEffort(effortLevels, e) {
-		return e
-	}
-	if hasEffort(effortLevels, models.ReasoningEffortMedium) {
-		return models.ReasoningEffortMedium
-	}
-	// No medium: land on the tier closest to it rather than on effortLevels[0],
-	// which is whatever the registry listed first (usually the weakest tier).
-	if nearest := models.NearestEffortToMedium(effortLevels); nearest != "" {
-		return nearest
-	}
-	return models.ReasoningEffortMedium
-}
-
-// effectiveReasoningEfforts intersects the model's advertised effort levels
-// with the selected client's current wire policy. Generic OpenAI-format clients
-// retain the existing max-to-xhigh compatibility behavior, while Codex uses its
-// catalog levels directly. openAIWireEffort in models/sdk.go is defence-in-depth.
-// Keep normalizesMaxReasoningEffort in sync with the frontend
-// MAX_NORMALIZED_CLIENT_TYPES.
-func effectiveReasoningEfforts(effortLevels []string, clientType string) []string {
-	levels := effortLevels
-	if len(levels) == 0 {
-		levels = []string{models.ReasoningEffortLow, models.ReasoningEffortMedium, models.ReasoningEffortHigh}
-	}
-	out := make([]string, 0, len(levels))
-	for _, e := range levels {
-		if normalizesMaxReasoningEffort(clientType) && e == models.ReasoningEffortMax {
-			continue
-		}
-		if !hasEffort(out, e) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// normalizesMaxReasoningEffort reports whether the current compatibility policy
-// maps "max" to "xhigh". Keep in sync with MAX_NORMALIZED_CLIENT_TYPES in
-// reasoning-effort.ts.
-func normalizesMaxReasoningEffort(clientType string) bool {
-	switch models.ClientType(clientType) {
-	case models.ClientTypeOpenAICompletions, models.ClientTypeOpenAIResponses:
-		return true
-	default:
-		return false
-	}
-}
-
-func hasEffort(effortLevels []string, effort string) bool {
-	for _, e := range effortLevels {
-		if e == effort {
-			return true
-		}
-	}
-	return false
-}
-
-// offEffortFor picks the effort an OpenAI-style provider should send to
-// approximate "off": "none" when advertised, else "minimal" when advertised,
-// else "" meaning the caller must omit reasoning_effort entirely. Returning a
-// real tier (low/medium/high) here would *enable* thinking instead of disabling
-// it — e.g. OpenRouter translates reasoning_effort:"low" into Anthropic extended
-// thinking, so a toggle model that advertises only low/medium/high would keep
-// reasoning on when the user selected Off. Omitting the field instead lets the
-// provider default (thinking off for toggle/Anthropic-compat models) take over
-// and also avoids sending an unsupported tier. effortLevels is ordered low→high.
-func offEffortFor(effortLevels []string) string {
-	if hasEffort(effortLevels, models.ReasoningEffortNone) {
-		return models.ReasoningEffortNone
-	}
-	if hasEffort(effortLevels, models.ReasoningEffortMinimal) {
-		return models.ReasoningEffortMinimal
-	}
-	return ""
-}
-
-func reasoningEffortDisabled(effort string) bool {
-	return models.IsReasoningDisabled(effort)
-}
-
-func offEffortOrEmpty(rc *models.ReasoningConfig) string {
-	if rc == nil {
-		return ""
-	}
-	return rc.OffEffort
+	return reasoning.ResolveConfig(
+		chatModel.ResolveThinkingMode(),
+		chatModel.Config.ReasoningEfforts,
+		chatModel.ReasoningOptions(clientType),
+		botSettings.ReasoningEffort,
+		requestedEffort,
+		clientType,
+	)
 }
 
 func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
@@ -1265,23 +1232,28 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 		return ResolveRunConfigResult{}, err
 	}
 
+	contextBudget := s.effectiveContextTokenBudget(chatModel)
+	cfg.ContextBudgetMaxTokens = contextBudget
 	cfg = s.prepareRunConfig(ctx, cfg)
 	return ResolveRunConfigResult{
-		RunConfig:   cfg,
-		ModelID:     chatModel.ID,
-		RuntimeType: runtimeType,
+		RunConfig:              cfg,
+		ModelID:                chatModel.ID,
+		RuntimeType:            runtimeType,
+		ContextBudgetMaxTokens: contextBudget,
 	}, nil
 }
 
 // prepareRunConfig generates the system prompt and appends the user message.
 func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) native.RunConfig {
-	beforePromptContext := s.runPromptHook(ctx, agentRunConfigView{
+	cfg.ContextHookText = ""
+	beforePromptResult := s.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
 		SessionID:    cfg.Identity.SessionID,
 		ChatID:       cfg.Identity.ChatID,
 		SessionType:  cfg.SessionType,
 		MessageCount: len(cfg.Messages),
 	}, hooks.EventBeforePromptBuild)
+	beforePromptContext := beforePromptResult.AppendContext
 	var files []native.SystemFile
 	limits := native.DefaultLimits()
 	if s.agent != nil {
@@ -1322,22 +1294,24 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 	var promptHookTexts []string
 	if beforePromptContext != "" {
 		text := formatServiceHookContext(hooks.EventBeforePromptBuild, beforePromptContext)
-		cfg.System += "\n\n" + text
 		promptHookTexts = append(promptHookTexts, text)
 	}
-	afterPromptContext := s.runPromptHook(ctx, agentRunConfigView{
+	beforePromptObservedTexts := append([]string(nil), promptHookTexts...)
+	beforePromptObservedTexts = append(beforePromptObservedTexts, hookSystemSectionTexts(beforePromptResult)...)
+	afterPromptResult := s.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
 		SessionID:    cfg.Identity.SessionID,
 		ChatID:       cfg.Identity.ChatID,
 		SessionType:  cfg.SessionType,
 		MessageCount: len(cfg.Messages),
-		SystemBytes:  len(cfg.System),
+		SystemBytes:  afterPromptHookSystemBytes(cfg.System, beforePromptObservedTexts),
 	}, hooks.EventAfterPromptBuild)
+	afterPromptContext := afterPromptResult.AppendContext
 	if afterPromptContext != "" {
 		text := formatServiceHookContext(hooks.EventAfterPromptBuild, afterPromptContext)
-		cfg.System += "\n\n" + text
 		promptHookTexts = append(promptHookTexts, text)
 	}
+	cfg.ContextHookText = strings.Join(promptHookTexts, "\n\n")
 
 	if cfg.Query != "" {
 		var extra []sdk.MessagePart
@@ -1391,7 +1365,17 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		}
 	}
 
-	cfg.ContextSourceFrags = buildProviderSourceFrags(ctx, cfg, native.GenerateSystemSections(systemParams), promptHookTexts)
+	hookBuild := buildHookSystemSections([]promptHookOutput{
+		{Event: hooks.EventBeforePromptBuild, Result: beforePromptResult},
+		{Event: hooks.EventAfterPromptBuild, Result: afterPromptResult},
+	}, cfg.ContextScope)
+	cfg.ContextSourceFrags = buildProviderSourceFrags(
+		ctx,
+		cfg,
+		native.GenerateSystemSections(systemParams),
+		hookBuild.Frags,
+	)
+	cfg.ContextSourceWarnings = hookBuild.Warnings
 	return cfg.RefreshContextFrag()
 }
 
@@ -1421,6 +1405,20 @@ func prependContextMessages(prefix, messages []ModelMessage, trackedIndex *int) 
 		}
 	}
 	return append(prefix, messages...), trackedIndex
+}
+
+func normalizedContextPrefixLength(messages []ModelMessage, rawPrefixLength int) int {
+	if rawPrefixLength <= 0 || len(messages) == 0 {
+		return 0
+	}
+	rawPrefixLength = min(rawPrefixLength, len(messages))
+	stripTools := len(sanitizeMessages(messages)) > 10
+	prefix := sanitizeMessages(messages[:rawPrefixLength])
+	if stripTools {
+		prefix = stripToolMessages(prefix)
+	}
+	prefix = repairToolCallClosures(prefix, syntheticToolClosureError)
+	return len(prefix)
 }
 
 func remapContextMessageIndex(messages []ModelMessage, index *int, stripTools bool) *int {

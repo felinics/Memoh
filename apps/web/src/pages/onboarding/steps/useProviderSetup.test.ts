@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   importModels: vi.fn(),
   postProvider: vi.fn(),
   postProviderFromTemplate: vi.fn(),
+  putModelsById: vi.fn(),
   testProvider: vi.fn(),
   updateProvider: vi.fn(),
   invalidateQueries: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock('@memohai/sdk', () => ({
   postProvidersByIdImportModels: mocks.importModels,
   postProvidersByIdTest: mocks.testProvider,
   postProvidersFromTemplate: mocks.postProviderFromTemplate,
+  putModelsById: mocks.putModelsById,
   putProvidersById: mocks.updateProvider,
 }))
 
@@ -89,7 +91,7 @@ describe('useProviderSetup', () => {
     })
   })
 
-  it('creates a preset from its template and exposes all chat models', async () => {
+  it('hands off a template provider without enabling every imported model', async () => {
     mocks.getProviderTemplates.mockResolvedValue({
       data: [{ id: 'template-id', domain: 'llm', key: 'deepseek' }],
     })
@@ -109,7 +111,12 @@ describe('useProviderSetup', () => {
       throwOnError: true,
     })
     expect(mocks.postProvider).not.toHaveBeenCalled()
+    expect(mocks.importModels).toHaveBeenCalledWith({
+      path: { id: 'provider-id' },
+      throwOnError: true,
+    })
     expect(ready).toHaveBeenCalledWith({ providerId: 'provider-id' })
+    expect(mocks.putModelsById).not.toHaveBeenCalled()
     app.unmount()
   })
 
@@ -134,7 +141,7 @@ describe('useProviderSetup', () => {
     'openai-completions',
     'anthropic-messages',
     'google-generative-ai',
-  ])('uses explicit defaults with the generic API for custom %s providers', async (clientType) => {
+  ])('imports custom %s providers with explicit protocol defaults', async (clientType) => {
     mocks.getProviderByName.mockResolvedValue({ data: null })
     mocks.postProvider.mockResolvedValue({ data: { id: 'provider-id' } })
     const { app, setup } = mountSetup(null)
@@ -143,7 +150,6 @@ describe('useProviderSetup', () => {
       api_key: 'sk-test',
       base_url: 'https://example.com/v1',
       client_type: clientType,
-      default_capabilities: ['tool-call'],
     }
 
     await setup.saveAndNext()
@@ -152,7 +158,7 @@ describe('useProviderSetup', () => {
     expect(mocks.postProviderFromTemplate).not.toHaveBeenCalled()
     expect(mocks.importModels).toHaveBeenCalledWith({
       path: { id: 'provider-id' },
-      body: { default_compatibilities: ['tool-call'] },
+      body: { default_compatibilities: ['tool-call', 'reasoning'] },
       throwOnError: true,
     })
     app.unmount()

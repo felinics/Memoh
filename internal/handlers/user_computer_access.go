@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // UserComputerAccessHandler serves the account-level Computer ACL view: which

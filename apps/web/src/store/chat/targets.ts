@@ -84,7 +84,7 @@ export function createChatTargets(deps: {
     const session = targetFor(resolved).session
     if (!session) return Boolean(resolved.sessionId)
     const type = session.type ?? 'chat'
-    if (type === 'heartbeat' || type === 'schedule') {
+    if (type === 'schedule') {
       return true
     }
     const channelType = (session.channel_type ?? '').trim().toLowerCase()

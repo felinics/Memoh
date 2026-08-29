@@ -92,7 +92,7 @@ services:
   # Connect-It owns the connect_it schema and creates it on startup; it only
   # needs postgres, never Memoh's migrations.
   connect-it:
-    image: "${MEMOH_DEV_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.1.1}"
+    image: "${MEMOH_DEV_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.0}"
     container_name: memoh-dev-connect-it
     environment:
       DATABASE_URL: "postgres://memoh:memoh123@postgres:5432/memoh?sslmode=disable&search_path=connect_it"
@@ -124,11 +124,15 @@ services:
     working_dir: /workspace
     privileged: true
     pid: host
+    # Mirror production's memory ceiling (CM-PRC-001) so unbounded-context
+    # regressions surface in dev instead of only under the production limit.
+    mem_limit: ${MEMOH_DEV_SERVER_MEMORY_LIMIT:-8g}
     command: ["air", "-c", ".air.toml"]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
+      GOMEMLIMIT: "${MEMOH_DEV_SERVER_GOMEMLIMIT:-7GiB}"
       GOFLAGS: -buildvcs=false
       TZ: "${MEMOH_DEV_TZ:-UTC}"
       # Entrypoint only: which ref the workspace archive carries, so it can tell

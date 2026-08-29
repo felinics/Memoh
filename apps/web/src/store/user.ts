@@ -8,7 +8,7 @@ import { notifyAuthSessionCleared, onAuthSessionCleared, type AuthSessionClearRe
 import { cancelPendingQueryCacheSave, removeQueryCacheFromDisk } from '@/lib/query-cache-persistence'
 import { resetOnboardingState } from '@/composables/useOnboarding'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
-import { resetOnboardingRuntimeState } from '@/pages/onboarding/state'
+import { resetOnboardingSession } from '@/pages/onboarding/session'
 import { safeLocalRemove } from '@/utils/safe-storage'
 
 export interface UserInfo {
@@ -101,8 +101,7 @@ export const useUserStore = defineStore(
       // flag is no longer persisted, but an in-memory value from a prior user
       // could otherwise leak across a switch that skips logout — force a fresh
       // server check.
-      onboardingCompleted.value = false
-      _meChecked = false
+      resetOnboarding()
       localToken.value = token
       for (const key of Object.keys(userData) as (keyof UserInfo)[]) {
         userInfo[key] = userData[key]
@@ -123,7 +122,7 @@ export const useUserStore = defineStore(
       _meChecked = false
       _pendingFetch = null
       safeLocalRemove(ONBOARDING_KEYS.introSeen)
-      resetOnboardingRuntimeState()
+      resetOnboardingSession()
       resetOnboardingState()
     }
 

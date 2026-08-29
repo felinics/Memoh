@@ -1,36 +1,52 @@
-/* Sidebar-specific native scroll bar: narrow so it doesn't dominate the tight
- * list panes. The 2px transparent border + padding-box clip insets the thumb
- * to a ~4px sliver — visible on hover/scroll but not a constant presence.
- * Callers keep extra right padding (e.g. recents' pr-3) so hover chips stay
- * off the bar.
+/* Sidebar scroll treatment, on top of @felinic/ui's ScrollArea (reka-ui).
  *
- * Deliberately a shared stylesheet, NOT a `<style scoped>` block: the class is
- * used by BOTH sidebar/recents.vue and sidebar/panel-schedule.vue. It first
- * lived in recents' scoped style, which silently did nothing for
- * panel-schedule (scoped selectors only match the defining component's DOM).
- * Import this file from every component that puts `sidebar-scroll` on a
- * scroll container.
+ * The visible bar is reka's self-drawn scrollbar, NOT the native one — the
+ * viewport's native bar is hidden by the component's own injected style
+ * (scrollbar-width:none + ::-webkit-scrollbar{display:none}). We went
+ * self-drawn for one reason: the fade. Native scrollbar pseudos don't
+ * participate in CSS transitions and `scrollbar-color` is not animatable, so
+ * a native bar can only appear instantly; reka's thumb is a real element, and
+ * its data-state flips (visible/hidden) drive keyframe fades. Presence keeps
+ * the node mounted until the exit animation ends.
  *
- * overflow-anchor is OFF here on purpose. Chat panes keep the browser default
- * so history prepend stays visually pinned; sidebar lists grow downward from
- * a short first paint (load-more append), and anchoring would walk scrollTop
- * down with that growth — Recents opening mid-list. */
-.sidebar-scroll {
+ * Ink levels reuse the exact percentages the ui-contract alpha baseline
+ * already knows (10% container-hover, 16% thumb-hover) — do not invent new
+ * ones without burning down the baseline first.
+ *
+ * overflow-anchor is OFF on the viewport on purpose. Chat panes keep the
+ * browser default so history prepend stays visually pinned; sidebar lists
+ * grow downward from a short first paint (load-more append), and anchoring
+ * would walk scrollTop down with that growth — Recents opening mid-list. */
+.sidebar-scroll [data-slot="scroll-area-viewport"] {
   overflow-anchor: none;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+  /* Keeps the rows' hover chips clear of the 8px overlay bar (the bar is
+   * absolutely positioned over the viewport's right edge). */
+  padding-right: 0.25rem;
 }
-.sidebar-scroll::-webkit-scrollbar {
-  width: 8px;
+
+.sidebar-scroll [data-slot="scroll-area-scrollbar"][data-state="visible"] {
+  animation: sidebar-scroll-in 0.1s ease-out both;
 }
-.sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
+.sidebar-scroll [data-slot="scroll-area-scrollbar"][data-state="hidden"] {
+  animation: sidebar-scroll-out 0.16s ease-in both;
 }
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 9999px;
+@keyframes sidebar-scroll-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sidebar-scroll-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Quieter than the library default (muted-foreground/35): the sidebar is a
+ * tight, dark-adjacent surface where 35% read as a smudge. Specificity must
+ * beat the wrapper's tailwind classes (bg-muted-foreground/35 + hover:/55). */
+.sidebar-scroll [data-slot="scroll-area-thumb"] {
+  background-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+.sidebar-scroll [data-slot="scroll-area-thumb"]:hover {
+  background-color: color-mix(in oklab, var(--foreground) 16%, transparent);
 }
 
 /* Session title skeletons are short (~40–70% of ~240px). The global tile is 640px

@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/agent/background"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 // ---------------------------------------------------------------------------
@@ -459,7 +459,7 @@ func TestE2E_RunningTasksSummaryInjected(t *testing.T) {
 
 	bgMgr := background.New(nil)
 
-	var step3System string
+	var step3Params sdk.GenerateParams
 	modelProvider := &agentReadMediaMockProvider{
 		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
 			switch call {
@@ -489,8 +489,9 @@ func TestE2E_RunningTasksSummaryInjected(t *testing.T) {
 					}},
 				}, nil
 			case 3:
-				// Capture the system prompt which should include running tasks.
-				step3System = params.System
+				// Capture the params; the running tasks summary should ride a
+				// message, never the system prompt.
+				step3Params = cloneGenerateParams(params)
 				return &sdk.GenerateResult{
 					Text:         "Done checking.",
 					FinishReason: sdk.FinishReasonStop,
@@ -521,11 +522,16 @@ func TestE2E_RunningTasksSummaryInjected(t *testing.T) {
 		t.Fatalf("Generate error: %v", err)
 	}
 
-	if !strings.Contains(step3System, "Currently running background tasks:") {
-		t.Error("expected running tasks summary in system prompt")
+	if strings.Contains(step3Params.System, "Currently running background tasks:") {
+		t.Errorf("running tasks summary must not rewrite the system prompt, got: %s", step3Params.System)
 	}
-	if !strings.Contains(step3System, "Long running task") {
-		t.Errorf("expected task description in system prompt, got: %s", step3System)
+	if got := backgroundSummaryCount(step3Params.Messages); got != 1 {
+		t.Fatalf("summary messages = %d, want exactly 1", got)
+	}
+	last := step3Params.Messages[len(step3Params.Messages)-1]
+	text, _ := last.Content[0].(sdk.TextPart)
+	if last.Role != sdk.MessageRoleUser || !strings.Contains(text.Text, "Long running task") {
+		t.Errorf("expected tail user message carrying the task summary, got: %#v", last)
 	}
 }
 

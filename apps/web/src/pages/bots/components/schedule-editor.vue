@@ -466,6 +466,7 @@ function defaultExecutionForm(): ScheduleExecutionForm {
     runTarget: 'new_session',
     targetSessionId: '',
     runtimeType: '',
+    botAgentId: '',
     acpAgentId: '',
     modelId: '',
     acpModelId: '',
@@ -478,6 +479,7 @@ function hydrateExecution(schedule: ScheduleSchedule) {
   execution.runTarget = schedule.run_target === 'existing_session' ? 'existing_session' : 'new_session'
   execution.targetSessionId = schedule.target_session_id ?? ''
   execution.runtimeType = schedule.runtime_type === 'acp_agent' ? 'acp_agent' : ''
+  execution.botAgentId = schedule.bot_agent_id ?? ''
   execution.acpAgentId = schedule.acp_agent_id ?? ''
   execution.modelId = schedule.model_id ?? ''
   execution.acpModelId = schedule.acp_model_id ?? ''
@@ -489,7 +491,7 @@ function hydrateExecution(schedule: ScheduleSchedule) {
 // override — used to auto-expand the disclosure the fields live in.
 function hasExecutionConfig(schedule: ScheduleSchedule): boolean {
   return schedule.run_target === 'existing_session'
-    || !!schedule.runtime_type || !!schedule.acp_agent_id || !!schedule.model_id
+    || !!schedule.runtime_type || !!schedule.bot_agent_id || !!schedule.acp_agent_id || !!schedule.model_id
     || !!schedule.acp_model_id || !!schedule.reasoning_effort || !!schedule.workdir_id
 }
 
@@ -498,6 +500,7 @@ function executionRequestBlock() {
     run_target: execution.runTarget,
     target_session_id: execution.targetSessionId || undefined,
     runtime_type: execution.runTarget === 'new_session' && execution.runtimeType ? execution.runtimeType : undefined,
+    bot_agent_id: execution.runTarget === 'new_session' && execution.botAgentId ? execution.botAgentId : undefined,
     acp_agent_id: execution.runTarget === 'new_session' && execution.acpAgentId ? execution.acpAgentId : undefined,
     model_id: execution.modelId || undefined,
     acp_model_id: execution.acpModelId || undefined,

@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 type MessageProvider struct {
@@ -38,7 +38,7 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 		switch session.SessionType {
 		case sessionmode.Discuss:
 			parts = append(parts, "Use "+sendRef+" to speak in the observed conversation; if you do not call it, you stay silent.")
-		case sessionmode.Schedule, sessionmode.Heartbeat:
+		case sessionmode.Schedule:
 			parts = append(parts, "Use "+sendRef+" only when the background task needs to notify a person or channel; specify `platform` and `target`.")
 		default:
 			if session.CanOmitMessagingTarget() {

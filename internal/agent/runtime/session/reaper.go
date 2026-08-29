@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // Error codes written to session_runs.error_code by the reaper. They are the
@@ -40,6 +40,8 @@ type Reaper struct {
 	ownerID                string
 	logger                 *slog.Logger
 	recoverWaitingDecision func(context.Context, LeaseCandidate) (bool, error)
+	terminalObserver       func(context.Context, TerminalRun)
+	terminalReconciler     func(context.Context) error
 
 	// generation is the liveness incarnation last observed. Runs stamped with
 	// anything else were claimed by a backend that no longer exists.
@@ -67,6 +69,23 @@ func (r *Reaper) SetWaitingDecisionRecoverer(recoverer func(context.Context, Lea
 		return
 	}
 	r.recoverWaitingDecision = recoverer
+}
+
+// SetTerminalObserver installs the sink for authoritative durable outcomes.
+func (r *Reaper) SetTerminalObserver(observer func(context.Context, TerminalRun)) {
+	if r == nil {
+		return
+	}
+	r.terminalObserver = observer
+}
+
+// SetTerminalReconciler installs the bounded repair pass run by the elected
+// reaper after its ordinary ledger duties.
+func (r *Reaper) SetTerminalReconciler(reconciler func(context.Context) error) {
+	if r == nil {
+		return
+	}
+	r.terminalReconciler = reconciler
 }
 
 // NewReaper builds a reaper for one manager. It shares the manager's derived
@@ -169,6 +188,11 @@ func (r *Reaper) tick(ctx context.Context) {
 	if err := r.repairOrphanedAdmissions(ctx); err != nil {
 		r.logger.Warn("repair orphaned session runtime admissions failed", slog.Any("error", err))
 	}
+	if r.terminalReconciler != nil {
+		if err := r.terminalReconciler(context.WithoutCancel(ctx)); err != nil {
+			r.logger.Warn("reconcile session runtime terminal observations failed", slog.Any("error", err))
+		}
+	}
 }
 
 // reapExpiredLeases handles the ordinary case: an owner stopped renewing. The
@@ -187,8 +211,7 @@ func (r *Reaper) reapExpiredLeases(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("load expired session runtime run: %w", getErr))
 			continue
 		}
-		if getErr == nil && run.State == ledger.StateWaitingDecision &&
-			run.FencingToken == candidate.FencingToken && r.recoverWaitingDecision != nil {
+		if getErr == nil && run.State == ledger.StateWaitingDecision && r.recoverWaitingDecision != nil {
 			recovered, recoverErr := r.recoverWaitingDecision(ctx, candidate)
 			if recoverErr != nil {
 				errs = append(errs, fmt.Errorf("recover waiting-decision runtime run: %w", recoverErr))
@@ -348,8 +371,24 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 		return fmt.Errorf("mark session run lost: %w", err)
 	}
 	if !applied {
-		// Already terminal, or a newer owner holds the run. Both mean this
-		// reaper has nothing to decide.
+		// A prior owner may have committed its terminal row and died before
+		// publishing the application-owned terminal observation. Replay that
+		// authoritative outcome, but never speak for a newer active owner.
+		run, err = r.runs.Get(ctx, runID)
+		if err != nil {
+			if errors.Is(err, ledger.ErrRunNotFound) {
+				return nil
+			}
+			return fmt.Errorf("load authoritative reaped run terminal: %w", err)
+		}
+		if !run.State.Terminal() {
+			return nil
+		}
+	}
+	if r.terminalObserver != nil {
+		r.terminalObserver(context.WithoutCancel(ctx), terminalRunFromLedger(run))
+	}
+	if !applied {
 		return nil
 	}
 	if run.State == ledger.StateAborted {

@@ -19,7 +19,7 @@ import { useChatStore } from './chat-list'
 const api = vi.hoisted(() => ({
   createSession: vi.fn(),
   deleteSession: vi.fn(),
-  forkSessionFromMessage: vi.fn(),
+  forkSessionFromTurn: vi.fn(),
   fetchSession: vi.fn(),
   fetchSessions: vi.fn(),
   fetchBots: vi.fn(),
@@ -255,6 +255,12 @@ function wsRunId(index = 0): string {
 beforeEach(() => {
     pinia = createPinia()
     setActivePinia(pinia)
+    // The runtime client coalesces delta projections to one per animation
+    // frame; run frames synchronously so existing per-event assertions hold.
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 0
+    })
     h.streamHandler = null
     h.sessionsActivityHandler = null
     h.lastRunId = ''
@@ -868,6 +874,25 @@ describe('chat-list store', () => {
         explicitSelection: false,
         runtimeType: 'acp_agent',
       })
+    })
+
+  it('does not match a staged default when only the BotAgent row changes', async () => {
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      store.stageDefaultACPSession({
+        botAgentId: 'agent-1',
+        agentId: 'codex',
+        projectPath: '/data',
+        projectMode: 'project',
+      })
+
+      expect(store.pendingACPMatchesInput({
+        botAgentId: 'agent-2',
+        agentId: 'codex',
+        projectPath: '/data',
+        projectMode: 'project',
+      })).toBe(false)
     })
 
   it('restages the bot default ACP when opening a non-explicit draft after an ACP session', async () => {
@@ -2280,6 +2305,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-0-1',
           role: 'user',
           text: 'hello',
           attachments: [],
@@ -2287,6 +2313,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-0-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2297,13 +2324,13 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const retry = store.retryLatestAssistant('assistant-old', { workspaceTargetId: 'computer-b' })
+      const retry = store.retryLatestAssistant('turn-fx-0-1', { workspaceTargetId: 'computer-b' })
       await flushPromises()
 
       expect(h.sentWSMessages.at(-1)).toMatchObject({
         type: 'retry_message',
         session_id: 'session-1',
-        message_id: 'assistant-old',
+        turn_id: 'turn-fx-0-1',
         workspace_target_id: 'computer-b',
       })
       expect(store.messages.map(message => message.id)).not.toContain('assistant-old')
@@ -2317,6 +2344,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-0-2',
           role: 'user',
           text: 'hello',
           attachments: [],
@@ -2324,6 +2352,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-new',
+          turn_id: 'turn-fx-0-2',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'new answer' }],
           timestamp: '2026-05-17T08:00:02.000Z',
@@ -2360,6 +2389,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-1-1',
           role: 'user',
           text: 'first',
           attachments: [],
@@ -2367,6 +2397,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-prev',
+          turn_id: 'turn-fx-1-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'previous answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2374,6 +2405,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'user-2',
+          turn_id: 'turn-fx-1-2',
           role: 'user',
           text: 'second',
           attachments: [],
@@ -2381,6 +2413,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-1-2',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:03.000Z',
@@ -2391,7 +2424,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const retry = store.retryLatestAssistant('assistant-old')
+      const retry = store.retryLatestAssistant('turn-fx-1-2')
       await flushPromises()
 
       expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
@@ -2401,6 +2434,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-1-3',
           role: 'user',
           text: 'first',
           attachments: [],
@@ -2408,6 +2442,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-prev',
+          turn_id: 'turn-fx-1-3',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'previous answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2415,6 +2450,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'user-2',
+          turn_id: 'turn-fx-1-4',
           role: 'user',
           text: 'second',
           attachments: [],
@@ -2422,6 +2458,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-new',
+          turn_id: 'turn-fx-1-4',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'new answer' }],
           timestamp: '2026-05-17T08:00:06.000Z',
@@ -2460,6 +2497,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-2-1',
           role: 'user',
           text: 'hello',
           attachments: [],
@@ -2467,6 +2505,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-2-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2477,7 +2516,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const retry = store.retryLatestAssistant('assistant-old')
+      const retry = store.retryLatestAssistant('turn-fx-2-1')
       await flushPromises()
 
       expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
@@ -2489,6 +2528,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-2-2',
           role: 'user',
           text: 'hello',
           attachments: [],
@@ -2496,6 +2536,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-new',
+          turn_id: 'turn-fx-2-2',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'new answer' }],
           timestamp: '2026-05-17T08:00:06.000Z',
@@ -2532,6 +2573,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-3-1',
           role: 'user',
           text: 'first',
           attachments: [],
@@ -2539,6 +2581,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-prev',
+          turn_id: 'turn-fx-3-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'previous answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2546,6 +2589,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'user-2',
+          turn_id: 'turn-fx-3-2',
           role: 'user',
           text: 'second',
           attachments: [],
@@ -2553,6 +2597,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-3-2',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:03.000Z',
@@ -2563,7 +2608,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const edit = store.editLatestUser('user-2', 'edited second')
+      const edit = store.editLatestUser('turn-fx-3-2', 'edited second')
       await flushPromises()
 
       expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
@@ -2573,6 +2618,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-3-3',
           role: 'user',
           text: 'first',
           attachments: [],
@@ -2580,6 +2626,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-prev',
+          turn_id: 'turn-fx-3-3',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'previous answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2587,6 +2634,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'user-new',
+          turn_id: 'turn-fx-3-4',
           role: 'user',
           text: 'edited second',
           attachments: [],
@@ -2594,6 +2642,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-new',
+          turn_id: 'turn-fx-3-4',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'new answer' }],
           timestamp: '2026-05-17T08:00:07.000Z',
@@ -2618,6 +2667,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-4-1',
           role: 'user',
           text: 'hello',
           attachments: [],
@@ -2625,6 +2675,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-4-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2635,7 +2686,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const result = await store.retryLatestAssistant('assistant-old')
+      const result = await store.retryLatestAssistant('turn-fx-4-1')
 
       expect(result).toMatchObject({ ok: false, stage: 'startup', error: 'model failed' })
       expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
@@ -2655,6 +2706,7 @@ describe('chat-list store', () => {
           return Promise.resolve([
             {
               id: 'user-a',
+              turn_id: 'turn-fx-5-1',
               role: 'user',
               text: 'hello',
               attachments: [],
@@ -2662,6 +2714,7 @@ describe('chat-list store', () => {
             },
             {
               id: 'assistant-old',
+              turn_id: 'turn-fx-5-1',
               role: 'assistant',
               messages: [{ id: 1, type: 'text', content: 'old answer' }],
               timestamp: '2026-05-17T08:00:01.000Z',
@@ -2673,6 +2726,7 @@ describe('chat-list store', () => {
           return Promise.resolve([
             {
               id: 'user-b',
+              turn_id: 'turn-fx-5-2',
               role: 'user',
               text: 'other chat',
               attachments: [],
@@ -2686,7 +2740,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const retry = store.retryLatestAssistant('assistant-old')
+      const retry = store.retryLatestAssistant('turn-fx-5-1')
       await flushPromises()
       expect(store.messages.map(message => message.id)).toEqual(['user-a', expect.any(String)])
       const retryRunId = h.lastRunId
@@ -2718,6 +2772,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-6-1',
           role: 'user',
           text: 'old prompt',
           attachments: [],
@@ -2725,6 +2780,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-6-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2735,13 +2791,13 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const edit = store.editLatestUser('user-1', 'new prompt', { workspaceTargetId: 'computer-a' })
+      const edit = store.editLatestUser('turn-fx-6-1', 'new prompt', { workspaceTargetId: 'computer-a' })
       await flushPromises()
 
       expect(h.sentWSMessages.at(-1)).toMatchObject({
         type: 'edit_message',
         session_id: 'session-1',
-        message_id: 'user-1',
+        turn_id: 'turn-fx-6-1',
         text: 'new prompt',
         workspace_target_id: 'computer-a',
       })
@@ -2762,6 +2818,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-new',
+          turn_id: 'turn-fx-6-2',
           role: 'user',
           text: 'new prompt',
           attachments: [],
@@ -2769,6 +2826,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-new',
+          turn_id: 'turn-fx-6-2',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'new answer' }],
           timestamp: '2026-05-17T08:00:03.000Z',
@@ -2791,6 +2849,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-7-1',
           role: 'user',
           text: 'old prompt',
           attachments: [],
@@ -2798,6 +2857,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-7-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2808,7 +2868,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const result = await store.editLatestUser('user-1', 'new prompt')
+      const result = await store.editLatestUser('turn-fx-7-1', 'new prompt')
 
       expect(result).toMatchObject({
         ok: false,
@@ -2833,6 +2893,7 @@ describe('chat-list store', () => {
           return Promise.resolve([
             {
               id: 'user-a',
+              turn_id: 'turn-fx-8-1',
               role: 'user',
               text: 'old prompt',
               attachments: [],
@@ -2840,6 +2901,7 @@ describe('chat-list store', () => {
             },
             {
               id: 'assistant-a',
+              turn_id: 'turn-fx-8-1',
               role: 'assistant',
               messages: [{ id: 1, type: 'text', content: 'old answer' }],
               timestamp: '2026-05-17T08:00:01.000Z',
@@ -2851,6 +2913,7 @@ describe('chat-list store', () => {
           return Promise.resolve([
             {
               id: 'user-b',
+              turn_id: 'turn-fx-8-2',
               role: 'user',
               text: 'other chat',
               attachments: [],
@@ -2864,7 +2927,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const edit = store.editLatestUser('user-a', 'new prompt')
+      const edit = store.editLatestUser('turn-fx-8-1', 'new prompt')
       await flushPromises()
       expect(store.messages.map(message => message.role)).toEqual(['user', 'assistant'])
       expect(store.messages[0]).toMatchObject({ role: 'user', text: 'new prompt' })
@@ -2902,6 +2965,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'user-1',
+          turn_id: 'turn-fx-8-3',
           role: 'user',
           text: 'old prompt',
           attachments: [{
@@ -2917,6 +2981,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'assistant-old',
+          turn_id: 'turn-fx-8-3',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'old answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2927,7 +2992,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const result = await store.editLatestUser('user-1', 'new prompt')
+      const result = await store.editLatestUser('turn-fx-8-3', 'new prompt')
 
       expect(result).toMatchObject({ ok: false, stage: 'startup' })
       expect(h.sentWSMessages).toHaveLength(0)
@@ -2946,6 +3011,7 @@ describe('chat-list store', () => {
       const sourceTurns = [
         {
           id: 'source-user',
+          turn_id: 'turn-fx-9-1',
           role: 'user' as const,
           text: 'hello',
           attachments: [],
@@ -2953,6 +3019,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'source-assistant',
+          turn_id: 'turn-fx-9-1',
           role: 'assistant' as const,
           messages: [{ id: 1, type: 'text' as const, content: 'answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2962,6 +3029,7 @@ describe('chat-list store', () => {
       const forkTurns = [
         {
           id: 'fork-user',
+          turn_id: 'turn-fx-9-2',
           role: 'user' as const,
           text: 'hello',
           attachments: [],
@@ -2969,6 +3037,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'fork-assistant',
+          turn_id: 'turn-fx-9-2',
           role: 'assistant' as const,
           messages: [{ id: 1, type: 'text' as const, content: 'answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -2980,7 +3049,7 @@ describe('chat-list store', () => {
         if (sessionId === 'fork-session') return Promise.resolve(forkTurns)
         return Promise.resolve([])
       })
-      api.forkSessionFromMessage.mockResolvedValueOnce({
+      api.forkSessionFromTurn.mockResolvedValueOnce({
         id: 'fork-session',
         bot_id: 'bot-1',
         title: 'Source fork',
@@ -3015,12 +3084,12 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const ok = await store.forkMessage('source-assistant', { title: 'Custom fork name' })
+      const ok = await store.forkTurn('turn-fx-9-1', { title: 'Custom fork name' })
       await applyLatestForkRequest(store)
       await flushPromises()
 
       expect(ok).toBe(true)
-      expect(api.forkSessionFromMessage).toHaveBeenCalledWith('bot-1', 'source-session', 'source-assistant', { title: 'Custom fork name' })
+      expect(api.forkSessionFromTurn).toHaveBeenCalledWith('bot-1', 'source-session', 'turn-fx-9-1', { title: 'Custom fork name' })
       expect(store.sessionId).toBe('fork-session')
       expect(store.messages.map(message => message.id)).toEqual(['fork-user', 'fork-assistant'])
       expect(store.activeChatTarget.metadata.forked_from).toMatchObject({
@@ -3038,6 +3107,7 @@ describe('chat-list store', () => {
       const sourceTurns = [
         {
           id: 'source-user',
+          turn_id: 'turn-fx-10-1',
           role: 'user' as const,
           text: 'hello',
           attachments: [],
@@ -3045,6 +3115,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'source-assistant',
+          turn_id: 'turn-fx-10-1',
           role: 'assistant' as const,
           messages: [{ id: 1, type: 'text' as const, content: 'answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -3054,6 +3125,7 @@ describe('chat-list store', () => {
       const forkTurns = [
         {
           id: 'fork-user',
+          turn_id: 'turn-fx-10-2',
           role: 'user' as const,
           text: 'hello',
           attachments: [],
@@ -3061,6 +3133,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'fork-assistant',
+          turn_id: 'turn-fx-10-2',
           role: 'assistant' as const,
           messages: [{ id: 1, type: 'text' as const, content: 'answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -3072,7 +3145,7 @@ describe('chat-list store', () => {
         if (sessionId === 'fork-session') return Promise.resolve(forkTurns)
         return Promise.resolve([])
       })
-      api.forkSessionFromMessage.mockResolvedValueOnce({
+      api.forkSessionFromTurn.mockResolvedValueOnce({
         id: 'fork-session',
         bot_id: 'bot-1',
         title: 'Source fork',
@@ -3094,7 +3167,7 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const ok = await store.forkMessage('source-assistant')
+      const ok = await store.forkTurn('turn-fx-10-1')
       await applyLatestForkRequest(store)
       await flushPromises()
 
@@ -3123,6 +3196,7 @@ describe('chat-list store', () => {
           return Promise.resolve([
             {
               id: 'source-assistant',
+              turn_id: 'turn-fx-11-1',
               role: 'assistant' as const,
               messages: [{ id: 1, type: 'text' as const, content: 'answer' }],
               timestamp: '2026-05-17T08:00:01.000Z',
@@ -3134,6 +3208,7 @@ describe('chat-list store', () => {
           return Promise.resolve([
             {
               id: 'other-user',
+              turn_id: 'turn-fx-11-2',
               role: 'user' as const,
               text: 'other',
               attachments: [],
@@ -3144,7 +3219,7 @@ describe('chat-list store', () => {
         return Promise.resolve([])
       })
       let resolveFork!: (session: unknown) => void
-      api.forkSessionFromMessage.mockReturnValueOnce(new Promise(resolve => {
+      api.forkSessionFromTurn.mockReturnValueOnce(new Promise(resolve => {
         resolveFork = resolve
       }))
       const store = useChatStore()
@@ -3155,7 +3230,7 @@ describe('chat-list store', () => {
       const targetB = { botId: 'bot-1', sessionId: 'other-session', viewId: 'chat:b' }
       store.bindChatView(targetA.viewId, targetA, true)
       store.focusChatView(targetA.viewId)
-      const fork = store.forkMessage('source-assistant', { target: targetA })
+      const fork = store.forkTurn('turn-fx-11-1', { target: targetA })
       await flushPromises()
       store.bindChatView(targetB.viewId, targetB, true)
       store.focusChatView(targetB.viewId)
@@ -3200,6 +3275,7 @@ describe('chat-list store', () => {
       })
       api.fetchMessagesUI.mockResolvedValueOnce([{
         id: 'source-assistant',
+        turn_id: 'turn-fx-12-1',
         role: 'assistant',
         messages: [{ id: 1, type: 'text', content: 'answer' }],
         timestamp: '2026-07-11T00:00:00Z',
@@ -3211,12 +3287,12 @@ describe('chat-list store', () => {
         title: string
         type: string
       }>()
-      api.forkSessionFromMessage.mockReturnValueOnce(response.promise)
+      api.forkSessionFromTurn.mockReturnValueOnce(response.promise)
       const store = useChatStore()
       await store.selectBot('bot-1')
       await flushPromises()
 
-      const fork = store.forkMessage('source-assistant')
+      const fork = store.forkTurn('turn-fx-12-1')
       windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
         detail: { reason: 'logout' },
       }))
@@ -3236,6 +3312,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'assistant-1',
+          turn_id: 'turn-fx-13-1',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'answer' }],
           timestamp: '2026-05-17T08:00:01.000Z',
@@ -3246,10 +3323,10 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       await flushPromises()
-      const ok = await store.forkMessage('assistant-1')
+      const ok = await store.forkTurn('turn-fx-13-1')
 
       expect(ok).toBe(false)
-      expect(api.forkSessionFromMessage).not.toHaveBeenCalled()
+      expect(api.forkSessionFromTurn).not.toHaveBeenCalled()
     })
 
   it('sends disable as an explicit reasoning effort override', async () => {
@@ -4246,6 +4323,7 @@ describe('chat-list store', () => {
       ], nextCursor: null })
       api.fetchMessagesUI.mockResolvedValueOnce([{
         id: 'visible-message',
+        turn_id: 'turn-fx-14-1',
         role: 'user',
         text: 'visible',
         attachments: [],
@@ -4410,6 +4488,7 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'server-user',
+          turn_id: 'turn-fx-14-2',
           role: 'user',
           text: 'hi',
           attachments: [],
@@ -4417,6 +4496,7 @@ describe('chat-list store', () => {
         },
         {
           id: 'server-assistant',
+          turn_id: 'turn-fx-14-2',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'hello', running: false }],
           timestamp: past,
@@ -4510,7 +4590,11 @@ describe('chat-list store', () => {
       // Initial page == PAGE_SIZE so hasMoreOlder is true after refresh; the
       // older fetch then returns empty to simulate end-of-history.
       const initialPage = Array.from({ length: 30 }, (_, idx) => ({
-        id: `msg-${idx}`,
+        id: `00000000-0000-4000-8000-${String(idx).padStart(12, '0')}`,
+        turn_id: `turn-${idx}`,
+        // A settled page always carries turn positions; the older-page cursor
+        // is taken from the oldest turn that has one.
+        turn_position: idx + 1,
         role: 'user' as const,
         text: 'hi',
         attachments: [],
@@ -4665,12 +4749,14 @@ describe('chat-list store', () => {
       api.fetchMessagesUI.mockResolvedValueOnce([
         {
           id: 'bot-2-user',
+          turn_id: 'turn-fx-14-3',
           role: 'user',
           text: 'bot two prompt',
           timestamp: '2026-06-20T00:00:00.000Z',
         },
         {
           id: 'bot-2-assistant',
+          turn_id: 'turn-fx-14-3',
           role: 'assistant',
           messages: [{ id: 1, type: 'text', content: 'bot two reply' }],
           timestamp: '2026-06-20T00:00:01.000Z',

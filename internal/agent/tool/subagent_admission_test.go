@@ -2,14 +2,20 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/agent/turn"
+	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // fakeSubagentAdmitter stands in for the durable admission gate, and it
@@ -29,16 +35,18 @@ type fakeSubagentAdmitter struct {
 type subagentAdmissionRecord struct {
 	botID        string
 	threadID     string
+	runID        string
 	invocationID string
 	submission   string
 }
 
 type subagentTerminalRecord struct {
-	threadID string
-	cause    string
+	threadID         string
+	cause            string
+	contextLifecycle *contextfrag.LifecycleSnapshot
 }
 
-func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(error), error) {
+func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(SubagentTerminal), error) {
 	f.mu.Lock()
 	if f.reject != nil {
 		err := f.reject
@@ -52,10 +60,12 @@ func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, thre
 	if f.active == nil {
 		f.active = make(map[string]bool)
 	}
+	runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", len(f.starts)+1)
 	f.active[threadID] = true
 	f.starts = append(f.starts, subagentAdmissionRecord{
 		botID:        botID,
 		threadID:     threadID,
+		runID:        runID,
 		invocationID: invocationID,
 		submission:   string(submission),
 	})
@@ -63,18 +73,21 @@ func (f *fakeSubagentAdmitter) AdmitSubagentRun(ctx context.Context, botID, thre
 
 	runCtx, cancel := context.WithCancel(ctx)
 	admission := SubagentAdmission{
-		RunID:        "run-" + invocationID,
+		RunID:        runID,
 		TurnID:       "turn-" + invocationID,
 		TurnPosition: 1,
 	}
-	return runCtx, admission, func(cause error) {
+	return runCtx, admission, func(terminal SubagentTerminal) {
 		defer cancel()
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		delete(f.active, threadID)
-		record := subagentTerminalRecord{threadID: threadID}
-		if cause != nil {
-			record.cause = cause.Error()
+		record := subagentTerminalRecord{
+			threadID:         threadID,
+			contextLifecycle: terminal.ContextLifecycle,
+		}
+		if terminal.Cause != nil {
+			record.cause = terminal.Cause.Error()
 		}
 		f.finishes = append(f.finishes, record)
 	}, nil
@@ -127,6 +140,269 @@ func TestSpawnedTurnIsAdmittedOnTheAgentsOwnThread(t *testing.T) {
 	if len(terminals) != 1 || terminals[0].threadID != childSessionID || terminals[0].cause != "" {
 		t.Errorf("terminals = %#v, want one clean release of %q", terminals, childSessionID)
 	}
+}
+
+type retryingIdentitySpawnAgent struct {
+	mu       sync.Mutex
+	calls    []SpawnRunConfig
+	first    *contextfrag.LifecycleSnapshot
+	terminal *contextfrag.LifecycleSnapshot
+}
+
+func (a *retryingIdentitySpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return a.GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (a *retryingIdentitySpawnAgent) GenerateWithWatchdog(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls = append(a.calls, cfg)
+	if len(a.calls) == 1 {
+		return &SpawnResult{ContextLifecycle: a.first}, errors.New("provider returned 429")
+	}
+	return &SpawnResult{
+		Text: "done",
+		Messages: []sdk.Message{{
+			Role:    sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "done"}},
+		}},
+		ContextLifecycle: a.terminal,
+	}, nil
+}
+
+func (a *retryingIdentitySpawnAgent) configs() []SpawnRunConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]SpawnRunConfig(nil), a.calls...)
+}
+
+func TestSpawnedTurnReusesAdmittedRunIDAcrossRetries(t *testing.T) {
+	first := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 1},
+	}
+	final := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 2},
+	}
+	agent := &retryingIdentitySpawnAgent{first: first, terminal: final}
+	admitter := &fakeSubagentAdmitter{}
+	p := newSubagentAdmissionTestProvider(t, agent, admitter)
+
+	result := asMap(t, mustExecuteAgentTool(t, p, SessionContext{
+		BotID:     "bot1",
+		SessionID: "parent1",
+	}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "retry once",
+	}))
+	if result["status"] != string(background.TaskCompleted) {
+		t.Fatalf("status = %v, want %q", result["status"], background.TaskCompleted)
+	}
+
+	admissions := admitter.admissions()
+	if len(admissions) != 1 {
+		t.Fatalf("admissions = %d, want 1", len(admissions))
+	}
+	calls := agent.configs()
+	if len(calls) != 2 {
+		t.Fatalf("agent calls = %d, want 2", len(calls))
+	}
+	for i, call := range calls {
+		if call.RunID != admissions[0].runID {
+			t.Errorf("call %d RunID = %q, want admitted RunID %q", i, call.RunID, admissions[0].runID)
+		}
+	}
+	terminals := admitter.terminals()
+	if len(terminals) != 1 {
+		t.Fatalf("terminal calls = %d, want 1", len(terminals))
+	}
+	if got := terminals[0].contextLifecycle; got == nil || got.Counts.Fragments != 2 || got.AssistantMessageID != "msg_2" {
+		t.Fatalf("terminal snapshot = %#v, want final retry snapshot associated with msg_2", got)
+	}
+}
+
+type failedLifecycleSpawnAgent struct {
+	snapshot *contextfrag.LifecycleSnapshot
+}
+
+func (a *failedLifecycleSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return a.GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (a *failedLifecycleSpawnAgent) GenerateWithWatchdog(context.Context, SpawnRunConfig, func()) (*SpawnResult, error) {
+	return &SpawnResult{ContextLifecycle: a.snapshot}, errors.New("provider unavailable")
+}
+
+func TestSpawnedTurnRetainsLifecycleSnapshotOnGenerationFailure(t *testing.T) {
+	snapshot := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 3, Messages: 2},
+	}
+	admitter := &fakeSubagentAdmitter{}
+	p := newSubagentAdmissionTestProvider(t, &failedLifecycleSpawnAgent{snapshot: snapshot}, admitter)
+
+	result := asMap(t, mustExecuteAgentTool(t, p, SessionContext{
+		BotID:     "bot1",
+		SessionID: "parent1",
+	}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "fail after assembly",
+	}))
+	if result["status"] != string(background.TaskFailed) {
+		t.Fatalf("status = %v, want %q", result["status"], background.TaskFailed)
+	}
+	terminals := admitter.terminals()
+	if len(terminals) != 1 {
+		t.Fatalf("terminal calls = %d, want 1", len(terminals))
+	}
+	if !reflect.DeepEqual(terminals[0].contextLifecycle, snapshot) {
+		t.Fatalf("terminal snapshot = %#v, want %#v", terminals[0].contextLifecycle, snapshot)
+	}
+	if terminals[0].cause != "provider unavailable" {
+		t.Fatalf("terminal cause = %q, want provider failure", terminals[0].cause)
+	}
+}
+
+type abortingSpawnAgent struct {
+	calls    int
+	snapshot *contextfrag.LifecycleSnapshot
+}
+
+func (a *abortingSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return a.GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (a *abortingSpawnAgent) GenerateWithWatchdog(context.Context, SpawnRunConfig, func()) (*SpawnResult, error) {
+	a.calls++
+	return &SpawnResult{ContextLifecycle: a.snapshot}, errors.New("agent run aborted")
+}
+
+func TestSpawnedTurnDoesNotCompleteAdmittedRunAfterAgentAbort(t *testing.T) {
+	snapshot := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 3, Messages: 2},
+	}
+	agent := &abortingSpawnAgent{snapshot: snapshot}
+	admitter := &fakeSubagentAdmitter{}
+	p := newSubagentAdmissionTestProvider(t, agent, admitter)
+
+	result := asMap(t, mustExecuteAgentTool(t, p, SessionContext{
+		BotID:     "bot1",
+		SessionID: "parent1",
+	}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "abort internally",
+	}))
+	if result["status"] != string(background.TaskFailed) {
+		t.Fatalf("status = %v, want %q", result["status"], background.TaskFailed)
+	}
+	if agent.calls != 1 {
+		t.Fatalf("agent calls = %d, want one non-retryable attempt", agent.calls)
+	}
+	terminals := admitter.terminals()
+	if len(terminals) != 1 || terminals[0].cause != "agent run aborted" {
+		t.Fatalf("terminals = %#v, want one aborted-cause terminal", terminals)
+	}
+	if !reflect.DeepEqual(terminals[0].contextLifecycle, snapshot) {
+		t.Fatalf("terminal snapshot = %#v, want %#v", terminals[0].contextLifecycle, snapshot)
+	}
+}
+
+type canceledSubagentSpawnAgent struct{}
+
+func (*canceledSubagentSpawnAgent) Generate(ctx context.Context, cfg SpawnRunConfig) (*SpawnResult, error) {
+	return (&canceledSubagentSpawnAgent{}).GenerateWithWatchdog(ctx, cfg, func() {})
+}
+
+func (*canceledSubagentSpawnAgent) GenerateWithWatchdog(
+	ctx context.Context,
+	_ SpawnRunConfig,
+	_ func(),
+) (*SpawnResult, error) {
+	return nil, context.Cause(ctx)
+}
+
+func TestRunSubagentTaskPreservesOwningCancellationCause(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(context.Canceled)
+	p := &SpawnProvider{
+		agent:  &canceledSubagentSpawnAgent{},
+		logger: slog.New(slog.DiscardHandler),
+		modelResolver: func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+			return resolvedSubagentModel{}, nil
+		},
+	}
+
+	result := p.runSubagentTask(ctx, &agentRequest{
+		taskID:         "task-aborted",
+		agentID:        "worker",
+		agentSessionID: "session-aborted",
+		message:        "work",
+		parentSession:  SessionContext{BotID: "bot-1"},
+	})
+
+	if !errors.Is(result.Cause, context.Canceled) {
+		t.Fatalf("terminal cause = %v, want owning context cancellation", result.Cause)
+	}
+}
+
+func TestRunSubagentTaskKeepsResolvedFailureWhenCancellationRaces(t *testing.T) {
+	providerErr := errors.New("provider failed before cancellation")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	agent := &mockSpawnAgent{
+		generateFunc: func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
+			if cfg.ResolveAttempt == nil {
+				t.Fatal("attempt resolver is nil")
+			}
+			if got := cfg.ResolveAttempt(providerErr); got != SpawnAttemptFailure {
+				t.Fatalf("attempt disposition = %v, want failure", got)
+			}
+			cancel(context.Canceled)
+			return nil, providerErr
+		},
+	}
+	p := &SpawnProvider{
+		agent:  agent,
+		logger: slog.New(slog.DiscardHandler),
+		modelResolver: func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+			return resolvedSubagentModel{}, nil
+		},
+	}
+
+	result := p.runSubagentTask(ctx, &agentRequest{
+		taskID:         "task-failure-race",
+		agentID:        "worker",
+		agentSessionID: "session-failure-race",
+		message:        "work",
+		parentSession:  SessionContext{BotID: "bot-1"},
+	})
+
+	if !result.AttemptResolved || result.AttemptOutcome != SpawnAttemptFailure {
+		t.Fatalf("attempt outcome = resolved %v disposition %v, want failure", result.AttemptResolved, result.AttemptOutcome)
+	}
+	if !errors.Is(result.Cause, providerErr) || errors.Is(result.Cause, context.Canceled) {
+		t.Fatalf("terminal cause = %v, want resolved provider failure", result.Cause)
+	}
+}
+
+func newSubagentAdmissionTestProvider(t *testing.T, agent SpawnAgent, admitter SubagentAdmitter) *SpawnProvider {
+	t.Helper()
+	p := NewSpawnProvider(nil, nil, nil, nil, nil, background.New(nil))
+	p.sessionService = &fakeAgentSessionService{}
+	p.SetAgent(agent)
+	p.SetMessageService(newFakeAgentMessageService())
+	p.SetSubagentAdmitter(admitter)
+	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+		return resolvedSubagentModel{
+			Model:            &sdk.Model{},
+			UUID:             "00000000-0000-0000-0000-000000000123",
+			ModelID:          "test-model",
+			ProviderName:     "test-provider",
+			SupportsToolCall: true,
+		}, nil
+	}
+	return p
 }
 
 func TestBusyAgentThreadIsReportedToTheParentAndRunsNothing(t *testing.T) {

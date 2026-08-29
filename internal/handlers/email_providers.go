@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/email"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/email"
 )
 
 type EmailProvidersHandler struct {

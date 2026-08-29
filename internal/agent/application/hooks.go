@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func (s *Service) applyUserMessageHook(ctx context.Context, req ChatRequest) (ChatRequest, error) {
@@ -49,7 +49,7 @@ func (s *Service) applyUserMessageHook(ctx context.Context, req ChatRequest) (Ch
 	return req, nil
 }
 
-func (s *Service) runPromptHook(ctx context.Context, cfg agentRunConfigView, eventName string) string {
+func (s *Service) runPromptHook(ctx context.Context, cfg agentRunConfigView, eventName string) hooks.Result {
 	res, err := s.runBaseHook(ctx, cfg.BotID, cfg.SessionID, cfg.ChatID, eventName, func(req *hooks.Request) {
 		req.Turn = map[string]any{
 			"session_type":  cfg.SessionType,
@@ -59,9 +59,10 @@ func (s *Service) runPromptHook(ctx context.Context, cfg agentRunConfigView, eve
 	})
 	if err != nil {
 		s.logHookWarn(eventName, cfg.BotID, cfg.SessionID, err)
-		return ""
+		return hooks.Result{}
 	}
-	return strings.TrimSpace(res.AppendContext)
+	res.AppendContext = strings.TrimSpace(res.AppendContext)
+	return res
 }
 
 type agentRunConfigView struct {
@@ -138,6 +139,16 @@ func formatServiceHookContext(eventName, text string) string {
 		return ""
 	}
 	return "[Hook Context: " + strings.TrimSpace(eventName) + "]\n" + text
+}
+
+// afterPromptHookSystemBytes preserves the historical SystemBytes observation
+// while hook system sections travel separately as typed fragments.
+func afterPromptHookSystemBytes(system string, hookTexts []string) int {
+	n := len(system)
+	if len(hookTexts) > 0 {
+		n += len("\n\n") + len(strings.Join(hookTexts, "\n\n"))
+	}
+	return n
 }
 
 func firstHookText(values ...string) string {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestToolDefAccountingForMeasuresSerializedDefinition(t *testing.T) {

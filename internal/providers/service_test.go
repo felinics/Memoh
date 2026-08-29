@@ -12,8 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func TestMaskAPIKey(t *testing.T) {
@@ -90,6 +93,9 @@ models:
 	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,reasoning" {
 		t.Fatalf("compatibilities = %q", got)
 	}
+	if !model.CapabilitiesKnown {
+		t.Fatal("expected legacy preset template capabilities to be authoritative")
+	}
 	if model.ContextWindow == nil || *model.ContextWindow != 200000 {
 		t.Fatalf("context window = %#v", model.ContextWindow)
 	}
@@ -124,6 +130,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 					"display_name": "GPT-5.6-Sol",
 					"visibility":   "list",
 					"supported_reasoning_levels": []map[string]any{
+						{"effort": " NONE "},
 						{"effort": "low"},
 						{"effort": "medium"},
 						{"effort": "high"},
@@ -131,6 +138,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 						{"effort": "xhigh"},
 						{"effort": "max"},
 						{"effort": "ultra"},
+						{"effort": "none"},
 					},
 					"context_window":   372000,
 					"input_modalities": []string{"text", "image"},
@@ -183,7 +191,7 @@ func TestListCodexRemoteModels(t *testing.T) {
 	if got := strings.Join(model.Compatibilities, ","); got != "tool-call,vision,reasoning" {
 		t.Fatalf("compatibilities = %q", got)
 	}
-	if got := strings.Join(model.ReasoningEfforts, ","); got != "low,medium,high,xhigh,max" {
+	if got := strings.Join(model.ReasoningEfforts, ","); got != "disable,low,medium,high,xhigh,max" {
 		t.Fatalf("reasoning efforts = %q", got)
 	}
 	if model.ThinkingMode != models.ThinkingModeToggle {
@@ -944,4 +952,126 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 			t.Fatalf("expected Name to fall back to ID when DisplayName is empty, got %q", remoteModels[0].Name)
 		}
 	})
+}
+
+// providerTestQueries stubs dbstore.Queries with the single row Test needs;
+// every other method nil-panics, which keeps this test honest about how
+// little the probe path is allowed to touch the database.
+type providerTestQueries struct {
+	dbstore.Queries
+	provider sqlc.Provider
+}
+
+func (s providerTestQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc.Provider, error) {
+	return s.provider, nil
+}
+
+// Regression for #1042: a successful models list is conclusive for
+// reachability + auth. The fake-model generation probe that used to run
+// afterwards turned into an "Invalid API key" false positive on gateways
+// that answer 401 for an unknown model. This test fails if any request
+// beyond the models list is attempted.
+func TestTestSkipsModelProbeAfterSuccessfulModelsList(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{"id": "real-model"}},
+			})
+			return
+		}
+		t.Errorf("unexpected probe request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	providerID := pgtype.UUID{Bytes: [16]byte{0x10, 0x42}, Valid: true}
+	service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+		ID:         providerID,
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"api_key":"sk-test","base_url":"` + server.URL + `"}`),
+	}}}
+
+	resp, err := service.Test(context.Background(), providerID.String())
+	if err != nil {
+		t.Fatalf("Test() error = %v", err)
+	}
+	if resp.Status != TestStatusOK {
+		t.Fatalf("status = %q, want %q (message: %s)", resp.Status, TestStatusOK, resp.Message)
+	}
+	if !resp.Reachable {
+		t.Fatal("reachable = false, want true")
+	}
+}
+
+// Locks the #1087 outcome mapping: only an auth failure on the models list
+// is an auth_error; any other HTTP response is unverified (not a failure);
+// a transport-level failure stays a hard error.
+func TestTestModelsListOutcomeMapping(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		modelsStatus int
+		wantStatus   TestStatus
+	}{
+		{"auth failure stays auth_error", http.StatusUnauthorized, TestStatusAuthError},
+		{"missing models endpoint is unverified", http.StatusNotFound, TestStatusUnverified},
+		{"upstream 5xx is unverified", http.StatusInternalServerError, TestStatusUnverified},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/models" {
+					t.Errorf("unexpected probe request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(tc.modelsStatus)
+			}))
+			defer server.Close()
+
+			providerID := pgtype.UUID{Bytes: [16]byte{0x10, 0x87}, Valid: true}
+			service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+				ID:         providerID,
+				ClientType: string(models.ClientTypeOpenAICompletions),
+				Config:     []byte(`{"api_key":"sk-test","base_url":"` + server.URL + `"}`),
+			}}}
+
+			resp, err := service.Test(context.Background(), providerID.String())
+			if err != nil {
+				t.Fatalf("Test() error = %v", err)
+			}
+			if resp.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q (message: %s)", resp.Status, tc.wantStatus, resp.Message)
+			}
+			if !resp.Reachable {
+				t.Fatal("reachable = false, want true")
+			}
+		})
+	}
+}
+
+func TestTestUnreachableStaysHardError(t *testing.T) {
+	t.Parallel()
+
+	// Port 1 is reserved and refuses connections deterministically.
+	providerID := pgtype.UUID{Bytes: [16]byte{0x10, 0x87, 0x01}, Valid: true}
+	service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+		ID:         providerID,
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"api_key":"sk-test","base_url":"http://127.0.0.1:1"}`),
+	}}}
+
+	resp, err := service.Test(context.Background(), providerID.String())
+	if err != nil {
+		t.Fatalf("Test() error = %v", err)
+	}
+	if resp.Status != TestStatusError {
+		t.Fatalf("status = %q, want %q", resp.Status, TestStatusError)
+	}
+	if resp.Reachable {
+		t.Fatal("reachable = true, want false")
+	}
 }

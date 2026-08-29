@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const connectingTimeout = 30 * time.Second
@@ -197,6 +197,23 @@ func (c *Client) ListDirAll(ctx context.Context, path string, recursive bool) ([
 	return result.Entries, nil
 }
 
+// ListDirBounded lists at most maxEntries entries. The bridge stops traversing
+// once the bound is exceeded and fails with a resource-exhausted error, so
+// server-side memory stays bounded BEFORE collection - callers with a hard
+// ceiling (the ACP session-state capture) must use this instead of judging an
+// unbounded listing after the fact.
+func (c *Client) ListDirBounded(ctx context.Context, path string, recursive bool, maxEntries int32) ([]*pb.FileEntry, error) {
+	resp, err := c.svc.ListDir(ctx, &pb.ListDirRequest{
+		Path:       path,
+		Recursive:  recursive,
+		MaxEntries: maxEntries,
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetEntries(), nil
+}
+
 func (c *Client) Stat(ctx context.Context, path string) (*pb.FileEntry, error) {
 	resp, err := c.svc.Stat(ctx, &pb.StatRequest{Path: path})
 	if err != nil {
@@ -262,7 +279,10 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		return nil, mapError(err)
 	}
 
-	// Send config message first
+	// A command may exit without consuming its stdin; the server then closes
+	// the stream while these sends are still in flight, and gRPC reports the
+	// close as io.EOF. The receive loop below carries the authoritative
+	// result or status, so half-closed sends fall through to it.
 	err = stream.Send(&pb.ExecInput{
 		Command:        command,
 		WorkDir:        workDir,
@@ -271,15 +291,15 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	if len(stdinData) > 0 {
-		if err := stream.Send(&pb.ExecInput{StdinData: stdinData}); err != nil {
+	if err == nil && len(stdinData) > 0 {
+		if err := stream.Send(&pb.ExecInput{StdinData: stdinData}); err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
 	}
-	if err := stream.CloseSend(); err != nil {
+	if err := stream.CloseSend(); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 
@@ -422,11 +442,29 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 
 // ReadRaw streams raw file bytes. Caller must consume the returned reader.
 func (c *Client) ReadRaw(ctx context.Context, path string) (io.ReadCloser, error) {
-	stream, err := c.svc.ReadRaw(ctx, &pb.ReadRawRequest{Path: path})
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := c.svc.ReadRaw(streamCtx, &pb.ReadRawRequest{Path: path})
 	if err != nil {
+		cancel()
 		return nil, mapError(err)
 	}
-	return newStreamReader(stream)
+	return newStreamReader(stream, cancel)
+}
+
+// ReadRawNoFollow streams a regular file below root without following any
+// symbolic-link component. The bridge performs validation and open as one
+// descriptor-anchored operation; callers must pass a clean relative path.
+func (c *Client) ReadRawNoFollow(ctx context.Context, root, relativePath string) (io.ReadCloser, error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := c.svc.ReadRawNoFollow(streamCtx, &pb.ReadRawNoFollowRequest{
+		Root:         root,
+		RelativePath: relativePath,
+	})
+	if err != nil {
+		cancel()
+		return nil, mapError(err)
+	}
+	return newStreamReader(stream, cancel)
 }
 
 // WriteRaw writes raw bytes to a file in the container.
@@ -458,6 +496,11 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 			break
 		}
 		if readErr != nil {
+			// Abort explicitly and wait for the bridge's terminal status so
+			// its temporary file is already removed when this returns; a bare
+			// context cancel would race the server-side cleanup.
+			_ = stream.Send(&pb.WriteRawChunk{Abort: true})
+			_, _ = stream.CloseAndRecv()
 			return 0, readErr
 		}
 	}
@@ -465,6 +508,47 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
 		return 0, err
+	}
+	return resp.GetBytesWritten(), nil
+}
+
+// WriteRawNoFollow creates a new regular file below root without following any
+// symbolic-link component. It fails closed if the target already exists.
+func (c *Client) WriteRawNoFollow(ctx context.Context, root, relativePath string, r io.Reader) (int64, error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := c.svc.WriteRawNoFollow(streamCtx)
+	if err != nil {
+		return 0, mapError(err)
+	}
+	if err := stream.Send(&pb.WriteRawNoFollowChunk{Root: root, RelativePath: relativePath}); err != nil {
+		return 0, mapError(err)
+	}
+
+	buf := make([]byte, 64*1024)
+	for {
+		n, readErr := r.Read(buf)
+		if n > 0 {
+			if sendErr := stream.Send(&pb.WriteRawNoFollowChunk{Data: buf[:n]}); sendErr != nil {
+				return 0, mapError(sendErr)
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			// Mirror WriteRaw: an explicit abort keeps the failure terminal on
+			// the bridge side before this call returns.
+			_ = stream.Send(&pb.WriteRawNoFollowChunk{Abort: true})
+			_, _ = stream.CloseAndRecv()
+			return 0, readErr
+		}
+	}
+
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		return 0, mapError(err)
 	}
 	return resp.GetBytesWritten(), nil
 }
@@ -652,17 +736,21 @@ type streamReader struct {
 	stream pb.ContainerService_ReadRawClient
 	buf    []byte
 	off    int
+	cancel context.CancelFunc
+	once   sync.Once
 }
 
-func newStreamReader(stream pb.ContainerService_ReadRawClient) (io.ReadCloser, error) {
+func newStreamReader(stream pb.ContainerService_ReadRawClient, cancel context.CancelFunc) (io.ReadCloser, error) {
 	first, err := stream.Recv()
 	switch {
 	case errors.Is(err, io.EOF):
+		cancel()
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	case err != nil:
+		cancel()
 		return nil, mapError(err)
 	default:
-		return &streamReader{stream: stream, buf: first.GetData()}, nil
+		return &streamReader{stream: stream, buf: first.GetData(), cancel: cancel}, nil
 	}
 }
 
@@ -670,6 +758,7 @@ func (r *streamReader) fill() error {
 	for r.off >= len(r.buf) {
 		msg, err := r.stream.Recv()
 		if err != nil {
+			r.once.Do(r.cancel)
 			if errors.Is(err, io.EOF) {
 				return io.EOF
 			}
@@ -693,7 +782,8 @@ func (r *streamReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (*streamReader) Close() error {
+func (r *streamReader) Close() error {
+	r.once.Do(r.cancel)
 	return nil
 }
 

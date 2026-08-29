@@ -1,9 +1,9 @@
 {
   "name": "@memohai/sdk",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/memohai/Memoh.git",
+    "url": "git+https://github.com/felinics/Memoh.git",
     "directory": "packages/sdk"
   },
   "description": "",

@@ -30,10 +30,8 @@ const props = withDefaults(defineProps<{
   profile: AcpprofilePublicProfile
   oauthHint: string
   fieldGap?: 'card' | 'bare'
-  initialSelection?: AcpSetupSelection | null
 }>(), {
   fieldGap: 'card',
-  initialSelection: null,
 })
 
 const errorMessage = defineModel<string>('errorMessage', { default: '' })
@@ -54,24 +52,6 @@ const selfModeHint = computed(() => isHermes.value
   ? t('bots.settings.acpHermesSelfModeHint')
   : t('bots.settings.acpSelfModeHint'))
 
-function applyInitialSelection(profile: AcpprofilePublicProfile) {
-  const seed = props.initialSelection
-  if (!seed) return
-  if (normalizeACPAgentID(seed.agentId) !== normalizeACPAgentID(profile.id)) return
-  const modes = setupModes()
-  if (modes.includes(seed.setupMode)) {
-    setupMode.value = seed.setupMode
-  }
-  if (setupMode.value !== 'api_key') return
-  for (const [key, value] of Object.entries(seed.managed)) {
-    const id = normalizeACPAgentID(key)
-    if (id && id in managed) managed[id] = value
-  }
-  if (isHermes.value) {
-    ensureHermesManagedDefaults(managed)
-  }
-}
-
 watch(() => props.profile, (profile) => {
   for (const key of Object.keys(managed)) delete managed[key]
   for (const field of profile.managed_fields ?? []) {
@@ -84,7 +64,6 @@ watch(() => props.profile, (profile) => {
   if (isHermes.value && setupMode.value === 'api_key') {
     ensureHermesManagedDefaults(managed)
   }
-  applyInitialSelection(profile)
   errorMessage.value = ''
 }, { immediate: true })
 

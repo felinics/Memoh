@@ -188,6 +188,9 @@ export interface ChatWorkspaceTargetSnapshot {
 export type ChatWorkspaceTargetSelectionSource = 'unset' | 'default' | 'session' | 'user'
 
 export interface ACPAgentSessionInput {
+  /** Persisted Agent instance selected for this session. */
+  botAgentId?: string
+  /** Temporary ACP provider identity stored in BotAgent metadata. */
   agentId: string
   sessionMode?: 'chat' | 'discuss'
   projectPath?: string

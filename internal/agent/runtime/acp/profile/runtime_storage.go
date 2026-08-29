@@ -16,7 +16,26 @@ import (
 type RuntimeStoragePolicy struct {
 	AgentEnv []RuntimeEnvBinding
 	Modes    map[string]RuntimeStorageMode
+	// SessionRoots are process-local JSONL trees that may be restored from and
+	// snapshotted to Memoh's database. They are relative to the UUID-owned
+	// runtime directory and are never staged from or synchronized to /data.
+	SessionRoots []string
+	// SessionLocator identifies the audited on-disk transcript contract. The
+	// client uses this profile-owned value to select only files belonging to the
+	// requested ACP session and to validate the session ID stored in the primary
+	// transcript.
+	SessionLocator RuntimeSessionLocator
 }
+
+// RuntimeSessionLocator names an agent-specific, pinned JSONL layout. It is an
+// internal launcher contract rather than part of the public ACP profile API.
+type RuntimeSessionLocator string
+
+const (
+	RuntimeSessionLocatorNone          RuntimeSessionLocator = ""
+	RuntimeSessionLocatorCodexRollout  RuntimeSessionLocator = "codex_rollout"
+	RuntimeSessionLocatorClaudeProject RuntimeSessionLocator = "claude_project"
+)
 
 // RuntimeEnvBinding declares one environment variable owned by the runtime
 // launcher. Exactly one of RuntimePath and Value must be set. RuntimePath is
@@ -84,9 +103,20 @@ const claudeManagedSettings = `{
 }
 `
 
+func genericACPRuntimeStorage() RuntimeStoragePolicy {
+	return RuntimeStoragePolicy{
+		AgentEnv: stateEnv(),
+		Modes: map[string]RuntimeStorageMode{
+			setupModeAPIKey: {},
+		},
+	}
+}
+
 func codexRuntimeStorage() RuntimeStoragePolicy {
 	return RuntimeStoragePolicy{
-		AgentEnv: stateEnv("CODEX_HOME", "CODEX_SQLITE_HOME"),
+		AgentEnv:       stateEnv("CODEX_HOME", "CODEX_SQLITE_HOME"),
+		SessionRoots:   []string{"state/sessions"},
+		SessionLocator: RuntimeSessionLocatorCodexRollout,
 		Modes: map[string]RuntimeStorageMode{
 			setupModeAPIKey: {
 				Artifacts: []RuntimeArtifact{
@@ -123,7 +153,12 @@ func claudeCodeRuntimeStorage() RuntimeStoragePolicy {
 		}},
 	}
 	return RuntimeStoragePolicy{
-		AgentEnv: stateEnv("CLAUDE_CONFIG_DIR"),
+		AgentEnv: append(stateEnv("CLAUDE_CONFIG_DIR"), RuntimeEnvBinding{
+			Name:  "CLAUDE_CODE_EAGER_FLUSH",
+			Value: "1",
+		}),
+		SessionRoots:   []string{"state/projects"},
+		SessionLocator: RuntimeSessionLocatorClaudeProject,
 		Modes: map[string]RuntimeStorageMode{
 			setupModeAPIKey: managed,
 			setupModeOAuth:  managed,
@@ -268,6 +303,19 @@ func validateRuntimeStorage(p Profile) error {
 		}
 	}
 
+	switch policy.SessionLocator {
+	case RuntimeSessionLocatorNone:
+		if len(policy.SessionRoots) != 0 {
+			return fmt.Errorf("profile %q declares session roots without a session locator", p.ID)
+		}
+	case RuntimeSessionLocatorCodexRollout, RuntimeSessionLocatorClaudeProject:
+		if len(policy.SessionRoots) == 0 {
+			return fmt.Errorf("profile %q declares session locator %q without session roots", p.ID, policy.SessionLocator)
+		}
+	default:
+		return fmt.Errorf("profile %q has invalid session locator %q", p.ID, policy.SessionLocator)
+	}
+
 	for _, setupMode := range p.SetupModes {
 		mode := NormalizeAgentID(setupMode)
 		storageMode, ok := policy.Modes[mode]
@@ -277,8 +325,43 @@ func validateRuntimeStorage(p Profile) error {
 		if err := validateRuntimeStorageMode(p.ID, mode, storageMode); err != nil {
 			return err
 		}
+		if err := validateSessionRoots(p.ID, mode, policy.SessionRoots, storageMode); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func validateSessionRoots(profileID, mode string, roots []string, storage RuntimeStorageMode) error {
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		if !safeRelativeRuntimePath(root) {
+			return fmt.Errorf("profile %q has unsafe session root %q", profileID, root)
+		}
+		for existing := range seen {
+			if runtimePathsOverlap(root, existing) {
+				return fmt.Errorf("profile %q session root %q overlaps session root %q", profileID, root, existing)
+			}
+		}
+		seen[root] = struct{}{}
+		for _, artifact := range storage.Artifacts {
+			if runtimePathsOverlap(root, artifact.RuntimePath) {
+				return fmt.Errorf("profile %q mode %q session root %q overlaps runtime artifact %q", profileID, mode, root, artifact.RuntimePath)
+			}
+		}
+		for _, generated := range storage.Generated {
+			if runtimePathsOverlap(root, generated.RuntimePath) {
+				return fmt.Errorf("profile %q mode %q session root %q overlaps generated file %q", profileID, mode, root, generated.RuntimePath)
+			}
+		}
+	}
+	return nil
+}
+
+func runtimePathsOverlap(first, second string) bool {
+	first = path.Clean(first)
+	second = path.Clean(second)
+	return first == second || strings.HasPrefix(first, second+"/") || strings.HasPrefix(second, first+"/")
 }
 
 func validateRuntimeStorageMode(profileID, mode string, storage RuntimeStorageMode) error {

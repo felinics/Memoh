@@ -2,6 +2,96 @@ package profile
 
 import "testing"
 
+func TestListIncludesGenericACP(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile was not registered")
+	}
+	if profile.Launch.ManagedCommandField != "command" || profile.Launch.ManagedArgumentsField != "arguments" {
+		t.Fatalf("generic ACP launch policy = %#v, want managed command and arguments", profile.Launch)
+	}
+	if len(profile.ManagedFields) != 2 || profile.ManagedFields[0].ID != "command" || !profile.ManagedFields[0].Required || profile.ManagedFields[1].ID != "arguments" {
+		t.Fatalf("generic ACP managed fields = %#v", profile.ManagedFields)
+	}
+	if len(profile.SetupModes) != 1 || profile.SetupModes[0] != setupModeAPIKey {
+		t.Fatalf("generic ACP setup modes = %#v", profile.SetupModes)
+	}
+	if len(profile.RuntimeStorage.SessionRoots) != 0 || profile.RuntimeStorage.SessionLocator != RuntimeSessionLocatorNone {
+		t.Fatalf("generic ACP unexpectedly declares resumable storage: %#v", profile.RuntimeStorage)
+	}
+}
+
+func TestResolveGenericACPLaunch(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile was not registered")
+	}
+	command, arguments, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{
+		"command":   "  uvx  ",
+		"arguments": "agent-package\r\n--mode\nvalue with spaces\n\n",
+	}})
+	if err != nil {
+		t.Fatalf("ResolveLaunch() error = %v", err)
+	}
+	if command != "uvx" {
+		t.Fatalf("ResolveLaunch() command = %q, want uvx", command)
+	}
+	want := []string{"agent-package", "--mode", "value with spaces"}
+	if len(arguments) != len(want) {
+		t.Fatalf("ResolveLaunch() arguments = %#v, want %#v", arguments, want)
+	}
+	for i := range want {
+		if arguments[i] != want[i] {
+			t.Fatalf("ResolveLaunch() arguments[%d] = %q, want %q", i, arguments[i], want[i])
+		}
+	}
+}
+
+func TestResolveGenericACPLaunchRejectsInvalidCommand(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile was not registered")
+	}
+	if _, _, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{"command": "uvx\nagent"}}); err == nil {
+		t.Fatal("ResolveLaunch() error = nil, want invalid command error")
+	}
+}
+
+func TestResolveBuiltInLaunchKeepsPinnedCommand(t *testing.T) {
+	profile, ok := Lookup(AgentCodexID)
+	if !ok {
+		t.Fatal("Codex profile was not registered")
+	}
+	command, arguments, err := ResolveLaunch(profile, AgentSetup{Managed: map[string]string{"command": "ignored"}})
+	if err != nil {
+		t.Fatalf("ResolveLaunch() error = %v", err)
+	}
+	if command != "codex-acp" || len(arguments) != 0 {
+		t.Fatalf("ResolveLaunch() = %q, %#v; want pinned Codex command", command, arguments)
+	}
+}
+
+func TestResolveLaunchUsesProfileManagedPolicyWithoutKnownAgentID(t *testing.T) {
+	custom := Profile{
+		ID:          "custom-agent",
+		DisplayName: "Custom Agent",
+		Launch: LaunchPolicy{
+			ManagedCommandField:   "executable",
+			ManagedArgumentsField: "argv",
+		},
+	}
+	command, arguments, err := ResolveLaunch(custom, AgentSetup{Managed: map[string]string{
+		"executable": "custom-acp",
+		"argv":       "--stdio\n--verbose",
+	}})
+	if err != nil {
+		t.Fatalf("ResolveLaunch() error = %v", err)
+	}
+	if command != "custom-acp" || len(arguments) != 2 || arguments[0] != "--stdio" || arguments[1] != "--verbose" {
+		t.Fatalf("ResolveLaunch() = %q, %#v; want profile-managed launch", command, arguments)
+	}
+}
+
 func TestListIncludesClaudeCode(t *testing.T) {
 	items := List()
 	if len(items) < 2 {
@@ -11,16 +101,13 @@ func TestListIncludesClaudeCode(t *testing.T) {
 	if !ok {
 		t.Fatalf("Claude Code profile was not registered")
 	}
-	if profile.Command != "claude-agent-acp" {
-		t.Fatalf("Claude Code command = %q", profile.Command)
-	}
-	if profile.DynamicCommand != "" || len(profile.DynamicArgs) != 0 || profile.DynamicPackage != "" {
-		t.Fatalf("Claude Code built-in profile must use its pinned workspace binary, got dynamic launcher %q %#v package %q", profile.DynamicCommand, profile.DynamicArgs, profile.DynamicPackage)
+	if profile.Launch.Command != "claude-agent-acp" {
+		t.Fatalf("Claude Code command = %q", profile.Launch.Command)
 	}
 	if len(profile.ManagedFields) == 0 || !profile.ManagedFields[0].Required {
 		t.Fatalf("Claude Code profile should expose required API key field: %#v", profile.ManagedFields)
 	}
-	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeAPIKey || profile.SetupModes[1] != setupModeOAuth || profile.SetupModes[2] != setupModeSelf {
+	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeOAuth || profile.SetupModes[1] != setupModeAPIKey || profile.SetupModes[2] != setupModeSelf {
 		t.Fatalf("Claude Code setup modes = %#v", profile.SetupModes)
 	}
 	if profile.ReasoningConfigID != "effort" || profile.DefaultReasoningEffort != "high" {
@@ -37,11 +124,18 @@ func TestCodexUsesPinnedWorkspaceAdapter(t *testing.T) {
 	if !ok {
 		t.Fatal("Codex profile was not registered")
 	}
-	if profile.DynamicCommand != "" || len(profile.DynamicArgs) != 0 || profile.DynamicPackage != "" {
-		t.Fatalf("Codex built-in profile must not resolve a dynamic adapter: %q %#v package %q", profile.DynamicCommand, profile.DynamicArgs, profile.DynamicPackage)
+	if profile.Launch.Command != "codex-acp" {
+		t.Fatalf("Codex pinned launcher = command %q", profile.Launch.Command)
 	}
-	if profile.Command != "codex-acp" {
-		t.Fatalf("Codex pinned launcher = command %q", profile.Command)
+	if len(profile.RuntimeStorage.SessionRoots) != 1 || profile.RuntimeStorage.SessionRoots[0] != "state/sessions" {
+		t.Fatalf("Codex session roots = %#v, want state/sessions", profile.RuntimeStorage.SessionRoots)
+	}
+	if profile.RuntimeStorage.SessionLocator != RuntimeSessionLocatorCodexRollout {
+		t.Fatalf("Codex session locator = %q, want %q", profile.RuntimeStorage.SessionLocator, RuntimeSessionLocatorCodexRollout)
+	}
+	// OAuth leads the picker on purpose — the account sign-in is the primary path.
+	if len(profile.SetupModes) != 3 || profile.SetupModes[0] != setupModeOAuth || profile.SetupModes[1] != setupModeAPIKey || profile.SetupModes[2] != setupModeSelf {
+		t.Fatalf("Codex setup modes = %#v", profile.SetupModes)
 	}
 }
 
@@ -50,13 +144,13 @@ func TestListIncludesHermes(t *testing.T) {
 	if !ok {
 		t.Fatalf("Hermes profile was not registered")
 	}
-	if profile.Command != "hermes-acp" {
-		t.Fatalf("Hermes command = %q", profile.Command)
+	if profile.Launch.Command != "hermes-acp" {
+		t.Fatalf("Hermes command = %q", profile.Launch.Command)
 	}
 	if len(profile.ManagedFields) != 4 {
 		t.Fatalf("Hermes managed fields = %#v", profile.ManagedFields)
 	}
-	if len(profile.SetupModes) != 2 || profile.SetupModes[0] != setupModeSelf || profile.SetupModes[1] != setupModeAPIKey {
+	if len(profile.SetupModes) != 2 || profile.SetupModes[0] != setupModeAPIKey || profile.SetupModes[1] != setupModeSelf {
 		t.Fatalf("Hermes setup modes = %#v", profile.SetupModes)
 	}
 	if len(profile.SupportedBackends) != 1 || profile.SupportedBackends[0] != "container" {
@@ -67,6 +161,12 @@ func TestListIncludesHermes(t *testing.T) {
 	}
 	if ShouldForceHTTPMCPServer(AgentCodexID) {
 		t.Fatalf("Codex should rely on advertised HTTP MCP capability")
+	}
+	if len(profile.RuntimeStorage.SessionRoots) != 0 {
+		t.Fatalf("Hermes unexpectedly declares resumable session roots: %#v", profile.RuntimeStorage.SessionRoots)
+	}
+	if profile.RuntimeStorage.SessionLocator != RuntimeSessionLocatorNone {
+		t.Fatalf("Hermes unexpectedly declares session locator %q", profile.RuntimeStorage.SessionLocator)
 	}
 }
 
@@ -165,6 +265,23 @@ func TestMissingRequiredManagedFieldForPreflightSkipsLegacyMode(t *testing.T) {
 	setup.ModeSet = true
 	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); !missing || field.ID != "api_key" {
 		t.Fatalf("explicit api_key preflight = %#v, %v; want missing api_key", field, missing)
+	}
+}
+
+func TestMissingRequiredManagedFieldForPreflightRequiresGenericACPCommand(t *testing.T) {
+	profile, ok := Lookup(AgentACPID)
+	if !ok {
+		t.Fatal("generic ACP profile not registered")
+	}
+	setup := AgentSetup{
+		AgentID: AgentACPID,
+		Enabled: true,
+		Mode:    setupModeAPIKey,
+		ModeSet: false,
+		Managed: map[string]string{},
+	}
+	if field, missing := MissingRequiredManagedFieldForPreflight(profile, setup); !missing || field.ID != "command" {
+		t.Fatalf("generic ACP preflight = %#v, %v; want missing command", field, missing)
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {
@@ -44,10 +44,28 @@ func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {
 	}
 	bindTeamQueryFixture(t, ctx, tx)
 	if _, err := tx.Exec(ctx, `
+CREATE SEQUENCE session_runtime_fencing_token_seq AS BIGINT NO CYCLE;
+
 CREATE TABLE bot_sessions (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
-  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id()
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
+  runtime_fencing_token BIGINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE acp_session_states (
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
+  session_id UUID NOT NULL
+);
+
+CREATE TABLE acp_session_state_lines (
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
+  session_id UUID NOT NULL
+);
+
+CREATE TABLE acp_session_publications (
+  team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
+  session_id UUID NOT NULL
 );
 
 CREATE TABLE bot_history_message_compacts (
@@ -105,6 +123,14 @@ CREATE TABLE bot_history_messages (
 	VALUES ($1, $2), ($3, $4), ($5, $6), ($7, $8)
 		`, sessionID, botID, foreignSessionID, foreignBotID, repairSessionID, repairBotID, clearedSessionID, clearedBotID); err != nil {
 		t.Fatalf("insert sessions: %v", err)
+	}
+	for _, table := range []string{"acp_session_states", "acp_session_state_lines", "acp_session_publications"} {
+		if _, err := tx.Exec(ctx,
+			"INSERT INTO "+pgx.Identifier{table}.Sanitize()+" (session_id) VALUES ($1), ($2)",
+			sessionID, foreignSessionID,
+		); err != nil {
+			t.Fatalf("insert %s fixture: %v", table, err)
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 	INSERT INTO bot_history_message_compacts (id, bot_id, session_id, status, summary, message_count)
@@ -251,6 +277,11 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 	assertRowCount(t, ctx, tx, "bot_history_messages", 2)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 4)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
+	// The session clear must also drop that session's ACP state while the
+	// foreign session's rows survive.
+	assertRowCount(t, ctx, tx, "acp_session_states", 1)
+	assertRowCount(t, ctx, tx, "acp_session_state_lines", 1)
+	assertRowCount(t, ctx, tx, "acp_session_publications", 1)
 
 	parsedForeignBotID, err := ParseUUID(foreignBotID)
 	if err != nil {
@@ -262,6 +293,9 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
+	assertRowCount(t, ctx, tx, "acp_session_states", 0)
+	assertRowCount(t, ctx, tx, "acp_session_state_lines", 0)
+	assertRowCount(t, ctx, tx, "acp_session_publications", 0)
 
 	parsedRepairSessionID, err := ParseUUID(repairSessionID)
 	if err != nil {

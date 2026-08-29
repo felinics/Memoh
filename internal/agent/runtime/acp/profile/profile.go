@@ -7,6 +7,8 @@ import (
 )
 
 const (
+	AgentACPID          = "acp"
+	AgentACPName        = "ACP"
 	AgentCodexID        = "codex"
 	AgentCodexName      = "Codex"
 	AgentClaudeCodeID   = "claude-code"
@@ -25,25 +27,11 @@ type Profile struct {
 	ID          string
 	DisplayName string
 	Description string
-	// DynamicCommand, DynamicArgs, and DynamicPackage describe an npm-backed
-	// launcher whose version can be refreshed independently of Memoh. The
-	// session pool resolves the dist-tag once per bot for the lifetime of the
-	// server process, launches the resulting exact package version, and falls
-	// back to Command/Args when lookup or startup fails. DynamicArgs are the
-	// arguments inserted before the exact package spec.
-	DynamicCommand string
-	DynamicArgs    []string
-	DynamicPackage string
-	Command        string
-	Args           []string
+	Launch      LaunchPolicy
 	// SessionModeID, when set, is the ACP session mode Memoh pins right after
 	// session/new so tool permissions flow through ACP regardless of ambient
 	// agent-side configuration (e.g. a host ~/.claude/settings.json).
 	SessionModeID string
-	// SessionConfigValues are ACP session config options pinned after
-	// session/new when the agent advertises them. Options the agent does not
-	// expose are skipped.
-	SessionConfigValues map[string]string
 	// ReasoningConfigID maps an agent-specific select to ACP's semantic
 	// thought_level category when the agent has not annotated the option yet.
 	// Categorized options always take precedence over this compatibility ID.
@@ -65,6 +53,16 @@ type Profile struct {
 	ManagedFields     []ManagedField
 	SupportedBackends []string
 	SetupModes        []string
+}
+
+// LaunchPolicy declares how an ACP profile resolves its process command. A
+// pinned Command is used by built-in adapters. ManagedCommandField and
+// ManagedArgumentsField let a profile opt into bot-metadata-driven launch
+// configuration without teaching the runtime about that profile's ID.
+type LaunchPolicy struct {
+	Command               string
+	ManagedCommandField   string
+	ManagedArgumentsField string
 }
 
 type ManagedField struct {
@@ -162,7 +160,10 @@ func MissingRequiredManagedField(profile Profile, setup AgentSetup) (ManagedFiel
 // decided without a workspace backend. Legacy metadata with no explicit
 // setup_mode is resolved by the runtime pool because legacy metadata may omit it.
 func MissingRequiredManagedFieldForPreflight(profile Profile, setup AgentSetup) (ManagedField, bool) {
-	if !setup.ModeSet {
+	// Built-in profiles predate setup_mode, so missing mode metadata must keep
+	// its legacy runtime resolution. Generic ACP has no legacy representation:
+	// its command is always explicit and can be validated before startup.
+	if !setup.ModeSet && NormalizeAgentID(profile.ID) != AgentACPID {
 		return ManagedField{}, false
 	}
 	return MissingRequiredManagedField(profile, setup)
@@ -185,6 +186,7 @@ func managedFieldOrFallback(profile Profile, fieldID string, fallback ManagedFie
 var registry = map[string]Profile{}
 
 func init() {
+	Register(genericACPProfile())
 	Register(codexProfile())
 	Register(claudeCodeProfile())
 	Register(hermesProfile())
@@ -204,12 +206,46 @@ func Register(profile Profile) {
 	registry[id] = profile
 }
 
+func genericACPProfile() Profile {
+	return Profile{
+		ID:          AgentACPID,
+		DisplayName: AgentACPName,
+		Description: "Run a custom Agent Client Protocol command",
+		Launch: LaunchPolicy{
+			ManagedCommandField:   genericACPCommandFieldID,
+			ManagedArgumentsField: genericACPArgumentsFieldID,
+		},
+		RuntimeStorage: genericACPRuntimeStorage(),
+		ManagedFields: []ManagedField{
+			{
+				ID:          "command",
+				Label:       "Command",
+				Type:        "text",
+				Required:    true,
+				Placeholder: "my-agent-acp",
+				Help:        "Executable name or path for the ACP agent.",
+			},
+			{
+				ID:          "arguments",
+				Label:       "Arguments",
+				Type:        "textarea",
+				Placeholder: "--stdio",
+				Help:        "Optional process arguments, one argument per line.",
+			},
+		},
+		SupportedBackends: []string{"container"},
+		// api_key is an internal managed-mode marker here; generic ACP has no
+		// authentication UI of its own and only needs Memoh-managed launch data.
+		SetupModes: []string{setupModeAPIKey},
+	}
+}
+
 func codexProfile() Profile {
 	return Profile{
 		ID:                     AgentCodexID,
 		DisplayName:            AgentCodexName,
 		Description:            "OpenAI Codex ACP adapter",
-		Command:                "codex-acp",
+		Launch:                 LaunchPolicy{Command: "codex-acp"},
 		DefaultReasoningEffort: "medium",
 		RuntimeStorage:         codexRuntimeStorage(),
 		ManagedFields: []ManagedField{
@@ -230,7 +266,9 @@ func codexProfile() Profile {
 			},
 		},
 		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		// OAuth first: signing in with a ChatGPT account is the path we want
+		// users to reach for; the API key stays available behind it.
+		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
 	}
 }
 
@@ -239,7 +277,7 @@ func claudeCodeProfile() Profile {
 		ID:          AgentClaudeCodeID,
 		DisplayName: AgentClaudeCodeName,
 		Description: "Claude Code ACP adapter",
-		Command:     "claude-agent-acp",
+		Launch:      LaunchPolicy{Command: "claude-agent-acp"},
 		// "default" routes every gated tool through session/request_permission;
 		// without the pin a host-level Claude settings file (defaultMode auto /
 		// acceptEdits) silently bypasses Memoh's approval flow.
@@ -278,7 +316,9 @@ func claudeCodeProfile() Profile {
 			},
 		},
 		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
+		// OAuth first, same reasoning as Codex: the Claude account sign-in is
+		// the primary path, the API key is the fallback.
+		SetupModes: []string{setupModeOAuth, setupModeAPIKey, setupModeSelf},
 	}
 }
 
@@ -287,7 +327,7 @@ func hermesProfile() Profile {
 		ID:          AgentHermesID,
 		DisplayName: AgentHermesName,
 		Description: "Hermes Agent ACP adapter",
-		Command:     "hermes-acp",
+		Launch:      LaunchPolicy{Command: "hermes-acp"},
 		ToolQuirks: &ToolQuirks{
 			WriteTitleKeywords: []string{"write", "write file", "create", "create file", "new file"},
 			GenericExecTitles: []string{
@@ -333,7 +373,9 @@ func hermesProfile() Profile {
 			},
 		},
 		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeSelf, setupModeAPIKey},
+		// The first mode is the client's default selection, so the managed
+		// API-key path leads and self-managed stays the escape hatch.
+		SetupModes: []string{setupModeAPIKey, setupModeSelf},
 	}
 }
 

@@ -66,7 +66,7 @@
 import { computed, nextTick, ref, watch, type Component } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { Clock, GitBranch, HeartPulse, MessageCircle, MessageSquare, Search, X } from 'lucide-vue-next'
+import { Clock, GitBranch, MessageCircle, MessageSquare, Search, X } from 'lucide-vue-next'
 import {
   Button,
   Dialog,
@@ -111,7 +111,6 @@ const results = computed<SessionSummary[]>(() => {
 
 function iconOf(session: SessionSummary): Component {
   switch (session.type) {
-    case 'heartbeat': return HeartPulse
     case 'schedule': return Clock
     case 'subagent': return GitBranch
     case 'discuss': return MessageCircle

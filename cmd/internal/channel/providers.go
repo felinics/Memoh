@@ -18,62 +18,61 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"go.uber.org/fx"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/acl"
-	acpprofileadapter "github.com/memohai/memoh/internal/agent/adapter/acpprofile"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/dingtalk"
-	"github.com/memohai/memoh/internal/channel/adapters/discord"
-	"github.com/memohai/memoh/internal/channel/adapters/feishu"
-	"github.com/memohai/memoh/internal/channel/adapters/line"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
-	"github.com/memohai/memoh/internal/channel/adapters/matrix"
-	"github.com/memohai/memoh/internal/channel/adapters/misskey"
-	"github.com/memohai/memoh/internal/channel/adapters/qq"
-	slackadapter "github.com/memohai/memoh/internal/channel/adapters/slack"
-	"github.com/memohai/memoh/internal/channel/adapters/telegram"
-	"github.com/memohai/memoh/internal/channel/adapters/wechatoa"
-	"github.com/memohai/memoh/internal/channel/adapters/wecom"
-	"github.com/memohai/memoh/internal/channel/adapters/weixin"
-	"github.com/memohai/memoh/internal/channel/discuss"
-	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/channel/inbound"
-	"github.com/memohai/memoh/internal/channel/publicmedia"
-	"github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/channelaccess"
-	"github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	emailgeneric "github.com/memohai/memoh/internal/email/adapters/generic"
-	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
-	emailmailgun "github.com/memohai/memoh/internal/email/adapters/mailgun"
-	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/media"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthclients"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/storage/providers/localfs"
-	"github.com/memohai/memoh/internal/team"
-	"github.com/memohai/memoh/internal/webhooktunnel"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/acl"
+	acpprofileadapter "github.com/felinics/memoh/internal/agent/adapter/acpprofile"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/dingtalk"
+	"github.com/felinics/memoh/internal/channel/adapters/discord"
+	"github.com/felinics/memoh/internal/channel/adapters/feishu"
+	"github.com/felinics/memoh/internal/channel/adapters/line"
+	"github.com/felinics/memoh/internal/channel/adapters/local"
+	"github.com/felinics/memoh/internal/channel/adapters/matrix"
+	"github.com/felinics/memoh/internal/channel/adapters/misskey"
+	"github.com/felinics/memoh/internal/channel/adapters/qq"
+	slackadapter "github.com/felinics/memoh/internal/channel/adapters/slack"
+	"github.com/felinics/memoh/internal/channel/adapters/telegram"
+	"github.com/felinics/memoh/internal/channel/adapters/wechatoa"
+	"github.com/felinics/memoh/internal/channel/adapters/wecom"
+	"github.com/felinics/memoh/internal/channel/adapters/weixin"
+	"github.com/felinics/memoh/internal/channel/discuss"
+	"github.com/felinics/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/channel/inbound"
+	"github.com/felinics/memoh/internal/channel/publicmedia"
+	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/channelaccess"
+	"github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	emailgeneric "github.com/felinics/memoh/internal/email/adapters/generic"
+	emailgmail "github.com/felinics/memoh/internal/email/adapters/gmail"
+	emailmailgun "github.com/felinics/memoh/internal/email/adapters/mailgun"
+	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/media"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthclients"
+	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/storage/providers/localfs"
+	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/webhooktunnel"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func providePipeline() *timeline.Pipeline {
@@ -92,12 +91,13 @@ func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.Even
 	return timeline.NewEventStore(log, queries)
 }
 
-func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries) *discuss.DiscussDriver {
+func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries, cfg config.Config) *discuss.DiscussDriver {
 	return discuss.NewDiscussDriver(discuss.DiscussDriverDeps{
-		MessageService: msgService,
-		CursorStore:    eventStore,
-		Artifacts:      compaction.NewTimelineArtifactSource(queries),
-		Logger:         log,
+		MessageService:     msgService,
+		CursorStore:        eventStore,
+		Artifacts:          compaction.NewTimelineArtifactSource(queries),
+		Logger:             log,
+		AdmissionMaxTokens: cfg.Agent.EffectiveContextAbsoluteMaxTokens(),
 	})
 }
 
@@ -267,7 +267,6 @@ func provideCommandHandler(
 	searchProvService *searchproviders.Service,
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
-	heartbeatService *heartbeat.Service,
 	queries dbstore.Queries,
 	aclService *acl.Service,
 	containerdHandler *handlers.ContainerdHandler,
@@ -286,7 +285,6 @@ func provideCommandHandler(
 		searchProvService,
 		emailService,
 		emailOutboxService,
-		heartbeatService,
 		queries,
 		aclService,
 		&commandSkillLoaderAdapter{handler: containerdHandler},
@@ -398,6 +396,7 @@ func (a *sessionEnsurerAdapter) CreateNewSession(ctx context.Context, botID, rou
 	createdByUserID := newSessionCreatedByUserID(spec)
 	sess, err := a.coordinator.CreateNew(ctx, sessionpkg.CreateInput{
 		BotID:           botID,
+		BotAgentID:      spec.BotAgentID,
 		RouteID:         routeID,
 		ChannelType:     channelType,
 		Type:            spec.Type,
@@ -480,6 +479,7 @@ func (r *settingsDefaultChatRuntime) DefaultChatRuntime(ctx context.Context, bot
 		return inbound.DefaultChatRuntimeSettings{}, err
 	}
 	return inbound.DefaultChatRuntimeSettings{
+		BotAgentID:  s.DefaultBotAgentID,
 		Runtime:     s.ChatRuntime,
 		ACPAgentID:  s.ChatACPAgentID,
 		ProjectPath: s.ChatACPProjectPath,

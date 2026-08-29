@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func convertTestMessagesToUITurns(messages []messagepkg.Message) []UITurn {
@@ -147,6 +147,49 @@ func TestConvertMessagesToUITurnsGroupsAssistantToolAndKeepsCurrentConversationD
 	}
 	if assistantTurn.Messages[4].Type != UIMessageText || assistantTurn.Messages[4].Content != "done" {
 		t.Fatalf("unexpected trailing text block: %#v", assistantTurn.Messages[4])
+	}
+}
+
+func TestConvertMessagesToUITurnsProjectsPersistedReasoningTiming(t *testing.T) {
+	t.Parallel()
+
+	createdAt := time.Date(2026, 8, 26, 1, 2, 5, 0, time.UTC)
+	rawMetadata := json.RawMessage(`{
+		"reasoning_timing": {
+			"version": 1,
+			"segments": [{
+				"ordinal": 0,
+				"duration_ms": 2000,
+				"state": "completed"
+			}, {
+				"ordinal": 1,
+				"duration_ms": 3500,
+				"state": "completed"
+			}]
+		}
+	}`)
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
+		ID:          "assistant-1",
+		Role:        "assistant",
+		Content:     json.RawMessage(`{"role":"assistant","content":[{"type":"reasoning","text":"thinking"},{"type":"reasoning","text":"thinking again"},{"type":"text","text":"answer"}]}`),
+		RawMetadata: rawMetadata,
+		CreatedAt:   createdAt,
+	}})
+	if len(turns) != 1 || len(turns[0].Messages) != 3 {
+		t.Fatalf("turns = %#v", turns)
+	}
+	reasoning := turns[0].Messages[0]
+	if reasoning.Type != UIMessageReasoning || reasoning.ReasoningTiming == nil {
+		t.Fatalf("reasoning block = %#v", reasoning)
+	}
+	if got := reasoning.ReasoningTiming; got.DurationMS != 2000 {
+		t.Fatalf("reasoning timing = %#v", got)
+	}
+	if got := turns[0].Messages[1].ReasoningTiming; got == nil || got.DurationMS != 3500 {
+		t.Fatalf("second reasoning timing = %#v", got)
+	}
+	if turns[0].Messages[2].ReasoningTiming != nil {
+		t.Fatalf("text block unexpectedly received timing: %#v", turns[0].Messages[2])
 	}
 }
 
@@ -574,7 +617,7 @@ func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 		Content: mustUIMessageJSON(t, turn.ModelMessage{
 			Role: "user",
 			Content: mustUIRawJSON(t, `<message id="msg-image-only" sender="Test User (@test_user)" t="2026-05-08T19:08:58Z" channel="telegram" conversation="Test Group" type="group" target="test-group">
-<attachment path="/data/media/test/test-image.webp"/>
+<attachment path="/data/.memoh/media/test/test-image.webp"/>
 
 </message>`),
 		}),
@@ -592,6 +635,44 @@ func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFallback(t *testing.T) {
 	}
 	if turns[0].Text != "" {
 		t.Fatalf("expected XML envelope to be stripped, got %q", turns[0].Text)
+	}
+	if len(turns[0].Attachments) != 1 || turns[0].Attachments[0].Type != "image" {
+		t.Fatalf("expected image attachment to remain, got %#v", turns[0].Attachments)
+	}
+}
+
+// Attachment-only turns persisted before the display-text fix stored the
+// headerified envelope as display content. History must not render it.
+func TestConvertMessagesToUITurnsStripsUserXMLEnvelopeFromDisplayContent(t *testing.T) {
+	now := time.Now().UTC()
+	envelope := `<message sender="User" t="2026-08-20T17:37:14+08:00" channel="web" type="private" target="115e7013-dc2a-4437-8e21-b49fbb21dfef">
+<attachment path="/data/.memoh/media/b2/b2edf40e.png"/>
+
+</message>`
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
+		ID:             "user-1",
+		BotID:          "bot-1",
+		SessionID:      "session-1",
+		Role:           "user",
+		DisplayContent: envelope,
+		Content: mustUIMessageJSON(t, turn.ModelMessage{
+			Role:    "user",
+			Content: mustUIRawJSON(t, envelope),
+		}),
+		Assets: []messagepkg.MessageAsset{{
+			ContentHash: "test-image-hash",
+			Mime:        "image/png",
+			StorageKey:  "media/b2/b2edf40e.png",
+			Name:        "image.png",
+		}},
+		CreatedAt: now,
+	}})
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].Text != "" {
+		t.Fatalf("expected display content envelope to be stripped, got %q", turns[0].Text)
 	}
 	if len(turns[0].Attachments) != 1 || turns[0].Attachments[0].Type != "image" {
 		t.Fatalf("expected image attachment to remain, got %#v", turns[0].Attachments)
@@ -853,6 +934,37 @@ func TestConvertMessagesToUITurnsTruncatesReplyPreview(t *testing.T) {
 	}
 	if !strings.HasSuffix(turns[0].Reply.Preview, "...") {
 		t.Fatalf("expected ellipsis suffix, got %q", turns[0].Reply.Preview)
+	}
+}
+
+func TestConvertMessagesToUITurnsProjectsTimeoutFailure(t *testing.T) {
+	now := time.Now().UTC()
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
+		ID:        "user-1",
+		TurnID:    "turn-1",
+		BotID:     "bot-1",
+		Role:      "user",
+		Content:   json.RawMessage(`{"role":"user","content":[{"type":"text","text":"hello"}]}`),
+		CreatedAt: now,
+	}, {
+		ID:      "assistant-1",
+		TurnID:  "turn-1",
+		BotID:   "bot-1",
+		Role:    "assistant",
+		Content: json.RawMessage(`{"role":"assistant","content":[]}`),
+		Metadata: map[string]any{
+			messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout",
+		},
+		CreatedAt: now.Add(time.Second),
+	}})
+	if len(turns) != 2 {
+		t.Fatalf("expected user + timeout assistant, got %d", len(turns))
+	}
+	if turns[1].Role != "assistant" || len(turns[1].Messages) != 1 {
+		t.Fatalf("timeout assistant turn = %#v", turns[1])
+	}
+	if turns[1].Messages[0].Type != UIMessageError || turns[1].Messages[0].Code != "agent.response_timeout" {
+		t.Fatalf("timeout block = %#v", turns[1].Messages[0])
 	}
 }
 

@@ -7,12 +7,12 @@ import (
 
 	"go.uber.org/fx"
 
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	"github.com/memohai/memoh/internal/config"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/runtimefence"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/config"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // provideSessionRunLedger returns the durable half of the session runtime. It
@@ -22,7 +22,7 @@ func provideSessionRunLedger(postgresStore *postgresstore.Store) (ledger.Store, 
 	if postgresStore == nil {
 		return nil, errors.New("session run ledger requires postgres")
 	}
-	return ledger.NewPostgres(postgresStore.SQLC()), nil
+	return ledger.NewPostgres(postgresStore.SQLC(), postgresStore.Pool()), nil
 }
 
 // provideRuntimeFenceActivator supplies the second half of a claim. The ledger

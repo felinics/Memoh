@@ -1,13 +1,14 @@
 package native
 
 import (
+	"context"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestSpawnRunConfigClassifiesRawQueryAsCurrentUser(t *testing.T) {
@@ -35,6 +36,50 @@ func TestSpawnRunConfigClassifiesRawQueryAsCurrentUser(t *testing.T) {
 	}
 	if current != 1 {
 		t.Fatalf("current fragment count = %d, want 1", current)
+	}
+}
+
+func TestSpawnRunConfigCarriesContextBudgetAndToolExchangePolicy(t *testing.T) {
+	t.Parallel()
+
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
+	rc := runConfigFromSpawnRunConfig(tools.SpawnRunConfig{
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+	})
+
+	if rc.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", rc.ContextBudgetMaxTokens)
+	}
+	if rc.ContextToolExchangePolicy != policy {
+		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", rc.ContextToolExchangePolicy, policy)
+	}
+}
+
+func TestSpawnAdapterGenerateWithWatchdogFailsOnStreamError(t *testing.T) {
+	t.Parallel()
+
+	a := New(Deps{
+		ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
+			return cfg, contextfrag.ErrBudgetUnsatisfied
+		},
+	})
+	adapter := NewSpawnAdapter(a)
+
+	result, err := adapter.GenerateWithWatchdog(context.Background(), tools.SpawnRunConfig{
+		Model: &sdk.Model{
+			ID:       "spawn-preflight-error",
+			Provider: &preflightCountingProvider{},
+			Type:     sdk.ModelTypeChat,
+		},
+		Query: "do the task",
+	}, func() {})
+
+	if result != nil {
+		t.Fatalf("GenerateWithWatchdog result = %#v, want nil", result)
+	}
+	if err == nil || err.Error() != "The model context window is too small for this request." {
+		t.Fatalf("GenerateWithWatchdog error = %v, want public context-budget failure", err)
 	}
 }
 

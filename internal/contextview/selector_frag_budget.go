@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/textutil"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const fragBudgetTokenByteFactor = contextfrag.EstimateBytesPerToken
@@ -18,7 +18,17 @@ type fragBudgetDrop struct {
 	reason string
 }
 
-func enforceFragBudgets(frags []contextfrag.ContextFrag, profile IntentProfile) (kept []contextfrag.ContextFrag, dropped []fragBudgetDrop, edits []contextfrag.ContextEditTrace, warnings []contextfrag.ValidationWarning) {
+type fragBudgetEdit struct {
+	trace  contextfrag.ContextEditTrace
+	fragID string
+	reason string
+}
+
+func enforceFragBudgets(
+	frags []contextfrag.ContextFrag,
+	profile IntentProfile,
+	systemPlanActive bool,
+) (kept []contextfrag.ContextFrag, dropped []fragBudgetDrop, edits []fragBudgetEdit, warnings []contextfrag.ValidationWarning) {
 	kept = make([]contextfrag.ContextFrag, 0, len(frags))
 	for _, frag := range frags {
 		reason, exceeded := fragBudgetExceeded(frag)
@@ -32,7 +42,7 @@ func enforceFragBudgets(frags []contextfrag.ContextFrag, profile IntentProfile) 
 			case isToolExchangeFrag(frag):
 				kept = append(kept, frag)
 				warnings = append(warnings, contextfrag.ValidationWarning{Code: "frag_budget_drop_blocked_tool_closure", Ref: frag.Ref})
-			case isMustKeepFrag(frag, profile):
+			case isMustKeepFrag(frag, profile) && (!systemPlanActive || !droppableSystemBudgetFrag(frag)):
 				kept = append(kept, frag)
 				warnings = append(warnings, contextfrag.ValidationWarning{Code: "frag_budget_drop_blocked_must_keep", Ref: frag.Ref})
 			default:
@@ -46,7 +56,11 @@ func enforceFragBudgets(frags []contextfrag.ContextFrag, profile IntentProfile) 
 				continue
 			}
 			kept = append(kept, trimmed)
-			edits = append(edits, fragBudgetTrimEdit(trimmed))
+			edits = append(edits, fragBudgetEdit{
+				trace:  fragBudgetTrimEdit(trimmed),
+				fragID: frag.ID,
+				reason: reason,
+			})
 		case contextfrag.OverflowSummarize:
 			kept = append(kept, frag)
 			warnings = append(warnings, contextfrag.ValidationWarning{Code: "overflow_summarize_unsupported", Ref: frag.Ref})
@@ -55,6 +69,12 @@ func enforceFragBudgets(frags []contextfrag.ContextFrag, profile IntentProfile) 
 		}
 	}
 	return kept, dropped, edits, warnings
+}
+
+func droppableSystemBudgetFrag(frag contextfrag.ContextFrag) bool {
+	return frag.Slot == contextfrag.SlotSystem &&
+		(frag.RetentionTier == contextfrag.RetentionOptional ||
+			frag.RetentionTier == contextfrag.RetentionPreferred)
 }
 
 func fragBudgetExceeded(frag contextfrag.ContextFrag) (string, bool) {

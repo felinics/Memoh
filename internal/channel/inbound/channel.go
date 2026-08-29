@@ -18,24 +18,24 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/memohai/memoh/internal/acl"
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/discuss"
-	"github.com/memohai/memoh/internal/channel/route"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/media"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/slash"
+	"github.com/felinics/memoh/internal/acl"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/discuss"
+	"github.com/felinics/memoh/internal/channel/route"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/media"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 var base64Std = base64.StdEncoding
@@ -123,6 +123,7 @@ type IMDisplayOptionsReader interface {
 }
 
 type DefaultChatRuntimeSettings struct {
+	BotAgentID  string
 	Runtime     string
 	ACPAgentID  string
 	ProjectPath string
@@ -168,6 +169,7 @@ type SessionResult struct {
 }
 
 type NewSessionSpec struct {
+	BotAgentID            string
 	Mode                  string
 	Runtime               string
 	Type                  string
@@ -3083,7 +3085,7 @@ func isHTTPURL(raw string) bool {
 }
 
 // extractStorageKey derives the media storage key from a container-internal
-// access path. The expected path format is /data/media/<storage_key>.
+// access path. The expected path format is /data/.memoh/media/<storage_key>.
 func extractStorageKey(accessPath string, _ string) string {
 	return attachment.ExtractStorageKey(accessPath)
 }
@@ -4455,6 +4457,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	}
 	spec.Runtime = sessionpkg.RuntimeACPAgent
 	spec.Type = sessionpkg.TypeACPAgent
+	spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
 	spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, "")
 	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{
 		"acp_agent_id":     agentID,
@@ -4589,7 +4592,7 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 		return err
 	}
 	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
-	if !setup.Enabled {
+	if strings.TrimSpace(spec.BotAgentID) == "" && !setup.Enabled {
 		return acpfeedback.New(
 			acpfeedback.CodeAgentNotEnabled,
 			"agent_not_enabled",

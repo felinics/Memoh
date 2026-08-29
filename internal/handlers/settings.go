@@ -9,27 +9,25 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type SettingsHandler struct {
-	service          *settings.Service
-	botService       *bots.Service
-	accountService   *accounts.Service
-	heartbeatService *heartbeat.Service
-	logger           *slog.Logger
+	service        *settings.Service
+	botService     *bots.Service
+	accountService *accounts.Service
+	logger         *slog.Logger
 }
 
-func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService *bots.Service, accountService *accounts.Service, heartbeatService *heartbeat.Service) *SettingsHandler {
+func NewSettingsHandler(log *slog.Logger, service *settings.Service, botService *bots.Service, accountService *accounts.Service) *SettingsHandler {
 	return &SettingsHandler{
-		service:          service,
-		botService:       botService,
-		accountService:   accountService,
-		heartbeatService: heartbeatService,
-		logger:           log.With(slog.String("handler", "settings")),
+		service:        service,
+		botService:     botService,
+		accountService: accountService,
+		logger:         log.With(slog.String("handler", "settings")),
 	}
 }
 
@@ -78,7 +76,8 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body settings.UpsertRequest true "Settings payload"
 // @Success 200 {object} settings.Settings
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{bot_id}/settings [put]
 // @Router /bots/{bot_id}/settings [post].
@@ -100,6 +99,12 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 	resp, err := h.service.UpsertBot(c.Request().Context(), botID, req)
 	if err != nil {
+		if botAgentErr := botAgentHTTPError(err); botAgentErr != nil {
+			return botAgentErr
+		}
+		if reasoningErr := settingsReasoningHTTPError(err); reasoningErr != nil {
+			return reasoningErr
+		}
 		if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
 			return feedbackErr
 		}
@@ -112,13 +117,20 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	if req.HeartbeatEnabled != nil || req.HeartbeatInterval != nil {
-		if err := h.heartbeatService.Reschedule(c.Request().Context(), botID); err != nil {
-			h.logger.Error("failed to reschedule heartbeat", slog.String("bot_id", botID), slog.Any("error", err))
-		}
-	}
-
 	return c.JSON(http.StatusOK, resp)
+}
+
+func settingsReasoningHTTPError(err error) error {
+	var invalid *settings.InvalidReasoningEffortError
+	if errors.As(err, &invalid) {
+		return apperror.New(apperror.CodeSettingsReasoningEffortInvalid, map[string]string{
+			"effort": invalid.Effort,
+		})
+	}
+	if errors.Is(err, settings.ErrReasoningOptionsUnavailable) {
+		return apperror.Wrap(apperror.CodeSettingsReasoningUnavailable, err, nil)
+	}
+	return nil
 }
 
 // Delete godoc

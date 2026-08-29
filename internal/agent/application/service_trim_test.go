@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 func intPtr(v int) *int { return &v }

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	googleembedding "github.com/memohai/twilight-ai/provider/google/embedding"
-	openaiembedding "github.com/memohai/twilight-ai/provider/openai/embedding"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	googleembedding "github.com/felinics/twilight/provider/google/embedding"
+	openaiembedding "github.com/felinics/twilight/provider/openai/embedding"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // NewSDKEmbeddingModel creates a Twilight AI SDK EmbeddingModel for the given

@@ -28,13 +28,25 @@ vi.mock('@/store/user', () => ({
   useUserStore: () => mocks.user,
 }))
 
+const storage = new Map<string, string>()
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    clear: () => storage.clear(),
+  },
+  configurable: true,
+})
+
 import { resetOnboardingState, useOnboarding } from './useOnboarding'
 import {
-  commitOnboardingACP,
-  commitOnboardingBotResult,
-  onboardingRuntimeState,
-  resetOnboardingRuntimeState,
-} from '@/pages/onboarding/state'
+  readOnboardingBotResult,
+  resetOnboardingSession,
+  writeOnboardingBotResult,
+} from '@/pages/onboarding/session'
+import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 
 describe('useOnboarding completion', () => {
   beforeEach(() => {
@@ -43,21 +55,26 @@ describe('useOnboarding completion', () => {
     mocks.updateMe.mockResolvedValue({})
     mocks.replace.mockResolvedValue(undefined)
     resetOnboardingState()
-    resetOnboardingRuntimeState()
+    resetOnboardingSession()
+    localStorage.clear()
   })
 
-  it('keeps runtime state on navigation failure and clears it after retry', async () => {
-    commitOnboardingACP({ agentId: 'codex', setupMode: 'oauth', managed: {} })
-    commitOnboardingBotResult({
+  it('restores forced onboarding and keeps the handoff when navigation fails', async () => {
+    writeOnboardingBotResult({
       botId: 'bot-id',
-      settingsApplied: true,
-      acpLaunchAgentId: 'codex',
+      modelConfigured: false,
+      acp: { agentId: 'codex', botAgentId: 'agent-id', oauthPending: false },
+    })
+    localStorage.setItem(ONBOARDING_KEYS.forceOnboarding, '1')
+
+    mocks.replace.mockImplementationOnce(async () => {
+      expect(localStorage.getItem(ONBOARDING_KEYS.forceOnboarding)).toBeNull()
+      throw new Error('navigation failed')
     })
 
-    mocks.replace.mockRejectedValue(new Error('navigation failed'))
-
     expect(await useOnboarding().complete()).toBe(false)
-    expect(onboardingRuntimeState.value.botResult?.botId).toBe('bot-id')
+    expect(readOnboardingBotResult()?.botId).toBe('bot-id')
+    expect(localStorage.getItem(ONBOARDING_KEYS.forceOnboarding)).toBe('1')
     expect(mocks.toastError).toHaveBeenCalledWith('onboarding.complete.navigationFailed')
 
     mocks.replace.mockResolvedValue(undefined)
@@ -67,6 +84,30 @@ describe('useOnboarding completion', () => {
       params: { botName: 'bot-id' },
       query: { acp: 'codex' },
     })
-    expect(onboardingRuntimeState.value.selection.kind).toBe('none')
+    expect(readOnboardingBotResult()).toBeNull()
+    expect(localStorage.getItem(ONBOARDING_KEYS.forceOnboarding)).toBeNull()
+  })
+
+  it('does not launch an ACP agent while OAuth is still pending', async () => {
+    writeOnboardingBotResult({
+      botId: 'bot-id',
+      modelConfigured: false,
+      acp: { agentId: 'claude-code', botAgentId: 'agent-id', oauthPending: true },
+    })
+
+    expect(await useOnboarding().complete()).toBe(true)
+    expect(mocks.replace).toHaveBeenCalledWith({
+      name: 'bot',
+      params: { botName: 'bot-id' },
+    })
+  })
+
+  it('treats a resolved router failure as a failed completion', async () => {
+    writeOnboardingBotResult({ botId: 'bot-id', modelConfigured: true })
+    mocks.replace.mockResolvedValue({ type: 4 })
+
+    expect(await useOnboarding().complete()).toBe(false)
+    expect(readOnboardingBotResult()?.botId).toBe('bot-id')
+    expect(mocks.toastError).toHaveBeenCalledWith('onboarding.complete.navigationFailed')
   })
 })

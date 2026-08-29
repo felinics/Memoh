@@ -17,10 +17,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/textutil"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 // OAuthService manages OAuth flows for MCP connections.
@@ -41,6 +41,16 @@ func NewOAuthService(log *slog.Logger, queries dbstore.Queries, callbackURL stri
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
 		callbackURL: callbackURL,
 	}
+}
+
+// WithQueries returns a shallow service copy bound to the supplied queries.
+func (s *OAuthService) WithQueries(queries dbstore.Queries) *OAuthService {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.queries = queries
+	return &clone
 }
 
 // DiscoveryResult holds the result of an OAuth discovery flow.

@@ -61,9 +61,14 @@ services:
     container_name: memoh-server
     privileged: true
     pid: host
+    # Explicit memory ceiling (CM-PRC-001): the Go runtime backs off at
+    # GOMEMLIMIT instead of running into the container's OOM kill. Keep
+    # GOMEMLIMIT at roughly 85% of mem_limit when overriding either.
+    mem_limit: ${MEMOH_SERVER_MEMORY_LIMIT:-8g}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      GOMEMLIMIT: "${MEMOH_SERVER_GOMEMLIMIT:-7GiB}"
       # Proxy: use host.docker.internal for localhost proxies, e.g.
       #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
@@ -175,7 +180,7 @@ services:
   # Connect-It at startup and presented by the Memoh server as its bearer
   # token — the install script generates and persists all of these values.
   connect-it:
-    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.1.1}"
+    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.0}"
     container_name: memoh-connect-it
     profiles: [connectors]
     environment:

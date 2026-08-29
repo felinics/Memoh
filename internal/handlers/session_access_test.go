@@ -3,8 +3,8 @@ package handlers
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 func TestCanAccessSessionScopesChatToCreator(t *testing.T) {
@@ -61,7 +61,7 @@ func TestRequiredPermissionForACPRuntimeKeepsSystemModesManaged(t *testing.T) {
 		}
 	}
 
-	managedModes := []string{session.TypeHeartbeat, session.TypeSchedule, session.TypeSubagent}
+	managedModes := []string{session.TypeSchedule, session.TypeSubagent}
 	for _, mode := range managedModes {
 		if got := requiredPermissionForSessionRuntime(mode, session.RuntimeACPAgent); got != bots.PermissionManage {
 			t.Fatalf("%s ACP permission = %q, want manage", mode, got)

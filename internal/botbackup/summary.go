@@ -3,8 +3,8 @@ package botbackup
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/db"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
 )
 
 // summaryLightSections is the section set collected in full for the export

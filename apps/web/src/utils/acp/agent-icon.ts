@@ -1,13 +1,18 @@
 import type { Component } from 'vue'
 import { Bot as BotIcon } from 'lucide-vue-next'
-import { ClaudeCode, ClaudeCodeColor, Codex, CodexColor, HermesAgent } from '@memohai/icon'
+import { Acp, ClaudeCode, ClaudeCodeColor, Codex, CodexColor, HermesAgent } from '@memohai/icon'
 import { normalizeACPAgentID } from './metadata'
 
 export function acpAgentIcon(agentID: unknown, color = false): Component {
+  if (isACPAgent(agentID)) return Acp
   if (isCodexAgent(agentID)) return color ? CodexColor : Codex
   if (isClaudeCodeAgent(agentID)) return color ? ClaudeCodeColor : ClaudeCode
   if (isHermesAgent(agentID)) return HermesAgent
   return BotIcon
+}
+
+export function isACPAgent(agentID: unknown): boolean {
+  return normalizeACPAgentID(agentID) === 'acp'
 }
 
 export function isCodexAgent(agentID: unknown): boolean {
@@ -25,6 +30,7 @@ function isHermesAgent(agentID: unknown): boolean {
 export function acpAgentDisplayName(agentID: unknown, fallback = ''): string {
   const normalized = normalizeACPAgentID(agentID)
   if (!normalized) return fallback
+  if (isACPAgent(normalized)) return 'ACP'
   if (isCodexAgent(normalized)) return 'Codex'
   if (isClaudeCodeAgent(normalized)) return 'Claude Code'
   if (isHermesAgent(normalized)) return 'Hermes'

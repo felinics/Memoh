@@ -193,7 +193,7 @@ const getTokenUsageByModel = `-- name: GetTokenUsageByModel :many
 SELECT
   m.model_id,
   COALESCE(mo.model_id, 'unknown') AS model_slug,
-  COALESCE(mo.name, 'Unknown') AS model_name,
+  COALESCE(mo.name, mo.model_id, 'Unknown') AS model_name,
   COALESCE(lp.name, 'Unknown') AS provider_name,
   COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens
@@ -313,7 +313,7 @@ SELECT
   END::text AS session_type,
   m.model_id,
   COALESCE(mo.model_id, 'unknown')::text AS model_slug,
-  COALESCE(mo.name, 'Unknown')::text AS model_name,
+  COALESCE(mo.name, mo.model_id, 'Unknown')::text AS model_name,
   COALESCE(lp.name, 'Unknown')::text AS provider_name,
   COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
   COALESCE((m.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,

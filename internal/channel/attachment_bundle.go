@@ -1,6 +1,6 @@
 package channel
 
-import attachmentpkg "github.com/memohai/memoh/internal/attachment"
+import attachmentpkg "github.com/felinics/memoh/internal/attachment"
 
 // BundleFromAttachment converts a channel attachment to the shared internal
 // bundle shape.

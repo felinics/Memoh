@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type runtimeSnapshotQueries struct {
@@ -237,6 +237,18 @@ func (q *clearHistoryQueries) ClearHistoryByBot(_ context.Context, id pgtype.UUI
 func (q *clearHistoryQueries) ClearHistoryBySession(_ context.Context, id pgtype.UUID) error {
 	q.sessionID = id
 	return nil
+}
+
+func (*clearHistoryQueries) DeleteACPSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (*clearHistoryQueries) DeleteACPSessionStatesBySession(context.Context, pgtype.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (*clearHistoryQueries) DeleteACPSessionStateLinesBySession(context.Context, pgtype.UUID) (int64, error) {
+	return 0, nil
 }
 
 func TestDeleteByScopeClearsCanonicalHistory(t *testing.T) {

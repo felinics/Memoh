@@ -11,17 +11,19 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type fakeSpawnAgent struct {
-	block   chan struct{}
-	failFor map[string]string
+	block            chan struct{}
+	failFor          map[string]string
+	contextLifecycle *contextfrag.LifecycleSnapshot
 
 	mu    sync.Mutex
 	calls []SpawnRunConfig
@@ -52,6 +54,7 @@ func (f *fakeSpawnAgent) GenerateWithWatchdog(ctx context.Context, cfg SpawnRunC
 			Role:    sdk.MessageRoleAssistant,
 			Content: []sdk.MessagePart{sdk.TextPart{Text: "report for " + cfg.Query}},
 		}},
+		ContextLifecycle: f.contextLifecycle,
 	}, nil
 }
 
@@ -204,6 +207,7 @@ func (s *fakeAgentMessageService) Persist(_ context.Context, input messagepkg.Pe
 		SessionID: input.SessionID,
 		Role:      input.Role,
 		Content:   input.Content,
+		Metadata:  input.Metadata,
 		Usage:     input.Usage,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -249,6 +253,18 @@ func (*fakeAgentMessageService) ListSinceBySession(context.Context, string, time
 
 func (*fakeAgentMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
 	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+	return messagepkg.ActiveMessagesMeasure{}, nil
 }
 
 func (*fakeAgentMessageService) ListLatestBySession(context.Context, string, int32) ([]messagepkg.Message, error) {
@@ -476,6 +492,54 @@ func TestSpawnAgentSessionInheritsParentUserIdentity(t *testing.T) {
 	}
 }
 
+func TestSpawnAgentPropagatesContextBudgetAndToolExchangePolicy(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
+	session := SessionContext{
+		BotID:                     "bot1",
+		SessionID:                 "parent1",
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+	}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"task": "alpha"})
+
+	call, ok := agent.callAt(0)
+	if !ok {
+		t.Fatal("expected spawn_agent call")
+	}
+	if call.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", call.ContextBudgetMaxTokens)
+	}
+	if call.ContextToolExchangePolicy != policy {
+		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", call.ContextToolExchangePolicy, policy)
+	}
+}
+
+func TestSpawnAgentUsesResolvedModelContextBudgetOverParent(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+		return resolvedSubagentModel{Model: &sdk.Model{}, ModelID: "model-2", ContextBudgetMaxTokens: 64000}, nil
+	}
+	session := SessionContext{
+		BotID:                  "bot1",
+		SessionID:              "parent1",
+		ContextBudgetMaxTokens: 128000,
+	}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{"task": "alpha"})
+
+	call, ok := agent.callAt(0)
+	if !ok {
+		t.Fatal("expected spawn_agent call")
+	}
+	if call.ContextBudgetMaxTokens != 64000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 64000 (the resolved subagent model's own context window, not the parent's 128000)", call.ContextBudgetMaxTokens)
+	}
+}
+
 func TestSpawnAgentIDsAndDuplicateValidation(t *testing.T) {
 	p, _, _, _ := newAgentControlProvider(t, &fakeSpawnAgent{})
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
@@ -625,6 +689,46 @@ func TestNonForkedSubagentDoesNotInheritAvailableParentSnapshot(t *testing.T) {
 	}
 }
 
+func TestSpawnAgentPersistsLifecycleOnFinalAssistantAndAssociatesItsID(t *testing.T) {
+	snapshot := &contextfrag.LifecycleSnapshot{
+		Version: 1,
+		Counts:  contextfrag.ManifestCounts{Fragments: 3, Messages: 2},
+	}
+	admitter := &fakeSubagentAdmitter{}
+	p, _, sessions, messages := newAgentControlProviderWithAdmitter(
+		t,
+		&fakeSpawnAgent{contextLifecycle: snapshot},
+		admitter,
+	)
+
+	mustExecuteAgentTool(t, p, SessionContext{BotID: "bot1", SessionID: "parent1"}, "spawn_agent", map[string]any{
+		"id":   "worker",
+		"task": "audit context",
+	})
+	child, ok := sessions.byAgent("parent1", "worker")
+	if !ok {
+		t.Fatal("expected child session")
+	}
+	stored, err := messages.ListBySession(context.Background(), child.ID)
+	if err != nil {
+		t.Fatalf("ListBySession error: %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("persisted messages = %d, want user and assistant", len(stored))
+	}
+	metadataSnapshot, ok := stored[1].Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot)
+	if !ok || metadataSnapshot.Counts.Fragments != snapshot.Counts.Fragments {
+		t.Fatalf("assistant metadata lifecycle = %#v, want content-light snapshot", stored[1].Metadata)
+	}
+	terminals := admitter.terminals()
+	if len(terminals) != 1 || terminals[0].contextLifecycle == nil {
+		t.Fatalf("terminal records = %#v, want one lifecycle snapshot", terminals)
+	}
+	if got := terminals[0].contextLifecycle.AssistantMessageID; got != stored[1].ID {
+		t.Fatalf("assistant message association = %q, want %q", got, stored[1].ID)
+	}
+}
+
 func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	block := make(chan struct{})
 	agent := &fakeSpawnAgent{block: block}
@@ -663,6 +767,66 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	}
 	if snap.Status != background.TaskCompleted {
 		t.Fatalf("expected third task completed, got %+v", snap)
+	}
+}
+
+func TestQueuedSpawnAgentUsesExecutionModelContextBudget(t *testing.T) {
+	block := make(chan struct{})
+	agent := &fakeSpawnAgent{block: block}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	var resolverMu sync.Mutex
+	resolverBudgets := []int{128000, 128000, 128000, 64000, 32000}
+	resolverCall := 0
+	p.modelResolver = func(context.Context, SessionContext, string, string, string) (resolvedSubagentModel, error) {
+		resolverMu.Lock()
+		defer resolverMu.Unlock()
+		if resolverCall >= len(resolverBudgets) {
+			return resolvedSubagentModel{}, errors.New("unexpected model resolution")
+		}
+		budget := resolverBudgets[resolverCall]
+		resolverCall++
+		return resolvedSubagentModel{
+			Model:                  &sdk.Model{},
+			ModelID:                "model-2",
+			ProviderName:           "provider-2",
+			ContextBudgetMaxTokens: budget,
+		}, nil
+	}
+	session := SessionContext{
+		BotID:                  "bot1",
+		SessionID:              "parent1",
+		ContextBudgetMaxTokens: 256000,
+	}
+
+	mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
+		"id":                "worker",
+		"task":              "first",
+		"run_in_background": true,
+	})
+	waitUntil(t, 2*time.Second, func() bool {
+		return reflect.DeepEqual(agent.queries(), []string{"first"})
+	})
+	queued := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{
+		"id":      "worker",
+		"message": "second",
+	}))
+	if queued["status"] != string(background.TaskQueued) {
+		t.Fatalf("expected second request queued, got %v", queued)
+	}
+
+	close(block)
+	waitUntil(t, 2*time.Second, func() bool {
+		return reflect.DeepEqual(agent.queries(), []string{"first", "second"})
+	})
+	secondCall, ok := agent.callAt(1)
+	if !ok {
+		t.Fatal("expected queued request to execute")
+	}
+	if secondCall.ContextBudgetMaxTokens != 32000 {
+		t.Fatalf(
+			"queued ContextBudgetMaxTokens = %d, want latest execution resolution 32000",
+			secondCall.ContextBudgetMaxTokens,
+		)
 	}
 }
 
@@ -778,7 +942,8 @@ func TestBackgroundWaitTimeoutDoesNotCancelRunningAgentTask(t *testing.T) {
 func TestKillBackgroundCancelsRunningAndQueuedAgentTasks(t *testing.T) {
 	block := make(chan struct{})
 	agent := &fakeSpawnAgent{block: block}
-	p, mgr, _, _ := newAgentControlProvider(t, agent)
+	admitter := &fakeSubagentAdmitter{}
+	p, mgr, _, _ := newAgentControlProviderWithAdmitter(t, agent, admitter)
 	session := SessionContext{BotID: "bot1", SessionID: "parent1"}
 
 	first := asMap(t, mustExecuteAgentTool(t, p, session, "spawn_agent", map[string]any{
@@ -805,6 +970,12 @@ func TestKillBackgroundCancelsRunningAndQueuedAgentTasks(t *testing.T) {
 		task := mgr.Get(first["task_id"].(string))
 		return task != nil && task.Snapshot().Status == background.TaskKilled
 	})
+	waitUntil(t, time.Second, func() bool {
+		return len(admitter.terminals()) == 1
+	})
+	if terminals := admitter.terminals(); len(terminals) != 1 || terminals[0].cause != "" {
+		t.Fatalf("killed terminal = %#v, want one cancellation-derived release", terminals)
+	}
 	if got := agent.queries(); !reflect.DeepEqual(got, []string{"first"}) {
 		t.Fatalf("killed queued task should not run, got queries %v", got)
 	}

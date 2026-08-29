@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func qualityRows(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {

@@ -9,13 +9,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type SessionInfoHandler struct {
@@ -40,6 +40,7 @@ func NewSessionInfoHandler(log *slog.Logger, queries dbstore.Queries, botService
 
 func (h *SessionInfoHandler) Register(e *echo.Echo) {
 	e.GET("/bots/:bot_id/sessions/:session_id/status", h.GetSessionInfo)
+	e.GET("/bots/:bot_id/sessions/:session_id/context-lifecycle", h.GetSessionContextLifecycle)
 }
 
 type SessionInfoResponse struct {

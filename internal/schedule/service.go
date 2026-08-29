@@ -15,12 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/robfig/cron/v3"
 
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/boot"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 // SessionSpec describes the session one schedule fire runs in. The creator
@@ -28,6 +29,8 @@ import (
 // ACP runtime metadata; the schedule domain only states intent.
 type SessionSpec struct {
 	BotID string
+	// BotAgentID is empty for Native and set for a persisted Agent selection.
+	BotAgentID string
 	// Title labels the session in user-facing lists (the schedule name).
 	Title string
 	// RuntimeType is RuntimeModel ("" means model) or RuntimeACPAgent.
@@ -62,11 +65,16 @@ type Service struct {
 	triggerer       Triggerer
 	sessionCreator  SessionCreator
 	workdirs        WorkdirValidator
+	botAgents       *botagents.Service
 	jwtSecret       string
 	logger          *slog.Logger
 	defaultLocation *time.Location
 	mu              sync.Mutex
 	jobs            map[string]cron.EntryID
+}
+
+func (s *Service) SetBotAgents(service *botagents.Service) {
+	s.botAgents = service
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, workdirService *workdir.Service, runtimeConfig *boot.RuntimeConfig) *Service {
@@ -152,6 +160,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 		RunTarget:       exec.RunTarget,
 		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
 		RuntimeType:     optionalText(exec.RuntimeType),
+		BotAgentID:      db.ParseUUIDOrEmpty(exec.BotAgentID),
 		AcpAgentID:      optionalText(exec.ACPAgentID),
 		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
 		AcpModelID:      optionalText(exec.ACPModelID),
@@ -268,6 +277,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 		RunTarget:       exec.RunTarget,
 		TargetSessionID: db.ParseUUIDOrEmpty(exec.TargetSessionID),
 		RuntimeType:     optionalText(exec.RuntimeType),
+		BotAgentID:      db.ParseUUIDOrEmpty(exec.BotAgentID),
 		AcpAgentID:      optionalText(exec.ACPAgentID),
 		ModelID:         db.ParseUUIDOrEmpty(exec.ModelID),
 		AcpModelID:      optionalText(exec.ACPModelID),
@@ -440,8 +450,16 @@ func (s *Service) resolveRunSession(ctx context.Context, sched Schedule, ownerUs
 	if s.sessionCreator == nil {
 		return "", errors.New("schedule session creator not configured")
 	}
+	if strings.TrimSpace(sched.BotAgentID) != "" {
+		resolved, err := s.resolveBotAgentExecution(ctx, sched.BotID, sched.ExecutionConfig)
+		if err != nil {
+			return "", err
+		}
+		sched.ExecutionConfig = resolved
+	}
 	sessionID, err := s.sessionCreator.CreateScheduleSession(ctx, SessionSpec{
 		BotID:       sched.BotID,
+		BotAgentID:  sched.BotAgentID,
 		Title:       sched.Name,
 		RuntimeType: sched.RuntimeType,
 		ACPAgentID:  sched.ACPAgentID,
@@ -718,6 +736,9 @@ func executionFromRow(row sqlc.Schedule) ExecutionConfig {
 		ACPAgentID:      row.AcpAgentID.String,
 		ACPModelID:      row.AcpModelID.String,
 		ReasoningEffort: row.ReasoningEffort.String,
+	}
+	if row.BotAgentID.Valid {
+		exec.BotAgentID = row.BotAgentID.String()
 	}
 	if row.TargetSessionID.Valid {
 		exec.TargetSessionID = row.TargetSessionID.String()

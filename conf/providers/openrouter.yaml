@@ -955,6 +955,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "mistralai/mistral-small-3.1-24b-instruct"
     name: "Mistral: Mistral Small 3.1 24B"
     type: chat
@@ -1313,7 +1315,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 400000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high]
+      reasoning_efforts: [disable, minimal, low, medium, high]
   - model_id: "openai/gpt-5.1-chat"
     name: "OpenAI: GPT-5.1 Chat"
     type: chat
@@ -1351,7 +1353,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 400000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high, xhigh]
+      reasoning_efforts: [disable, minimal, low, medium, high, xhigh]
   - model_id: "openai/gpt-5.2-chat"
     name: "OpenAI: GPT-5.2 Chat"
     type: chat
@@ -1395,7 +1397,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high, xhigh]
+      reasoning_efforts: [disable, minimal, low, medium, high, xhigh]
   - model_id: "openai/gpt-5.4-image-2"
     name: "OpenAI: GPT-5.4 Image 2"
     type: chat
@@ -1409,7 +1411,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 400000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "openai/gpt-5.4-nano"
     name: "OpenAI: GPT-5.4 Nano"
     type: chat
@@ -1417,7 +1419,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 400000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "openai/gpt-5.4-pro"
     name: "OpenAI: GPT-5.4 Pro"
     type: chat
@@ -1433,7 +1435,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "openai/gpt-5.5-pro"
     name: "OpenAI: GPT-5.5 Pro"
     type: chat

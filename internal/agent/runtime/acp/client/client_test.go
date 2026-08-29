@@ -9,28 +9,29 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/runtimefence"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
-	"github.com/memohai/memoh/internal/workspace/bridgesvc"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridgesvc"
 )
 
 type testWorkspace struct {
@@ -63,57 +64,6 @@ func (w *rotatingTestWorkspace) MCPClient(context.Context, string) (*bridge.Clie
 
 func (w *rotatingTestWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
 	return w.info, nil
-}
-
-func TestRunnerResolveACPAdapterVersion(t *testing.T) {
-	client, recorder := newRecordingBridgeClient(t)
-	command := "npm view @agentclientprotocol/codex-acp dist-tags.latest --json"
-	recorder.setStdout(command, "\"1.2.3-beta.1\"\n")
-	runner := NewRunner(nil, testWorkspace{
-		client: client,
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendContainer,
-			DefaultWorkDir: "/data",
-		},
-	})
-	env := []string{"NPM_CONFIG_CACHE=/data/.memoh/acp/npm-cache", "SSL_CERT_FILE=/opt/memoh/toolkit/certs/ca-certificates.crt"}
-
-	version, err := runner.ResolveACPAdapterVersion(context.Background(), "bot-1", "@agentclientprotocol/codex-acp", env)
-	if err != nil {
-		t.Fatalf("ResolveACPAdapterVersion() error = %v", err)
-	}
-	if version != "1.2.3-beta.1" {
-		t.Fatalf("ResolveACPAdapterVersion() = %q", version)
-	}
-	records := recorder.records()
-	if len(records) != 1 {
-		t.Fatalf("adapter version exec records = %#v", records)
-	}
-	record := records[0]
-	if record.Command != command || record.WorkDir != "/data" || record.Timeout != acpAdapterVersionLookupTimeoutSeconds {
-		t.Fatalf("adapter version exec record = %#v", record)
-	}
-	if len(record.Env) != len(env) || record.Env[0] != env[0] || record.Env[1] != env[1] {
-		t.Fatalf("adapter version exec env = %#v, want %#v", record.Env, env)
-	}
-}
-
-func TestRunnerResolveACPAdapterVersionRejectsMutableOrUnsafeSpecs(t *testing.T) {
-	client, recorder := newRecordingBridgeClient(t)
-	command := "npm view @agentclientprotocol/codex-acp dist-tags.latest --json"
-	runner := NewRunner(nil, testWorkspace{
-		client: client,
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendContainer,
-			DefaultWorkDir: "/data",
-		},
-	})
-	for _, output := range []string{`"latest"`, `"1.2"`, `"1.2.3; touch /tmp/pwned"`, `{}`} {
-		recorder.setStdout(command, output)
-		if _, err := runner.ResolveACPAdapterVersion(context.Background(), "bot-1", "@agentclientprotocol/codex-acp", nil); err == nil {
-			t.Fatalf("ResolveACPAdapterVersion() unexpectedly accepted %s", output)
-		}
-	}
 }
 
 func TestRunnerRequiresACPCommand(t *testing.T) {
@@ -219,6 +169,240 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	}
 	if writeInput["path"] == "" || writeInput["content"] != "written by fake agent\n" {
 		t.Fatalf("write input = %#v, want path and content", writeInput)
+	}
+}
+
+func TestRunnerStartSessionPrefersResumeForPersistedState(t *testing.T) {
+	requireAnchoredSessionRestorePlatform(t)
+
+	runner, agentPath := newSessionResumeTestRunner(t)
+	capturePath := filepath.Join(t.TempDir(), "lifecycle.json")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_RESUME", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_LOAD", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_MODELS", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_SESSION_LIFECYCLE_FILE", capturePath)
+	state := fakeCodexSessionState(t)
+	stateHeader := state.State()
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+		Resume:      state,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+	if got := sess.ID(); got != stateHeader.SessionID {
+		t.Fatalf("Session.ID() = %q, want %q", got, stateHeader.SessionID)
+	}
+	if model := sess.ModelState(); !model.Supported || model.CurrentModelID != "gpt-5.1-codex" {
+		t.Fatalf("resumed model state = %#v", model)
+	}
+	assertFakeSessionLifecycle(t, capturePath, "resume", stateHeader.SessionID)
+}
+
+func TestRunnerStartSessionFallsBackToLoadWithoutReplayingHistory(t *testing.T) {
+	requireAnchoredSessionRestorePlatform(t)
+
+	runner, agentPath := newSessionResumeTestRunner(t)
+	capturePath := filepath.Join(t.TempDir(), "lifecycle.json")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_LOAD", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_REPLAY_HISTORY", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_SESSION_LIFECYCLE_FILE", capturePath)
+	state := fakeCodexSessionState(t)
+	stateHeader := state.State()
+	var streamedMu sync.Mutex
+	var streamed []event.StreamEvent
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+		Resume:      state,
+	}, EventSinkFunc(func(ev event.StreamEvent) {
+		streamedMu.Lock()
+		streamed = append(streamed, ev)
+		streamedMu.Unlock()
+	}))
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+	assertFakeSessionLifecycle(t, capturePath, "load", stateHeader.SessionID)
+	streamedMu.Lock()
+	defer streamedMu.Unlock()
+	if len(streamed) != 0 {
+		t.Fatalf("session/load replay leaked into startup sink: %#v", streamed)
+	}
+}
+
+func TestRunnerStartSessionDoesNotReplaceUnsupportedResumeWithNewSession(t *testing.T) {
+	requireAnchoredSessionRestorePlatform(t)
+
+	runner, agentPath := newSessionResumeTestRunner(t)
+	capturePath := filepath.Join(t.TempDir(), "lifecycle.json")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_SESSION_LIFECYCLE_FILE", capturePath)
+	state := fakeCodexSessionState(t)
+
+	_, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+		Resume:      state,
+	}, nil)
+	if !errors.Is(err, ErrSessionResumeUnsupported) {
+		t.Fatalf("StartSession() error = %v, want ErrSessionResumeUnsupported", err)
+	}
+	if _, statErr := os.Stat(capturePath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unsupported resume invoked an ACP lifecycle method: %v", statErr)
+	}
+}
+
+func TestRunnerStartSessionRejectsUnsupportedProtocolVersion(t *testing.T) {
+	runner, agentPath := newSessionResumeTestRunner(t)
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_PROTOCOL_VERSION", "2")
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "unsupported protocol version 2") {
+		t.Fatalf("StartSession() = (%#v, %v), want unsupported protocol version", sess, err)
+	}
+}
+
+func TestRunnerStartSessionRejectsEmptyNewSessionID(t *testing.T) {
+	runner, agentPath := newSessionResumeTestRunner(t)
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_EMPTY_SESSION_ID", "1")
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "empty session id") {
+		t.Fatalf("StartSession() = (%#v, %v), want empty session id failure", sess, err)
+	}
+}
+
+func TestSessionCloseRequiresAdvertisedCapability(t *testing.T) {
+	runner, agentPath := newSessionResumeTestRunner(t)
+	capturePath := filepath.Join(t.TempDir(), "close")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE", capturePath)
+
+	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Stat(capturePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("session/close was called without the capability: %v", err)
+	}
+}
+
+func TestSessionCloseUsesAdvertisedCapability(t *testing.T) {
+	type contextKey struct{}
+
+	runner, agentPath := newSessionResumeTestRunner(t)
+	capturePath := filepath.Join(t.TempDir(), "close")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CLOSE", "1")
+	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE", capturePath)
+
+	startCtx := context.WithValue(context.Background(), contextKey{}, "session-scope")
+	sess, err := runner.StartSession(startCtx, StartRequest{
+		AgentID:     acpprofile.AgentCodexID,
+		BotID:       "bot-1",
+		ProjectPath: "/data/project",
+		Command:     agentPath,
+		Timeout:     10 * time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if got := sess.lifecycleCtx.Value(contextKey{}); got != "session-scope" {
+		t.Fatalf("session lifecycle context value = %v, want session-scope", got)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if data, err := os.ReadFile(capturePath); err != nil || string(data) != "fake-session" { //nolint:gosec // test helper reads its own temporary capture.
+		t.Fatalf("session/close capture = %q, %v", data, err)
+	}
+}
+
+func newSessionResumeTestRunner(t *testing.T) (*Runner, string) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "project"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	client := newTestBridgeClient(t, root)
+	agentPath := writeFakeAgentScript(t, root)
+	return NewRunner(nil, testWorkspace{
+		client: client,
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: root,
+		},
+	}), agentPath
+}
+
+func requireAnchoredSessionRestorePlatform(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("descriptor-anchored ACP session restore is supported by the Linux workspace bridge")
+	}
+}
+
+func fakeCodexSessionState(t *testing.T) *SessionStateSnapshot {
+	t.Helper()
+	const sessionID = "0198a33f-3fe3-7000-8000-000000000001"
+	transcriptPath := "state/sessions/2026/08/12/rollout-2026-08-12T00-00-00-" + sessionID + ".jsonl"
+	return snapshotFromRecordsForTest(t, acpprofile.RuntimeSessionLocatorCodexRollout, []string{"state/sessions"}, SessionState{
+		SessionID:      sessionID,
+		TranscriptPath: transcriptPath,
+	}, []SessionStateRecord{{
+		FilePath: transcriptPath, LineNumber: 1,
+		Content: json.RawMessage(`{"type":"session_meta","payload":{"id":"` + sessionID + `"}}`),
+	}})
+}
+
+func assertFakeSessionLifecycle(t *testing.T, capturePath, method, sessionID string) {
+	t.Helper()
+	raw, err := os.ReadFile(capturePath) //nolint:gosec // test helper reads its own temporary capture.
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Method    string `json:"method"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Method != method || got.SessionID != sessionID {
+		t.Fatalf("ACP lifecycle = %#v, want method %q session %q", got, method, sessionID)
 	}
 }
 
@@ -755,7 +939,7 @@ func TestRunnerStartSessionSendsNoMCPServers(t *testing.T) {
 	}
 }
 
-func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
+func TestRunnerStartGenericACPSessionInjectsHTTPToolServer(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o750); err != nil {
@@ -777,6 +961,7 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 	})
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
@@ -835,7 +1020,7 @@ func TestRunnerStartSessionInjectsHTTPToolServer(t *testing.T) {
 	}
 }
 
-func TestRunnerStartSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
+func TestRunnerStartGenericACPSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o750); err != nil {
@@ -855,7 +1040,7 @@ func TestRunnerStartSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
 	})
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
@@ -1144,7 +1329,7 @@ func TestRunnerMissingCommandIncludesStderr(t *testing.T) {
 	if !strings.Contains(err.Error(), "memoh-definitely-missing-acp-command") {
 		t.Fatalf("missing command error did not include stderr command detail: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not available") {
+	if !strings.Contains(err.Error(), "not available") && !strings.Contains(err.Error(), "pinned adapter") {
 		t.Fatalf("missing command error is not actionable: %v", err)
 	}
 }
@@ -3103,29 +3288,6 @@ func TestPinSessionModeFailsWhenRequiredModeCannotBeVerified(t *testing.T) {
 	}
 }
 
-func TestPinSessionConfigValuesSkipsWhenNotNeeded(t *testing.T) {
-	t.Parallel()
-
-	effort := acp.SessionConfigOption{
-		Select: &acp.SessionConfigOptionSelect{
-			Id:           acp.SessionConfigId("effort"),
-			CurrentValue: acp.SessionConfigValueId("high"),
-			Options: acp.SessionConfigSelectOptions{
-				Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-					{Value: acp.SessionConfigValueId("default"), Name: "Default"},
-					{Value: acp.SessionConfigValueId("high"), Name: "High"},
-				},
-			},
-		},
-	}
-	// nil conn proves these paths never issue a set_config_option call:
-	// no desired entry, already at desired value, and unadvertised value.
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, nil, nil, "claude-code")
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, map[string]string{"effort": "high"}, nil, "claude-code")
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), []acp.SessionConfigOption{effort}, map[string]string{"effort": "ultra"}, nil, "claude-code")
-	pinSessionConfigValues(context.Background(), nil, acp.SessionId("s1"), nil, map[string]string{"effort": "high"}, nil, "claude-code")
-}
-
 func TestApprovalGrantsAreClearedBetweenPrompts(t *testing.T) {
 	t.Parallel()
 
@@ -3401,14 +3563,27 @@ func (*fakeACPAgent) Logout(context.Context, acp.LogoutRequest) (acp.LogoutRespo
 
 func (*fakeACPAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
 	capabilities := acp.AgentCapabilities{LoadSession: false}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_RESUME") == "1" {
+		capabilities.SessionCapabilities.Resume = &acp.SessionResumeCapabilities{}
+	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_LOAD") == "1" {
+		capabilities.LoadSession = true
+	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MCP_HTTP") == "1" {
 		capabilities.McpCapabilities.Http = true
 	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MCP_ACP") == "1" {
 		capabilities.McpCapabilities.Acp = true
 	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_CLOSE") == "1" {
+		capabilities.SessionCapabilities.Close = &acp.SessionCloseCapabilities{}
+	}
+	protocolVersion := acp.ProtocolVersion(acp.ProtocolVersionNumber)
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_PROTOCOL_VERSION") == "2" {
+		protocolVersion = acp.ProtocolVersion(2)
+	}
 	return acp.InitializeResponse{
-		ProtocolVersion:   acp.ProtocolVersionNumber,
+		ProtocolVersion:   protocolVersion,
 		AgentCapabilities: capabilities,
 	}, nil
 }
@@ -3420,7 +3595,12 @@ func (*fakeACPAgent) Cancel(context.Context, acp.CancelNotification) error {
 	return nil
 }
 
-func (*fakeACPAgent) CloseSession(context.Context, acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+func (*fakeACPAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	if path := os.Getenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte(req.SessionId), 0o600); err != nil { //nolint:gosec // test helper writes to env-provided temp path.
+			return acp.CloseSessionResponse{}, err
+		}
+	}
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -3429,7 +3609,10 @@ func (*fakeACPAgent) ListSessions(context.Context, acp.ListSessionsRequest) (acp
 }
 
 func (a *fakeACPAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	a.cwd = p.Cwd
+	a.prepareFakeSession(p.Cwd)
+	if err := captureFakeSessionLifecycle("new", "fake-session", p.Meta); err != nil {
+		return acp.NewSessionResponse{}, err
+	}
 	if capturePath := os.Getenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_MCP_FILE"); capturePath != "" {
 		raw, err := json.Marshal(p.McpServers)
 		if err != nil {
@@ -3439,13 +3622,11 @@ func (a *fakeACPAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (a
 			return acp.NewSessionResponse{}, err
 		}
 	}
-	resp := acp.NewSessionResponse{SessionId: acp.SessionId("fake-session")}
-	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MODELS") == "1" {
-		a.modelID = "gpt-5.1-codex"
+	sessionID := acp.SessionId("fake-session")
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_EMPTY_SESSION_ID") == "1" {
+		sessionID = ""
 	}
-	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REASONING") != "" {
-		a.reasoningEffort = "medium"
-	}
+	resp := acp.NewSessionResponse{SessionId: sessionID}
 	resp.ConfigOptions = a.configOptions()
 	return resp, nil
 }
@@ -3587,8 +3768,50 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) {
 	t.Fatalf("file %s was not created within %s", path, timeout)
 }
 
-func (*fakeACPAgent) ResumeSession(context.Context, acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
-	return acp.ResumeSessionResponse{}, nil
+func (a *fakeACPAgent) ResumeSession(_ context.Context, p acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	a.prepareFakeSession(p.Cwd)
+	if err := captureFakeSessionLifecycle("resume", string(p.SessionId), p.Meta); err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
+	return acp.ResumeSessionResponse{ConfigOptions: a.configOptions()}, nil
+}
+
+func (a *fakeACPAgent) LoadSession(ctx context.Context, p acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	a.prepareFakeSession(p.Cwd)
+	if err := captureFakeSessionLifecycle("load", string(p.SessionId), p.Meta); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REPLAY_HISTORY") == "1" {
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: p.SessionId,
+			Update:    acp.UpdateAgentMessageText("historical replay"),
+		}); err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+	}
+	return acp.LoadSessionResponse{ConfigOptions: a.configOptions()}, nil
+}
+
+func (a *fakeACPAgent) prepareFakeSession(cwd string) {
+	a.cwd = cwd
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MODELS") == "1" {
+		a.modelID = "gpt-5.1-codex"
+	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REASONING") != "" {
+		a.reasoningEffort = "medium"
+	}
+}
+
+func captureFakeSessionLifecycle(method, sessionID string, meta map[string]any) error {
+	path := os.Getenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_SESSION_LIFECYCLE_FILE")
+	if path == "" {
+		return nil
+	}
+	raw, err := json.Marshal(map[string]any{"method": method, "session_id": sessionID, "meta": meta})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600) //nolint:gosec // test helper writes to an env-provided temporary capture.
 }
 
 func (a *fakeACPAgent) SetSessionConfigOption(ctx context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {

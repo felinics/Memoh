@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/hooks"
-	workspacepkg "github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/hooks"
+	workspacepkg "github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // resolveToolPath with no workdir must be byte-identical to normalizePath —

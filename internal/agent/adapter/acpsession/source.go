@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 
-	acp "github.com/memohai/memoh/internal/agent/runtime/acp"
-	"github.com/memohai/memoh/internal/chat/thread"
+	acp "github.com/felinics/memoh/internal/agent/runtime/acp"
+	"github.com/felinics/memoh/internal/chat/thread"
 )
 
 type Source struct {
@@ -19,10 +19,6 @@ type threadGetter interface {
 }
 
 func NewSource(threads *thread.Service) *Source {
-	return &Source{threads: threads}
-}
-
-func newSource(threads threadGetter) *Source {
 	return &Source{threads: threads}
 }
 

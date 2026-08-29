@@ -1,8 +1,13 @@
 package botbackup
 
 import (
+	"errors"
 	"time"
 )
+
+// ErrHistoryResetUnavailable means an overwrite that can invalidate ACP state
+// could not acquire the mandatory distributed runtime-reset boundary.
+var ErrHistoryResetUnavailable = errors.New("bot backup: ACP history reset coordination is unavailable")
 
 const (
 	BackupSchemaVersion = 1

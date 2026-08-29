@@ -13,7 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
+	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
 
 func TestBuildToolCallPayloadFromRaw(t *testing.T) {
@@ -142,6 +142,12 @@ func TestHandleMCPToolsWithGatewayAcceptCompatibility(t *testing.T) {
 		t.Fatalf("decode list payload failed: %v", err)
 	}
 	result, _ := listPayload["result"].(map[string]any)
+	if cacheScope, _ := result["cacheScope"].(string); cacheScope != "private" {
+		t.Fatalf("tools/list cacheScope = %#v, want private", result["cacheScope"])
+	}
+	if ttlMs, ok := result["ttlMs"].(float64); !ok || ttlMs != 0 {
+		t.Fatalf("tools/list ttlMs = %#v, want 0", result["ttlMs"])
+	}
 	tools, _ := result["tools"].([]any)
 	if len(tools) != 1 {
 		t.Fatalf("expected one tool, got: %#v", result["tools"])
@@ -362,29 +368,5 @@ func TestBuildToolSessionContextUsesAuthenticatedIdentity(t *testing.T) {
 	session := (&ContainerdHandler{}).buildToolSessionContext(c, "bot-1")
 	if session.ChannelIdentityID != "user-1" {
 		t.Fatalf("channel identity = %q, want authenticated user", session.ChannelIdentityID)
-	}
-}
-
-func TestBuildToolSessionContextDoesNotMergeStoredACPContextForPublicEndpoint(t *testing.T) {
-	store := mcpgw.NewToolSessionContextStore()
-	store.Put(mcpgw.ToolSessionContext{
-		BotID:            "bot-1",
-		SessionID:        "session-1",
-		RunID:            "run-latest",
-		CurrentPlatform:  "web",
-		ReplyTarget:      "reply-latest",
-		ConversationType: "private",
-	})
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tools", nil)
-	req.Header.Set(headerBotID, "bot-1")
-	req.Header.Set(headerSessionID, "session-1")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	session := (&ContainerdHandler{toolContexts: store}).buildToolSessionContext(c, "bot-1")
-	if session.RunID != "" || session.CurrentPlatform != "" || session.ReplyTarget != "" || session.ConversationType != "" {
-		t.Fatalf("public endpoint merged ACP context: %#v", session)
 	}
 }

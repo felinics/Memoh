@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/workdir"
-	"github.com/memohai/memoh/internal/workspace"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type sessionWorkdirSessionService struct {

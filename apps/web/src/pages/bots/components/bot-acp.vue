@@ -1,15 +1,19 @@
 <template>
   <SwapTransition :direction="direction">
-    <!-- List: one agent per row. The card navigates into its setup; the Switch
-         is the only enable affordance and stays on this list, never on the
-         setup page (so enabling never unfurls a long inline form). -->
     <PageShell
       v-if="view === 'list'"
       variant="tab"
-      :title="$t('bots.tabs.acp')"
+      :title="t('bots.tabs.acp')"
     >
+      <template #actions>
+        <Button @click="addOpen = true">
+          <Plus />
+          {{ t('bots.agent.add') }}
+        </Button>
+      </template>
+
       <div
-        v-if="profilesLoading && profiles.length === 0"
+        v-if="agentsLoading && agents.length === 0"
         class="space-y-3"
       >
         <Skeleton
@@ -20,11 +24,22 @@
       </div>
 
       <Empty
-        v-else-if="profiles.length === 0"
+        v-else-if="agents.length === 0"
         class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
       >
-        <EmptyTitle>{{ $t('bots.settings.acpEmptyTitle') }}</EmptyTitle>
-        <EmptyDescription>{{ $t('bots.settings.acpEmptyDescription') }}</EmptyDescription>
+        <EmptyHeader>
+          <EmptyTitle>{{ t('bots.agent.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ t('bots.agent.emptyDescription') }}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button
+            variant="outline"
+            @click="addOpen = true"
+          >
+            <Plus />
+            {{ t('bots.agent.add') }}
+          </Button>
+        </EmptyContent>
       </Empty>
 
       <div
@@ -32,27 +47,24 @@
         class="space-y-3"
       >
         <div
-          v-for="profile in profiles"
-          :key="profile.id"
+          v-for="agent in agents"
+          :key="agent.id"
           class="relative flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3.5 transition-colors hover:bg-accent/30 dark:hover:bg-accent"
         >
-          <!-- Stretched navigate target: fills the card so the whole row opens
-               setup, while the Switch above keeps its own click. -->
           <button
             type="button"
             class="absolute inset-0 rounded-[var(--radius-menu-shell)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            :aria-label="profile.display_name || profile.id"
-            @click="openAgent(profile)"
+            :aria-label="botAgentName(agent)"
+            @click="openAgent(agent)"
           />
 
           <span class="pointer-events-none relative flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
             <component
-              :is="acpAgentIcon(profile.id, true)"
+              :is="botAgentIcon(agent, true)"
               class="size-5"
             />
-            <!-- Green dot: on + ready (healthy state — small, says nothing more). -->
             <StatusDot
-              v-if="agentRowState(profile) === 'on_ready'"
+              v-if="agentRowState(agent) === 'on_ready'"
               status="success"
               class="absolute -bottom-0.5 -right-0.5 size-2.5! ring-2 ring-card"
             />
@@ -60,50 +72,84 @@
 
           <span class="pointer-events-none relative min-w-0 flex-1">
             <span class="block truncate text-sm font-medium text-foreground">
-              {{ profile.display_name || profile.id }}
+              {{ botAgentName(agent) }}
             </span>
-            <span
-              v-if="profile.description"
-              class="mt-0.5 block truncate text-xs text-muted-foreground"
-            >
-              {{ profile.description }}
+            <span class="mt-0.5 block truncate text-xs text-muted-foreground">
+              {{ providerLabel(agent) }}
             </span>
           </span>
 
           <div class="relative flex shrink-0 items-center gap-3">
-            <!-- Row status: surfaced as a Badge (aligns to a region, not a loose dot).
-                 Needs-config is actionable so it earns its place; "Disabled" distinguishes
-                 a previously-configured agent from one never touched. -->
             <Badge
-              v-if="agentRowState(profile) === 'on_needs_config'"
+              v-if="agentRowState(agent) === 'on_needs_config'"
               variant="outline"
               size="sm"
               class="border-warning/30 text-warning"
             >
-              {{ $t('bots.settings.acpStatusNeedsConfig') }}
+              {{ t('bots.agent.statusNeedsConfig') }}
             </Badge>
             <Badge
-              v-else-if="agentRowState(profile) === 'off_configured'"
+              v-else-if="agentRowState(agent) === 'off'"
               variant="outline"
               size="sm"
             >
-              {{ $t('bots.settings.acpStatusOff') }}
+              {{ t('bots.agent.statusOff') }}
             </Badge>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="t('common.actions')"
+                  @click.stop
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  variant="destructive"
+                  @select="deleteTarget = agent"
+                >
+                  <Trash2 />
+                  {{ t('common.delete') }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             <ChevronRight class="size-4 text-muted-foreground/60" />
             <Switch
-              :model-value="agentForm(profile).enabled"
-              :aria-label="profile.display_name || profile.id"
-              @update:model-value="(val) => setAgentEnabled(profile, !!val)"
+              :model-value="agent.enabled !== false"
+              :disabled="busyAgentIDs.has(agent.id ?? '')"
+              :aria-label="botAgentName(agent)"
+              @update:model-value="(value) => setAgentEnabled(agent, !!value)"
             />
           </div>
         </div>
       </div>
+
+      <AddBotAgentDialog
+        v-model:open="addOpen"
+        :bot-id="botId"
+        :profiles="profiles"
+        :agents="agents"
+        :bot-metadata="botMetadata"
+        @created="openAgent"
+      />
+
+      <ConfirmDeleteDialog
+        :open="!!deleteTarget"
+        :title="t('bots.agent.deleteTitle')"
+        :description="t('bots.agent.deleteDescription', { name: botAgentName(deleteTarget) })"
+        :cancel-label="t('common.cancel')"
+        :confirm-label="t('common.delete')"
+        :loading="deleting"
+        @update:open="value => { if (!value) deleteTarget = null }"
+        @confirm="confirmDelete"
+      />
     </PageShell>
 
-    <!-- Setup: configuration for the selected agent only. The top padding and
-         back-button margin mirror the list view's PageShell (pt-6 tab variant +
-         mb-6 title-to-body gap), so the back arrow lands at the same height as
-         the list page's title and the gap to the first card is the same. -->
     <section
       v-else
       class="mx-auto max-w-3xl pt-6 pb-8"
@@ -114,17 +160,35 @@
         @click="closeDetail()"
       >
         <ChevronLeft class="size-4" />
-        {{ $t('bots.tabs.acp') }}
+        {{ t('bots.tabs.acp') }}
       </Button>
 
+      <SettingsSection
+        v-if="selectedAgent"
+        class="mb-8"
+      >
+        <SettingsRow
+          :label="t('common.name')"
+          :description="t('bots.agent.nameDescription')"
+          stack="sm"
+        >
+          <Input
+            v-model="selectedName"
+            class="w-full sm:w-56"
+            :aria-label="t('common.name')"
+            @blur="saveSelectedName"
+            @keydown.enter.prevent="saveSelectedName"
+          />
+        </SettingsRow>
+      </SettingsSection>
+
       <SettingsAcpDetail
-        v-if="selectedProfile"
-        :key="`${botId}:${selectedProfile.id}`"
+        v-if="selectedAgent && selectedProfile"
+        :key="`${botId}:${selectedAgent.id}:${selectedProfile.id}`"
         :bot-id="botId"
         :profile="selectedProfile"
         :form="form"
-        :pending-self-confirm="selectedPendingHermesSelfConfirm"
-        @commit="handleDetailCommit"
+        @commit="persistACPForm"
       />
     </section>
   </SwapTransition>
@@ -132,19 +196,50 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Badge, Button, Empty, EmptyDescription, EmptyTitle, PageShell, Skeleton, StatusDot, SwapTransition, Switch, toast } from '@felinic/ui'
-import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
-import { getAcpProfiles, getBotsById, putBotsById } from '@memohai/sdk'
+import {
+  Badge,
+  Button,
+  ConfirmDeleteDialog,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+  Input,
+  PageShell,
+  SettingsRow,
+  SettingsSection,
+  Skeleton,
+  StatusDot,
+  SwapTransition,
+  Switch,
+  toast,
+} from '@felinic/ui'
+import { ChevronLeft, ChevronRight, MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
+import {
+  deleteBotsByBotIdAgentsById,
+  getAcpProfiles,
+  getBotsByBotIdAgents,
+  getBotsById,
+  patchBotsByBotIdAgentsById,
+  putBotsById,
+  type AcpprofilePublicProfile,
+  type BotagentsBotAgent,
+  type BotsUpdateBotRequest,
+} from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
-import type { AcpprofilePublicProfile, BotsUpdateBotRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
+import AddBotAgentDialog from './add-bot-agent-dialog.vue'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
-  acpAgentIcon,
   emptyACPAgentForm,
   ensureACPAgentForm,
   findMissingRequiredManagedField,
@@ -155,44 +250,49 @@ import {
   type ACPAgentForm,
   type ACPForm,
 } from '@/utils/acp'
+import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
 import { useChatStore } from '@/store/chat-list'
 
-const props = defineProps<{
-  botId: string
-}>()
-
+const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
 const queryCache = useQueryCache()
 const chatStore = useChatStore()
 const botIdRef = computed(() => props.botId) as Ref<string>
 
-const form = reactive<ACPForm>({
-  agents: {},
-})
+const form = reactive<ACPForm>({ agents: {} })
 const lastPersistedSnapshot = ref('')
 const persistRunning = ref(false)
 const persistQueued = ref(false)
-const pendingHermesSelfConfirm = ref<Set<string>>(new Set())
+const busyAgentIDs = reactive(new Set<string>())
+const addOpen = ref(false)
+const deleteTarget = ref<BotagentsBotAgent | null>(null)
+const deleting = ref(false)
 
 const { view, direction, openDetail, backToList } = useViewSwap()
-const selectedId = ref('')
+const selectedID = ref('')
+const selectedName = ref('')
 
-const { data: profileData, isLoading: profilesLoading } = useQuery({
+const { data: profileData } = useQuery({
   key: () => ['acp-profiles'],
   query: async () => {
     const { data } = await getAcpProfiles({ throwOnError: true })
     return data
   },
 })
-
 const profiles = computed<AcpprofilePublicProfile[]>(() => profileData.value?.items ?? [])
 
-const selectedProfile = computed(() =>
-  profiles.value.find(p => normalizeACPAgentID(p.id) === selectedId.value) ?? null,
-)
-const selectedPendingHermesSelfConfirm = computed(() =>
-  selectedId.value ? pendingHermesSelfConfirm.value.has(selectedId.value) : false,
-)
+const { data: agentData, isLoading: agentsLoading } = useQuery({
+  key: () => ['bot-agents', botIdRef.value],
+  query: async () => {
+    const { data } = await getBotsByBotIdAgents({
+      path: { bot_id: botIdRef.value },
+      throwOnError: true,
+    })
+    return data
+  },
+  enabled: () => !!botIdRef.value,
+})
+const agents = computed<BotagentsBotAgent[]>(() => agentData.value?.items ?? [])
 
 const { data: bot } = useQuery({
   key: () => ['bot', botIdRef.value],
@@ -202,19 +302,37 @@ const { data: bot } = useQuery({
   },
   enabled: () => !!botIdRef.value,
 })
+const botMetadata = computed(() => bot.value?.metadata as Record<string, unknown> | undefined)
 
-const { mutateAsync: updateBot } = useMutation({
-  mutation: async (body: BotsUpdateBotRequest) => {
-    const { data } = await putBotsById({
-      path: { id: botIdRef.value },
+const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedID.value) ?? null)
+const selectedProfile = computed(() => {
+  const provider = botAgentProvider(selectedAgent.value)
+  return profiles.value.find(profile => normalizeACPAgentID(profile.id) === provider) ?? null
+})
+
+const { mutateAsync: updateAgent } = useMutation({
+  mutation: async ({ agent, body }: { agent: BotagentsBotAgent; body: { name?: string; enabled?: boolean } }) => {
+    const { data } = await patchBotsByBotIdAgentsById({
+      path: { bot_id: props.botId, id: agent.id ?? '' },
       body,
       throwOnError: true,
     })
     return data
   },
   onSettled: () => {
-    queryCache.invalidateQueries({ key: ['bot', botIdRef.value] })
-    queryCache.invalidateQueries({ key: getBotsQueryKey() })
+    void queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+    void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
+  },
+})
+
+const { mutateAsync: updateBot } = useMutation({
+  mutation: async (body: BotsUpdateBotRequest) => {
+    const { data } = await putBotsById({ path: { id: props.botId }, body, throwOnError: true })
+    return data
+  },
+  onSettled: () => {
+    void queryCache.invalidateQueries({ key: ['bot', props.botId] })
+    void queryCache.invalidateQueries({ key: getBotsQueryKey() })
     void chatStore.refreshBots().catch(() => {})
   },
 })
@@ -223,62 +341,93 @@ watch([bot, profiles], ([value, list]) => {
   applyMetadataToForm(value?.metadata as Record<string, unknown> | undefined, list)
 }, { immediate: true })
 
-// If the open agent vanishes after a profile refetch, fall back to the list.
-watch(profiles, (list) => {
-  if (view.value === 'detail' && selectedId.value && !list.some(p => normalizeACPAgentID(p.id) === selectedId.value)) {
-    closeDetail()
-  }
+watch(selectedAgent, (agent) => {
+  selectedName.value = botAgentName(agent)
 })
+
+watch(agents, (list) => {
+  if (view.value === 'detail' && selectedID.value && !list.some(agent => agent.id === selectedID.value)) closeDetail()
+})
+
+function profileFor(agent: BotagentsBotAgent): AcpprofilePublicProfile | null {
+  const provider = botAgentProvider(agent)
+  return profiles.value.find(profile => normalizeACPAgentID(profile.id) === provider) ?? null
+}
+
+function providerLabel(agent: BotagentsBotAgent): string {
+  const profile = profileFor(agent)
+  return profile?.display_name?.trim() || botAgentProvider(agent)
+}
 
 function agentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
   return ensureACPAgentForm(form, profile)
 }
 
-function openAgent(profile: AcpprofilePublicProfile) {
-  selectedId.value = normalizeACPAgentID(profile.id)
+function agentNeedsConfig(agent: BotagentsBotAgent): boolean {
+  const profile = profileFor(agent)
+  if (!profile) return true
+  const config = agentForm(profile)
+  if (config.setup_mode === 'self') return false
+  return findMissingRequiredManagedField(profile, config.managed, config.setup_mode) !== null
+}
+
+function agentRowState(agent: BotagentsBotAgent): 'off' | 'on_needs_config' | 'on_ready' {
+  if (agent.enabled === false) return 'off'
+  return agentNeedsConfig(agent) ? 'on_needs_config' : 'on_ready'
+}
+
+function openAgent(agent: BotagentsBotAgent) {
+  if (!agent.id) return
+  selectedID.value = agent.id
+  selectedName.value = botAgentName(agent)
   openDetail()
 }
 
-function setAgentEnabled(profile: AcpprofilePublicProfile, enabled: boolean) {
-  const id = normalizeACPAgentID(profile.id)
-  const agent = agentForm(profile)
-  agent.enabled = enabled
-  if (enabled && shouldOpenAgentOnEnable(profile)) {
-    openAgent(profile)
-    if (isHermesSelfMode(profile)) {
-      if (id) pendingHermesSelfConfirm.value.add(id)
-      return
-    }
-    if (agentNeedsConfig(profile)) return
+async function setAgentEnabled(agent: BotagentsBotAgent, enabled: boolean) {
+  const id = agent.id ?? ''
+  if (!id || busyAgentIDs.has(id)) return
+  busyAgentIDs.add(id)
+  try {
+    await updateAgent({ agent, body: { enabled } })
+    if (enabled && agentNeedsConfig(agent)) openAgent(agent)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } finally {
+    busyAgentIDs.delete(id)
   }
-  if (id) pendingHermesSelfConfirm.value.delete(id)
-  void persistACPForm()
 }
 
-function shouldOpenAgentOnEnable(profile: AcpprofilePublicProfile): boolean {
-  return agentNeedsConfig(profile) || isHermesSelfMode(profile)
+async function saveSelectedName() {
+  const agent = selectedAgent.value
+  const name = selectedName.value.trim()
+  if (!agent || !name || name === botAgentName(agent)) return
+  try {
+    await updateAgent({ agent, body: { name } })
+  } catch (error) {
+    selectedName.value = botAgentName(agent)
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  }
 }
 
-function agentNeedsConfig(profile: AcpprofilePublicProfile): boolean {
-  const agent = agentForm(profile)
-  if (agent.setup_mode === 'self') return false
-  return findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode) !== null
-}
-
-function isHermesSelfMode(profile: AcpprofilePublicProfile): boolean {
-  return normalizeACPAgentID(profile.id) === 'hermes' && agentForm(profile).setup_mode === 'self'
-}
-
-// Drives the row's status Badge / dot. Four honest states:
-//   off_empty      — never touched (no credentials, disabled): show nothing.
-//   off_configured — disabled but has saved credentials (distinct from "never used").
-//   on_needs_config — enabled but missing required credentials: actionable hint.
-//   on_ready       — enabled and ready: a small green dot, nothing more.
-function agentRowState(profile: AcpprofilePublicProfile): 'off_empty' | 'off_configured' | 'on_needs_config' | 'on_ready' {
-  const agent = agentForm(profile)
-  const hasCredentials = Object.values(agent.managed).some(v => String(v ?? '').trim() !== '')
-  if (!agent.enabled) return hasCredentials ? 'off_configured' : 'off_empty'
-  return agentNeedsConfig(profile) ? 'on_needs_config' : 'on_ready'
+async function confirmDelete() {
+  const agent = deleteTarget.value
+  if (!agent?.id || deleting.value) return
+  deleting.value = true
+  try {
+    await deleteBotsByBotIdAgentsById({
+      path: { bot_id: props.botId, id: agent.id },
+      throwOnError: true,
+    })
+    deleteTarget.value = null
+    if (selectedID.value === agent.id) closeDetail()
+    toast.success(t('bots.agent.deleted'))
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.agent.deleteFailed')))
+  } finally {
+    deleting.value = false
+    void queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
+    void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
+  }
 }
 
 async function persistACPForm() {
@@ -287,24 +436,28 @@ async function persistACPForm() {
     persistQueued.value = true
     return
   }
-  const normalized = normalizedFormForPersist()
+  const normalized = normalizeACPForm(form, profiles.value)
+  // Shared ACP credentials outlive individual BotAgent rows. Never turn the
+  // legacy provider bit off when one configured instance is disabled or
+  // deleted. New, incomplete Agents stay disabled until their required setup
+  // is present so partial settings can be saved without failing server checks.
+  for (const agent of agents.value) {
+    const provider = botAgentProvider(agent)
+    const profile = profileFor(agent)
+    const config = provider ? normalized.agents[provider] : undefined
+    if (profile && config && !findMissingRequiredManagedField(profile, config.managed, config.setup_mode)) {
+      config.enabled = true
+    }
+  }
   const snapshot = JSON.stringify(normalized)
   if (snapshot === lastPersistedSnapshot.value) return
   persistRunning.value = true
   try {
-    await updateBot({
-      metadata: withACPMetadata(
-        bot.value?.metadata as Record<string, unknown> | undefined,
-        normalized,
-        profiles.value,
-      ),
-    })
+    await updateBot({ metadata: withACPMetadata(botMetadata.value, normalized, profiles.value) })
     lastPersistedSnapshot.value = snapshot
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
-    if (!persistQueued.value) {
-      applyMetadataToForm(bot.value?.metadata as Record<string, unknown> | undefined, profiles.value, true)
-    }
+    if (!persistQueued.value) applyMetadataToForm(botMetadata.value, profiles.value, true)
   } finally {
     persistRunning.value = false
     if (persistQueued.value) {
@@ -314,76 +467,15 @@ async function persistACPForm() {
   }
 }
 
-interface ACPCommitOptions {
-  confirmSelf?: boolean
-}
-
-function handleDetailCommit(options?: ACPCommitOptions) {
-  const id = selectedId.value
-  if (id && (options?.confirmSelf || !selectedProfile.value || !isHermesSelfMode(selectedProfile.value))) {
-    pendingHermesSelfConfirm.value.delete(id)
-  }
-  void persistACPForm()
-}
-
 function closeDetail() {
-  discardPendingHermesSelfConfirm()
   backToList()
-}
-
-function normalizedFormForPersist(): ACPForm {
-  const normalized = normalizeACPForm(form, profiles.value)
-  const persisted = parsePersistedSnapshot()
-  for (const id of pendingHermesSelfConfirm.value) {
-    const existing = persisted?.agents?.[id]
-    if (existing) {
-      normalized.agents[id] = {
-        enabled: existing.enabled,
-        setup_mode: existing.setup_mode,
-        managed: { ...existing.managed },
-      }
-      continue
-    }
-    if (normalized.agents[id]) {
-      normalized.agents[id].enabled = false
-    }
-  }
-  return normalized
-}
-
-function discardPendingHermesSelfConfirm() {
-  const id = selectedId.value
-  if (!id || !pendingHermesSelfConfirm.value.has(id)) return
-  const profile = selectedProfile.value
-  const persisted = parsePersistedSnapshot()?.agents?.[id]
-  if (persisted) {
-    form.agents[id] = {
-      enabled: persisted.enabled,
-      setup_mode: persisted.setup_mode,
-      managed: { ...persisted.managed },
-    }
-  } else if (profile) {
-    form.agents[id] = emptyACPAgentForm(profile)
-  }
-  pendingHermesSelfConfirm.value.delete(id)
-}
-
-function parsePersistedSnapshot(): ACPForm | null {
-  if (!lastPersistedSnapshot.value) return null
-  try {
-    return JSON.parse(lastPersistedSnapshot.value) as ACPForm
-  } catch {
-    return null
-  }
 }
 
 function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list: AcpprofilePublicProfile[], force = false) {
   const next = readACPConfig(metadata, list)
   const nextSnapshot = JSON.stringify(next)
   const currentSnapshot = JSON.stringify(normalizeACPForm(form, list))
-  if (!force && (persistRunning.value || persistQueued.value || currentSnapshot !== lastPersistedSnapshot.value) && nextSnapshot === lastPersistedSnapshot.value) {
-    return
-  }
+  if (!force && (persistRunning.value || persistQueued.value || currentSnapshot !== lastPersistedSnapshot.value) && nextSnapshot === lastPersistedSnapshot.value) return
   for (const key of Object.keys(form.agents)) {
     if (!next.agents[key]) delete form.agents[key]
   }

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package bridgepb;
 
-option go_package = "github.com/memohai/memoh/internal/workspace/bridgepb";
+option go_package = "github.com/felinics/memoh/internal/workspace/bridgepb";
 
 service ContainerService {
   rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
@@ -16,6 +16,12 @@ service ContainerService {
   rpc ReverseHTTP(stream ReverseHTTPFrame) returns (stream ReverseHTTPFrame);
   rpc ReadRaw(ReadRawRequest) returns (stream DataChunk);
   rpc WriteRaw(stream WriteRawChunk) returns (WriteRawResponse);
+  // These anchored variants are security boundaries for ACP session state.
+  // The server opens root and every relative_path component without following
+  // symbolic links. WriteRawNoFollow creates a new regular file and fails if
+  // the final component already exists.
+  rpc ReadRawNoFollow(ReadRawNoFollowRequest) returns (stream DataChunk);
+  rpc WriteRawNoFollow(stream WriteRawNoFollowChunk) returns (WriteRawResponse);
   rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
 }
 
@@ -44,6 +50,11 @@ message ListDirRequest {
   int32 offset = 3;
   int32 limit = 4;
   int32 collapse_threshold = 5;
+  // max_entries, when positive, makes the bridge STOP TRAVERSING and fail
+  // with ResourceExhausted once more than max_entries entries exist, bounding
+  // server-side memory before collection instead of after. Zero keeps the
+  // unbounded pre-existing behavior for general callers.
+  int32 max_entries = 6;
 }
 
 message FileEntry {
@@ -153,10 +164,27 @@ message DataChunk {
 message WriteRawChunk {
   string path = 1;
   bytes data = 2;
+  // abort tells the bridge the sender's source failed mid-stream: discard the
+  // temporary file and fail the write instead of committing a partial target.
+  // The sender then waits for the terminal status, so cleanup is synchronous.
+  bool abort = 3;
 }
 
 message WriteRawResponse {
   int64 bytes_written = 1;
+}
+
+message ReadRawNoFollowRequest {
+  string root = 1;
+  string relative_path = 2;
+}
+
+message WriteRawNoFollowChunk {
+  string root = 1;
+  string relative_path = 2;
+  bytes data = 3;
+  // abort mirrors WriteRawChunk.abort for the anchored variant.
+  bool abort = 4;
 }
 
 message DeleteFileRequest {

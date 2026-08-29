@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type testACPSetupValidator struct{}
@@ -47,7 +47,7 @@ func newACPTestService(queries dbstore.Queries) *Service {
 }
 
 func TestIsKnownTypeIncludesACPAgent(t *testing.T) {
-	for _, typ := range []string{TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent} {
+	for _, typ := range []string{TypeChat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent} {
 		if !IsKnownType(typ) {
 			t.Fatalf("IsKnownType(%q) = false", typ)
 		}
@@ -66,14 +66,6 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "conflicts with runtime_type") {
 		t.Fatalf("error = %v, want a 'conflicts with runtime_type' message", err)
 	}
-	// Schedule mode supports the ACP runtime (schedules can run through an
-	// ACP agent), but internal loop modes like heartbeat still reject it.
-	if _, _, _, err := ResolveDescriptor(TypeHeartbeat, "", RuntimeACPAgent); err == nil {
-		t.Fatal("ResolveDescriptor(heartbeat, acp_agent) = nil error, want an unsupported combination error")
-	} else if !strings.Contains(err.Error(), "only supported") {
-		t.Fatalf("error = %v, want an 'only supported' message", err)
-	}
-
 	// Legitimate combinations must still resolve cleanly.
 	cases := []struct {
 		name                            string
@@ -695,7 +687,6 @@ func TestThreadVisibilityIsDerivedFromMode(t *testing.T) {
 		{name: "chat", legacyType: TypeChat, mode: TypeChat, want: VisibilityUser},
 		{name: "discuss", legacyType: TypeDiscuss, mode: TypeDiscuss, want: VisibilityUser},
 		{name: "legacy acp", legacyType: TypeACPAgent, want: VisibilityUser},
-		{name: "heartbeat", legacyType: TypeHeartbeat, mode: TypeHeartbeat, want: VisibilityInternal},
 		{name: "schedule", legacyType: TypeSchedule, mode: TypeSchedule, want: VisibilityInternal},
 		{name: "subagent", legacyType: TypeSubagent, mode: TypeSubagent, want: VisibilityInternal},
 	}

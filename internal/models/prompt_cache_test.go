@@ -3,9 +3,9 @@ package models
 import (
 	"testing"
 
-	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
-	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
+	openaicompletions "github.com/felinics/twilight/provider/openai/completions"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestNormalizePromptCacheTTL(t *testing.T) {

@@ -12,8 +12,18 @@ type Code string
 
 const (
 	CodeBotNameTaken                     Code = "bot.name_taken"
+	CodeBotAgentNotFound                 Code = "bot_agent.not_found"
+	CodeBotAgentNameTaken                Code = "bot_agent.name_taken"
+	CodeBotAgentInvalidRuntime           Code = "bot_agent.invalid_runtime"
+	CodeBotAgentInvalidMetadata          Code = "bot_agent.invalid_metadata"
+	CodeBotAgentDefaultInUse             Code = "bot_agent.default_in_use"
+	CodeBotAgentUnavailable              Code = "bot_agent.unavailable"
 	CodeChannelRuntimeUnavailable        Code = "channel.runtime_unavailable"
 	CodeCompactionModelUnavailable       Code = "compaction.model_unavailable"
+	CodeSettingsReasoningEffortInvalid   Code = "settings.reasoning_effort_invalid"
+	CodeSettingsReasoningUnavailable     Code = "settings.reasoning_options_unavailable"
+	CodeContextBudgetUnsatisfied         Code = "context.budget_unsatisfied"
+	CodeContextProtectedOverflow         Code = "context.protected_overflow"
 	CodeWorkspaceUnreachable             Code = "workspace.unreachable"
 	CodeWorkspaceImageIncompatible       Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed Code = "workspace.template_bootstrap_failed"
@@ -32,6 +42,13 @@ const (
 	CodeConnectorRequestRejected         Code = "connector.request_rejected"
 	CodeConnectorUpstreamUnavailable     Code = "connector.upstream_unavailable"
 	CodeConnectorOperationFailed         Code = "connector.operation_failed"
+	CodeSkillBuiltinReadOnly             Code = "skill.builtin_read_only"
+	CodeSkillNameTaken                   Code = "skill.name_taken"
+	CodeSkillSaveFailed                  Code = "skill.save_failed"
+	CodeRegistryUnavailable              Code = "registry.unavailable"
+	CodeRegistryPackageNotFound          Code = "registry.package_not_found"
+	CodeRegistryPackageInvalid           Code = "registry.package_invalid"
+	CodeRegistryPackageInstallFailed     Code = "registry.package_install_failed"
 	CodeProfileRequestInvalid            Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid         Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed              Code = "profile.update_failed"
@@ -64,6 +81,14 @@ const (
 	CodeSessionBusy                      Code = "session_runtime.session_busy"
 	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
 	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
+	CodeAgentResponseTimeout             Code = "agent.response_timeout"
+	CodeAgentResponseInterrupted         Code = "agent.response_interrupted"
+
+	CodeContextLifecycleRequestInvalid         Code = "context_lifecycle.request_invalid"
+	CodeContextLifecycleAuthenticationRequired Code = "context_lifecycle.authentication_required"
+	CodeContextLifecycleAccessDenied           Code = "context_lifecycle.access_denied"
+	CodeContextLifecycleNotFound               Code = "context_lifecycle.not_found"
+	CodeContextLifecycleLoadFailed             Code = "context_lifecycle.load_failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -83,6 +108,31 @@ var catalog = map[Code]Definition{
 		Detail:      "This name is already taken.",
 		AllowedArgs: []string{"field"},
 	},
+	CodeBotAgentNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "This Agent is no longer available.",
+	},
+	CodeBotAgentNameTaken: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This Agent name is already taken.",
+	},
+	CodeBotAgentInvalidRuntime: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The selected Agent runtime is not supported.",
+	},
+	CodeBotAgentInvalidMetadata: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The Agent configuration is invalid.",
+	},
+	CodeBotAgentDefaultInUse: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Choose another default Agent before disabling or deleting this one.",
+	},
+	CodeBotAgentUnavailable: {
+		HTTPStatus:  http.StatusConflict,
+		Detail:      "This Agent is disabled or not configured.",
+		AllowedArgs: []string{"field"},
+	},
 	CodeChannelRuntimeUnavailable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The channel service could not be reached.",
@@ -91,6 +141,23 @@ var catalog = map[Code]Definition{
 		HTTPStatus:  http.StatusBadRequest,
 		Detail:      "The compaction model is unavailable.",
 		AllowedArgs: []string{"reason"},
+	},
+	CodeSettingsReasoningEffortInvalid: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The selected reasoning level is not supported by the chat model.",
+		AllowedArgs: []string{"effort"},
+	},
+	CodeSettingsReasoningUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The chat model's reasoning options could not be resolved. Please try again.",
+	},
+	CodeContextBudgetUnsatisfied: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "The model context window is too small for this request.",
+	},
+	CodeContextProtectedOverflow: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "Required context exceeds the model context budget.",
 	},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
@@ -165,6 +232,34 @@ var catalog = map[Code]Definition{
 	CodeConnectorOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The connector operation failed. Please try again.",
+	},
+	CodeSkillBuiltinReadOnly: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Built-in Skills are managed by Memoh and cannot be edited or deleted.",
+	},
+	CodeSkillNameTaken: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "A Skill with this name already exists.",
+	},
+	CodeSkillSaveFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Skill could not be saved.",
+	},
+	CodeRegistryUnavailable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The Supermarket is unavailable.",
+	},
+	CodeRegistryPackageNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The Skill package was not found.",
+	},
+	CodeRegistryPackageInvalid: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The Skill package is invalid.",
+	},
+	CodeRegistryPackageInstallFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Skill package could not be installed.",
 	},
 	CodeProfileTitleModelInvalid: {
 		HTTPStatus: http.StatusBadRequest,
@@ -298,6 +393,34 @@ var catalog = map[Code]Definition{
 	CodeSessionHistoryInconsistent: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation history could not be reconciled. Refresh and try again.",
+	},
+	CodeAgentResponseTimeout: {
+		HTTPStatus: http.StatusGatewayTimeout,
+		Detail:     "The model did not respond in time. Please try again.",
+	},
+	CodeAgentResponseInterrupted: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The model response was interrupted. Please try again.",
+	},
+	CodeContextLifecycleRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The context lifecycle request is invalid.",
+	},
+	CodeContextLifecycleAuthenticationRequired: {
+		HTTPStatus: http.StatusUnauthorized,
+		Detail:     "Sign in to view context lifecycle diagnostics.",
+	},
+	CodeContextLifecycleAccessDenied: {
+		HTTPStatus: http.StatusForbidden,
+		Detail:     "You do not have access to context lifecycle diagnostics.",
+	},
+	CodeContextLifecycleNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "The conversation was not found.",
+	},
+	CodeContextLifecycleLoadFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "Context lifecycle diagnostics could not be loaded. Please try again.",
 	},
 }
 

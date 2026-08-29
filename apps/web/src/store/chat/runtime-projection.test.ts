@@ -157,7 +157,7 @@ describe('runtime projection', () => {
     ])
   })
 
-  it('resets messages and projects terminal errors from run patches', () => {
+  it('resets messages and projects stable terminal error codes from run patches', () => {
     const initial = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
       messages: [{ id: 0, type: 'text', content: 'partial' }],
     })))
@@ -166,7 +166,8 @@ describe('runtime projection', () => {
       run: {
         run_id: 'run-1',
         status: 'lost',
-        error: 'runtime owner lease expired',
+        error_code: 'agent.response_timeout',
+        error: 'The model did not respond in time. Please try again.',
       },
     }))
 
@@ -174,8 +175,35 @@ describe('runtime projection', () => {
     expect(terminal.transcript.streaming).toBe(false)
     expect(terminal.transcript.turns[1]).toMatchObject({
       role: 'assistant',
-      messages: [{ id: 0, type: 'error', content: 'runtime owner lease expired' }],
+      messages: [{
+        id: 0,
+        type: 'error',
+        code: 'agent.response_timeout',
+        content: 'The model did not respond in time. Please try again.',
+      }],
     })
+  })
+
+  it('projects a durable code-only failure after backend recovery', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'errored',
+      request_user_turn: undefined,
+      error_code: 'agent.response_interrupted',
+      error: undefined,
+      messages: [],
+    })))
+
+    expect(state.transcript.turns).toEqual([
+      expect.objectContaining({
+        role: 'assistant',
+        messages: [{
+          id: 0,
+          type: 'error',
+          code: 'agent.response_interrupted',
+          content: '',
+        }],
+      }),
+    ])
   })
 
   it('keeps one stable tool block when a later upsert changes its local id', () => {
@@ -265,5 +293,35 @@ describe('runtime projection', () => {
     expect(isRuntimeRunActive('aborting')).toBe(true)
     expect(isRuntimeRunActive('completed')).toBe(false)
     expect(isRuntimeRunActive('lost')).toBe(false)
+  })
+})
+
+describe('idle settled run projection', () => {
+  it('emits no assistant turn for a settled run without streamed content', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'completed',
+      messages: null as unknown as RuntimeCurrentRunView['messages'],
+    })))
+
+    expect(state.transcript.turns.map(turn => turn.role)).toEqual(['user'])
+  })
+
+  it('emits an empty slice when the settled run also lacks a user turn', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'completed',
+      messages: null as unknown as RuntimeCurrentRunView['messages'],
+      request_user_turn: undefined,
+    })))
+
+    expect(state.transcript.turns).toEqual([])
+  })
+
+  it('still projects the assistant turn for an active run without content yet', () => {
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+      status: 'running',
+      messages: [],
+    })))
+
+    expect(state.transcript.turns.map(turn => turn.role)).toEqual(['user', 'assistant'])
   })
 })

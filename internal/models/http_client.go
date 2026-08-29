@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/version"
+	"github.com/felinics/memoh/internal/version"
 )
 
 const (

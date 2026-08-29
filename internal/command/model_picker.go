@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 const (
@@ -166,7 +166,7 @@ func (h *Handler) buildModelPickerResult(cc CommandContext) (*Result, error) {
 			{cc.T("cmd.status.fieldModel"), modelDisplayName(item)},
 			{cc.T("cmd.model.fieldProvider"), h.resolveProviderName(cc, item.ProviderID)},
 		}
-		// Active-role markers (chat/heartbeat) are a chip, not bracketed into the
+		// The active chat marker is a chip, not bracketed into the
 		// name — brackets would force the whole name into a monospace code span.
 		if markers := modelMarkers(item.ID, settingsResp); len(markers) > 0 {
 			for i, marker := range markers {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/memohai/memoh/internal/channelaccess"
+	"github.com/felinics/memoh/internal/channelaccess"
 )
 
 // LinkConsumer binds the calling channel identity to the web user that owns a

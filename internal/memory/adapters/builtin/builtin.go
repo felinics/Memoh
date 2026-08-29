@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/internal/mcp"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/mcp"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 const (
@@ -18,26 +18,21 @@ const (
 
 	defaultMemoryToolLimit = 8
 	maxMemoryToolLimit     = 50
-	maxSourceRefsPerResult = 8
+	maxSourceRefsPerResult = adapters.MaxSourceRefsPerToolResult
 )
 
-// sourceRefsPayload renders the most recent source refs of a memory item as
-// tool-facing {session_id, message_id} objects.
+// sourceRefsPayload renders a bounded set of retained, scoped source refs as
+// tool-facing {session_id, message_id} objects. Validation happens before the
+// projection cap so malformed tail entries cannot crowd out valid refs.
 func sourceRefsPayload(refs []string) []map[string]any {
-	if len(refs) > maxSourceRefsPerResult {
-		refs = refs[len(refs)-maxSourceRefsPerResult:]
-	}
+	refs = adapters.RetainSourceRefs(refs, maxSourceRefsPerResult)
 	out := make([]map[string]any, 0, len(refs))
 	for _, ref := range refs {
-		sessionID, messageID := adapters.ParseSourceRef(ref)
-		if messageID == "" {
+		sessionID, messageID, ok := adapters.ParseScopedSourceRef(ref)
+		if !ok {
 			continue
 		}
-		entry := map[string]any{"message_id": messageID}
-		if sessionID != "" {
-			entry["session_id"] = sessionID
-		}
-		out = append(out, entry)
+		out = append(out, map[string]any{"session_id": sessionID, "message_id": messageID})
 	}
 	return out
 }
@@ -306,7 +301,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 		BotID:            botID,
 		Metadata:         metadata,
 		Filters:          filters,
-		SourceMessageIDs: req.SourceMessageIDs,
+		SourceMessageIDs: sourceMessageIDsFromMessages(req.Messages),
 	}); err != nil {
 		p.logger.Warn("store memory failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}

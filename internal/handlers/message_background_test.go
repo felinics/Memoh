@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/background"
 )
 
 func TestBackgroundTaskSnapshotsUseDescriptionAsSpawnLabel(t *testing.T) {

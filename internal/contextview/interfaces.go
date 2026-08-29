@@ -3,7 +3,7 @@ package contextview
 import (
 	"context"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 type CollectRequest struct {
@@ -39,9 +39,18 @@ type Selector interface {
 type SelectionResult struct {
 	Selected []contextfrag.ContextFrag
 	Dropped  []contextfrag.ContextFrag
-	Edited   []contextfrag.ContextEditTrace
-	Warnings []contextfrag.ValidationWarning
-	Summary  SelectionSummary
+	// FatalError stops rendering while allowing Builder to return the partial,
+	// content-light selection audit accumulated before the failure.
+	FatalError error
+	// TrimNotice reports that budget trimming dropped history and the builder
+	// must splice the trim notice into Selected at TrimNoticeIndex.
+	TrimNotice      bool
+	TrimNoticeIndex int
+	Edited          []contextfrag.ContextEditTrace
+	// EditReasons maps an edited fragment ID to its stable selection reason.
+	EditReasons map[string]string
+	Warnings    []contextfrag.ValidationWarning
+	Summary     SelectionSummary
 }
 
 type IntentProfile struct {

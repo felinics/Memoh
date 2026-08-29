@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	dbpkg "github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/memory/migrate"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
 )
 
 func TestPostgresUpsertNodeConcurrentlyUnionsSourceRefs(t *testing.T) {
@@ -40,7 +41,7 @@ func TestPostgresUpsertNodeConcurrentlyUnionsSourceRefs(t *testing.T) {
 	}{
 		{`INSERT INTO users (id, username, email) VALUES ($1, $2, $3)`, []any{userID, username, email}},
 		{`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`, []any{teamID, userID}},
-		{`INSERT INTO bots (team_id, id, owner_user_id, type, name) VALUES ($1, $2, $3, 'personal', $4)`, []any{teamID, botID, userID, botName}},
+		{`INSERT INTO bots (team_id, id, owner_user_id, name) VALUES ($1, $2, $3, $4)`, []any{teamID, botID, userID, botName}},
 	}
 	for _, statement := range fixtureStatements {
 		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
@@ -103,5 +104,23 @@ func TestPostgresUpsertNodeConcurrentlyUnionsSourceRefs(t *testing.T) {
 	sort.Strings(want)
 	if fmt.Sprint(got.SourceMessageIDs) != fmt.Sprint(want) {
 		t.Fatalf("source refs = %v, want %v", got.SourceMessageIDs, want)
+	}
+
+	for i := 0; i < adapters.MaxSourceRefsPerMemory+20; i++ {
+		node := base
+		node.SourceMessageIDs = []string{fmt.Sprintf("session/capped-%03d", i)}
+		if _, err := store.UpsertNode(ctx, node); err != nil {
+			t.Fatalf("bounded upsert %d: %v", i, err)
+		}
+	}
+	got, err = store.GetNode(ctx, botID, nodeID)
+	if err != nil {
+		t.Fatalf("get bounded node: %v", err)
+	}
+	if len(got.SourceMessageIDs) != adapters.MaxSourceRefsPerMemory {
+		t.Fatalf("bounded source refs = %d, want %d", len(got.SourceMessageIDs), adapters.MaxSourceRefsPerMemory)
+	}
+	if got.SourceMessageIDs[0] != "session/capped-020" || got.SourceMessageIDs[len(got.SourceMessageIDs)-1] != "session/capped-083" {
+		t.Fatalf("bounded refs retained range = %q...%q", got.SourceMessageIDs[0], got.SourceMessageIDs[len(got.SourceMessageIDs)-1])
 	}
 }

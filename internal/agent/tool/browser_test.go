@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 type computerDisplayExecServer struct {
@@ -201,7 +201,7 @@ func TestBrowserSchemasAreStrict(t *testing.T) {
 
 func TestBuildScreenshotResultDropsShareMetadata(t *testing.T) {
 	p := &BrowserProvider{dataRoot: "/data"}
-	result := p.buildScreenshotBytesResult(t.Context(), "", []byte("png-bytes"), "image/png", "/data/computer-screenshots", nil)
+	result := p.buildScreenshotBytesResult(t.Context(), "", []byte("png-bytes"), "image/png", "/data/.memoh/screenshots", nil)
 	asMap, ok := result.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map result, got %T", result)
@@ -216,6 +216,28 @@ func TestBuildScreenshotResultDropsShareMetadata(t *testing.T) {
 	text, _ := content[0]["text"].(string)
 	if !strings.HasPrefix(text, "Screenshot saved to ") && !strings.HasPrefix(text, "Screenshot captured") {
 		t.Fatalf("unexpected screenshot text: %q", text)
+	}
+}
+
+func TestScreenshotDirUsesSharedMemohDirectory(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		dataRoot string
+		want     string
+	}{
+		{name: "default", want: "/data/.memoh/screenshots"},
+		{name: "configured", dataRoot: "/workspace/data/", want: "/workspace/data/.memoh/screenshots"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := &BrowserProvider{dataRoot: tt.dataRoot}
+			if got := provider.screenshotDir(); got != tt.want {
+				t.Fatalf("screenshotDir() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

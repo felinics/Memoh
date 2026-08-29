@@ -7,11 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 // Each half is reached by asserting the one injected session runtime, and a
@@ -119,7 +118,7 @@ func (a *wsMessageAdmission) build(ctx context.Context, handle sessionruntime.Ru
 	}
 	request := a.request
 	request.TurnID = handle.TurnID
-	request.Attachments = wsRuntimeUIAttachments(a.botID, a.attachments)
+	request.Attachments = chatview.UIAttachmentsFromTurnAttachments(a.botID, a.attachments)
 	return sessionruntime.RunAdmissionView{RequestUserTurn: &request}, nil
 }
 
@@ -159,7 +158,7 @@ func (a *wsReplacementAdmission) build(ctx context.Context, handle sessionruntim
 		}
 		replacement := *a.replacementUserTurn
 		replacement.TurnID = handle.TurnID
-		replacement.Attachments = wsRuntimeUIAttachments(a.botID, a.attachments)
+		replacement.Attachments = chatview.UIAttachmentsFromTurnAttachments(a.botID, a.attachments)
 		operation.ReplacementUserTurn = &replacement
 	}
 	return sessionruntime.RunAdmissionView{Operation: operation}, nil
@@ -167,41 +166,6 @@ func (a *wsReplacementAdmission) build(ctx context.Context, handle sessionruntim
 
 func (a *wsReplacementAdmission) preparedAttachments() []turn.Attachment {
 	return a.attachments
-}
-
-func wsRuntimeUIAttachments(botID string, attachments []turn.Attachment) []chatview.UIAttachment {
-	uiAttachments := make([]chatview.UIAttachment, 0, len(attachments))
-	for _, attachment := range attachments {
-		kind := strings.ToLower(strings.TrimSpace(attachment.Type))
-		if kind == "" {
-			switch mime := strings.ToLower(strings.TrimSpace(attachment.Mime)); {
-			case strings.HasPrefix(mime, "image/"):
-				kind = "image"
-			case strings.HasPrefix(mime, "audio/"):
-				kind = "audio"
-			case strings.HasPrefix(mime, "video/"):
-				kind = "video"
-			default:
-				kind = "file"
-			}
-		}
-		contentHash := strings.TrimSpace(attachment.ContentHash)
-		// Runtime state carries media references, not the uploaded bytes. Copying
-		// Base64 here would duplicate every attachment into the live backend.
-		uiAttachments = append(uiAttachments, chatview.UIAttachment{
-			ID:          contentHash,
-			Type:        kind,
-			Path:        strings.TrimSpace(attachment.Path),
-			URL:         strings.TrimSpace(attachment.URL),
-			Name:        strings.TrimSpace(attachment.Name),
-			ContentHash: contentHash,
-			BotID:       strings.TrimSpace(botID),
-			Mime:        strings.TrimSpace(attachment.Mime),
-			Size:        attachment.Size,
-			StorageKey:  attachmentpkg.MetadataString(attachment.Metadata, attachmentpkg.MetadataKeyStorageKey),
-		})
-	}
-	return uiAttachments
 }
 
 // runtimeSubscribeAuthorizer re-checks this connection's read access to one

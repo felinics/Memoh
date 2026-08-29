@@ -3,7 +3,7 @@ package channel
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel/inbound"
+	"github.com/felinics/memoh/internal/channel/inbound"
 )
 
 func TestNewSessionCreatedByUserIDPrefersCreator(t *testing.T) {

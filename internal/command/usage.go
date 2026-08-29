@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 var usageRangePresets = []string{"24h", "7d", "30d", "all"}
@@ -74,15 +74,13 @@ func (h *Handler) buildUsageGroup() *CommandGroup {
 				label string
 				rows  []dbsqlc.GetTokenUsageByDayAndTypeRow
 			}
-			buckets := []bucket{{label: cc.T("cmd.usage.bucketChat")}, {label: cc.T("cmd.usage.bucketDiscuss")}, {label: cc.T("cmd.usage.bucketHeartbeat")}, {label: cc.T("cmd.usage.bucketSchedule")}}
+			buckets := []bucket{{label: cc.T("cmd.usage.bucketChat")}, {label: cc.T("cmd.usage.bucketDiscuss")}, {label: cc.T("cmd.usage.bucketSchedule")}}
 			for _, r := range rows {
 				switch r.SessionType {
 				case "discuss":
 					buckets[1].rows = append(buckets[1].rows, r)
-				case "heartbeat":
-					buckets[2].rows = append(buckets[2].rows, r)
 				case "schedule":
-					buckets[3].rows = append(buckets[3].rows, r)
+					buckets[2].rows = append(buckets[2].rows, r)
 				default:
 					buckets[0].rows = append(buckets[0].rows, r)
 				}

@@ -3,9 +3,10 @@
 package contextfrag
 
 import (
+	"errors"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // Kind identifies the semantic source and intent of a context fragment.
@@ -24,6 +25,7 @@ const (
 	KindNativeImage          Kind = "native_image"
 	KindSkillsCatalog        Kind = "skills_catalog"
 	KindHookContext          Kind = "hook_context"
+	KindInjectedMessage      Kind = "injected_message"
 	KindBackgroundSummary    Kind = "background_summary"
 	KindACPContext           Kind = "acp_context"
 
@@ -32,6 +34,29 @@ const (
 	KindMemoryRecall        Kind = "memory_recall"
 	KindConversationSummary Kind = "conversation_summary"
 )
+
+// BackgroundSummaryMessagePrefix marks the per-step user message that carries
+// KindBackgroundSummary content. The agent rebuilds that message between steps
+// (remove by prefix, append the fresh summary) so running-task status never
+// rewrites the cached system prefix, and step reselection recognizes it as a
+// status notice rather than a conversation turn.
+const BackgroundSummaryMessagePrefix = "[Background tasks]\n"
+
+// IsBackgroundSummaryCarrier reports whether msg is the per-step background
+// summary carrier: a user message holding exactly one unadorned text part that
+// starts with BackgroundSummaryMessagePrefix. The agent's between-step removal
+// and step reselection share this single contract so a message one side would
+// remove is never content the other side protects.
+func IsBackgroundSummaryCarrier(msg sdk.Message) bool {
+	if msg.Role != sdk.MessageRoleUser || len(msg.Content) != 1 {
+		return false
+	}
+	part, ok := msg.Content[0].(sdk.TextPart)
+	return ok &&
+		part.CacheControl == nil &&
+		part.ProviderMetadata == nil &&
+		strings.HasPrefix(part.Text, BackgroundSummaryMessagePrefix)
+}
 
 // WorkspaceInstructionAnchor is the heading that marks where the workspace
 // instruction section begins in a flattened system prompt string; it must
@@ -148,6 +173,11 @@ const (
 	RetentionOptional    RetentionTier = "optional"
 )
 
+var (
+	ErrProtectedContextOverflow = errors.New("protected context exceeds its budget")
+	ErrBudgetUnsatisfied        = errors.New("context budget reserves exceed the available window")
+)
+
 // DropPriority orders fragments within one retention tier. Higher values drop
 // before lower values, so lower values survive longer under policy pressure.
 type DropPriority int
@@ -216,13 +246,12 @@ type Provenance struct {
 type AttentionReason string
 
 const (
-	AttentionDirect    AttentionReason = "direct"
-	AttentionMention   AttentionReason = "mention"
-	AttentionReply     AttentionReason = "reply"
-	AttentionCommand   AttentionReason = "command"
-	AttentionSchedule  AttentionReason = "schedule"
-	AttentionHeartbeat AttentionReason = "heartbeat"
-	AttentionPassive   AttentionReason = "passive"
+	AttentionDirect   AttentionReason = "direct"
+	AttentionMention  AttentionReason = "mention"
+	AttentionReply    AttentionReason = "reply"
+	AttentionCommand  AttentionReason = "command"
+	AttentionSchedule AttentionReason = "schedule"
+	AttentionPassive  AttentionReason = "passive"
 )
 
 // Scope preserves IM/group-chat topology separately from rendered text.
@@ -330,6 +359,7 @@ type Manifest struct {
 	Items              []ManifestItem      `json:"items,omitempty"`
 	SelectionDecisions []SelectionDecision `json:"selection_decisions,omitempty"`
 	Selection          *SelectionTrace     `json:"selection,omitempty"`
+	BudgetPlan         *ContextBudgetPlan  `json:"budget_plan,omitempty"`
 	CachePlan          *CachePlan          `json:"cache_plan,omitempty"`
 	Mutations          *MutationLedger     `json:"mutations,omitempty"`
 }
@@ -391,6 +421,21 @@ type ToolDefAccounting struct {
 	Name          string `json:"name"`
 	Bytes         int    `json:"bytes"`
 	TokenEstimate int    `json:"token_estimate"`
+}
+
+// ContextBudgetPlan records the numeric input-envelope allocation used for one
+// provider-bound turn. Raw prompt content never enters this accounting view.
+type ContextBudgetPlan struct {
+	Estimator                    string `json:"estimator"`
+	EstimatorSafetyFactorPercent int    `json:"estimator_safety_factor_percent"`
+	Window                       int    `json:"window"`
+	OutputReserve                int    `json:"output_reserve"`
+	OutputReserveResolution      string `json:"output_reserve_resolution,omitempty"`
+	ToolDefsCost                 int    `json:"tool_defs_cost"`
+	CurrentRequestCost           int    `json:"current_request_cost"`
+	SystemBudget                 int    `json:"system_budget"`
+	ActualSystemCost             int    `json:"actual_system_cost"`
+	HistoryBudget                int    `json:"history_budget"`
 }
 
 type SelectionTrace struct {

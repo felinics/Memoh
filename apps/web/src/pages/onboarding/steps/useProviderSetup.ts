@@ -32,7 +32,6 @@ export function useProviderSetup(options: {
     api_key: '',
     base_url: '',
     client_type: 'openai-completions',
-    default_capabilities: suggestedModelCompatibilities('openai-completions'),
   })
 
   const formError = ref('')
@@ -111,11 +110,11 @@ export function useProviderSetup(options: {
   })
 
   const { mutateAsync: importModels, isLoading: importing } = useMutation({
-    mutation: async (providerId: string) => {
+    mutation: async (payload: { providerId: string, defaultCompatibilities?: string[] }) => {
       const { data } = await postProvidersByIdImportModels({
-        path: { id: providerId },
-        ...(!options.selectedPreset() && {
-          body: { default_compatibilities: formValues.value.default_capabilities ?? ['tool-call'] },
+        path: { id: payload.providerId },
+        ...(payload.defaultCompatibilities !== undefined && {
+          body: { default_compatibilities: payload.defaultCompatibilities },
         }),
         throwOnError: true,
       })
@@ -167,8 +166,8 @@ export function useProviderSetup(options: {
   function initFormValues(preset: ProviderPreset | null) {
     suppressDirtyReset.value = true
     formValues.value = preset
-      ? { name: preset.name, api_key: '', base_url: preset.baseUrl, client_type: preset.clientType, default_capabilities: suggestedModelCompatibilities(preset.clientType) }
-      : { name: '', api_key: '', base_url: '', client_type: 'openai-completions', default_capabilities: suggestedModelCompatibilities('openai-completions') }
+      ? { name: preset.name, api_key: '', base_url: preset.baseUrl, client_type: preset.clientType }
+      : { name: '', api_key: '', base_url: '', client_type: 'openai-completions' }
     formError.value = ''
     resetFormState()
   }
@@ -289,7 +288,7 @@ export function useProviderSetup(options: {
     }
   }
 
-  async function runImport(providerId: string) {
+  async function runImport(providerId: string, defaultCompatibilities?: string[]) {
     errorState.value = null
     errorDetail.value = ''
 
@@ -315,7 +314,7 @@ export function useProviderSetup(options: {
 
     let importFailed = false
     try {
-      await importModels(providerId)
+      await importModels({ providerId, defaultCompatibilities })
     } catch {
       importFailed = true
     }
@@ -353,7 +352,10 @@ export function useProviderSetup(options: {
     try {
       const providerId = await ensureProviderCreated()
       if (!providerId) return
-      await runImport(providerId)
+      const defaultCompatibilities = options.selectedPreset()
+        ? undefined
+        : suggestedModelCompatibilities(formValues.value.client_type)
+      await runImport(providerId, defaultCompatibilities)
     } finally {
       saving.value = false
     }
@@ -364,7 +366,10 @@ export function useProviderSetup(options: {
       await saveAndNext()
       return
     }
-    await runImport(createdProviderId.value)
+    const defaultCompatibilities = options.selectedPreset()
+      ? undefined
+      : suggestedModelCompatibilities(formValues.value.client_type)
+    await runImport(createdProviderId.value, defaultCompatibilities)
   }
 
   async function onEnterManual() {
@@ -397,14 +402,7 @@ export function useProviderSetup(options: {
   }
 
   watch(
-    () => formValues.value.client_type,
-    clientType => {
-      formValues.value.default_capabilities = suggestedModelCompatibilities(clientType)
-    },
-  )
-
-  watch(
-    () => [formValues.value.name, formValues.value.api_key, formValues.value.base_url, formValues.value.client_type, formValues.value.default_capabilities],
+    () => [formValues.value.name, formValues.value.api_key, formValues.value.base_url, formValues.value.client_type],
     () => {
       if (suppressDirtyReset.value) return
       if (manualMode.value) return

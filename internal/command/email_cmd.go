@@ -3,7 +3,7 @@ package command
 import (
 	"strings"
 
-	emailpkg "github.com/memohai/memoh/internal/email"
+	emailpkg "github.com/felinics/memoh/internal/email"
 )
 
 func (h *Handler) buildEmailGroup() *CommandGroup {
@@ -121,7 +121,7 @@ func (h *Handler) buildEmailGroup() *CommandGroup {
 				if item.Error != "" {
 					note = truncate(item.Error, 80)
 				}
-				// "Sent" is the expected outcome; flag only failures, like heartbeat.
+				// "Sent" is the expected outcome; flag only failures.
 				fields := []kv{{cc.T("cmd.email.fieldSubject"), truncate(item.Subject, 40)}}
 				if st := strings.ToLower(strings.TrimSpace(item.Status)); st != "sent" && !isSuccessStatus(item.Status) {
 					fields = append(fields, kv{cc.T("cmd.common.fieldStatus"), humanizeStatusT(cc, item.Status)})

@@ -56,9 +56,9 @@ func TestLocalizerTParams(t *testing.T) {
 		t.Errorf("param substitution = %q", got)
 	}
 	// Numeric params stringify.
-	zh := New("zh").T("cmd.settings.heartbeatOnEvery", map[string]any{"minutes": 30})
-	if zh != "开 · 每 30 分钟" {
-		t.Errorf("zh heartbeat = %q", zh)
+	zh := New("zh").T("cmd.cron.everyNMinutes", map[string]any{"n": 30})
+	if zh != "每 30 分钟" {
+		t.Errorf("zh cron interval = %q", zh)
 	}
 }
 

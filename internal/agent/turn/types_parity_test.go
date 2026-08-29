@@ -5,12 +5,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/attachment"
 )
 
 func TestContractTypesAreOwnedByTurn(t *testing.T) {
-	const wantPackage = "github.com/memohai/memoh/internal/agent/turn"
+	const wantPackage = "github.com/felinics/memoh/internal/agent/turn"
 	values := []any{
 		turn.Attachment{},
 		turn.SkillActivation{},
@@ -59,24 +59,24 @@ func TestContractWireJSONShapes(t *testing.T) {
 			value: turn.SkillActivation{
 				Skills: []turn.SkillActivationSkill{{
 					Name: "skill", DisplayName: "Skill", Description: "desc",
-					SourceKind: "plugin", State: "effective",
+					SourceKind: "registry", State: "effective",
 				}},
 				Prompt: "prompt",
 			},
-			want: `{"skills":[{"name":"skill","display_name":"Skill","description":"desc","source_kind":"plugin","state":"effective"}],"prompt":"prompt"}`,
+			want: `{"skills":[{"name":"skill","display_name":"Skill","description":"desc","source_kind":"registry","state":"effective"}],"prompt":"prompt"}`,
 		},
 		{
 			name: "skill activation skill",
 			value: turn.SkillActivationSkill{
 				Name: "skill", DisplayName: "Skill", Description: "desc",
-				SourceKind: "plugin", State: "effective",
+				SourceKind: "registry", State: "effective",
 			},
-			want: `{"name":"skill","display_name":"Skill","description":"desc","source_kind":"plugin","state":"effective"}`,
+			want: `{"name":"skill","display_name":"Skill","description":"desc","source_kind":"registry","state":"effective"}`,
 		},
 		{
 			name: "requested skill context remains internal",
 			value: turn.RequestedSkillContext{
-				Name: "skill", Description: "desc", Content: "body", SourceKind: "plugin",
+				Name: "skill", Description: "desc", Content: "body", SourceKind: "registry",
 				OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
 			},
 			want: `{}`,
@@ -301,8 +301,8 @@ func TestContentPartHasValue(t *testing.T) {
 
 func TestSkillActivationFiltersAndDeduplicatesSkills(t *testing.T) {
 	items := []turn.RequestedSkillContext{
-		{Name: " skill-a ", Description: " desc ", SourceKind: " plugin ", Identity: "same"},
-		{Name: "duplicate", SourceKind: "plugin", Identity: " same "},
+		{Name: " skill-a ", Description: " desc ", SourceKind: " registry ", Identity: "same"},
+		{Name: "duplicate", SourceKind: "registry", Identity: " same "},
 		{Name: " skill-b ", SourceKind: "builtin"},
 		{Name: "skill-b", SourceKind: " builtin "},
 		{Name: "  "},
@@ -313,7 +313,7 @@ func TestSkillActivationFiltersAndDeduplicatesSkills(t *testing.T) {
 		Skills: []turn.SkillActivationSkill{
 			{
 				Name: "skill-a", DisplayName: "skill-a", Description: "desc",
-				SourceKind: "plugin", State: "effective",
+				SourceKind: "registry", State: "effective",
 			},
 			{
 				Name: "skill-b", DisplayName: "skill-b",
@@ -325,7 +325,7 @@ func TestSkillActivationFiltersAndDeduplicatesSkills(t *testing.T) {
 		t.Fatalf("NewSkillActivation() = %#v, want %#v", got, want)
 	}
 
-	const wantJSON = `{"skills":[{"name":"skill-a","display_name":"skill-a","description":"desc","source_kind":"plugin","state":"effective"},{"name":"skill-b","display_name":"skill-b","source_kind":"builtin","state":"effective"}]}`
+	const wantJSON = `{"skills":[{"name":"skill-a","display_name":"skill-a","description":"desc","source_kind":"registry","state":"effective"},{"name":"skill-b","display_name":"skill-b","source_kind":"builtin","state":"effective"}]}`
 	gotJSON, err := json.Marshal(got)
 	if err != nil {
 		t.Fatal(err)

@@ -18,9 +18,9 @@ describe('formatProbeError', () => {
     expect(out.endsWith('…')).toBe(true)
   })
 
-  it('strips html from an embedded [body: …] payload', () => {
+  it('drops html from an embedded [body: …] payload', () => {
     const raw = 'service error (404): [body: <!doctype html><html><head><style>p{color:red}</style></head><body><p>Not Found</p></body></html>]'
-    expect(formatProbeError(raw, 'x')).toBe('service error (404): · Not Found')
+    expect(formatProbeError(raw, 'x')).toBe('service error (404):')
   })
 
   it('keeps only the head when the body collapses to nothing', () => {

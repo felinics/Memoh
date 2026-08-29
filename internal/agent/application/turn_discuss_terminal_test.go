@@ -7,10 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/apperror"
+	sdk "github.com/felinics/twilight/sdk"
+
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 type canceledDiscussTerminalReporter struct {
@@ -24,6 +27,24 @@ func (f *canceledDiscussTerminalReporter) Stream(ctx context.Context, _ native.R
 		defer close(ch)
 		<-ctx.Done()
 		ch <- native.StreamEvent{Type: native.EventAgentAbort}
+	}()
+	return ch
+}
+
+type canceledDiscussMessagesReporter struct {
+	started chan struct{}
+}
+
+func (f *canceledDiscussMessagesReporter) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
+	ch := make(chan native.StreamEvent, 1)
+	close(f.started)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		ch <- native.StreamEvent{
+			Type:     native.EventAgentAbort,
+			Messages: json.RawMessage(`[{"role":"assistant","content":"partial answer"}]`),
+		}
 	}()
 	return ch
 }
@@ -62,13 +83,28 @@ func (*fullBufferTerminalDiscussStreamer) Stream(context.Context, native.RunConf
 	return ch
 }
 
-func TestDiscussCancellationWithDetachedTerminalEventFinishesAborted(t *testing.T) {
-	agent := &canceledDiscussTerminalReporter{started: make(chan struct{})}
+func TestDiscussCancellationPersistsAndPublishesTerminalOnDetachedContext(t *testing.T) {
+	agent := &canceledDiscussMessagesReporter{started: make(chan struct{})}
 	resolver := &fakeDiscussService{
 		resolveResult: ResolveRunConfigResult{ModelID: "model-1"},
 	}
 	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
 	admitter := a.sessionRuntime.(*scriptedAdmitter)
+	stored := make(chan struct{}, 1)
+	published := make(chan struct{}, 1)
+	a.turnHooks.storeRound = func(
+		ctx context.Context,
+		_, _, _, _, _ string,
+		_ []sdk.Message,
+		_ string,
+		_ *contextfrag.LifecycleHolder,
+	) error {
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		stored <- struct{}{}
+		return nil
+	}
 	a.publishTurnEvent = func(
 		ctx context.Context,
 		handle sessionruntime.RunHandle,
@@ -76,6 +112,9 @@ func TestDiscussCancellationWithDetachedTerminalEventFinishesAborted(t *testing.
 	) error {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
+		}
+		if event.Type == native.EventAgentAbort {
+			published <- struct{}{}
 		}
 		return admitter.PublishAgentEvent(ctx, handle, event)
 	}
@@ -94,9 +133,84 @@ func TestDiscussCancellationWithDetachedTerminalEventFinishesAborted(t *testing.
 	for streamErr := range h.Errs() {
 		t.Fatalf("canceled discuss run exposed stream error: %v", streamErr)
 	}
+	select {
+	case <-stored:
+	default:
+		t.Fatal("canceled discuss terminal messages were not stored")
+	}
+	select {
+	case <-published:
+	default:
+		t.Fatal("canceled discuss terminal event was not published")
+	}
 
-	if got := admitter.awaitFinish(t); got.status != sessionruntime.RunStatusAborted {
-		t.Fatalf("status = %q, want %q", got.status, sessionruntime.RunStatusAborted)
+	if got := admitter.awaitFinish(t); got.status != "" {
+		t.Fatalf("status = %q, want runtime-derived aborted status", got.status)
+	}
+}
+
+func TestDiscussTimeoutPersistsNonemptyAbortSnapshotBeforeFailure(t *testing.T) {
+	agent := &canceledDiscussMessagesReporter{started: make(chan struct{})}
+	resolver := &fakeDiscussService{
+		resolveResult: ResolveRunConfigResult{ModelID: "model-1"},
+	}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	a.streamIdleTimeout = 10 * time.Millisecond
+	admitter := a.sessionRuntime.(*scriptedAdmitter)
+
+	var storedMessages []sdk.Message
+	var order []string
+	a.turnHooks.storeRound = func(
+		_ context.Context,
+		_, _, _, _, _ string,
+		messages []sdk.Message,
+		_ string,
+		_ *contextfrag.LifecycleHolder,
+	) error {
+		order = append(order, "store")
+		storedMessages = append([]sdk.Message(nil), messages...)
+		return nil
+	}
+	a.publishTurnEvent = func(
+		ctx context.Context,
+		handle sessionruntime.RunHandle,
+		event native.StreamEvent,
+	) error {
+		switch event.Type {
+		case native.EventError:
+			order = append(order, "failure")
+		case native.EventAgentEnd, native.EventAgentAbort:
+			order = append(order, "terminal")
+		}
+		return admitter.PublishAgentEvent(ctx, handle, event)
+	}
+
+	h, err := a.StartTurn(context.Background(), discussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-agent.started:
+	case <-time.After(time.Second):
+		t.Fatal("discuss turn did not reach native streaming")
+	}
+	for range h.Events() {
+	}
+	var streamErr error
+	for err := range h.Errs() {
+		streamErr = err
+	}
+
+	assertSDKMessagesEqual(t, storedMessages, []sdk.Message{sdk.AssistantMessage("partial answer")})
+	if len(order) != 2 || order[0] != "store" || order[1] != "failure" {
+		t.Fatalf("terminal order = %v, want persistence before timeout failure", order)
+	}
+	if got := apperror.CodeOf(streamErr); got != apperror.CodeAgentResponseTimeout {
+		t.Fatalf("stream error code = %q, want %q: %v", got, apperror.CodeAgentResponseTimeout, streamErr)
+	}
+	finish := admitter.awaitFinish(t)
+	if finish.status != sessionruntime.RunStatusErrored || finish.message != string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("runtime finish = %#v, want errored response timeout", finish)
 	}
 }
 

@@ -6,8 +6,8 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {

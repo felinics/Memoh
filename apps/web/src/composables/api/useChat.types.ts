@@ -5,6 +5,7 @@ export type Bot = BotsBot
 export interface SessionSummary {
   id: string
   bot_id: string
+  bot_agent_id?: string
   route_id?: string
   channel_type?: string
   type?: string
@@ -157,6 +158,11 @@ export interface UIReasoningMessage {
   id: number
   type: 'reasoning'
   content: string
+  reasoning_timing?: UIReasoningTiming
+}
+
+export interface UIReasoningTiming {
+  duration_ms: number
 }
 
 export interface UIToolMessage {
@@ -259,6 +265,7 @@ export interface UIAttachmentsMessage {
 export interface UIErrorMessage {
   id: number
   type: 'error'
+  code?: string
   content: string
 }
 
@@ -354,6 +361,7 @@ export interface UIStreamErrorEvent {
   run_id?: string
   invocation_id?: string
   session_id?: string
+  code?: string
   message: string
   feedback?: unknown
 }
@@ -408,6 +416,7 @@ export interface RuntimeCurrentRunView {
   updated_at: string
   messages: UIMessage[]
   request_user_turn?: UIUserTurn
+  error_code?: string
   error?: string
   steer?: RuntimeSteerState
   operation?: RuntimeRunOperation
@@ -425,6 +434,7 @@ export interface RuntimeSnapshot {
 export interface RuntimeCurrentRunPatch {
   run_id: string
   status?: RuntimeRunStatus
+  error_code?: string
   error?: string
   steer?: RuntimeSteerState
   updated_at?: string

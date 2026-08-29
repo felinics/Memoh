@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 type fakeRuntime struct {

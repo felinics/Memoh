@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // UIMessageType identifies the frontend-friendly message block type.
@@ -16,6 +16,7 @@ const (
 	UIMessageReasoning   UIMessageType = "reasoning"
 	UIMessageTool        UIMessageType = "tool"
 	UIMessageAttachments UIMessageType = "attachments"
+	UIMessageError       UIMessageType = "error"
 )
 
 // UIAttachment is the normalized attachment shape used by the web frontend.
@@ -65,7 +66,16 @@ type UIMessage struct {
 	UserInput         *UIUserInput         `json:"user_input,omitempty"`
 	Attachments       []UIAttachment       `json:"attachments,omitempty"`
 	Background        *UIBackgroundTask    `json:"background_task,omitempty"`
+	ReasoningTiming   *UIReasoningTiming   `json:"reasoning_timing,omitempty"`
+	Code              string               `json:"code,omitempty"`
 } // @name conversation.UIMessage
+
+// UIReasoningTiming is the persisted server observation for one reasoning
+// block. It is absent for legacy rows and non-streaming responses whose block
+// boundaries were not observable.
+type UIReasoningTiming struct {
+	DurationMS int64 `json:"duration_ms"`
+} // @name conversation.UIReasoningTiming
 
 type UIExecutionLocation struct {
 	Kind string `json:"kind"`

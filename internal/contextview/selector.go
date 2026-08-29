@@ -1,6 +1,6 @@
 package contextview
 
-import contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+import contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 
 type FragmentSelector struct{}
 
@@ -27,33 +27,164 @@ func mustKeepProviderSystemFrag(frag contextfrag.ContextFrag) bool {
 }
 
 func (*FragmentSelector) Select(frags []contextfrag.ContextFrag, profile IntentProfile, budget BudgetEnvelope) SelectionResult {
-	collected := len(frags)
-	selected, gated := applyTrustGate(frags, profile)
-	selected, superseded := resolveConflictGroups(selected)
-	selected, budgetDropped, edits, warnings := enforceFragBudgets(selected, profile)
-	selected, exchangeDropped, exchangeEdits := applyToolExchangePolicy(selected, budget.ToolExchange)
-
-	result := SelectionResult{
-		Selected: selected,
-		Edited:   append(edits, exchangeEdits...),
-		Warnings: warnings,
-		Summary: SelectionSummary{
-			TotalCollected: collected,
-			TotalSelected:  len(selected),
-		},
+	frags, gated := applyTrustGate(frags, profile)
+	frags, superseded := resolveConflictGroups(frags)
+	frags, fragBudgetDropped, fragBudgetEdits, fragBudgetWarnings := enforceFragBudgets(
+		frags,
+		profile,
+		systemBudgetPlanActive(profile, budget.Plan),
+	)
+	frags, systemBudgetDropped, fatalError := enforceSystemBudget(frags, profile, budget.Plan, fragBudgetDropped)
+	if fatalError != nil {
+		tagged := tagFragments(frags, profile)
+		result := selectionResultFromTaggedReasons(tagged, allSelectedIndexes(tagged), nil)
+		result.FatalError = fatalError
+		return finalizeSelection(
+			result,
+			profile,
+			gated,
+			superseded,
+			fragBudgetDropped,
+			fragBudgetEdits,
+			fragBudgetWarnings,
+			systemBudgetDropped,
+			nil,
+			nil,
+		)
 	}
+	if budget.Plan != nil {
+		budget.MaxTokens = budget.Plan.HistoryBudget
+	}
+
+	var exchangeDropped []contextfrag.ContextFrag
+	var exchangeEdits []contextfrag.ContextEditTrace
+	frags, exchangeDropped, exchangeEdits = applyToolExchangePolicy(frags, budget.ToolExchange)
+	tagged := tagFragments(frags, profile)
+	historyBudget := budget.MaxTokens
+	trimDrops := budgetTrimDrops
+	hardBudget := budget.Plan != nil || budget.EnforceProtectedBudget
+	if hardBudget {
+		for i := range tagged {
+			tagged[i].Tokens = contextfrag.ResolveProviderBudgetFragTokens(tagged[i].Frag)
+		}
+		protectedCost := protectedHistoryTokenCost(tagged)
+		if protectedCost > historyBudget {
+			result := selectionResultFromTaggedReasons(tagged, allSelectedIndexes(tagged), nil)
+			result.FatalError = contextfrag.ErrProtectedContextOverflow
+			return finalizeSelection(
+				result,
+				profile,
+				gated,
+				superseded,
+				fragBudgetDropped,
+				fragBudgetEdits,
+				fragBudgetWarnings,
+				systemBudgetDropped,
+				exchangeDropped,
+				exchangeEdits,
+			)
+		}
+		historyBudget -= protectedCost
+		trimDrops = budgetTrimDropsEnabled
+	}
+
+	if drops, dropReasons := trimDrops(tagged, historyBudget, budget.RecentProtectTokens); len(drops) > 0 {
+		if hardBudget && hasSpatialBudgetDrop(dropReasons) {
+			noticeCost := contextfrag.ResolveProviderBudgetFragTokens(TrimNoticeFrag(contextfrag.Scope{}))
+			if noticeCost > historyBudget {
+				result := selectionResultFromTaggedReasons(tagged, keptIndexes(tagged, drops), dropReasons)
+				result.FatalError = contextfrag.ErrProtectedContextOverflow
+				return finalizeSelection(
+					result,
+					profile,
+					gated,
+					superseded,
+					fragBudgetDropped,
+					fragBudgetEdits,
+					fragBudgetWarnings,
+					systemBudgetDropped,
+					exchangeDropped,
+					exchangeEdits,
+				)
+			}
+			drops, dropReasons = budgetTrimDropsEnabled(
+				tagged,
+				historyBudget-noticeCost,
+				budget.RecentProtectTokens,
+			)
+		}
+		result := selectionResultFromTaggedReasons(tagged, keptIndexes(tagged, drops), dropReasons)
+		if hasSpatialBudgetDrop(dropReasons) {
+			result.TrimNotice = true
+			result.TrimNoticeIndex = trimNoticeIndex(tagged, drops)
+		}
+		return finalizeSelection(
+			result,
+			profile,
+			gated,
+			superseded,
+			fragBudgetDropped,
+			fragBudgetEdits,
+			fragBudgetWarnings,
+			systemBudgetDropped,
+			exchangeDropped,
+			exchangeEdits,
+		)
+	}
+
+	result := selectionResultFromTaggedReasons(tagged, allSelectedIndexes(tagged), nil)
+	return finalizeSelection(
+		result,
+		profile,
+		gated,
+		superseded,
+		fragBudgetDropped,
+		fragBudgetEdits,
+		fragBudgetWarnings,
+		systemBudgetDropped,
+		exchangeDropped,
+		exchangeEdits,
+	)
+}
+
+func finalizeSelection(
+	result SelectionResult,
+	profile IntentProfile,
+	gated []contextfrag.ContextFrag,
+	superseded []conflictLoser,
+	fragBudgetDropped []fragBudgetDrop,
+	fragBudgetEdits []fragBudgetEdit,
+	fragBudgetWarnings []contextfrag.ValidationWarning,
+	systemBudgetDropped []contextfrag.ContextFrag,
+	exchangeDropped []contextfrag.ContextFrag,
+	exchangeEdits []contextfrag.ContextEditTrace,
+) SelectionResult {
+	result.Edited = append(result.Edited, exchangeEdits...)
+	for _, edit := range fragBudgetEdits {
+		result.Edited = append(result.Edited, edit.trace)
+		if result.EditReasons == nil {
+			result.EditReasons = make(map[string]string, len(fragBudgetEdits))
+		}
+		result.EditReasons[edit.fragID] = edit.reason
+	}
+	result.Warnings = append(result.Warnings, fragBudgetWarnings...)
 	for _, frag := range gated {
 		result.recordDrop(frag, "trust_gate:"+string(frag.Slot)+"_requires_"+string(profile.SlotTrustFloors[frag.Slot]))
 	}
 	for _, loser := range superseded {
 		result.recordDrop(loser.frag, "precedence:superseded_by_"+loser.winnerID)
 	}
-	for _, dropped := range budgetDropped {
+	for _, dropped := range fragBudgetDropped {
 		result.recordDrop(dropped.frag, dropped.reason)
+	}
+	for _, frag := range systemBudgetDropped {
+		result.recordDrop(frag, systemBudgetDropReason)
 	}
 	for _, frag := range exchangeDropped {
 		result.recordDrop(frag, toolExchangeDropReason)
 	}
+	result.Summary.TotalCollected = len(result.Selected) + len(result.Dropped)
+	result.Summary.TotalSelected = len(result.Selected)
 	result.Summary.TotalDropped = len(result.Dropped)
 	return result
 }
@@ -65,6 +196,118 @@ func (r *SelectionResult) recordDrop(frag contextfrag.ContextFrag, reason string
 		Ref:    frag.Ref,
 		Reason: reason,
 	})
+}
+
+func selectionResultFromTaggedReasons(
+	tagged []TaggedFrag,
+	selectedIndexes map[int]bool,
+	reasonOverrides map[int]string,
+) SelectionResult {
+	selected := make([]contextfrag.ContextFrag, 0, len(selectedIndexes))
+	dropped := make([]contextfrag.ContextFrag, 0, len(tagged)-len(selectedIndexes))
+	dropRecords := make([]DropRecord, 0, len(tagged)-len(selectedIndexes))
+	for i, taggedFrag := range tagged {
+		if selectedIndexes[i] {
+			selected = append(selected, taggedFrag.Frag)
+			continue
+		}
+		reason := reasonOverrides[i]
+		if reason == "" {
+			reason = selectionDropReason(taggedFrag)
+		}
+		dropped = append(dropped, taggedFrag.Frag)
+		dropRecords = append(dropRecords, DropRecord{
+			FragID: taggedFrag.Frag.ID,
+			Ref:    taggedFrag.Frag.Ref,
+			Reason: reason,
+		})
+	}
+	return SelectionResult{
+		Selected: selected,
+		Dropped:  dropped,
+		Summary: SelectionSummary{
+			TotalCollected: len(tagged),
+			TotalSelected:  len(selected),
+			TotalDropped:   len(dropped),
+			DropReasons:    dropRecords,
+		},
+	}
+}
+
+func keptIndexes(tagged []TaggedFrag, drops map[int]bool) map[int]bool {
+	kept := make(map[int]bool, len(tagged)-len(drops))
+	for i := range tagged {
+		if !drops[i] {
+			kept[i] = true
+		}
+	}
+	return kept
+}
+
+// trimNoticeIndex returns the closure-safe position nearest to the first kept
+// fragment that follows the last dropped fragment.
+func trimNoticeIndex(tagged []TaggedFrag, drops map[int]bool) int {
+	lastDropped := -1
+	for i := range tagged {
+		if drops[i] {
+			lastDropped = i
+		}
+	}
+	if lastDropped < 0 {
+		return -1
+	}
+	kept := make([]contextfrag.ContextFrag, 0, len(tagged)-len(drops))
+	base := -1
+	for i := range tagged {
+		if drops[i] {
+			continue
+		}
+		if base < 0 && i > lastDropped {
+			base = len(kept)
+		}
+		kept = append(kept, tagged[i].Frag)
+	}
+	if base < 0 {
+		base = len(kept)
+	}
+	return closureSafeNoticeIndex(kept, base)
+}
+
+func closureSafeNoticeIndex(kept []contextfrag.ContextFrag, base int) int {
+	open := make(map[string]int)
+	fallback := 0
+	for pos := 0; pos <= len(kept); pos++ {
+		if len(open) == 0 {
+			if pos >= base {
+				return pos
+			}
+			fallback = pos
+		}
+		if pos == len(kept) {
+			break
+		}
+		for _, id := range fragToolCallIDs(kept[pos]) {
+			open[id]++
+		}
+		for _, id := range fragToolResultCallIDs(kept[pos]) {
+			if count, ok := open[id]; ok {
+				if count <= 1 {
+					delete(open, id)
+				} else {
+					open[id] = count - 1
+				}
+			}
+		}
+	}
+	return fallback
+}
+
+func allSelectedIndexes(tagged []TaggedFrag) map[int]bool {
+	selected := make(map[int]bool, len(tagged))
+	for i := range tagged {
+		selected[i] = true
+	}
+	return selected
 }
 
 func applyTrustGate(frags []contextfrag.ContextFrag, profile IntentProfile) ([]contextfrag.ContextFrag, []contextfrag.ContextFrag) {
@@ -123,19 +366,4 @@ func conflictBeats(challenger, incumbent contextfrag.ContextFrag) bool {
 		return challengerTrust > incumbentTrust
 	}
 	return true
-}
-
-func isMustKeepFrag(frag contextfrag.ContextFrag, profile IntentProfile) bool {
-	if frag.Budget.Overflow == contextfrag.OverflowKeep {
-		return true
-	}
-	if profile.MustKeepFrag != nil && profile.MustKeepFrag(frag) {
-		return true
-	}
-	for _, slot := range profile.MustKeepSlots {
-		if frag.Slot == slot {
-			return true
-		}
-	}
-	return false
 }

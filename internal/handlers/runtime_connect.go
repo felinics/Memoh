@@ -16,8 +16,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"google.golang.org/grpc/connectivity"
 
-	"github.com/memohai/memoh/internal/userruntime"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/userruntime"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

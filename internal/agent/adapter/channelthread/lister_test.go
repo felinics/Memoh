@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	session "github.com/memohai/memoh/internal/chat/thread"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type fakeLister struct {

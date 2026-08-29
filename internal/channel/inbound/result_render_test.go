@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func listResult(total, page, pageSize int) *command.Result {
@@ -210,7 +210,7 @@ func TestRenderChoicesViewUsesSingleColumnForLongLabels(t *testing.T) {
 			Choices: &command.ChoicesView{
 				Title: "settings",
 				Choices: []command.ListItem{
-					{Label: "Turn heartbeat off now", Action: &command.ItemAction{Resource: "settings", Action: "update"}},
+					{Label: "Disable workspace display now", Action: &command.ItemAction{Resource: "settings", Action: "update"}},
 					{Label: "Ask before tools", Action: &command.ItemAction{Resource: "settings", Action: "update"}},
 				},
 			},
@@ -304,7 +304,7 @@ func TestFormatStartWelcomeMessageTelegramGroup(t *testing.T) {
 
 func TestFormatNewSessionMessage(t *testing.T) {
 	got := formatNewSessionMessage(i18n.New("en"), "chat", command.CurrentContext{
-		ChatModel: "Claude Opus 4.7 (Anthropic)", HeartbeatModel: "DeepSeek V4 (DeepSeek)",
+		ChatModel:       "Claude Opus 4.7 (Anthropic)",
 		ReasoningEffort: "medium", ContextWindow: "128.0K",
 	}, "")
 	// A fresh-start card confirms the full setup: model (+provider), reasoning,
@@ -312,7 +312,6 @@ func TestFormatNewSessionMessage(t *testing.T) {
 	for _, want := range []string{
 		"**✨ New chat started.**",
 		"Model: Claude Opus 4.7 (Anthropic)",
-		"Heartbeat: DeepSeek V4 (DeepSeek)",
 		"Reasoning: medium",
 		"Context: 128.0K tokens",
 	} {
@@ -334,17 +333,14 @@ func TestFormatNewSessionMessage(t *testing.T) {
 		t.Errorf("channel.StripInlineMarkup left markers: %q", plain)
 	}
 
-	// Reasoning off is still shown (it sets expectations on a fresh start); no
-	// heartbeat and no known context window are omitted.
-	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", HeartbeatModel: "(none)", ReasoningEffort: models.ReasoningEffortDisable}, "")
+	// Reasoning off is still shown (it sets expectations on a fresh start); an
+	// unknown context window is omitted.
+	off := formatNewSessionMessage(i18n.New("en"), "discussion", command.CurrentContext{ChatModel: "(none)", ReasoningEffort: models.ReasoningEffortDisable}, "")
 	if !strings.Contains(off, "Reasoning: off") {
 		t.Errorf("reasoning state should be confirmed on the fresh-start card: %s", off)
 	}
 	if !strings.Contains(off, "**✨ New discussion started.**") {
 		t.Errorf("mode label not reflected: %s", off)
-	}
-	if strings.Contains(off, "Heartbeat:") {
-		t.Errorf("'(none)' heartbeat should be omitted: %s", off)
 	}
 	if strings.Contains(off, "Context:") {
 		t.Errorf("unknown context window should be omitted: %s", off)

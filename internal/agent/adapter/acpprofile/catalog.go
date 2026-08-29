@@ -3,9 +3,9 @@
 package acpprofile
 
 import (
-	runtimeprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/chat/thread"
+	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/thread"
 )
 
 // Catalog exposes the channel-safe subset of the ACP runtime profile registry.

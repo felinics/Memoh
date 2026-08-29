@@ -1,7 +1,6 @@
 // Package templates holds the built-in files seeded into every agent
-// workspace on first boot: the AGENTS.md persona scaffold, memory and
-// heartbeat notes, and the default .memoh directory (hooks, built-in
-// skills).
+// workspace on first boot: the AGENTS.md persona scaffold, memory notes, and
+// the default .memoh directory (hooks, built-in skills).
 //
 // The canonical copy lives in the workspace/ subdirectory. The Server embeds
 // this package and applies it through the provider-neutral workspace bootstrap

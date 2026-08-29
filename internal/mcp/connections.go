@@ -9,30 +9,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 // Connection represents a stored MCP connection for a bot.
 type Connection struct {
-	ID                            string           `json:"id"`
-	BotID                         string           `json:"bot_id"`
-	Name                          string           `json:"name"`
-	Type                          string           `json:"type"`
-	Config                        map[string]any   `json:"config"`
-	Active                        bool             `json:"is_active"`
-	Status                        string           `json:"status"`
-	ToolsCache                    []ToolDescriptor `json:"tools_cache"`
-	LastProbedAt                  *time.Time       `json:"last_probed_at,omitempty"`
-	StatusMessage                 string           `json:"status_message"`
-	AuthType                      string           `json:"auth_type"`
-	ManagedByPluginInstallationID string           `json:"managed_by_plugin_installation_id,omitempty"`
-	ManagedResourceKey            string           `json:"managed_resource_key,omitempty"`
-	Visible                       bool             `json:"visible"`
-	Metadata                      map[string]any   `json:"metadata,omitempty"`
-	CreatedAt                     time.Time        `json:"created_at"`
-	UpdatedAt                     time.Time        `json:"updated_at"`
+	ID            string           `json:"id"`
+	BotID         string           `json:"bot_id"`
+	Name          string           `json:"name"`
+	Type          string           `json:"type"`
+	Config        map[string]any   `json:"config"`
+	Active        bool             `json:"is_active"`
+	Status        string           `json:"status"`
+	ToolsCache    []ToolDescriptor `json:"tools_cache"`
+	LastProbedAt  *time.Time       `json:"last_probed_at,omitempty"`
+	StatusMessage string           `json:"status_message"`
+	AuthType      string           `json:"auth_type"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
 }
 
 // UpsertRequest accepts standard mcpServers item format.
@@ -74,13 +70,6 @@ type ListResponse struct {
 // ExportResponse returns connections in standard mcpServers format.
 type ExportResponse struct {
 	MCPServers map[string]MCPServerEntry `json:"mcpServers"`
-}
-
-type ManagedConnectionRequest struct {
-	InstallationID string
-	ResourceKey    string
-	Visible        bool
-	Metadata       map[string]any
 }
 
 // ConnectionService handles CRUD operations for MCP connections.
@@ -198,64 +187,6 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 		Config:   configPayload,
 		IsActive: active,
 		AuthType: authType,
-	})
-	if err != nil {
-		return Connection{}, err
-	}
-	return normalizeMCPConnection(row)
-}
-
-func (s *ConnectionService) CreateManaged(ctx context.Context, botID string, req UpsertRequest, managed ManagedConnectionRequest) (Connection, error) {
-	if s.queries == nil {
-		return Connection{}, errors.New("mcp queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return Connection{}, err
-	}
-	installationUUID, err := db.ParseUUID(managed.InstallationID)
-	if err != nil {
-		return Connection{}, err
-	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return Connection{}, errors.New("name is required")
-	}
-	resourceKey := strings.TrimSpace(managed.ResourceKey)
-	if resourceKey == "" {
-		return Connection{}, errors.New("managed resource key is required")
-	}
-	mcpType, config, err := inferTypeAndConfig(req)
-	if err != nil {
-		return Connection{}, err
-	}
-	configPayload, err := json.Marshal(config)
-	if err != nil {
-		return Connection{}, err
-	}
-	active := true
-	if req.Active != nil {
-		active = *req.Active
-	}
-	authType := strings.TrimSpace(req.AuthType)
-	if authType == "" {
-		authType = "none"
-	}
-	metadataPayload, err := json.Marshal(normalizeMap(managed.Metadata))
-	if err != nil {
-		return Connection{}, err
-	}
-	row, err := s.queries.CreateManagedMCPConnection(ctx, sqlc.CreateManagedMCPConnectionParams{
-		BotID:                         botUUID,
-		Name:                          name,
-		Type:                          mcpType,
-		Config:                        configPayload,
-		IsActive:                      active,
-		AuthType:                      authType,
-		ManagedByPluginInstallationID: installationUUID,
-		ManagedResourceKey:            resourceKey,
-		Visible:                       managed.Visible,
-		Metadata:                      metadataPayload,
 	})
 	if err != nil {
 		return Connection{}, err
@@ -418,43 +349,6 @@ func (s *ConnectionService) Delete(ctx context.Context, botID, id string) error 
 	})
 }
 
-func (s *ConnectionService) SetPluginConnectionsActive(ctx context.Context, botID, installationID string, active bool) error {
-	if s.queries == nil {
-		return errors.New("mcp queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	installationUUID, err := db.ParseUUID(installationID)
-	if err != nil {
-		return err
-	}
-	return s.queries.UpdateMCPConnectionsActiveByPlugin(ctx, sqlc.UpdateMCPConnectionsActiveByPluginParams{
-		BotID:                         botUUID,
-		ManagedByPluginInstallationID: installationUUID,
-		IsActive:                      active,
-	})
-}
-
-func (s *ConnectionService) DeleteByPlugin(ctx context.Context, botID, installationID string) error {
-	if s.queries == nil {
-		return errors.New("mcp queries not configured")
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return err
-	}
-	installationUUID, err := db.ParseUUID(installationID)
-	if err != nil {
-		return err
-	}
-	return s.queries.DeleteMCPConnectionsByPlugin(ctx, sqlc.DeleteMCPConnectionsByPluginParams{
-		BotID:                         botUUID,
-		ManagedByPluginInstallationID: installationUUID,
-	})
-}
-
 // BatchDelete removes multiple MCP connections by IDs. Invalid IDs are skipped; at least one must succeed for no error.
 func (s *ConnectionService) BatchDelete(ctx context.Context, botID string, ids []string) error {
 	if s.queries == nil {
@@ -481,38 +375,26 @@ func normalizeMCPConnection(row sqlc.McpConnection) (Connection, error) {
 	if err != nil {
 		return Connection{}, err
 	}
-	metadata, err := decodeMCPConfig(row.Metadata)
-	if err != nil {
-		return Connection{}, err
-	}
 	toolsCache, _ := decodeToolsCache(row.ToolsCache)
 	var lastProbedAt *time.Time
 	if row.LastProbedAt.Valid {
 		t := db.TimeFromPg(row.LastProbedAt)
 		lastProbedAt = &t
 	}
-	var managedByPluginInstallationID string
-	if row.ManagedByPluginInstallationID.Valid {
-		managedByPluginInstallationID = row.ManagedByPluginInstallationID.String()
-	}
 	return Connection{
-		ID:                            row.ID.String(),
-		BotID:                         row.BotID.String(),
-		Name:                          strings.TrimSpace(row.Name),
-		Type:                          strings.TrimSpace(row.Type),
-		Config:                        config,
-		Active:                        row.IsActive,
-		Status:                        strings.TrimSpace(row.Status),
-		ToolsCache:                    toolsCache,
-		LastProbedAt:                  lastProbedAt,
-		StatusMessage:                 strings.TrimSpace(row.StatusMessage),
-		AuthType:                      strings.TrimSpace(row.AuthType),
-		ManagedByPluginInstallationID: managedByPluginInstallationID,
-		ManagedResourceKey:            strings.TrimSpace(row.ManagedResourceKey),
-		Visible:                       row.Visible,
-		Metadata:                      metadata,
-		CreatedAt:                     db.TimeFromPg(row.CreatedAt),
-		UpdatedAt:                     db.TimeFromPg(row.UpdatedAt),
+		ID:            row.ID.String(),
+		BotID:         row.BotID.String(),
+		Name:          strings.TrimSpace(row.Name),
+		Type:          strings.TrimSpace(row.Type),
+		Config:        config,
+		Active:        row.IsActive,
+		Status:        strings.TrimSpace(row.Status),
+		ToolsCache:    toolsCache,
+		LastProbedAt:  lastProbedAt,
+		StatusMessage: strings.TrimSpace(row.StatusMessage),
+		AuthType:      strings.TrimSpace(row.AuthType),
+		CreatedAt:     db.TimeFromPg(row.CreatedAt),
+		UpdatedAt:     db.TimeFromPg(row.UpdatedAt),
 	}, nil
 }
 
@@ -565,13 +447,6 @@ func decodeMCPConfig(raw []byte) (map[string]any, error) {
 		payload = map[string]any{}
 	}
 	return payload, nil
-}
-
-func normalizeMap(value map[string]any) map[string]any {
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
 }
 
 // sameOAuthResource reports whether an existing connection and a new config

@@ -20,8 +20,8 @@
       v-if="form.runTarget === 'existing_session'"
       :label="t('bots.schedule.execution.session')"
     >
-      <!-- Only chat and schedule sessions can host a scheduled run; heartbeat,
-           discuss and subagent threads back their own loops. -->
+      <!-- Only chat and schedule sessions can host a scheduled run; discuss
+           and subagent threads back their own loops. -->
       <SessionSelect
         v-model="sessionModel"
         :bot-id="botId"
@@ -134,7 +134,7 @@ import {
 import {
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
   getAcpProfiles,
-  getBotsById,
+  getBotsByBotIdAgents,
   getBotsByBotIdSettings,
   getModels,
   getProviders,
@@ -144,12 +144,14 @@ import type {
   AcpclientModelInfo,
   AcpclientReasoningEffortInfo,
   AcpprofilePublicProfile,
+  BotagentsBotAgent,
   ModelsGetResponse,
   ProvidersGetResponse,
   SessionSession,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { isACPAgentEnabled, normalizeACPAgentID } from '@/utils/acp'
+import { normalizeACPAgentID } from '@/utils/acp'
+import { botAgentName, botAgentProvider } from '@/utils/bot-agent'
 import { normalizedRuntimeType } from '@/store/chat-list.utils'
 import { useWorkdirsStore } from '@/store/workdirs'
 import SessionSelect from '@/components/session-select/index.vue'
@@ -157,10 +159,8 @@ import ModelSelect from './model-select.vue'
 import {
   EFFORT_LABELS,
   REASONING_EFFORT_DISABLE,
-  availableEffortsForMode,
-  nearestEffortToMedium,
-  resolveEffortLevels,
-  resolveThinkingMode,
+  reconcileStoredEffort,
+  selectableEfforts,
 } from './reasoning-effort'
 
 // ScheduleExecutionForm is the editor-owned execution state this component
@@ -169,6 +169,7 @@ export interface ScheduleExecutionForm {
   runTarget: 'new_session' | 'existing_session'
   targetSessionId: string
   runtimeType: '' | 'acp_agent'
+  botAgentId: string
   acpAgentId: string
   modelId: string
   acpModelId: string
@@ -203,7 +204,7 @@ const botDefaultModelID = ref<string | undefined>(undefined)
 const models = ref<ModelsGetResponse[]>([])
 const providers = ref<ProvidersGetResponse[]>([])
 const acpProfiles = ref<AcpprofilePublicProfile[]>([])
-const botMetadata = ref<Record<string, unknown> | undefined>(undefined)
+const botAgents = ref<BotagentsBotAgent[]>([])
 
 interface ACPCatalog {
   agentId: string
@@ -219,9 +220,7 @@ const chatModels = computed(() =>
   models.value.filter((m) => m.type === 'chat' && m.enable !== false),
 )
 
-const enabledAgents = computed(() =>
-  acpProfiles.value.filter((profile) => isACPAgentEnabled(botMetadata.value, profile.id)),
-)
+const enabledAgents = computed(() => botAgents.value.filter(agent => agent.enabled !== false && !!agent.id))
 
 const selectableWorkdirs = computed(() => {
   const live = workdirsStore.workdirsFor(props.botId).filter((wd) => !wd.archived && !!wd.id)
@@ -249,8 +248,9 @@ const selectedSessionAgentID = computed(() => {
 const selectedSessionSummary = computed(() => {
   if (!selectedSession.value) return ''
   if (selectedSessionIsACP.value) {
-    const agent = acpProfiles.value.find((p) => p.id === selectedSessionAgentID.value)
-    return t('bots.schedule.execution.sessionRuntimeAcp', { agent: agent?.display_name || selectedSessionAgentID.value })
+    const botAgent = botAgents.value.find(agent => agent.id === selectedSession.value?.bot_agent_id)
+    const profile = acpProfiles.value.find(item => normalizeACPAgentID(item.id) === selectedSessionAgentID.value)
+    return t('bots.schedule.execution.sessionRuntimeAcp', { agent: botAgent ? botAgentName(botAgent) : (profile?.display_name || selectedSessionAgentID.value) })
   }
   return t('bots.schedule.execution.sessionRuntimeNative')
 })
@@ -277,6 +277,7 @@ const runTargetModel = computed({
     props.form.runTarget = next
     props.form.targetSessionId = ''
     props.form.runtimeType = ''
+    props.form.botAgentId = ''
     props.form.acpAgentId = ''
     props.form.modelId = ''
     props.form.acpModelId = ''
@@ -298,7 +299,7 @@ const sessionModel = computed({
 })
 
 // The new-session picker folds runtime + model + agent into one list:
-// '' (bot default) | '<model uuid>' | 'acp:<agent id>'.
+// '' (bot default) | '<model uuid>' | 'acp:<BotAgent uuid>'.
 const runtimePickerModels = computed<ModelsGetResponse[]>(() => [
   ...chatModels.value,
   ...enabledAgents.value.flatMap<ModelsGetResponse>((agent) => {
@@ -307,7 +308,7 @@ const runtimePickerModels = computed<ModelsGetResponse[]>(() => [
     return [{
       id: `${ACP_VALUE_PREFIX}${id}`,
       model_id: id,
-      name: agent.display_name || id,
+      name: botAgentName(agent),
       provider_id: ACP_PROVIDER_ID,
       type: 'chat',
     }]
@@ -349,12 +350,12 @@ const modelHelp = computed(() => {
 // selection they can change.
 watch([modelRequired, chatModels], ([required, available]) => {
   if (!required || props.form.modelId || available.length === 0) return
-  props.form.modelId = available[0].id ?? ''
+  props.form.modelId = available[0]?.id ?? ''
 }, { immediate: true })
 
 const runtimeModel = computed({
   get: () => {
-    if (props.form.runtimeType === 'acp_agent' && props.form.acpAgentId) return `${ACP_VALUE_PREFIX}${props.form.acpAgentId}`
+    if (props.form.runtimeType === 'acp_agent' && props.form.botAgentId) return `${ACP_VALUE_PREFIX}${props.form.botAgentId}`
     return props.form.modelId || ''
   },
   set: (value: string) => {
@@ -362,10 +363,14 @@ const runtimeModel = computed({
     props.form.acpModelId = ''
     props.form.reasoningEffort = ''
     if (value.startsWith(ACP_VALUE_PREFIX)) {
+      const botAgentId = value.slice(ACP_VALUE_PREFIX.length)
+      const agent = enabledAgents.value.find(item => item.id === botAgentId)
       props.form.runtimeType = 'acp_agent'
-      props.form.acpAgentId = value.slice(ACP_VALUE_PREFIX.length)
+      props.form.botAgentId = botAgentId
+      props.form.acpAgentId = botAgentProvider(agent)
     } else {
       props.form.runtimeType = ''
+      props.form.botAgentId = ''
       props.form.acpAgentId = ''
       props.form.modelId = value
     }
@@ -421,18 +426,17 @@ const workdirModel = computed({
   },
 })
 
-// The selected native model's advertised tiers, plus the explicit "off" the
-// composer offers. Without a model the bot/session default applies whole —
-// there is nothing to override, so the picker shows no reasoning footer.
-const nativeEffortTiers = computed<string[]>(() => {
-  if (acpAgentInPlay.value || !props.form.modelId) return []
+// The selected native model's tiers, as the server resolved them. The client
+// no longer derives efforts from raw model config — that duplication is what
+// let the picker and the wire disagree. Without a model the bot/session
+// default applies whole, so the picker shows no reasoning footer.
+const nativeReasoning = computed(() => {
+  if (acpAgentInPlay.value || !props.form.modelId) return null
   const model = chatModels.value.find((m) => m.id === props.form.modelId)
-  if (!model) return []
-  const config = model.config as Parameters<typeof resolveThinkingMode>[0]
-  if (resolveThinkingMode(config) === 'none') return []
-  const clientType = providers.value.find((p) => p.id === model.provider_id)?.client_type
-  return availableEffortsForMode(resolveThinkingMode(config), resolveEffortLevels(config, clientType))
+  return model?.reasoning ?? null
 })
+
+const nativeEffortTiers = computed<string[]>(() => selectableEfforts(nativeReasoning.value))
 
 const nativeReasoningOptions = computed<{ value: string; label: string }[]>(() =>
   nativeEffortTiers.value.map((effort) => ({
@@ -464,10 +468,10 @@ watch(nativeReasoningOptions, (options) => {
   if (options.length === 0) return
   const current = props.form.reasoningEffort
   if (current && options.some((option) => option.value === current)) return
-  const tiers = nativeEffortTiers.value.filter((effort) => effort !== REASONING_EFFORT_DISABLE)
-  props.form.reasoningEffort = tiers.includes('medium')
-    ? 'medium'
-    : nearestEffortToMedium(tiers) || REASONING_EFFORT_DISABLE
+  // The server's resolved default is the seed; reconcileStoredEffort also maps
+  // a stale stored tier onto it, mirroring what the chat composer does.
+  props.form.reasoningEffort =
+    reconcileStoredEffort(current ?? '', nativeReasoning.value) || REASONING_EFFORT_DISABLE
 }, { immediate: true })
 
 watch([acpReasoningOptions, acpAgentInPlay] as const, ([options, inPlay]) => {
@@ -477,7 +481,7 @@ watch([acpReasoningOptions, acpAgentInPlay] as const, ([options, inPlay]) => {
   const agentCurrent = (acpCatalog.value?.currentEffort ?? '').trim()
   props.form.reasoningEffort = options.some((option) => option.value === agentCurrent)
     ? agentCurrent
-    : options[0].value
+    : (options[0]?.value ?? '')
 }, { immediate: true })
 
 // loadACPCatalog boots a temporary pre-session runtime — the only place an
@@ -539,6 +543,12 @@ onMounted(async () => {
     })(),
     (async () => {
       try {
+        const { data } = await getBotsByBotIdAgents({ path: { bot_id: props.botId }, throwOnError: true })
+        botAgents.value = data.items ?? []
+      } catch { botAgents.value = [] }
+    })(),
+    (async () => {
+      try {
         const { data } = await getBotsByBotIdSettings({ path: { bot_id: props.botId }, throwOnError: true })
         botDefaultModelID.value = (data as { chat_model_id?: string } | undefined)?.chat_model_id?.trim() ?? ''
       } catch {
@@ -547,12 +557,6 @@ onMounted(async () => {
         // transient settings error.
         botDefaultModelID.value = undefined
       }
-    })(),
-    (async () => {
-      try {
-        const { data } = await getBotsById({ path: { id: props.botId }, throwOnError: true })
-        botMetadata.value = (data as { metadata?: Record<string, unknown> }).metadata
-      } catch { botMetadata.value = undefined }
     })(),
   ])
 })

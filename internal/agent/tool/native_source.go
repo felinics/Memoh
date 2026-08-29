@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/mcp"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 type NativeToolSourceOptions struct {
@@ -181,7 +182,7 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if !approval.approved {
 			return s.limitMCPResult(toolName, mcp.BuildToolErrorResult(approval.message)), nil
 		}
-		if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+		if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 			return nil, err
 		}
 		result, err := tool.Execute(&sdk.ToolExecContext{
@@ -418,20 +419,22 @@ func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessio
 
 func sessionFromMCP(session mcp.ToolSessionContext) SessionContext {
 	return SessionContext{
-		BotID:               session.BotID,
-		ChatID:              firstNonEmpty(session.ChatID, session.BotID),
-		SessionID:           session.SessionID,
-		SessionType:         session.SessionType,
-		ChannelIdentityID:   session.ChannelIdentityID,
-		SessionToken:        session.SessionToken,
-		CurrentPlatform:     session.CurrentPlatform,
-		ReplyTarget:         session.ReplyTarget,
-		ConversationType:    session.ConversationType,
-		CanRequestUserInput: session.CanRequestUserInput,
-		CanListUserInput:    session.CanListUserInput,
-		SupportsImageInput:  session.SupportsImageInput,
-		SupportsFileInput:   session.SupportsFileInput,
-		IsSubagent:          session.IsSubagent,
+		BotID:                    session.BotID,
+		ChatID:                   firstNonEmpty(session.ChatID, session.BotID),
+		SessionID:                session.SessionID,
+		SessionType:              session.SessionType,
+		ChannelIdentityID:        session.ChannelIdentityID,
+		SessionToken:             session.SessionToken,
+		CurrentPlatform:          session.CurrentPlatform,
+		ReplyTarget:              session.ReplyTarget,
+		ConversationType:         session.ConversationType,
+		CanRequestUserInput:      session.CanRequestUserInput,
+		CanListUserInput:         session.CanListUserInput,
+		SupportsImageInput:       session.SupportsImageInput,
+		SupportsFileInput:        session.SupportsFileInput,
+		IsSubagent:               session.IsSubagent,
+		ReasoningStoredEffort:    session.ReasoningStoredEffort,
+		ReasoningRequestedEffort: session.ReasoningRequestedEffort,
 	}
 }
 

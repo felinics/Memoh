@@ -3,31 +3,30 @@ package core
 import (
 	"go.uber.org/fx"
 
-	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channelaccess"
-	"github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/connectors"
-	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthclients"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/providertemplates"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/userruntime"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/workdir"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/boot"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channelaccess"
+	"github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/connectors"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthclients"
+	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/providertemplates"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/skillpackages"
+	"github.com/felinics/memoh/internal/userruntime"
+	videopkg "github.com/felinics/memoh/internal/video"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // FoundationModule assembles process-neutral domain infrastructure shared by
@@ -66,7 +65,8 @@ func ServerModule() fx.Option {
 			provideOverlayProviderRegistry,
 			provideNetworkService,
 			provideNetworkController,
-			settings.NewService,
+			provideSettingsService,
+			provideBotAgentsService,
 			provideToolApprovalService,
 			providePGVectorStore,
 			provideUserRuntimeStore,
@@ -80,7 +80,6 @@ func ServerModule() fx.Option {
 			provideWorkspaceManager,
 			workdir.NewService,
 			provideBridgeProvider,
-			providePluginBridgeProvider,
 			provideMemoryLLM,
 			memprovider.NewService,
 			provideMemoryProviderRegistry,
@@ -97,7 +96,7 @@ func ServerModule() fx.Option {
 			mcp.NewConnectionService,
 			connectors.NewService,
 			connectors.NewSource,
-			pluginspkg.NewService,
+			provideSkillPackageService,
 			mcp.NewToolSessionContextStore,
 			provideAudioRegistry,
 			audiopkg.NewService,
@@ -112,11 +111,8 @@ func ServerModule() fx.Option {
 			provideAgentService,
 			provideTurnService,
 			provideScheduleTriggerer,
-			provideHeartbeatSessionCreator,
 			provideScheduleSessionCreator,
 			schedule.NewService,
-			provideHeartbeatTriggerer,
-			heartbeat.NewService,
 			compaction.NewService,
 			provideContainerdHandler,
 			provideBotBackupService,
@@ -131,15 +127,20 @@ func ServerModule() fx.Option {
 			injectToolProviders,
 			injectACPToolProviders,
 			injectBotConnectorLifecycle,
+			injectBotContainerLifecycle,
 			configureMemoryProviderRegistry,
+			injectScheduleBotAgents,
 			startProviderTemplateSync,
 			startScheduleService,
-			startHeartbeatService,
 			startContainerReconciliation,
 			startBackgroundTaskCleanup,
 			startAudioTempStoreCleanup,
 		),
 	)
+}
+
+func provideSkillPackageService(queries dbstore.Queries) *skillpackages.Service {
+	return skillpackages.NewService(queries)
 }
 
 // Module preserves the all-in-one composition API for tests and transitional

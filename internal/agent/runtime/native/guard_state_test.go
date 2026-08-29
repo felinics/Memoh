@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestToolAbortRegistryConcurrentAccess(t *testing.T) {
@@ -38,7 +38,7 @@ func TestToolEventCollectorCloseIgnoresLateAdds(t *testing.T) {
 	collector := newToolEventCollector()
 
 	for i := 0; i < 5; i++ {
-		if !collector.Add(tools.ToolStreamEvent{Type: tools.StreamEventSpawnHeartbeat}) {
+		if !collector.Add(tools.ToolStreamEvent{Type: tools.StreamEventSpawnProgress}) {
 			t.Fatalf("unexpected add failure before close, i=%d", i)
 		}
 	}
@@ -53,7 +53,7 @@ func TestToolEventCollectorCloseIgnoresLateAdds(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if collector.Add(tools.ToolStreamEvent{Type: tools.StreamEventSpawnHeartbeat}) {
+			if collector.Add(tools.ToolStreamEvent{Type: tools.StreamEventSpawnProgress}) {
 				postCloseAdds.Add(1)
 			}
 		}()

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -22,8 +23,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
-	"github.com/memohai/memoh/internal/workspace/bridgesvc"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridgesvc"
 )
 
 type failAfterDataReader struct {
@@ -178,11 +179,26 @@ func newTestReadRawClient(t *testing.T, files map[string][]byte) *Client {
 	return newTestClient(t, &rawReadTestServer{files: files})
 }
 
+func TestClientRenameMissingSourceReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{
+		DefaultWorkDir: root,
+		WorkspaceRoot:  root,
+		DataMount:      "/data",
+	}))
+	err := client.Rename(context.Background(), "/data/skills/openai/docs", "/data/skills/.staging/openai/docs/backup")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Rename() error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestClientReadRawMissingFileReturnsNotFoundImmediately(t *testing.T) {
 	t.Parallel()
 
 	client := newTestReadRawClient(t, map[string][]byte{})
-	_, err := client.ReadRaw(context.Background(), "/data/media/missing.jpg")
+	_, err := client.ReadRaw(context.Background(), "/data/.memoh/media/missing.jpg")
 	if err == nil {
 		t.Fatal("expected read raw to fail for missing file")
 	}
@@ -195,9 +211,9 @@ func TestClientReadRawPreservesFirstChunk(t *testing.T) {
 	t.Parallel()
 
 	client := newTestReadRawClient(t, map[string][]byte{
-		"/data/media/existing.jpg": []byte("hello"),
+		"/data/.memoh/media/existing.jpg": []byte("hello"),
 	})
-	reader, err := client.ReadRaw(context.Background(), "/data/media/existing.jpg")
+	reader, err := client.ReadRaw(context.Background(), "/data/.memoh/media/existing.jpg")
 	if err != nil {
 		t.Fatalf("ReadRaw returned error: %v", err)
 	}
@@ -216,9 +232,9 @@ func TestClientReadRawSupportsEmptyFile(t *testing.T) {
 	t.Parallel()
 
 	client := newTestReadRawClient(t, map[string][]byte{
-		"/data/media/empty.txt": {},
+		"/data/.memoh/media/empty.txt": {},
 	})
-	reader, err := client.ReadRaw(context.Background(), "/data/media/empty.txt")
+	reader, err := client.ReadRaw(context.Background(), "/data/.memoh/media/empty.txt")
 	if err != nil {
 		t.Fatalf("ReadRaw returned error: %v", err)
 	}
@@ -242,10 +258,10 @@ func TestClientWriteRawSupportsEmptyFile(t *testing.T) {
 		WorkspaceRoot:  root,
 		DataMount:      "/data",
 	}))
-	if _, err := client.WriteRaw(context.Background(), "/data/media/empty.txt", bytes.NewReader(nil)); err != nil {
+	if _, err := client.WriteRaw(context.Background(), "/data/.memoh/media/empty.txt", bytes.NewReader(nil)); err != nil {
 		t.Fatalf("WriteRaw() error = %v", err)
 	}
-	info, err := os.Stat(filepath.Join(root, "media", "empty.txt"))
+	info, err := os.Stat(filepath.Join(root, ".memoh", "media", "empty.txt"))
 	if err != nil {
 		t.Fatalf("stat empty file: %v", err)
 	}
@@ -258,7 +274,7 @@ func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	target := filepath.Join(root, "media", "asset.txt")
+	target := filepath.Join(root, ".memoh", "media", "asset.txt")
 	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		t.Fatalf("mkdir target: %v", err)
 	}
@@ -270,21 +286,73 @@ func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
 		WorkspaceRoot:  root,
 		DataMount:      "/data",
 	}))
-	if _, err := client.WriteRaw(context.Background(), "/data/media/asset.txt", &failAfterDataReader{}); err == nil {
+	if _, err := client.WriteRaw(context.Background(), "/data/.memoh/media/asset.txt", &failAfterDataReader{}); err == nil {
 		t.Fatal("WriteRaw() error = nil, want reader failure")
 	}
 
-	deadline := time.Now().Add(time.Second)
-	for {
-		data, readErr := os.ReadFile(target) //nolint:gosec // G304: target is constructed under t.TempDir.
-		temps, globErr := filepath.Glob(filepath.Join(filepath.Dir(target), ".asset.txt.tmp-*"))
-		if readErr == nil && globErr == nil && string(data) == "original" && len(temps) == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("atomic write cleanup: data=%q readErr=%v globErr=%v temps=%v", data, readErr, globErr, temps)
-		}
-		time.Sleep(10 * time.Millisecond)
+	// The abort frame makes cleanup synchronous: once WriteRaw returned, the
+	// bridge has already discarded its temporary file and left the target
+	// untouched, so no polling window is needed.
+	data, readErr := os.ReadFile(target) //nolint:gosec // G304: target is constructed under t.TempDir.
+	if readErr != nil || string(data) != "original" {
+		t.Fatalf("target after aborted write = (%q, %v), want the original content", data, readErr)
+	}
+	temps, globErr := filepath.Glob(filepath.Join(filepath.Dir(target), ".asset.txt.tmp-*"))
+	if globErr != nil || len(temps) != 0 {
+		t.Fatalf("temporary files after aborted write = (%v, %v), want none", temps, globErr)
+	}
+}
+
+func TestClientNoFollowRawIORejectsSymlinksAndExistingTargets(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("strict anchored nofollow I/O requires Linux openat2")
+	}
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sessions"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "victim.jsonl")
+	if err := os.WriteFile(victim, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(root, "sessions", "read-link.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(root, "sessions", "write-link.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escaped")); err != nil {
+		t.Fatal(err)
+	}
+
+	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{AllowHostAbsolute: true}))
+	if _, err := client.ReadRawNoFollow(context.Background(), root, "sessions/read-link.jsonl"); err == nil {
+		t.Fatal("ReadRawNoFollow() followed a final symlink")
+	}
+	if _, err := client.WriteRawNoFollow(context.Background(), root, "sessions/write-link.jsonl", strings.NewReader("replacement\n")); err == nil {
+		t.Fatal("WriteRawNoFollow() replaced a final symlink")
+	}
+	if _, err := client.WriteRawNoFollow(context.Background(), root, "escaped/new.jsonl", strings.NewReader("outside\n")); err == nil {
+		t.Fatal("WriteRawNoFollow() followed a parent symlink")
+	}
+	if _, err := client.WriteRawNoFollow(context.Background(), root, "new/tree/session.jsonl", strings.NewReader("restored\n")); err != nil {
+		t.Fatalf("WriteRawNoFollow() create nested file: %v", err)
+	}
+	if _, err := client.WriteRawNoFollow(context.Background(), root, "new/tree/session.jsonl", strings.NewReader("overwrite\n")); err == nil {
+		t.Fatal("WriteRawNoFollow() replaced an existing target")
+	}
+
+	if got, err := os.ReadFile(victim); err != nil || string(got) != "secret\n" { //nolint:gosec // victim is below t.TempDir.
+		t.Fatalf("outside victim changed: data=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "new.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("parent symlink received a file: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "new", "tree", "session.jsonl")); err != nil || string(got) != "restored\n" { //nolint:gosec // root is t.TempDir.
+		t.Fatalf("nested restore = %q, %v", got, err)
 	}
 }
 
@@ -549,5 +617,33 @@ func assertMetadataValue(t *testing.T, md metadata.MD, key, want string) {
 	}
 	if len(values) != 1 || values[0] != want {
 		t.Fatalf("metadata %s = %v, want %q", key, values, want)
+	}
+}
+
+type execEarlyCloseTestServer struct {
+	pb.UnimplementedContainerServiceServer
+}
+
+func (*execEarlyCloseTestServer) Exec(stream pb.ContainerService_ExecServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_STDOUT, Data: []byte("done")}); err != nil {
+		return err
+	}
+	return stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: 0})
+}
+
+func TestClientExecReturnsResultWhenServerClosesBeforeStdinLands(t *testing.T) {
+	t.Parallel()
+
+	client := newTestClient(t, &execEarlyCloseTestServer{})
+	stdin := bytes.Repeat([]byte("x"), 8<<20)
+	result, err := client.ExecWithStdin(context.Background(), "hook", "", 5, stdin)
+	if err != nil {
+		t.Fatalf("ExecWithStdin returned error: %v", err)
+	}
+	if result.Stdout != "done" || result.ExitCode != 0 {
+		t.Fatalf("exec result = %q/%d, want %q/0", result.Stdout, result.ExitCode, "done")
 	}
 }

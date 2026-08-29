@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestNearestEffortToMedium(t *testing.T) {
 	t.Parallel()
@@ -52,8 +55,11 @@ func TestIsReasoningDisabled(t *testing.T) {
 	}{
 		{effort: ReasoningEffortDisable, want: true},
 		{effort: "  disable  ", want: true},
-		{effort: ReasoningEffortNone, want: false},
+		// Legacy spelling: "none" was declarable and storable before off was
+		// unified onto the disable token, so stored values must still read as off.
+		{effort: ReasoningEffortNone, want: true},
 		{effort: "", want: false},
+		{effort: ReasoningEffortMinimal, want: false},
 	} {
 		if got := IsReasoningDisabled(tt.effort); got != tt.want {
 			t.Errorf("IsReasoningDisabled(%q) = %v, want %v", tt.effort, got, tt.want)
@@ -61,12 +67,102 @@ func TestIsReasoningDisabled(t *testing.T) {
 	}
 }
 
-func TestIsValidReasoningEffortRejectsDisable(t *testing.T) {
+// A model declares whether it can be turned off, and "disable" is how it says so.
+// The OpenAI wire spelling of that state is not declarable — adaptors translate
+// into it — so accepting both would give one state two selectable tokens again.
+func TestIsValidReasoningEffortVocabulary(t *testing.T) {
 	t.Parallel()
 
-	// ModelConfig stores wire tiers only; "disable" is a settings-level value and
-	// must never be persisted as a model capability.
-	if IsValidReasoningEffort(ReasoningEffortDisable) {
-		t.Fatal("IsValidReasoningEffort accepted the disable sentinel")
+	if !IsValidReasoningEffort(ReasoningEffortDisable) {
+		t.Error("IsValidReasoningEffort rejected disable, which a model must be able to advertise")
+	}
+	if IsValidReasoningEffort(ReasoningEffortNone) {
+		t.Error("IsValidReasoningEffort accepted none, which is a provider wire value")
+	}
+}
+
+// Declarations written before off was unified, and provider registries that have
+// not been regenerated, still advertise the legacy spelling. Normalizing on both
+// boundaries of ModelConfig is what keeps those models readable as turn-off
+// capable — dropping the value instead would hide Off from a model that supports
+// it, and would make every consumer that looks for the disable token misread it.
+func TestNormalizeModelConfigRewritesLegacyOff(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "legacy spelling becomes the declarable token",
+			in:   []string{ReasoningEffortNone, "low", "medium", "high"},
+			want: []string{ReasoningEffortDisable, "low", "medium", "high"},
+		},
+		{
+			name: "both spellings collapse to one entry",
+			in:   []string{ReasoningEffortNone, ReasoningEffortDisable, "low"},
+			want: []string{ReasoningEffortDisable, "low"},
+		},
+		{
+			name: "active tiers are untouched",
+			in:   []string{"minimal", "low", "high"},
+			want: []string{"minimal", "low", "high"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := normalizeModelConfig(ModelConfig{ReasoningEfforts: tt.in}).ReasoningEfforts
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("ReasoningEfforts = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Normalizing before validation is what lets a legacy declaration be stored at all:
+// the vocabulary no longer accepts "none", so a config carrying it would otherwise
+// be rejected on write.
+func TestLegacyOffDeclarationSurvivesValidation(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		ModelID:    "m",
+		ProviderID: "11111111-1111-1111-1111-111111111111",
+		Type:       ModelTypeChat,
+		Config:     normalizeModelConfig(ModelConfig{ReasoningEfforts: []string{ReasoningEffortNone, "high"}}),
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want a legacy declaration to normalize and pass", err)
+	}
+}
+
+// The nearest-tier fallback must never resolve an active reasoning config to off,
+// which is why the disable token is kept out of the tier ordering.
+func TestNearestEffortToMediumNeverReturnsOff(t *testing.T) {
+	t.Parallel()
+
+	if got := NearestEffortToMedium([]string{ReasoningEffortDisable}); got != "" {
+		t.Errorf("NearestEffortToMedium([disable]) = %q, want empty", got)
+	}
+	if got := NearestEffortToMedium([]string{ReasoningEffortDisable, ReasoningEffortHigh}); got != ReasoningEffortHigh {
+		t.Errorf("NearestEffortToMedium([disable high]) = %q, want high", got)
+	}
+}
+
+func TestLegacyGoogleRowIsSupportedWithoutAControl(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		ModelID: "gemini-2.5-pro",
+		Type:    ModelTypeChat,
+		Config: ModelConfig{
+			Compatibilities:  []string{CompatReasoning},
+			ReasoningEfforts: []string{ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh},
+		},
+	}
+	opts := m.ReasoningOptions(string(ClientTypeGoogleGenerativeAI))
+	if !opts.Supported || opts.CanDisable || len(opts.Efforts) != 0 || opts.DefaultEffort != "" {
+		t.Fatalf("legacy Google options = %+v, want supported without controls", opts)
 	}
 }

@@ -8,25 +8,22 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	textprune "github.com/memohai/memoh/internal/prune"
-	skillset "github.com/memohai/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	textprune "github.com/felinics/memoh/internal/prune"
+	skillset "github.com/felinics/memoh/internal/skills"
 )
 
 //go:embed prompts/*.md
 var promptsFS embed.FS
 
 var (
-	systemCommonTmpl  string
-	modeChatTmpl      string
-	modeDiscussTmpl   string
-	modeHeartbeatTmpl string
-	modeScheduleTmpl  string
-	modeSubagentTmpl  string
-	scheduleTmpl      string
-	heartbeatTmpl     string
+	systemCommonTmpl string
+	modeChatTmpl     string
+	modeDiscussTmpl  string
+	modeScheduleTmpl string
+	modeSubagentTmpl string
+	scheduleTmpl     string
 
 	includes map[string]string
 )
@@ -37,11 +34,9 @@ func init() {
 	systemCommonTmpl = mustReadPrompt("prompts/system_common.md")
 	modeChatTmpl = mustReadPrompt("prompts/mode_chat.md")
 	modeDiscussTmpl = mustReadPrompt("prompts/mode_discuss.md")
-	modeHeartbeatTmpl = mustReadPrompt("prompts/mode_heartbeat.md")
 	modeScheduleTmpl = mustReadPrompt("prompts/mode_schedule.md")
 	modeSubagentTmpl = mustReadPrompt("prompts/mode_subagent.md")
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
-	heartbeatTmpl = mustReadPrompt("prompts/heartbeat.md")
 
 	includes = map[string]string{
 		"_memory":     mustReadPrompt("prompts/_memory.md"),
@@ -51,7 +46,6 @@ func init() {
 	systemCommonTmpl = resolveIncludes(systemCommonTmpl)
 	modeChatTmpl = resolveIncludes(modeChatTmpl)
 	modeDiscussTmpl = resolveIncludes(modeDiscussTmpl)
-	modeHeartbeatTmpl = resolveIncludes(modeHeartbeatTmpl)
 	modeScheduleTmpl = resolveIncludes(modeScheduleTmpl)
 	modeSubagentTmpl = resolveIncludes(modeSubagentTmpl)
 }
@@ -92,8 +86,6 @@ func selectModeTemplate(sessionType string) string {
 	switch sessionType {
 	case sessionmode.Discuss:
 		return modeDiscussTmpl
-	case sessionmode.Heartbeat:
-		return modeHeartbeatTmpl
 	case sessionmode.Schedule:
 		return modeScheduleTmpl
 	case sessionmode.Subagent:
@@ -155,24 +147,6 @@ func GenerateSchedulePrompt(s Schedule) string {
 	})
 }
 
-// GenerateHeartbeatPrompt builds the user message for a heartbeat trigger.
-func GenerateHeartbeatPrompt(interval int, checklist string, now time.Time, lastHeartbeatAt string) string {
-	checklistSection := ""
-	if strings.TrimSpace(checklist) != "" {
-		checklistSection = "\n## HEARTBEAT.md (checklist)\n\n" + strings.TrimSpace(checklist) + "\n"
-	}
-	lastHB := strings.TrimSpace(lastHeartbeatAt)
-	if lastHB == "" {
-		lastHB = "never (first heartbeat)"
-	}
-	return render(heartbeatTmpl, map[string]string{
-		"interval":         strconv.Itoa(interval),
-		"timeNow":          now.Format(time.RFC3339),
-		"lastHeartbeat":    lastHB,
-		"checklistSection": checklistSection,
-	})
-}
-
 func buildSkillsSection(skills []SkillEntry) string {
 	items := buildSkillPromptItems(skills)
 	if len(items) == 0 {
@@ -208,7 +182,7 @@ func buildSkillsHeader(count int) string {
 	sb.WriteString("## Skills\n\n")
 	sb.WriteString("Memoh-managed skills are stored in `" + skillset.ManagedDir() + "/`. ")
 	sb.WriteString("Compatible external skill directories inside the bot workspace may also be discovered automatically. ")
-	sb.WriteString("Each skill is a `SKILL.md` file inside a named subdirectory. ")
+	sb.WriteString("Each skill is represented by a `SKILL.md` file in one of the discovered source directories. ")
 	sb.WriteString("Only activate a skill when it is relevant to the current task and a skill-loading capability is available.\n\n")
 	sb.WriteString(strconv.Itoa(count))
 	sb.WriteString(" skill(s) available:")

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/media"
 )
 
 // Bundle is the internal attachment normalization shape shared across
@@ -40,7 +40,8 @@ const (
 	MetadataKeySourcePath = "source_path"
 	MetadataKeySourceURL  = "source_url"
 
-	containerMediaSubdir = "media"
+	containerMediaSubdir       = ".memoh/media"
+	legacyContainerMediaSubdir = "media"
 )
 
 // Normalize canonicalizes transport fields and fills lightweight derived data
@@ -380,15 +381,29 @@ func IsDataPath(raw string) bool {
 	return ok
 }
 
-// ExtractStorageKey derives the media storage key from a consumer-facing
-// `/data/media/...` access path.
+// ExtractStorageKey derives the media storage key from a consumer-facing media
+// path. The legacy /data/media root remains readable during the transition.
 func ExtractStorageKey(accessPath string) string {
-	marker := strings.TrimRight(MediaAccessPath(""), "/") + "/"
-	idx := strings.Index(strings.TrimSpace(accessPath), marker)
-	if idx < 0 {
-		return ""
+	raw := strings.TrimSpace(accessPath)
+	for _, root := range mediaAccessRoots() {
+		marker := strings.TrimRight(root, "/") + "/"
+		if idx := strings.Index(raw, marker); idx >= 0 {
+			return raw[idx+len(marker):]
+		}
 	}
-	return accessPath[idx+len(marker):]
+	return ""
+}
+
+// IsMediaAccessPath reports whether raw is under the current or legacy media
+// root. Both roots are managed media during the transition.
+func IsMediaAccessPath(raw string) bool {
+	cleaned := path.Clean("/" + strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/"))
+	for _, root := range mediaAccessRoots() {
+		if cleaned == root || strings.HasPrefix(cleaned, strings.TrimRight(root, "/")+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // DataMountPath joins a relative path under the canonical container data mount.
@@ -402,11 +417,22 @@ func DataMountPath(raw string) string {
 
 // MediaAccessPath returns the consumer-facing media access path for a storage key.
 func MediaAccessPath(storageKey string) string {
+	return mediaAccessPath(containerMediaSubdir, storageKey)
+}
+
+func mediaAccessRoots() [2]string {
+	return [2]string{
+		mediaAccessPath(containerMediaSubdir, ""),
+		mediaAccessPath(legacyContainerMediaSubdir, ""),
+	}
+}
+
+func mediaAccessPath(subdir, storageKey string) string {
 	storageKey = strings.TrimSpace(storageKey)
 	if storageKey == "" {
-		return path.Join(config.DefaultDataMount, containerMediaSubdir)
+		return path.Join(config.DefaultDataMount, subdir)
 	}
-	return path.Join(config.DefaultDataMount, containerMediaSubdir, storageKey)
+	return path.Join(config.DefaultDataMount, subdir, storageKey)
 }
 
 // DataSubpath strips the canonical /data/ prefix and returns the container-relative path.

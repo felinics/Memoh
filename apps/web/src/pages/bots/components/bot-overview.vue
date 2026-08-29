@@ -652,7 +652,6 @@ function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
 
 const dayMaps = computed(() => ({
   chat: buildDayMap(tokenUsage.value?.chat),
-  heartbeat: buildDayMap(tokenUsage.value?.heartbeat),
   schedule: buildDayMap(tokenUsage.value?.schedule),
 }))
 
@@ -662,7 +661,7 @@ const usageTotals = computed(() => {
   let output = 0
   let cacheRead = 0
   for (const day of usageDays.value) {
-    for (const tp of ['chat', 'heartbeat', 'schedule'] as const) {
+    for (const tp of ['chat', 'schedule'] as const) {
       const r = maps[tp].get(day)
       if (!r) continue
       input += r.input_tokens ?? 0
@@ -758,7 +757,7 @@ const dailyOption = computed(() => {
   const outputLabel = t('bots.overview.usageOutput')
   const sumDay = (day: string, field: 'input_tokens' | 'output_tokens') => {
     let sum = 0
-    for (const tp of ['chat', 'heartbeat', 'schedule'] as const) {
+    for (const tp of ['chat', 'schedule'] as const) {
       sum += maps[tp].get(day)?.[field] ?? 0
     }
     return sum

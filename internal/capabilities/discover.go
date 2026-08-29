@@ -1,6 +1,9 @@
 package capabilities
 
-import "github.com/memohai/memoh/internal/models"
+import (
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/reasoning"
+)
 
 // litellmEntry is the subset of a LiteLLM registry record we consume. All
 // capability fields are pointers so we can distinguish "registry is silent"
@@ -43,15 +46,13 @@ type Capabilities struct {
 }
 
 // effortOrder is the canonical low→high ordering used to render effort lists.
-var effortOrder = []string{
-	models.ReasoningEffortNone,
-	models.ReasoningEffortMinimal,
-	models.ReasoningEffortLow,
-	models.ReasoningEffortMedium,
-	models.ReasoningEffortHigh,
-	models.ReasoningEffortXHigh,
-	models.ReasoningEffortMax,
-}
+// "off" leads because it is the weakest thing a user can ask for, even though it
+// is not a tier — which is why it is prepended here rather than living in the
+// reasoning package's tier ordering.
+var effortOrder = append(
+	[]string{reasoning.EffortDisable},
+	reasoning.OrderedEfforts()...,
+)
 
 func boolVal(p *bool) bool { return p != nil && *p }
 
@@ -103,8 +104,10 @@ func deriveEffortLevels(e litellmEntry) []string {
 	if e.SupportsLowReasoningEffort == nil || *e.SupportsLowReasoningEffort {
 		present[models.ReasoningEffortLow] = true
 	}
+	// The registry flag is named after OpenAI's wire value, but what it tells us is
+	// that the model can be turned off, so it lands on our neutral token.
 	if boolVal(e.SupportsNoneReasoningEffort) {
-		present[models.ReasoningEffortNone] = true
+		present[models.ReasoningEffortDisable] = true
 	}
 	if boolVal(e.SupportsMinimalReasoningEffort) {
 		present[models.ReasoningEffortMinimal] = true

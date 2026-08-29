@@ -10,6 +10,10 @@
       :tone="display.isError ? 'error' : 'cop'"
       @toggle="toggleOpen"
     >
+      <ConnectorLogo
+        v-if="connector"
+        :connector="connector"
+      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -44,9 +48,9 @@
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
-        v-if="display.errorSuffix"
+        v-if="exitLabel"
         class="font-mono shrink-0"
-      >{{ display.errorSuffix }}</span>
+      >{{ exitLabel }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -66,6 +70,10 @@
       class="flex items-center gap-1.5 w-full py-px"
       :class="rowClass"
     >
+      <ConnectorLogo
+        v-if="connector"
+        :connector="connector"
+      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -100,9 +108,9 @@
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
-        v-if="display.errorSuffix"
+        v-if="exitLabel"
         class="font-mono shrink-0"
-      >{{ display.errorSuffix }}</span>
+      >{{ exitLabel }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -175,11 +183,13 @@ import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { useConnectorLogos } from '../composables/useConnectorLogos'
 import {
   getToolDisplay,
   isDirPathTool,
   isFilePathTool,
 } from './tool-call-registry'
+import ConnectorLogo from './tool-detail/connector-logo.vue'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
@@ -187,12 +197,17 @@ import HeaderRow from './tool-detail/header-row.vue'
 import ExpandChevron from './tool-detail/expand-chevron.vue'
 import Capsule from './tool-detail/capsule.vue'
 
-const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
+const props = defineProps<{ block: ToolCallBlock, messageId: string, inGroup?: boolean }>()
 const { t } = useI18n()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const display = computed(() => getToolDisplay(props.block))
+
+// A Connect-It tool carries its binding's alias in the tool name; when that
+// alias resolves to one of the bot's connectors the row leads with its logo.
+const connectorLookup = useConnectorLogos()
+const connector = computed(() => connectorLookup.value(props.block.toolName))
 const executionLocationLabel = computed(() => {
   const location = props.block.execution_location
   if (!location) return ''
@@ -201,15 +216,21 @@ const executionLocationLabel = computed(() => {
 })
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
-const collapseKey = computed(() => toolCollapseKey(props.block))
-const open = ref(getCollapseOpen(collapseKey.value) || display.value.defaultOpen === true)
+const collapseKey = computed(() => toolCollapseKey(props.messageId, props.block))
+const open = ref(getCollapseOpen(collapseKey.value) ?? (display.value.defaultOpen === true))
 watch(collapseKey, (key) => {
-  open.value = getCollapseOpen(key) || display.value.defaultOpen === true
+  open.value = getCollapseOpen(key) ?? (display.value.defaultOpen === true)
 })
 
 const expandable = computed(
   () => Boolean(display.value.detail) || display.value.expandable === true,
 )
+
+// A failed command carries its exit status on the collapsed row; every other
+// failure detail stays in the expanded output.
+const exitLabel = computed(() => (
+  display.value.exitCode ? t('chat.tools.exitCode', { code: display.value.exitCode }) : ''
+))
 
 const actionLabel = computed(() => {
   const key = `chat.tools.${display.value.actionKey}`

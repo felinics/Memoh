@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package memoh.turn.v1;
 
-option go_package = "github.com/memohai/memoh/internal/agent/turn/turnpb";
+option go_package = "github.com/felinics/memoh/internal/agent/turn/turnpb";
 
 service TurnService {
   rpc Run(stream RunRequest) returns (stream RunResponse);

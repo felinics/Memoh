@@ -3,13 +3,13 @@ package channel
 import (
 	"go.uber.org/fx"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
-	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/channel/inbound"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/rpc/serverruntime"
-	"github.com/memohai/memoh/internal/webhooktunnel"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/local"
+	"github.com/felinics/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/channel/inbound"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	"github.com/felinics/memoh/internal/rpc/serverruntime"
+	"github.com/felinics/memoh/internal/webhooktunnel"
 )
 
 // Module assembles the shared Channel boundary providers: registry,

@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 const (
@@ -23,6 +23,12 @@ type HistoryMessagesConfig struct {
 	// MemoryMessageIndex identifies materialized memory recall that must be
 	// collected separately without changing its provider message position.
 	MemoryMessageIndex *int
+	// TokenEstimates carries per-message token estimates computed at the
+	// source. Missing entries fall back to fragment-side estimation.
+	TokenEstimates []int
+	// TrimmablePrefix marks the leading message count that may be dropped.
+	// Messages at or after the boundary are protected.
+	TrimmablePrefix int
 	// RepairToolClosures applies the shared repair when a caller has not
 	// already repaired its materialized message stream.
 	RepairToolClosures bool
@@ -52,18 +58,28 @@ func (*HistoryMessagesCollector) Collect(_ context.Context, req CollectRequest) 
 		if hasCurrentUser && i == currentUserIndex || hasMemory && i == memoryIndex {
 			continue
 		}
+		estimate := 0
+		if i < len(cfg.TokenEstimates) {
+			estimate = cfg.TokenEstimates[i]
+		}
+		budget := contextfrag.BudgetPolicy{}
+		if i >= cfg.TrimmablePrefix {
+			budget.Overflow = contextfrag.OverflowKeep
+		}
 		frags = append(frags, contextfrag.MessageFrag(contextfrag.MessageFragInput{
-			ID:         fmt.Sprintf("message.%03d", i),
-			Message:    msg,
-			Kind:       kindForSDKMessage(msg),
-			Slot:       contextfrag.SlotHistory,
-			Priority:   contextfrag.PriorityForMessage(msg),
-			CacheClass: cacheForSDKMessage(msg),
-			Trust:      trustForSDKMessage(msg),
-			Scope:      historyScope,
-			Source:     contextfrag.SourceRunConfig,
-			Collector:  historyMessagesCollectorName,
-			Index:      i,
+			ID:            fmt.Sprintf("message.%03d", i),
+			Message:       msg,
+			Kind:          kindForSDKMessage(msg),
+			Slot:          contextfrag.SlotHistory,
+			Priority:      contextfrag.PriorityForMessage(msg),
+			CacheClass:    cacheForSDKMessage(msg),
+			Trust:         trustForSDKMessage(msg),
+			Scope:         historyScope,
+			Source:        contextfrag.SourceRunConfig,
+			Collector:     historyMessagesCollectorName,
+			Index:         i,
+			Budget:        budget,
+			TokenEstimate: estimate,
 		}))
 	}
 	if cfg.RepairToolClosures {
@@ -88,20 +104,25 @@ func (*materializedCurrentUserCollector) Collect(_ context.Context, req CollectR
 	if !ok {
 		return nil, nil
 	}
+	estimate := 0
+	if index < len(cfg.TokenEstimates) {
+		estimate = cfg.TokenEstimates[index]
+	}
 	msg := cfg.Messages[index]
 	return []contextfrag.ContextFrag{contextfrag.MessageFrag(contextfrag.MessageFragInput{
-		ID:         fmt.Sprintf("message.%03d", index),
-		Message:    msg,
-		Kind:       contextfrag.KindCurrentUserMessage,
-		Slot:       contextfrag.SlotCurrentUser,
-		Priority:   contextfrag.PriorityForMessage(msg),
-		CacheClass: contextfrag.CacheNever,
-		Trust:      contextfrag.TrustUser,
-		Scope:      req.Scope,
-		Source:     contextfrag.SourceRunConfig,
-		Collector:  materializedCurrentUserCollectorName,
-		Index:      index,
-		Budget:     contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep},
+		ID:            fmt.Sprintf("message.%03d", index),
+		Message:       msg,
+		Kind:          contextfrag.KindCurrentUserMessage,
+		Slot:          contextfrag.SlotCurrentUser,
+		Priority:      contextfrag.PriorityForMessage(msg),
+		CacheClass:    contextfrag.CacheNever,
+		Trust:         contextfrag.TrustUser,
+		Scope:         req.Scope,
+		Source:        contextfrag.SourceRunConfig,
+		Collector:     materializedCurrentUserCollectorName,
+		Index:         index,
+		Budget:        contextfrag.BudgetPolicy{Overflow: contextfrag.OverflowKeep},
+		TokenEstimate: estimate,
 	})}, nil
 }
 

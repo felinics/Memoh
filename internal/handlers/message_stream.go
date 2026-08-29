@@ -11,10 +11,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/bots"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/bots"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 // sessionMessageStreamBuffer sizes the per-subscriber channel for the activity
@@ -31,7 +31,7 @@ const sseHeartbeatInterval = 20 * time.Second
 // @Description Lightweight SSE for sidebar live-sort. Carries only session
 // @Description identifiers and minimal metadata (touched timestamps, titles).
 // @Description Never includes message bodies. Filters out internal session
-// @Description types such as heartbeat, schedule, subagent.
+// @Description types such as schedule and subagent.
 // @Tags messages
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"

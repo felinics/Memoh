@@ -1,7 +1,6 @@
 <template>
-  <!-- 超市列表卡的形状 owner:plugin-card / skill-card 原本各手写一份同形结构,
-       且 hover 反馈只有 skill 那份有(plugin 卡悬停无任何反馈,是可见 bug)。
-       归一后:图标槽(#leading)+ 标题 + 主页外链 + 两行截断描述 + 尾部动作槽(#actions)。
+  <!-- 超市列表卡的形状由不同市场资源共用:
+       图标槽(#leading)+ 标题 + 主页外链 + 两行截断描述 + 尾部动作槽(#actions)。
        卡高固定:描述框恒占两行(min-h-8 = 2 × text-xs 的 1rem 行高),短描述不塌、长描述
        被 line-clamp-2 省略,所以每张卡的高度都是 p-4 + 标题行 + 两行描述,网格不再参差。
        根是 Card[role=button](两处原本就这么写,天然避开 button 嵌套陷阱),
@@ -16,7 +15,7 @@
     @keydown.enter.prevent="$emit('open')"
     @keydown.space.prevent="$emit('open')"
   >
-    <!-- overflow-hidden:外链图标图片可能非方形,靠它裁进圆角盒(原 plugin 卡就有,skill 卡漏了) -->
+    <!-- overflow-hidden:外链图标图片可能非方形,靠它裁进圆角盒。 -->
     <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent">
       <slot name="leading" />
     </div>
@@ -45,11 +44,17 @@
       <p class="mt-1 line-clamp-2 min-h-8 break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">
         {{ description }}
       </p>
+      <div
+        v-if="$slots.meta"
+        class="mt-3 flex min-w-0 flex-wrap items-center gap-2"
+      >
+        <slot name="meta" />
+      </div>
     </div>
 
     <div
       v-if="$slots.actions"
-      class="shrink-0"
+      class="shrink-0 self-end sm:self-auto"
       @click.stop
       @keydown.stop
     >
@@ -62,8 +67,8 @@
 import { ExternalLink } from 'lucide-vue-next'
 import { Card } from '@felinic/ui'
 
-// 整卡可点,hover 是刻意的 owner 级交互反馈(修掉 plugin 卡原本没有反馈的 bug)
-const rootClass = 'group flex cursor-pointer flex-row items-start gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20' /* ui-allow-style */
+// 整卡可点，hover 是 owner 级交互反馈。
+const rootClass = 'group flex cursor-pointer flex-col items-stretch gap-3 p-4 transition-colors hover:border-foreground/20 hover:bg-accent/20 sm:flex-row sm:items-start' /* ui-allow-style */
 const homepageLinkClass = 'shrink-0 text-muted-foreground transition-colors hover:text-foreground' /* ui-allow-style */
 
 defineProps<{

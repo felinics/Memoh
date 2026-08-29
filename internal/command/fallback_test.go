@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 func TestItemActionTypeable(t *testing.T) {
@@ -19,7 +19,7 @@ func TestItemActionTypeable(t *testing.T) {
 		{"resource and action only", &ItemAction{Resource: "memory", Action: "list"}, "/memory list"},
 		{"single arg", &ItemAction{Resource: "memory", Action: "set", Args: []string{"alice"}}, "/memory set alice"},
 		{"multiple args", &ItemAction{Resource: "model", Action: "set", Args: []string{"openai", "gpt-4o"}}, "/model set openai gpt-4o"},
-		{"flag args", &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "true"}}, "/settings update --heartbeat_enabled true"},
+		{"flag args", &ItemAction{Resource: "settings", Action: "update", Args: []string{"--display_enabled", "true"}}, "/settings update --display_enabled true"},
 		{"empty arg skipped", &ItemAction{Resource: "memory", Action: "set", Args: []string{"alice", "", "  "}}, "/memory set alice"},
 		{"whitespace trimmed", &ItemAction{Resource: " memory ", Action: " list "}, "/memory list"},
 		{"arg with internal space gets quoted", &ItemAction{Resource: "memory", Action: "set", Args: []string{"daily report"}}, `/memory set "daily report"`},
@@ -112,9 +112,9 @@ func TestFallbackTrailer_List(t *testing.T) {
 			contains: []string{"Switch with", "/memory set <name>"},
 		},
 		{
-			name: "display-only list no extras (heartbeat logs)",
+			name: "display-only list no extras (schedule logs)",
 			iv: &Interactive{Kind: InteractiveList, List: &ListView{
-				Resource: "heartbeat", Action: "logs",
+				Resource: "schedule", Action: "logs",
 				Items: []ListItem{{Label: "10:00 OK"}, {Label: "11:00 OK"}},
 			}},
 			empty: true,
@@ -208,26 +208,26 @@ func TestFallbackTrailer_Choices(t *testing.T) {
 			contains: []string{"Pick with", "/reasoning set <off|low|high>"},
 		},
 		{
-			name: "homogeneous toggle shape (heartbeat flags)",
+			name: "homogeneous toggle shape (boolean flags)",
 			iv: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{
 				Choices: []ListItem{
-					{Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "true"}}},
-					{Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "false"}}},
+					{Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--display_enabled", "true"}}},
+					{Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--display_enabled", "false"}}},
 				},
 			}},
-			contains: []string{"Toggle:", "/settings update --heartbeat_enabled true", "/settings update --heartbeat_enabled false"},
+			contains: []string{"Toggle:", "/settings update --display_enabled true", "/settings update --display_enabled false"},
 		},
 		{
 			name: "heterogeneous cross-nav (settings worst case)",
 			iv: &Interactive{Kind: InteractiveChoices, Choices: &ChoicesView{
 				Choices: []ListItem{
-					{Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "true"}}},
+					{Action: &ItemAction{Resource: "settings", Action: "update", Args: []string{"--display_enabled", "true"}}},
 					{Action: &ItemAction{Resource: "reasoning", Action: "show"}},
 					{Action: &ItemAction{Resource: "model", Action: "list"}},
 					{Action: &ItemAction{Resource: "memory", Action: "list"}},
 				},
 			}},
-			contains: []string{"Open:", "/settings update --heartbeat_enabled true", "/reasoning show", "/model list", "/memory list"},
+			contains: []string{"Open:", "/settings update --display_enabled true", "/reasoning show", "/model list", "/memory list"},
 		},
 		{
 			name: "homogeneous single no-arg button (WithButtons empty state)",
@@ -595,7 +595,7 @@ func TestJoinActionCmdsSingleItemHasSpace(t *testing.T) {
 	}
 }
 
-// TestTrailerForList_HeartbeatStyleOpenSingleItemReadable verifies the
+// TestTrailerForList_OpenSingleExtraReadable verifies the
 // rendered trailer reads cleanly when a list has a single ExtraAction and no
 // row actions (e.g. an empty-state list with one nav button), exercising the
 // joinActionCmds single-item branch through the template.

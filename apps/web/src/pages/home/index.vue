@@ -17,11 +17,12 @@ import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getBotsById } from '@memohai/sdk'
+import { getBotsByBotIdAgents, getBotsById } from '@memohai/sdk'
 import { PanePlaceholder } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
+import { botAgentProvider } from '@/utils/bot-agent'
 import ChatWorkspace from './components/chat-workspace.vue'
 
 const route = useRoute()
@@ -97,8 +98,17 @@ async function maybeStartACPSession() {
   acpStartConsumed = true
   const agentId = normalizeACPAgentID(raw)
   try {
-    if (agentId) {
-      const { session } = await chatStore.createACPSession({ agentId, projectMode: ACP_NO_PROJECT_MODE, projectPath: createACPNoProjectPath() })
+    const botId = currentBotId.value?.trim() ?? ''
+    if (agentId && botId) {
+      const { data } = await getBotsByBotIdAgents({ path: { bot_id: botId }, throwOnError: true })
+      const botAgent = data.items?.find(agent => agent.enabled !== false && botAgentProvider(agent) === agentId)
+      if (!botAgent?.id) return
+      const { session } = await chatStore.createACPSession({
+        botAgentId: botAgent.id,
+        agentId,
+        projectMode: ACP_NO_PROJECT_MODE,
+        projectPath: createACPNoProjectPath(),
+      })
       // Open (or focus) the tab for the freshly created session; activation selects
       // it. ensureChatPanel covers the case where the dock mounts later.
       workspaceTabs.openSessionChat({ sessionId: session.id })
@@ -115,7 +125,7 @@ async function syncStoreFromUrl(rawName: string) {
   const urlName = rawName.trim()
   if (!urlName) {
     if (!currentBotId.value) {
-      await chatStore.initialize()
+      await chatStore.initializeWithRecovery()
     }
     await maybeStartACPSession()
     return

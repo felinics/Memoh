@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // fakeLiveness is a scriptable live backend. The reaper reads liveness and
@@ -129,6 +131,145 @@ func TestReaperMarksExpiredLeaseLost(t *testing.T) {
 	if len(live.releasedCandidates()) != 1 || len(live.indexed()) != 0 {
 		t.Fatalf("candidate should be released after the durable write: released=%d indexed=%d",
 			len(live.releasedCandidates()), len(live.indexed()))
+	}
+}
+
+func TestReaperObservesAppliedAndAlreadyTerminalOutcomes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		seedState      ledger.State
+		abortRequested bool
+		wantState      ledger.State
+	}{
+		{name: "applied lost", wantState: ledger.StateLost},
+		{name: "applied abort intent", abortRequested: true, wantState: ledger.StateAborted},
+		{name: "already completed", seedState: ledger.StateCompleted, wantState: ledger.StateCompleted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runs := newFakeLedger()
+			runs.insertClaimed("run-observed", "session-observed", 5, "generation-1")
+			if tt.abortRequested {
+				runs.mu.Lock()
+				runs.runs["run-observed"].AbortRequestedAt = time.Now()
+				runs.mu.Unlock()
+			}
+			if tt.seedState != "" {
+				if _, applied, err := runs.Finalize(context.Background(), ledger.FinalizeParams{
+					RunID: "run-observed", FencingToken: 5, State: tt.seedState,
+				}); err != nil || !applied {
+					t.Fatalf("seed terminal = applied:%v err:%v", applied, err)
+				}
+			}
+			live := newFakeLiveness("generation-1")
+			live.setCandidates(LeaseCandidate{
+				Key: Key{BotID: testBotID, SessionID: "session-observed"}, RunID: "run-observed", FencingToken: 5,
+			})
+			reaper := newTestReaper(t, runs, live)
+			var observed []TerminalRun
+			reaper.SetTerminalObserver(func(_ context.Context, run TerminalRun) {
+				observed = append(observed, run)
+			})
+
+			reaper.tick(context.Background())
+
+			if len(observed) != 1 {
+				t.Fatalf("terminal observations = %d, want 1", len(observed))
+			}
+			if observed[0].RunID != "run-observed" || observed[0].BotID != testBotID ||
+				observed[0].SessionID != "session-observed" || observed[0].FencingToken != 5 ||
+				observed[0].State != string(tt.wantState) {
+				t.Fatalf("terminal observation = %+v, want state %q and authoritative identity", observed[0], tt.wantState)
+			}
+		})
+	}
+}
+
+func TestReaperDoesNotObserveNewerActiveOwner(t *testing.T) {
+	t.Parallel()
+	runs := newFakeLedger()
+	runs.insertClaimed("run-newer-owner", "session-newer-owner", 6, "generation-1")
+	live := newFakeLiveness("generation-1")
+	live.setCandidates(LeaseCandidate{
+		Key: Key{BotID: testBotID, SessionID: "session-newer-owner"}, RunID: "run-newer-owner", FencingToken: 5,
+	})
+	reaper := newTestReaper(t, runs, live)
+	var observed []TerminalRun
+	reaper.SetTerminalObserver(func(_ context.Context, run TerminalRun) {
+		observed = append(observed, run)
+	})
+
+	reaper.tick(context.Background())
+
+	if len(observed) != 0 {
+		t.Fatalf("newer active owner emitted terminal observations: %+v", observed)
+	}
+	if got := runs.state("run-newer-owner"); got != ledger.StateRunning {
+		t.Fatalf("ledger state = %q, want running", got)
+	}
+}
+
+func TestReaperRetriesWaitingDecisionRecoveryAfterTokenHandoff(t *testing.T) {
+	t.Parallel()
+	runs := newFakeLedger()
+	runs.insertClaimed("run-waiting-handoff", "session-waiting-handoff", 5, "generation-1")
+	runs.mu.Lock()
+	runs.runs["run-waiting-handoff"].State = ledger.StateWaitingDecision
+	runs.runs["run-waiting-handoff"].FencingToken = 6
+	runs.mu.Unlock()
+	live := newFakeLiveness("generation-1")
+	live.setCandidates(LeaseCandidate{
+		Key:   Key{BotID: testBotID, SessionID: "session-waiting-handoff"},
+		RunID: "run-waiting-handoff", FencingToken: 5,
+	})
+	reaper := newTestReaper(t, runs, live)
+	var recovered []LeaseCandidate
+	reaper.SetWaitingDecisionRecoverer(func(_ context.Context, candidate LeaseCandidate) (bool, error) {
+		recovered = append(recovered, candidate)
+		return true, nil
+	})
+
+	reaper.tick(context.Background())
+
+	if len(recovered) != 1 || recovered[0].FencingToken != 5 {
+		t.Fatalf("recovery calls = %+v, want the stale candidate retried once", recovered)
+	}
+	if got := runs.state("run-waiting-handoff"); got != ledger.StateWaitingDecision {
+		t.Fatalf("ledger state = %q, want waiting_decision", got)
+	}
+	if len(live.indexed()) != 0 || len(live.releasedCandidates()) != 1 {
+		t.Fatalf("stale candidate was not released after recovery: indexed=%+v released=%+v", live.indexed(), live.releasedCandidates())
+	}
+}
+
+func TestReaperRunsTerminalReconcilerOnlyAsLeader(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name      string
+		leader    bool
+		wantCalls int
+	}{
+		{name: "leader", leader: true, wantCalls: 1},
+		{name: "follower", leader: false, wantCalls: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			runs := newFakeLedger()
+			live := newFakeLiveness("generation-1")
+			live.leader = tt.leader
+			reaper := newTestReaper(t, runs, live)
+			calls := 0
+			reaper.SetTerminalReconciler(func(context.Context) error {
+				calls++
+				return errors.New("repair unavailable")
+			})
+
+			reaper.tick(context.Background())
+
+			if calls != tt.wantCalls {
+				t.Fatalf("reconciler calls = %d, want %d", calls, tt.wantCalls)
+			}
+		})
 	}
 }
 

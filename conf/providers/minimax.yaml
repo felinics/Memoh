@@ -10,9 +10,9 @@ models:
     name: MiniMax M2.7
     type: chat
     config:
-      compatibilities: [tool-call]
+      compatibilities: [tool-call, reasoning]
       context_window: 204800
-      thinking_mode: none
+      thinking_mode: always
 
   - model_id: MiniMax-M2.7-highspeed
     name: MiniMax M2.7 Highspeed
@@ -20,6 +20,7 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
+      thinking_mode: always
 
   - model_id: MiniMax-M2.5
     name: MiniMax M2.5
@@ -27,6 +28,7 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
+      thinking_mode: always
 
   - model_id: MiniMax-M2.5-Lightning
     name: MiniMax M2.5 Lightning
@@ -43,6 +45,7 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
+      thinking_mode: always
 
   - model_id: MiniMax-M2.1-Lightning
     name: MiniMax M2.1 Lightning
@@ -59,6 +62,7 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
+      thinking_mode: always
 
   - model_id: MiniMax-M2-Stable
     name: MiniMax M2 Stable
@@ -66,6 +70,7 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
+      thinking_mode: always
 
   - model_id: MiniMax-M1
     name: MiniMax M1
@@ -73,6 +78,7 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 1000192
+      thinking_mode: always
 
   - model_id: MiniMax-Text-01
     name: MiniMax Text 01

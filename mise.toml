@@ -26,7 +26,7 @@ dir = "{{cwd}}"
 experimental = true
 
 [tasks.submodule-init]
-description = "Init/update git submodules (packages/ui lives in memohai/ui)"
+description = "Init/update git submodules (packages/ui lives in felinics/ui)"
 run = "node scripts/ensure-submodules.mjs"
 
 [tasks.pnpm-install]

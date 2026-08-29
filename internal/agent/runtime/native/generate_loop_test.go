@@ -3,15 +3,17 @@ package native
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 type staticToolProvider struct {
@@ -88,6 +90,29 @@ func (m *atomicMockProvider) DoStream(ctx context.Context, params sdk.GeneratePa
 	return &sdk.StreamResult{Stream: ch}, nil
 }
 
+func TestContextBudgetGuardProviderNeverDelegatesCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	provider := &atomicMockProvider{
+		handler: func(int, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+	guarded := contextBudgetGuardProvider{Provider: provider}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := guarded.DoGenerate(ctx, sdk.GenerateParams{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("DoGenerate() error = %v, want context canceled", err)
+	}
+	if _, err := guarded.DoStream(ctx, sdk.GenerateParams{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("DoStream() error = %v, want context canceled", err)
+	}
+	if got := provider.calls.Load(); got != 0 {
+		t.Fatalf("underlying provider calls = %d, want 0 for canceled context", got)
+	}
+}
+
 func TestAgentGenerateStopsOnTerminalTextLoopAbort(t *testing.T) {
 	t.Parallel()
 
@@ -141,25 +166,32 @@ func TestAgentGenerateStopsOnTerminalTextLoopAbort(t *testing.T) {
 	}
 }
 
-func TestAgentStreamStopsOnToolLoopAbort(t *testing.T) {
+func TestAgentGenerateRunsStepReselectorBeforeNextProviderCall(t *testing.T) {
 	t.Parallel()
 
+	ledger := contextfrag.NewMutationLedger()
+	var secondCallMessages []sdk.Message
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			if call >= 20 {
+		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			switch call {
+			case 1:
 				return &sdk.GenerateResult{
-					Text:         "unexpected-final-step",
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "call-1",
+						ToolName:   "lookup",
+						Input:      map[string]any{"q": "one"},
+					}},
+				}, nil
+			case 2:
+				secondCallMessages = append([]sdk.Message(nil), params.Messages...)
+				return &sdk.GenerateResult{
+					Text:         "ok",
 					FinishReason: sdk.FinishReasonStop,
 				}, nil
+			default:
+				return nil, errors.New("unexpected provider call")
 			}
-			return &sdk.GenerateResult{
-				FinishReason: sdk.FinishReasonToolCalls,
-				ToolCalls: []sdk.ToolCall{{
-					ToolCallID: "call-stream",
-					ToolName:   "loop_tool",
-					Input:      map[string]any{"query": "same"},
-				}},
-			}, nil
 		},
 	}
 
@@ -167,287 +199,311 @@ func TestAgentStreamStopsOnToolLoopAbort(t *testing.T) {
 	a.SetToolProviders([]agenttools.ToolProvider{
 		staticToolProvider{
 			tools: []sdk.Tool{{
-				Name:       "loop_tool",
+				Name:       "lookup",
 				Parameters: &jsonschema.Schema{Type: "object"},
 				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return map[string]any{"ok": true}, nil
+					return map[string]any{"answer": strings.Repeat("tool-result ", 64)}, nil
 				},
 			}},
 		},
 	})
 
-	var terminal StreamEvent
-	for event := range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		Messages:         []sdk.Message{sdk.UserMessage("loop stream")},
-		SupportsToolCall: true,
-		Identity:         SessionContext{BotID: "bot-1"},
-		LoopDetection:    LoopDetectionConfig{Enabled: true},
-	}) {
-		if event.IsTerminal() {
-			terminal = event
-		}
+	var reselectorCalls atomic.Int32
+	recentProtect := 4096
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:                      &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:                   []sdk.Message{sdk.UserMessage("start")},
+		SupportsToolCall:           true,
+		Identity:                   SessionContext{BotID: "bot-1"},
+		ContextMutations:           ledger,
+		ContextRecentProtectTokens: &recentProtect,
+		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
+			reselectorCalls.Add(1)
+			if input.InitialMessageCount != 1 {
+				t.Fatalf("InitialMessageCount = %d, want 1", input.InitialMessageCount)
+			}
+			if len(input.Messages) != 3 {
+				t.Fatalf("selector input messages = %d, want 3", len(input.Messages))
+			}
+			// The resolved recent-protect window travels with the step
+			// reselection input.
+			if input.RecentProtectTokens == nil || *input.RecentProtectTokens != recentProtect {
+				t.Fatalf("RecentProtectTokens = %v, want %d", input.RecentProtectTokens, recentProtect)
+			}
+			return ContextStepSelectionResult{
+				Messages:    append([]sdk.Message(nil), input.Messages[:input.InitialMessageCount]...),
+				Dropped:     len(input.Messages) - input.InitialMessageCount,
+				DropReasons: map[string]int{"test": len(input.Messages) - input.InitialMessageCount},
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
 	}
-
-	if terminal.Type != EventAgentAbort {
-		t.Fatalf("expected EventAgentAbort, got %q", terminal.Type)
+	if reselectorCalls.Load() != 1 {
+		t.Fatalf("step reselector calls = %d, want 1", reselectorCalls.Load())
+	}
+	if len(secondCallMessages) != 1 {
+		t.Fatalf("second provider call messages = %d, want 1", len(secondCallMessages))
+	}
+	if secondCallMessages[0].Role != sdk.MessageRoleUser {
+		t.Fatalf("second provider call first role = %q, want user", secondCallMessages[0].Role)
+	}
+	records := ledger.Records()
+	if len(records) != 1 || records[0].Kind != contextfrag.MutationLoopStepReselection {
+		t.Fatalf("mutation records = %#v, want one loop_step_reselection", records)
+	}
+	if got := ledger.FinalInputHash(); got == "" {
+		t.Fatal("final input hash was not updated after step reselection")
 	}
 }
 
-func TestAgentStreamMarksTerminalTextLoopAsAbort(t *testing.T) {
+func TestAgentGeneratePassesRemainingBudgetToStepReselector(t *testing.T) {
 	t.Parallel()
+	const budget = 1_000
 
-	repeatedChunk := strings.Repeat("abcd", 64)
-	var observedCancel atomic.Bool
 	modelProvider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
-			ch := make(chan sdk.StreamPart, 16)
-			go func() {
-				defer close(ch)
-				send := func(part sdk.StreamPart) bool {
-					select {
-					case <-ctx.Done():
-						observedCancel.Store(true)
-						return false
-					case ch <- part:
-						return true
-					}
-				}
-				if !send(&sdk.StartPart{}) {
-					return
-				}
-				if !send(&sdk.StartStepPart{}) {
-					return
-				}
-				if !send(&sdk.TextStartPart{ID: "mock"}) {
-					return
-				}
-				for i := 0; i < 4; i++ {
-					if !send(&sdk.TextDeltaPart{ID: "mock", Text: repeatedChunk}) {
-						return
-					}
-				}
-				select {
-				case <-ctx.Done():
-					observedCancel.Store(true)
-					return
-				case <-time.After(50 * time.Millisecond):
-				}
-				if !send(&sdk.TextEndPart{ID: "mock"}) {
-					return
-				}
-				if !send(&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}) {
-					return
-				}
-				_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
-			}()
-			return &sdk.StreamResult{Stream: ch}, nil
+		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			if call == 1 {
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "call-budget",
+						ToolName:   "lookup",
+						Input:      map[string]any{"q": "one"},
+					}},
+				}, nil
+			}
+			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
 	a := New(Deps{})
-
-	var terminal StreamEvent
-	for event := range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		Messages:         []sdk.Message{sdk.UserMessage("loop stream text")},
-		SupportsToolCall: true,
-		Identity:         SessionContext{BotID: "bot-1"},
-		LoopDetection:    LoopDetectionConfig{Enabled: true},
-	}) {
-		if event.IsTerminal() {
-			terminal = event
-		}
-	}
-
-	if !observedCancel.Load() {
-		t.Fatal("expected stream provider to observe context cancellation from text-loop abort")
-	}
-	if terminal.Type != EventAgentAbort {
-		t.Fatalf("expected EventAgentAbort, got %q", terminal.Type)
-	}
-}
-
-func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
-	t.Parallel()
-
-	repeatedChunk := strings.Repeat("abcd", 64)
-	var streamCalls atomic.Int32
-	var observedCancel atomic.Bool
-	modelProvider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
-			call := streamCalls.Add(1)
-			ch := make(chan sdk.StreamPart, 16)
-			go func() {
-				defer close(ch)
-				send := func(part sdk.StreamPart) bool {
-					select {
-					case <-ctx.Done():
-						observedCancel.Store(true)
-						return false
-					case ch <- part:
-						return true
-					}
-				}
-
-				if !send(&sdk.StartPart{}) {
-					return
-				}
-				if !send(&sdk.StartStepPart{}) {
-					return
-				}
-
-				if call == 1 {
-					_ = send(&sdk.ErrorPart{Error: errors.New("api error 500")})
-					return
-				}
-
-				if !send(&sdk.TextStartPart{ID: "mock-retry"}) {
-					return
-				}
-				for i := 0; i < 4; i++ {
-					if !send(&sdk.TextDeltaPart{ID: "mock-retry", Text: repeatedChunk}) {
-						return
-					}
-				}
-				select {
-				case <-ctx.Done():
-					observedCancel.Store(true)
-					return
-				case <-time.After(50 * time.Millisecond):
-				}
-				if !send(&sdk.TextEndPart{ID: "mock-retry"}) {
-					return
-				}
-				if !send(&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}) {
-					return
-				}
-				_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
-			}()
-			return &sdk.StreamResult{Stream: ch}, nil
-		},
-	}
-
-	a := New(Deps{})
-
-	var terminal StreamEvent
-	for event := range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
-		Messages:         []sdk.Message{sdk.UserMessage("loop stream retry text")},
-		SupportsToolCall: true,
-		Identity:         SessionContext{BotID: "bot-1"},
-		LoopDetection:    LoopDetectionConfig{Enabled: true},
-	}) {
-		if event.IsTerminal() {
-			terminal = event
-		}
-	}
-
-	if streamCalls.Load() != 2 {
-		t.Fatalf("expected one retry stream attempt, got %d stream calls", streamCalls.Load())
-	}
-	if !observedCancel.Load() {
-		t.Fatal("expected retry stream provider to observe context cancellation from text-loop abort")
-	}
-	if terminal.Type != EventAgentAbort {
-		t.Fatalf("expected EventAgentAbort after retry text-loop abort, got %q", terminal.Type)
-	}
-}
-
-func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
-	t.Parallel()
-
-	repeatedChunk := strings.Repeat("abcd", 64)
-	var observedCancel atomic.Bool
-	modelProvider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
-			ch := make(chan sdk.StreamPart)
-			go func() {
-				defer close(ch)
-				send := func(part sdk.StreamPart) bool {
-					select {
-					case <-ctx.Done():
-						observedCancel.Store(true)
-						return false
-					case ch <- part:
-						return true
-					}
-				}
-
-				if !send(&sdk.StartPart{}) {
-					return
-				}
-				if !send(&sdk.StartStepPart{}) {
-					return
-				}
-				if !send(&sdk.TextStartPart{ID: "mock-retry-only"}) {
-					return
-				}
-				for i := 0; i < 4; i++ {
-					if !send(&sdk.TextDeltaPart{ID: "mock-retry-only", Text: repeatedChunk}) {
-						return
-					}
-				}
-				select {
-				case <-ctx.Done():
-					observedCancel.Store(true)
-					return
-				case <-time.After(200 * time.Millisecond):
-					t.Error("expected text-loop detection to cancel retry stream before any extra part was sent")
-					return
-				}
-			}()
-			return &sdk.StreamResult{Stream: ch}, nil
-		},
-	}
-
-	a := New(Deps{})
-	streamCtx, cancel := context.WithCancelCause(context.Background())
-	defer cancel(nil)
-
-	textLoopGuard := NewTextLoopGuard(LoopDetectedStreakThreshold, LoopDetectedMinNewGramsPerChunk, SentialOptions{})
-	textLoopProbeBuffer := NewTextLoopProbeBuffer(LoopDetectedProbeChars, func(text string) {
-		result := textLoopGuard.Inspect(text)
-		if result.Abort {
-			cancel(ErrTextLoopDetected)
-		}
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{tools: []sdk.Tool{{
+			Name:       "lookup",
+			Parameters: &jsonschema.Schema{Type: "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return map[string]any{"answer": "ok"}, nil
+			},
+		}}},
 	})
 
-	retryResult, aborted := a.runMidStreamRetry(
-		context.Background(),
-		streamCtx,
-		cancel,
-		newToolAbortRegistry(),
-		make(chan StreamEvent, 32),
-		RunConfig{
-			Model:         &sdk.Model{ID: "mock-model", Provider: modelProvider},
-			Messages:      []sdk.Message{sdk.UserMessage("retry text loop")},
-			Identity:      SessionContext{BotID: "bot-1"},
-			LoopDetection: LoopDetectionConfig{Enabled: true},
+	var seenBudget int
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:                  &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:               []sdk.Message{sdk.UserMessage(strings.Repeat("prefix ", 80))},
+		SupportsToolCall:       true,
+		Identity:               SessionContext{BotID: "bot-1"},
+		ContextMutations:       contextfrag.NewMutationLedger(),
+		ContextBudgetMaxTokens: budget,
+		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
+			seenBudget = input.BudgetMaxTokens
+			return ContextStepSelectionResult{}
 		},
-		nil,
-		nil,
-		nil,
-		&sdk.StreamResult{Messages: []sdk.Message{sdk.UserMessage("previous step")}},
-		&stepMessageCapture{},
-		nil,
-		&interruptedStepCapture{},
-		0,
-		"api error 500",
-		&strings.Builder{},
-		textLoopProbeBuffer,
-	)
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if seenBudget <= 0 || seenBudget >= budget {
+		t.Fatalf("step budget = %d, want remaining budget below full run budget", seenBudget)
+	}
+}
 
-	if retryResult == nil {
-		t.Fatal("expected retry result")
+func TestAgentGenerateActivePlanStepBudgetSubtractsFixedEnvelopeOnce(t *testing.T) {
+	t.Parallel()
+
+	lookupTool := sdk.Tool{
+		Name:       "lookup",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+			return map[string]any{"answer": "ok"}, nil
+		},
 	}
-	if !observedCancel.Load() {
-		t.Fatal("expected retry stream provider to observe context cancellation from text-loop abort")
+	toolCost := contextfrag.ToolDefAccountingFor("native", lookupTool).TokenEstimate
+	plan := contextfrag.ContextBudgetPlan{
+		Window:        2048,
+		OutputReserve: toolCost + 200,
 	}
-	if !errors.Is(context.Cause(streamCtx), ErrTextLoopDetected) {
-		t.Fatalf("expected stream context cause ErrTextLoopDetected, got %v", context.Cause(streamCtx))
+
+	var firstParams sdk.GenerateParams
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			if call == 1 {
+				firstParams = cloneGenerateParams(params)
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "call-budget-plan",
+						ToolName:   "lookup",
+						Input:      map[string]any{"q": "one"},
+					}},
+				}, nil
+			}
+			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+		},
 	}
-	if !aborted {
-		t.Fatal("expected runMidStreamRetry to report aborted when retry stream hit text-loop cancellation")
+
+	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
+		return cfg, nil
+	}})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{tools: []sdk.Tool{lookupTool}},
+	})
+
+	var seenBudget int
+	var expectedBudget int
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:                  &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		System:                 "fixed system prefix",
+		Messages:               []sdk.Message{sdk.UserMessage(strings.Repeat("prefix ", 20))},
+		SupportsToolCall:       true,
+		Identity:               SessionContext{BotID: "bot-1"},
+		ContextMutations:       contextfrag.NewMutationLedger(),
+		ContextBudgetMaxTokens: plan.Window,
+		ContextManifest:        contextfrag.Manifest{BudgetPlan: &plan},
+		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
+			allowance := plan.Window - plan.OutputReserve
+			expectedBudget = remainingStepBudget(allowance, &firstParams, input.InitialMessageCount)
+			seenBudget = input.BudgetMaxTokens
+			if input.ProviderSystem != firstParams.System || len(input.ProviderTools) != len(firstParams.Tools) {
+				t.Fatalf("step provider envelope = system %q tools %d, want system %q tools %d", input.ProviderSystem, len(input.ProviderTools), firstParams.System, len(firstParams.Tools))
+			}
+			if input.ProviderInputAllowanceTokens != allowance {
+				t.Fatalf("step provider allowance = %d, want %d", input.ProviderInputAllowanceTokens, allowance)
+			}
+			return ContextStepSelectionResult{}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if seenBudget != expectedBudget {
+		t.Fatalf("step budget = %d, want %d from window-output reserve minus the actual fixed prefix/tools once", seenBudget, expectedBudget)
+	}
+	legacyDoubleCounted := remainingStepBudget(plan.Window-toolCost, &firstParams, len(firstParams.Messages))
+	if expectedBudget == legacyDoubleCounted {
+		t.Fatalf("test setup does not distinguish active plan allowance %d from legacy double-counted allowance %d", expectedBudget, legacyDoubleCounted)
+	}
+}
+
+func TestAgentGenerateFailsClosedOnProtectedStepOverflow(t *testing.T) {
+	t.Parallel()
+
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			if call != 1 {
+				return nil, fmt.Errorf("unexpected provider call %d after protected overflow", call)
+			}
+			return &sdk.GenerateResult{
+				FinishReason: sdk.FinishReasonToolCalls,
+				ToolCalls: []sdk.ToolCall{{
+					ToolCallID: "call-step-overflow",
+					ToolName:   "lookup",
+					Input:      map[string]any{"q": "one"},
+				}},
+			}, nil
+		},
+	}
+	ledger := contextfrag.NewMutationLedger()
+	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
+		return cfg, nil
+	}})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{tools: []sdk.Tool{{
+			Name:       "lookup",
+			Parameters: &jsonschema.Schema{Type: "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return map[string]any{"answer": "ok"}, nil
+			},
+		}}},
+	})
+
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:         []sdk.Message{sdk.UserMessage("task")},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1"},
+		ContextMutations: ledger,
+		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
+			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
+		},
+	})
+	if !errors.Is(err, contextfrag.ErrProtectedContextOverflow) {
+		t.Fatalf("Generate() error = %v, want %v", err, contextfrag.ErrProtectedContextOverflow)
+	}
+	if got := modelProvider.calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1", got)
+	}
+	steps := ledger.StepSnapshots()
+	if len(steps) != 2 || steps[0].StepIndex != 0 || steps[1].StepIndex != 1 {
+		t.Fatalf("step snapshots = %#v, want exactly one entry for initial and failed steps", steps)
+	}
+	if steps[1].PostPrepareInputHash != "" {
+		t.Fatalf("failed step snapshot has provider input hash %q, want none", steps[1].PostPrepareInputHash)
+	}
+	records := ledger.Records()
+	if len(records) != 1 ||
+		records[0].Kind != contextfrag.MutationContextBudgetFailure ||
+		records[0].Detail != "protected_context_overflow" {
+		t.Fatalf("budget failure mutations = %#v, want one protected-overflow record", records)
+	}
+}
+
+func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
+	t.Parallel()
+
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			if call != 1 {
+				return nil, fmt.Errorf("unexpected provider call %d after protected overflow", call)
+			}
+			return &sdk.GenerateResult{
+				FinishReason: sdk.FinishReasonToolCalls,
+				ToolCalls: []sdk.ToolCall{{
+					ToolCallID: "call-stream-step-overflow",
+					ToolName:   "lookup",
+					Input:      map[string]any{"q": "one"},
+				}},
+			}, nil
+		},
+	}
+	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
+		return cfg, nil
+	}})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{tools: []sdk.Tool{{
+			Name:       "lookup",
+			Parameters: &jsonschema.Schema{Type: "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return map[string]any{"answer": "ok"}, nil
+			},
+		}}},
+	})
+
+	var errorEvents []StreamEvent
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:         []sdk.Message{sdk.UserMessage("task")},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1"},
+		ContextMutations: contextfrag.NewMutationLedger(),
+		ContextStepReselector: func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult {
+			return ContextStepSelectionResult{FatalError: contextfrag.ErrProtectedContextOverflow}
+		},
+	}) {
+		if event.Type == EventError {
+			errorEvents = append(errorEvents, event)
+		}
+	}
+
+	if got := modelProvider.calls.Load(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1", got)
+	}
+	if len(errorEvents) != 1 {
+		t.Fatalf("error events = %#v, want exactly one", errorEvents)
+	}
+	if errorEvents[0].Code != string(apperror.CodeContextProtectedOverflow) {
+		t.Fatalf("error code = %q, want %q", errorEvents[0].Code, apperror.CodeContextProtectedOverflow)
 	}
 }

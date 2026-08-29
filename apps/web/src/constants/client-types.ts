@@ -6,9 +6,10 @@ export interface ClientTypeMeta {
 
 const MANAGED_OAUTH_CLIENT_TYPES = new Set(['openai-codex', 'github-copilot'])
 
-// These API protocols can carry tool calls for agent models. This is only a
-// visible suggestion for custom providers: individual models may still lack
-// tool support, and no protocol-level suggestion implies vision or reasoning.
+// These API protocols commonly carry tool calls and reasoning metadata for
+// agent models. Custom-provider auto import submits these as an explicit
+// fallback when discovery cannot report a model's capabilities. Vision stays
+// opt-in because protocol compatibility does not imply image input support.
 const AGENT_PROTOCOL_CLIENT_TYPES = new Set([
   'openai-responses',
   'openai-completions',
@@ -18,7 +19,7 @@ const AGENT_PROTOCOL_CLIENT_TYPES = new Set([
 
 export function suggestedModelCompatibilities(clientType: unknown): string[] {
   if (typeof clientType === 'string' && AGENT_PROTOCOL_CLIENT_TYPES.has(clientType)) {
-    return ['tool-call']
+    return ['tool-call', 'reasoning']
   }
   return []
 }

@@ -16,22 +16,22 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/discuss"
-	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/channel/route"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/command"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/media"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/slash"
+	"github.com/felinics/memoh/internal/acl"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/discuss"
+	"github.com/felinics/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/channel/route"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/command"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/media"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 type fakeChatGateway struct {
@@ -546,7 +546,7 @@ func (*fakeMediaIngestor) IngestContainerFile(_ context.Context, _, _ string) (m
 }
 
 func (*fakeMediaIngestor) AccessPath(_ context.Context, asset media.Asset) string {
-	return "/data/media/" + asset.StorageKey
+	return "/data/.memoh/media/" + asset.StorageKey
 }
 
 type fakeStorageProvider struct {
@@ -579,7 +579,7 @@ func (f *fakeStorageProvider) Delete(_ context.Context, key string) error {
 }
 
 func (*fakeStorageProvider) AccessPath(_ context.Context, key string) string {
-	return "/data/media/" + key
+	return "/data/.memoh/media/" + key
 }
 
 type fakeAttachmentResolverAdapter struct {
@@ -1464,7 +1464,6 @@ func TestChannelInboundProcessorACLDeniedManagerMessageDoesNotSuggestLink(t *tes
 		nil,
 		nil,
 		nil,
-		nil,
 	))
 	sender := &fakeReplySender{}
 
@@ -1649,7 +1648,7 @@ func TestChannelInboundProcessorQQAndWeixinWriteCommandsNeedLinkedManager(t *tes
 			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 			aclSvc := &fakeChatACL{allowed: false}
 			processor.SetACLService(aclSvc)
-			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
+			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
 			sender := &fakeReplySender{}
 
 			msg := channel.InboundMessage{
@@ -2123,7 +2122,6 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
 		cmdQueries,
 		nil,
 		nil,
@@ -2181,7 +2179,6 @@ func TestChannelInboundProcessorDirectedModeCommandPermissionDeniedReplies(t *te
 	gateway := &fakeChatGateway{}
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 	processor.SetCommandHandler(command.NewHandler(
-		nil,
 		nil,
 		nil,
 		nil,
@@ -2727,8 +2724,8 @@ func TestChannelInboundProcessorIngestsBase64Attachment(t *testing.T) {
 	if gotAttachment.Base64 != "" {
 		t.Fatalf("expected base64 to be cleared after ingest, got %q", gotAttachment.Base64)
 	}
-	if !strings.HasPrefix(gotAttachment.Path, "/data/media/") {
-		t.Fatalf("expected attachment path under /data/media/, got %q", gotAttachment.Path)
+	if !strings.HasPrefix(gotAttachment.Path, "/data/.memoh/media/") {
+		t.Fatalf("expected attachment path under /data/.memoh/media/, got %q", gotAttachment.Path)
 	}
 	if len(chatSvc.persistedIn) != 0 {
 		t.Fatalf("user message persistence is deferred to storeRound; expected 0 persisted, got %d", len(chatSvc.persistedIn))
@@ -2868,7 +2865,7 @@ func TestChannelInboundProcessorPipelineUsesResolvedAttachments(t *testing.T) {
 	if len(atts) != 1 {
 		t.Fatalf("expected one pipeline attachment, got %d", len(atts))
 	}
-	if got := atts[0].FilePath; got != "/data/media/test/asset-pipeline-photo" {
+	if got := atts[0].FilePath; got != "/data/.memoh/media/test/asset-pipeline-photo" {
 		t.Fatalf("expected pipeline attachment path to use media store, got %q", got)
 	}
 	if strings.Contains(atts[0].FilePath, "api.telegram.org") {
@@ -3567,7 +3564,7 @@ func TestIngestOutboundAttachments_NonDataURL(t *testing.T) {
 	p := &ChannelInboundProcessor{}
 	attachments := []channel.Attachment{
 		{Type: channel.AttachmentImage, URL: "https://example.com/img.png"},
-		{Type: channel.AttachmentImage, ContentHash: "existing-asset", URL: "/data/media/img.png"},
+		{Type: channel.AttachmentImage, ContentHash: "existing-asset", URL: "/data/.memoh/media/img.png"},
 	}
 	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 2 {
@@ -3611,7 +3608,7 @@ func TestIsDataURL(t *testing.T) {
 		{"data:image/png;base64,abc", true},
 		{"DATA:text/plain;base64,abc", true},
 		{"https://example.com", false},
-		{"/data/media/img.png", false},
+		{"/data/.memoh/media/img.png", false},
 		{"", false},
 	}
 	for _, tt := range tests {
@@ -3628,8 +3625,8 @@ func TestExtractStorageKey(t *testing.T) {
 		botID      string
 		want       string
 	}{
-		{"/data/media/26da/26da0cc7.jpg", "bot-1", "26da/26da0cc7.jpg"},
-		{"/data/media/abcd/abcd1234.pdf", "bot-2", "abcd/abcd1234.pdf"},
+		{"/data/.memoh/media/26da/26da0cc7.jpg", "bot-1", "26da/26da0cc7.jpg"},
+		{"/data/.memoh/media/abcd/abcd1234.pdf", "bot-2", "abcd/abcd1234.pdf"},
 		{"https://example.com/img.png", "bot-1", ""},
 		{"", "bot-1", ""},
 	}
@@ -3650,7 +3647,7 @@ func TestIsHTTPURL(t *testing.T) {
 		{"https://example.com/img.png", true},
 		{"http://localhost:8080/test", true},
 		{"HTTP://EXAMPLE.COM", true},
-		{"/data/media/img.png", false},
+		{"/data/.memoh/media/img.png", false},
 		{"data:image/png;base64,abc", false},
 		{"", false},
 	}
@@ -3669,7 +3666,7 @@ func TestIngestOutboundAttachments_ContainerPath(t *testing.T) {
 	}
 	p := &ChannelInboundProcessor{mediaService: ms}
 	attachments := []channel.Attachment{
-		{Type: channel.AttachmentImage, Path: "/data/media/26da/26da0cc7.jpg"},
+		{Type: channel.AttachmentImage, Path: "/data/.memoh/media/26da/26da0cc7.jpg"},
 	}
 	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 1 {
@@ -3691,13 +3688,13 @@ func TestIngestOutboundAttachments_ContainerPathNotFound(t *testing.T) {
 	}
 	p := &ChannelInboundProcessor{mediaService: ms}
 	attachments := []channel.Attachment{
-		{Type: channel.AttachmentImage, Path: "/data/media/26da/missing.jpg"},
+		{Type: channel.AttachmentImage, Path: "/data/.memoh/media/26da/missing.jpg"},
 	}
 	result := p.ingestOutboundAttachments(context.Background(), "bot-1", channel.ChannelType("telegram"), attachments)
 	if len(result) != 1 {
 		t.Fatalf("expected unresolved container attachment to remain unchanged, got %d", len(result))
 	}
-	if result[0].Path != "/data/media/26da/missing.jpg" {
+	if result[0].Path != "/data/.memoh/media/26da/missing.jpg" {
 		t.Fatalf("expected original path preserved, got %q", result[0].Path)
 	}
 	if result[0].ContentHash != "" {
@@ -3712,7 +3709,7 @@ func TestMapChannelToChatAttachments(t *testing.T) {
 		{
 			Type:        channel.AttachmentImage,
 			ContentHash: "asset-1",
-			Path:        "/data/media/ab/c.png",
+			Path:        "/data/.memoh/media/ab/c.png",
 			Base64:      "AAAA",
 			Mime:        "image/png",
 		},
@@ -3727,7 +3724,7 @@ func TestMapChannelToChatAttachments(t *testing.T) {
 	if len(mapped) != 2 {
 		t.Fatalf("expected 2 mapped attachments, got %d", len(mapped))
 	}
-	if mapped[0].Path != "/data/media/ab/c.png" {
+	if mapped[0].Path != "/data/.memoh/media/ab/c.png" {
 		t.Fatalf("expected asset attachment path, got %q", mapped[0].Path)
 	}
 	if !strings.HasPrefix(mapped[0].Base64, "data:image/png;base64,") {
@@ -3764,7 +3761,6 @@ func TestChannelInboundProcessorCommandExecutesWithUnprovenReplyAttachments(t *t
 		},
 	}
 	processor.SetCommandHandler(command.NewHandler(
-		nil,
 		nil,
 		nil,
 		nil,

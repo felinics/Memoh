@@ -9,8 +9,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 const (
@@ -112,9 +113,12 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 		if containsFold(model.InputModalities, "image") {
 			compatibilities = append(compatibilities, models.CompatVision)
 		}
-		reasoningEfforts := make([]string, 0, len(model.SupportedReasoningLevels))
+		advertisedEfforts := make([]string, 0, len(model.SupportedReasoningLevels))
 		for _, level := range model.SupportedReasoningLevels {
-			effort := strings.TrimSpace(level.Effort)
+			advertisedEfforts = append(advertisedEfforts, strings.ToLower(strings.TrimSpace(level.Effort)))
+		}
+		reasoningEfforts := make([]string, 0, len(advertisedEfforts))
+		for _, effort := range reasoning.NormalizeAdvertised(advertisedEfforts) {
 			if models.IsValidReasoningEffort(effort) && !containsFold(reasoningEfforts, effort) {
 				reasoningEfforts = append(reasoningEfforts, effort)
 			}

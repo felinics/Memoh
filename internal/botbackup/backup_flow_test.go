@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/botbackup/secure"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/botbackup/secure"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 // buildSampleBundle assembles a complete plaintext .memoh.zip the way Export
@@ -210,18 +210,16 @@ func TestImportStateItemErr(t *testing.T) {
 }
 
 func TestRestoredSessionDescriptorRejectsSystemACPRuntime(t *testing.T) {
-	// Schedule sessions may run through an ACP agent, so schedule/acp_agent
-	// restores cleanly; heartbeat remains a pure internal loop and still
-	// rejects the ACP runtime.
+	// Schedule sessions may run through an ACP agent, while retired automation
+	// sessions are filtered before descriptor restoration.
 	if _, _, _, err := restoredSessionDescriptor("schedule", "schedule", "acp_agent"); err != nil {
 		t.Fatalf("restoredSessionDescriptor(schedule/acp_agent) error = %v, want nil", err)
 	}
-	_, _, _, err := restoredSessionDescriptor("heartbeat", "heartbeat", "acp_agent")
-	if err == nil {
-		t.Fatal("restoredSessionDescriptor(heartbeat/acp_agent) = nil error, want unsupported combination")
+	if !isRetiredAutomationSession("heartbeat", "") || !isRetiredAutomationSession("", "heartbeat") {
+		t.Fatal("retired automation descriptors must be recognized before restore")
 	}
-	if !strings.Contains(err.Error(), "only supported") {
-		t.Fatalf("error = %v, want unsupported runtime/mode message", err)
+	if isRetiredAutomationSession("schedule", "schedule") {
+		t.Fatal("schedule descriptor must not be classified as retired automation")
 	}
 }
 

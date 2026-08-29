@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 // Runner defines conversation execution behavior for sync, stream, and scheduled flows.

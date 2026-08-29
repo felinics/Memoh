@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/models"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
@@ -24,7 +29,7 @@ type turnRuntimeHooks struct {
 	streamAgent      func(context.Context, native.RunConfig) <-chan native.StreamEvent
 	resolveRunConfig func(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
 	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
-	storeRound       func(context.Context, string, string, string, string, []sdk.Message, string) error
+	storeRound       func(context.Context, string, string, string, string, string, []sdk.Message, string, *contextfrag.LifecycleHolder) error
 }
 
 // startDiscussTurn orchestrates one discuss turn: resolve the run config,
@@ -72,9 +77,10 @@ func (*discussHandle) Inject(context.Context, turn.InjectMessage) error {
 // discussHandle reuses runHandle's channel pair with manual event emission.
 type discussHandle struct {
 	runHandle
-	teamID    string
-	sessionID string
-	seq       int64
+	teamID               string
+	sessionID            string
+	seq                  int64
+	contentLightTerminal bool
 }
 
 // emit delivers one event, giving up when the run context is canceled so
@@ -114,6 +120,11 @@ func (h *discussHandle) emitErr(err error) bool {
 func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
 	defer close(h.events)
 	defer close(h.errs)
+	defer func() {
+		if h.contentLightTerminal && !h.failed.Load() && h.streamErr == nil && !s.usesDurableTerminalObserver() {
+			s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
+		}
+	}()
 	defer h.finish()
 	defer func() {
 		// External cancellation can surface as a cleanly closed agent
@@ -138,7 +149,9 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 
 	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
 		if !cmd.DiscussAddressed {
-			h.emit(turn.DiscussEventSkipped, nil)
+			if h.emit(turn.DiscussEventSkipped, nil) {
+				h.contentLightTerminal = true
+			}
 			return
 		}
 		s.pumpDiscussACP(ctx, cmd, h)
@@ -149,69 +162,183 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 
 func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {
 	runConfig := resolved.RunConfig
-	runConfig.Messages = discussMessagesToSDK(cmd.DiscussMessages)
+	runConfig.RunID = h.id
+	budgetTokens := resolved.ContextBudgetMaxTokens
+	if budgetTokens <= 0 {
+		budgetTokens = s.contextAbsoluteMaxTokens()
+	}
+	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, budgetTokens)
+	if admission.ProtectedOverflow {
+		s.logger.Error("context_admission_rejected",
+			slog.String("path", "discuss_turn"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens))
+		h.emitErr(apperror.New(apperror.CodeContextProtectedOverflow, nil))
+		return
+	}
+	if admission.DroppedMessages > 0 {
+		s.logger.Info("context_admission",
+			slog.String("path", "discuss_turn"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("selected_tokens", admission.SelectedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens),
+			slog.Int("dropped_messages", admission.DroppedMessages))
+	}
+	runConfig.Messages = discussMessagesToSDK(admitted)
 	runConfig.SessionType = sessionpkg.TypeDiscuss
 	runConfig.Query = ""
 	runConfig.ContextCurrentUserMessageIndex = nil
 	runConfig.ContextMemoryMessageIndex = nil
-	runConfig.ContextSourceFrags = nil
+	if runConfig.ContextLifecycle == nil {
+		runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+	}
+	runConfig.ContextBudgetMaxTokens = resolved.ContextBudgetMaxTokens
+	if runConfig.ContextToolExchangePolicy == nil {
+		runConfig.ContextToolExchangePolicy = defaultToolExchangePolicy()
+	}
 
 	// Inline image attachments from new RC segments so the model receives
 	// them as native vision input (ImagePart) on the first encounter.
+	var imageParts []sdk.ImagePart
 	if runConfig.SupportsImageInput && len(cmd.DiscussImageRefs) > 0 {
 		refs := make([]timeline.ImageAttachmentRef, len(cmd.DiscussImageRefs))
 		for i, r := range cmd.DiscussImageRefs {
 			refs[i] = timeline.ImageAttachmentRef{ContentHash: r.ContentHash, Mime: r.Mime}
 		}
-		imageParts := s.inlineDiscussImages(ctx, cmd.BotID, refs)
+		imageParts = s.inlineDiscussImages(ctx, cmd.BotID, refs)
 		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 	}
+	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, imageParts)
 	runConfig = runConfig.RefreshContextFrag()
+	terminal := s.contextLifecycleTerminal(ctx, runConfig)
+	var lifecycleCause error
+	var lifecycleDeferred bool
+	defer func() {
+		if !lifecycleDeferred {
+			terminal(lifecycleCause)
+		}
+	}()
 
-	eventCh := s.streamDiscussAgent(ctx, runConfig)
+	reasoningTiming := newReasoningTimingTracker(nil)
+	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
+	defer idleCancel.Stop()
+	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
 	var finalMessages json.RawMessage
+	var finalReasoningTiming []messagepkg.ReasoningTimingSegment
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
 	var hasTerminalEvent bool
 	for event := range eventCh {
+		idleCancel.Reset()
+		if event.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
+			lifecycleCause = eventErr
+		}
 		terminal := event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort
 		if terminal {
 			finalMessages = event.Messages
+			finalReasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
 			terminalEvent = event
 			terminalPayload, _ = json.Marshal(event)
 			hasTerminalEvent = true
+			lifecycleDeferred = strings.TrimSpace(event.ApprovalID) != ""
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					lifecycleCause = nil
+				case native.EventAgentAbort:
+					if idleCancel.DidFire() {
+						lifecycleCause = context.Cause(idleCtx)
+					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
+						lifecycleCause = agentAbortCause(ctx)
+					}
+				}
+			}
 			continue
 		}
 		if h.publishAgentEvent != nil {
-			if publishErr := h.publishAgentEvent(ctx, event); publishErr != nil {
+			if publishErr := h.publishAgentEvent(ctx, publicAgentStreamEvent(event)); publishErr != nil {
+				lifecycleCause = publishErr
+				lifecycleDeferred = false
 				h.emitErr(publishErr)
 				return
 			}
 		}
-		payload, marshalErr := json.Marshal(event)
+		payload, marshalErr := json.Marshal(publicAgentStreamEvent(event))
 		if marshalErr != nil {
 			continue
 		}
 		if !h.emit(string(event.Type), payload) {
+			if lifecycleCause == nil {
+				lifecycleCause = context.Cause(ctx)
+			}
+			return
+		}
+	}
+	timedOut := idleCancel.DidFire()
+	if timedOut {
+		lifecycleCause = context.Cause(idleCtx)
+		lifecycleDeferred = false
+	}
+	if !hasTerminalEvent && !timedOut {
+		if lifecycleCause == nil {
+			if ctx.Err() != nil {
+				lifecycleCause = context.Cause(ctx)
+			} else {
+				lifecycleCause = errors.New("native discuss stream ended without a terminal event")
+			}
+		}
+		if ctx.Err() == nil {
+			h.emitErr(lifecycleCause)
+		}
+		return
+	}
+
+	// The native stream deliberately drains to a terminal event after external
+	// cancellation. Preserve the admitted run's values and fencing token while
+	// detaching cancellation so that terminal history and runtime publication
+	// can cross the same durable boundary as the main chat stream.
+	terminalCtx := context.WithoutCancel(ctx)
+	if hasTerminalEvent || timedOut {
+		var failureCode apperror.Code
+		if timedOut {
+			failureCode = snapshotFailureCode(true, lifecycleCause)
+		}
+		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode); storeErr != nil {
+			historyErr := runtimeHistoryError(storeErr)
+			lifecycleCause = historyErr
+			lifecycleDeferred = false
+			h.emitErr(historyErr)
 			return
 		}
 	}
 
-	if len(finalMessages) > 0 {
-		var sdkMsgs []sdk.Message
-		if json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
-			if storeErr := s.storeDiscussRound(ctx,
-				cmd.BotID, cmd.ThreadID, cmd.SourceChannelIdentityID, cmd.CurrentChannel,
-				sdkMsgs, resolved.ModelID,
-			); storeErr != nil {
-				h.emitErr(runtimeHistoryError(storeErr))
+	if timedOut {
+		failureEvent := agentFailureStreamEvent(lifecycleCause)
+		if h.publishAgentEvent != nil {
+			if publishErr := h.publishAgentEvent(terminalCtx, failureEvent); publishErr != nil {
+				h.emitErr(publishErr)
 				return
 			}
 		}
+		if payload, marshalErr := json.Marshal(failureEvent); marshalErr == nil {
+			h.emit(string(failureEvent.Type), payload)
+		}
+		h.emitErr(lifecycleCause)
+		return
 	}
 	if hasTerminalEvent && h.publishAgentEvent != nil {
-		if publishErr := h.publishAgentEvent(ctx, terminalEvent); publishErr != nil {
+		if publishErr := h.publishAgentEvent(terminalCtx, terminalEvent); publishErr != nil {
+			lifecycleCause = publishErr
+			lifecycleDeferred = false
 			h.emitErr(publishErr)
 			return
 		}
@@ -224,22 +351,143 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// Compute pressure on this goroutine so the detached trigger holds a few
 	// scalars instead of pinning the whole composed context until it runs.
 	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
+		// Pressure is measured on the full composed context, not the admitted
+		// window: what admission dropped is exactly what compaction must cover.
 		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
 	}
+}
+
+func (s *Service) persistDiscussTerminalSnapshot(
+	ctx context.Context,
+	runConfig native.RunConfig,
+	cmd turn.StartTurnCommand,
+	modelID string,
+	finalMessages json.RawMessage,
+	reasoningTiming []messagepkg.ReasoningTimingSegment,
+	failureCode apperror.Code,
+) error {
+	var sdkMsgs []sdk.Message
+	if len(finalMessages) > 0 && json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
+		return s.storeDiscussRound(
+			ctx,
+			runConfig.RunID,
+			cmd.BotID,
+			cmd.ThreadID,
+			cmd.SourceChannelIdentityID,
+			cmd.CurrentChannel,
+			sdkMsgs,
+			modelID,
+			runConfig.ContextLifecycle,
+			reasoningTiming,
+		)
+	}
+	if failureCode == "" {
+		return nil
+	}
+	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
+		return s.turnHooks.storeRound(
+			ctx,
+			runConfig.RunID,
+			cmd.BotID,
+			cmd.ThreadID,
+			cmd.SourceChannelIdentityID,
+			cmd.CurrentChannel,
+			[]sdk.Message{sdk.AssistantMessage("")},
+			modelID,
+			runConfig.ContextLifecycle,
+		)
+	}
+	return s.storeRoundWithOptions(ctx, ChatRequest{
+		RunID:                   runConfig.RunID,
+		BotID:                   cmd.BotID,
+		ChatID:                  cmd.BotID,
+		ThreadID:                cmd.ThreadID,
+		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
+		CurrentChannel:          cmd.CurrentChannel,
+		UserMessagePersisted:    true,
+	}, []ModelMessage{{
+		Role:    "assistant",
+		Content: newTextContent(""),
+	}}, modelID, storeRoundOptions{
+		AllowEmptyAssistantText: true,
+		MessageMetadataByIndex: map[int]map[string]any{
+			0: {
+				messagepkg.AgentStepInterruptedMetadataKey: true,
+				messagepkg.HistoryErrorCodeMetadataKey:     string(failureCode),
+			},
+		},
+		ContextLifecycle: runConfig.ContextLifecycle,
+		ReasoningTiming:  reasoningTiming,
+	})
+}
+
+func (s *Service) collectDiscussSourceFrags(
+	ctx context.Context,
+	runConfig native.RunConfig,
+	messages []turn.DiscussMessage,
+	inlineImages []sdk.ImagePart,
+) []contextfrag.ContextFrag {
+	var systemFrags []contextfrag.ContextFrag
+	var memoryFrags []contextfrag.ContextFrag
+	var hookFrags []contextfrag.ContextFrag
+	for _, frag := range runConfig.ContextSourceFrags {
+		switch {
+		case frag.Slot == contextfrag.SlotSystem:
+			systemFrags = append(systemFrags, frag)
+		case frag.Kind == contextfrag.KindMemoryRecall:
+			memoryFrags = append(memoryFrags, frag)
+		case frag.Kind == contextfrag.KindHookContext:
+			hookFrags = append(hookFrags, frag)
+		}
+	}
+	frags, err := (&contextview.DiscussSDKContextBuilder{}).CollectDiscussSourceFrags(
+		ctx,
+		runConfig.ContextScope,
+		runConfig.System,
+		contextview.DiscussContextInput{
+			ComposedMessages: discussMessagesToTimeline(messages),
+			InlineImages:     inlineImages,
+			SystemFrags:      systemFrags,
+		},
+	)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("collect typed discuss context failed", slog.Any("error", err))
+		}
+		return nil
+	}
+	dynamic := make([]contextfrag.ContextFrag, 0, len(memoryFrags)+len(hookFrags))
+	dynamic = append(dynamic, memoryFrags...)
+	dynamic = append(dynamic, hookFrags...)
+	if len(dynamic) == 0 {
+		return frags
+	}
+	currentIndex := len(frags)
+	for i, frag := range frags {
+		if frag.Kind == contextfrag.KindCurrentUserMessage {
+			currentIndex = i
+			break
+		}
+	}
+	out := make([]contextfrag.ContextFrag, 0, len(frags)+len(dynamic))
+	out = append(out, frags[:currentIndex]...)
+	out = append(out, dynamic...)
+	out = append(out, frags[currentIndex:]...)
+	return out
 }
 
 // maybeCompactDiscuss re-evaluates compaction pressure after a native discuss
 // turn with the same trigger policy as the chat path. ACP discuss turns run
 // through streamTurnChat and inherit its trigger directly.
 func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, modelID string, compactable int) {
-	budget := 0
+	// The absolute cap keeps compaction triggers alive even when the model
+	// has no configured context window; a zero budget would disable them.
+	budget := s.contextAbsoluteMaxTokens()
 	var turnModel models.GetResponse
 	if s.modelsService != nil && strings.TrimSpace(modelID) != "" {
 		if model, err := s.modelsService.GetByID(ctx, modelID); err == nil {
 			turnModel = model
-			if model.Config.ContextWindow != nil {
-				budget = *model.Config.ContextWindow
-			}
+			budget = s.effectiveContextTokenBudget(model)
 		}
 	}
 	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID}, resolvedContext{
@@ -251,33 +499,54 @@ func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, mode
 }
 
 // discussCompactableTokens estimates the raw history share of a discuss
-// context, excluding artifact summaries, in the chat trigger's token unit.
+// context, excluding artifact summaries, in the shared estimator's unit.
 func discussCompactableTokens(messages []turn.DiscussMessage) int {
 	total := 0
 	for _, message := range messages {
 		if message.CompactionArtifactID != "" {
 			continue
 		}
-		size := len(message.RawContent)
-		if size == 0 {
-			size = len(message.Content)
-		}
-		total += size / 4
+		total += discussMessageTokens(message)
 	}
 	return total
 }
 
 func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
-	prompt := discussACPFullContextPrompt(cmd.DiscussMessages)
+	// ACP resolution carries no model window, so the prompt is budgeted by
+	// the absolute cap before any concatenation (CM-ADM-001).
+	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, s.contextAbsoluteMaxTokens())
+	if admission.ProtectedOverflow {
+		s.logger.Error("context_admission_rejected",
+			slog.String("path", "discuss_acp"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens))
+		h.emitErr(apperror.New(apperror.CodeContextProtectedOverflow, nil))
+		return
+	}
+	if admission.DroppedMessages > 0 {
+		s.logger.Info("context_admission",
+			slog.String("path", "discuss_acp"),
+			slog.String("bot_id", cmd.BotID),
+			slog.String("session_id", cmd.ThreadID),
+			slog.Int("estimated_tokens", admission.EstimatedTokens),
+			slog.Int("selected_tokens", admission.SelectedTokens),
+			slog.Int("budget_tokens", admission.BudgetTokens),
+			slog.Int("dropped_messages", admission.DroppedMessages))
+	}
+	prompt := discussACPFullContextPrompt(admitted)
 	if strings.TrimSpace(prompt) == "" {
 		// No composable context: end without a skip marker so the caller
 		// does not advance its consumed cursor (pre-port semantics).
+		h.contentLightTerminal = true
 		return
 	}
 	chunks, errs := s.streamTurnChat(ctx, ChatRequest{
 		BotID:                   cmd.BotID,
 		ChatID:                  cmd.BotID,
 		ThreadID:                cmd.ThreadID,
+		RunID:                   h.id,
 		RouteID:                 cmd.RouteID,
 		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
 		CurrentChannel:          cmd.CurrentChannel,
@@ -298,6 +567,10 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 			if !ok {
 				chunks = nil
 				continue
+			}
+			if err := h.publishChunk(chunk); err != nil {
+				h.emitErr(err)
+				return
 			}
 			if !h.emit(parseKind(chunk), chunk) {
 				return
@@ -373,22 +646,38 @@ func (s *Service) streamDiscussAgent(ctx context.Context, cfg native.RunConfig) 
 
 func (s *Service) storeDiscussRound(
 	ctx context.Context,
+	runID string,
 	botID, sessionID, channelIdentityID, currentPlatform string,
 	messages []sdk.Message,
 	modelID string,
+	lifecycle *contextfrag.LifecycleHolder,
+	reasoningTiming []messagepkg.ReasoningTimingSegment,
 ) error {
 	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
 		return s.turnHooks.storeRound(
 			ctx,
+			runID,
 			botID,
 			sessionID,
 			channelIdentityID,
 			currentPlatform,
 			messages,
 			modelID,
+			lifecycle,
 		)
 	}
-	return s.StoreRound(ctx, botID, sessionID, channelIdentityID, currentPlatform, messages, modelID)
+	return s.storeRoundWithOptions(ctx, ChatRequest{
+		RunID:                   runID,
+		BotID:                   botID,
+		ChatID:                  botID,
+		ThreadID:                sessionID,
+		SourceChannelIdentityID: channelIdentityID,
+		CurrentChannel:          currentPlatform,
+		UserMessagePersisted:    true,
+	}, sdkMessagesToModelMessages(messages), modelID, storeRoundOptions{
+		ContextLifecycle: lifecycle,
+		ReasoningTiming:  reasoningTiming,
+	})
 }
 
 // discussMessagesToSDK converts composed context messages into SDK
@@ -417,6 +706,19 @@ func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
 			result = append(result, sdk.AssistantMessage(m.Content))
 		default:
 			result = append(result, sdk.UserMessage(m.Content))
+		}
+	}
+	return result
+}
+
+func discussMessagesToTimeline(messages []turn.DiscussMessage) []timeline.ContextMessage {
+	result := make([]timeline.ContextMessage, len(messages))
+	for i, message := range messages {
+		result[i] = timeline.ContextMessage{
+			Role:                 message.Role,
+			Content:              message.Content,
+			RawContent:           message.RawContent,
+			CompactionArtifactID: message.CompactionArtifactID,
 		}
 	}
 	return result

@@ -132,9 +132,13 @@
       />
     </div>
 
-    <!-- Settings, pinned below the scrollable panel. Solid bg + z-index so a
-         short viewport never paints list rows over the footer. -->
-    <div class="relative z-1 shrink-0 bg-sidebar px-2 pt-1 pb-2">
+    <!-- Settings, pinned below the scrollable panel. Solid bg + z-index keep
+         list rows behind the footer on Web; the native-surface hook lets macOS
+         Desktop expose the same sidebar material as the surrounding rail. -->
+    <div
+      class="relative z-1 shrink-0 bg-sidebar px-2 pt-1 pb-2"
+      data-native-sidebar-surface
+    >
       <SidebarNavButton
         :active="isSettingsActive"
         :aria-label="t('sidebar.settings')"

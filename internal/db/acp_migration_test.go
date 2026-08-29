@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	embeddeddb "github.com/memohai/memoh/db"
+	embeddeddb "github.com/felinics/memoh/db"
 )
 
 func TestPostgresACPAgentSessionTypeMigrationFiles(t *testing.T) {
 	baseline := readEmbeddedMigration(t, "postgres/migrations/0001_init.up.sql")
-	if !strings.Contains(baseline, "type IN ('chat', 'heartbeat', 'schedule', 'subagent', 'discuss', 'acp_agent')") {
+	if !strings.Contains(baseline, "type IN ('chat', 'schedule', 'subagent', 'discuss', 'acp_agent')") {
 		t.Fatal("postgres baseline bot_sessions type CHECK missing acp_agent")
 	}
 	up := readEmbeddedMigration(t, "postgres/migrations/0082_acp_agent_session_type.up.sql")

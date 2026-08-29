@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	memohcopilot "github.com/memohai/memoh/internal/copilot"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
+	memohcopilot "github.com/felinics/memoh/internal/copilot"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/models"
 )
 
 const openAIAuthClaimPath = "https://api.openai.com/auth"

@@ -1,9 +1,10 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, session_mode, runtime_type, visibility, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id
+  bot_id, bot_agent_id, route_id, channel_type, type, session_mode, runtime_type, visibility, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id
 )
 VALUES (
   sqlc.arg(bot_id),
+  sqlc.narg(bot_agent_id)::uuid,
   sqlc.narg(route_id)::uuid,
   sqlc.narg(channel_type)::text,
   sqlc.arg(type),
@@ -19,7 +20,7 @@ VALUES (
 )
 RETURNING *;
 
--- name: ForkSessionFromAssistantMessage :one
+-- name: ForkSessionFromAssistantTurn :one
 WITH source_session AS (
   SELECT s.*
   FROM bot_sessions s
@@ -37,10 +38,9 @@ target_turn AS (
   FROM source_session s
   JOIN bot_visible_history_messages vm ON vm.team_id = public.memoh_current_team_id()
     AND vm.session_id = s.id
-    AND vm.id = sqlc.arg(message_id)
+    AND vm.turn_id = sqlc.arg(turn_id)
     AND vm.role = 'assistant'
-    AND vm.turn_id IS NOT NULL
-    AND vm.turn_position IS NOT NULL
+  ORDER BY vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
   LIMIT 1
 ),
 copy_messages AS (
@@ -101,15 +101,18 @@ fork_plan AS (
   SELECT
     s.*,
     fam.new_message_id AS fork_message_id,
+    tt.message_id AS source_message_id,
     ntp.value AS next_turn_position_value
   FROM source_session s
   JOIN fork_anchor_message fam ON true
+  JOIN target_turn tt ON true
   CROSS JOIN next_turn_position ntp
   WHERE EXISTS (SELECT 1 FROM copy_turns)
 ),
 created_session AS (
   INSERT INTO bot_sessions (
     bot_id,
+    bot_agent_id,
     channel_type,
     type,
     session_mode,
@@ -124,6 +127,7 @@ created_session AS (
   )
   SELECT
     fp.bot_id,
+    fp.bot_agent_id,
     fp.channel_type,
     fp.type,
     fp.session_mode,
@@ -135,7 +139,10 @@ created_session AS (
     jsonb_set(
       pm.value,
       '{forked_from}',
-      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fp.fork_message_id::text),
+      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object(
+        'message_id', fp.source_message_id::text,
+        'fork_message_id', fp.fork_message_id::text
+      ),
       true
     ),
     fp.next_turn_position_value,
@@ -257,6 +264,18 @@ WHERE team_id = public.memoh_current_team_id()
   AND deleted_at IS NULL
 FOR UPDATE;
 
+-- name: LockSessionForCommitReconciliation :one
+-- Commit-unknown reconciliation must wait for the original writer even when a
+-- concurrent reset has soft-deleted the session. A missing row after this lock
+-- attempt is terminal (the session was hard-deleted and its history cascaded),
+-- not a transient condition to retry forever.
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id)
+  AND bot_id = sqlc.arg(bot_id)
+FOR UPDATE;
+
 -- name: LockSessionRuntimeFence :one
 SELECT runtime_fencing_token
 FROM bot_sessions
@@ -278,7 +297,7 @@ FOR UPDATE;
 
 -- name: ListSessionsByBot :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -288,7 +307,7 @@ ORDER BY s.updated_at DESC;
 
 -- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -304,7 +323,7 @@ ORDER BY s.updated_at DESC;
 -- disabled, "sessions of this workdir", or "sessions with no workdir"
 -- (workdir_unassigned) for the sidebar's ungrouped bucket.
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -335,7 +354,7 @@ LIMIT sqlc.arg(limit_count)::int;
 
 -- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
   s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
@@ -410,16 +429,49 @@ UPDATE bot_sessions
 SET type = sqlc.arg(type),
     session_mode = sqlc.arg(session_mode),
     runtime_type = sqlc.arg(runtime_type),
+    bot_agent_id = sqlc.arg(bot_agent_id),
     runtime_metadata = sqlc.arg(runtime_metadata),
     metadata = sqlc.arg(metadata),
+    runtime_config_epoch = runtime_config_epoch + 1,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id) AND deleted_at IS NULL
 RETURNING *;
 
 -- name: SoftDeleteSession :exec
-UPDATE bot_sessions
-SET deleted_at = now(), updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id) AND deleted_at IS NULL;
+-- ACP state is removed in full: soft delete never fires the hard-delete FK
+-- cascades, so headers, the shared line set, and the publication head must
+-- all be dropped here or they orphan forever.
+WITH invalidated_session AS MATERIALIZED (
+  UPDATE bot_sessions
+  SET deleted_at = now(),
+      updated_at = now(),
+      runtime_config_epoch = runtime_config_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+  WHERE team_id = public.memoh_current_team_id()
+    AND id = sqlc.arg(id)
+    AND deleted_at IS NULL
+  RETURNING id
+),
+deleted_acp_states AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_session invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_session invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+)
+DELETE FROM acp_session_publications publication
+USING invalidated_session invalidated
+WHERE publication.team_id = public.memoh_current_team_id()
+  AND publication.session_id = invalidated.id
+  AND (SELECT count(*) FROM deleted_acp_states) >= 0
+  AND (SELECT count(*) FROM deleted_acp_lines) >= 0;
 
 -- name: TouchSession :exec
 UPDATE bot_sessions
@@ -493,6 +545,43 @@ WHERE team_id = public.memoh_current_team_id()
 ORDER BY created_at DESC;
 
 -- name: SoftDeleteSessionsByBot :exec
-UPDATE bot_sessions
-SET deleted_at = now(), updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id) AND deleted_at IS NULL;
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = sqlc.arg(bot_id)
+    AND session.deleted_at IS NULL
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS MATERIALIZED (
+  UPDATE bot_sessions session
+  SET deleted_at = now(),
+      updated_at = now(),
+      runtime_config_epoch = session.runtime_config_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+  FROM target_sessions target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+  RETURNING session.id
+),
+deleted_acp_states AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_sessions invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_sessions invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+)
+DELETE FROM acp_session_publications publication
+USING invalidated_sessions invalidated
+WHERE publication.team_id = public.memoh_current_team_id()
+  AND publication.session_id = invalidated.id
+  AND (SELECT count(*) FROM deleted_acp_states) >= 0
+  AND (SELECT count(*) FROM deleted_acp_lines) >= 0;

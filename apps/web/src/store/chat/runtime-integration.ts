@@ -273,7 +273,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
         pending.assistantTurn,
       ) ? 'stream' : 'startup'
-      if (pending.assistantTurn.messages.length === 0) {
+      if (pending.assistantTurn.messages.length === 0 && !event.code) {
         deps.removeTurnFromSession(
           pending.botId,
           pending.sessionId,
@@ -374,13 +374,17 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (currentRun.status === 'completed') {
         deps.assistantStreams.resolveAssistantStream(invocationId)
       } else {
-        const message = currentRun.error || deps.sendFailedMessage()
+        const message = resolveApiErrorMessage(
+          currentRun,
+          currentRun.error || deps.sendFailedMessage(),
+        )
         if (currentRun.status === 'aborted') {
           const aborted = new Error(message)
           aborted.name = 'AbortError'
           deps.assistantStreams.rejectAssistantStream(invocationId, aborted)
         } else {
           const stage: SendMessageStage = currentRun.messages.length > 0
+            || Boolean(currentRun.error_code)
             ? 'stream'
             : 'startup'
           deps.assistantStreams.rejectAssistantStream(

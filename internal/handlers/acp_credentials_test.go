@@ -9,7 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 func acpCredentialsMetadata(agentID, mode string, managed map[string]any) map[string]any {

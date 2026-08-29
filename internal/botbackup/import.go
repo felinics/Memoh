@@ -19,24 +19,25 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/botbackup/secure"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	fetchpkg "github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	modelpkg "github.com/memohai/memoh/internal/models"
-	providerpkg "github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/schedule"
-	searchpkg "github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/acl"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/botbackup/secure"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	modelpkg "github.com/felinics/memoh/internal/models"
+	providerpkg "github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/schedule"
+	searchpkg "github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type importState struct {
@@ -328,12 +329,6 @@ func settingsLabels(raw []byte) []string {
 		}
 		return ""
 	}
-	boolStr := func(k string) string {
-		if v, ok := m[k].(bool); ok && v {
-			return "on"
-		}
-		return "off"
-	}
 	// Reasoning has two archive shapes: the retired reasoning_enabled flag, and
 	// the current effort field where "disable" is off. Prefer the legacy flag when
 	// present so old archives preview the state they will actually import as.
@@ -357,8 +352,11 @@ func settingsLabels(raw []byte) []string {
 		out = append(out, "acl default: "+v)
 	}
 	out = append(out, "reasoning: "+reasoningStr())
-	out = append(out, "heartbeat: "+boolStr("heartbeat_enabled"))
-	out = append(out, "compaction: "+boolStr("compaction_enabled"))
+	compaction := "off"
+	if enabled, ok := m["compaction_enabled"].(bool); ok && enabled {
+		compaction = "on"
+	}
+	out = append(out, "compaction: "+compaction)
 	return out
 }
 
@@ -506,12 +504,24 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 			return ImportResult{}, err
 		}
 	}
+	var releaseACPRuntimeReset func()
+	if shouldGateOverwriteACPRuntimes(opts) && s.acpRuntimes == nil {
+		return ImportResult{}, ErrHistoryResetUnavailable
+	}
+	if shouldGateOverwriteACPRuntimes(opts) {
+		target := strings.TrimSpace(opts.TargetBotID)
+		ctx, releaseACPRuntimeReset, err = s.acpRuntimes.BeginBotHistoryReset(ctx, target)
+		if err != nil {
+			return ImportResult{}, errors.Join(
+				ErrHistoryResetUnavailable,
+				fmt.Errorf("begin ACP runtime reset for overwrite import: %w", err),
+			)
+		}
+		defer releaseACPRuntimeReset()
+	}
 	targetBotID, created, err := s.restoreBot(ctx, actorUserID, profile, opts)
 	if err != nil {
 		return ImportResult{}, err
-	}
-	if shouldCloseOverwriteACPRuntimes(opts, created) {
-		s.closeBotACPRuntimes(targetBotID)
 	}
 	state.idMap[profile.ID] = targetBotID
 	state.createMode = created
@@ -538,6 +548,26 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		}()
 	}
 
+	// Permanently invalidate every old runtime before any overwrite section can
+	// mutate database or workspace state. This short committed transaction is
+	// intentionally before applyRestore: a process crash during an external
+	// workspace transfer must not roll the epoch invalidation back.
+	if _, fenced := runtimefence.ResetFromContext(ctx); releaseACPRuntimeReset != nil && fenced {
+		botUUID, parseErr := db.ParseUUID(targetBotID)
+		if parseErr != nil {
+			return ImportResult{}, parseErr
+		}
+		bumpErr := runtimefence.InResetTransaction(ctx, s.queries, targetBotID, "", func(queries dbstore.Queries) error {
+			_, err := queries.BumpBotRuntimeConfigEpoch(ctx, botUUID)
+			return err
+		})
+		if bumpErr != nil {
+			return ImportResult{}, errors.Join(
+				ErrHistoryResetUnavailable,
+				fmt.Errorf("advance ACP runtime config generation: %w", bumpErr),
+			)
+		}
+	}
 	if err := s.applyRestore(ctx, actorUserID, targetBotID, cfg, deps, opts, state); err != nil {
 		return ImportResult{}, err
 	}
@@ -661,10 +691,30 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 			state.warnings = append(state.warnings, "workspace restore skipped: workspace manager not configured")
 		} else if archive, err := workspaceArchive(state.entries); err != nil {
 			state.warnings = append(state.warnings, "workspace restore failed: "+err.Error())
-		} else if err := s.restoreWorkspaceData(ctx, targetBotID, archive, state.createMode); err != nil {
-			state.warnings = append(state.warnings, "workspace restore failed: "+err.Error())
 		} else {
-			state.counts[SectionWorkspace] = countWorkspaceFiles(state.entries)
+			_, fenced := runtimefence.ResetFromContext(ctx)
+			var transferErr, guardErr error
+			if fenced {
+				transferErr, guardErr = runtimefence.PublishBotRuntimeConfig(
+					ctx,
+					s.queries,
+					targetBotID,
+					workspaceRestoreRetryTimeout,
+					func(publishCtx context.Context) error {
+						return s.restoreWorkspaceData(publishCtx, targetBotID, archive, state.createMode)
+					},
+				)
+			} else {
+				transferErr = s.restoreWorkspaceData(ctx, targetBotID, archive, state.createMode)
+			}
+			switch {
+			case guardErr != nil:
+				return guardErr
+			case transferErr == nil:
+				state.counts[SectionWorkspace] = countWorkspaceFiles(state.entries)
+			default:
+				state.warnings = append(state.warnings, "workspace restore failed: "+transferErr.Error())
+			}
 		}
 	}
 	return nil
@@ -861,26 +911,12 @@ func (s *Service) restoreBot(ctx context.Context, actorUserID string, profile bo
 	return created.ID, true, nil
 }
 
-func shouldCloseOverwriteACPRuntimes(opts ImportOptions, created bool) bool {
-	if created || normalizeImportMode(opts.Mode) != ImportModeOverwrite {
+func shouldGateOverwriteACPRuntimes(opts ImportOptions) bool {
+	if normalizeImportMode(opts.Mode) != ImportModeOverwrite {
 		return false
 	}
-	return opts.wants(SectionProfile) || opts.wants(SectionWorkspace)
-}
-
-func (s *Service) closeBotACPRuntimes(botID string) {
-	if s == nil || s.acpRuntimes == nil {
-		return
-	}
-	for _, profile := range acpprofile.List() {
-		if err := s.acpRuntimes.CloseBotAgentRuntimes(botID, profile.ID); err != nil {
-			s.logger.Warn("close ACP runtime after bot backup import failed",
-				slog.String("bot_id", botID),
-				slog.String("agent_id", profile.ID),
-				slog.Any("error", err),
-			)
-		}
-	}
+	return opts.wants(SectionProfile) || opts.wants(SectionWorkspace) ||
+		(opts.wants(SectionHistory) && opts.strategyFor(SectionHistory) == StrategyReplace)
 }
 
 // restoreSettings writes the bot settings, importing the behavior group
@@ -911,7 +947,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.MemoryProviderID = current.MemoryProviderID
 				eff.TtsModelID = current.TtsModelID
 				eff.TranscriptionModelID = current.TranscriptionModelID
-				eff.HeartbeatModelID = current.HeartbeatModelID
 				eff.CompactionModelID = current.CompactionModelID
 				eff.DiscussProbeModelID = current.DiscussProbeModelID
 			}
@@ -924,8 +959,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.ChatACPProjectPath = current.ChatACPProjectPath
 				eff.ChatACPProjectMode = current.ChatACPProjectMode
 				eff.ReasoningEffort = current.ReasoningEffort
-				eff.HeartbeatEnabled = current.HeartbeatEnabled
-				eff.HeartbeatInterval = current.HeartbeatInterval
 				eff.CompactionEnabled = current.CompactionEnabled
 				eff.CompactionThreshold = current.CompactionThreshold
 				eff.CompactionTargetPercent = current.CompactionTargetPercent
@@ -951,8 +984,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 
 	timezone := eff.Timezone
 	reasoningEffort := eff.ReasoningEffort
-	heartbeatEnabled := eff.HeartbeatEnabled
-	heartbeatInterval := eff.HeartbeatInterval
 	compactionEnabled := eff.CompactionEnabled
 	compactionThreshold := eff.CompactionThreshold
 	compactionTargetPercent := 0
@@ -982,9 +1013,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		AclDefaultEffect:        eff.AclDefaultEffect,
 		Timezone:                &timezone,
 		ReasoningEffort:         &reasoningEffort,
-		HeartbeatEnabled:        &heartbeatEnabled,
-		HeartbeatInterval:       &heartbeatInterval,
-		HeartbeatModelID:        ptrStringAllowEmpty(modelID(eff.HeartbeatModelID, deps.models)),
 		CompactionEnabled:       &compactionEnabled,
 		CompactionThreshold:     &compactionThreshold,
 		CompactionTargetPercent: &compactionTargetPercent,
@@ -1255,9 +1283,16 @@ func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state 
 // single transaction so a failure leaves no partial history. When replace is
 // set, existing conversation state is cleared first so the import is a real
 // replacement, not a partial append.
-func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string, state *importState, includeAssets, replace bool) error {
+func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string, state *importState, includeAssets, replace bool) (retErr error) {
 	if s.queries == nil {
 		return nil
+	}
+	_, resetProtected := runtimefence.ResetFromContext(ctx)
+	if resetProtected {
+		defer func() { retErr = runtimefence.NormalizeResetError(ctx, retErr) }()
+	}
+	if resetProtected && s.db == nil {
+		return runtimefence.ErrTransactionsUnsupported
 	}
 	q := s.queries
 	var tx pgx.Tx
@@ -1267,11 +1302,25 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			return fmt.Errorf("begin history tx: %w", err)
 		}
 		tx = begun
-		defer func() { _ = tx.Rollback(ctx) }()
+		defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 		q = s.queries.WithTx(tx)
 	}
 
 	pgBotID := optionalUUID(botID)
+	if resetProtected {
+		// Keep the parent lock and the fresh token/expiry validation in the
+		// transaction that performs the destructive replace and restore. An old
+		// reset owner therefore cannot commit after a successor takes over.
+		if _, err := q.LockBotForRuntimeReset(ctx, pgBotID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return runtimefence.ErrResetLeaseLost
+			}
+			return fmt.Errorf("lock history restore reset: %w", err)
+		}
+		if err := runtimefence.ValidateResetLocked(ctx, q, botID, ""); err != nil {
+			return err
+		}
+	}
 	if replace {
 		routes, err := q.ListChatRoutes(ctx, pgBotID)
 		if err != nil {
@@ -1305,6 +1354,30 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 	sessions, err := readEntry[[]sqlc.ListSessionsByBotRow](state, "history/sessions.json")
 	if err != nil {
 		return err
+	}
+	retiredSessionIDs := make(map[string]struct{})
+	for _, item := range sessions {
+		if isRetiredAutomationSession(item.Type, item.SessionMode) {
+			retiredSessionIDs[item.ID.String()] = struct{}{}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, item := range sessions {
+			if !item.ParentSessionID.Valid {
+				continue
+			}
+			if _, parentRetired := retiredSessionIDs[item.ParentSessionID.String()]; !parentRetired {
+				continue
+			}
+			if _, alreadyRetired := retiredSessionIDs[item.ID.String()]; !alreadyRetired {
+				retiredSessionIDs[item.ID.String()] = struct{}{}
+				changed = true
+			}
+		}
+	}
+	if len(retiredSessionIDs) > 0 {
+		state.warnings = appendWarningOnce(state.warnings, "retired automation history was skipped")
 	}
 	createRestoredSession := func(item sqlc.ListSessionsByBotRow, parentSessionID pgtype.UUID) error {
 		legacyType, sessionMode, runtimeType, err := restoredSessionDescriptor(item.Type, item.SessionMode, item.RuntimeType)
@@ -1348,7 +1421,12 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		sessionMetadata[item.ID.String()] = created.Metadata
 		return nil
 	}
-	pendingSessions := append([]sqlc.ListSessionsByBotRow(nil), sessions...)
+	pendingSessions := make([]sqlc.ListSessionsByBotRow, 0, len(sessions))
+	for _, item := range sessions {
+		if _, retired := retiredSessionIDs[item.ID.String()]; !retired {
+			pendingSessions = append(pendingSessions, item)
+		}
+	}
 	for len(pendingSessions) > 0 {
 		progressed := false
 		next := make([]sqlc.ListSessionsByBotRow, 0, len(pendingSessions))
@@ -1423,6 +1501,11 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 	messageMap := map[string]pgtype.UUID{}
 	restoredMessages := make([]restoredHistoryMessage, 0, len(messages))
 	for _, item := range messages {
+		_, sessionRetired := retiredSessionIDs[item.SessionID.String()]
+		if sessionRetired || isRetiredAutomationSession("", item.SessionMode) {
+			state.warnings = appendWarningOnce(state.warnings, "retired automation history was skipped")
+			continue
+		}
 		sessionID := pgtype.UUID{}
 		var descriptor restoredHistoryDescriptor
 		if item.SessionID.Valid {
@@ -1443,6 +1526,12 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		if runtimeType == "" {
 			runtimeType = sessionpkg.RuntimeModel
 		}
+		// Bundles carry no ACP publication heads or snapshots, so imported ACP
+		// sessions always start a fresh native session.
+		metadata := item.Metadata
+		if runtimeType == sessionpkg.RuntimeACPAgent {
+			state.warnings = appendWarningOnce(state.warnings, acpCheckpointBackupWarning)
+		}
 		eventID := pgtype.UUID{}
 		if item.EventID.Valid {
 			eventID = eventMap[item.EventID.String()]
@@ -1454,7 +1543,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 			SourceReplyToMessageID: item.SourceReplyToMessageID,
 			Role:                   item.Role,
 			Content:                item.Content,
-			Metadata:               item.Metadata,
+			Metadata:               metadata,
 			Usage:                  item.Usage,
 			SessionMode:            sessionMode,
 			RuntimeType:            runtimeType,
@@ -2180,6 +2269,11 @@ func restoredSessionDescriptor(legacyType, sessionMode, runtimeType string) (str
 		}
 	}
 	return sessionpkg.ResolveDescriptor(legacyType, sessionMode, runtimeType)
+}
+
+func isRetiredAutomationSession(legacyType, sessionMode string) bool {
+	return strings.EqualFold(strings.TrimSpace(legacyType), "heartbeat") ||
+		strings.EqualFold(strings.TrimSpace(sessionMode), "heartbeat")
 }
 
 func defaultJSONMap(raw []byte) []byte {

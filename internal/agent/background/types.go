@@ -44,13 +44,14 @@ type Task struct {
 	StartedAt      time.Time
 	CompletedAt    time.Time
 
-	mu           sync.Mutex
-	cancel       context.CancelFunc
-	stalled      bool            // true once the task appears stuck on interactive input
-	changed      chan struct{}   // closed and replaced whenever waiters should re-check task state
-	output       strings.Builder // buffered output tail
-	lastOutputAt time.Time       // when output last grew; zero means no output yet
-	branches     []SpawnBranch   // spawn-kind branch outcomes, set at completion
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	stopRequested bool            // running agent task cancellation awaits its runtime terminal
+	stalled       bool            // true once the task appears stuck on interactive input
+	changed       chan struct{}   // closed and replaced whenever waiters should re-check task state
+	output        strings.Builder // buffered output tail
+	lastOutputAt  time.Time       // when output last grew; zero means no output yet
+	branches      []SpawnBranch   // spawn-kind branch outcomes, set at completion
 }
 
 // WaitOutcome explains why a wait on a task returned.

@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 // ErrDuplicateTurn reports that a StartTurnCommand's (TeamID,

@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 const (
@@ -202,19 +202,6 @@ func TestNormalizeExecutionExistingSessionRejectsForeignAndInternalSessions(t *t
 		})
 		if !errors.Is(err, ErrTargetSessionNotFound) {
 			t.Fatalf("error = %v, want ErrTargetSessionNotFound", err)
-		}
-	})
-
-	t.Run("heartbeat session", func(t *testing.T) {
-		queries := &executionQueries{sessions: map[string]sqlc.BotSession{
-			execTestSessionID: chatSession(t, execTestBotID, "model", "heartbeat", "heartbeat"),
-		}}
-		svc := newExecutionService(t, queries, nil)
-		_, err := svc.normalizeExecution(context.Background(), execTestBotID, ExecutionConfig{
-			RunTarget: RunTargetExistingSession, TargetSessionID: execTestSessionID,
-		})
-		if err == nil || !strings.Contains(err.Error(), "mode") {
-			t.Fatalf("error = %v, want session mode rejection", err)
 		}
 	})
 }

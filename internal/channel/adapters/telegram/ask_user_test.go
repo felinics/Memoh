@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/i18n"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 const testAskUserRequestID = "0b5e7a1c-9f2d-4e3a-8b6c-1d2e3f4a5b6c"

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type ManagedACPConfigRequest struct {

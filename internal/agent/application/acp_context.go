@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/prune"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/prune"
 )
 
 const acpContextURI = "memoh://context/current-turn"

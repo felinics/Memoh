@@ -8,6 +8,7 @@ import (
 
 const (
 	AgentStepInterruptedMetadataKey     = "agent_step_interrupted"
+	HistoryErrorCodeMetadataKey         = "error_code"
 	AgentStepInterruptedReasoningPrefix = "[Previous assistant response was interrupted during reasoning. Continue from this checkpoint:]\n"
 )
 
@@ -126,7 +127,7 @@ type PersistInput struct {
 	// TurnID and TurnPosition carry a turn this message must be filed under
 	// because admission already allocated it (SR-TURN-001). Both empty means no
 	// admission decided the turn and the history layer allocates one, which is
-	// still the case for channel inbound, schedules and heartbeats.
+	// still the case for channel inbound and schedules.
 	//
 	// They travel together: a turn id without its position would file the row
 	// under the right turn at the wrong place in the session's order, and a
@@ -138,6 +139,14 @@ type PersistInput struct {
 type LocateResult struct {
 	Messages []Message
 	TargetID string
+}
+
+// ActiveMessagesMeasure is a database-side aggregate over a session's active
+// messages (CM-ADM-001): counts and raw content bytes, computed without
+// loading any payload into the process.
+type ActiveMessagesMeasure struct {
+	MessageCount int64
+	ContentBytes int64
 }
 
 // Writer defines write behavior needed by the inbound router.
@@ -160,8 +169,18 @@ type TurnReplacement struct {
 	SessionMetadata         map[string]any
 }
 
+// ACPPublication moves the session's canonical ACP publication head to the
+// round's run inside the same transaction as the round's messages. A head with
+// CheckpointReset=true is canonical but not resumable.
+type ACPPublication struct {
+	RunID           string
+	CheckpointReset bool
+}
+
 type RoundPersistenceOptions struct {
-	Replacement *TurnReplacement
+	Replacement                   *TurnReplacement
+	CleanupACPDecisionProjections bool
+	ACPPublication                *ACPPublication
 }
 
 // AtomicRoundPersister writes a complete round in one transaction.
@@ -190,11 +209,24 @@ type Service interface {
 	List(ctx context.Context, botID string) ([]Message, error)
 	ListSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
+	// ListActiveSinceWithinBytes is the byte-budgeted variant of
+	// ListActiveSince (CM-ADM-001): rows are admitted newest-first until
+	// their content byte total crosses maxBytes, so process memory is
+	// bounded by the budget regardless of total history size.
+	ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
 	ListBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
+	// ListActiveSinceBySessionWithinBytes is the byte-budgeted variant of
+	// ListActiveSinceBySession (CM-ADM-001), same admission semantics as
+	// ListActiveSinceWithinBytes scoped to one session.
+	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error)
+	// MeasureActiveBySession aggregates message count and content bytes on
+	// the database side (CM-ADM-001): admission sizes a session's history
+	// without shipping any payload into the process.
+	MeasureActiveBySession(ctx context.Context, sessionID string, since time.Time) (ActiveMessagesMeasure, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]Message, error)
 	ListBeforeMessageBySession(ctx context.Context, sessionID string, beforeMessageID string, limit int32) ([]Message, error)

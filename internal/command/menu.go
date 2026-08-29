@@ -1,6 +1,6 @@
 package command
 
-import "github.com/memohai/memoh/internal/i18n"
+import "github.com/felinics/memoh/internal/i18n"
 
 // MenuCommand is one entry for a channel's native slash-command menu (e.g.
 // Telegram's setMyCommands), so users discover and tap commands without typing.
@@ -35,7 +35,6 @@ func MenuCommands(t *i18n.Localizer) []MenuCommand {
 		{"mcp", t.T("menu.mcp")},
 		{"usage", t.T("menu.usage")},
 		{"email", t.T("menu.email")},
-		{"heartbeat", t.T("menu.heartbeat")},
 		{"skill", t.T("menu.skill")},
 		{"fs", t.T("menu.fs")},
 		{"access", t.T("menu.access")},

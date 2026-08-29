@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {
@@ -130,6 +130,42 @@ func TestDecodeTurnResponseEntryPreservesToolCallProviderMetadata(t *testing.T) 
 	}
 	google, ok := meta["google"].(map[string]any)
 	if !ok || google["thoughtSignature"] != "sig-1" {
+		t.Fatalf("google metadata = %#v, want thought signature", meta["google"])
+	}
+}
+
+func TestDecodeTurnResponseEntryPreservesTextProviderMetadata(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type": "text",
+		"text": " the answer ",
+		"providerMetadata": map[string]any{
+			"google": map[string]any{"thoughtSignature": "SIG_TEXT"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{Role: "assistant", Content: content})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{
+		Role:    "assistant",
+		Content: modelMessage,
+	})
+	if !ok {
+		t.Fatal("expected turn response entry")
+	}
+	part := assertRawPart(t, entry.RawContent, "text", " the answer ", "")
+	meta, ok := part["providerMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("providerMetadata = %#v, want map", part["providerMetadata"])
+	}
+	google, ok := meta["google"].(map[string]any)
+	if !ok || google["thoughtSignature"] != "SIG_TEXT" {
 		t.Fatalf("google metadata = %#v, want thought signature", meta["google"])
 	}
 }
@@ -276,6 +312,57 @@ func TestDecodeTurnResponseEntryKeepsOnlyInterruptedReasoning(t *testing.T) {
 	assertRawPart(t, entries[0].RawContent, "text", messagepkg.AgentStepInterruptedReasoningPrefix+"thinking out loud", "")
 }
 
+func TestDecodeTurnResponseEntriesKeepsOpaqueInterruptedReasoning(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type":   "reasoning",
+		"id":     "r1",
+		"text":   "",
+		"format": "anthropic-v1",
+		"model":  "claude-sonnet-4-20250514",
+		"providerMetadata": map[string]any{
+			"anthropic": map[string]any{"redactedData": "BLOB"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{Role: "assistant", Content: content})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+	checkpoint := messagepkg.Message{
+		Role:    "assistant",
+		Content: modelMessage,
+		Metadata: map[string]any{
+			messagepkg.AgentStepInterruptedMetadataKey: true,
+		},
+	}
+
+	entries := DecodeTurnResponseEntries([]messagepkg.Message{checkpoint})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want opaque interrupted checkpoint", len(entries))
+	}
+	part := assertRawPart(t, entries[0].RawContent, "reasoning", "", "")
+	if part["id"] != "r1" || part["format"] != "anthropic-v1" ||
+		part["model"] != "claude-sonnet-4-20250514" {
+		t.Fatalf("reasoning provenance was not preserved: %#v", part)
+	}
+	meta, ok := part["providerMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("providerMetadata = %#v, want map", part["providerMetadata"])
+	}
+	anthropic, ok := meta["anthropic"].(map[string]any)
+	if !ok || anthropic["redactedData"] != "BLOB" {
+		t.Fatalf("anthropic metadata = %#v, want redactedData", meta["anthropic"])
+	}
+
+	if _, ok := DecodeTurnResponseEntry(checkpoint); ok {
+		t.Fatal("completed-history decoder retained opaque reasoning")
+	}
+}
+
 func TestDecodeTurnResponseEntriesDropSupersededCheckpoint(t *testing.T) {
 	t.Parallel()
 
@@ -345,6 +432,103 @@ func TestDecodeTurnResponseEntryLegacyToolCallsField(t *testing.T) {
 	input, ok := part["input"].(map[string]any)
 	if !ok || input["text"] != "hi" {
 		t.Fatalf("arguments missing: %#v", part["input"])
+	}
+}
+
+func TestDecodeTurnResponseEntriesInterruptedLegacyToolCallIsNotDuplicated(t *testing.T) {
+	t.Parallel()
+
+	reasoning, err := json.Marshal([]map[string]any{{
+		"type": "reasoning",
+		"text": "still thinking",
+	}})
+	if err != nil {
+		t.Fatalf("marshal reasoning: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{
+		Role:    "assistant",
+		Content: reasoning,
+		ToolCalls: []turn.ToolCall{{
+			ID:   "call-legacy",
+			Type: "function",
+			Function: turn.ToolCallFunction{
+				Name:      "send",
+				Arguments: `{"text":"hi"}`,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entries := DecodeTurnResponseEntries([]messagepkg.Message{{
+		Role:    "assistant",
+		Content: modelMessage,
+		Metadata: map[string]any{
+			messagepkg.AgentStepInterruptedMetadataKey: true,
+		},
+	}})
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want one live checkpoint", len(entries))
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(entries[0].RawContent, &parts); err != nil {
+		t.Fatalf("unmarshal raw content: %v", err)
+	}
+	toolCalls := 0
+	for _, part := range parts {
+		if part["type"] == "tool-call" && part["toolCallId"] == "call-legacy" {
+			toolCalls++
+		}
+	}
+	if toolCalls != 1 {
+		t.Fatalf("legacy tool-call parts = %d, want 1: %#v", toolCalls, parts)
+	}
+}
+
+func TestDecodeTurnResponseEntryDoesNotDuplicateHybridToolCall(t *testing.T) {
+	t.Parallel()
+
+	content, err := json.Marshal([]map[string]any{{
+		"type":       "tool-call",
+		"toolCallId": "call-hybrid",
+		"toolName":   "lookup",
+		"input":      map[string]any{"query": "memoh"},
+	}})
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	modelMessage, err := json.Marshal(turn.ModelMessage{
+		Role:    "assistant",
+		Content: content,
+		ToolCalls: []turn.ToolCall{{
+			ID: "call-hybrid",
+			Function: turn.ToolCallFunction{
+				Name:      "lookup",
+				Arguments: `{"query":"memoh"}`,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal model message: %v", err)
+	}
+
+	entry, ok := DecodeTurnResponseEntry(messagepkg.Message{Role: "assistant", Content: modelMessage})
+	if !ok {
+		t.Fatal("expected hybrid tool-call entry")
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal(entry.RawContent, &parts); err != nil {
+		t.Fatalf("unmarshal raw content: %v", err)
+	}
+	toolCalls := 0
+	for _, part := range parts {
+		if part["type"] == "tool-call" && part["toolCallId"] == "call-hybrid" {
+			toolCalls++
+		}
+	}
+	if toolCalls != 1 {
+		t.Fatalf("hybrid tool-call parts = %d, want 1: %#v", toolCalls, parts)
 	}
 }
 

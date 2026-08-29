@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/i18n"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 // handlePlainTextUserInput is the universal fallback for channels that do not

@@ -1,13 +1,16 @@
 <template>
   <!-- Folders — a sidebar section that is a SIBLING of Recents, never a
        group inside it: folders organize workdir-bound chats, Recents keeps
-       the ungrouped timeline. Bounded height so a long folder list can never
-       squeeze the Recents list out of the panel. -->
+       the ungrouped timeline. This section does NOT scroll and has no height
+       cap: it flows in the sessions panel's single scroll container so every
+       folder is a peer of Recents on one continuous list. What keeps a long
+       folder from burying the ones below it is the per-folder Show more page
+       (see folder-sessions-list.vue), not a scrollbar. -->
   <div
     v-if="currentBotId"
-    class="flex min-h-0 max-h-[min(14rem,45%)] shrink flex-col overflow-hidden px-2 pb-0.5"
+    class="px-2 pb-0.5"
   >
-    <div class="flex items-center pt-1 pr-1">
+    <div class="flex items-center pt-1">
       <!-- Same header affordance as the Recents mode switcher: the label is a
            TextButton with a tight trailing chevron; clicking it folds the
            whole section. -->
@@ -36,8 +39,7 @@
 
     <div
       v-if="!sectionCollapsed"
-      ref="foldersScrollEl"
-      class="sidebar-scroll min-h-0 flex-1 overflow-y-auto pr-1 pt-0.5"
+      class="pt-0.5"
     >
       <template
         v-for="folder in liveFolders"
@@ -101,7 +103,6 @@
         <FolderSessionsList
           v-if="isExpanded(folder.id ?? '')"
           :workdir-id="folder.id ?? ''"
-          :scroll-el="foldersScrollEl"
           @select="handleSelect"
           @open-new-tab="handleOpenNewTab"
           @rename="sessionDialogs?.openRename($event)"
@@ -195,7 +196,6 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import SessionDialogs from './session-dialogs.vue'
 import FolderSessionsList from './folder-sessions-list.vue'
 import FolderCreateDialog from './folder-create-dialog.vue'
-import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
 const chatStore = useChatStore()
@@ -217,7 +217,6 @@ const sectionTrailingClass = 'flex shrink-0 items-center pr-[11px]' /* ui-allow-
 const folderRowClass = 'group/folder relative flex w-full min-h-[2.125rem] cursor-pointer select-none items-center rounded-[9px] px-[11px] text-left transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-px: matches session-item.vue's 11px sidebar row gutter */ /* ui-allow-style: sidebar rows are a deliberately local row system (see ui-owners) — same hover token as session-item.vue */
 
 const sessionDialogs = ref<InstanceType<typeof SessionDialogs> | null>(null)
-const foldersScrollEl = ref<HTMLElement | null>(null)
 
 watch(currentBotId, (botId) => {
   if (botId) void workdirsStore.ensureWorkdirs(botId)

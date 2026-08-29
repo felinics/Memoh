@@ -5,8 +5,8 @@ import { putUsersMe } from '@memohai/sdk'
 import { toast } from '@felinic/ui'
 import { useUserStore } from '@/store/user'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
-import { onboardingRuntimeState, resetOnboardingRuntimeState } from '@/pages/onboarding/state'
-import { safeLocalRemove } from '@/utils/safe-storage'
+import { readOnboardingBotResult, resetOnboardingSession } from '@/pages/onboarding/session'
+import { safeLocalGet, safeLocalRemove, safeLocalSet } from '@/utils/safe-storage'
 
 export const LAST_STEP_INDEX = 4
 export const STEP_COUNT = 5
@@ -66,26 +66,31 @@ export function useOnboarding() {
       return false
     }
     await minWait
-    const { botId: createdBotId, acpLaunchAgentId = '' } = onboardingRuntimeState.value.botResult ?? {}
+    const result = readOnboardingBotResult()
+    const acpLaunchAgentId = result?.acp && !result.acp.oauthPending
+      ? result.acp.agentId
+      : ''
+    const forceOnboarding = safeLocalGet(ONBOARDING_KEYS.forceOnboarding)
+    safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
     try {
-      if (createdBotId) {
-        // Navigate to the `bot` route directly (not the `/chat/...` redirect,
-        // which drops the query) so the chat page can read `?acp=` on landing.
-        await router.replace(
-          acpLaunchAgentId
-            ? { name: 'bot', params: { botName: createdBotId }, query: { acp: acpLaunchAgentId } }
-            : { name: 'bot', params: { botName: createdBotId } },
-        )
-      } else {
-        await router.replace('/')
-      }
+      // Use the `bot` route directly (not the `/chat/...` redirect, which drops
+      // the query) so the chat page can read `?acp=` on landing.
+      const destination = result?.botId
+        ? acpLaunchAgentId
+          ? { name: 'bot', params: { botName: result.botId }, query: { acp: acpLaunchAgentId } }
+          : { name: 'bot', params: { botName: result.botId } }
+        : '/'
+      const navigationFailure = await router.replace(destination)
+      if (navigationFailure) throw navigationFailure
     } catch {
+      if (forceOnboarding !== null) {
+        safeLocalSet(ONBOARDING_KEYS.forceOnboarding, forceOnboarding)
+      }
       toast.error(t('onboarding.complete.navigationFailed'))
       completing.value = false
       return false
     }
-    resetOnboardingRuntimeState()
-    safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
+    resetOnboardingSession()
     completing.value = false
     return true
   }

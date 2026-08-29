@@ -4,29 +4,21 @@ import (
 	"context"
 	"strings"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/contextview"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/contextview"
 )
 
 func buildProviderSourceFrags(
 	ctx context.Context,
 	cfg native.RunConfig,
 	sections []native.SystemSection,
-	promptHookTexts []string,
+	hookSystemFrags []contextfrag.ContextFrag,
 ) []contextfrag.ContextFrag {
 	frags := native.SystemSectionFrags(sections, cfg.ContextScope)
-	if hookText := strings.Join(promptHookTexts, "\n\n"); hookText != "" {
-		hookFrags, err := (&contextview.HookContextCollector{}).Collect(ctx, contextview.CollectRequest{
-			Scope: cfg.ContextScope, Intent: contextfrag.IntentRunConfigPreProvider,
-			Config: contextview.HookContextConfig{Text: hookText},
-		})
-		if err == nil {
-			frags = append(frags, hookFrags...)
-		}
-	}
+	frags = append(frags, hookSystemFrags...)
 	return append(frags, contextview.CollectNonSystemProviderSourceFrags(ctx, cfg)...)
 }
 
@@ -67,11 +59,8 @@ func contextFragAttentionReasons(req ChatRequest) []contextfrag.AttentionReason 
 		reasons = append(reasons, reason)
 	}
 
-	switch strings.TrimSpace(req.SessionType) {
-	case sessionmode.Schedule:
+	if strings.TrimSpace(req.SessionType) == sessionmode.Schedule {
 		add(contextfrag.AttentionSchedule)
-	case sessionmode.Heartbeat:
-		add(contextfrag.AttentionHeartbeat)
 	}
 	if req.MentionsBot {
 		add(contextfrag.AttentionMention)

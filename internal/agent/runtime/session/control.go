@@ -8,8 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func (m *Manager) localControl(runID string) *runControl {
@@ -150,7 +149,9 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 
 	var releaseErr error
 	for _, ctrl := range controls {
-		_, err := m.finishRunState(ctx, ctrl.handle(), RunStatusLost, runtimeOwnerShutdownError)
+		runCtx, cancel := ctrl.cleanupContext(ctx)
+		_, err := m.finishRunState(runCtx, ctrl.handle(), RunStatusLost, "", runtimeOwnerShutdownError)
+		cancel()
 		if err == nil || errors.Is(err, ErrRunOwnershipLost) {
 			continue
 		}
@@ -162,30 +163,81 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 	return releaseErr
 }
 
+func (c *runControl) cleanupContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if c == nil || c.lifecycleCtx == nil {
+		return context.WithCancel(parent)
+	}
+	ctx, cancel := context.WithCancel(context.WithoutCancel(c.lifecycleCtx))
+	stop := context.AfterFunc(parent, cancel)
+	if parent.Err() != nil {
+		cancel()
+	}
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
 func (c *runControl) commandContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	if c != nil {
-		if fence, ok := runtimefence.FromContext(c.lifecycleCtx); ok {
-			parent = runtimefence.WithContext(parent, fence)
-		}
-	}
-	ctx, cancelCause := context.WithCancelCause(parent)
-	cancel := func() { cancelCause(context.Canceled) }
 	if c == nil || c.lifecycleCtx == nil {
+		ctx, cancelCause := context.WithCancelCause(parent)
+		cancel := func() { cancelCause(context.Canceled) }
 		return ctx, cancel
 	}
-	stop := context.AfterFunc(c.lifecycleCtx, func() {
+
+	// The run owns context values; the command transport only contributes its
+	// cancellation. Detach both here so ownership loss can retain its cause.
+	base, cancelCause := context.WithCancelCause(context.WithoutCancel(c.lifecycleCtx))
+	ctx := base
+	stopDeadline := func() {}
+	// A command deadline must stay a deadline: callers distinguish an expired
+	// command from a cancelled one by ctx.Err(), which a cancel-only relay
+	// would always report as context.Canceled.
+	deadline, hasDeadline := parent.Deadline()
+	if hasDeadline {
+		var cancelDeadline context.CancelFunc
+		ctx, cancelDeadline = context.WithDeadline(base, deadline)
+		stopDeadline = cancelDeadline
+	}
+	cancelParent := func() {
+		cause := context.Cause(parent)
+		// The deadline layer expires on its own at the same instant and is the
+		// only path that can report ctx.Err() as context.DeadlineExceeded. Check
+		// Err rather than Cause: a parent cancelled early may carry a
+		// DeadlineExceeded cause while its cancellation mode is still Canceled.
+		if hasDeadline && errors.Is(parent.Err(), context.DeadlineExceeded) {
+			return
+		}
+		cancelCause(cause)
+	}
+	cancelOwner := func() {
 		if c.ownershipWasLost() {
 			cancelCause(ErrRunOwnershipLost)
 			return
 		}
 		cancelCause(context.Canceled)
-	})
+	}
+	stopParent := context.AfterFunc(parent, cancelParent)
+	stopOwner := context.AfterFunc(c.lifecycleCtx, cancelOwner)
+	// AfterFunc callbacks run asynchronously. Apply cancellation synchronously
+	// when either source is already done because callers inspect ctx.Err next.
+	if parent.Err() != nil {
+		cancelParent()
+	}
+	if c.lifecycleCtx.Err() != nil {
+		cancelOwner()
+	}
 	return ctx, func() {
-		stop()
-		cancel()
+		stopParent()
+		stopOwner()
+		stopDeadline()
+		cancelCause(context.Canceled)
 	}
 }
 
@@ -433,10 +485,6 @@ func (c *runControl) revokeOwnership(cause error) {
 // answer distinguishes "the run ended" from "the run was taken away".
 func (c *runControl) ownershipWasLost() bool {
 	return c != nil && c.ownershipLost.Load()
-}
-
-func (m *Manager) stopLeaseRenewal(ctrl *runControl) {
-	_ = m.stopLeaseRenewalContext(context.Background(), ctrl)
 }
 
 func (*Manager) stopLeaseRenewalContext(ctx context.Context, ctrl *runControl) error {

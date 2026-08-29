@@ -8,18 +8,18 @@ import (
 	"log/slog"
 	"strings"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/memohai/memoh/internal/db"
-	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
-	pgvectorsqlc "github.com/memohai/memoh/internal/db/pgvector/sqlc"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/team"
+	"github.com/felinics/memoh/internal/db"
+	pgvectordb "github.com/felinics/memoh/internal/db/pgvector"
+	pgvectorsqlc "github.com/felinics/memoh/internal/db/pgvector/sqlc"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/team"
 )
 
 const (

@@ -1,9 +1,9 @@
 {
   "name": "@memohai/web",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/memohai/Memoh.git",
+    "url": "git+https://github.com/felinics/Memoh.git",
     "directory": "apps/web"
   },
   "type": "module",
@@ -50,7 +50,7 @@
     "echarts": "^6.1.0",
     "katex": "^0.18.1",
     "lucide-vue-next": "^0.562.0",
-    "markstream-vue": "1.0.7",
+    "markstream-vue": "2.0.0",
     "mermaid": "^11.16.0",
     "misans-vf": "1.0.0",
     "monaco-editor": "^0.52.2",

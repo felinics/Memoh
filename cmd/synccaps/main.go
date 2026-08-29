@@ -21,12 +21,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/memohai/memoh/internal/capabilities"
+	"github.com/felinics/memoh/internal/capabilities"
 )
 
 const defaultLitellmURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -184,6 +185,27 @@ func applyToModel(model *yaml.Node, mode string, efforts []string) bool {
 	if len(wantEfforts) == 0 {
 		wantEfforts = []string{"low", "medium", "high"}
 	}
+	// Hand-maintained tokens the registry cannot know about are preserved rather
+	// than overwritten. LiteLLM's only off signal is the OpenAI-wire
+	// supports_none_reasoning_effort flag, so where off travels another way
+	// (DeepSeek toggle via chat_completions_compat, Gemini 2.5 Flash via a
+	// zero budget) the token can only come from the template. The same holds for
+	// minimal, which the registry reports for exactly one model family while
+	// Gemini 3.x accepts it as its floor. Registry silence is not evidence of
+	// absence.
+	if existing := mapValue(cfg, "reasoning_efforts"); existing != nil {
+		// Collected in canonical order and prepended once, so the list stays
+		// weakest-to-strongest instead of reversing with each insertion.
+		var carried []string
+		for _, token := range []string{"disable", "minimal"} {
+			if seqContains(existing, token) && !slices.Contains(wantEfforts, token) {
+				carried = append(carried, token)
+			}
+		}
+		if len(carried) > 0 {
+			wantEfforts = append(carried, wantEfforts...)
+		}
+	}
 
 	changed := false
 	if scalarValue(mapValue(cfg, "thinking_mode")) != wantMode {
@@ -230,11 +252,16 @@ func applyFileInputToModel(model *yaml.Node) bool {
 }
 
 // applyNoReasonToModel records an explicit no-reasoning discovery only when the
-// template already carries stale reasoning metadata. It does not create a config
-// block for ordinary non-reasoning models.
+// template already carries stale derived reasoning metadata. A hand-maintained
+// always declaration is authoritative because registry negatives can lag the
+// provider's first-party contract. It does not create a config block for ordinary
+// non-reasoning models.
 func applyNoReasonToModel(model *yaml.Node) bool {
 	cfg := mapValue(model, "config")
 	if cfg == nil || !hasReasoningResidue(cfg) {
+		return false
+	}
+	if scalarValue(mapValue(cfg, "thinking_mode")) == "always" {
 		return false
 	}
 

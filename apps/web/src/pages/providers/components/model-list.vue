@@ -26,7 +26,6 @@
           :provider-id="providerId"
           size="sm"
           :mode="(models?.length ?? 0) > 0 ? 'refresh' : 'import'"
-          :custom="custom"
           :client-type="clientType"
         />
         <CreateModel
@@ -157,7 +156,6 @@ const props = defineProps<{
   models: ModelsGetResponse[] | undefined
   deleteModelLoading: boolean
   managed?: boolean
-  custom?: boolean
   clientType?: string
   preview?: boolean
 }>()

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func probeTestProvider(t *testing.T, handler http.HandlerFunc) TestResponse {
@@ -15,7 +15,7 @@ func probeTestProvider(t *testing.T, handler http.HandlerFunc) TestResponse {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	sdkProvider := models.NewSDKProvider(server.URL, "sk-test", "", models.ClientTypeOpenAIResponses, 5*time.Second, server.Client())
-	return TestSDKProvider(context.Background(), sdkProvider)
+	return TestSDKCredentials(context.Background(), sdkProvider)
 }
 
 func TestTestSDKProviderOK(t *testing.T) {
@@ -72,7 +72,7 @@ func TestTestSDKProviderUnreachable(t *testing.T) {
 	client := server.Client()
 	server.Close()
 	sdkProvider := models.NewSDKProvider(serverURL, "sk-test", "", models.ClientTypeOpenAIResponses, 5*time.Second, client)
-	resp := TestSDKProvider(context.Background(), sdkProvider)
+	resp := TestSDKCredentials(context.Background(), sdkProvider)
 	if resp.Status != TestStatusError || resp.Reachable {
 		t.Fatalf("response = %#v", resp)
 	}

@@ -439,12 +439,20 @@ ON CONFLICT (team_id, id) DO UPDATE SET
   source_message_ids = (
     SELECT COALESCE(jsonb_agg(ref.value ORDER BY ref.first_seen), '[]'::jsonb)
     FROM (
-      SELECT value, min(ordinality) AS first_seen
-      FROM jsonb_array_elements(
-        COALESCE(memory_nodes.source_message_ids, '[]'::jsonb)
-        || COALESCE(EXCLUDED.source_message_ids, '[]'::jsonb)
-      ) WITH ORDINALITY AS combined(value, ordinality)
-      GROUP BY value
+      SELECT deduplicated.value, deduplicated.first_seen
+      FROM (
+        SELECT value, min(ordinality) AS first_seen
+        FROM jsonb_array_elements(
+          COALESCE(memory_nodes.source_message_ids, '[]'::jsonb)
+          || COALESCE(EXCLUDED.source_message_ids, '[]'::jsonb)
+        ) WITH ORDINALITY AS combined(value, ordinality)
+        WHERE jsonb_typeof(value) = 'string'
+          AND (value #>> '{}') ~ '^[^/]+/[^/]+$'
+        GROUP BY value
+      ) AS deduplicated
+      ORDER BY deduplicated.first_seen DESC
+      -- Keep in sync with adapters.MaxSourceRefsPerMemory.
+      LIMIT 64
     ) AS ref
   ),
   profile_ref = EXCLUDED.profile_ref,

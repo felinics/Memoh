@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,11 +10,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/application"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/apperror"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/felinics/memoh/internal/agent/application"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 const (
@@ -40,6 +46,33 @@ type stubWSTurnAdmitter struct {
 	// terminal reports each terminal write, so a test can wait for the release
 	// that happens on the run's goroutine instead of sleeping for it.
 	terminal chan wsTerminalWrite
+}
+
+type wsLifecycleQueries struct {
+	dbstore.Queries
+	params []sqlc.CreateContextLifecycleParams
+}
+
+func (q *wsLifecycleQueries) CreateContextLifecycle(
+	_ context.Context,
+	arg sqlc.CreateContextLifecycleParams,
+) (sqlc.ContextLifecycle, error) {
+	q.params = append(q.params, arg)
+	return sqlc.ContextLifecycle{
+		RunID:     arg.RunID,
+		BotID:     arg.BotID,
+		SessionID: arg.SessionID,
+		Status:    arg.Status,
+		ErrorCode: arg.ErrorCode,
+		Snapshot:  arg.Snapshot,
+	}, nil
+}
+
+func (*wsLifecycleQueries) GetContextLifecycleByRunID(
+	context.Context,
+	pgtype.UUID,
+) (sqlc.ContextLifecycle, error) {
+	return sqlc.ContextLifecycle{}, pgx.ErrNoRows
 }
 
 func newStubWSTurnAdmitter() *stubWSTurnAdmitter {
@@ -530,6 +563,62 @@ func TestFinishWSRunSkipsRunsThisProcessDoesNotOwn(t *testing.T) {
 	case write := <-runtime.terminal:
 		t.Fatalf("unowned run wrote a terminal state: %+v", write)
 	default:
+	}
+}
+
+func TestFinishWSRunPersistsPreContextFailureAfterFencedFinish(t *testing.T) {
+	const runID = "33333333-3333-4333-8333-333333333333"
+	queries := &wsLifecycleQueries{}
+	agentService := application.NewService(
+		slog.New(slog.DiscardHandler),
+		nil,
+		queries,
+		nil,
+		nil,
+		nil,
+		nil,
+		time.UTC,
+		time.Second,
+	)
+	runtime := newStubWSTurnAdmitter()
+	handler := &LocalChannelHandler{
+		agentService:   agentService,
+		logger:         slog.Default(),
+		sessionRuntime: runtime,
+	}
+	admitted := startedWSAdmission()
+	admitted.RunID = runID
+	admitted.Handle.RunID = runID
+	runErr := errors.New("resolve failed before context assembly")
+
+	handler.finishWSRun(
+		context.Background(),
+		wsRunAdmission{RunID: admitted.RunID, Handle: admitted.Handle},
+		runErr,
+	)
+
+	write := runtime.awaitTerminalWrite(t)
+	if write.status != sessionruntime.RunStatusErrored {
+		t.Fatalf("terminal status = %q, want %q", write.status, sessionruntime.RunStatusErrored)
+	}
+	if len(queries.params) != 1 {
+		t.Fatalf("CreateContextLifecycle calls = %d, want 1", len(queries.params))
+	}
+	row := queries.params[0]
+	if row.Status != "failed_provider" {
+		t.Fatalf("context lifecycle status = %q, want failed_provider", row.Status)
+	}
+	if bytes.Contains(row.Snapshot, []byte("resolve failed")) {
+		t.Fatalf("content-light snapshot leaked private error: %s", row.Snapshot)
+	}
+	var snapshot struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
+		t.Fatalf("decode lifecycle snapshot: %v", err)
+	}
+	if snapshot.Version != 1 {
+		t.Fatalf("snapshot version = %d, want 1", snapshot.Version)
 	}
 }
 

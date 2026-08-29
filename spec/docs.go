@@ -1661,6 +1661,262 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/agents": {
+            "get": {
+                "description": "List active and disabled non-deleted Agents attached to a bot",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "List a bot's Agents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.ListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Add a named Agent backed by a runtime descriptor",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Add an Agent to a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/botagents.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}": {
+            "get": {
+                "description": "Get one Agent attached to a bot",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Get a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Soft-delete an Agent while preserving existing session bindings",
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Delete a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Rename, enable, or disable an Agent; runtime metadata is immutable",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Update a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent changes",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/botagents.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/backup/export": {
             "post": {
                 "consumes": [
@@ -3743,6 +3999,12 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID",
+                        "name": "workspace_target_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3820,10 +4082,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "503": {
@@ -3874,6 +4142,12 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
@@ -3932,6 +4206,12 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
@@ -4510,91 +4790,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/heartbeat/logs": {
-            "get": {
-                "description": "List heartbeat execution logs for a bot",
-                "tags": [
-                    "heartbeat"
-                ],
-                "summary": "List heartbeat logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Limit",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Offset",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/heartbeat.ListLogsResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete all heartbeat execution logs for a bot",
-                "tags": [
-                    "heartbeat"
-                ],
-                "summary": "Delete heartbeat logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/hooks/events": {
             "get": {
                 "tags": [
@@ -4697,14 +4892,6 @@ const docTemplate = `{
                     "mcp"
                 ],
                 "summary": "List MCP connections",
-                "parameters": [
-                    {
-                        "type": "boolean",
-                        "description": "Include plugin-managed hidden MCP connections",
-                        "name": "include_managed",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4759,7 +4946,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -4810,6 +4997,87 @@ const docTemplate = `{
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp-ops/export": {
+            "get": {
+                "description": "Export all MCP connections for a bot in standard mcpServers format.",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Export MCP connections",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ExportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp-ops/import": {
+            "put": {
+                "description": "Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Import MCP connections",
+                "parameters": [
+                    {
+                        "description": "mcpServers dict",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ImportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ListResponse"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -4945,87 +5213,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/mcp/export": {
-            "get": {
-                "description": "Export all MCP connections for a bot in standard mcpServers format.",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Export MCP connections",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ExportResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/mcp/import": {
-            "put": {
-                "description": "Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Import MCP connections",
-                "parameters": [
-                    {
-                        "description": "mcpServers dict",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ImportRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/mcp/{id}": {
             "get": {
                 "description": "Get a MCP connection by ID",
@@ -5046,7 +5233,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -5103,7 +5290,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -6372,408 +6559,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/plugins": {
-            "get": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "List bot plugins",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}": {
-            "get": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Get bot plugin installation",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Purge bot plugin installation",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/disable": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Disable bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/enable": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Enable bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/oauth/authorize": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Start managed OAuth for a bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "OAuth authorize request",
-                        "name": "payload",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.OAuthAuthorizeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.AuthorizeResult"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/oauth/status": {
-            "get": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Refresh managed OAuth status for a bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/uninstall": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Uninstall bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/quick-actions/execute": {
             "post": {
                 "description": "Runs a typed Web quick action such as help or skill.list and returns a command_result or command_error envelope.",
@@ -6840,6 +6625,15 @@ const docTemplate = `{
                     "schedule"
                 ],
                 "summary": "List schedules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -6868,6 +6662,13 @@ const docTemplate = `{
                 ],
                 "summary": "Create schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "description": "Schedule payload",
                         "name": "payload",
@@ -6995,6 +6796,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "Schedule ID",
                         "name": "id",
                         "in": "path",
@@ -7035,6 +6843,13 @@ const docTemplate = `{
                 ],
                 "summary": "Update schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Schedule ID",
@@ -7080,6 +6895,13 @@ const docTemplate = `{
                 ],
                 "summary": "Delete schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Schedule ID",
@@ -7279,7 +7101,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/events": {
             "get": {
-                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as heartbeat, schedule, subagent.",
+                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as schedule and subagent.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -7875,6 +7697,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
+            "get": {
+                "description": "List run-keyed context lifecycle snapshots for a chat session; sessions predating run lifecycle persistence fall back to legacy assistant metadata",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get session context lifecycle",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of turns to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextLifecycleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/fork": {
             "post": {
                 "tags": [
@@ -7897,7 +7788,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Fork source message",
+                        "description": "Fork source turn",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -8068,13 +7959,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -8113,13 +8010,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -8207,12 +8110,12 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/supermarket/install-plugin": {
+        "/bots/{bot_id}/supermarket/install-package": {
             "post": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Install plugin from supermarket to bot",
+                "summary": "Install an immutable Skill Package release to a bot workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -8222,12 +8125,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Install plugin request",
+                        "description": "Install Package request",
                         "name": "payload",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.InstallPluginRequest"
+                            "$ref": "#/definitions/handlers.InstallPackageRequest"
                         }
                     }
                 ],
@@ -8235,7 +8138,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
+                            "$ref": "#/definitions/handlers.InstallRegistryPackageResponse"
                         }
                     },
                     "400": {
@@ -8247,11 +8150,63 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/supermarket/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages installed for a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/skillpackages.Installation"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -8259,12 +8214,12 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/supermarket/install-skill": {
-            "post": {
+        "/bots/{bot_id}/supermarket/packages/{installation_id}": {
+            "delete": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Install skill from supermarket to bot workspace",
+                "summary": "Uninstall a Skill Package from a bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -8274,39 +8229,22 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Install skill request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.InstallSkillRequest"
-                        }
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/supermarket.UninstallPackageResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -8316,7 +8254,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/token-usage": {
             "get": {
-                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
+                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, and schedule session types, with optional model filter and per-model breakdown",
                 "tags": [
                     "token-usage"
                 ],
@@ -8351,7 +8289,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     }
@@ -8424,7 +8362,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     },
@@ -13316,12 +13254,55 @@ const docTemplate = `{
                 }
             }
         },
-        "/supermarket/plugins": {
+        "/supermarket/artifacts/icon/{digest}": {
             "get": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "List plugins from supermarket",
+                "summary": "Get a mirrored Skill icon",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SHA-256 digest",
+                        "name": "digest",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages across supermarket Registries",
                 "parameters": [
                     {
                         "type": "string",
@@ -13331,7 +13312,19 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by tag",
+                        "description": "Registry ID",
+                        "name": "registry",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
                         "name": "tag",
                         "in": "query"
                     },
@@ -13346,13 +13339,25 @@ const docTemplate = `{
                         "description": "Items per page",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketPluginListResponse"
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "502": {
@@ -13364,17 +13369,39 @@ const docTemplate = `{
                 }
             }
         },
-        "/supermarket/plugins/{id}": {
+        "/supermarket/registries": {
             "get": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Get plugin detail from supermarket",
+                "summary": "List Skill Registries from supermarket",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketRegistryListResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/categories": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List categories in a Skill Registry",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Plugin ID",
-                        "name": "id",
+                        "description": "Registry ID",
+                        "name": "registry_id",
                         "in": "path",
                         "required": true
                     }
@@ -13383,7 +13410,256 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/plugins.Manifest"
+                            "$ref": "#/definitions/handlers.SupermarketSkillCategoryListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages in one Registry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages/{package_id}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get a namespaced Skill Package",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageDescriptor"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get an immutable Skill Package release",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package revision",
+                        "name": "revision",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageDescriptor"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get a namespaced Registry Skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skill_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "404": {
@@ -13406,7 +13682,7 @@ const docTemplate = `{
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "List skills from supermarket",
+                "summary": "List Skills across supermarket Registries",
                 "parameters": [
                     {
                         "type": "string",
@@ -13416,7 +13692,25 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by tag",
+                        "description": "Registry ID",
+                        "name": "registry",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
                         "name": "tag",
                         "in": "query"
                     },
@@ -13431,72 +13725,25 @@ const docTemplate = `{
                         "description": "Items per page",
                         "name": "limit",
                         "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketSkillListResponse"
-                        }
                     },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/supermarket/skills/{id}": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "Get skill detail from supermarket",
-                "parameters": [
                     {
                         "type": "string",
-                        "description": "Skill ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketSkillEntry"
+                            "$ref": "#/definitions/handlers.SupermarketCatalogSkillListResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/supermarket/tags": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "List all tags from supermarket",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketTagsResponse"
                         }
                     },
                     "502": {
@@ -16229,6 +16476,76 @@ const docTemplate = `{
                 }
             }
         },
+        "botagents.BotAgent": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.ListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botagents.BotAgent"
+                    }
+                }
+            }
+        },
+        "botagents.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "botbackup.ExportRequest": {
             "type": "object",
             "properties": {
@@ -17660,6 +17977,427 @@ const docTemplate = `{
                 }
             }
         },
+        "contextfrag.CacheClass": {
+            "type": "string",
+            "enum": [
+                "stable",
+                "dynamic",
+                "never"
+            ],
+            "x-enum-varnames": [
+                "CacheStable",
+                "CacheDynamic",
+                "CacheNever"
+            ]
+        },
+        "contextfrag.CachePlan": {
+            "type": "object",
+            "properties": {
+                "mid_stable_message_count": {
+                    "type": "integer"
+                },
+                "stable_message_count": {
+                    "type": "integer"
+                },
+                "stable_prefix_hash": {
+                    "type": "string"
+                },
+                "stable_prefix_token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.CacheUsageRecord": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_1h_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_5m_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "no_cache_tokens": {
+                    "type": "integer"
+                },
+                "step_index": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContentRange": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextBudgetPlan": {
+            "type": "object",
+            "properties": {
+                "actual_system_cost": {
+                    "type": "integer"
+                },
+                "current_request_cost": {
+                    "type": "integer"
+                },
+                "estimator": {
+                    "type": "string"
+                },
+                "estimator_safety_factor_percent": {
+                    "type": "integer"
+                },
+                "history_budget": {
+                    "type": "integer"
+                },
+                "output_reserve": {
+                    "type": "integer"
+                },
+                "output_reserve_resolution": {
+                    "type": "string"
+                },
+                "system_budget": {
+                    "type": "integer"
+                },
+                "tool_defs_cost": {
+                    "type": "integer"
+                },
+                "window": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextRef": {
+            "type": "object",
+            "properties": {
+                "content_hash": {
+                    "type": "string"
+                },
+                "durability": {
+                    "$ref": "#/definitions/contextfrag.RefDurability"
+                },
+                "hash_algo": {
+                    "type": "string"
+                },
+                "hash_scope": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "range": {
+                    "$ref": "#/definitions/contextfrag.ContentRange"
+                },
+                "schema": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.LifecycleSnapshot": {
+            "type": "object",
+            "properties": {
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "budget_plan": {
+                    "$ref": "#/definitions/contextfrag.ContextBudgetPlan"
+                },
+                "cache_plan": {
+                    "$ref": "#/definitions/contextfrag.CachePlan"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_usage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.CacheUsageRecord"
+                    }
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "client_type": {
+                    "type": "string"
+                },
+                "counts": {
+                    "$ref": "#/definitions/contextfrag.ManifestCounts"
+                },
+                "final_input_hash": {
+                    "type": "string"
+                },
+                "loop_selection_mode": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "mutations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.MutationRecord"
+                    }
+                },
+                "selection": {
+                    "$ref": "#/definitions/contextfrag.SelectionTrace"
+                },
+                "selection_decisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.SelectionDecision"
+                    }
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.StepSnapshot"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "view": {
+                    "$ref": "#/definitions/contextfrag.ManifestView"
+                }
+            }
+        },
+        "contextfrag.ManifestCounts": {
+            "type": "object",
+            "properties": {
+                "fragments": {
+                    "type": "integer"
+                },
+                "images": {
+                    "type": "integer"
+                },
+                "messages": {
+                    "type": "integer"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ManifestView": {
+            "type": "string",
+            "enum": [
+                "run_config_pre_provider"
+            ],
+            "x-enum-varnames": [
+                "ViewRunConfigPreProvider"
+            ]
+        },
+        "contextfrag.MutationKind": {
+            "type": "string",
+            "enum": [
+                "before_model_call_hook",
+                "background_summary",
+                "mid_task_prune",
+                "loop_step_reselection",
+                "injected_message",
+                "context_view_fallback",
+                "context_budget_failure",
+                "context_budget_disabled",
+                "capability_gate",
+                "read_media",
+                "mid_stream_retry"
+            ],
+            "x-enum-varnames": [
+                "MutationBeforeModelCallHook",
+                "MutationBackgroundSummary",
+                "MutationMidTaskPrune",
+                "MutationLoopStepReselection",
+                "MutationInjectedMessage",
+                "MutationContextViewFallback",
+                "MutationContextBudgetFailure",
+                "MutationContextBudgetDisabled",
+                "MutationCapabilityGate",
+                "MutationReadMedia",
+                "MutationMidStreamRetry"
+            ]
+        },
+        "contextfrag.MutationRecord": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.MutationKind"
+                }
+            }
+        },
+        "contextfrag.RefDurability": {
+            "type": "string",
+            "enum": [
+                "durable",
+                "synthetic",
+                "debug"
+            ],
+            "x-enum-varnames": [
+                "RefDurable",
+                "RefSynthetic",
+                "RefDebug"
+            ]
+        },
+        "contextfrag.RetentionTier": {
+            "type": "string",
+            "enum": [
+                "",
+                "required",
+                "preferred",
+                "optional"
+            ],
+            "x-enum-varnames": [
+                "RetentionUnspecified",
+                "RetentionRequired",
+                "RetentionPreferred",
+                "RetentionOptional"
+            ]
+        },
+        "contextfrag.SelectionDecision": {
+            "type": "object",
+            "properties": {
+                "cache_class": {
+                    "$ref": "#/definitions/contextfrag.CacheClass"
+                },
+                "decision": {
+                    "$ref": "#/definitions/contextfrag.SelectionDecisionKind"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_count": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "ref": {
+                    "$ref": "#/definitions/contextfrag.ContextRef"
+                },
+                "retention_tier": {
+                    "$ref": "#/definitions/contextfrag.RetentionTier"
+                },
+                "slot": {
+                    "$ref": "#/definitions/contextfrag.Slot"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.SelectionDecisionKind": {
+            "type": "string",
+            "enum": [
+                "selected",
+                "trimmed",
+                "dropped"
+            ],
+            "x-enum-varnames": [
+                "DecisionSelected",
+                "DecisionTrimmed",
+                "DecisionDropped"
+            ]
+        },
+        "contextfrag.SelectionTrace": {
+            "type": "object",
+            "properties": {
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dropped": {
+                    "type": "integer"
+                },
+                "selected": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.Slot": {
+            "type": "string",
+            "enum": [
+                "system",
+                "before_history",
+                "history",
+                "after_history_before_current",
+                "current_user",
+                "after_current"
+            ],
+            "x-enum-varnames": [
+                "SlotSystem",
+                "SlotBeforeHistory",
+                "SlotHistory",
+                "SlotAfterHistoryBeforeCurrent",
+                "SlotCurrentUser",
+                "SlotAfterCurrent"
+            ]
+        },
+        "contextfrag.StepSnapshot": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dropped": {
+                    "type": "integer"
+                },
+                "post_prepare_input_hash": {
+                    "type": "string"
+                },
+                "reselection_applied": {
+                    "type": "boolean"
+                },
+                "reselection_outcome": {
+                    "type": "string"
+                },
+                "step_index": {
+                    "type": "integer"
+                },
+                "truncated": {
+                    "type": "integer"
+                }
+            }
+        },
         "conversation.SkillActivation": {
             "type": "object",
             "properties": {
@@ -17823,6 +18561,9 @@ const docTemplate = `{
                 "background_task": {
                     "$ref": "#/definitions/conversation.UIBackgroundTask"
                 },
+                "code": {
+                    "type": "string"
+                },
                 "content": {
                     "type": "string"
                 },
@@ -17840,6 +18581,9 @@ const docTemplate = `{
                 "progress": {
                     "type": "array",
                     "items": {}
+                },
+                "reasoning_timing": {
+                    "$ref": "#/definitions/conversation.UIReasoningTiming"
                 },
                 "running": {
                     "type": "boolean"
@@ -17861,14 +18605,24 @@ const docTemplate = `{
                 "text",
                 "reasoning",
                 "tool",
-                "attachments"
+                "attachments",
+                "error"
             ],
             "x-enum-varnames": [
                 "UIMessageText",
                 "UIMessageReasoning",
                 "UIMessageTool",
-                "UIMessageAttachments"
+                "UIMessageAttachments",
+                "UIMessageError"
             ]
+        },
+        "conversation.UIReasoningTiming": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                }
+            }
         },
         "conversation.UIReplyRef": {
             "type": "object",
@@ -18427,7 +19181,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_memohai_memoh_internal_mcp.Connection": {
+        "github_com_felinics_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
                 "auth_type": {
@@ -18452,16 +19206,6 @@ const docTemplate = `{
                 "last_probed_at": {
                     "type": "string"
                 },
-                "managed_by_plugin_installation_id": {
-                    "type": "string"
-                },
-                "managed_resource_key": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
                 "name": {
                     "type": "string"
                 },
@@ -18482,9 +19226,6 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
-                },
-                "visible": {
-                    "type": "boolean"
                 }
             }
         },
@@ -18947,6 +19688,40 @@ const docTemplate = `{
                 },
                 "used_bytes": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.ContextLifecycleResponse": {
+            "type": "object",
+            "properties": {
+                "turns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextLifecycleTurn"
+                    }
+                }
+            }
+        },
+        "handlers.ContextLifecycleTurn": {
+            "type": "object",
+            "properties": {
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "snapshot": {
+                    "$ref": "#/definitions/contextfrag.LifecycleSnapshot"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
@@ -19431,24 +20206,101 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.InstallPluginRequest": {
+        "handlers.InstallPackageRequest": {
             "type": "object",
+            "required": [
+                "package_id",
+                "registry_id",
+                "revision"
+            ],
             "properties": {
-                "plugin_id": {
+                "package_id": {
                     "type": "string"
                 },
-                "variables": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
                 }
             }
         },
-        "handlers.InstallSkillRequest": {
+        "handlers.InstallRegistryPackageResponse": {
             "type": "object",
+            "required": [
+                "installation",
+                "ok",
+                "package_id",
+                "registry_id",
+                "revision",
+                "skills",
+                "workspace_target_id"
+            ],
             "properties": {
+                "installation": {
+                    "$ref": "#/definitions/skillpackages.Installation"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.InstallRegistrySkillResponse"
+                    }
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.InstallRegistrySkillResponse": {
+            "type": "object",
+            "required": [
+                "artifact_digest",
+                "files_written",
+                "install_id",
+                "ok",
+                "package_id",
+                "registry_id",
+                "skill_id",
+                "workspace_target_id"
+            ],
+            "properties": {
+                "artifact_digest": {
+                    "type": "string"
+                },
+                "files_written": {
+                    "type": "integer"
+                },
+                "install_id": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
                 "skill_id": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
                     "type": "string"
                 }
             }
@@ -19716,8 +20568,14 @@ const docTemplate = `{
                 "content": {
                     "type": "string"
                 },
+                "deletable": {
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
+                },
+                "editable": {
+                    "type": "boolean"
                 },
                 "managed": {
                     "type": "boolean"
@@ -19729,10 +20587,19 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "package_id": {
+                    "type": "string"
+                },
                 "raw": {
                     "type": "string"
                 },
+                "registry_id": {
+                    "type": "string"
+                },
                 "shadowed_by": {
+                    "type": "string"
+                },
+                "skill_id": {
                     "type": "string"
                 },
                 "source_kind": {
@@ -19763,7 +20630,8 @@ const docTemplate = `{
         "handlers.SkillsDeleteRequest": {
             "type": "object",
             "properties": {
-                "names": {
+                "source_paths": {
+                    "description": "SourcePaths are SKILL.md paths reported in the skill list. Deleting by name\ncannot address registry skills, which are nested by registry and package.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -19790,6 +20658,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "source_path": {
+                    "description": "SourcePath is the existing SKILL.md being edited when saving a single skill.\nEmpty means create (or overwrite by frontmatter name under\n/data/skills/user/personal/\u003cname\u003e/).",
+                    "type": "string"
                 }
             }
         },
@@ -19839,6 +20711,10 @@ const docTemplate = `{
         },
         "handlers.SupermarketAuthor": {
             "type": "object",
+            "required": [
+                "email",
+                "name"
+            ],
             "properties": {
                 "email": {
                     "type": "string"
@@ -19848,30 +20724,35 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.SupermarketPluginListResponse": {
+        "handlers.SupermarketCatalogSkill": {
             "type": "object",
+            "required": [
+                "artifact",
+                "author",
+                "category",
+                "category_name",
+                "description",
+                "files",
+                "install_id",
+                "name",
+                "package_id",
+                "registry_id",
+                "schema_version",
+                "skill_id",
+                "source",
+                "tags"
+            ],
             "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.Manifest"
-                    }
+                "artifact": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
                 },
-                "limit": {
-                    "type": "integer"
+                "author": {
+                    "$ref": "#/definitions/handlers.SupermarketAuthor"
                 },
-                "page": {
-                    "type": "integer"
+                "category": {
+                    "type": "string"
                 },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "handlers.SupermarketSkillEntry": {
-            "type": "object",
-            "properties": {
-                "content": {
+                "category_name": {
                     "type": "string"
                 },
                 "description": {
@@ -19883,24 +20764,57 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "id": {
+                "homepage": {
                     "type": "string"
                 },
-                "metadata": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillMetadata"
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "install_id": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_id": {
+                    "type": "string"
+                },
+                "source": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillSource"
+                },
+                "source_category": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
-        "handlers.SupermarketSkillListResponse": {
+        "handlers.SupermarketCatalogSkillListResponse": {
             "type": "object",
+            "required": [
+                "data",
+                "limit",
+                "page",
+                "total"
+            ],
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.SupermarketSkillEntry"
+                        "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
                     }
                 },
                 "limit": {
@@ -19914,14 +20828,268 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.SupermarketSkillMetadata": {
+        "handlers.SupermarketRegistry": {
+            "type": "object",
+            "required": [
+                "adapter",
+                "category_count",
+                "enabled",
+                "id",
+                "name",
+                "package_count",
+                "priority",
+                "skill_count",
+                "skipped_package_count"
+            ],
+            "properties": {
+                "adapter": {
+                    "type": "string"
+                },
+                "category_count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_count": {
+                    "type": "integer"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
+                "skipped_package_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketRegistryListResponse": {
+            "type": "object",
+            "required": [
+                "data"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketRegistry"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketSkillArtifact": {
+            "type": "object",
+            "required": [
+                "archive_size",
+                "content_type",
+                "digest",
+                "download_url",
+                "file_count",
+                "format",
+                "size",
+                "uncompressed_size"
+            ],
+            "properties": {
+                "archive_size": {
+                    "type": "integer"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "download_url": {
+                    "type": "string"
+                },
+                "file_count": {
+                    "type": "integer"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "uncompressed_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillCategory": {
+            "type": "object",
+            "required": [
+                "count",
+                "id",
+                "name",
+                "registries"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillCategoryRegistry"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketSkillCategoryListResponse": {
+            "type": "object",
+            "required": [
+                "data"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillCategory"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketSkillCategoryRegistry": {
+            "type": "object",
+            "required": [
+                "count",
+                "id"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SupermarketSkillIcon": {
             "type": "object",
             "properties": {
-                "author": {
-                    "$ref": "#/definitions/handlers.SupermarketAuthor"
-                },
-                "homepage": {
+                "brand_color": {
                     "type": "string"
+                },
+                "card": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
+                },
+                "dark": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
+                },
+                "detail": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
+                }
+            }
+        },
+        "handlers.SupermarketSkillIconAsset": {
+            "type": "object",
+            "required": [
+                "content_type",
+                "digest",
+                "size"
+            ],
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageCategory": {
+            "type": "object",
+            "required": [
+                "id",
+                "name",
+                "skill_count"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageDescriptor": {
+            "type": "object",
+            "required": [
+                "categories",
+                "description",
+                "name",
+                "package_id",
+                "registry_id",
+                "revision",
+                "schema_version",
+                "skill_count",
+                "skills",
+                "tags"
+            ],
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
+                    }
                 },
                 "tags": {
                     "type": "array",
@@ -19931,14 +21099,99 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.SupermarketTagsResponse": {
+        "handlers.SupermarketSkillPackageListResponse": {
             "type": "object",
+            "required": [
+                "data",
+                "limit",
+                "page",
+                "total"
+            ],
             "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageSummary"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageSummary": {
+            "type": "object",
+            "required": [
+                "categories",
+                "description",
+                "name",
+                "package_id",
+                "registry_id",
+                "schema_version",
+                "skill_count",
+                "tags"
+            ],
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
                 "tags": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "handlers.SupermarketSkillSource": {
+            "type": "object",
+            "required": [
+                "path",
+                "revision",
+                "type"
+            ],
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "repository": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
                 }
             }
         },
@@ -20019,12 +21272,6 @@ const docTemplate = `{
                     }
                 },
                 "discuss": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.DailyTokenUsage"
-                    }
-                },
-                "heartbeat": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
@@ -20208,6 +21455,9 @@ const docTemplate = `{
                     "description": "ACPRuntimeID optionally binds a warm pre-session runtime (created via\nPOST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a\ntransient in-memory handle reference, never persisted in metadata.",
                     "type": "string"
                 },
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "channel_type": {
                     "type": "string"
                 },
@@ -20348,15 +21598,18 @@ const docTemplate = `{
         },
         "handlers.forkSessionRequest": {
             "type": "object",
-            "required": [
-                "message_id"
-            ],
             "properties": {
                 "message_id": {
-                    "type": "string"
+                    "description": "MessageID is the pre-turn spelling of TurnID, resolved server-side to the\nround that contains it. Deprecated: send turn_id. A client holds a turn id\nfrom admission onward, while a stored message id exists only once the\nround has been persisted.",
+                    "type": "string",
+                    "format": "uuid"
                 },
                 "title": {
                     "type": "string"
+                },
+                "turn_id": {
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },
@@ -20635,6 +21888,9 @@ const docTemplate = `{
         "handlers.updateSessionRequest": {
             "type": "object",
             "properties": {
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -20657,55 +21913,17 @@ const docTemplate = `{
                 }
             }
         },
-        "heartbeat.ListLogsResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/heartbeat.Log"
-                    }
-                },
-                "total_count": {
-                    "type": "integer"
-                }
-            }
-        },
-        "heartbeat.Log": {
-            "type": "object",
-            "properties": {
-                "bot_id": {
-                    "type": "string"
-                },
-                "completed_at": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "result_text": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "usage": {}
-            }
-        },
         "hooks.ActionResult": {
             "type": "object",
             "properties": {
                 "action_type": {
                     "type": "string"
+                },
+                "append_system_sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.SystemSectionOutput"
+                    }
                 },
                 "decision": {
                     "type": "string"
@@ -20732,6 +21950,29 @@ const docTemplate = `{
                 },
                 "stdout": {
                     "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.OutputWarning"
+                    }
+                }
+            }
+        },
+        "hooks.OutputWarning": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "hook_name": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "section_id": {
+                    "type": "string"
                 }
             }
         },
@@ -20750,6 +21991,12 @@ const docTemplate = `{
                 "append_context": {
                     "type": "string"
                 },
+                "append_system_sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.SystemSectionOutput"
+                    }
+                },
                 "decision": {
                     "type": "string"
                 },
@@ -20765,8 +22012,56 @@ const docTemplate = `{
                 },
                 "runtime_supported": {
                     "type": "boolean"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.OutputWarning"
+                    }
                 }
             }
+        },
+        "hooks.SystemSectionCache": {
+            "type": "string",
+            "enum": [
+                "dynamic",
+                "stable"
+            ],
+            "x-enum-varnames": [
+                "SystemSectionCacheDynamic",
+                "SystemSectionCacheStable"
+            ]
+        },
+        "hooks.SystemSectionOutput": {
+            "type": "object",
+            "properties": {
+                "cache": {
+                    "$ref": "#/definitions/hooks.SystemSectionCache"
+                },
+                "hook_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "retention": {
+                    "$ref": "#/definitions/hooks.SystemSectionRetention"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "hooks.SystemSectionRetention": {
+            "type": "string",
+            "enum": [
+                "optional",
+                "preferred"
+            ],
+            "x-enum-varnames": [
+                "SystemSectionRetentionOptional",
+                "SystemSectionRetentionPreferred"
+            ]
         },
         "hooks.ToolPayload": {
             "type": "object",
@@ -20849,7 +22144,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                        "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                     }
                 }
             }
@@ -21037,6 +22332,14 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "string"
                 },
+                "reasoning": {
+                    "description": "Reasoning is the model's resolved thinking options, filled by the API layer\n(it depends on the provider's client type). Clients render this rather than\nderiving their own answer from ThinkingMode and ReasoningEfforts — the\nduplication that let the web picker and the wire disagree.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/reasoning.Options"
+                        }
+                    ]
+                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
                 }
@@ -21063,11 +22366,30 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "reasoning_default_on": {
+                    "description": "ReasoningDefaultOn reports whether omitting the thinking field leaves the\nmodel thinking. Separate from off-ability: Claude 4.6 can be turned off *and*\ndefaults to off, while Opus 5 can be turned off but defaults to on, so\nomitting the field there keeps thinking running — billed, and invisible to a\nuser who believes they turned it off. nil means unknown.",
+                    "type": "boolean"
+                },
+                "reasoning_dialect": {
+                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty leaves provider\npolicy in charge; Google's adaptor deliberately sends no thinking control so\npre-dialect rows retain their safe pre-upgrade request shape.",
+                    "type": "string"
+                },
                 "reasoning_efforts": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "reasoning_off_support": {
+                    "description": "ReasoningOffSupport declares how the model answers an explicit request to\nstop thinking. Anthropic's per-model table splits models that share a\nthinking mode and an identical tier list, so this cannot be derived — see the\nreasoning package's OffSupport constants.",
+                    "type": "string"
+                },
+                "thinking_budget_max": {
+                    "type": "integer"
+                },
+                "thinking_budget_min": {
+                    "description": "ThinkingBudgetMin/Max bound the budget dialect. The range is per model\nfamily, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned\noff, while Flash starts at 0 and can.",
+                    "type": "integer"
                 },
                 "thinking_mode": {
                     "type": "string"
@@ -21143,352 +22465,6 @@ const docTemplate = `{
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
-                }
-            }
-        },
-        "plugins.AuthRequirement": {
-            "type": "object",
-            "properties": {
-                "client_ref": {
-                    "type": "string"
-                },
-                "key": {
-                    "type": "string"
-                },
-                "scopes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "type": {
-                    "type": "string"
-                },
-                "variables": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "plugins.Author": {
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.ConfigVar": {
-            "type": "object",
-            "properties": {
-                "defaultValue": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "key": {
-                    "type": "string"
-                },
-                "required": {
-                    "type": "boolean"
-                },
-                "secret": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "plugins.Icon": {
-            "type": "object",
-            "properties": {
-                "kind": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "url": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.Installation": {
-            "type": "object",
-            "properties": {
-                "bot_id": {
-                    "type": "string"
-                },
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "installed_at": {
-                    "type": "string"
-                },
-                "manifest": {
-                    "$ref": "#/definitions/plugins.Manifest"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "plugin_id": {
-                    "type": "string"
-                },
-                "plugin_name": {
-                    "type": "string"
-                },
-                "resources": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.Resource"
-                    }
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.ListResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.Installation"
-                    }
-                }
-            }
-        },
-        "plugins.MCPResource": {
-            "type": "object",
-            "properties": {
-                "args": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "auth_ref": {
-                    "type": "string"
-                },
-                "capabilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "command": {
-                    "type": "string"
-                },
-                "cwd": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "env": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.ConfigVar"
-                    }
-                },
-                "headers": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.ConfigVar"
-                    }
-                },
-                "key": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "transport": {
-                    "type": "string"
-                },
-                "url": {
-                    "type": "string"
-                },
-                "visibility": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.Manifest": {
-            "type": "object",
-            "properties": {
-                "auth_requirements": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.AuthRequirement"
-                    }
-                },
-                "author": {
-                    "$ref": "#/definitions/plugins.Author"
-                },
-                "bundled_skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.SkillEntry"
-                    }
-                },
-                "capabilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "description": {
-                    "type": "string"
-                },
-                "homepage": {
-                    "type": "string"
-                },
-                "icon": {
-                    "$ref": "#/definitions/plugins.Icon"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "install": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "mcps": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.MCPResource"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                },
-                "schema_version": {
-                    "type": "string"
-                },
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.SkillResource"
-                    }
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "variables": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.ConfigVar"
-                    }
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.OAuthAuthorizeRequest": {
-            "type": "object",
-            "properties": {
-                "callback_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.Resource": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "resource_id": {
-                    "type": "string"
-                },
-                "resource_key": {
-                    "type": "string"
-                },
-                "resource_type": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.SkillEntry": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.SkillResource": {
-            "type": "object",
-            "properties": {
-                "key": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "path": {
-                    "type": "string"
                 }
             }
         },
@@ -21727,12 +22703,14 @@ const docTemplate = `{
             "enum": [
                 "ok",
                 "auth_error",
-                "error"
+                "error",
+                "unverified"
             ],
             "x-enum-varnames": [
                 "TestStatusOK",
                 "TestStatusAuthError",
-                "TestStatusError"
+                "TestStatusError",
+                "TestStatusUnverified"
             ]
         },
         "providers.UpdateRequest": {
@@ -21847,6 +22825,37 @@ const docTemplate = `{
                 }
             }
         },
+        "reasoning.Options": {
+            "type": "object",
+            "properties": {
+                "can_disable": {
+                    "description": "CanDisable reports whether picking \"off\" actually reaches the model.",
+                    "type": "boolean"
+                },
+                "default_effort": {
+                    "description": "DefaultEffort is the tier to use when nothing is stored, and the tier to fall\nback to when a stored value is no longer offered by the model.",
+                    "type": "string"
+                },
+                "efforts": {
+                    "description": "Efforts are the selectable active tiers, weakest to strongest as advertised.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "efforts_without_off": {
+                    "description": "EffortsWithoutOff are tiers that cannot be combined with off on this model.\nOpus 5 accepts an explicit disable only at effort high or below, so a client\nthat lets a user hold both must know which tiers conflict.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "supported": {
+                    "description": "Supported is false when the model has no thinking concept; the other fields\nare then empty and no control should be rendered at all.",
+                    "type": "boolean"
+                }
+            }
+        },
         "schedule.CreateRequest": {
             "type": "object",
             "properties": {
@@ -21856,6 +22865,10 @@ const docTemplate = `{
                 },
                 "acp_model_id": {
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
                     "type": "string"
                 },
                 "command": {
@@ -21911,6 +22924,10 @@ const docTemplate = `{
                 },
                 "acp_model_id": {
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
                     "type": "string"
                 },
                 "model_id": {
@@ -22017,6 +23034,10 @@ const docTemplate = `{
                 },
                 "acp_model_id": {
                     "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
                     "type": "string"
                 },
                 "bot_id": {
@@ -22252,6 +23273,9 @@ const docTemplate = `{
         "session.Session": {
             "type": "object",
             "properties": {
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -22345,6 +23369,9 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
+                "default_bot_agent_id": {
+                    "type": "string"
+                },
                 "discuss_probe_model_id": {
                     "type": "string"
                 },
@@ -22352,15 +23379,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "fetch_provider_id": {
-                    "type": "string"
-                },
-                "heartbeat_enabled": {
-                    "type": "boolean"
-                },
-                "heartbeat_interval": {
-                    "type": "integer"
-                },
-                "heartbeat_model_id": {
                     "type": "string"
                 },
                 "image_model_id": {
@@ -22525,6 +23543,9 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
+                "default_bot_agent_id": {
+                    "type": "string"
+                },
                 "discuss_probe_model_id": {
                     "type": "string"
                 },
@@ -22532,16 +23553,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "fetch_provider_id": {
-                    "type": "string"
-                },
-                "heartbeat_enabled": {
-                    "type": "boolean"
-                },
-                "heartbeat_interval": {
-                    "type": "integer"
-                },
-                "heartbeat_model_id": {
-                    "description": "HeartbeatModelID joins the pointer group above (nil/\"\"/value) so the\nheartbeat tab's autosave can clear a model override.",
                     "type": "string"
                 },
                 "image_model_id": {
@@ -22593,6 +23604,45 @@ const docTemplate = `{
                 }
             }
         },
+        "skillpackages.Installation": {
+            "type": "object",
+            "required": [
+                "bot_id",
+                "id",
+                "installed_at",
+                "package_id",
+                "registry_id",
+                "revision",
+                "updated_at",
+                "workspace_target_id"
+            ],
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installed_at": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
         "skills.SafeCatalogItem": {
             "type": "object",
             "properties": {
@@ -22610,6 +23660,21 @@ const docTemplate = `{
                 },
                 "state": {
                     "type": "string"
+                }
+            }
+        },
+        "supermarket.UninstallPackageResponse": {
+            "type": "object",
+            "required": [
+                "installation",
+                "ok"
+            ],
+            "properties": {
+                "installation": {
+                    "$ref": "#/definitions/skillpackages.Installation"
+                },
+                "ok": {
+                    "type": "boolean"
                 }
             }
         },

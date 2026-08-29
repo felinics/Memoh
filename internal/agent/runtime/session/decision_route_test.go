@@ -9,18 +9,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 func TestRunControlCommandContextPreservesOwnershipLossCause(t *testing.T) {
-	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	type contextKey struct{}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(
+		context.WithValue(context.Background(), contextKey{}, "run-scope"),
+	)
 	ctrl := &runControl{
 		lifecycleCtx:    lifecycleCtx,
 		lifecycleCancel: lifecycleCancel,
 	}
 	ctx, cancel := ctrl.commandContext(context.Background())
 	defer cancel()
+	if got := ctx.Value(contextKey{}); got != "run-scope" {
+		t.Fatalf("command context value = %v, want run-scope", got)
+	}
 
 	ctrl.revokeOwnership(ErrRunOwnershipLost)
 	ctrl.stopCommands()
@@ -28,6 +34,74 @@ func TestRunControlCommandContextPreservesOwnershipLossCause(t *testing.T) {
 	<-ctx.Done()
 	if cause := context.Cause(ctx); !errors.Is(cause, ErrRunOwnershipLost) {
 		t.Fatalf("command context cause = %v, want %v", cause, ErrRunOwnershipLost)
+	}
+}
+
+// A command carries the acknowledgement deadline of the request that routed
+// it. Relaying only cancellation would report every expiry as context.Canceled
+// and hide expired commands from callers that branch on DeadlineExceeded.
+func TestRunControlCommandContextKeepsParentDeadline(t *testing.T) {
+	type contextKey struct{}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(
+		context.WithValue(context.Background(), contextKey{}, "run-scope"),
+	)
+	defer lifecycleCancel()
+	ctrl := &runControl{
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+	}
+
+	parent, cancelParent := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelParent()
+	ctx, cancel := ctrl.commandContext(parent)
+	defer cancel()
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("command context has no deadline")
+	}
+	if got := ctx.Value(contextKey{}); got != "run-scope" {
+		t.Fatalf("command context value = %v, want run-scope", got)
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("command context did not expire with its parent")
+	}
+	if err := ctx.Err(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("command context error = %v, want context deadline exceeded", err)
+	}
+	if cause := context.Cause(ctx); !errors.Is(cause, context.DeadlineExceeded) {
+		t.Fatalf("command context cause = %v, want context deadline exceeded", cause)
+	}
+}
+
+func TestRunControlCommandContextPropagatesCancellationCauseBeforeDeadline(t *testing.T) {
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	defer lifecycleCancel()
+	ctrl := &runControl{
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+	}
+
+	sourceCtx, cancelSource := context.WithCancelCause(context.Background())
+	parent, cancelDeadline := context.WithDeadline(sourceCtx, time.Now().Add(time.Minute))
+	defer cancelDeadline()
+	ctx, cancel := ctrl.commandContext(parent)
+	defer cancel()
+
+	// A DeadlineExceeded cause does not mean the deadline itself fired. This
+	// cancellation must propagate immediately and retain Canceled as ctx.Err().
+	cancelSource(context.DeadlineExceeded)
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("command context did not propagate parent cancellation")
+	}
+	if err := ctx.Err(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("command context error = %v, want context canceled", err)
+	}
+	if cause := context.Cause(ctx); !errors.Is(cause, context.DeadlineExceeded) {
+		t.Fatalf("command context cause = %v, want context deadline exceeded", cause)
 	}
 }
 

@@ -1,26 +1,26 @@
 -- name: CreateBot :one
 INSERT INTO bots (owner_user_id, name, display_name, avatar_url, timezone, is_active, metadata, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at;
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at;
 
 -- name: GetBotByID :one
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: GetBotByName :one
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND name = $1;
 
 -- name: ListBotsByOwner :many
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 FROM bots
 WHERE team_id = public.memoh_current_team_id() AND owner_user_id = $1
 ORDER BY created_at DESC;
 
 -- name: ListAccessibleBots :many
-SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at
+SELECT id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at
 FROM bots b
 WHERE b.team_id = public.memoh_current_team_id()
   AND (
@@ -38,6 +38,10 @@ WHERE b.team_id = public.memoh_current_team_id()
 ORDER BY b.created_at DESC;
 
 -- name: UpdateBotProfile :one
+-- The runtime config epoch invalidates warm ACP processes, so it must move
+-- only when the ACP launch configuration (the metadata 'acp' subtree) actually
+-- changes. A rename, avatar, timezone, or activation toggle must not tear down
+-- a mid-conversation runtime.
 UPDATE bots
 SET name = $2,
     display_name = $3,
@@ -45,16 +49,31 @@ SET name = $2,
     timezone = $5,
     is_active = $6,
     metadata = $7,
+    runtime_config_epoch = runtime_config_epoch
+        + CASE
+            WHEN COALESCE(metadata -> 'acp', 'null'::jsonb)
+                 IS DISTINCT FROM COALESCE($7::jsonb -> 'acp', 'null'::jsonb)
+            THEN 1
+            ELSE 0
+          END,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at;
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at;
+
+-- name: BumpBotRuntimeConfigEpoch :one
+UPDATE bots
+SET runtime_config_epoch = runtime_config_epoch + 1,
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(bot_id)
+RETURNING runtime_config_epoch;
 
 -- name: UpdateBotOwner :one
 UPDATE bots
 SET owner_user_id = $2,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
-RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt, metadata, created_at, updated_at;
+RETURNING id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status, language, reasoning_effort, chat_model_id, search_provider_id, memory_provider_id, metadata, created_at, updated_at;
 
 -- name: UpdateBotStatus :exec
 UPDATE bots
@@ -123,11 +142,21 @@ WHERE route.team_id = public.memoh_current_team_id()
   AND (SELECT count(*) FROM deleted_sessions) >= 0;
 
 -- name: DeleteBotByID :exec
-WITH target_sessions AS MATERIALIZED (
+-- Runtime-fenced writers lock the bot parent before a child session. Keep the
+-- same parent-before-child order here so deletion cannot deadlock with them.
+WITH target_bot AS MATERIALIZED (
+  SELECT bot.id
+  FROM bots bot
+  WHERE bot.team_id = public.memoh_current_team_id()
+    AND bot.id = sqlc.arg(id)
+  FOR UPDATE
+),
+target_sessions AS MATERIALIZED (
   SELECT session.id
   FROM bot_sessions session
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.bot_id = sqlc.arg(id)
+    AND EXISTS (SELECT 1 FROM target_bot)
   ORDER BY session.id
   FOR UPDATE
 ),
@@ -173,8 +202,9 @@ deleted_sessions AS (
   RETURNING session.id
 )
 DELETE FROM bots bot
+USING target_bot target
 WHERE bot.team_id = public.memoh_current_team_id()
-  AND bot.id = sqlc.arg(id)
+  AND bot.id = target.id
   AND (SELECT count(*) FROM target_sessions) >= 0
   AND (SELECT count(*) FROM deleted_sessions) >= 0;
 
@@ -184,8 +214,3 @@ FROM bots
 WHERE team_id = public.memoh_current_team_id()
   AND id = $1
 FOR KEY SHARE;
-
--- name: ListHeartbeatEnabledBots :many
-SELECT id, owner_user_id, heartbeat_enabled, heartbeat_interval, heartbeat_prompt
-FROM bots
-WHERE team_id = public.memoh_current_team_id() AND heartbeat_enabled = true AND status = 'ready';

@@ -3,7 +3,7 @@ package attachment
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/media"
 )
 
 func TestBundleNormalize_DataURLBecomesBase64(t *testing.T) {
@@ -169,9 +169,9 @@ func TestBundleWithAssetAccess(t *testing.T) {
 		Mime:        "text/plain",
 		SizeBytes:   7,
 		StorageKey:  "bb/asset-2.txt",
-	}, "/data/media/bb/asset-2.txt")
+	}, "/data/.memoh/media/bb/asset-2.txt")
 
-	if bundle.Path != "/data/media/bb/asset-2.txt" {
+	if bundle.Path != "/data/.memoh/media/bb/asset-2.txt" {
 		t.Fatalf("expected access path preserved, got %q", bundle.Path)
 	}
 	if MetadataString(bundle.Metadata, MetadataKeySourcePath) != "/data/work/demo.txt" {
@@ -182,21 +182,49 @@ func TestBundleWithAssetAccess(t *testing.T) {
 func TestExtractStorageKey(t *testing.T) {
 	t.Parallel()
 
-	if got := ExtractStorageKey("/data/media/aa/demo.png"); got != "aa/demo.png" {
-		t.Fatalf("unexpected storage key: %q", got)
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "current", path: "/data/.memoh/media/aa/demo.png", want: "aa/demo.png"},
+		{name: "legacy", path: "/data/media/aa/demo.png", want: "aa/demo.png"},
+		{name: "other", path: "/tmp/demo.png", want: ""},
 	}
-	if got := ExtractStorageKey("/tmp/demo.png"); got != "" {
-		t.Fatalf("expected empty storage key for non-media path, got %q", got)
+	for _, tt := range tests {
+		if got := ExtractStorageKey(tt.path); got != tt.want {
+			t.Errorf("%s: ExtractStorageKey(%q) = %q, want %q", tt.name, tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestIsMediaAccessPath(t *testing.T) {
+	t.Parallel()
+
+	for _, mediaPath := range []string{
+		"/data/.memoh/media",
+		"/data/.memoh/media/aa/demo.png",
+		"/data/media",
+		"data/media/aa/demo.png",
+	} {
+		if !IsMediaAccessPath(mediaPath) {
+			t.Errorf("IsMediaAccessPath(%q) = false, want true", mediaPath)
+		}
+	}
+	for _, otherPath := range []string{"/data/mediakit/demo.png", "/data/.memoh/mediakit/demo.png", "/tmp/demo.png"} {
+		if IsMediaAccessPath(otherPath) {
+			t.Errorf("IsMediaAccessPath(%q) = true, want false", otherPath)
+		}
 	}
 }
 
 func TestMediaAccessPath(t *testing.T) {
 	t.Parallel()
 
-	if got := MediaAccessPath("aa/demo.png"); got != "/data/media/aa/demo.png" {
+	if got := MediaAccessPath("aa/demo.png"); got != "/data/.memoh/media/aa/demo.png" {
 		t.Fatalf("unexpected media access path: %q", got)
 	}
-	if got := MediaAccessPath(""); got != "/data/media" {
+	if got := MediaAccessPath(""); got != "/data/.memoh/media" {
 		t.Fatalf("unexpected media root path: %q", got)
 	}
 }

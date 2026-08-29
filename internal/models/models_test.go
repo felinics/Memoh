@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func intPtr(v int) *int { return &v }
@@ -142,6 +142,30 @@ func TestModel_HasCompatibility(t *testing.T) {
 	assert.True(t, m.HasCompatibility("tool-call"))
 	assert.True(t, m.HasCompatibility("reasoning"))
 	assert.False(t, m.HasCompatibility("image-output"))
+}
+
+func TestModelConfigContextBudgetMaxTokens(t *testing.T) {
+	t.Parallel()
+
+	zero := 0
+	positive := 128000
+	for _, tt := range []struct {
+		name   string
+		config models.ModelConfig
+		want   int
+	}{
+		{name: "missing", config: models.ModelConfig{}, want: 0},
+		{name: "zero", config: models.ModelConfig{ContextWindow: &zero}, want: 0},
+		{name: "positive", config: models.ModelConfig{ContextWindow: &positive}, want: positive},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.config.ContextBudgetMaxTokens(); got != tt.want {
+				t.Fatalf("ContextBudgetMaxTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestModelTypes(t *testing.T) {

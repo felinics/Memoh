@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Input,
@@ -12,41 +12,18 @@ import {
   Spinner,
 } from '@felinic/ui'
 import { ArrowLeft, Plus, AlertCircle } from 'lucide-vue-next'
-import { getAcpProfiles, type AcpprofileManagedField, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { FieldStack, FormStack } from '@felinic/ui'
 import { useOnboarding } from '@/composables/useOnboarding'
 import ProviderIcon from '@/components/provider-icon/index.vue'
-import DefaultModelCapabilities from '@/components/default-model-capabilities/index.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import ModelItem from '@/pages/providers/components/model-item.vue'
 import ChoiceTile from '../components/choice-tile.vue'
 import StepFrame from '../components/step-frame.vue'
 import StepExitShell from '../components/step-exit-shell.vue'
-import HintBox from '../components/hint-box.vue'
 import FooterNav from '../components/footer-nav.vue'
 import { onboardingProviderPresets as providerPresets, type ProviderPreset } from '@/constants/provider-presets'
-import {
-  HERMES_CUSTOM_MODEL_VALUE,
-  HERMES_PROVIDER_PRESETS,
-  acpAgentIcon,
-  defaultSetupMode,
-  ensureHermesManagedDefaults,
-  findMissingRequiredManagedField,
-  hermesAPIKeyPlaceholder,
-  hermesDefaultModel,
-  hermesModelPresets,
-  hermesModelSelectValue,
-  hermesProviderValue,
-  isHermesCustomProvider,
-  isHermesPresetModel,
-  normalizeACPAgentID,
-} from '@/utils/acp'
 import { useStepTransition, nextFrame } from '../useStepTransition'
-import {
-  commitOnboardingACP,
-  commitOnboardingProvider,
-  onboardingRuntimeState,
-} from '../state'
+import { readOnboardingProviderId, writeOnboardingProviderId } from '../session'
 import { useProviderSetup } from './useProviderSetup'
 
 const { t } = useI18n()
@@ -54,21 +31,15 @@ const { nextStep, prevStep } = useOnboarding()
 const { visible, exiting, leave } = useStepTransition()
 const listVisible = ref(false)
 const gridVisible = ref(false)
-const mode = ref<'list' | 'form' | 'acp'>('list')
+const mode = ref<'list' | 'form'>('list')
 const formVisible = ref(false)
 const formContentVisible = ref(false)
 const selectedPreset = ref<ProviderPreset | null>(null)
-const hasConfiguredAI = computed(() => onboardingRuntimeState.value.selection.kind !== 'none')
-
-const acpProfiles = ref<AcpprofilePublicProfile[]>([])
-const selectedAcpProfile = ref<AcpprofilePublicProfile | null>(null)
-const acpSetupMode = ref('api_key')
-const acpManaged = reactive<Record<string, string>>({})
-const acpError = ref('')
-const acpSubmitting = ref(false)
+const hasConfiguredProvider = ref(!!readOnboardingProviderId())
 
 function advanceWithProvider(result: { providerId: string }) {
-  commitOnboardingProvider(result.providerId)
+  writeOnboardingProviderId(result.providerId)
+  hasConfiguredProvider.value = true
   leave(nextStep)
 }
 
@@ -88,7 +59,7 @@ const {
 })
 
 const ctaLabel = computed(() =>
-  hasConfiguredAI.value
+  hasConfiguredProvider.value
     ? t('onboarding.next')
     : t('onboarding.skip'),
 )
@@ -115,7 +86,6 @@ function backToList() {
   setTimeout(() => {
     mode.value = 'list'
     selectedPreset.value = null
-    selectedAcpProfile.value = null
     resetFormState()
     listVisible.value = false
     visible.value = false
@@ -130,172 +100,10 @@ function onSkipStep() {
   leave(nextStep)
 }
 
-async function openAcpForm(profile: AcpprofilePublicProfile) {
-  selectedAcpProfile.value = profile
-  acpError.value = ''
-  acpSubmitting.value = false
-  for (const key of Object.keys(acpManaged)) delete acpManaged[key]
-  for (const field of profile.managed_fields ?? []) {
-    const id = normalizeACPAgentID(field.id)
-    if (id) acpManaged[id] = ''
-  }
-  const modes = acpSetupModes(profile)
-  const preferred = defaultSetupMode(profile)
-  acpSetupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
-  if (isAcpHermesProfile(profile) && acpSetupMode.value === 'api_key') {
-    ensureHermesManagedDefaults(acpManaged)
-  }
-  listVisible.value = false
-  setTimeout(() => {
-    mode.value = 'acp'
-    formVisible.value = false
-    formContentVisible.value = false
-    nextFrame(() => {
-      formVisible.value = true
-      formContentVisible.value = true
-    })
-  }, 175)
-}
-
-function acpSetupModes(profile: AcpprofilePublicProfile): string[] {
-  const modes = (profile.setup_modes ?? []).filter(Boolean)
-  return modes.length > 0 ? modes : ['api_key']
-}
-
-function acpSetupModeLabel(modeValue: string, profile: AcpprofilePublicProfile): string {
-  if (modeValue === 'api_key') return t('onboarding.provider.acp.modeApiKey')
-  if (modeValue === 'oauth') {
-    if (normalizeACPAgentID(profile.id) === 'codex') return t('onboarding.provider.acp.modeChatGPT')
-    if (normalizeACPAgentID(profile.id) === 'claude-code') return t('onboarding.provider.acp.modeClaude')
-    return t('onboarding.provider.acp.modeOAuth')
-  }
-  if (modeValue === 'self') return t('onboarding.provider.acp.modeSelf')
-  return modeValue
-}
-
-function setAcpSetupMode(modeValue: string) {
-  acpSetupMode.value = modeValue
-  if (selectedAcpProfile.value && isAcpHermesProfile(selectedAcpProfile.value) && modeValue === 'api_key') {
-    ensureHermesManagedDefaults(acpManaged)
-  }
-}
-
-function acpVisibleFields(profile: AcpprofilePublicProfile): AcpprofileManagedField[] {
-  if (acpSetupMode.value !== 'api_key') return []
-  return (profile.managed_fields ?? []).filter((field) => {
-    const id = normalizeACPAgentID(field.id)
-    if (!id || id === 'provider_id' || id === 'oauth_token') return false
-    if (isAcpHermesProfile(profile) && id === 'base_url') return isHermesCustomProvider(acpManaged.provider)
-    return true
-  })
-}
-
-function acpInputType(type: string | undefined): string {
-  if (type === 'password') return 'password'
-  if (type === 'url') return 'url'
-  return 'text'
-}
-
-function acpManagedPlaceholder(field: AcpprofileManagedField): string | undefined {
-  if (isAcpHermesProfile(selectedAcpProfile.value) && normalizeACPAgentID(field.id) === 'api_key') {
-    return hermesAPIKeyPlaceholder(acpHermesProvider(), field.placeholder)
-  }
-  return field.placeholder
-}
-
-function setAcpManaged(fieldID: string | undefined, value: string) {
-  const id = normalizeACPAgentID(fieldID)
-  if (!id) return
-  acpManaged[id] = value
-}
-
-function isAcpHermesProfile(profile: AcpprofilePublicProfile | null | undefined): boolean {
-  return normalizeACPAgentID(profile?.id) === 'hermes'
-}
-
-function isAcpHermesProviderField(field: AcpprofileManagedField): boolean {
-  return isAcpHermesProfile(selectedAcpProfile.value) && normalizeACPAgentID(field.id) === 'provider'
-}
-
-function isAcpHermesModelField(field: AcpprofileManagedField): boolean {
-  return isAcpHermesProfile(selectedAcpProfile.value) && normalizeACPAgentID(field.id) === 'model'
-}
-
-function acpHermesProvider(): string {
-  return hermesProviderValue(acpManaged.provider)
-}
-
-function acpHermesModelOptions() {
-  return hermesModelPresets(acpHermesProvider())
-}
-
-function acpHermesModelSelect(): string {
-  return hermesModelSelectValue(acpHermesProvider(), acpManaged.model)
-}
-
-function acpHermesUsingCustomModel(): boolean {
-  return acpHermesModelSelect() === HERMES_CUSTOM_MODEL_VALUE
-}
-
-function setAcpHermesProvider(value: string) {
-  const provider = hermesProviderValue(value)
-  acpManaged.provider = provider
-  acpManaged.model = hermesDefaultModel(provider)
-  if (!isHermesCustomProvider(provider)) acpManaged.base_url = ''
-}
-
-function setAcpHermesModel(value: string) {
-  if (value === HERMES_CUSTOM_MODEL_VALUE) {
-    if (isHermesPresetModel(acpHermesProvider(), acpManaged.model)) {
-      acpManaged.model = ''
-    }
-  } else {
-    acpManaged.model = value
-  }
-}
-
-function saveAcpAndNext() {
-  const profile = selectedAcpProfile.value
-  if (!profile || acpSubmitting.value) return
-  acpError.value = ''
-  if (acpSetupMode.value === 'api_key') {
-    const missing = findMissingRequiredManagedField(profile, acpManaged, acpSetupMode.value)
-    if (missing) {
-      acpError.value = t('onboarding.provider.acp.requiredError', { field: missing.label || missing.id || '' })
-      return
-    }
-  }
-  const agentId = normalizeACPAgentID(profile.id)
-  if (!agentId) return
-  const managed: Record<string, string> = {}
-  if (acpSetupMode.value === 'api_key') {
-    for (const field of acpVisibleFields(profile)) {
-      const id = normalizeACPAgentID(field.id)
-      const value = (acpManaged[id] ?? '').trim()
-      if (value) managed[id] = value
-    }
-  }
-  commitOnboardingACP({ agentId, setupMode: acpSetupMode.value, managed })
-  acpSubmitting.value = true
-  leave(nextStep)
-}
-
 onMounted(() => {
-  void (async () => {
-    try {
-      const { data } = await getAcpProfiles({ throwOnError: true })
-      acpProfiles.value = data?.items ?? []
-    } catch {
-      acpProfiles.value = []
-    } finally {
-      nextFrame(() => {
-        gridVisible.value = true
-      })
-    }
-  })()
-
   nextFrame(() => {
     listVisible.value = true
+    gridVisible.value = true
   })
 
   if (import.meta.env.DEV) {
@@ -334,7 +142,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- 三个模式变体共用一个退出壳,所以壳在 StepFrame 之上而非各 frame 自带 -->
+  <!-- 两个模式变体共用一个退出壳,所以壳在 StepFrame 之上而非各 frame 自带 -->
   <StepExitShell :exiting="exiting">
     <StepFrame
       v-if="mode === 'list'"
@@ -377,19 +185,6 @@ onMounted(() => {
               />
             </template>
           </ChoiceTile>
-          <ChoiceTile
-            v-for="profile in acpProfiles"
-            :key="`acp-${profile.id}`"
-            :label="profile.display_name || profile.id"
-            @click="openAcpForm(profile)"
-          >
-            <template #icon>
-              <component
-                :is="acpAgentIcon(profile.id, true)"
-                class="size-[22px] shrink-0"
-              />
-            </template>
-          </ChoiceTile>
         </div>
       </div>
 
@@ -408,7 +203,7 @@ onMounted(() => {
       :visible="visible"
       :body-class="['pt-16 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
     >
-      <!-- form/acp 模式有返回箭头+图标+标题的头行,而非纯 h2,走 #header slot -->
+      <!-- form 模式有返回箭头+图标+标题的头行,而非纯 h2,走 #header slot -->
       <template #header>
         <div
           class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
@@ -478,13 +273,6 @@ onMounted(() => {
                 </SelectContent>
               </Select>
             </FieldStack>
-          </div>
-          <div
-            v-if="!selectedPreset"
-            class="transition-all duration-[200ms] ease-out delay-[60ms]"
-            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <DefaultModelCapabilities v-model="formValues.default_capabilities" />
           </div>
           <div
             class="transition-all duration-[200ms] ease-out"
@@ -688,185 +476,6 @@ onMounted(() => {
                 {{ formCtaLabel }}
               </span>
             </Transition>
-          </button>
-        </template>
-      </FooterNav>
-    </StepFrame>
-
-    <StepFrame
-      v-else-if="mode === 'acp' && selectedAcpProfile"
-      :visible="visible"
-      :body-class="['pt-16 transition-all duration-[175ms] ease-out', formVisible ? 'scale-100 opacity-100' : 'scale-[0.96] opacity-0']"
-    >
-      <template #header>
-        <div
-          class="mb-8 flex items-center gap-3 transition-all duration-[200ms] ease-out"
-          :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-        >
-          <button
-            type="button"
-            class="-ml-1.5 inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            :disabled="acpSubmitting"
-            :aria-label="t('onboarding.prev')"
-            @click="backToList"
-          >
-            <ArrowLeft class="size-4" />
-          </button>
-          <component
-            :is="acpAgentIcon(selectedAcpProfile.id, true)"
-            class="size-7 shrink-0"
-          />
-          <h2 class="text-2xl font-semibold">
-            {{ selectedAcpProfile.display_name || selectedAcpProfile.id }}
-          </h2>
-        </div>
-      </template>
-
-      <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
-        <FormStack>
-          <div
-            class="transition-all duration-[200ms] ease-out delay-[20ms]"
-            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <FieldStack>
-              <template #label>
-                <Label class="text-sm font-medium">
-                  {{ t('onboarding.provider.acp.setupMode') }}
-                </Label>
-              </template>
-              <div class="grid grid-cols-3 gap-2">
-                <button
-                  v-for="m in acpSetupModes(selectedAcpProfile)"
-                  :key="m"
-                  type="button"
-                  class="min-h-10 rounded-lg border px-3 py-2 text-sm font-medium leading-tight transition-colors"
-                  :class="acpSetupMode === m ? 'border-foreground bg-foreground text-background' : 'border-border bg-background text-foreground hover:bg-accent/40'"
-                  @click="setAcpSetupMode(m)"
-                >
-                  {{ acpSetupModeLabel(m, selectedAcpProfile) }}
-                </button>
-              </div>
-            </FieldStack>
-          </div>
-
-          <div
-            v-for="(field, index) in acpVisibleFields(selectedAcpProfile)"
-            :key="field.id || index"
-            class="transition-all duration-[200ms] ease-out"
-            :style="{ transitionDelay: `${40 + index * 20}ms` }"
-            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <FieldStack>
-              <template #label>
-                <Label class="text-sm font-medium">
-                  {{ field.label || field.id }}
-                </Label>
-              </template>
-              <Select
-                v-if="isAcpHermesProviderField(field)"
-                :model-value="acpHermesProvider()"
-                @update:model-value="(value) => setAcpHermesProvider(String(value))"
-              >
-                <SelectTrigger class="w-full">
-                  <SelectValue :placeholder="t('bots.settings.acpHermesProviderPlaceholder')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="provider in HERMES_PROVIDER_PRESETS"
-                    :key="provider.value"
-                    :value="provider.value"
-                  >
-                    {{ t(provider.labelKey) }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <template v-else-if="isAcpHermesModelField(field)">
-                <Select
-                  :model-value="acpHermesModelSelect()"
-                  @update:model-value="(value) => setAcpHermesModel(String(value))"
-                >
-                  <SelectTrigger class="w-full">
-                    <SelectValue :placeholder="t('bots.settings.acpHermesModelPlaceholder')" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="model in acpHermesModelOptions()"
-                      :key="model.value"
-                      :value="model.value"
-                    >
-                      {{ model.label }}
-                    </SelectItem>
-                    <SelectItem :value="HERMES_CUSTOM_MODEL_VALUE">
-                      {{ t('bots.settings.acpHermesCustomModel') }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  v-if="acpHermesUsingCustomModel()"
-                  class="mt-2"
-                  :model-value="acpManaged.model || ''"
-                  autocomplete="off"
-                  autocapitalize="off"
-                  autocorrect="off"
-                  spellcheck="false"
-                  :placeholder="t('bots.settings.acpHermesCustomModelPlaceholder')"
-                  @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
-                />
-              </template>
-              <Input
-                v-else
-                :model-value="acpManaged[field.id || ''] || ''"
-                :type="acpInputType(field.type)"
-                autocomplete="off"
-                autocapitalize="off"
-                autocorrect="off"
-                spellcheck="false"
-                :placeholder="acpManagedPlaceholder(field)"
-                @update:model-value="(val) => setAcpManaged(field.id, String(val ?? ''))"
-              />
-            </FieldStack>
-          </div>
-
-          <HintBox
-            v-if="acpSetupMode === 'oauth'"
-            class="transition-all duration-[200ms] ease-out delay-[40ms]"
-            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            {{ t('onboarding.provider.acp.oauthDeferredHint') }}
-          </HintBox>
-
-          <HintBox
-            v-else-if="acpSetupMode === 'self'"
-            class="transition-all duration-[200ms] ease-out delay-[40ms]"
-            :class="formContentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            {{ isAcpHermesProfile(selectedAcpProfile) ? t('bots.settings.acpHermesSelfModeHint') : t('onboarding.provider.acp.selfHint') }}
-          </HintBox>
-        </FormStack>
-
-        <p
-          v-if="acpError"
-          class="mt-3 text-xs text-destructive"
-        >
-          {{ acpError }}
-        </p>
-      </div>
-
-      <FooterNav
-        class="delay-[80ms]"
-        :visible="formContentVisible"
-        :next-label="t('onboarding.next')"
-        :next-disabled="acpSubmitting"
-        @next="saveAcpAndNext"
-      >
-        <template #prev>
-          <button
-            type="button"
-            class="inline-flex h-[2.625rem] items-center justify-center rounded-lg px-4 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            :disabled="acpSubmitting"
-            @click="backToList"
-          >
-            {{ t('onboarding.provider.form.cancel') }}
           </button>
         </template>
       </FooterNav>

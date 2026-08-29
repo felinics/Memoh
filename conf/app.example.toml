@@ -68,6 +68,16 @@ jwt_expires_in = "168h"
 tool_output_max_bytes = 65536
 tool_output_max_lines = 2000
 system_files_max_bytes = 32768
+# In-loop context step reselector rollout mode: active | shadow | off.
+# active runs the reselector and applies its result (default). shadow runs
+# it for observability only and never touches the payload. off skips it
+# entirely, keeping only legacy mid-task pruning.
+# context_loop_reselect = "active"
+# Server-wide context admission cap in estimated tokens. The effective
+# per-turn budget is min(model context window, this cap); when the model has
+# no configured context window the cap alone bounds the context. Raise it for
+# models with windows above the default; it can never be disabled.
+# context_absolute_max_tokens = 200000
 
 [session_runtime]
 # Stores live run snapshots for WebSocket attach/reconnect. memory is best for

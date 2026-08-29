@@ -19,14 +19,14 @@ import (
 	"golang.org/x/time/rate"
 	tele "gopkg.in/telebot.v4"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/common"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/redact"
-	"github.com/memohai/memoh/internal/textutil"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/common"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const (

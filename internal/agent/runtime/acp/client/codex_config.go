@@ -13,7 +13,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -89,15 +89,6 @@ type CodexOAuthCredentials struct {
 type CodexOAuthAuthStatus struct {
 	Valid     bool
 	AccountID string
-}
-
-// WriteCodexManagedConfig writes the fixed Codex config.toml and auth.json
-// used by Memoh-managed Codex ACP sessions.
-func WriteCodexManagedConfig(ctx context.Context, client *bridge.Client, managed map[string]string) error {
-	return WriteCodexManagedConfigWithAuth(ctx, client, CodexManagedConfig{
-		Mode:    SetupModeAPIKey,
-		Managed: managed,
-	})
 }
 
 func WriteCodexManagedConfigWithAuth(ctx context.Context, client *bridge.Client, cfg CodexManagedConfig) error {

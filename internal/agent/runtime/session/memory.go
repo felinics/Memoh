@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 // subscriberSet tracks per-key subscriber channels. All methods must be called
@@ -81,6 +82,7 @@ type MemoryBackend struct {
 	nextCleanup       time.Time
 	snapshots         map[string]Snapshot
 	snapshotExpiresAt map[string]time.Time
+	historyResets     map[string]ResetLease
 	subscribers       *subscriberSet[Event]
 	closed            bool
 	// generation is this process's liveness incarnation. It is minted once and
@@ -100,9 +102,135 @@ func NewMemoryBackendWithTTL(stateTTL time.Duration) *MemoryBackend {
 		stateTTL:          stateTTL,
 		snapshots:         make(map[string]Snapshot),
 		snapshotExpiresAt: make(map[string]time.Time),
+		historyResets:     make(map[string]ResetLease),
 		subscribers:       newSubscriberSet[Event](),
 		generation:        uuid.NewString(),
 	}
+}
+
+func (b *MemoryBackend) AcquireHistoryReset(ctx context.Context, scope ResetScope, token string, ttl time.Duration) (ResetLease, bool, error) {
+	if err := contextError(ctx); err != nil {
+		return ResetLease{}, false, err
+	}
+	scope = scope.normalized()
+	token = strings.TrimSpace(token)
+	if !scope.valid() || token == "" || ttl <= 0 {
+		return ResetLease{}, false, errors.New("reset scope, token, and positive ttl are required")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().UTC()
+	b.purgeHistoryResetsLocked(now)
+	if _, blocked, _ := b.effectiveHistoryResetLocked(scope); blocked {
+		return ResetLease{}, false, nil
+	}
+	lease := ResetLease{Scope: scope, Token: token, ExpiresAt: now.Add(ttl)}
+	b.historyResets[historyResetKey(scope)] = lease
+	return lease, true, nil
+}
+
+func (b *MemoryBackend) RenewHistoryReset(ctx context.Context, lease ResetLease, ttl time.Duration) (ResetLease, bool, error) {
+	if err := contextError(ctx); err != nil {
+		return ResetLease{}, false, err
+	}
+	if !lease.valid() || ttl <= 0 {
+		return ResetLease{}, false, errors.New("valid reset lease and positive ttl are required")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().UTC()
+	b.purgeHistoryResetsLocked(now)
+	key := historyResetKey(lease.Scope)
+	current, ok := b.historyResets[key]
+	if !ok || current.Token != strings.TrimSpace(lease.Token) {
+		return ResetLease{}, false, nil
+	}
+	if _, blocked := b.oppositeHistoryResetLocked(lease.Scope); blocked {
+		return ResetLease{}, false, nil
+	}
+	current.ExpiresAt = now.Add(ttl)
+	b.historyResets[key] = current
+	return current, true, nil
+}
+
+func (b *MemoryBackend) ReleaseHistoryReset(ctx context.Context, lease ResetLease) (bool, error) {
+	if err := contextError(ctx); err != nil {
+		return false, err
+	}
+	if !lease.Scope.valid() || strings.TrimSpace(lease.Token) == "" {
+		return false, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := historyResetKey(lease.Scope)
+	current, ok := b.historyResets[key]
+	if !ok || current.Token != strings.TrimSpace(lease.Token) {
+		return false, nil
+	}
+	delete(b.historyResets, key)
+	return true, nil
+}
+
+func (b *MemoryBackend) EffectiveHistoryReset(ctx context.Context, scope ResetScope) (ResetLease, bool, error) {
+	if err := contextError(ctx); err != nil {
+		return ResetLease{}, false, err
+	}
+	scope = scope.normalized()
+	if !scope.valid() {
+		return ResetLease{}, false, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.purgeHistoryResetsLocked(time.Now().UTC())
+	return b.effectiveHistoryResetLocked(scope)
+}
+
+func (b *MemoryBackend) effectiveHistoryResetLocked(scope ResetScope) (ResetLease, bool, error) {
+	scope = scope.normalized()
+	var bot *ResetLease
+	if lease, ok := b.historyResets[historyResetKey(ResetScope{BotID: scope.BotID})]; ok {
+		bot = &lease
+	}
+	var sessions []ResetLease
+	prefix := "session:" + scope.BotID + ":"
+	for key, lease := range b.historyResets {
+		if strings.HasPrefix(key, prefix) {
+			sessions = append(sessions, lease)
+		}
+	}
+	lease, ok := effectiveResetLease(scope, bot, sessions)
+	return lease, ok, nil
+}
+
+func (b *MemoryBackend) oppositeHistoryResetLocked(scope ResetScope) (ResetLease, bool) {
+	scope = scope.normalized()
+	if scope.SessionID != "" {
+		lease, ok := b.historyResets[historyResetKey(ResetScope{BotID: scope.BotID})]
+		return lease, ok
+	}
+	prefix := "session:" + scope.BotID + ":"
+	for key, lease := range b.historyResets {
+		if strings.HasPrefix(key, prefix) {
+			return lease, true
+		}
+	}
+	return ResetLease{}, false
+}
+
+func (b *MemoryBackend) purgeHistoryResetsLocked(now time.Time) {
+	for key, lease := range b.historyResets {
+		if !now.Before(lease.ExpiresAt) {
+			delete(b.historyResets, key)
+		}
+	}
+}
+
+func historyResetKey(scope ResetScope) string {
+	scope = scope.normalized()
+	if scope.SessionID == "" {
+		return "bot:" + scope.BotID
+	}
+	return "session:" + scope.BotID + ":" + scope.SessionID
 }
 
 func (*MemoryBackend) Now(ctx context.Context) (time.Time, error) {
@@ -155,6 +283,40 @@ func (b *MemoryBackend) Update(ctx context.Context, key Key, update SnapshotUpda
 		return Snapshot{}, false, err
 	}
 	next, changed, err := update(current, ok)
+	if err != nil || !changed {
+		return next, changed, err
+	}
+	stored, err := cloneSnapshot(next)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	b.snapshots[k] = stored
+	b.snapshotExpiresAt[k] = now.Add(b.stateTTL)
+	b.scheduleCleanupLocked(b.snapshotExpiresAt[k])
+	return next, true, nil
+}
+
+func (b *MemoryBackend) StartRunIfNoHistoryReset(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error) {
+	if update == nil {
+		return Snapshot{}, false, errors.New("snapshot update is required")
+	}
+	if err := contextError(ctx); err != nil {
+		return Snapshot{}, false, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now().UTC()
+	b.purgeHistoryResetsLocked(now)
+	if _, blocked, _ := b.effectiveHistoryResetLocked(ResetScope(key)); blocked {
+		return Snapshot{}, false, ErrHistoryResetInProgress
+	}
+	b.purgeExpiredLocked(now)
+	k := key.String()
+	current, err := cloneSnapshot(b.snapshots[k])
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	next, changed, err := update(current, b.snapshots[k].SessionID != "")
 	if err != nil || !changed {
 		return next, changed, err
 	}

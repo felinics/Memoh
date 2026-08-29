@@ -17,12 +17,12 @@ import (
 	"sync"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/gorilla/websocket"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	displaypkg "github.com/memohai/memoh/internal/display"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	displaypkg "github.com/felinics/memoh/internal/display"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -31,8 +31,7 @@ const (
 	browserToolTimeout                  = 45 * time.Second
 	browserStartupTimeout               = 12 * time.Second
 	computerDisplayStartupTimeout int32 = 1200
-	browserScreenshotSubdir             = "browser-screenshots"
-	computerScreenshotSubdir            = "computer-screenshots"
+	screenshotSubdir                    = ".memoh/screenshots"
 	defaultComputerWidth                = 1280
 	defaultComputerHeight               = 800
 	rfbButtonLeft                 byte  = 1
@@ -144,7 +143,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 			Name:        ToolBrowserAction().String(),
 			Description: "Operate the current workspace browser tab. Prefer element refs from an observation result over CSS selectors; use selectors only as a fallback. Use fill to replace input values, type to append text, and press for shortcuts or submit keys. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
 			Parameters: browserObjectSchema(map[string]any{
-				"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "double_click", "focus", "type", "fill", "press", "hover", "select", "check", "uncheck", "scroll", "scroll_into_view", "drag", "upload", "wait", "go_back", "go_forward", "reload", "tab_new", "tab_select", "tab_close"}, "description": "Browser action to perform. Compatibility aliases dblclick and scrollintoview are also accepted."},
+				"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "double_click", "focus", "type", "fill", "press", "hover", "select", "check", "uncheck", "scroll", "scroll_into_view", "drag", "upload", "wait", "go_back", "go_forward", "reload", "tab_new", "tab_select", "tab_close"}, "description": "Browser action to perform. Compatibility aliases dblclick, scrollintoview, keyboard_type, and keyboard_inserttext are also accepted; keydown and keyup dispatch a single raw key event."},
 				"url":             map[string]any{"type": "string", "description": "URL to open for navigate or tab_new."},
 				"ref":             map[string]any{"type": "string", "description": "Element ref such as e12 from a browser observation snapshot or screenshot annotation. Preferred over selector."},
 				"selector":        map[string]any{"type": "string", "description": "CSS selector for the target element when no ref is available."},
@@ -360,7 +359,7 @@ func (p *BrowserProvider) execComputerScreenshot(ctx context.Context, session Se
 	if err != nil {
 		return nil, err
 	}
-	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(computerScreenshotSubdir), nil), nil
+	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(), nil), nil
 }
 
 func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext) (any, error) {
@@ -1428,7 +1427,7 @@ func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Cl
 
 func (p *BrowserProvider) browserActionResult(ctx context.Context, botID string, data map[string]any) any {
 	if b64, ok := data["screenshot"].(string); ok && b64 != "" {
-		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(browserScreenshotSubdir), data)
+		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(), data)
 	}
 	return data
 }
@@ -1975,12 +1974,12 @@ func (p *BrowserProvider) buildScreenshotBytesResult(ctx context.Context, botID 
 	return result
 }
 
-func (p *BrowserProvider) screenshotDir(name string) string {
+func (p *BrowserProvider) screenshotDir() string {
 	root := strings.TrimRight(strings.TrimSpace(p.dataRoot), "/")
 	if root == "" {
 		root = "/data"
 	}
-	return root + "/" + strings.TrimLeft(name, "/")
+	return root + "/" + screenshotSubdir
 }
 
 func (p *BrowserProvider) saveBytes(ctx context.Context, botID, path string, data []byte) error {

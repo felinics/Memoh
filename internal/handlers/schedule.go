@@ -9,10 +9,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 type ScheduleHandler struct {
@@ -47,6 +47,7 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 // @Summary Create schedule
 // @Description Create a schedule for current user
 // @Tags schedule
+// @Param bot_id path string true "Bot ID"
 // @Param payload body schedule.CreateRequest true "Schedule payload"
 // @Success 201 {object} schedule.Schedule
 // @Failure 400 {object} ErrorResponse
@@ -79,6 +80,7 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 // @Summary List schedules
 // @Description List schedules for current user
 // @Tags schedule
+// @Param bot_id path string true "Bot ID"
 // @Success 200 {object} schedule.ListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -106,6 +108,7 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 // @Summary Get schedule
 // @Description Get a schedule by ID
 // @Tags schedule
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "Schedule ID"
 // @Success 200 {object} schedule.Schedule
 // @Failure 400 {object} ErrorResponse
@@ -142,6 +145,7 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 // @Summary Update schedule
 // @Description Update a schedule by ID
 // @Tags schedule
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "Schedule ID"
 // @Param payload body schedule.UpdateRequest true "Schedule payload"
 // @Success 200 {object} schedule.Schedule
@@ -186,6 +190,7 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 // @Summary Delete schedule
 // @Description Delete a schedule by ID
 // @Tags schedule
+// @Param bot_id path string true "Bot ID"
 // @Param id path string true "Schedule ID"
 // @Success 204 "No Content"
 // @Failure 400 {object} ErrorResponse
@@ -327,6 +332,9 @@ func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, userID, botID 
 // scheduleServiceError maps schedule domain errors onto HTTP status codes:
 // user-correctable validation failures answer 400, everything else stays 500.
 func scheduleServiceError(err error) error {
+	if botAgentErr := botAgentHTTPError(err); botAgentErr != nil {
+		return botAgentErr
+	}
 	var invalid schedule.InvalidRequestError
 	if errors.As(err, &invalid) {
 		return echo.NewHTTPError(http.StatusBadRequest, invalid.Error())

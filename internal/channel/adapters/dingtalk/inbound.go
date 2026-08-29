@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/dingtalk-stream-sdk-go/chatbot"
+	"github.com/felinics/dingtalk-stream-sdk-go/chatbot"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 // sessionWebhookContext holds a cached session webhook for a received message.

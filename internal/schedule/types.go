@@ -36,6 +36,9 @@ type ExecutionConfig struct {
 	// the native model runtime, "acp_agent" for an ACP agent. Must be empty
 	// in existing_session mode (inherited from the target session).
 	RuntimeType string `json:"runtime_type,omitempty"`
+	// BotAgentID selects one persisted BotAgent for a new session. Empty means
+	// the built-in Native runtime (or the legacy ACP fields below).
+	BotAgentID string `json:"bot_agent_id,omitempty"`
 	// ACPAgentID names the ACP agent when RuntimeType is acp_agent.
 	ACPAgentID string `json:"acp_agent_id,omitempty"`
 	// ModelID is a native model UUID override (models.id).

@@ -9,14 +9,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
-	modelspkg "github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
+	modelspkg "github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestACPToolProvidersIncludeAskUser(t *testing.T) {
@@ -50,6 +51,30 @@ func TestAgentLimitsFromConfigUsesCustomValues(t *testing.T) {
 		got.ToolOutputMaxLines != 56 ||
 		got.SystemFilesMaxBytes != 7890 {
 		t.Fatalf("agent limits = %#v", got)
+	}
+}
+
+func TestAgentLoopReselectModeFromConfigDefaultsToActiveWhenUnrecognized(t *testing.T) {
+	got := agentLoopReselectModeFromConfig(slog.Default(), config.AgentConfig{ContextLoopReselect: "bogus"})
+	if got != native.LoopReselectActive {
+		t.Fatalf("mode = %q, want active", got)
+	}
+}
+
+func TestAgentLoopReselectModeFromConfigHonorsShadow(t *testing.T) {
+	got := agentLoopReselectModeFromConfig(slog.Default(), config.AgentConfig{ContextLoopReselect: "shadow"})
+	if got != native.LoopReselectShadow {
+		t.Fatalf("mode = %q, want shadow", got)
+	}
+}
+
+func TestProvideAgentWiresLoopReselectMode(t *testing.T) {
+	agent := provideAgent(slog.Default(), nil, nil, config.Config{Agent: config.AgentConfig{ContextLoopReselect: "off"}})
+	if agent == nil {
+		t.Fatal("expected a non-nil agent")
+	}
+	if got := agent.LoopReselectMode(); got != native.LoopReselectOff {
+		t.Fatalf("LoopReselectMode() = %q, want off", got)
 	}
 }
 

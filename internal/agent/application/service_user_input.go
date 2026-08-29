@@ -5,15 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/bots"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workspace"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/bots"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // userInputService is the slice of *userinput.Service the application depends
@@ -67,6 +69,7 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 type CommittedUserInputResponse struct {
 	request      userinput.Request
 	input        UserInputResponseInput
+	runID        string
 	activePrompt *acpActivePromptSubscription
 	ackOnly      bool
 }
@@ -153,6 +156,15 @@ func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputRe
 }
 
 func (s *Service) ContinueCommittedUserInputResponse(ctx context.Context, committed CommittedUserInputResponse, eventCh chan<- WSStreamEvent) error {
+	return s.continueCommittedUserInputResponse(ctx, committed, nil, eventCh)
+}
+
+func (s *Service) continueCommittedUserInputResponse(
+	ctx context.Context,
+	committed CommittedUserInputResponse,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	resolved := committed.request
 	if strings.TrimSpace(resolved.ID) == "" {
 		return errors.New("committed user input response is missing its request")
@@ -174,17 +186,17 @@ func (s *Service) ContinueCommittedUserInputResponse(ctx context.Context, commit
 		return emitApprovalAck(ctx, eventCh)
 	}
 
+	runID := runIDForChatRequest(committed.runID)
 	toolResult := sdk.ToolResultPart{
 		ToolCallID: resolved.ToolCallID,
 		ToolName:   resolved.ToolName,
 		Result:     s.limitToolResultValue(resolved.Result, resolved.ToolName),
 		IsError:    false,
 	}
-	continueFn := s.continueUserInputFn
-	if continueFn == nil {
-		continueFn = s.storeUserInputResultAndContinue
+	if s.continueUserInputFn != nil {
+		return s.continueUserInputFn(ctx, resolved, committed.input, toolResult, eventCh)
 	}
-	return continueFn(ctx, resolved, committed.input, toolResult, eventCh)
+	return s.storeUserInputResultAndContinue(ctx, resolved, committed.input, toolResult, runID, lifecycle, eventCh)
 }
 
 func (s *Service) authorizeACPUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {
@@ -304,7 +316,15 @@ func splitUserInputAnswerText(text string) []string {
 	return parts
 }
 
-func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+func (s *Service) storeUserInputResultAndContinue(
+	ctx context.Context,
+	req userinput.Request,
+	input UserInputResponseInput,
+	result sdk.ToolResultPart,
+	runID string,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, req.WorkspaceTargetID)
@@ -313,6 +333,7 @@ func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req useri
 	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := ChatRequest{
+		RunID:                   runID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,
@@ -327,10 +348,17 @@ func (s *Service) storeUserInputResultAndContinue(ctx context.Context, req useri
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueUserInputSession(ctx, req, input, eventCh)
+	return s.continueUserInputSession(ctx, req, input, runID, lifecycle, eventCh)
 }
 
-func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Request, input UserInputResponseInput, eventCh chan<- WSStreamEvent) error {
+func (s *Service) continueUserInputSession(
+	ctx context.Context,
+	req userinput.Request,
+	input UserInputResponseInput,
+	runID string,
+	runtimeLifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	req = withLocalWebUserInputReplyTarget(req)
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -345,6 +373,7 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 	if err != nil {
 		return err
 	}
+	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -356,8 +385,26 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 	if err != nil {
 		return err
 	}
+	terminal := s.contextLifecycleTerminal(ctx, cfg)
+	var lifecycleCause error
+	var lifecycleDeferred bool
+	var terminalEventSeen bool
+	defer func() {
+		if runtimeLifecycle != nil {
+			runtimeLifecycle.cause = lifecycleCause
+			runtimeLifecycle.deferred = lifecycleDeferred
+			if snapshot, ok := cfg.ContextLifecycle.Snapshot(); ok {
+				runtimeLifecycle.snapshot = &snapshot
+			}
+			return
+		}
+		if !lifecycleDeferred {
+			terminal(lifecycleCause)
+		}
+	}()
 
 	chatReq := ChatRequest{
+		RunID:                   cfg.RunID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                req.SessionID,
@@ -370,36 +417,110 @@ func (s *Service) continueUserInputSession(ctx context.Context, req userinput.Re
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := s.agent.Stream(ctx, cfg)
+	reasoningTiming := newReasoningTimingTracker(nil)
+	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
+	defer idleCancel.Stop()
+	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
+	failureEventForwarded := false
+	var hasVisibleOutput bool
 	for event := range stream {
-		data, err := json.Marshal(event)
+		idleCancel.Reset()
+		if event.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
+			lifecycleCause = eventErr
+		}
+		if event.IsTerminal() {
+			terminalEventSeen = true
+			lifecycleDeferred = pendingContinuationDecision(event)
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					lifecycleCause = nil
+				case native.EventAgentAbort:
+					if idleCancel.DidFire() {
+						lifecycleCause = context.Cause(idleCtx)
+					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
+						lifecycleCause = agentAbortCause(ctx)
+					}
+				}
+			}
+		}
+		if hasVisibleAgentStreamOutput(event) {
+			hasVisibleOutput = true
+		}
+		if event.Type == native.EventAgentAbort && idleCancel.DidFire() && eventCh != nil {
+			if failureData, marshalErr := json.Marshal(agentFailureStreamEvent(context.Cause(idleCtx))); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(failureData):
+					failureEventForwarded = true
+				case <-ctx.Done():
+					lifecycleCause = context.Cause(ctx)
+					return lifecycleCause
+				}
+			}
+		}
+		data, err := json.Marshal(publicAgentStreamEvent(event))
 		if err != nil {
 			continue
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				snap.visibleOutput = hasVisibleOutput
+				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
+				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
+				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
+					lifecycleCause = agentAbortCause(ctx)
+				}
 				if storeErr := s.persistTerminalSnapshot(
 					context.WithoutCancel(ctx),
 					chatReq,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
+					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
 				); storeErr != nil {
+					lifecycleCause = storeErr
+					lifecycleDeferred = false
 					return storeErr
 				}
 				stored = true
 			}
 		}
-		if eventCh != nil {
+		if eventCh != nil && shouldForwardAfterIdleFailure(event, failureEventForwarded) {
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
-				return ctx.Err()
+				lifecycleCause = context.Cause(ctx)
+				return lifecycleCause
 			}
 		}
 	}
+	if idleCancel.DidFire() {
+		lifecycleCause = context.Cause(idleCtx)
+		if !stored {
+			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), chatReq, resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}}, snapshotFailureCode(true, lifecycleCause)); storeErr != nil {
+				s.logger.Error("user input timeout persist failed", slog.Any("error", storeErr))
+			}
+		}
+		if eventCh != nil && !failureEventForwarded {
+			if data, marshalErr := json.Marshal(agentFailureStreamEvent(lifecycleCause)); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(data):
+				case <-ctx.Done():
+				}
+			}
+		}
+		return lifecycleCause
+	}
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		lifecycleCause = context.Cause(ctx)
+		return lifecycleCause
+	}
+	if lifecycleCause == nil && !lifecycleDeferred && !terminalEventSeen {
+		lifecycleCause = errors.New("agent continuation ended without a terminal event")
 	}
 	return nil
 }

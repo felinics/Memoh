@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/bots"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/workspace"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/bots"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type workspaceRequestTargetService struct{}

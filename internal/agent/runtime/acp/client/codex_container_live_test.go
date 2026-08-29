@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func TestCodexACPLiveContainerAPIKey(t *testing.T) {
@@ -55,7 +55,7 @@ func TestCodexACPLiveContainerAPIKey(t *testing.T) {
 	if baseURL := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")); baseURL != "" {
 		managed["base_url"] = baseURL
 	}
-	if err := WriteCodexManagedConfig(ctx, client, managed); err != nil {
+	if err := WriteCodexManagedConfigWithAuth(ctx, client, CodexManagedConfig{Mode: SetupModeAPIKey, Managed: managed}); err != nil {
 		t.Fatalf("write live Codex managed config: %v", err)
 	}
 	result, err := runner.Run(ctx, RunRequest{
@@ -86,7 +86,9 @@ func TestACPContainerAPIKeyCredentialNotInPSEF(t *testing.T) {
 
 	client := startLiveBridgeContainer(t, "")
 	const secret = "sk-memoh-ps-secret" //nolint:gosec // live test uses a fake secret to verify process listing redaction.
-	if err := WriteCodexManagedConfig(context.Background(), client, map[string]string{"api_key": secret}); err != nil {
+	if err := WriteCodexManagedConfigWithAuth(context.Background(), client, CodexManagedConfig{
+		Mode: SetupModeAPIKey, Managed: map[string]string{"api_key": secret},
+	}); err != nil {
 		t.Fatalf("write Codex managed config: %v", err)
 	}
 	proc, err := startBridgeProcess(context.Background(), client, "sh", []string{"-c", "sleep 30"}, "/data", time.Minute, processOptions{

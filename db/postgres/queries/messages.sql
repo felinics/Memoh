@@ -144,7 +144,7 @@ RETURNING (next_turn_position - 1)::bigint AS position;
 -- from this same counter (SR-TURN-001, SR-DUR-002), so bumping again would
 -- spend a second position and file the message under a turn the client was
 -- never told about. Entry points with no admission — channel inbound,
--- schedules, heartbeats — pass NULL and keep allocating here.
+-- schedules — pass NULL and keep allocating here.
 WITH next_position AS (
   UPDATE bot_sessions
   SET next_turn_position = next_turn_position + 1
@@ -1711,6 +1711,144 @@ WHERE m.team_id = public.memoh_current_team_id()
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
 
+-- name: MeasureActiveMessagesBySession :one
+-- Metadata-only context admission measure (CM-ADM-001): counts and content
+-- bytes aggregate on the database side, so admission can size a session's
+-- history without shipping any payload into the process.
+SELECT
+  COUNT(*)::BIGINT AS message_count,
+  COALESCE(SUM(octet_length(m.content::text)), 0)::BIGINT AS content_bytes
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = sqlc.arg(session_id)
+  AND m.created_at >= sqlc.arg(created_at)
+  AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
+
+-- name: ListActiveMessagesSinceBySessionWithinBytes :many
+-- Byte-budgeted variant of ListActiveMessagesSinceBySession (CM-ADM-001):
+-- rows are admitted newest-first until their running content byte total
+-- crosses max_bytes (the crossing row is kept, so the newest row always
+-- loads), then returned in ascending order. Process memory is bounded by
+-- max_bytes regardless of total history size.
+SELECT
+  ranked.id,
+  ranked.bot_id,
+  ranked.session_id,
+  ranked.sender_channel_identity_id,
+  ranked.sender_user_id,
+  ranked.external_message_id,
+  ranked.source_reply_to_message_id,
+  ranked.role,
+  ranked.content,
+  ranked.metadata,
+  ranked.usage,
+  ranked.session_mode,
+  ranked.runtime_type,
+  ranked.event_id,
+  ranked.display_text,
+  ranked.compact_id,
+  ranked.created_at,
+  ranked.sender_display_name,
+  ranked.sender_avatar_url,
+  ranked.platform
+FROM (
+  SELECT
+    m.id,
+    m.bot_id,
+    m.session_id,
+    m.sender_channel_identity_id,
+    m.sender_account_user_id AS sender_user_id,
+    m.source_message_id AS external_message_id,
+    m.source_reply_to_message_id,
+    m.role,
+    m.content,
+    m.metadata,
+    m.usage,
+    m.session_mode,
+    m.runtime_type,
+    m.event_id,
+    m.display_text,
+    m.compact_id,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    ci.display_name AS sender_display_name,
+    ci.avatar_url AS sender_avatar_url,
+    s.channel_type AS platform,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = sqlc.arg(session_id)
+    AND m.created_at >= sqlc.arg(created_at)
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+) ranked
+WHERE ranked.preceding_bytes < sqlc.arg(max_bytes)::BIGINT
+ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC;
+
+-- name: ListActiveMessagesSinceWithinBytes :many
+-- Byte-budgeted variant of ListActiveMessagesSince (CM-ADM-001), same
+-- newest-first admission semantics scoped to a bot instead of a session.
+SELECT
+  ranked.id,
+  ranked.bot_id,
+  ranked.session_id,
+  ranked.sender_channel_identity_id,
+  ranked.sender_user_id,
+  ranked.external_message_id,
+  ranked.source_reply_to_message_id,
+  ranked.role,
+  ranked.content,
+  ranked.metadata,
+  ranked.usage,
+  ranked.session_mode,
+  ranked.runtime_type,
+  ranked.event_id,
+  ranked.display_text,
+  ranked.compact_id,
+  ranked.created_at,
+  ranked.sender_display_name,
+  ranked.sender_avatar_url,
+  ranked.platform
+FROM (
+  SELECT
+    m.id,
+    m.bot_id,
+    m.session_id,
+    m.sender_channel_identity_id,
+    m.sender_account_user_id AS sender_user_id,
+    m.source_message_id AS external_message_id,
+    m.source_reply_to_message_id,
+    m.role,
+    m.content,
+    m.metadata,
+    m.usage,
+    m.session_mode,
+    m.runtime_type,
+    m.event_id,
+    m.display_text,
+    m.compact_id,
+    m.created_at,
+    ci.display_name AS sender_display_name,
+    ci.avatar_url AS sender_avatar_url,
+    s.channel_type AS platform,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.bot_id = sqlc.arg(bot_id)
+    AND m.created_at >= sqlc.arg(created_at)
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+) ranked
+WHERE ranked.preceding_bytes < sqlc.arg(max_bytes)::BIGINT
+ORDER BY ranked.created_at ASC, ranked.id ASC;
+
 -- name: ListMessagesBefore :many
 SELECT
   m.id,
@@ -2343,18 +2481,43 @@ WITH target_sessions AS MATERIALIZED (
 ),
 invalidated_sessions AS (
   UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
+  SET compaction_epoch = session.compaction_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
   FROM target_sessions target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
+),
+deleted_acp_states AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_sessions invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_sessions invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+),
+deleted_acp_publications AS (
+  DELETE FROM acp_session_publications publication
+  USING invalidated_sessions invalidated
+  WHERE publication.team_id = public.memoh_current_team_id()
+    AND publication.session_id = invalidated.id
+  RETURNING publication.session_id
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.bot_id = sqlc.arg(target_bot_id)
-    AND (SELECT count(*) FROM target_sessions) >= 0
+    AND (SELECT count(*) FROM invalidated_sessions) >= 0
+    AND (SELECT count(*) FROM deleted_acp_states) >= 0
+    AND (SELECT count(*) FROM deleted_acp_lines) >= 0
+    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),
@@ -2390,18 +2553,43 @@ WITH target_session AS MATERIALIZED (
 ),
 invalidated_session AS (
   UPDATE bot_sessions session
-  SET compaction_epoch = session.compaction_epoch + 1
+  SET compaction_epoch = session.compaction_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
   FROM target_session target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
+),
+deleted_acp_state AS (
+  DELETE FROM acp_session_states state
+  USING invalidated_session invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM acp_session_state_lines line
+  USING invalidated_session invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+),
+deleted_acp_publications AS (
+  DELETE FROM acp_session_publications publication
+  USING invalidated_session invalidated
+  WHERE publication.team_id = public.memoh_current_team_id()
+    AND publication.session_id = invalidated.id
+  RETURNING publication.session_id
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
   WHERE compact.team_id = public.memoh_current_team_id()
     AND compact.session_id = sqlc.arg(target_session_id)
-    AND (SELECT count(*) FROM target_session) >= 0
+    AND (SELECT count(*) FROM invalidated_session) >= 0
+    AND (SELECT count(*) FROM deleted_acp_state) >= 0
+    AND (SELECT count(*) FROM deleted_acp_lines) >= 0
+    AND (SELECT count(*) FROM deleted_acp_publications) >= 0
   ORDER BY compact.id
   FOR UPDATE
 ),

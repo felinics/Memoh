@@ -152,6 +152,55 @@ func FormatUserHeaderFromMeta(meta UserMessageMeta, query string) string {
 	return sb.String()
 }
 
+// UnwrapUserMessageEnvelope is the inverse of FormatUserHeaderFromMeta: it
+// returns the text the user actually wrote, with the model-facing <message>
+// wrapper and its structural children (<attachment>, <in-reply-to>) removed.
+// Input that is not a complete envelope is returned unchanged, so callers can
+// apply it defensively to any query string. An attachment-only message unwraps
+// to the empty string — the envelope is the only content it ever had.
+func UnwrapUserMessageEnvelope(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "<message") {
+		return text
+	}
+
+	openEnd := strings.IndexByte(trimmed, '>')
+	if openEnd < 0 {
+		return text
+	}
+	if strings.HasSuffix(strings.TrimSpace(trimmed[:openEnd+1]), "/>") {
+		return ""
+	}
+
+	body := strings.TrimSpace(trimmed[openEnd+1:])
+	if !strings.HasSuffix(body, "</message>") {
+		return text
+	}
+	body = strings.TrimSpace(strings.TrimSuffix(body, "</message>"))
+
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if isUserEnvelopeStructuralLine(strings.TrimSpace(line)) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+// isUserEnvelopeStructuralLine reports whether a line inside a <message>
+// envelope is machine-generated context rather than user-written text.
+func isUserEnvelopeStructuralLine(line string) bool {
+	if line == "" {
+		return false
+	}
+	if strings.HasPrefix(line, "<attachment ") && strings.HasSuffix(line, "/>") {
+		return true
+	}
+	return strings.HasPrefix(line, "<in-reply-to ") && strings.HasSuffix(line, "</in-reply-to>")
+}
+
 // escapeXMLAttr escapes a string for use inside an XML attribute value.
 func escapeXMLAttr(s string) string {
 	r := strings.NewReplacer(

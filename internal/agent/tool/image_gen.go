@@ -14,16 +14,16 @@ import (
 	"strings"
 	"time"
 
-	alibabaimages "github.com/memohai/twilight-ai/provider/alibabacloud/images"
-	openaiimages "github.com/memohai/twilight-ai/provider/openai/images"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	alibabaimages "github.com/felinics/twilight/provider/alibabacloud/images"
+	openaiimages "github.com/felinics/twilight/provider/openai/images"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

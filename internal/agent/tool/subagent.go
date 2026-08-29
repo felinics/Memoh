@@ -15,17 +15,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // SpawnAgent is the interface the subagent control tools use to run tasks.
@@ -35,35 +38,71 @@ type SpawnAgent interface {
 	GenerateWithWatchdog(ctx context.Context, cfg SpawnRunConfig, touchFn func()) (*SpawnResult, error)
 }
 
+// SpawnAttemptDisposition names the authoritative outcome of one native
+// attempt. Failed attempts can end the admitted run, retry inside it, or
+// reflect owning cancellation; a clean end is recorded as completed.
+type SpawnAttemptDisposition uint8
+
+const (
+	SpawnAttemptFailure SpawnAttemptDisposition = iota
+	SpawnAttemptRetry
+	SpawnAttemptAbort
+	SpawnAttemptCompleted
+)
+
 // SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
-	Model                 *sdk.Model
-	ModelUUID             string
-	ModelID               string
-	ModelProvider         string
-	System                string
-	Query                 string
-	SessionType           string
-	Identity              SpawnIdentity
-	LoopDetection         SpawnLoopConfig
-	Messages              []sdk.Message
-	ReasoningEffort       string
-	PromptCacheTTL        string
-	ChatCompletionsCompat string
-	SupportsImageInput    bool
-	SupportsFileInput     bool
-	SupportsToolCall      bool
-	Skills                map[string]SkillDetail
-	BackgroundManager     *background.Manager
+	RunID         string
+	Model         *sdk.Model
+	ModelUUID     string
+	ModelID       string
+	ModelProvider string
+	System        string
+	Query         string
+	SessionType   string
+	Identity      SpawnIdentity
+	LoopDetection SpawnLoopConfig
+	Messages      []sdk.Message
+	// ReasoningConfig is the thinking decision resolved for the subagent's own
+	// model. It replaces a lone effort string that was never assigned, which is
+	// how subagents came to run with no reasoning configuration at all (#983).
+	ReasoningConfig *models.ReasoningConfig
+	// Keep the unresolved parent-turn inputs as well, so a nested subagent can
+	// resolve the same override against its own selected model.
+	ReasoningStoredEffort     string
+	ReasoningRequestedEffort  string
+	PromptCacheTTL            string
+	ChatCompletionsCompat     string
+	SupportsImageInput        bool
+	SupportsFileInput         bool
+	SupportsToolCall          bool
+	Skills                    map[string]SkillDetail
+	BackgroundManager         *background.Manager
+	ContextBudgetMaxTokens    int
+	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
 	// TurnRequestMessageID is the persisted task user message this run's
 	// assistant and tool rows bind to, so incremental step persistence files
 	// them into the same history turn the runtime view names.
 	TurnRequestMessageID string
-	// OnStepPersisted, if set, is called after a complete step of this run has
-	// been durably persisted. The spawn provider uses it to stop retrying an
-	// attempt that has already produced durable output (and possibly real side
-	// effects): replaying the turn from the top would do that work twice.
+	// OnStepPersisted, if set, is called after a complete or interrupted step of
+	// this run has been durably persisted. The spawn provider uses it to stop
+	// retrying an attempt that has already produced durable output (and possibly
+	// real side effects): replaying the turn from the top would do that work twice.
 	OnStepPersisted func()
+	// Attempt is one-based and MaxAttempts is the total outer-attempt budget.
+	// ResolveAttempt is called at most once after a failed native attempt. It is
+	// the spawn provider's authoritative disposition: retry keeps the admitted
+	// run live, abort records owning cancellation, and failure ends the run.
+	// ResolveCompletion arbitrates a clean native end against concurrent owning
+	// cancellation before that end is published; it returns Completed, Abort for
+	// an explicit stop, or Failure for another owning-context failure.
+	// ReconcileTerminal applies the outcome selected by the session runtime when
+	// terminal publication races a routed control such as AbortControl.
+	Attempt           int
+	MaxAttempts       int
+	ResolveAttempt    func(error) SpawnAttemptDisposition
+	ResolveCompletion func() SpawnAttemptDisposition
+	ReconcileTerminal func(SpawnAttemptDisposition)
 }
 
 // SpawnIdentity mirrors agent.SessionContext fields needed by subagent controls.
@@ -92,9 +131,10 @@ type SpawnLoopConfig struct {
 
 // SpawnResult mirrors agent.GenerateResult.
 type SpawnResult struct {
-	Messages []sdk.Message
-	Text     string
-	Usage    *sdk.Usage
+	Messages         []sdk.Message
+	Text             string
+	Usage            *sdk.Usage
+	ContextLifecycle *contextfrag.LifecycleSnapshot
 	// Persisted reports that incremental step persistence owned this run's
 	// history, so the caller must not persist the result again.
 	Persisted bool
@@ -103,8 +143,8 @@ type SpawnResult struct {
 const (
 	// subagentTimeout caps total execution time as a safety net per attempt.
 	subagentTimeout = 10 * time.Minute
-	// spawnHeartbeatInterval keeps the parent stream active during foreground waits.
-	spawnHeartbeatInterval  = 30 * time.Second
+	// spawnProgressInterval keeps the parent stream active during foreground waits.
+	spawnProgressInterval   = 30 * time.Second
 	subagentMaxRetries      = 3
 	subagentRetryBaseDelay  = 2 * time.Second
 	subagentWatchdogTimeout = 3 * time.Minute
@@ -192,15 +232,21 @@ type agentSessionService interface {
 }
 
 type resolvedSubagentModel struct {
-	Model                 *sdk.Model
-	UUID                  string
-	ModelID               string
-	ProviderName          string
-	PromptCacheTTL        string
-	ChatCompletionsCompat string
-	SupportsImageInput    bool
-	SupportsFileInput     bool
-	SupportsToolCall      bool
+	Model        *sdk.Model
+	UUID         string
+	ModelID      string
+	ProviderName string
+	// ReasoningConfig is resolved against this model, not inherited from the
+	// parent: a subagent may run a different model, whose advertised tiers and
+	// off-ability differ. Before #983 it was neither inherited nor resolved, so
+	// subagents ran with no thinking configuration at all.
+	ReasoningConfig        *models.ReasoningConfig
+	PromptCacheTTL         string
+	ChatCompletionsCompat  string
+	SupportsImageInput     bool
+	SupportsFileInput      bool
+	SupportsToolCall       bool
+	ContextBudgetMaxTokens int
 }
 
 type subagentModelCatalogItem struct {
@@ -420,19 +466,23 @@ type agentRecord struct {
 }
 
 type agentRunResult struct {
-	AgentID        string `json:"agent_id"`
-	SessionID      string `json:"session_id,omitempty"`
-	TaskID         string `json:"task_id,omitempty"`
-	ModelID        string `json:"model_id,omitempty"`
-	Provider       string `json:"provider,omitempty"`
-	Fork           bool   `json:"fork,omitempty"`
-	Status         string `json:"status"`
-	Message        string `json:"message,omitempty"`
-	Text           string `json:"text,omitempty"`
-	Error          string `json:"error,omitempty"`
-	QueuePosition  int    `json:"queue_position,omitempty"`
-	QueueRemaining int    `json:"queue_remaining,omitempty"`
-	TimedOut       bool   `json:"timed_out,omitempty"`
+	AgentID          string                         `json:"agent_id"`
+	SessionID        string                         `json:"session_id,omitempty"`
+	TaskID           string                         `json:"task_id,omitempty"`
+	ModelID          string                         `json:"model_id,omitempty"`
+	Provider         string                         `json:"provider,omitempty"`
+	Fork             bool                           `json:"fork,omitempty"`
+	Status           string                         `json:"status"`
+	Message          string                         `json:"message,omitempty"`
+	Text             string                         `json:"text,omitempty"`
+	Error            string                         `json:"error,omitempty"`
+	QueuePosition    int                            `json:"queue_position,omitempty"`
+	QueueRemaining   int                            `json:"queue_remaining,omitempty"`
+	TimedOut         bool                           `json:"timed_out,omitempty"`
+	ContextLifecycle *contextfrag.LifecycleSnapshot `json:"-"`
+	Cause            error                          `json:"-"`
+	AttemptResolved  bool                           `json:"-"`
+	AttemptOutcome   SpawnAttemptDisposition        `json:"-"`
 }
 
 type agentRequest struct {
@@ -753,9 +803,9 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		}, nil
 	}
 
-	heartbeatCtx, heartbeatCancel := context.WithCancel(context.WithoutCancel(ctx))
-	defer heartbeatCancel()
-	p.startSpawnHeartbeat(heartbeatCtx, session, 1)
+	progressCtx, progressCancel := context.WithCancel(ctx)
+	defer progressCancel()
+	p.startSpawnProgress(progressCtx, session)
 	result := p.runAgentRequest(taskCtx, key, req)
 	return agentResultMap(result), nil
 }
@@ -774,27 +824,42 @@ func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *ag
 		req.requestMessageID = requestMessageID
 	}
 	result := p.runSubagentTask(runCtx, req)
-	if task := p.bgManager.Get(req.taskID); task != nil {
-		if snap := task.Snapshot(); snap.Status == background.TaskKilled {
+	if result.AttemptResolved && result.AttemptOutcome == SpawnAttemptAbort {
+		if p.agentTaskStopRequested(req.taskID) {
 			result.Status = string(background.TaskKilled)
+			result.Error = "stopped by the user"
 		}
-	}
-	if result.Status != string(background.TaskKilled) &&
-		runCtx.Err() != nil && ctx.Err() == nil &&
-		errors.Is(context.Cause(runCtx), context.Canceled) {
-		// The run context died while the parent task is still alive: the child
-		// run itself was aborted (stop control on the subagent session). That
-		// is a deliberate stop, not a failure, so it is recorded exactly like a
-		// kill — and the wording tells the parent what happened rather than
-		// handing it an opaque cancellation.
-		result.Status = string(background.TaskKilled)
-		result.Error = "stopped by the user"
+		if result.Status != string(background.TaskKilled) &&
+			runCtx.Err() != nil && ctx.Err() == nil {
+			result.Status = string(background.TaskKilled)
+			result.Error = "stopped by the user"
+		}
+	} else if !result.AttemptResolved {
+		if p.agentTaskStopRequested(req.taskID) {
+			result.Status = string(background.TaskKilled)
+			result.Error = "stopped by the user"
+		}
+		if result.Status != string(background.TaskKilled) &&
+			runCtx.Err() != nil && ctx.Err() == nil &&
+			errors.Is(context.Cause(runCtx), context.Canceled) {
+			// The run context died while the parent task is still alive: the child
+			// run itself was aborted (stop control on the subagent session). That
+			// is a deliberate stop, not a failure, so it is recorded exactly like a
+			// kill — and the wording tells the parent what happened rather than
+			// handing it an opaque cancellation.
+			result.Status = string(background.TaskKilled)
+			result.Error = "stopped by the user"
+		}
 	}
 	// Release the thread's slot before the queue promotes the next message, or
 	// the successor's admission finds this run still active and is told the
 	// agent is busy.
 	finishRun(result)
 	return p.completeAgentRequest(ctx, key, req, result)
+}
+
+func (p *SpawnProvider) agentTaskStopRequested(taskID string) bool {
+	return p != nil && p.bgManager != nil && p.bgManager.AgentTaskStopRequested(taskID)
 }
 
 // completeAgentRequest closes the background record and hands the agent's queue
@@ -900,12 +965,14 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	)
 	if err != nil {
 		res.Error = fmt.Sprintf("resolve pinned subagent model: %v", err)
+		res.Cause = err
 		res.Status = string(background.TaskFailed)
 		return res
 	}
 	req.runtime = runtime
 	if err := p.runSubagentHook(ctx, hooks.EventSubagentStart, req, res); err != nil {
 		res.Error = err.Error()
+		res.Cause = err
 		res.Status = string(background.TaskFailed)
 		return res
 	}
@@ -926,6 +993,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		parentMessages, loadErr := p.loadAgentForkContext(context.WithoutCancel(ctx), req.agentSessionID)
 		if loadErr != nil {
 			res.Error = fmt.Sprintf("load fork context: %v", loadErr)
+			res.Cause = loadErr
 			res.Status = string(background.TaskFailed)
 			return res
 		}
@@ -934,23 +1002,33 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		combined = append(combined, history...)
 		history = combined
 	}
+	contextBudgetMaxTokens := req.runtime.ContextBudgetMaxTokens
+	if contextBudgetMaxTokens <= 0 {
+		contextBudgetMaxTokens = req.parentSession.ContextBudgetMaxTokens
+	}
 	cfg := SpawnRunConfig{
-		Model:                 req.runtime.Model,
-		ModelUUID:             req.runtime.UUID,
-		ModelID:               req.runtime.ModelID,
-		ModelProvider:         req.runtime.ProviderName,
-		System:                req.systemPrompt,
-		Query:                 req.message,
-		SessionType:           sessionpkg.TypeSubagent,
-		PromptCacheTTL:        req.runtime.PromptCacheTTL,
-		ChatCompletionsCompat: req.runtime.ChatCompletionsCompat,
-		SupportsImageInput:    req.runtime.SupportsImageInput,
-		SupportsFileInput:     req.runtime.SupportsFileInput,
-		SupportsToolCall:      req.runtime.SupportsToolCall,
-		Messages:              history,
-		Skills:                req.parentSession.Skills,
-		BackgroundManager:     p.bgManager,
-		TurnRequestMessageID:  req.requestMessageID,
+		RunID:                     strings.TrimSpace(req.admission.RunID),
+		Model:                     req.runtime.Model,
+		ModelUUID:                 req.runtime.UUID,
+		ModelID:                   req.runtime.ModelID,
+		ModelProvider:             req.runtime.ProviderName,
+		ReasoningConfig:           req.runtime.ReasoningConfig,
+		ReasoningStoredEffort:     req.parentSession.ReasoningStoredEffort,
+		ReasoningRequestedEffort:  req.parentSession.ReasoningRequestedEffort,
+		System:                    req.systemPrompt,
+		Query:                     req.message,
+		SessionType:               sessionpkg.TypeSubagent,
+		PromptCacheTTL:            req.runtime.PromptCacheTTL,
+		ChatCompletionsCompat:     req.runtime.ChatCompletionsCompat,
+		SupportsImageInput:        req.runtime.SupportsImageInput,
+		SupportsFileInput:         req.runtime.SupportsFileInput,
+		SupportsToolCall:          req.runtime.SupportsToolCall,
+		Messages:                  history,
+		Skills:                    req.parentSession.Skills,
+		BackgroundManager:         p.bgManager,
+		ContextBudgetMaxTokens:    contextBudgetMaxTokens,
+		ContextToolExchangePolicy: req.parentSession.ContextToolExchangePolicy,
+		TurnRequestMessageID:      req.requestMessageID,
 		Identity: SpawnIdentity{
 			BotID:               req.parentSession.BotID,
 			ChatID:              req.parentSession.ChatID,
@@ -971,10 +1049,10 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		},
 		LoopDetection: SpawnLoopConfig{Enabled: true},
 	}
-	// stepPersisted flips once any complete step of this task has durably
-	// committed. From then on the attempt loop stops retrying: a committed step
-	// means the agent already produced durable output and possibly real side
-	// effects, and replaying the turn from the top would do that work twice.
+	// stepPersisted flips once any complete step or interrupted checkpoint has
+	// durably committed. From then on the attempt loop stops retrying: the agent
+	// already produced durable output and possibly real side effects, and
+	// replaying the turn from the top would do that work twice.
 	var stepPersisted atomic.Bool
 	cfg.OnStepPersisted = func() { stepPersisted.Store(true) }
 
@@ -988,17 +1066,83 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			case <-ctx.Done():
 				timer.Stop()
 				res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+				res.Cause = context.Cause(ctx)
+				res.AttemptResolved = true
+				res.AttemptOutcome = SpawnAttemptFailure
+				if errors.Is(context.Cause(ctx), context.Canceled) {
+					res.AttemptOutcome = SpawnAttemptAbort
+				}
 				return res
 			}
 		}
 
 		safetyCtx, safetyCancel := context.WithTimeout(ctx, subagentTimeout)
 		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
+		cfg.Attempt = attempt + 1
+		cfg.MaxAttempts = subagentMaxRetries + 1
+		attemptDisposition := SpawnAttemptFailure
+		dispositionResolved := false
+		cfg.ResolveAttempt = func(attemptErr error) SpawnAttemptDisposition {
+			if p.agentTaskStopRequested(req.taskID) {
+				attemptDisposition = SpawnAttemptAbort
+			} else {
+				attemptDisposition = subagentAttemptDisposition(
+					ctx,
+					attemptErr,
+					stepPersisted.Load(),
+					attempt < subagentMaxRetries,
+				)
+			}
+			dispositionResolved = true
+			return attemptDisposition
+		}
+		cfg.ResolveCompletion = func() SpawnAttemptDisposition {
+			switch {
+			case p.agentTaskStopRequested(req.taskID), errors.Is(context.Cause(ctx), context.Canceled):
+				attemptDisposition = SpawnAttemptAbort
+			case ctx.Err() != nil:
+				attemptDisposition = SpawnAttemptFailure
+			default:
+				attemptDisposition = SpawnAttemptCompleted
+			}
+			dispositionResolved = true
+			return attemptDisposition
+		}
+		cfg.ReconcileTerminal = func(outcome SpawnAttemptDisposition) {
+			attemptDisposition = outcome
+			dispositionResolved = true
+		}
 		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)
 		wd.Stop()
 		safetyCancel()
 
+		if genResult != nil && genResult.ContextLifecycle != nil {
+			res.ContextLifecycle = genResult.ContextLifecycle
+		}
 		if err == nil {
+			if !dispositionResolved {
+				attemptDisposition = cfg.ResolveCompletion()
+			}
+			res.AttemptResolved = true
+			res.AttemptOutcome = attemptDisposition
+			if attemptDisposition == SpawnAttemptAbort {
+				cause := context.Cause(ctx)
+				if cause == nil {
+					cause = context.Canceled
+				}
+				res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+				res.Cause = cause
+				return res
+			}
+			if attemptDisposition != SpawnAttemptCompleted {
+				cause := context.Cause(ctx)
+				if cause == nil {
+					cause = errors.New("agent run failed")
+				}
+				res.Error = cause.Error()
+				res.Cause = cause
+				return res
+			}
 			res.Text = genResult.Text
 			if !genResult.Persisted && p.messageService != nil && req.agentSessionID != "" {
 				p.persistMessages(context.WithoutCancel(ctx), req, genResult, !req.messagePersisted)
@@ -1006,22 +1150,66 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			return res
 		}
 		lastErr = err
-		if ctx.Err() != nil && !errors.Is(err, ErrWatchdogTimedOut) {
-			res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+		if !dispositionResolved {
+			if p.agentTaskStopRequested(req.taskID) {
+				attemptDisposition = SpawnAttemptAbort
+			} else {
+				attemptDisposition = subagentAttemptDisposition(
+					ctx,
+					err,
+					stepPersisted.Load(),
+					attempt < subagentMaxRetries,
+				)
+			}
+		}
+		if attemptDisposition == SpawnAttemptRetry {
+			continue
+		}
+		res.AttemptResolved = true
+		res.AttemptOutcome = attemptDisposition
+		if attemptDisposition == SpawnAttemptAbort {
+			cause := context.Cause(ctx)
+			if cause == nil {
+				cause = context.Canceled
+			}
+			res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+			res.Cause = cause
 			return res
 		}
 		if stepPersisted.Load() {
-			res.Error = fmt.Sprintf("%v (progress up to the last completed step is saved; send a follow-up message to continue)", err)
+			res.Error = fmt.Sprintf("%v (progress from this attempt is saved; send a follow-up message to continue)", err)
 			return res
 		}
-		if errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err) {
-			continue
+		if (errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) &&
+			attempt == subagentMaxRetries {
+			break
 		}
 		res.Error = err.Error()
+		res.Cause = err
 		return res
 	}
 	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
+	res.Cause = lastErr
 	return res
+}
+
+func subagentAttemptDisposition(
+	ctx context.Context,
+	err error,
+	stepPersisted bool,
+	attemptsRemain bool,
+) SpawnAttemptDisposition {
+	if errors.Is(context.Cause(ctx), context.Canceled) {
+		return SpawnAttemptAbort
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return SpawnAttemptFailure
+	}
+	if err != nil && !stepPersisted && attemptsRemain &&
+		(errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) {
+		return SpawnAttemptRetry
+	}
+	return SpawnAttemptFailure
 }
 
 func (p *SpawnProvider) runSubagentHook(ctx context.Context, eventName string, req *agentRequest, result agentRunResult) error {
@@ -1359,23 +1547,33 @@ func agentResultMap(res agentRunResult) map[string]any {
 	return out
 }
 
-func (*SpawnProvider) startSpawnHeartbeat(ctx context.Context, session SessionContext, _ int) {
+func (*SpawnProvider) startSpawnProgress(ctx context.Context, session SessionContext) {
 	emitter := session.Emitter
 	if emitter == nil {
 		return
 	}
 	go func() {
-		ticker := time.NewTicker(spawnHeartbeatInterval)
+		ticker := time.NewTicker(spawnProgressInterval)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				emitter(ToolStreamEvent{Type: StreamEventSpawnHeartbeat})
-			}
-		}
+		runSpawnProgress(ctx, emitter, ticker.C)
 	}()
+}
+
+func runSpawnProgress(ctx context.Context, emitter StreamEmitter, ticks <-chan time.Time) {
+	if emitter == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			if ctx.Err() != nil {
+				return
+			}
+			emitter(ToolStreamEvent{Type: StreamEventSpawnProgress})
+		}
+	}
 }
 
 func isRetryableSubagentError(err error) bool {
@@ -1412,11 +1610,18 @@ func (p *SpawnProvider) persistMessages(
 		}
 	}
 
-	for _, msg := range result.Messages {
+	lastAssistantIdx := -1
+	for i, msg := range result.Messages {
+		if msg.Role == sdk.MessageRoleAssistant {
+			lastAssistantIdx = i
+		}
+	}
+
+	for i, msg := range result.Messages {
 		if msg.Role == sdk.MessageRoleUser {
 			continue
 		}
-		content, err := json.Marshal(msg)
+		content, err := historyfrag.MarshalStoredSDKMessage(msg)
 		if err != nil {
 			continue
 		}
@@ -1424,19 +1629,31 @@ func (p *SpawnProvider) persistMessages(
 		if msg.Usage != nil {
 			usage, _ = json.Marshal(msg.Usage)
 		}
-		if _, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
+		var metadata map[string]any
+		if i == lastAssistantIdx && result.ContextLifecycle != nil {
+			metadata = map[string]any{
+				contextfrag.MetadataContextLifecycleKey: *result.ContextLifecycle,
+			}
+		}
+		persisted, err := p.messageService.Persist(ctx, messagepkg.PersistInput{
 			BotID:     req.parentSession.BotID,
 			SessionID: req.agentSessionID,
 			Role:      string(msg.Role),
 			Content:   content,
+			Metadata:  metadata,
 			Usage:     usage,
 			ModelID:   req.runtime.UUID,
 			// Bind to the task's request row so the whole task is one history
 			// turn; the run id is traceability, exactly like the chat path.
 			RunID:                strings.TrimSpace(req.admission.RunID),
 			TurnRequestMessageID: strings.TrimSpace(req.requestMessageID),
-		}); err != nil {
+		})
+		if err != nil {
 			p.logger.Warn("persist subagent message failed", slog.Any("error", err))
+			continue
+		}
+		if i == lastAssistantIdx && result.ContextLifecycle != nil {
+			result.ContextLifecycle.AssistantMessageID = persisted.ID
 		}
 	}
 }
@@ -1449,10 +1666,7 @@ func (p *SpawnProvider) persistUserMessage(ctx context.Context, req *agentReques
 	if p.messageService == nil || strings.TrimSpace(req.agentSessionID) == "" {
 		return "", false
 	}
-	userContent, _ := json.Marshal(map[string]any{
-		"role":    "user",
-		"content": req.message,
-	})
+	userContent, _ := historyfrag.MarshalStoredSDKMessage(sdk.UserMessage(req.message))
 	input := messagepkg.PersistInput{
 		BotID:     req.parentSession.BotID,
 		SessionID: req.agentSessionID,
@@ -1629,6 +1843,15 @@ func (p *SpawnProvider) resolveModel(
 		baseURL,
 		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
+	reasoningConfig, err := p.resolveSubagentReasoning(ctx, session, modelInfo, provider.ClientType)
+	if err != nil {
+		return resolvedSubagentModel{}, fmt.Errorf("resolve subagent reasoning: %w", err)
+	}
+	contextWindow := modelInfo.Config.ContextBudgetMaxTokens()
+	if contextWindow <= 0 {
+		contextWindow = session.ContextBudgetMaxTokens
+	}
+
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               modelInfo.ModelID,
 		ClientType:            provider.ClientType,
@@ -1636,16 +1859,25 @@ func (p *SpawnProvider) resolveModel(
 		CodexAccountID:        creds.CodexAccountID,
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
+		ReasoningConfig:       reasoningConfig,
+		ReasoningDialect:      modelInfo.Config.ReasoningDialect,
+		ReasoningOffSupport:   modelInfo.Config.ReasoningOffSupport,
+		ReasoningDefaultOn:    modelInfo.Config.ReasoningDefaultOn,
+		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin,
+		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax,
+		ContextWindow:         contextWindow,
 	})
 	return resolvedSubagentModel{
-		Model:                 sdkModel,
-		UUID:                  modelInfo.ID,
-		ModelID:               modelInfo.ModelID,
-		ProviderName:          provider.Name,
-		PromptCacheTTL:        providers.ProviderConfigString(provider, "prompt_cache_ttl"),
-		ChatCompletionsCompat: chatCompletionsCompat,
-		SupportsImageInput:    modelInfo.HasCompatibility(models.CompatVision),
-		SupportsToolCall:      modelInfo.HasCompatibility(models.CompatToolCall),
+		Model:                  sdkModel,
+		ReasoningConfig:        reasoningConfig,
+		UUID:                   modelInfo.ID,
+		ModelID:                modelInfo.ModelID,
+		ProviderName:           provider.Name,
+		PromptCacheTTL:         providers.ProviderConfigString(provider, "prompt_cache_ttl"),
+		ChatCompletionsCompat:  chatCompletionsCompat,
+		SupportsImageInput:     modelInfo.HasCompatibility(models.CompatVision),
+		SupportsToolCall:       modelInfo.HasCompatibility(models.CompatToolCall),
+		ContextBudgetMaxTokens: contextWindow,
 	}, nil
 }
 
@@ -1656,4 +1888,47 @@ func truncateTitle(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes-3]) + "..."
+}
+
+// resolveSubagentReasoning resolves the thinking decision for a subagent against
+// the model the subagent will actually run, using the bot's stored effort as the
+// on/off source. It deliberately does not inherit the parent's resolved config: a
+// subagent may run a different model, and a tier the parent's model advertises
+// may not exist on this one.
+//
+// A missing settings service retains the old nil-config fallback for direct or
+// test-only callers that do not carry the parent inputs. When a requested value
+// arrives without the stored fallback (as it does across the ACP tool bridge), a
+// configured settings service still loads stored: the child model may reject the
+// requested tier or Off and ResolveConfig must then fall back to the bot setting.
+// Read failures are returned instead of silently changing provider-wire behavior.
+func (p *SpawnProvider) resolveSubagentReasoning(
+	ctx context.Context,
+	session SessionContext,
+	modelInfo models.GetResponse,
+	clientType string,
+) (*models.ReasoningConfig, error) {
+	stored := strings.TrimSpace(session.ReasoningStoredEffort)
+	requested := strings.TrimSpace(session.ReasoningRequestedEffort)
+	if stored == "" {
+		if p.settings == nil {
+			if requested == "" {
+				return nil, nil
+			}
+		} else {
+			botSettings, err := p.settings.GetBot(ctx, session.BotID)
+			if err != nil {
+				return nil, fmt.Errorf("load bot reasoning settings: %w", err)
+			}
+			stored = botSettings.ReasoningEffort
+		}
+	}
+	return reasoning.ResolveConfig(
+		modelInfo.ResolveThinkingMode(),
+		modelInfo.Config.ReasoningEfforts,
+		modelInfo.ReasoningOptions(clientType),
+		stored,
+		requested,
+		clientType,
+	), nil
 }

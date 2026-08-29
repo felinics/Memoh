@@ -10,7 +10,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type fenceCapturingToolSource struct {
@@ -59,30 +59,6 @@ func TestToolGatewayMiddlewareStopsWhenOwningRunIsCanceled(t *testing.T) {
 	}
 	if source.calls != 0 {
 		t.Fatalf("tool source calls = %d, want zero for canceled run", source.calls)
-	}
-}
-
-func TestValidateRuntimeGuardRejectsCancellationDuringGuard(t *testing.T) {
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	session := ToolSessionContext{RunContext: runCtx}
-	bound, cancelBound := BindRuntimeContext(context.Background(), session)
-	defer cancelBound()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		session.RuntimeGuard = func(context.Context) error {
-			close(started)
-			<-release
-			return nil
-		}
-		done <- ValidateRuntimeGuard(bound, session)
-	}()
-	<-started
-	cancelRun()
-	close(release)
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("runtime guard error = %v, want context.Canceled", err)
 	}
 }
 

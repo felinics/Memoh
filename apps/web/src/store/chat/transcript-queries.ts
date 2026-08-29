@@ -1,4 +1,4 @@
-import { serverMessageId } from '../chat-list.normalize'
+import { messageIdentityId } from '../chat-list.normalize'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn } from './types'
 
 export function createTranscriptQueries(messages: ChatMessage[]) {
@@ -10,10 +10,18 @@ export function createTranscriptQueries(messages: ChatMessage[]) {
     return ''
   }
 
-  function findTurnByServerId(messageId: string): ChatMessage | null {
-    const id = messageId.trim()
+  // A turn id names a round, and a round has two halves on screen: retry
+  // addresses its assistant half, edit its user half. The role is part of the
+  // lookup rather than an afterthought.
+  function findTurnByTurnId(turnId: string, role: 'user'): ChatUserTurn | null
+  function findTurnByTurnId(turnId: string, role: 'assistant'): ChatAssistantTurn | null
+  function findTurnByTurnId(turnId: string, role: 'user' | 'assistant'): ChatUserTurn | ChatAssistantTurn | null {
+    const id = turnId.trim()
     if (!id) return null
-    return messages.find(turn => serverMessageId(turn) === id) ?? null
+    for (const turn of messages) {
+      if (turn.role === role && turn.turnId?.trim() === id) return turn
+    }
+    return null
   }
 
   function latestVisibleTurn(role: 'user'): ChatUserTurn | null
@@ -29,19 +37,19 @@ export function createTranscriptQueries(messages: ChatMessage[]) {
   function isLatestVisibleUserTurn(turn: ChatMessage): turn is ChatUserTurn {
     if (turn.role !== 'user') return false
     const latest = latestVisibleTurn('user')
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+    return Boolean(latest && messageIdentityId(latest) === messageIdentityId(turn))
   }
 
   function isLatestVisibleAssistantTurn(turn: ChatMessage): turn is ChatAssistantTurn {
     if (turn.role !== 'assistant') return false
     const latest = latestVisibleTurn('assistant')
-    return Boolean(latest && serverMessageId(latest) === serverMessageId(turn))
+    return Boolean(latest && messageIdentityId(latest) === messageIdentityId(turn))
   }
 
   return {
     latestOptimisticUserText,
     hasTurn: (turn: ChatMessage) => messages.includes(turn),
-    findTurnByServerId,
+    findTurnByTurnId,
     isLatestVisibleUserTurn,
     isLatestVisibleAssistantTurn,
   }

@@ -9,12 +9,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/acl"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // --- fake services ---
@@ -88,15 +88,15 @@ func (*fakeCommandQueries) GetTokenUsageByModel(_ context.Context, _ dbsqlc.GetT
 
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
 }
 
 func newTestHandlerWithACL(roleResolver MemberRoleResolver, evaluator AccessEvaluator) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
 }
 
 // --- tests ---
@@ -141,9 +141,6 @@ func TestExecute_Help(t *testing.T) {
 	}
 	if !strings.Contains(result, "Available commands") {
 		t.Errorf("expected help text, got: %s", result)
-	}
-	if strings.Contains(result, "set-heartbeat") {
-		t.Errorf("top-level help should not expand nested actions, got: %s", result)
 	}
 	if !strings.Contains(result, "Switch the chat model") {
 		t.Errorf("expected top-level model entry, got: %s", result)
@@ -369,25 +366,22 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 func TestSettingsResultUsesFocusedActions(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name             string
-		settings         settings.Settings
-		mustHaveLabels   []string
-		mustHaveArgValue string // the heartbeat toggle's Args[1] must match this
-		aclArgValue      string // the acl toggle's Args[1] must match this
+		name           string
+		settings       settings.Settings
+		mustHaveLabels []string
+		aclArgValue    string // the ACL toggle's Args[1] must match this
 	}{
 		{
-			name:             "acl=allow, heartbeat off → enable+aclAsk",
-			settings:         settings.Settings{AclDefaultEffect: "allow", HeartbeatEnabled: false},
-			mustHaveLabels:   []string{"Reasoning ▸", "Models ▸", "Turn heartbeat on", "Ask before tools", "Search ▸", "Memory ▸"},
-			mustHaveArgValue: "true",
-			aclArgValue:      "deny",
+			name:           "acl=allow shows ask action",
+			settings:       settings.Settings{AclDefaultEffect: "allow"},
+			mustHaveLabels: []string{"Reasoning ▸", "Models ▸", "Ask before tools", "Search ▸", "Memory ▸"},
+			aclArgValue:    "deny",
 		},
 		{
-			name:             "acl=deny, heartbeat on → disable+aclAllow",
-			settings:         settings.Settings{AclDefaultEffect: "deny", HeartbeatEnabled: true},
-			mustHaveLabels:   []string{"Reasoning ▸", "Models ▸", "Turn heartbeat off", "Allow tools", "Search ▸", "Memory ▸"},
-			mustHaveArgValue: "false",
-			aclArgValue:      "allow",
+			name:           "acl=deny shows allow action",
+			settings:       settings.Settings{AclDefaultEffect: "deny"},
+			mustHaveLabels: []string{"Reasoning ▸", "Models ▸", "Allow tools", "Search ▸", "Memory ▸"},
+			aclArgValue:    "allow",
 		},
 	}
 	for _, tc := range cases {
@@ -401,7 +395,7 @@ func TestSettingsResultUsesFocusedActions(t *testing.T) {
 			for _, item := range result.Interactive.Choices.Choices {
 				labels = append(labels, item.Label)
 			}
-			for _, forbidden := range []string{"Reasoning: off", "Effort ▸", "ACL: allow", "Heartbeat: off"} {
+			for _, forbidden := range []string{"Reasoning: off", "Effort ▸", "ACL: allow"} {
 				for _, label := range labels {
 					if label == forbidden {
 						t.Fatalf("settings should not expose redundant state button %q; labels=%v", forbidden, labels)
@@ -420,24 +414,16 @@ func TestSettingsResultUsesFocusedActions(t *testing.T) {
 					t.Fatalf("settings labels missing %q: %v", want, labels)
 				}
 			}
-			// Heartbeat toggle args must flip with current state so the
-			// re-dispatched command sets the opposite of the displayed state.
-			var heartbeatArgs, aclArgs []string
+			var aclArgs []string
 			for _, item := range result.Interactive.Choices.Choices {
 				if item.Action == nil || item.Action.Resource != "settings" || item.Action.Action != "update" {
 					continue
 				}
 				if len(item.Action.Args) >= 2 {
-					switch item.Action.Args[0] {
-					case "--heartbeat_enabled":
-						heartbeatArgs = item.Action.Args
-					case "--acl_default_effect":
+					if item.Action.Args[0] == "--acl_default_effect" {
 						aclArgs = item.Action.Args
 					}
 				}
-			}
-			if len(heartbeatArgs) != 2 || heartbeatArgs[1] != tc.mustHaveArgValue {
-				t.Errorf("heartbeat toggle should dispatch --heartbeat_enabled %s, got %v", tc.mustHaveArgValue, heartbeatArgs)
 			}
 			if len(aclArgs) != 2 || aclArgs[1] != tc.aclArgValue {
 				t.Errorf("acl toggle should dispatch --acl_default_effect %s, got %v", tc.aclArgValue, aclArgs)
@@ -460,7 +446,6 @@ func TestExecute_MissingArgs(t *testing.T) {
 		{"/mcp delete", "Usage:"},
 		{"/fs read", "isn't available"},
 		{"/model set", "Usage:"},
-		{"/model set-heartbeat", "Usage:"},
 		{"/memory set", "Usage:"},
 		{"/search set", "Usage:"},
 	}
@@ -585,7 +570,7 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 	for _, group := range []string{
 		"schedule", "mcp", "settings",
 		"model", "memory", "search", "usage",
-		"email", "heartbeat", "skill", "fs", "access",
+		"email", "skill", "fs", "access",
 	} {
 		if !strings.Contains(help, "/"+group) {
 			t.Errorf("missing /%s in global help", group)

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 func TestAdaptInbound_FallsBackToText_WhenPartsEmpty(t *testing.T) {
@@ -27,7 +27,7 @@ func TestAdaptInbound_FallsBackToText_WhenPartsEmpty(t *testing.T) {
 
 func TestAdaptAttachments_ContentHash(t *testing.T) {
 	atts := []channel.Attachment{
-		{Type: channel.AttachmentImage, ContentHash: "abc123", URL: "/data/media/bot/ab/abc123.jpg", Mime: "image/jpeg"},
+		{Type: channel.AttachmentImage, ContentHash: "abc123", URL: "/data/.memoh/media/bot/ab/abc123.jpg", Mime: "image/jpeg"},
 		{Type: channel.AttachmentFile, URL: "https://example.com/doc.pdf", Mime: "application/pdf"},
 	}
 	got := adaptAttachments(atts)
@@ -37,7 +37,7 @@ func TestAdaptAttachments_ContentHash(t *testing.T) {
 	if got[0].ContentHash != "abc123" || got[0].MimeType != "image/jpeg" {
 		t.Fatalf("unexpected first attachment: %+v", got[0])
 	}
-	if got[0].FilePath != "/data/media/bot/ab/abc123.jpg" {
+	if got[0].FilePath != "/data/.memoh/media/bot/ab/abc123.jpg" {
 		t.Fatalf("expected FilePath from URL, got %q", got[0].FilePath)
 	}
 	if got[1].Type != "file" || got[1].MimeType != "application/pdf" {

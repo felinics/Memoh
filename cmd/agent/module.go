@@ -8,12 +8,12 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
-	coremodule "github.com/memohai/memoh/cmd/internal/core"
-	channelpkg "github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/weixin"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/handlers"
+	channelmodule "github.com/felinics/memoh/cmd/internal/channel"
+	coremodule "github.com/felinics/memoh/cmd/internal/core"
+	channelpkg "github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/weixin"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/handlers"
 )
 
 func runServe() {
@@ -99,6 +99,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewFetchProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
 			provideServerHandler(handlers.NewModelsHandler),
+			provideServerHandler(handlers.NewBotAgentsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),
 			provideServerHandler(handlers.NewToolApprovalHandler),
 			provideServerHandler(handlers.NewHooksHandler),
@@ -106,7 +107,6 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewBotUserAccessHandler),
 			provideServerHandler(handlers.NewChannelAccessHandler),
 			provideServerHandler(handlers.NewScheduleHandler),
-			provideServerHandler(handlers.NewHeartbeatHandler),
 			provideServerHandler(handlers.NewCompactionHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(provideUsersHandler),
@@ -122,7 +122,6 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideServerHandler(handlers.NewConnectorsHandler),
-			provideServerHandler(handlers.NewPluginsHandler),
 			provideServerHandler(handlers.NewBotBackupHandler),
 			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(handlers.NewSessionInfoHandler),

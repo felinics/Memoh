@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
 )
 
 func TestPrepareImageForCreateIfNotPresentSkipsExistingImage(t *testing.T) {

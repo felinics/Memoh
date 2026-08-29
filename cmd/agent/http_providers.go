@@ -10,43 +10,44 @@ import (
 
 	"go.uber.org/fx"
 
-	coremodule "github.com/memohai/memoh/cmd/internal/core"
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/agent/application"
-	"github.com/memohai/memoh/internal/agent/background"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
-	"github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/config"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/healthcheck"
-	channelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/channel"
-	mcpchecker "github.com/memohai/memoh/internal/healthcheck/checkers/mcp"
-	modelchecker "github.com/memohai/memoh/internal/healthcheck/checkers/model"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/media"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthclients"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/server"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/version"
-	"github.com/memohai/memoh/internal/workdir"
-	"github.com/memohai/memoh/internal/workspace"
+	coremodule "github.com/felinics/memoh/cmd/internal/core"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/background"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/boot"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/local"
+	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/config"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/healthcheck"
+	channelchecker "github.com/felinics/memoh/internal/healthcheck/checkers/channel"
+	mcpchecker "github.com/felinics/memoh/internal/healthcheck/checkers/mcp"
+	modelchecker "github.com/felinics/memoh/internal/healthcheck/checkers/model"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/media"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthclients"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/server"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/version"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 func provideServerHandler(fn any) any {
@@ -68,25 +69,27 @@ func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
 
-func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager) *handlers.MessageHandler {
+func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
 	h.SetUserInputService(userInput)
 	h.SetBackgroundManager(bgManager)
+	h.SetRuntimeResetService(acpPool)
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service) *handlers.SessionHandler {
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service) *handlers.SessionHandler {
 	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
 	handler.SetThreadEnricher(routeService)
 	handler.SetWorkdirService(workdirService)
+	handler.SetBotAgents(botAgentsService)
 	return handler
 }
 
 func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool) *handlers.UsersHandler {
 	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaceManager)
-	handler.SetACPRuntimeCloser(acpPool)
+	handler.SetRuntimeResetService(acpPool)
 	return handler
 }
 
@@ -162,7 +165,6 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 			if err := coremodule.EnsureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
 				return err
 			}
-			botService.SetContainerLifecycle(manager)
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {
 				_, err := manager.MCPClient(ctx, botID)
 				return err

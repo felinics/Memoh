@@ -39,6 +39,10 @@ export const TERMINAL_TAB_COMPONENT = 'terminalTab'
 
 const DEFAULT_BROWSER_ADDRESS = 'localhost:5173/'
 const DEFAULT_CHAT_TITLE = 'New Session'
+const DEFAULT_TERMINAL_TITLE = 'Terminal'
+// Persisted layouts from older releases used this value as the terminal title.
+// It is only recognized for migration; it is never used as a new title.
+const LEGACY_TERMINAL_TITLE = 'zsh'
 
 // Default share of the editor height the bottom terminal panel claims when it
 // first splits off below the chat. ~1/3 mirrors VS Code's editor:panel ratio
@@ -337,6 +341,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return suffix ? `${prefix} ${suffix}` : prefix
   }
 
+  function terminalTitleFallback(id: string): string {
+    const prefix = i18n.global.t('bots.terminal.defaultTabLabel').trim() || DEFAULT_TERMINAL_TITLE
+    return numberedFallbackTitle(prefix, id)
+  }
+
   // Per-session chat title fallback (English; the sidebar callers pass localized
   // strings, and syncChatTitles overlays the server title once known).
   function chatTitleFallbackFor(sid: string | null): string {
@@ -359,7 +368,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return typeof name === 'string' && name.trim() ? name.trim() : 'file'
       }
       case 'terminal':
-        return 'zsh'
+        return terminalTitleFallback(panel.id)
       case 'browser': {
         const address = params.address
         return typeof address === 'string' && address.trim()
@@ -380,11 +389,24 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!dock) return false
     let repaired = false
     for (const panel of dock.panels) {
-      if ((panel.api.title ?? '').trim()) continue
+      const title = (panel.api.title ?? '').trim()
+      const isLegacyTerminalTitle = panelComponentOf(panel.id) === 'terminal'
+        && title.toLowerCase() === LEGACY_TERMINAL_TITLE
+      if (title && !isLegacyTerminalTitle) continue
       panel.api.setTitle(panelTitleFallback(panel))
       repaired = true
     }
     return repaired
+  }
+
+  function updateTerminalTitle(panelId: string, title: unknown) {
+    const dock = api.value
+    if (!dock || panelComponentOf(panelId) !== 'terminal' || typeof title !== 'string') return
+    const panel = dock.getPanel(panelId)
+    const normalized = title.trim()
+    if (!panel || !normalized || panel.api.title === normalized) return
+    panel.api.setTitle(normalized)
+    persistLayout()
   }
 
   function restoreLayout(botId: string) {
@@ -1679,9 +1701,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     // straight through would wrongly merge the terminal into that editor group.
     const initiating = groupId ? dock.getGroup(groupId) : undefined
     const joinTerminalGroup = !!initiating && isTerminalOnlyGroup(initiating)
+    const id = `terminal:${next}`
     addTerminalPanel({
-      id: `terminal:${next}`,
-      title: 'zsh',
+      id,
+      title: terminalTitleFallback(id),
       groupId: joinTerminalGroup ? groupId : undefined,
       position: joinTerminalGroup ? undefined : defaultTerminalPosition(dock, groupId),
     })
@@ -1787,12 +1810,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!hasCurrentPermission('manage')) return
     const dock = api.value
     if (!dock) return
-    // Mobile has no right-side region: the desktop viewer joins the single
-    // stack as a tab, same as a manual open.
-    if (isMobile.value) {
-      openDisplay()
-      return
-    }
+    // Mobile never auto-opens the Desktop for agent activity. The single
+    // stack has no right-side region, so open/focus steals the WHOLE screen
+    // from the conversation — and the runtime fires one request per GUI tool
+    // call, so a single turn would rip the user back to the viewer over and
+    // over (issue #1071). Watching stays possible via the manual top-bar
+    // "+" → Desktop entry; the viewer connects on demand there.
+    if (isMobile.value) return
 
     const primaryGroup = dock.groups.find(group => !isTerminalOnlyGroup(group))
     if (!primaryGroup) {
@@ -1914,9 +1938,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         if (!state) return
         const next = state.terminalCounter + 1
         patchBotLayout(bid, { terminalCounter: next })
+        const id = `terminal:${next}`
         addTerminalPanel({
-          id: `terminal:${next}`,
-          title: title || 'zsh',
+          id,
+          title: terminalTitleFallback(id),
           position,
         })
         break
@@ -2548,6 +2573,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     registerFileSaveHandler,
     unregisterFileSaveHandler,
     updateBrowserAddress,
+    updateTerminalTitle,
     resetBot,
     resetAll,
   }

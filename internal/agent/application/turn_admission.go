@@ -7,16 +7,18 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // turnAdmitter is the durable admission gate StartTurn depends on.
@@ -31,6 +33,10 @@ type turnAdmitter interface {
 	FinishRun(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error
 }
 
+type codedTurnFinisher interface {
+	FinishRunWithErrorCode(ctx context.Context, handle sessionruntime.RunHandle, status, errorCode string) error
+}
+
 // SetSessionRuntime injects the durable admission gate. Setter injection rather
 // than a constructor argument because the manager and this service are wired
 // into the same fx graph and each is reachable from the other's dependencies.
@@ -42,12 +48,15 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	}
 	s.sessionRuntime = manager
 	s.decisionRuntime = manager
+	s.abortRuntime = manager
 	s.publishTurnEvent = func(ctx context.Context, handle sessionruntime.RunHandle, event native.StreamEvent) error {
 		_, err := manager.HandleAgentEvent(ctx, handle, event)
 		return err
 	}
 	manager.SetDecisionStore(s)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
+	manager.SetTerminalObserver(s.reconcileTerminalContextLifecycle)
+	manager.SetTerminalReconciler(s.reconcileTerminalContextLifecycles)
 }
 
 // admitTurnRun puts a StartTurnCommand through durable admission and answers in
@@ -81,11 +90,16 @@ func (s *Service) admitTurnRun(
 		InvocationID: invocationID,
 		Payload:      payload,
 		Execution: sessionruntime.Execution{
-			// The subscriber-facing view stays empty until thread subscriptions
-			// replace per-run event forwarding: a channel turn's only reader is
-			// the adapter consuming this handle's events.
-			Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
-				return sessionruntime.RunAdmissionView{}, nil
+			// Project the inbound user message so subscribers (an open web
+			// session on the thread) see what fired the run while it still
+			// executes — the same contract the ws and schedule admissions
+			// already honor. NewRequestUserTurn returns nil for commands that
+			// persist no user message (discuss-shaped, attachment-only), and
+			// those runs stay contentless in the projection.
+			Admission: func(_ context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+				return sessionruntime.RunAdmissionView{
+					RequestUserTurn: chatview.NewRequestUserTurn(cmd, handle.TurnID),
+				}, nil
 			},
 			Cancel: cancel,
 			// Nil for discuss, which has no reader for steering messages.
@@ -128,20 +142,54 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 		return nil
 	}
 	handle := admission.Handle
+	runCtx := ctx
 	// The run's context is already canceled by the time the terminal write runs,
 	// so this detaches from its cancellation while keeping its values: the write
 	// still needs whatever scoping the caller's context carries.
 	writeCtx := context.WithoutCancel(ctx)
 	return func(status string, cause error) {
-		message := ""
-		if cause != nil {
-			message = string(apperror.CodeOf(cause))
+		lifecycleCause := cause
+		switch {
+		case lifecycleCause == nil && status == sessionruntime.RunStatusAborted:
+			lifecycleCause = context.Canceled
+		case lifecycleCause == nil && status == sessionruntime.RunStatusErrored:
+			lifecycleCause = errors.New("run finished with an unspecified error")
 		}
+		minimal := minimalContextLifecycleSnapshot()
+		staged := s.stageContextLifecycleCandidate(
+			runCtx,
+			handle.RunID,
+			handle.BotID,
+			handle.SessionID,
+			&minimal,
+			lifecycleCause,
+			contextLifecycleCandidateMinimal,
+		)
+		errorCode := strings.TrimSpace(string(apperror.CodeOf(cause)))
 		ctx, cancel := context.WithTimeout(writeCtx, terminalWriteTimeout)
 		defer cancel()
-		err := s.sessionRuntime.FinishRun(ctx, handle, status, message)
+		var err error
+		if coded, ok := s.sessionRuntime.(codedTurnFinisher); ok && errorCode != "" {
+			err = coded.FinishRunWithErrorCode(ctx, handle, status, errorCode)
+		} else {
+			// Compatibility implementations still receive only stable codes; raw
+			// provider diagnostics never cross this terminal boundary.
+			err = s.sessionRuntime.FinishRun(ctx, handle, status, errorCode)
+		}
 		switch {
-		case err == nil || s.logger == nil:
+		case err == nil:
+			if !staged && (status != "" || cause != nil) {
+				s.EnsureTerminalContextLifecycle(
+					runCtx,
+					handle.RunID,
+					handle.BotID,
+					handle.SessionID,
+					lifecycleCause,
+				)
+			}
+			return
+		case s.logger == nil:
+			return
 		case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
 			// Expected, not a failure: this process was superseded mid-run, so the
 			// terminal write was refused and the reaper names the outcome instead.
@@ -172,8 +220,8 @@ func runOwnershipLost(ctx context.Context) bool {
 	return ctx != nil && errors.Is(context.Cause(ctx), sessionruntime.ErrRunOwnershipLost)
 }
 
-// admitTriggeredRun admits a non-interactive turn — a schedule fire, a heartbeat
-// tick — and returns the run context to execute in plus the terminal write that
+// admitTriggeredRun admits a non-interactive schedule fire and returns the run
+// context to execute in plus the terminal write that
 // closes the run's record.
 //
 // These callers reach the agent directly rather than through StartTurn, but they
@@ -182,9 +230,25 @@ func runOwnershipLost(ctx context.Context) bool {
 // stop a long schedule run, and so a lost owner lease revokes execution instead
 // of letting a superseded owner keep writing.
 //
+// viewFn optionally supplies the subscriber-facing admission view (the request
+// user turn projection); nil keeps the run contentless in the projection, the
+// historical default for triggers and subagents alike.
+//
 // The finish function is always returned non-nil when the error is nil, so a
 // caller can defer it unconditionally.
-func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, sessionruntime.Admission, func(error), error) {
+type triggeredRunTerminal struct {
+	status string
+	cause  error
+}
+
+// triggeredAdmissionView lets a triggered caller inject the subscriber-facing
+// projection for its run. The hook fires at activation, when the handle already
+// carries the allocated turn identity — which is why the view is a factory
+// rather than a value: the turn id only exists by then.
+// Nil means the run projects no request user turn (the historical default).
+type triggeredAdmissionView func(handle sessionruntime.RunHandle) *sessionruntime.RunAdmissionView
+
+func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte, viewFn triggeredAdmissionView) (context.Context, sessionruntime.Admission, func(triggeredRunTerminal), error) {
 	if s.sessionRuntime == nil {
 		return nil, sessionruntime.Admission{}, nil, errors.New("session runtime is not configured")
 	}
@@ -195,7 +259,13 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 		InvocationID: invocationID,
 		Payload:      submission,
 		Execution: sessionruntime.Execution{
-			Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+			Admission: func(_ context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+				if viewFn == nil {
+					return sessionruntime.RunAdmissionView{}, nil
+				}
+				if view := viewFn(handle); view != nil {
+					return *view, nil
+				}
 				return sessionruntime.RunAdmissionView{}, nil
 			},
 			Cancel:          func() { cancelCause(context.Canceled) },
@@ -212,14 +282,27 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 		cancelCause(context.Canceled)
 		return nil, sessionruntime.Admission{}, nil, fmt.Errorf("%w: %s", sessionruntime.ErrInvocationConflict, invocationID)
 	}
+	runCtx = s.withAdmissionRuntimeFence(runCtx, admission)
 	finishRun := s.turnRunFinisher(runCtx, admission)
-	finish := func(cause error) {
+	finish := func(terminal triggeredRunTerminal) {
 		defer cancelCause(context.Canceled)
 		if finishRun == nil {
 			return
 		}
+		if strings.TrimSpace(terminal.status) != "" {
+			finishRun(terminal.status, terminal.cause)
+			return
+		}
+		cause := terminal.cause
+		failureCause := cause
+		if privateCause := apperror.CauseOf(cause); privateCause != nil {
+			failureCause = privateCause
+		}
+		explicitlyCanceled := cause != nil &&
+			errors.Is(failureCause, context.Canceled) &&
+			errors.Is(context.Cause(runCtx), context.Canceled)
 		switch {
-		case cause != nil:
+		case cause != nil && !explicitlyCanceled:
 			finishRun(sessionruntime.RunStatusErrored, cause)
 		case runCtx.Err() != nil:
 			finishRun(sessionruntime.RunStatusAborted, nil)
@@ -230,6 +313,22 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 	return runCtx, admission, finish, nil
 }
 
+func (s *Service) withAdmissionRuntimeFence(ctx context.Context, admission sessionruntime.Admission) context.Context {
+	if !s.usesDurableTerminalObserver() {
+		return ctx
+	}
+	return runtimefence.WithContext(ctx, runtimefence.Fence{
+		BotID:     admission.Handle.BotID,
+		SessionID: admission.Handle.SessionID,
+		Token:     admission.Handle.FencingToken,
+	})
+}
+
+func (s *Service) usesDurableTerminalObserver() bool {
+	_, durable := s.sessionRuntime.(*sessionruntime.Manager)
+	return durable
+}
+
 // AdmitSubagentRun puts a spawned agent's turn through the same durable
 // admission every other turn takes, and answers in the vocabulary of the turn
 // port so the tool layer never sees a runtime type.
@@ -238,8 +337,12 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 // have several agents working at once, and each of those threads still runs one
 // turn at a time. Busy therefore means *this agent* is already working — a fact
 // the parent model can act on — rather than a failure to report.
-func (s *Service) AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, tools.SubagentAdmission, func(error), error) {
-	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission)
+func (s *Service) AdmitSubagentRun(
+	ctx context.Context,
+	botID, threadID, invocationID string,
+	submission []byte,
+) (context.Context, tools.SubagentAdmission, func(tools.SubagentTerminal), error) {
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission, nil)
 	switch {
 	case errors.Is(err, sessionruntime.ErrSessionBusy):
 		return nil, tools.SubagentAdmission{}, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)
@@ -250,22 +353,47 @@ func (s *Service) AdmitSubagentRun(ctx context.Context, botID, threadID, invocat
 	case err != nil:
 		return nil, tools.SubagentAdmission{}, nil, fmt.Errorf("admit subagent turn: %w", err)
 	}
-	// The handle and its fence travel on the run context rather than through the
-	// tool layer's port: the step committer and runtime observer installed on
-	// the spawn path need the run's identity, but the SubagentAdmitter port
-	// deliberately speaks only turn vocabulary — the admission value it does
-	// return carries exactly the identity persistence files under.
-	runCtx = runtimefence.WithContext(runCtx, runtimefence.Fence{
-		BotID:     botID,
-		SessionID: threadID,
-		Token:     admission.Handle.FencingToken,
-	})
+	// The durable fence is installed during triggered admission. The opaque run
+	// handle also travels on the context so spawned step persistence and live
+	// observation can use it without exposing runtime types through this port.
 	runCtx = withSubagentRunHandle(runCtx, admission.Handle)
-	return runCtx, tools.SubagentAdmission{
+	toolAdmission := tools.SubagentAdmission{
 		RunID:        admission.RunID,
 		TurnID:       admission.TurnID,
 		TurnPosition: admission.TurnPosition,
-	}, finish, nil
+	}
+	var once sync.Once
+	terminal := func(result tools.SubagentTerminal) {
+		once.Do(func() {
+			lifecycleCause := result.Cause
+			if lifecycleCause == nil && runCtx.Err() != nil &&
+				(!result.OutcomeResolved || result.Outcome != tools.SpawnAttemptCompleted) {
+				lifecycleCause = context.Cause(runCtx)
+			}
+			status := ""
+			if result.OutcomeResolved {
+				switch result.Outcome {
+				case tools.SpawnAttemptCompleted:
+					status = sessionruntime.RunStatusCompleted
+				case tools.SpawnAttemptAbort:
+					status = sessionruntime.RunStatusAborted
+				case tools.SpawnAttemptFailure:
+					status = sessionruntime.RunStatusErrored
+				}
+			}
+			s.persistContextLifecycleSnapshot(
+				runCtx,
+				admission.RunID,
+				botID,
+				threadID,
+				result.ContextLifecycle,
+				lifecycleCause,
+				true,
+			)
+			finish(triggeredRunTerminal{status: status, cause: result.Cause})
+		})
+	}
+	return runCtx, toolAdmission, terminal, nil
 }
 
 // turnInvocationID resolves the command's retry identity.

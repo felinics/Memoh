@@ -8,9 +8,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/textutil"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const uiReplyPreviewMaxRunes = 120
@@ -25,8 +25,10 @@ var (
 		[]byte(`"model_requested_skills"`),
 		[]byte(`"platform"`),
 		[]byte(`"reply"`),
+		[]byte(`"reasoning_timing"`),
 		[]byte(`"skill_activation"`),
 		[]byte(`"user_message_kind"`),
+		[]byte(`"error_code"`),
 	}
 )
 
@@ -301,9 +303,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			result = append(result, turn)
 
 		case "assistant":
-			if strings.TrimSpace(raw.Platform) == "" {
-				ensurePersistedMetadata(&raw)
-			}
+			ensurePersistedMetadata(&raw)
 			modelMessage := decodePersistedModelMessage(raw)
 			toolCalls := extractPersistedToolCalls(&modelMessage)
 			text := extractPersistedMessageText(raw, &modelMessage)
@@ -313,6 +313,16 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			// A persisted turn_id is the only grouping key. Plain-text assistant
 			// messages and tool calls with that same id remain one reply.
 			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 {
+				if code := persistedHistoryErrorCode(raw.Metadata); code != "" {
+					if pending == nil {
+						pending = newPendingAssistantTurn(raw)
+					}
+					appendPendingAssistantMessage(pending, UIMessage{
+						Type:    UIMessageError,
+						Code:    code,
+						Content: persistedHistoryErrorDetail(raw.Metadata),
+					})
+				}
 				continue
 			}
 
@@ -320,11 +330,13 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				pending = newPendingAssistantTurn(raw)
 			}
 
-			for _, reasoning := range reasonings {
+			reasoningTimings := uiReasoningTimingsByOrdinal(raw.Metadata)
+			for ordinal, reasoning := range reasonings {
 				appendPendingAssistantMessage(pending, UIMessage{
-					ID:      pending.NextID,
-					Type:    UIMessageReasoning,
-					Content: reasoning,
+					ID:              pending.NextID,
+					Type:            UIMessageReasoning,
+					Content:         reasoning,
+					ReasoningTiming: reasoningTimings[ordinal],
 				})
 			}
 			if text != "" {
@@ -457,6 +469,22 @@ func decodePersistedModelMessage(raw messagepkg.Message) uiDecodedModelMessage {
 	return uiDecodedModelMessage{ModelMessage: message}
 }
 
+func persistedHistoryErrorCode(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	code, _ := meta[messagepkg.HistoryErrorCodeMetadataKey].(string)
+	return strings.TrimSpace(code)
+}
+
+func persistedHistoryErrorDetail(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	detail, _ := meta["error"].(string)
+	return strings.TrimSpace(detail)
+}
+
 func ensurePersistedMetadata(raw *messagepkg.Message) {
 	if raw == nil || raw.Metadata != nil || len(raw.RawMetadata) == 0 {
 		return
@@ -498,7 +526,10 @@ func extractPersistedMessageText(raw messagepkg.Message, message *uiDecodedModel
 			return ""
 		}
 		if text := strings.TrimSpace(raw.DisplayContent); text != "" {
-			return text
+			// Rows written before attachment-only messages stopped persisting
+			// the headerified query keep the <message> wrapper as their display
+			// content; unwrap it so history never renders the model-facing XML.
+			return strings.TrimSpace(turn.UnwrapUserMessageEnvelope(text))
 		}
 	}
 
@@ -712,6 +743,23 @@ func extractPersistedReasoning(message *uiDecodedModelMessage) []string {
 		}
 	}
 	return reasonings
+}
+
+func uiReasoningTimingsByOrdinal(metadata map[string]any) map[int]*UIReasoningTiming {
+	segments := messagepkg.ReasoningTimingFromMetadata(metadata)
+	if len(segments) == 0 {
+		return nil
+	}
+	timings := make(map[int]*UIReasoningTiming, len(segments))
+	for _, segment := range segments {
+		if _, exists := timings[segment.Ordinal]; exists {
+			continue
+		}
+		timings[segment.Ordinal] = &UIReasoningTiming{
+			DurationMS: segment.DurationMS,
+		}
+	}
+	return timings
 }
 
 func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedToolCall {

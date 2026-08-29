@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 const (
@@ -219,9 +221,46 @@ type AuthConfig struct {
 }
 
 type AgentConfig struct {
-	ToolOutputMaxBytes  int `toml:"tool_output_max_bytes"`
-	ToolOutputMaxLines  int `toml:"tool_output_max_lines"`
-	SystemFilesMaxBytes int `toml:"system_files_max_bytes"`
+	ToolOutputMaxBytes  int    `toml:"tool_output_max_bytes"`
+	ToolOutputMaxLines  int    `toml:"tool_output_max_lines"`
+	SystemFilesMaxBytes int    `toml:"system_files_max_bytes"`
+	ContextLoopReselect string `toml:"context_loop_reselect"`
+	// ContextAbsoluteMaxTokens is the server-wide context admission cap
+	// (CM-ADM-001): the effective per-turn budget is
+	// min(model context window − reserve, this cap), and the cap alone when
+	// the model has no configured window. Zero or negative selects the
+	// built-in default; the cap can be raised but never disabled.
+	ContextAbsoluteMaxTokens int `toml:"context_absolute_max_tokens"`
+}
+
+// EffectiveContextAbsoluteMaxTokens resolves the server-wide context
+// admission cap, falling back to the shared default when unset.
+func (c AgentConfig) EffectiveContextAbsoluteMaxTokens() int {
+	if c.ContextAbsoluteMaxTokens > 0 {
+		return c.ContextAbsoluteMaxTokens
+	}
+	return contextfrag.DefaultAbsoluteCapTokens
+}
+
+const (
+	ContextLoopReselectModeActive = "active"
+	ContextLoopReselectModeShadow = "shadow"
+	ContextLoopReselectModeOff    = "off"
+)
+
+// EffectiveContextLoopReselectMode normalizes the configured in-loop context
+// step reselector rollout mode. Empty defaults to active. recognized is false
+// when a non-empty value does not match active/shadow/off.
+func (c AgentConfig) EffectiveContextLoopReselectMode() (mode string, recognized bool) {
+	value := strings.TrimSpace(strings.ToLower(c.ContextLoopReselect))
+	switch value {
+	case "":
+		return ContextLoopReselectModeActive, true
+	case ContextLoopReselectModeActive, ContextLoopReselectModeShadow, ContextLoopReselectModeOff:
+		return value, true
+	default:
+		return ContextLoopReselectModeActive, false
+	}
 }
 
 const (

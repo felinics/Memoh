@@ -3,8 +3,8 @@
 `workspace/` is the canonical set of files seeded into every agent workspace
 on first boot:
 
-- `AGENTS.md`, `MEMORY.md`, `PROFILES.md`, `HEARTBEAT.md` — bot persona and
-  memory scaffolding (not developer guides).
+- `AGENTS.md`, `MEMORY.md`, `PROFILES.md` — bot persona and memory scaffolding
+  (not developer guides).
 - `.memoh/` — default hooks configuration and built-in skills
   (`skill-creator`, `hooks-setup`).
 

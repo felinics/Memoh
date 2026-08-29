@@ -2,15 +2,17 @@ package schedule
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 var (
@@ -46,6 +48,7 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		RunTarget:       strings.TrimSpace(exec.RunTarget),
 		TargetSessionID: strings.TrimSpace(exec.TargetSessionID),
 		RuntimeType:     strings.TrimSpace(exec.RuntimeType),
+		BotAgentID:      strings.TrimSpace(exec.BotAgentID),
 		ACPAgentID:      strings.TrimSpace(exec.ACPAgentID),
 		ModelID:         strings.TrimSpace(exec.ModelID),
 		ACPModelID:      strings.TrimSpace(exec.ACPModelID),
@@ -62,8 +65,8 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 	targetIsACP := false
 	switch out.RunTarget {
 	case RunTargetExistingSession:
-		if out.RuntimeType != "" || out.ACPAgentID != "" || out.WorkdirID != "" {
-			return ExecutionConfig{}, invalidRequest("existing_session inherits runtime and workdir from the target session; runtime_type, acp_agent_id, and workdir_id must be empty")
+		if out.RuntimeType != "" || out.BotAgentID != "" || out.ACPAgentID != "" || out.WorkdirID != "" {
+			return ExecutionConfig{}, invalidRequest("existing_session inherits runtime and workdir from the target session; runtime_type, bot_agent_id, acp_agent_id, and workdir_id must be empty")
 		}
 		acp, err := s.validateTargetSession(ctx, botID, out.TargetSessionID)
 		if err != nil {
@@ -79,6 +82,16 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 	case RunTargetNewSession:
 		if out.TargetSessionID != "" {
 			return ExecutionConfig{}, invalidRequest("target_session_id is only valid with the existing_session run target")
+		}
+		if out.BotAgentID != "" {
+			if out.RuntimeType != "" && out.RuntimeType != RuntimeACPAgent {
+				return ExecutionConfig{}, invalidRequest("bot_agent_id conflicts with the selected runtime_type")
+			}
+			resolved, err := s.resolveBotAgentExecution(ctx, botID, out)
+			if err != nil {
+				return ExecutionConfig{}, err
+			}
+			out = resolved
 		}
 		switch out.RuntimeType {
 		case "", RuntimeModel:
@@ -123,6 +136,44 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		return ExecutionConfig{}, invalidRequestf("unknown reasoning_effort %q", out.ReasoningEffort)
 	}
 	return out, nil
+}
+
+func (s *Service) resolveBotAgentExecution(ctx context.Context, botID string, exec ExecutionConfig) (ExecutionConfig, error) {
+	if s.botAgents == nil {
+		return ExecutionConfig{}, errors.New("bot agent service is not configured")
+	}
+	agent, err := s.botAgents.GetActive(ctx, botID, exec.BotAgentID)
+	if err != nil {
+		return ExecutionConfig{}, err
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return ExecutionConfig{}, invalidRequestf("invalid bot id: %v", err)
+	}
+	bot, err := s.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return ExecutionConfig{}, err
+	}
+	metadata := map[string]any{}
+	if len(bot.Metadata) > 0 {
+		if err := json.Unmarshal(bot.Metadata, &metadata); err != nil {
+			return ExecutionConfig{}, err
+		}
+	}
+	if err := botagents.ValidateConfiguration(agent, metadata); err != nil {
+		return ExecutionConfig{}, err
+	}
+	descriptor, err := botagents.DescriptorFor(agent)
+	if err != nil {
+		return ExecutionConfig{}, err
+	}
+	if descriptor.Runtime != botagents.RuntimeACP {
+		return ExecutionConfig{}, botagents.ErrInvalidRuntime
+	}
+	exec.BotAgentID = agent.ID
+	exec.RuntimeType = RuntimeACPAgent
+	exec.ACPAgentID = descriptor.Provider
+	return exec, nil
 }
 
 // requireResolvableModel rejects a schedule whose fires could not name a
@@ -183,7 +234,7 @@ func (s *Service) validateTargetSession(ctx context.Context, botID, sessionID st
 	if sess.BotID.String() != botID {
 		return false, ErrTargetSessionNotFound
 	}
-	// Heartbeat, subagent, and discuss sessions back internal loops with
+	// Subagent and discuss sessions back internal loops with
 	// their own drivers; appending schedule turns to them would corrupt
 	// those flows. Chat sessions and schedule-created sessions are fair
 	// targets.

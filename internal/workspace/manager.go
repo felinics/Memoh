@@ -15,19 +15,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/identity"
-	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/settings"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	workspacetemplates "github.com/memohai/memoh/templates"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/identity"
+	netctl "github.com/felinics/memoh/internal/network"
+	"github.com/felinics/memoh/internal/settings"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	workspacetemplates "github.com/felinics/memoh/templates"
 )
 
 const (
@@ -266,6 +266,9 @@ func (m *Manager) NativeMCPClient(ctx context.Context, botID string) (*bridge.Cl
 // override before falling back to the Bot's persisted Primary target.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		if targetID == WorkspaceTargetNative {
+			return m.nativeMCPClient(ctx, botID)
+		}
 		target, err := m.ResolveWorkspaceTarget(ctx, botID, targetID)
 		return target.Client, err
 	}
@@ -275,6 +278,25 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 		}
 	}
 	return m.nativeMCPClient(ctx, botID)
+}
+
+// CurrentWorkspaceTargetID resolves only the request or persisted target ID.
+// It intentionally avoids connecting to a runtime or loading target settings.
+func (m *Manager) CurrentWorkspaceTargetID(ctx context.Context, botID string) (string, error) {
+	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		return targetID, nil
+	}
+	if m.remote == nil {
+		return WorkspaceTargetNative, nil
+	}
+	record, err := m.remote.getPrimaryRecord(ctx, botID)
+	if errors.Is(err, ErrRemoteWorkspaceNotBound) {
+		return WorkspaceTargetNative, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return record.ID, nil
 }
 
 func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {

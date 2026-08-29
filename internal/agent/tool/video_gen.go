@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/settings"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/settings"
+	videopkg "github.com/felinics/memoh/internal/video"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

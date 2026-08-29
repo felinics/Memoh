@@ -8,11 +8,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 var _ turn.Service = (*Service)(nil)
@@ -52,6 +51,7 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 			cancel()
 			return nil, err
 		}
+		runCtx = s.withAdmissionRuntimeFence(runCtx, admission)
 		return s.startDiscussTurn(runCtx, cmd, cancel, admission)
 	}
 
@@ -61,9 +61,7 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 		cancel()
 		return nil, err
 	}
-	runCtx = runtimefence.WithContext(runCtx, runtimefence.Fence{
-		BotID: cmd.BotID, SessionID: cmd.ThreadID, Token: admission.Handle.FencingToken,
-	})
+	runCtx = s.withAdmissionRuntimeFence(runCtx, admission)
 
 	var (
 		assetMu sync.Mutex

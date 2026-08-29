@@ -9,7 +9,6 @@ const (
 	DefaultLanguage          = "auto"
 	DefaultCommandUILanguage = "auto"
 	DefaultReasoningEffort   = "medium"
-	DefaultHeartbeatInterval = 1440
 	ChatRuntimeModel         = "model"
 	ChatRuntimeACPAgent      = "acp_agent"
 	DefaultACPProjectPath    = "/data"
@@ -18,6 +17,7 @@ const (
 
 type Settings struct {
 	ChatModelID          string `json:"chat_model_id"`
+	DefaultBotAgentID    string `json:"default_bot_agent_id,omitempty"`
 	ChatRuntime          string `json:"chat_runtime"`
 	ChatACPAgentID       string `json:"chat_acp_agent_id,omitempty"`
 	ChatACPProjectPath   string `json:"chat_acp_project_path,omitempty"`
@@ -36,9 +36,6 @@ type Settings struct {
 	// ReasoningEffort is the single on/off source for reasoning:
 	// models.ReasoningEffortDisable means no reasoning, any other value is a tier.
 	ReasoningEffort         string             `json:"reasoning_effort"`
-	HeartbeatEnabled        bool               `json:"heartbeat_enabled"`
-	HeartbeatInterval       int                `json:"heartbeat_interval"`
-	HeartbeatModelID        string             `json:"heartbeat_model_id"`
 	CompactionEnabled       bool               `json:"compaction_enabled"`
 	CompactionThreshold     int                `json:"compaction_threshold"`
 	CompactionTargetPercent *int               `json:"compaction_target_percent" extensions:"x-nullable"`
@@ -60,6 +57,7 @@ type UpsertRequest struct {
 	// FetchProviderID / CompactionModelID); plain strings would make ""
 	// indistinguishable from "not sent".
 	ChatModelID          *string `json:"chat_model_id,omitempty"`
+	DefaultBotAgentID    *string `json:"default_bot_agent_id,omitempty"`
 	ChatRuntime          *string `json:"chat_runtime,omitempty"`
 	ChatACPAgentID       *string `json:"chat_acp_agent_id,omitempty"`
 	ChatACPProjectPath   *string `json:"chat_acp_project_path,omitempty"`
@@ -73,16 +71,11 @@ type UpsertRequest struct {
 	VideoModelID         *string `json:"video_model_id,omitempty"`
 	// Language follows the same pointer rule; "" normalizes to DefaultLanguage
 	// ("auto") rather than clearing the column.
-	Language          *string `json:"language,omitempty"`
-	CommandUILanguage string  `json:"command_ui_language,omitempty"`
-	AclDefaultEffect  string  `json:"acl_default_effect,omitempty"`
-	Timezone          *string `json:"timezone,omitempty"`
-	ReasoningEffort   *string `json:"reasoning_effort,omitempty"`
-	HeartbeatEnabled  *bool   `json:"heartbeat_enabled,omitempty"`
-	HeartbeatInterval *int    `json:"heartbeat_interval,omitempty"`
-	// HeartbeatModelID joins the pointer group above (nil/""/value) so the
-	// heartbeat tab's autosave can clear a model override.
-	HeartbeatModelID        *string             `json:"heartbeat_model_id,omitempty"`
+	Language                *string             `json:"language,omitempty"`
+	CommandUILanguage       string              `json:"command_ui_language,omitempty"`
+	AclDefaultEffect        string              `json:"acl_default_effect,omitempty"`
+	Timezone                *string             `json:"timezone,omitempty"`
+	ReasoningEffort         *string             `json:"reasoning_effort,omitempty"`
 	CompactionEnabled       *bool               `json:"compaction_enabled,omitempty"`
 	CompactionThreshold     *int                `json:"compaction_threshold,omitempty"`
 	CompactionTargetPercent *int                `json:"compaction_target_percent,omitempty"`

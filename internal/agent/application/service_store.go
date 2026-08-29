@@ -3,14 +3,18 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func (s *Service) storeRound(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string) error {
@@ -18,11 +22,15 @@ func (s *Service) storeRound(ctx context.Context, req ChatRequest, messages []Mo
 }
 
 type storeRoundOptions struct {
-	AllowPendingToolCalls   bool
-	SkipMemory              bool
-	AllowEmptyAssistantText bool
-	MessageMetadataByIndex  map[int]map[string]any
-	RequireCompletePersist  bool
+	AllowPendingToolCalls         bool
+	SkipMemory                    bool
+	AllowEmptyAssistantText       bool
+	MessageMetadataByIndex        map[int]map[string]any
+	ReasoningTiming               []messagepkg.ReasoningTimingSegment
+	RequireCompletePersist        bool
+	CleanupACPDecisionProjections bool
+	ACPPublication                *messagepkg.ACPPublication
+	ContextLifecycle              *contextfrag.LifecycleHolder
 }
 
 func (s *Service) storeRoundWithOptions(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) error {
@@ -66,16 +74,86 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 	if len(filtered) == 0 {
 		return nil, nil
 	}
+	opts = opts.withContextLifecycleMetadata(s.logger, req, filtered)
 
-	persisted := s.storeMessages(ctx, req, filtered, modelID, opts)
-	if opts.RequireCompletePersist && len(persisted) != len(filtered) {
-		return persisted, fmt.Errorf("persisted %d of %d messages", len(persisted), len(filtered))
+	persisted, persistErr := s.storeMessagesResult(ctx, req, filtered, modelID, opts)
+	opts.ContextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
+	if persistErr != nil {
+		return persisted, persistErr
+	}
+	if len(persisted) != len(filtered) {
+		if opts.RequireCompletePersist {
+			return persisted, fmt.Errorf("persisted %d of %d messages", len(persisted), len(filtered))
+		}
+		s.logger.Warn("skipping memory extraction for partially persisted round",
+			slog.String("bot_id", req.BotID),
+			slog.Int("persisted", len(persisted)),
+			slog.Int("expected", len(filtered)),
+		)
+		return persisted, nil
 	}
 	if !opts.SkipMemory && !req.SkipMemoryExtraction {
-		go s.storeMemory(context.WithoutCancel(ctx), req, filtered, roundSourceRefs(req, persisted))
+		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 
 	return persisted, nil
+}
+
+func (opts storeRoundOptions) withContextLifecycleMetadata(logger *slog.Logger, req ChatRequest, messages []ModelMessage) storeRoundOptions {
+	snapshot, ok := opts.ContextLifecycle.Snapshot()
+	if !ok {
+		reason := "missing_snapshot"
+		if opts.ContextLifecycle == nil {
+			reason = "missing_lifecycle"
+		}
+		logContextLifecycleMetadataSkipped(logger, req, reason, len(messages))
+		return opts
+	}
+	idx := lastAssistantMessageIndex(messages)
+	if idx < 0 {
+		logContextLifecycleMetadataSkipped(logger, req, "missing_assistant", len(messages))
+		return opts
+	}
+	if opts.MessageMetadataByIndex == nil {
+		opts.MessageMetadataByIndex = make(map[int]map[string]any, 1)
+	}
+	existing := opts.MessageMetadataByIndex[idx]
+	if existing == nil {
+		existing = map[string]any{}
+	}
+	existing[contextfrag.MetadataContextLifecycleKey] = snapshot
+	opts.MessageMetadataByIndex[idx] = existing
+	return opts
+}
+
+func logContextLifecycleMetadataSkipped(logger *slog.Logger, req ChatRequest, reason string, messages int) {
+	if logger == nil {
+		return
+	}
+	logger.Debug("context lifecycle metadata not persisted",
+		slog.String("reason", reason),
+		slog.String("bot_id", req.BotID),
+		slog.String("session_id", req.ThreadID),
+		slog.Int("messages", messages),
+	)
+}
+
+func lastAssistantMessageIndex(messages []ModelMessage) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "assistant") {
+			return i
+		}
+	}
+	return -1
+}
+
+func lastPersistedAssistantMessageID(messages []messagepkg.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "assistant") {
+			return strings.TrimSpace(messages[i].ID)
+		}
+	}
+	return ""
 }
 
 // isEmptyAssistantMessage returns true if an assistant message has no
@@ -115,34 +193,64 @@ func (s *Service) StoreRound(ctx context.Context, botID, sessionID, channelIdent
 }
 
 func (s *Service) storeMessages(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) []messagepkg.Message {
+	persisted, err := s.storeMessagesResult(ctx, req, messages, modelID, opts)
+	if err != nil {
+		s.logger.Warn("persist message round failed", slog.Any("error", err))
+	}
+	return persisted
+}
+
+func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.Message, error) {
 	if s.messageService == nil {
-		return nil
+		return nil, nil
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return nil
+		return nil, nil
 	}
 	persistInputs, err := s.buildPersistInputs(ctx, req, messages, modelID, opts)
 	if err != nil {
-		s.logger.Warn("prepare messages for persistence failed", slog.Any("error", err))
-		return nil
+		return nil, fmt.Errorf("prepare messages for persistence: %w", err)
+	}
+	// A successful ACP checkpoint is published by metadata on the final
+	// assistant row. Persist the complete round and that watermark in one
+	// transaction, otherwise a partially-written round could make a staged
+	// native snapshot visible before all canonical messages exist.
+	if opts.RequireCompletePersist {
+		atomic, ok := s.messageService.(messagepkg.AtomicRoundPersister)
+		if !ok {
+			return nil, errors.New("complete round persistence requires an atomic message persister")
+		}
+		persisted, handled, persistErr := atomic.PersistRound(ctx, persistInputs, messagepkg.RoundPersistenceOptions{
+			CleanupACPDecisionProjections: opts.CleanupACPDecisionProjections,
+			ACPPublication:                opts.ACPPublication,
+		})
+		if persistErr != nil {
+			return persisted, persistErr
+		}
+		if !handled {
+			return nil, errors.New("atomic message persister declined complete round persistence")
+		}
+		return persisted, nil
 	}
 	if batcher, ok := s.messageService.(messagepkg.ToolTailRoundPersister); ok {
 		if persisted, handled, err := batcher.PersistToolTailRound(ctx, persistInputs); handled || err != nil {
 			if err != nil {
-				s.logger.Warn("persist tool tail round failed", slog.Any("error", err))
-				return nil
+				return nil, fmt.Errorf("persist tool tail round: %w", err)
 			}
-			return persisted
+			return persisted, nil
 		}
 	}
 	turnRequestMessageID := ""
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
-	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID)
+	return s.persistMessageInputs(ctx, persistInputs, turnRequestMessageID), nil
 }
 
 func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) ([]messagepkg.PersistInput, error) {
+	// Project timing only at the final persistence boundary, after callers have
+	// finished filtering, repairing, or augmenting the rows being stored.
+	opts = opts.withReasoningTimingMetadata(messages)
 	// Check bot setting for full tool result persistence.
 	pruneToolResults := true
 	if botSettings, err := s.loadBotSettings(ctx, req.BotID); err == nil {
@@ -184,7 +292,7 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 			}
 		}
 
-		content, err := json.Marshal(msg)
+		content, err := historyfrag.MarshalStoredModelMessage(msg)
 		if err != nil {
 			return nil, fmt.Errorf("marshal message %d: %w", i, err)
 		}
@@ -240,6 +348,12 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 				default:
 					displayText = strings.TrimSpace(req.Query)
 				}
+				// req.Query is the headerified <message> envelope by the time a
+				// round is stored, and retry copies that envelope into RawQuery.
+				// An attachment-only message (no caption) has no raw text to fall
+				// back on, so without this the wrapper itself became the user
+				// bubble. Real user text is left untouched.
+				displayText = strings.TrimSpace(turnpkg.UnwrapUserMessageEnvelope(displayText))
 				assets = chatAttachmentsToAssetRefs(req.Attachments)
 				persistMeta = mergeMetadata(meta, buildInteractionMetadata(req))
 			} else {

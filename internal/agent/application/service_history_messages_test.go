@@ -7,19 +7,39 @@ import (
 	"strings"
 	"testing"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	compaction "github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	compaction "github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
+
+func TestDropEmptyHistoryFailures(t *testing.T) {
+	empty := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("")})[0]
+	kept := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("hello")})[0]
+	records := []historyfrag.HistoryRecord{
+		{ModelMessage: empty, Metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout"}},
+		{ModelMessage: kept, Metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout"}},
+		{ModelMessage: empty},
+	}
+	got := dropEmptyHistoryFailures(records)
+	if len(got) != 2 {
+		t.Fatalf("kept %d records, want 2", len(got))
+	}
+	if got[0].ModelMessage.TextContent() != "hello" {
+		t.Fatalf("first kept record = %#v", got[0].ModelMessage)
+	}
+	if strings.TrimSpace(got[1].ModelMessage.TextContent()) != "" || historyErrorCode(got[1].Metadata) != "" {
+		t.Fatalf("empty unmarked assistant should stay, got %#v", got[1])
+	}
+}
 
 func TestProjectInterruptedHistoryReasoning(t *testing.T) {
 	records := []historyfrag.HistoryRecord{{
@@ -38,6 +58,40 @@ func TestProjectInterruptedHistoryReasoning(t *testing.T) {
 	}
 	if len(modelMessageToSDKMessage(records[0].ModelMessage).Content) != 2 {
 		t.Fatal("input records were mutated")
+	}
+}
+
+func TestProjectInterruptedHistoryReasoningKeepsOpaqueBlock(t *testing.T) {
+	checkpoint := historyfrag.HistoryRecord{
+		ModelMessage: sdkMessagesToModelMessages([]sdk.Message{{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ReasoningPart{
+				ID:     "r1",
+				Format: sdk.ReasoningFormatAnthropic,
+				Model:  "claude-sonnet-4-20250514",
+				ProviderMetadata: map[string]any{
+					"anthropic": map[string]any{"redactedData": "BLOB"},
+				},
+			}},
+		}})[0],
+		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
+	}
+
+	got := modelMessageToSDKMessage(projectInterruptedHistoryReasoning([]historyfrag.HistoryRecord{checkpoint})[0].ModelMessage)
+	if len(got.Content) != 1 {
+		t.Fatalf("projected content = %#v, want one opaque reasoning block", got.Content)
+	}
+	part, ok := got.Content[0].(sdk.ReasoningPart)
+	if !ok {
+		t.Fatalf("content[0] = %T, want ReasoningPart", got.Content[0])
+	}
+	if part.ID != "r1" || part.Format != sdk.ReasoningFormatAnthropic ||
+		part.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("reasoning provenance was not preserved: %#v", part)
+	}
+	meta, _ := part.ProviderMetadata["anthropic"].(map[string]any)
+	if data, _ := meta["redactedData"].(string); data != "BLOB" {
+		t.Fatalf("redactedData = %q, want BLOB", data)
 	}
 }
 

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/memohai/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/attachment"
 )
 
 // InferAttachmentType infers a canonical attachment type from type/mime/name.

@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	native "github.com/memohai/memoh/internal/agent/runtime/native"
+	native "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 const platformIdentitiesIntro = "## Platform Identities\n\nThese XML tags describe your own known account identities across connected platforms.\n"

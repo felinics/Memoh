@@ -7,11 +7,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/accounts"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 type ACPCredentialsHandler struct {
@@ -71,5 +71,5 @@ func testACPManagedCredentials(ctx context.Context, metadata map[string]any, age
 		return providers.TestResponse{}, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	sdkProvider := models.NewSDKProvider(target.BaseURL, target.APIKey, "", models.ClientType(target.ClientType), models.DefaultProviderProbeTimeout, httpClient)
-	return providers.TestSDKProvider(ctx, sdkProvider), nil
+	return providers.TestSDKCredentials(ctx, sdkProvider), nil
 }

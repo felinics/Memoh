@@ -30,16 +30,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath \
     -ldflags "-s -w \
-      -X github.com/memohai/memoh/internal/version.Version=${VERSION} \
-      -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} \
-      -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
+      -X github.com/felinics/memoh/internal/version.Version=${VERSION} \
+      -X github.com/felinics/memoh/internal/version.CommitHash=${COMMIT_HASH} \
+      -X github.com/felinics/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o memoh-server ./cmd/agent && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath \
     -ldflags "-s -w \
-      -X github.com/memohai/memoh/internal/version.Version=${VERSION} \
-      -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} \
-      -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
+      -X github.com/felinics/memoh/internal/version.Version=${VERSION} \
+      -X github.com/felinics/memoh/internal/version.CommitHash=${COMMIT_HASH} \
+      -X github.com/felinics/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o memoh-channel ./cmd/channel
 
 # ---- Stage 3: Build bridge binary ----
@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath \
-    -ldflags "-s -w -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
+    -ldflags "-s -w -X github.com/felinics/memoh/internal/version.CommitHash=${COMMIT_HASH}" \
     -o /out/bridge ./cmd/bridge
 
 # ---- Stage 4: Final runtime (containerd + server + CNI) ----

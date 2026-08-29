@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/channel"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/channel"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type DiscussCursorStore interface {
@@ -36,6 +36,10 @@ type DiscussDriverDeps struct {
 	Artifacts      DiscussArtifactProvider
 	Broadcaster    DiscussStreamBroadcaster
 	Logger         *slog.Logger
+	// AdmissionMaxTokens is the server-wide context admission cap applied
+	// before composition materializes anything (CM-ADM-001). Zero selects
+	// the shared default; the cap is never disabled.
+	AdmissionMaxTokens int
 }
 
 // DiscussSessionConfig holds per-thread configuration for discuss mode.
@@ -58,15 +62,25 @@ type DiscussSessionConfig struct {
 // cursor persistence, turn execution, and stream projection live in dedicated
 // collaborators.
 type DiscussDriver struct {
-	mu        sync.Mutex
-	turn      turn.Service
-	sessions  map[string]*discussSession
-	history   discussHistoryReader
-	cursor    discussCursorTracker
-	trigger   discussTriggerBuilder
-	runner    discussTurnRunner
-	artifacts DiscussArtifactProvider
-	logger    *slog.Logger
+	mu                 sync.Mutex
+	turn               turn.Service
+	sessions           map[string]*discussSession
+	history            discussHistoryReader
+	cursor             discussCursorTracker
+	trigger            discussTriggerBuilder
+	runner             discussTurnRunner
+	artifacts          DiscussArtifactProvider
+	admissionCapTokens int
+	logger             *slog.Logger
+}
+
+// admissionMaxTokens resolves the effective admission cap; construction
+// without an explicit cap still gets the shared default, never unbounded.
+func (d *DiscussDriver) admissionMaxTokens() int {
+	if d.admissionCapTokens > 0 {
+		return d.admissionCapTokens
+	}
+	return turn.DefaultContextCapTokens
 }
 
 type discussSession struct {
@@ -85,14 +99,23 @@ func NewDiscussDriver(deps DiscussDriverDeps) *DiscussDriver {
 	}
 	logger = logger.With(slog.String("service", "channel/discuss"))
 	projector := newDiscussEventProjector(deps.Broadcaster)
+	capTokens := deps.AdmissionMaxTokens
+	if capTokens <= 0 {
+		capTokens = turn.DefaultContextCapTokens
+	}
 	return &DiscussDriver{
-		turn:      deps.Turn,
-		sessions:  make(map[string]*discussSession),
-		history:   discussHistoryReader{messages: deps.MessageService, logger: logger},
-		cursor:    discussCursorTracker{store: deps.CursorStore},
-		runner:    discussTurnRunner{projector: projector},
-		artifacts: deps.Artifacts,
-		logger:    logger,
+		turn:     deps.Turn,
+		sessions: make(map[string]*discussSession),
+		history: discussHistoryReader{
+			messages: deps.MessageService,
+			maxBytes: int64(capTokens) * turn.ContextBytesPerToken,
+			logger:   logger,
+		},
+		cursor:             discussCursorTracker{store: deps.CursorStore},
+		runner:             discussTurnRunner{projector: projector},
+		artifacts:          deps.Artifacts,
+		admissionCapTokens: capTokens,
+		logger:             logger,
 	}
 }
 

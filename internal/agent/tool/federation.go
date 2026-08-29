@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 // FederationProvider adapts a mcp.ToolSource (federated MCP connections)

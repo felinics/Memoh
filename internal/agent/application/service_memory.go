@@ -2,14 +2,15 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
 	"time"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/hooks"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/hooks"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 const defaultMemorySearchTimeout = 1200 * time.Millisecond
@@ -214,12 +215,24 @@ func (s *Service) effectiveMemorySearchTimeout() time.Duration {
 	return s.memorySearchTimeout
 }
 
-func (s *Service) storeMemory(ctx context.Context, req ChatRequest, messages []ModelMessage, sourceRefs []string) {
+func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []messagepkg.Message) {
 	botID := strings.TrimSpace(req.BotID)
 	if botID == "" {
 		return
 	}
-	memMsgs := toProviderMessages(messages)
+	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
+		userMessage, err := s.messageService.GetByIDBySession(ctx, req.ThreadID, req.PersistedUserMessageID)
+		if err != nil {
+			s.logger.Warn("load persisted user message for memory failed",
+				slog.String("session_id", req.ThreadID),
+				slog.String("message_id", req.PersistedUserMessageID),
+				slog.Any("error", err),
+			)
+		} else {
+			persisted = append([]messagepkg.Message{userMessage}, persisted...)
+		}
+	}
+	memMsgs := toProviderMessages(persisted)
 	if len(memMsgs) == 0 {
 		return
 	}
@@ -248,7 +261,6 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, messages []M
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 		DisplayName:       s.resolveDisplayName(ctx, req),
 		TimezoneLocation:  tzLoc,
-		SourceMessageIDs:  sourceRefs,
 	}); err != nil {
 		s.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return
@@ -269,37 +281,27 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, messages []M
 	}
 }
 
-func roundSourceRefs(req ChatRequest, persisted []messagepkg.Message) []string {
-	refs := make([]string, 0, len(persisted)+1)
-	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
-		if ref := memprovider.EncodeSourceRef(req.ThreadID, req.PersistedUserMessageID); ref != "" {
-			refs = append(refs, ref)
+func toProviderMessages(persisted []messagepkg.Message) []memprovider.Message {
+	out := make([]memprovider.Message, 0, len(persisted))
+	for _, stored := range persisted {
+		var msg ModelMessage
+		if err := json.Unmarshal(stored.Content, &msg); err != nil {
+			continue
 		}
-	}
-	for _, msg := range persisted {
-		sessionID := msg.SessionID
-		if strings.TrimSpace(sessionID) == "" {
-			sessionID = req.ThreadID
-		}
-		if ref := memprovider.EncodeSourceRef(sessionID, msg.ID); ref != "" {
-			refs = append(refs, ref)
-		}
-	}
-	return refs
-}
-
-func toProviderMessages(messages []ModelMessage) []memprovider.Message {
-	out := make([]memprovider.Message, 0, len(messages))
-	for _, msg := range messages {
 		text := strings.TrimSpace(msg.TextContent())
 		if text == "" {
 			continue
 		}
-		role := strings.TrimSpace(msg.Role)
-		if role == "" {
-			role = "assistant"
+		sessionID := strings.TrimSpace(stored.SessionID)
+		ref := memprovider.EncodeSourceRef(sessionID, stored.ID)
+		if _, _, ok := memprovider.ParseScopedSourceRef(ref); !ok {
+			continue
 		}
-		out = append(out, memprovider.Message{Role: role, Content: text})
+		role := strings.TrimSpace(stored.Role)
+		if role == "" {
+			role = strings.TrimSpace(msg.Role)
+		}
+		out = append(out, memprovider.Message{Role: role, Content: text, SourceMessageID: ref})
 	}
 	return out
 }

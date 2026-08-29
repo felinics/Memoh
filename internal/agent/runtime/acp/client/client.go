@@ -9,23 +9,23 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/runtimefence"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/toolcontext"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -48,10 +48,6 @@ const (
 	// user decision, even though both happen to be generous.
 	approvalGrantTTL = 10 * time.Minute
 )
-
-const acpAdapterVersionLookupTimeoutSeconds int32 = 90
-
-var exactACPAdapterVersionPattern = regexp.MustCompile(`^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
 type Workspace interface {
 	bridge.Provider
@@ -126,38 +122,6 @@ func (r *Runner) MCPClient(ctx context.Context, botID string) (*bridge.Client, e
 	return r.workspace.MCPClient(ctx, botID)
 }
 
-// ResolveACPAdapterVersion returns the exact version currently behind an npm
-// package's latest dist-tag in the target workspace.
-func (r *Runner) ResolveACPAdapterVersion(ctx context.Context, botID, packageName string, env []string) (string, error) {
-	info, err := r.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return "", fmt.Errorf("resolve workspace: %w", err)
-	}
-	client, err := r.MCPClient(ctx, botID)
-	if err != nil {
-		return "", fmt.Errorf("connect workspace bridge: %w", err)
-	}
-	command := buildShellCommand("npm", []string{"view", packageName, "dist-tags.latest", "--json"})
-	result, err := client.ExecWithOptions(ctx, command, info.DefaultWorkDir, acpAdapterVersionLookupTimeoutSeconds, nil, bridge.ExecOptions{
-		Env: append([]string(nil), env...),
-	})
-	if err != nil {
-		return "", fmt.Errorf("resolve adapter version: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return "", fmt.Errorf("resolve adapter version: npm exited with code %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
-	}
-	var version string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &version); err != nil {
-		return "", fmt.Errorf("parse adapter version: %w", err)
-	}
-	version = strings.TrimSpace(version)
-	if !exactACPAdapterVersionPattern.MatchString(version) {
-		return "", fmt.Errorf("npm returned invalid adapter version %q", version)
-	}
-	return version, nil
-}
-
 // Run is a convenience wrapper that performs a single-shot ACP exchange:
 // start a session, send one prompt, then close. Production code that needs a
 // persistent session should use StartSession + (*Session).Prompt directly.
@@ -223,6 +187,7 @@ type clientCallbacks struct {
 	baseSession    ToolSessionContext
 	mu             sync.RWMutex
 	collector      *eventCollector
+	stateReceipt   *sessionStateReceiptCollector
 	sink           EventSink
 	promptSession  ToolSessionContext
 	approvalGrants map[string]approvedToolGrant
@@ -448,7 +413,7 @@ func (c *clientCallbacks) updateAvailableCommands(sessionID acp.SessionId, comma
 
 func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 
 	toolID := "read-" + uuid.NewString()
@@ -491,7 +456,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	if p.Limit != nil && *p.Limit > 0 {
 		limit = boundedPositiveInt32(*p.Limit)
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		toolErr = err
 		return acp.ReadTextFileResponse{}, err
 	}
@@ -533,7 +498,7 @@ func (c *clientCallbacks) limitedApprovalRejectionMessage(toolName string, appro
 
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 
 	toolID := "write-" + uuid.NewString()
@@ -562,7 +527,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		toolErr = err
 		return acp.WriteTextFileResponse{}, err
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		toolErr = err
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -686,14 +651,14 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		}
 	}
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 	allowWithGuard := func() (acp.RequestPermissionResponse, error) {
 		resp := allowOncePermission(p)
 		if resp.Outcome.Cancelled != nil {
 			return resp, nil
 		}
-		if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+		if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 			return acp.RequestPermissionResponse{}, err
 		}
 		return resp, nil
@@ -834,7 +799,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		}
 		return resp, nil
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		return acp.RequestPermissionResponse{}, err
 	}
 	if native {
@@ -1091,7 +1056,7 @@ func (c *clientCallbacks) currentToolSession() ToolSessionContext {
 	base := c.baseSession
 	prompt := c.promptSession
 	c.mu.RUnlock()
-	return mcp.MergeToolSessionContext(base, prompt)
+	return toolcontext.Merge(base, prompt)
 }
 
 func permissionNativeToolState(state *acpToolState, quirks acpprofile.ToolQuirks) (toolCallID, toolName string, input map[string]any, ok bool) {
@@ -1548,7 +1513,7 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 
 func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 	return c.terminals.CreateTerminal(ctx, p, func(toolCallID string, input map[string]any) (terminalApprovalResult, error) {
 		id, approval, err := c.approveCallbackTool(ctx, toolCallID, "exec", input)
@@ -1559,7 +1524,7 @@ func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		}, err
 	}, terminalRuntimeScope{
 		validate: func(guardCtx context.Context) error {
-			return mcp.ValidateRuntimeGuard(guardCtx, session)
+			return toolcontext.ValidateRuntimeGuard(guardCtx, session)
 		},
 		runContext: session.RunContext,
 	})

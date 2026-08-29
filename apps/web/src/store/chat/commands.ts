@@ -107,7 +107,9 @@ export function createChatCommands(deps: ChatCommandDeps) {
     const command = deps.beginDraftCommand(target)
     try {
       const targetBotId = target.botId === '__unbound__' ? '' : target.botId
-      const botId = targetBotId || await deps.ensureBot()
+      // ensureBot now rethrows fetch failures (so bootstrap recovery can retry
+      // them); this interactive path keeps its original "not ready" reply.
+      const botId = targetBotId || await deps.ensureBot().catch(() => null)
       if (!botId) return { kind: 'error', message: 'Bot not ready' }
       const defaults = await deps.defaultACPSettingsForAgent(botId, agentId)
       if (

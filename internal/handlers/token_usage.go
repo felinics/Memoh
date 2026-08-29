@@ -10,12 +10,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type TokenUsageHandler struct {
@@ -60,12 +60,11 @@ type ModelTokenUsage struct {
 
 // TokenUsageResponse is the response body for GET /bots/:bot_id/token-usage.
 type TokenUsageResponse struct {
-	Chat      []DailyTokenUsage `json:"chat"`
-	Discuss   []DailyTokenUsage `json:"discuss"`
-	ACPAgent  []DailyTokenUsage `json:"acp_agent"`
-	Heartbeat []DailyTokenUsage `json:"heartbeat"`
-	Schedule  []DailyTokenUsage `json:"schedule"`
-	ByModel   []ModelTokenUsage `json:"by_model"`
+	Chat     []DailyTokenUsage `json:"chat"`
+	Discuss  []DailyTokenUsage `json:"discuss"`
+	ACPAgent []DailyTokenUsage `json:"acp_agent"`
+	Schedule []DailyTokenUsage `json:"schedule"`
+	ByModel  []ModelTokenUsage `json:"by_model"`
 }
 
 // TokenUsageRecord represents a single LLM call (one assistant message row) with its token usage.
@@ -92,13 +91,13 @@ type TokenUsageRecordsResponse struct {
 
 // GetTokenUsage godoc
 // @Summary Get token usage statistics
-// @Description Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown
+// @Description Get daily aggregated token usage for a bot, split by chat, discuss, and schedule session types, with optional model filter and per-model breakdown
 // @Tags token-usage
 // @Param bot_id path string true "Bot ID"
 // @Param from query string true "Start date (YYYY-MM-DD)"
 // @Param to query string true "End date exclusive (YYYY-MM-DD)"
 // @Param model_id query string false "Optional model UUID to filter by"
-// @Param session_type query string false "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime."
+// @Param session_type query string false "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime."
 // @Success 200 {object} TokenUsageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -156,7 +155,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	chat, discuss, acpAgent, heartbeat, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID, pgSessionType)
+	chat, discuss, acpAgent, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID, pgSessionType)
 	if err != nil {
 		h.logger.Error("fetch token usage failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage")
@@ -169,17 +168,16 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	}
 
 	resp := TokenUsageResponse{
-		Chat:      chat,
-		Discuss:   discuss,
-		ACPAgent:  acpAgent,
-		Heartbeat: heartbeat,
-		Schedule:  schedule,
-		ByModel:   byModel,
+		Chat:     chat,
+		Discuss:  discuss,
+		ACPAgent: acpAgent,
+		Schedule: schedule,
+		ByModel:  byModel,
 	}
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, modelID pgtype.UUID, sessionType pgtype.Text) (chat, discuss, acpAgent, heartbeat, schedule []DailyTokenUsage, err error) {
+func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, modelID pgtype.UUID, sessionType pgtype.Text) (chat, discuss, acpAgent, schedule []DailyTokenUsage, err error) {
 	rows, err := h.queries.GetTokenUsageByDayAndType(ctx, sqlc.GetTokenUsageByDayAndTypeParams{
 		BotID:       botID,
 		FromTime:    from,
@@ -188,7 +186,7 @@ func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UU
 		SessionType: sessionType,
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	for _, r := range rows {
@@ -204,15 +202,13 @@ func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UU
 			discuss = append(discuss, d)
 		case session.TypeACPAgent:
 			acpAgent = append(acpAgent, d)
-		case "heartbeat":
-			heartbeat = append(heartbeat, d)
 		case "schedule":
 			schedule = append(schedule, d)
 		default:
 			chat = append(chat, d)
 		}
 	}
-	return chat, discuss, acpAgent, heartbeat, schedule, nil
+	return chat, discuss, acpAgent, schedule, nil
 }
 
 func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, sessionType pgtype.Text) ([]ModelTokenUsage, error) {
@@ -268,7 +264,7 @@ const (
 // @Param from query string true "Start date (YYYY-MM-DD)"
 // @Param to query string true "End date exclusive (YYYY-MM-DD)"
 // @Param model_id query string false "Optional model UUID to filter by"
-// @Param session_type query string false "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime."
+// @Param session_type query string false "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime."
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} TokenUsageRecordsResponse
@@ -398,10 +394,10 @@ func parseTokenUsageSessionType(c echo.Context) (pgtype.Text, error) {
 	switch sessionType := strings.TrimSpace(c.QueryParam("session_type")); sessionType {
 	case "":
 		return pgtype.Text{}, nil
-	case session.TypeChat, session.TypeDiscuss, session.TypeHeartbeat, session.TypeSchedule, session.TypeACPAgent:
+	case session.TypeChat, session.TypeDiscuss, session.TypeSchedule, session.TypeACPAgent:
 		return pgtype.Text{String: sessionType, Valid: true}, nil
 	default:
-		return pgtype.Text{}, echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, discuss, heartbeat, schedule, acp_agent")
+		return pgtype.Text{}, echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, discuss, schedule, acp_agent")
 	}
 }
 

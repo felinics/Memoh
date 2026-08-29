@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 func historyMessageFrag(id string, msg sdk.Message) contextfrag.ContextFrag {

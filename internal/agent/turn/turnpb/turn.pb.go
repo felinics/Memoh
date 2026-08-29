@@ -523,7 +523,7 @@ const file_internal_agent_turn_turnpb_turn_proto_rawDesc = "" +
 	"\x03Run\x12\x19.memoh.turn.v1.RunRequest\x1a\x1a.memoh.turn.v1.RunResponse(\x010\x01\x12Q\n" +
 	"\x13RespondToolApproval\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1c.memoh.turn.v1.EventResponse0\x01\x12N\n" +
 	"\x10RespondUserInput\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1c.memoh.turn.v1.EventResponse0\x01\x12T\n" +
-	"\x19AdvancePlainTextUserInput\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponseB5Z3github.com/memohai/memoh/internal/agent/turn/turnpbb\x06proto3"
+	"\x19AdvancePlainTextUserInput\x12\x1a.memoh.turn.v1.JsonRequest\x1a\x1b.memoh.turn.v1.JsonResponseB6Z4github.com/felinics/memoh/internal/agent/turn/turnpbb\x06proto3"
 
 var (
 	file_internal_agent_turn_turnpb_turn_proto_rawDescOnce sync.Once

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestApplyProviderRunConfigGatesUnavailableSkillGuidance(t *testing.T) {
@@ -35,10 +35,11 @@ func TestApplyProviderRunConfigGatesUnavailableSkillGuidance(t *testing.T) {
 		t.Fatalf("selection = %#v, want two capability-gated drops", got.ContextManifest.Selection)
 	}
 	records := got.ContextMutations.Records()
-	if len(records) != 1 ||
-		records[0].Kind != contextfrag.MutationCapabilityGate ||
-		records[0].Detail != "dropped=2" {
-		t.Fatalf("mutations = %+v, want one count-only capability gate record", records)
+	if len(records) != 2 ||
+		records[0].Kind != contextfrag.MutationContextBudgetDisabled ||
+		records[1].Kind != contextfrag.MutationCapabilityGate ||
+		records[1].Detail != "dropped=2" {
+		t.Fatalf("mutations = %+v, want disabled-budget audit then count-only capability gate", records)
 	}
 }
 
@@ -56,8 +57,8 @@ func TestApplyProviderRunConfigKeepsAvailableSkillGuidanceByteIdentical(t *testi
 		got.ContextManifest.Selection.DropReasons[capabilityGateDropReason] != 0 {
 		t.Fatalf("selection = %#v, want no capability gate", got.ContextManifest.Selection)
 	}
-	if records := got.ContextMutations.Records(); len(records) != 0 {
-		t.Fatalf("mutations = %+v, want none", records)
+	if records := got.ContextMutations.Records(); len(records) != 1 || records[0].Kind != contextfrag.MutationContextBudgetDisabled {
+		t.Fatalf("mutations = %+v, want only missing-window audit", records)
 	}
 }
 
@@ -71,8 +72,8 @@ func TestApplyProviderRunConfigLeavesUnknownCapabilityRosterUngated(t *testing.T
 	if got.System != cfg.System {
 		t.Fatalf("system = %q, want unknown roster to preserve %q", got.System, cfg.System)
 	}
-	if records := got.ContextMutations.Records(); len(records) != 0 {
-		t.Fatalf("mutations = %+v, want unknown roster ungated", records)
+	if records := got.ContextMutations.Records(); len(records) != 1 || records[0].Kind != contextfrag.MutationContextBudgetDisabled {
+		t.Fatalf("mutations = %+v, want unknown roster ungated plus missing-window audit", records)
 	}
 }
 
@@ -133,8 +134,33 @@ func TestApplyProviderRunConfigFallbackCannotRestoreGatedGuidance(t *testing.T) 
 
 	cfg := capabilityGateFixture()
 	cfg.Messages = []sdk.Message{sdk.UserMessage("legacy message")}
+	currentUserIndex := 0
+	cfg.ContextCurrentUserMessageIndex = &currentUserIndex
+	cfg.ContextQueryMaterialized = true
+	cfg.ContextHookText = "legacy append_context"
+	legacyHooks, err := (&HookContextCollector{}).Collect(context.Background(), CollectRequest{
+		Config: HookContextConfig{Text: "legacy append_context"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceHook := contextfrag.NormalizeContextRefs([]contextfrag.ContextFrag{hookSystemTestFrag(
+		"system.hook.policy",
+		"workspace hook system section",
+		contextfrag.RetentionPreferred,
+		contextfrag.CacheDynamic,
+		contextfrag.TrustWorkspace,
+		80,
+		contextfrag.Scope{},
+	)})[0]
+	cfg.ContextSourceWarnings = []contextfrag.ValidationWarning{{
+		Code: "hook_system_section_required_clamped",
+		Ref:  workspaceHook.Ref,
+	}}
 	cfg.ContextSourceFrags = append(
 		cfg.ContextSourceFrags,
+		legacyHooks[0],
+		workspaceHook,
 		contextfrag.MessageFrag(contextfrag.MessageFragInput{
 			ID:        "duplicate",
 			Message:   sdk.UserMessage("first"),
@@ -154,17 +180,19 @@ func TestApplyProviderRunConfigFallbackCannotRestoreGatedGuidance(t *testing.T) 
 	)
 
 	got := ApplyProviderRunConfig(context.Background(), nil, cfg)
-	if got.System != "base system" || strings.Contains(got.System, "alpha") {
-		t.Fatalf("fallback system = %q, want capability-filtered base system", got.System)
+	if got.System != "base system" {
+		t.Fatalf("fallback system = %q, want capability-filtered base without hook context", got.System)
 	}
-	if len(got.Messages) != 1 || messageText(t, got.Messages[0]) != "legacy message" {
-		t.Fatalf("fallback messages = %#v, want legacy message", got.Messages)
+	if len(got.Messages) != 2 || messageText(t, got.Messages[0]) != "legacy append_context" ||
+		messageText(t, got.Messages[1]) != "legacy message" {
+		t.Fatalf("fallback messages = %#v, want user hook before current", got.Messages)
 	}
 	records := got.ContextMutations.Records()
-	if len(records) != 2 ||
-		records[0].Kind != contextfrag.MutationCapabilityGate ||
-		records[1].Kind != contextfrag.MutationContextViewFallback {
-		t.Fatalf("fallback mutations = %+v, want capability gate then context-view fallback", records)
+	if len(records) != 3 ||
+		records[0].Kind != contextfrag.MutationContextBudgetDisabled ||
+		records[1].Kind != contextfrag.MutationCapabilityGate ||
+		records[2].Kind != contextfrag.MutationContextViewFallback {
+		t.Fatalf("fallback mutations = %+v, want disabled budget, capability gate, then context-view fallback", records)
 	}
 	if got.ContextManifest.Selection == nil ||
 		got.ContextManifest.Selection.DropReasons[capabilityGateDropReason] != 2 {
@@ -184,6 +212,13 @@ func TestApplyProviderRunConfigFallbackCannotRestoreGatedGuidance(t *testing.T) 
 			"fallback selected count = %d, want actual rendered fragment count %d",
 			got.ContextManifest.Selection.Selected,
 			len(got.ContextFrags),
+		)
+	}
+	if !hasValidationWarning(got.ContextManifest.ValidationWarnings, cfg.ContextSourceWarnings[0]) {
+		t.Fatalf(
+			"fallback validation warnings = %#v, want source warning %#v",
+			got.ContextManifest.ValidationWarnings,
+			cfg.ContextSourceWarnings[0],
 		)
 	}
 }

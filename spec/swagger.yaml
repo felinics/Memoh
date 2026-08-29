@@ -877,6 +877,52 @@ definitions:
       name:
         type: string
     type: object
+  botagents.BotAgent:
+    properties:
+      bot_id:
+        type: string
+      created_at:
+        type: string
+      deleted_at:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      runtime:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  botagents.CreateRequest:
+    properties:
+      metadata:
+        additionalProperties: {}
+        type: object
+      name:
+        type: string
+      runtime:
+        type: string
+    type: object
+  botagents.ListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/botagents.BotAgent'
+        type: array
+    type: object
+  botagents.UpdateRequest:
+    properties:
+      enabled:
+        type: boolean
+      name:
+        type: string
+    type: object
   botbackup.ExportRequest:
     properties:
       passphrase:
@@ -1872,6 +1918,299 @@ definitions:
           $ref: '#/definitions/connectors.Connector'
         type: array
     type: object
+  contextfrag.CacheClass:
+    enum:
+    - stable
+    - dynamic
+    - never
+    type: string
+    x-enum-varnames:
+    - CacheStable
+    - CacheDynamic
+    - CacheNever
+  contextfrag.CachePlan:
+    properties:
+      mid_stable_message_count:
+        type: integer
+      stable_message_count:
+        type: integer
+      stable_prefix_hash:
+        type: string
+      stable_prefix_token_estimate:
+        type: integer
+    type: object
+  contextfrag.CacheUsageRecord:
+    properties:
+      attempt:
+        type: integer
+      cache_read_tokens:
+        type: integer
+      cache_write_1h_tokens:
+        type: integer
+      cache_write_5m_tokens:
+        type: integer
+      cache_write_tokens:
+        type: integer
+      no_cache_tokens:
+        type: integer
+      step_index:
+        type: integer
+    type: object
+  contextfrag.ContentRange:
+    properties:
+      end:
+        type: integer
+      start:
+        type: integer
+    type: object
+  contextfrag.ContextBudgetPlan:
+    properties:
+      actual_system_cost:
+        type: integer
+      current_request_cost:
+        type: integer
+      estimator:
+        type: string
+      estimator_safety_factor_percent:
+        type: integer
+      history_budget:
+        type: integer
+      output_reserve:
+        type: integer
+      output_reserve_resolution:
+        type: string
+      system_budget:
+        type: integer
+      tool_defs_cost:
+        type: integer
+      window:
+        type: integer
+    type: object
+  contextfrag.ContextRef:
+    properties:
+      content_hash:
+        type: string
+      durability:
+        $ref: '#/definitions/contextfrag.RefDurability'
+      hash_algo:
+        type: string
+      hash_scope:
+        type: string
+      id:
+        type: string
+      namespace:
+        type: string
+      range:
+        $ref: '#/definitions/contextfrag.ContentRange'
+      schema:
+        type: string
+      version:
+        type: integer
+    type: object
+  contextfrag.LifecycleSnapshot:
+    properties:
+      assistant_message_id:
+        type: string
+      budget_plan:
+        $ref: '#/definitions/contextfrag.ContextBudgetPlan'
+      cache_plan:
+        $ref: '#/definitions/contextfrag.CachePlan'
+      cache_read_tokens:
+        type: integer
+      cache_usage:
+        items:
+          $ref: '#/definitions/contextfrag.CacheUsageRecord'
+        type: array
+      cache_write_tokens:
+        type: integer
+      client_type:
+        type: string
+      counts:
+        $ref: '#/definitions/contextfrag.ManifestCounts'
+      final_input_hash:
+        type: string
+      loop_selection_mode:
+        type: string
+      model:
+        type: string
+      mutations:
+        items:
+          $ref: '#/definitions/contextfrag.MutationRecord'
+        type: array
+      selection:
+        $ref: '#/definitions/contextfrag.SelectionTrace'
+      selection_decisions:
+        items:
+          $ref: '#/definitions/contextfrag.SelectionDecision'
+        type: array
+      steps:
+        items:
+          $ref: '#/definitions/contextfrag.StepSnapshot'
+        type: array
+      version:
+        type: integer
+      view:
+        $ref: '#/definitions/contextfrag.ManifestView'
+    type: object
+  contextfrag.ManifestCounts:
+    properties:
+      fragments:
+        type: integer
+      images:
+        type: integer
+      messages:
+        type: integer
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+    type: object
+  contextfrag.ManifestView:
+    enum:
+    - run_config_pre_provider
+    type: string
+    x-enum-varnames:
+    - ViewRunConfigPreProvider
+  contextfrag.MutationKind:
+    enum:
+    - before_model_call_hook
+    - background_summary
+    - mid_task_prune
+    - loop_step_reselection
+    - injected_message
+    - context_view_fallback
+    - context_budget_failure
+    - context_budget_disabled
+    - capability_gate
+    - read_media
+    - mid_stream_retry
+    type: string
+    x-enum-varnames:
+    - MutationBeforeModelCallHook
+    - MutationBackgroundSummary
+    - MutationMidTaskPrune
+    - MutationLoopStepReselection
+    - MutationInjectedMessage
+    - MutationContextViewFallback
+    - MutationContextBudgetFailure
+    - MutationContextBudgetDisabled
+    - MutationCapabilityGate
+    - MutationReadMedia
+    - MutationMidStreamRetry
+  contextfrag.MutationRecord:
+    properties:
+      detail:
+        type: string
+      kind:
+        $ref: '#/definitions/contextfrag.MutationKind'
+    type: object
+  contextfrag.RefDurability:
+    enum:
+    - durable
+    - synthetic
+    - debug
+    type: string
+    x-enum-varnames:
+    - RefDurable
+    - RefSynthetic
+    - RefDebug
+  contextfrag.RetentionTier:
+    enum:
+    - ""
+    - required
+    - preferred
+    - optional
+    type: string
+    x-enum-varnames:
+    - RetentionUnspecified
+    - RetentionRequired
+    - RetentionPreferred
+    - RetentionOptional
+  contextfrag.SelectionDecision:
+    properties:
+      cache_class:
+        $ref: '#/definitions/contextfrag.CacheClass'
+      decision:
+        $ref: '#/definitions/contextfrag.SelectionDecisionKind'
+      id:
+        type: string
+      image_count:
+        type: integer
+      reason:
+        type: string
+      ref:
+        $ref: '#/definitions/contextfrag.ContextRef'
+      retention_tier:
+        $ref: '#/definitions/contextfrag.RetentionTier'
+      slot:
+        $ref: '#/definitions/contextfrag.Slot'
+      source:
+        type: string
+      source_id:
+        type: string
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+    type: object
+  contextfrag.SelectionDecisionKind:
+    enum:
+    - selected
+    - trimmed
+    - dropped
+    type: string
+    x-enum-varnames:
+    - DecisionSelected
+    - DecisionTrimmed
+    - DecisionDropped
+  contextfrag.SelectionTrace:
+    properties:
+      drop_reasons:
+        additionalProperties:
+          type: integer
+        type: object
+      dropped:
+        type: integer
+      selected:
+        type: integer
+    type: object
+  contextfrag.Slot:
+    enum:
+    - system
+    - before_history
+    - history
+    - after_history_before_current
+    - current_user
+    - after_current
+    type: string
+    x-enum-varnames:
+    - SlotSystem
+    - SlotBeforeHistory
+    - SlotHistory
+    - SlotAfterHistoryBeforeCurrent
+    - SlotCurrentUser
+    - SlotAfterCurrent
+  contextfrag.StepSnapshot:
+    properties:
+      attempt:
+        type: integer
+      drop_reasons:
+        additionalProperties:
+          type: integer
+        type: object
+      dropped:
+        type: integer
+      post_prepare_input_hash:
+        type: string
+      reselection_applied:
+        type: boolean
+      reselection_outcome:
+        type: string
+      step_index:
+        type: integer
+      truncated:
+        type: integer
+    type: object
   conversation.SkillActivation:
     properties:
       prompt:
@@ -1979,6 +2318,8 @@ definitions:
         type: array
       background_task:
         $ref: '#/definitions/conversation.UIBackgroundTask'
+      code:
+        type: string
       content:
         type: string
       execution_location:
@@ -1992,6 +2333,8 @@ definitions:
       progress:
         items: {}
         type: array
+      reasoning_timing:
+        $ref: '#/definitions/conversation.UIReasoningTiming'
       running:
         type: boolean
       tool_call_id:
@@ -2007,12 +2350,19 @@ definitions:
     - reasoning
     - tool
     - attachments
+    - error
     type: string
     x-enum-varnames:
     - UIMessageText
     - UIMessageReasoning
     - UIMessageTool
     - UIMessageAttachments
+    - UIMessageError
+  conversation.UIReasoningTiming:
+    properties:
+      duration_ms:
+        type: integer
+    type: object
   conversation.UIReplyRef:
     properties:
       attachments:
@@ -2390,7 +2740,7 @@ definitions:
       provider:
         $ref: '#/definitions/fetchproviders.ProviderName'
     type: object
-  github_com_memohai_memoh_internal_mcp.Connection:
+  github_com_felinics_memoh_internal_mcp.Connection:
     properties:
       auth_type:
         type: string
@@ -2407,13 +2757,6 @@ definitions:
         type: boolean
       last_probed_at:
         type: string
-      managed_by_plugin_installation_id:
-        type: string
-      managed_resource_key:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
       name:
         type: string
       status:
@@ -2428,8 +2771,6 @@ definitions:
         type: string
       updated_at:
         type: string
-      visible:
-        type: boolean
     type: object
   handlers.ACPClaudeCodeOAuthAuthorizeResponse:
     properties:
@@ -2730,6 +3071,28 @@ definitions:
         type: string
       used_bytes:
         type: integer
+    type: object
+  handlers.ContextLifecycleResponse:
+    properties:
+      turns:
+        items:
+          $ref: '#/definitions/handlers.ContextLifecycleTurn'
+        type: array
+    type: object
+  handlers.ContextLifecycleTurn:
+    properties:
+      assistant_message_id:
+        type: string
+      created_at:
+        type: string
+      error_code:
+        type: string
+      run_id:
+        type: string
+      snapshot:
+        $ref: '#/definitions/contextfrag.LifecycleSnapshot'
+      status:
+        type: string
     type: object
   handlers.ContextUsage:
     properties:
@@ -3045,19 +3408,75 @@ definitions:
           $ref: '#/definitions/handlers.HookEventInfo'
         type: array
     type: object
-  handlers.InstallPluginRequest:
+  handlers.InstallPackageRequest:
     properties:
-      plugin_id:
+      package_id:
         type: string
-      variables:
-        additionalProperties:
-          type: string
-        type: object
+      registry_id:
+        type: string
+      revision:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - package_id
+    - registry_id
+    - revision
     type: object
-  handlers.InstallSkillRequest:
+  handlers.InstallRegistryPackageResponse:
     properties:
+      installation:
+        $ref: '#/definitions/skillpackages.Installation'
+      ok:
+        type: boolean
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/handlers.InstallRegistrySkillResponse'
+        type: array
+      workspace_target_id:
+        type: string
+    required:
+    - installation
+    - ok
+    - package_id
+    - registry_id
+    - revision
+    - skills
+    - workspace_target_id
+    type: object
+  handlers.InstallRegistrySkillResponse:
+    properties:
+      artifact_digest:
+        type: string
+      files_written:
+        type: integer
+      install_id:
+        type: string
+      ok:
+        type: boolean
+      package_id:
+        type: string
+      registry_id:
+        type: string
       skill_id:
         type: string
+      workspace_target_id:
+        type: string
+    required:
+    - artifact_digest
+    - files_written
+    - install_id
+    - ok
+    - package_id
+    - registry_id
+    - skill_id
+    - workspace_target_id
     type: object
   handlers.ListSnapshotsResponse:
     properties:
@@ -3230,8 +3649,12 @@ definitions:
     properties:
       content:
         type: string
+      deletable:
+        type: boolean
       description:
         type: string
+      editable:
+        type: boolean
       managed:
         type: boolean
       metadata:
@@ -3239,9 +3662,15 @@ definitions:
         type: object
       name:
         type: string
+      package_id:
+        type: string
       raw:
         type: string
+      registry_id:
+        type: string
       shadowed_by:
+        type: string
+      skill_id:
         type: string
       source_kind:
         type: string
@@ -3261,7 +3690,10 @@ definitions:
     type: object
   handlers.SkillsDeleteRequest:
     properties:
-      names:
+      source_paths:
+        description: |-
+          SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
+          cannot address registry skills, which are nested by registry and package.
         items:
           type: string
         type: array
@@ -3279,6 +3711,12 @@ definitions:
         items:
           type: string
         type: array
+      source_path:
+        description: |-
+          SourcePath is the existing SKILL.md being edited when saving a single skill.
+          Empty means create (or overwrite by frontmatter name under
+          /data/skills/user/personal/<name>/).
+        type: string
     type: object
   handlers.SnapshotInfo:
     properties:
@@ -3315,23 +3753,19 @@ definitions:
         type: string
       name:
         type: string
+    required:
+    - email
+    - name
     type: object
-  handlers.SupermarketPluginListResponse:
+  handlers.SupermarketCatalogSkill:
     properties:
-      data:
-        items:
-          $ref: '#/definitions/plugins.Manifest'
-        type: array
-      limit:
-        type: integer
-      page:
-        type: integer
-      total:
-        type: integer
-    type: object
-  handlers.SupermarketSkillEntry:
-    properties:
-      content:
+      artifact:
+        $ref: '#/definitions/handlers.SupermarketSkillArtifact'
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      category:
+        type: string
+      category_name:
         type: string
       description:
         type: string
@@ -3339,18 +3773,51 @@ definitions:
         items:
           type: string
         type: array
-      id:
+      homepage:
         type: string
-      metadata:
-        $ref: '#/definitions/handlers.SupermarketSkillMetadata'
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      install_id:
+        type: string
       name:
         type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      schema_version:
+        type: string
+      skill_id:
+        type: string
+      source:
+        $ref: '#/definitions/handlers.SupermarketSkillSource'
+      source_category:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+    required:
+    - artifact
+    - author
+    - category
+    - category_name
+    - description
+    - files
+    - install_id
+    - name
+    - package_id
+    - registry_id
+    - schema_version
+    - skill_id
+    - source
+    - tags
     type: object
-  handlers.SupermarketSkillListResponse:
+  handlers.SupermarketCatalogSkillListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/handlers.SupermarketSkillEntry'
+          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
         type: array
       limit:
         type: integer
@@ -3358,24 +3825,266 @@ definitions:
         type: integer
       total:
         type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
     type: object
-  handlers.SupermarketSkillMetadata:
+  handlers.SupermarketRegistry:
     properties:
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      homepage:
+      adapter:
         type: string
-      tags:
-        items:
-          type: string
-        type: array
+      category_count:
+        type: integer
+      enabled:
+        type: boolean
+      id:
+        type: string
+      name:
+        type: string
+      package_count:
+        type: integer
+      priority:
+        type: integer
+      published_at:
+        type: string
+      revision:
+        type: string
+      skill_count:
+        type: integer
+      skipped_package_count:
+        type: integer
+    required:
+    - adapter
+    - category_count
+    - enabled
+    - id
+    - name
+    - package_count
+    - priority
+    - skill_count
+    - skipped_package_count
     type: object
-  handlers.SupermarketTagsResponse:
+  handlers.SupermarketRegistryListResponse:
     properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketRegistry'
+        type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketSkillArtifact:
+    properties:
+      archive_size:
+        type: integer
+      content_type:
+        type: string
+      digest:
+        type: string
+      download_url:
+        type: string
+      file_count:
+        type: integer
+      format:
+        type: string
+      size:
+        type: integer
+      uncompressed_size:
+        type: integer
+    required:
+    - archive_size
+    - content_type
+    - digest
+    - download_url
+    - file_count
+    - format
+    - size
+    - uncompressed_size
+    type: object
+  handlers.SupermarketSkillCategory:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      registries:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillCategoryRegistry'
+        type: array
+    required:
+    - count
+    - id
+    - name
+    - registries
+    type: object
+  handlers.SupermarketSkillCategoryListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillCategory'
+        type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketSkillCategoryRegistry:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+    required:
+    - count
+    - id
+    type: object
+  handlers.SupermarketSkillIcon:
+    properties:
+      brand_color:
+        type: string
+      card:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+      dark:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+      detail:
+        $ref: '#/definitions/handlers.SupermarketSkillIconAsset'
+    type: object
+  handlers.SupermarketSkillIconAsset:
+    properties:
+      content_type:
+        type: string
+      digest:
+        type: string
+      size:
+        type: integer
+    required:
+    - content_type
+    - digest
+    - size
+    type: object
+  handlers.SupermarketSkillPackageCategory:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      skill_count:
+        type: integer
+    required:
+    - id
+    - name
+    - skill_count
+    type: object
+  handlers.SupermarketSkillPackageDescriptor:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
+        type: array
+      description:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      name:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      skills:
+        items:
+          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        type: array
       tags:
         items:
           type: string
         type: array
+    required:
+    - categories
+    - description
+    - name
+    - package_id
+    - registry_id
+    - revision
+    - schema_version
+    - skill_count
+    - skills
+    - tags
+    type: object
+  handlers.SupermarketSkillPackageListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageSummary'
+        type: array
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
+    type: object
+  handlers.SupermarketSkillPackageSummary:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
+        type: array
+      description:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      name:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+    required:
+    - categories
+    - description
+    - name
+    - package_id
+    - registry_id
+    - schema_version
+    - skill_count
+    - tags
+    type: object
+  handlers.SupermarketSkillSource:
+    properties:
+      path:
+        type: string
+      repository:
+        type: string
+      revision:
+        type: string
+      type:
+        type: string
+    required:
+    - path
+    - revision
+    - type
     type: object
   handlers.TokenUsageRecord:
     properties:
@@ -3428,10 +4137,6 @@ definitions:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
       discuss:
-        items:
-          $ref: '#/definitions/handlers.DailyTokenUsage'
-        type: array
-      heartbeat:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
@@ -3558,6 +4263,8 @@ definitions:
           POST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a
           transient in-memory handle reference, never persisted in metadata.
         type: string
+      bot_agent_id:
+        type: string
       channel_type:
         type: string
       metadata:
@@ -3655,11 +4362,18 @@ definitions:
   handlers.forkSessionRequest:
     properties:
       message_id:
+        description: |-
+          MessageID is the pre-turn spelling of TurnID, resolved server-side to the
+          round that contains it. Deprecated: send turn_id. A client holds a turn id
+          from admission onward, while a stored message id exists only once the
+          round has been persisted.
+        format: uuid
         type: string
       title:
         type: string
-    required:
-    - message_id
+      turn_id:
+        format: uuid
+        type: string
     type: object
   handlers.fsOpResponse:
     properties:
@@ -3840,6 +4554,8 @@ definitions:
     type: object
   handlers.updateSessionRequest:
     properties:
+      bot_agent_id:
+        type: string
       metadata:
         additionalProperties: {}
         type: object
@@ -3855,39 +4571,14 @@ definitions:
       type:
         type: string
     type: object
-  heartbeat.ListLogsResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/heartbeat.Log'
-        type: array
-      total_count:
-        type: integer
-    type: object
-  heartbeat.Log:
-    properties:
-      bot_id:
-        type: string
-      completed_at:
-        type: string
-      error_message:
-        type: string
-      id:
-        type: string
-      result_text:
-        type: string
-      session_id:
-        type: string
-      started_at:
-        type: string
-      status:
-        type: string
-      usage: {}
-    type: object
   hooks.ActionResult:
     properties:
       action_type:
         type: string
+      append_system_sections:
+        items:
+          $ref: '#/definitions/hooks.SystemSectionOutput'
+        type: array
       decision:
         type: string
       error:
@@ -3906,6 +4597,21 @@ definitions:
         type: string
       stdout:
         type: string
+      warnings:
+        items:
+          $ref: '#/definitions/hooks.OutputWarning'
+        type: array
+    type: object
+  hooks.OutputWarning:
+    properties:
+      code:
+        type: string
+      hook_name:
+        type: string
+      message:
+        type: string
+      section_id:
+        type: string
     type: object
   hooks.Result:
     properties:
@@ -3917,6 +4623,10 @@ definitions:
         type: integer
       append_context:
         type: string
+      append_system_sections:
+        items:
+          $ref: '#/definitions/hooks.SystemSectionOutput'
+        type: array
       decision:
         type: string
       hooks_matched:
@@ -3928,7 +4638,40 @@ definitions:
         type: string
       runtime_supported:
         type: boolean
+      warnings:
+        items:
+          $ref: '#/definitions/hooks.OutputWarning'
+        type: array
     type: object
+  hooks.SystemSectionCache:
+    enum:
+    - dynamic
+    - stable
+    type: string
+    x-enum-varnames:
+    - SystemSectionCacheDynamic
+    - SystemSectionCacheStable
+  hooks.SystemSectionOutput:
+    properties:
+      cache:
+        $ref: '#/definitions/hooks.SystemSectionCache'
+      hook_name:
+        type: string
+      id:
+        type: string
+      retention:
+        $ref: '#/definitions/hooks.SystemSectionRetention'
+      text:
+        type: string
+    type: object
+  hooks.SystemSectionRetention:
+    enum:
+    - optional
+    - preferred
+    type: string
+    x-enum-varnames:
+    - SystemSectionRetentionOptional
+    - SystemSectionRetentionPreferred
   hooks.ToolPayload:
     properties:
       call_id:
@@ -3982,7 +4725,7 @@ definitions:
     properties:
       items:
         items:
-          $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+          $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         type: array
     type: object
   mcp.MCPServerEntry:
@@ -4105,6 +4848,14 @@ definitions:
         type: string
       provider_id:
         type: string
+      reasoning:
+        allOf:
+        - $ref: '#/definitions/reasoning.Options'
+        description: |-
+          Reasoning is the model's resolved thinking options, filled by the API layer
+          (it depends on the provider's client type). Clients render this rather than
+          deriving their own answer from ThinkingMode and ReasoningEfforts — the
+          duplication that let the web picker and the wire disagree.
       type:
         $ref: '#/definitions/models.ModelType'
     type: object
@@ -4122,10 +4873,43 @@ definitions:
         type: string
       dimensions:
         type: integer
+      reasoning_default_on:
+        description: |-
+          ReasoningDefaultOn reports whether omitting the thinking field leaves the
+          model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
+          defaults to off, while Opus 5 can be turned off but defaults to on, so
+          omitting the field there keeps thinking running — billed, and invisible to a
+          user who believes they turned it off. nil means unknown.
+        type: boolean
+      reasoning_dialect:
+        description: |-
+          ReasoningDialect declares the wire shape of this model's thinking control,
+          which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
+          token budget while 3.x takes a named level, and the two are mutually
+          exclusive on the same request. Declared per model because the alternative is
+          sniffing the model id, and an id is not a capability. Empty leaves provider
+          policy in charge; Google's adaptor deliberately sends no thinking control so
+          pre-dialect rows retain their safe pre-upgrade request shape.
+        type: string
       reasoning_efforts:
         items:
           type: string
         type: array
+      reasoning_off_support:
+        description: |-
+          ReasoningOffSupport declares how the model answers an explicit request to
+          stop thinking. Anthropic's per-model table splits models that share a
+          thinking mode and an identical tier list, so this cannot be derived — see the
+          reasoning package's OffSupport constants.
+        type: string
+      thinking_budget_max:
+        type: integer
+      thinking_budget_min:
+        description: |-
+          ThinkingBudgetMin/Max bound the budget dialect. The range is per model
+          family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
+          off, while Flash starts at 0 and can.
+        type: integer
       thinking_mode:
         type: string
     type: object
@@ -4180,234 +4964,6 @@ definitions:
         type: string
       type:
         $ref: '#/definitions/models.ModelType'
-    type: object
-  plugins.AuthRequirement:
-    properties:
-      client_ref:
-        type: string
-      key:
-        type: string
-      scopes:
-        items:
-          type: string
-        type: array
-      type:
-        type: string
-      variables:
-        items:
-          type: string
-        type: array
-    type: object
-  plugins.Author:
-    properties:
-      email:
-        type: string
-      name:
-        type: string
-    type: object
-  plugins.ConfigVar:
-    properties:
-      defaultValue:
-        type: string
-      description:
-        type: string
-      key:
-        type: string
-      required:
-        type: boolean
-      secret:
-        type: boolean
-    type: object
-  plugins.Icon:
-    properties:
-      kind:
-        type: string
-      name:
-        type: string
-      url:
-        type: string
-    type: object
-  plugins.Installation:
-    properties:
-      bot_id:
-        type: string
-      config:
-        additionalProperties: {}
-        type: object
-      enabled:
-        type: boolean
-      id:
-        type: string
-      installed_at:
-        type: string
-      manifest:
-        $ref: '#/definitions/plugins.Manifest'
-      metadata:
-        additionalProperties: {}
-        type: object
-      plugin_id:
-        type: string
-      plugin_name:
-        type: string
-      resources:
-        items:
-          $ref: '#/definitions/plugins.Resource'
-        type: array
-      status:
-        type: string
-      updated_at:
-        type: string
-      version:
-        type: string
-    type: object
-  plugins.ListResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/plugins.Installation'
-        type: array
-    type: object
-  plugins.MCPResource:
-    properties:
-      args:
-        items:
-          type: string
-        type: array
-      auth_ref:
-        type: string
-      capabilities:
-        items:
-          type: string
-        type: array
-      command:
-        type: string
-      cwd:
-        type: string
-      description:
-        type: string
-      display_name:
-        type: string
-      env:
-        items:
-          $ref: '#/definitions/plugins.ConfigVar'
-        type: array
-      headers:
-        items:
-          $ref: '#/definitions/plugins.ConfigVar'
-        type: array
-      key:
-        type: string
-      name:
-        type: string
-      transport:
-        type: string
-      url:
-        type: string
-      visibility:
-        type: string
-    type: object
-  plugins.Manifest:
-    properties:
-      auth_requirements:
-        items:
-          $ref: '#/definitions/plugins.AuthRequirement'
-        type: array
-      author:
-        $ref: '#/definitions/plugins.Author'
-      bundled_skills:
-        items:
-          $ref: '#/definitions/plugins.SkillEntry'
-        type: array
-      capabilities:
-        items:
-          type: string
-        type: array
-      description:
-        type: string
-      homepage:
-        type: string
-      icon:
-        $ref: '#/definitions/plugins.Icon'
-      id:
-        type: string
-      install:
-        items:
-          type: string
-        type: array
-      mcps:
-        items:
-          $ref: '#/definitions/plugins.MCPResource'
-        type: array
-      name:
-        type: string
-      schema_version:
-        type: string
-      skills:
-        items:
-          $ref: '#/definitions/plugins.SkillResource'
-        type: array
-      tags:
-        items:
-          type: string
-        type: array
-      variables:
-        items:
-          $ref: '#/definitions/plugins.ConfigVar'
-        type: array
-      version:
-        type: string
-    type: object
-  plugins.OAuthAuthorizeRequest:
-    properties:
-      callback_url:
-        type: string
-    type: object
-  plugins.Resource:
-    properties:
-      created_at:
-        type: string
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      resource_id:
-        type: string
-      resource_key:
-        type: string
-      resource_type:
-        type: string
-      status:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  plugins.SkillEntry:
-    properties:
-      content:
-        type: string
-      description:
-        type: string
-      files:
-        items:
-          type: string
-        type: array
-      id:
-        type: string
-      metadata:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-    type: object
-  plugins.SkillResource:
-    properties:
-      key:
-        type: string
-      name:
-        type: string
-      path:
-        type: string
     type: object
   providers.CountResponse:
     properties:
@@ -4566,11 +5122,13 @@ definitions:
     - ok
     - auth_error
     - error
+    - unverified
     type: string
     x-enum-varnames:
     - TestStatusOK
     - TestStatusAuthError
     - TestStatusError
+    - TestStatusUnverified
   providers.UpdateRequest:
     properties:
       client_type:
@@ -4647,6 +5205,37 @@ definitions:
       type:
         type: string
     type: object
+  reasoning.Options:
+    properties:
+      can_disable:
+        description: CanDisable reports whether picking "off" actually reaches the
+          model.
+        type: boolean
+      default_effort:
+        description: |-
+          DefaultEffort is the tier to use when nothing is stored, and the tier to fall
+          back to when a stored value is no longer offered by the model.
+        type: string
+      efforts:
+        description: Efforts are the selectable active tiers, weakest to strongest
+          as advertised.
+        items:
+          type: string
+        type: array
+      efforts_without_off:
+        description: |-
+          EffortsWithoutOff are tiers that cannot be combined with off on this model.
+          Opus 5 accepts an explicit disable only at effort high or below, so a client
+          that lets a user hold both must know which tiers conflict.
+        items:
+          type: string
+        type: array
+      supported:
+        description: |-
+          Supported is false when the model has no thinking concept; the other fields
+          are then empty and no control should be rendered at all.
+        type: boolean
+    type: object
   schedule.CreateRequest:
     properties:
       acp_agent_id:
@@ -4656,6 +5245,11 @@ definitions:
         description: |-
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+        type: string
+      bot_agent_id:
+        description: |-
+          BotAgentID selects one persisted BotAgent for a new session. Empty means
+          the built-in Native runtime (or the legacy ACP fields below).
         type: string
       command:
         type: string
@@ -4703,6 +5297,11 @@ definitions:
         description: |-
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+        type: string
+      bot_agent_id:
+        description: |-
+          BotAgentID selects one persisted BotAgent for a new session. Empty means
+          the built-in Native runtime (or the legacy ACP fields below).
         type: string
       model_id:
         description: ModelID is a native model UUID override (models.id).
@@ -4783,6 +5382,11 @@ definitions:
         description: |-
           ACPModelID is an agent-reported model identifier override for ACP
           runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+        type: string
+      bot_agent_id:
+        description: |-
+          BotAgentID selects one persisted BotAgent for a new session. Empty means
+          the built-in Native runtime (or the legacy ACP fields below).
         type: string
       bot_id:
         type: string
@@ -4957,6 +5561,8 @@ definitions:
     type: object
   session.Session:
     properties:
+      bot_agent_id:
+        type: string
       bot_id:
         type: string
       channel_type:
@@ -5020,17 +5626,13 @@ definitions:
         x-nullable: true
       compaction_threshold:
         type: integer
+      default_bot_agent_id:
+        type: string
       discuss_probe_model_id:
         type: string
       display_enabled:
         type: boolean
       fetch_provider_id:
-        type: string
-      heartbeat_enabled:
-        type: boolean
-      heartbeat_interval:
-        type: integer
-      heartbeat_model_id:
         type: string
       image_model_id:
         type: string
@@ -5148,20 +5750,13 @@ definitions:
         type: integer
       compaction_threshold:
         type: integer
+      default_bot_agent_id:
+        type: string
       discuss_probe_model_id:
         type: string
       display_enabled:
         type: boolean
       fetch_provider_id:
-        type: string
-      heartbeat_enabled:
-        type: boolean
-      heartbeat_interval:
-        type: integer
-      heartbeat_model_id:
-        description: |-
-          HeartbeatModelID joins the pointer group above (nil/""/value) so the
-          heartbeat tab's autosave can clear a model override.
         type: string
       image_model_id:
         type: string
@@ -5198,6 +5793,34 @@ definitions:
       video_model_id:
         type: string
     type: object
+  skillpackages.Installation:
+    properties:
+      bot_id:
+        type: string
+      id:
+        type: string
+      installed_at:
+        type: string
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      updated_at:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - bot_id
+    - id
+    - installed_at
+    - package_id
+    - registry_id
+    - revision
+    - updated_at
+    - workspace_target_id
+    type: object
   skills.SafeCatalogItem:
     properties:
       description:
@@ -5210,6 +5833,16 @@ definitions:
         type: string
       state:
         type: string
+    type: object
+  supermarket.UninstallPackageResponse:
+    properties:
+      installation:
+        $ref: '#/definitions/skillpackages.Installation'
+      ok:
+        type: boolean
+    required:
+    - installation
+    - ok
     type: object
   userinput.UIAnswer:
     properties:
@@ -6526,6 +7159,177 @@ paths:
       summary: Get Codex ACP OAuth status
       tags:
       - acp
+  /bots/{bot_id}/agents:
+    get:
+      description: List active and disabled non-deleted Agents attached to a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/botagents.ListResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List a bot's Agents
+      tags:
+      - bot-agents
+    post:
+      consumes:
+      - application/json
+      description: Add a named Agent backed by a runtime descriptor
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/botagents.CreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/botagents.BotAgent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Add an Agent to a bot
+      tags:
+      - bot-agents
+  /bots/{bot_id}/agents/{id}:
+    delete:
+      description: Soft-delete an Agent while preserving existing session bindings
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Delete a bot Agent
+      tags:
+      - bot-agents
+    get:
+      description: Get one Agent attached to a bot
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/botagents.BotAgent'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get a bot Agent
+      tags:
+      - bot-agents
+    patch:
+      consumes:
+      - application/json
+      description: Rename, enable, or disable an Agent; runtime metadata is immutable
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Agent changes
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/botagents.UpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/botagents.BotAgent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Update a bot Agent
+      tags:
+      - bot-agents
   /bots/{bot_id}/backup/export:
     post:
       consumes:
@@ -7932,6 +8736,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -7949,6 +8757,10 @@ paths:
         in: path
         name: bot_id
         required: true
+        type: string
+      - description: Workspace target ID
+        in: query
+        name: workspace_target_id
         type: string
       responses:
         "200":
@@ -8000,10 +8812,14 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -8038,6 +8854,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -8418,63 +9238,6 @@ paths:
       summary: Get outbox email detail
       tags:
       - email-outbox
-  /bots/{bot_id}/heartbeat/logs:
-    delete:
-      description: Delete all heartbeat execution logs for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete heartbeat logs
-      tags:
-      - heartbeat
-    get:
-      description: List heartbeat execution logs for a bot
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - default: 50
-        description: Limit
-        in: query
-        name: limit
-        type: integer
-      - default: 0
-        description: Offset
-        in: query
-        name: offset
-        type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/heartbeat.ListLogsResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List heartbeat logs
-      tags:
-      - heartbeat
   /bots/{bot_id}/hooks/events:
     get:
       parameters:
@@ -8540,11 +9303,6 @@ paths:
   /bots/{bot_id}/mcp:
     get:
       description: List MCP connections for a bot
-      parameters:
-      - description: Include plugin-managed hidden MCP connections
-        in: query
-        name: include_managed
-        type: boolean
       responses:
         "200":
           description: OK
@@ -8582,7 +9340,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+            $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         "400":
           description: Bad Request
           schema:
@@ -8628,6 +9386,61 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Batch delete MCP connections
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp-ops/export:
+    get:
+      description: Export all MCP connections for a bot in standard mcpServers format.
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.ExportResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Export MCP connections
+      tags:
+      - mcp
+  /bots/{bot_id}/mcp-ops/import:
+    put:
+      description: Batch import MCP connections from standard mcpServers format. Existing
+        connections (matched by name) get config updated with is_active preserved.
+        New connections are created as active.
+      parameters:
+      - description: mcpServers dict
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/mcp.ImportRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mcp.ListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Import MCP connections
       tags:
       - mcp
   /bots/{bot_id}/mcp-stdio:
@@ -8749,7 +9562,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+            $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         "400":
           description: Bad Request
           schema:
@@ -8787,7 +9600,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+            $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         "400":
           description: Bad Request
           schema:
@@ -8968,61 +9781,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Probe MCP connection
-      tags:
-      - mcp
-  /bots/{bot_id}/mcp/export:
-    get:
-      description: Export all MCP connections for a bot in standard mcpServers format.
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/mcp.ExportResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Export MCP connections
-      tags:
-      - mcp
-  /bots/{bot_id}/mcp/import:
-    put:
-      description: Batch import MCP connections from standard mcpServers format. Existing
-        connections (matched by name) get config updated with is_active preserved.
-        New connections are created as active.
-      parameters:
-      - description: mcpServers dict
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/mcp.ImportRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/mcp.ListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Import MCP connections
       tags:
       - mcp
   /bots/{bot_id}/memory:
@@ -9676,271 +10434,6 @@ paths:
       summary: Locate a bot history message
       tags:
       - messages
-  /bots/{bot_id}/plugins:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.ListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List bot plugins
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}:
-    delete:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Purge bot plugin installation
-      tags:
-      - plugins
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get bot plugin installation
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/disable:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Disable bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/enable:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Enable bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/oauth/authorize:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: OAuth authorize request
-        in: body
-        name: payload
-        schema:
-          $ref: '#/definitions/plugins.OAuthAuthorizeRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/mcp.AuthorizeResult'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Start managed OAuth for a bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/oauth/status:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Refresh managed OAuth status for a bot plugin
-      tags:
-      - plugins
-  /bots/{bot_id}/plugins/{id}/uninstall:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Plugin installation ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/plugins.Installation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Uninstall bot plugin
-      tags:
-      - plugins
   /bots/{bot_id}/quick-actions/execute:
     post:
       consumes:
@@ -9984,6 +10477,12 @@ paths:
   /bots/{bot_id}/schedule:
     get:
       description: List schedules for current user
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       responses:
         "200":
           description: OK
@@ -10003,6 +10502,11 @@ paths:
     post:
       description: Create a schedule for current user
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Schedule payload
         in: body
         name: payload
@@ -10029,6 +10533,11 @@ paths:
     delete:
       description: Delete a schedule by ID
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Schedule ID
         in: path
         name: id
@@ -10051,6 +10560,11 @@ paths:
     get:
       description: Get a schedule by ID
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Schedule ID
         in: path
         name: id
@@ -10079,6 +10593,11 @@ paths:
     put:
       description: Update a schedule by ID
       parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
       - description: Schedule ID
         in: path
         name: id
@@ -10645,6 +11164,54 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/context-lifecycle:
+    get:
+      description: List run-keyed context lifecycle snapshots for a chat session;
+        sessions predating run lifecycle persistence fall back to legacy assistant
+        metadata
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Maximum number of turns to return (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextLifecycleResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get session context lifecycle
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:
     post:
       parameters:
@@ -10658,7 +11225,7 @@ paths:
         name: session_id
         required: true
         type: string
-      - description: Fork source message
+      - description: Fork source turn
         in: body
         name: body
         required: true
@@ -10733,7 +11300,7 @@ paths:
         Lightweight SSE for sidebar live-sort. Carries only session
         identifiers and minimal metadata (touched timestamps, titles).
         Never includes message bodies. Filters out internal session
-        types such as heartbeat, schedule, subagent.
+        types such as schedule and subagent.
       parameters:
       - description: Bot ID
         in: path
@@ -10831,11 +11398,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Update user settings
       tags:
       - settings
@@ -10861,11 +11432,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Update user settings
       tags:
       - settings
@@ -10901,7 +11476,7 @@ paths:
       summary: List runtime-safe skills for chat-time skill selection
       tags:
       - skills
-  /bots/{bot_id}/supermarket/install-plugin:
+  /bots/{bot_id}/supermarket/install-package:
     post:
       parameters:
       - description: Bot ID
@@ -10909,17 +11484,17 @@ paths:
         name: bot_id
         required: true
         type: string
-      - description: Install plugin request
+      - description: Install Package request
         in: body
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/handlers.InstallPluginRequest'
+          $ref: '#/definitions/handlers.InstallPackageRequest'
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/plugins.Installation'
+            $ref: '#/definitions/handlers.InstallRegistryPackageResponse'
         "400":
           description: Bad Request
           schema:
@@ -10927,55 +11502,77 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install plugin from supermarket to bot
+            $ref: '#/definitions/apperror.Problem'
+      summary: Install an immutable Skill Package release to a bot workspace
       tags:
       - supermarket
-  /bots/{bot_id}/supermarket/install-skill:
-    post:
+  /bots/{bot_id}/supermarket/packages:
+    get:
       parameters:
       - description: Bot ID
         in: path
         name: bot_id
         required: true
         type: string
-      - description: Install skill request
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.InstallSkillRequest'
+      - description: Workspace target ID
+        in: query
+        name: workspace_target_id
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: boolean
-            type: object
-        "400":
-          description: Bad Request
+            items:
+              $ref: '#/definitions/skillpackages.Installation'
+            type: array
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Packages installed for a bot
+      tags:
+      - supermarket
+  /bots/{bot_id}/supermarket/packages/{installation_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Package installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/supermarket.UninstallPackageResponse'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Install skill from supermarket to bot workspace
+      summary: Uninstall a Skill Package from a bot
       tags:
       - supermarket
   /bots/{bot_id}/token-usage:
     get:
       description: Get daily aggregated token usage for a bot, split by chat, discuss,
-        heartbeat, and schedule session types, with optional model filter and per-model
-        breakdown
+        and schedule session types, with optional model filter and per-model breakdown
       parameters:
       - description: Bot ID
         in: path
@@ -10996,8 +11593,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, heartbeat, schedule, or
-          acp_agent. acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
+          acp_agent filters by runtime.'
         in: query
         name: session_type
         type: string
@@ -11045,8 +11642,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, heartbeat, schedule, or
-          acp_agent. acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
+          acp_agent filters by runtime.'
         in: query
         name: session_type
         type: string
@@ -14422,14 +15019,50 @@ paths:
       summary: List speech provider metadata
       tags:
       - speech-providers
-  /supermarket/plugins:
+  /supermarket/artifacts/icon/{digest}:
+    get:
+      parameters:
+      - description: SHA-256 digest
+        in: path
+        name: digest
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a mirrored Skill icon
+      tags:
+      - supermarket
+  /supermarket/packages:
     get:
       parameters:
       - description: Search query
         in: query
         name: q
         type: string
-      - description: Filter by tag
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
         in: query
         name: tag
         type: string
@@ -14441,31 +15074,57 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Sort order
+        in: query
+        name: sort
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketPluginListResponse'
+            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List plugins from supermarket
+      summary: List Skill Packages across supermarket Registries
       tags:
       - supermarket
-  /supermarket/plugins/{id}:
+  /supermarket/registries:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketRegistryListResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Registries from supermarket
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/categories:
     get:
       parameters:
-      - description: Plugin ID
+      - description: Registry ID
         in: path
-        name: id
+        name: registry_id
         required: true
         type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/plugins.Manifest'
+            $ref: '#/definitions/handlers.SupermarketSkillCategoryListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -14474,7 +15133,168 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get plugin detail from supermarket
+      summary: List categories in a Skill Registry
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
+        in: query
+        name: tag
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Sort order
+        in: query
+        name: sort
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List Skill Packages in one Registry
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a namespaced Skill Package
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      - description: Package revision
+        in: path
+        name: revision
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get an immutable Skill Package release
+      tags:
+      - supermarket
+  /supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}:
+    get:
+      parameters:
+      - description: Registry ID
+        in: path
+        name: registry_id
+        required: true
+        type: string
+      - description: Package ID
+        in: path
+        name: package_id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skill_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a namespaced Registry Skill
       tags:
       - supermarket
   /supermarket/skills:
@@ -14484,7 +15304,19 @@ paths:
         in: query
         name: q
         type: string
-      - description: Filter by tag
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      - description: Package ID
+        in: query
+        name: package
+        type: string
+      - description: Category ID
+        in: query
+        name: category
+        type: string
+      - description: Exact tag
         in: query
         name: tag
         type: string
@@ -14496,54 +15328,24 @@ paths:
         in: query
         name: limit
         type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketSkillListResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List skills from supermarket
-      tags:
-      - supermarket
-  /supermarket/skills/{id}:
-    get:
-      parameters:
-      - description: Skill ID
-        in: path
-        name: id
-        required: true
+      - description: Sort order
+        in: query
+        name: sort
         type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillEntry'
-        "404":
-          description: Not Found
+            $ref: '#/definitions/handlers.SupermarketCatalogSkillListResponse'
+        "400":
+          description: Bad Request
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "502":
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get skill detail from supermarket
-      tags:
-      - supermarket
-  /supermarket/tags:
-    get:
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketTagsResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List all tags from supermarket
+      summary: List Skills across supermarket Registries
       tags:
       - supermarket
   /transcription-models:

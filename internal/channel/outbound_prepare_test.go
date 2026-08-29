@@ -9,15 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel/channeltest"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/channel/channeltest"
+	"github.com/felinics/memoh/internal/media"
 )
 
 func TestPrepareOutboundMessage_ContainerPathFallsBackToIngestContainerFile(t *testing.T) {
 	t.Parallel()
 
 	store := channeltest.NewMemoryAttachmentStore()
-	const sourcePath = "/data/media/26da/missing.png"
+	const sourcePath = "/data/.memoh/media/26da/missing.png"
 	store.SeedContainerFile("bot-1", sourcePath, []byte("image-bytes"), "image/png", "missing.png")
 
 	prepared, err := PrepareOutboundMessage(context.Background(), store, ChannelConfig{
@@ -612,10 +612,10 @@ func TestExtractPreparedStorageKey(t *testing.T) {
 		path string
 		want string
 	}{
-		{"/data/media/ab/abcdef.png", "ab/abcdef.png"},
+		{"/data/.memoh/media/ab/abcdef.png", "ab/abcdef.png"},
 		{"/other/media/ab/abcdef.png", ""},
-		{"/data/media/", ""},
-		{"/data/media", ""},
+		{"/data/.memoh/media/", ""},
+		{"/data/.memoh/media", ""},
 		{"ab/abcdef.png", ""},
 	}
 	for _, tc := range cases {
@@ -655,7 +655,7 @@ func TestIsHTTPURL(t *testing.T) {
 	if IsHTTPURL("data:image/png;base64,abc") {
 		t.Error("expected false for data: URL")
 	}
-	if IsHTTPURL("/data/media/file.png") {
+	if IsHTTPURL("/data/.memoh/media/file.png") {
 		t.Error("expected false for local path")
 	}
 }
@@ -663,7 +663,7 @@ func TestIsHTTPURL(t *testing.T) {
 func TestIsDataPath(t *testing.T) {
 	t.Parallel()
 
-	if !IsDataPath("/data/media/file.png") {
+	if !IsDataPath("/data/.memoh/media/file.png") {
 		t.Error("expected true for /data/ path")
 	}
 	if IsDataPath("/tmp/file.png") {

@@ -7,10 +7,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestUnifiedCompactionController(t *testing.T) {
@@ -153,7 +153,6 @@ func newControllerPolicyService(t *testing.T, targetPercent *int) (*Service, *re
 			BotID:                   compactionConfigUUID(t, botUUID),
 			Language:                "auto",
 			ReasoningEffort:         "medium",
-			HeartbeatInterval:       30,
 			CompactionEnabled:       true,
 			CompactionTargetPercent: target,
 			CompactionModelID:       compactionConfigUUID(t, modelUUID),

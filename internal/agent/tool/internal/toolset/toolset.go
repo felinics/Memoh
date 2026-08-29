@@ -1,6 +1,6 @@
 package toolset
 
-import "github.com/memohai/memoh/internal/agent/tool/internal/toolname"
+import "github.com/felinics/memoh/internal/agent/tool/internal/toolname"
 
 // Available is the set of built-in tool names registered for a session.
 // The backing set lives outside the public tools package so Usage code cannot

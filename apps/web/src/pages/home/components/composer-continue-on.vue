@@ -1,43 +1,55 @@
 <template>
   <DropdownMenu @update:open="onMenuOpen">
     <DropdownMenuTrigger as-child>
-      <!-- Icon-only ONLY for the default destination (the native cloud
-           workspace): a quiet peer of the ＋ button. The moment the session is
+      <!-- Icon-only for the default destination (the native cloud workspace):
+           a quiet peer of the ＋ button. On md+, the moment the session is
            pinned to a real machine — or holds any non-default selection — the
-           trigger expands to the labeled pill: a non-default target is worth
-           reading at a glance. The <button> itself never transforms (reka
-           anchors the open menu to its rendered rect); the pill's press
-           squish lives on .composer-pill-content. -->
+           trigger grows into the labeled pill: a non-default target is worth
+           reading at a glance. On mobile it NEVER expands: the pill and the
+           model trigger would squeeze each other into uselessness on a narrow
+           row, so the collapsed circle carries it and the selection is read
+           in the menu instead.
+           The two forms are ONE element morphing, never two nodes swapping:
+           a single Laptop glyph, a collapsing label slot (max-width/opacity),
+           and a padding transition converge the circle to exactly 32×32
+           (44×44 on mobile). Splitting the forms across v-if/v-else nodes
+           reads as two different controls mid-switch. The <button> itself
+           still never transforms (reka anchors the open menu to its rendered
+           rect); press squish lives on .composer-pill-content in BOTH forms
+           (composer-pill-press / composer-circle-press, style.css) so press
+           feedback is identical either way. -->
       <Button
         type="button"
         variant="ghost"
-        :size="isDefaultTarget ? 'icon-sm' : 'sm'"
+        size="sm"
         shape="circle"
         :disabled="locked"
         :title="isDefaultTarget ? currentName : t('chat.continueOn.label')"
         :aria-label="t('chat.continueOn.label')"
-        :class="isDefaultTarget
-          ? 'order-2 self-end text-muted-foreground max-md:size-11'
-          : 'composer-pill-press order-2 min-w-0 max-w-48 self-end max-md:h-11'"
+        class="order-2 min-w-0 max-w-48 self-end max-md:h-11 duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+        :class="rendersAsPill
+          ? 'composer-pill-press shrink'
+          : 'composer-circle-press px-2 max-md:px-3'"
       >
-        <Laptop
-          v-if="isDefaultTarget"
-          class="size-4"
-          :stroke-width="1.5"
-        />
-        <span
-          v-else
-          class="composer-pill-content inline-flex min-w-0 items-center gap-2"
-        >
+        <span class="composer-pill-content inline-flex min-w-0 items-center">
           <Laptop
-            class="size-3.5 shrink-0 text-muted-foreground"
+            class="size-4 max-md:size-5 shrink-0 text-muted-foreground"
             :stroke-width="1.5"
           />
-          <span class="min-w-0 truncate text-label text-composer-control-label">{{ currentName }}</span>
-          <ChevronDown
-            class="size-3.5 shrink-0 text-muted-foreground"
-            :stroke-width="1.5"
-          />
+          <!-- Spacing lives on the slot's children (ml-2), not the slot itself:
+               a gap/padding on the collapsing container would survive the
+               collapse and the circle could never converge to 32px. -->
+          <span
+            class="inline-flex min-w-0 items-center overflow-hidden transition-[max-width,opacity] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+            :class="rendersAsPill ? 'max-w-38 opacity-100' : 'max-w-0 opacity-0'"
+            :aria-hidden="!rendersAsPill"
+          >
+            <span class="ml-2 min-w-0 truncate text-label text-composer-control-label">{{ currentName }}</span>
+            <ChevronDown
+              class="ml-2 size-3.5 shrink-0 text-muted-foreground"
+              :stroke-width="1.5"
+            />
+          </span>
         </span>
       </Button>
     </DropdownMenuTrigger>
@@ -175,6 +187,7 @@ import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
+import { useIsMobile } from '@/composables/useIsMobile'
 import {
   workspaceTargetAvailable,
   workspaceTargetName,
@@ -240,13 +253,27 @@ function displayName(target: WorkspaceWorkspaceTarget): string {
 const currentName = computed(() => {
   if (selectedTarget.value) return displayName(selectedTarget.value)
   if (props.selectedMissing) return props.selectedSnapshotName || t('chat.computerUnavailable')
-  return t('chat.continueOn.label')
+  // A selection whose targets haven't loaded yet still wears its snapshot
+  // name — the pill is announcing THAT computer, not the generic label.
+  return props.selectedSnapshotName || t('chat.continueOn.label')
 })
 
-// The native cloud workspace IS the default destination; only it gets the
-// collapsed icon trigger. Any real machine (or a non-default/ghost selection)
-// gets the labeled pill.
-const isDefaultTarget = computed(() => selectedTarget.value?.kind === 'native')
+// Only an explicit non-default selection earns the pill. No selection at all —
+// including the window before the targets query lands — renders the collapsed
+// default circle: otherwise every fresh welcome page flashes a "Continue on"
+// pill that collapses the moment the default target resolves.
+const isDefaultTarget = computed(() => (
+  selectedTarget.value
+    ? selectedTarget.value.kind === 'native'
+    : !props.selectedTargetId
+))
+
+// The pill form only exists on md+; on mobile the trigger always renders the
+// circle (see the header comment), so it must also PRESS and read like the
+// circle — same composer-circle-press, collapsed slot, hidden from SRs. This
+// is the single source of truth for which form is on screen.
+const isMobileShell = useIsMobile()
+const rendersAsPill = computed(() => !isDefaultTarget.value && !isMobileShell.value)
 
 function goToRuntimes(): void {
   void router.push({ name: 'runtimes' })

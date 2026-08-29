@@ -21,28 +21,28 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/agent/application"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/apperror"
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/local"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/runtimefence"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/slash"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/local"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/runtimefence"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 // localSpeechSynthesizer synthesizes text to speech audio.
@@ -874,20 +874,40 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
-// wsClientMessage carries the two identifiers a client is allowed to name, and
-// they are not interchangeable. invocation_id is minted by the client and names
-// an *intent*: it is the idempotency key for starting a turn, so a redelivered
-// send resolves to the run it already started instead of a second one. run_id is
-// minted by the server and names a *run*: it is the only way to address work
-// that already exists, which is why abort and decision responses carry it. A
-// client can never name a run it has not been told about.
+// wsClientMessage carries the three identifiers a client is allowed to name,
+// and they are not interchangeable.
+//
+// invocation_id is minted by the client and names an *intent*: it is the
+// idempotency key for starting a turn, so a redelivered send resolves to the
+// run it already started instead of a second one.
+//
+// run_id is minted by the server and names a *run*: it is the only way to
+// address work that is executing, which is why abort and decision responses
+// carry it.
+//
+// turn_id is minted by the server at admission and names a *round*: it is how
+// a client addresses a round it wants replaced. It is published while the run
+// is still streaming, which is what separates it from a stored message id —
+// that only exists once the round has been persisted, so a client that had to
+// name one could not act on the round it is looking at.
+//
+// A client can never name a run or a turn it has not been told about.
 type wsClientMessage struct {
-	Type              string                     `json:"type"`
-	RunID             string                     `json:"run_id,omitempty"`
-	Text              string                     `json:"text,omitempty"`
-	SessionID         string                     `json:"session_id,omitempty"`
-	InvocationID      string                     `json:"invocation_id,omitempty"`
-	ComposerScope     string                     `json:"composer_scope,omitempty"`
+	Type          string `json:"type"`
+	RunID         string `json:"run_id,omitempty"`
+	Text          string `json:"text,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	InvocationID  string `json:"invocation_id,omitempty"`
+	ComposerScope string `json:"composer_scope,omitempty"`
+	// TurnID names an existing round the client wants replaced (retry, edit).
+	TurnID string `json:"turn_id,omitempty"`
+	// MessageID is the pre-turn spelling of TurnID.
+	//
+	// Deprecated: accepted so a client shipped against the message-id contract
+	// keeps working after a server upgrade — the desktop app is distributed on
+	// its own cadence and does not update in lockstep with the server it
+	// connects to. The server resolves it to the round that contains it.
+	// Remove once the compatibility window closes.
 	MessageID         string                     `json:"message_id,omitempty"`
 	Attachments       []json.RawMessage          `json:"attachments,omitempty"`
 	RequestedSkills   []webRequestedSkill        `json:"requested_skills,omitempty"`
@@ -1178,9 +1198,53 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 	return "Bearer " + signed
 }
 
+// resolveWSTargetTurnID settles which round a replacement names. A turn id is
+// the contract; a message id is the pre-turn spelling and is resolved to its
+// round here, at the transport boundary, so nothing downstream has to know two
+// ways of naming a round.
+//
+// It reads session history, so every caller MUST authorize the session first.
+// Resolving before that would answer "does this message id belong to this
+// session" for a caller who cannot read the session at all, which is a
+// cross-session existence oracle even though no write follows it.
+//
+// The storage error is deliberately not returned: it names rows, and the
+// caller only needs to know that the id did not resolve. The cause is logged.
+//
+// Deprecated behaviour: the message_id branch exists only for clients shipped
+// before the turn-id contract. Remove it with the field.
+func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, sessionID, turnID, legacyMessageID string) (string, error) {
+	if turnID != "" {
+		return turnID, nil
+	}
+	legacy := strings.TrimSpace(legacyMessageID)
+	if legacy == "" {
+		return "", errors.New("turn_id is required")
+	}
+	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
+	if err != nil {
+		h.logger.Warn("resolve deprecated message_id failed",
+			slog.String("session_id", sessionID),
+			slog.Any("error", err),
+		)
+		return "", errors.New("message_id does not name a turn in this session")
+	}
+	return resolved, nil
+}
+
 func sendWSError(writer *wsWriter, ref wsTurnRef, message string) {
 	event := ref.event("error")
 	event.Message = message
+	writer.SendJSON(event)
+}
+
+func sendWSAgentError(writer *wsWriter, ref wsTurnRef, streamEvent native.StreamEvent) {
+	event := ref.event("error")
+	event.Code = strings.TrimSpace(streamEvent.Code)
+	event.Message = strings.TrimSpace(streamEvent.Error)
+	if event.Message == "" {
+		event.Message = "stream error"
+	}
 	writer.SendJSON(event)
 }
 
@@ -1348,11 +1412,7 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 			// its own: it names the run as failed but not what to tell this
 			// caller, which is still waiting on the send it made.
 			if streamEvent.Type == native.EventError {
-				message := strings.TrimSpace(streamEvent.Error)
-				if message == "" {
-					message = "stream error"
-				}
-				sendWSError(writer, ref, message)
+				sendWSAgentError(writer, ref, streamEvent)
 			}
 		}
 	}
@@ -1389,7 +1449,7 @@ type wsSubmission struct {
 	Kind      string `json:"kind"`
 	SessionID string `json:"session_id"`
 	Text      string `json:"text,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
 	// Attachments is a digest rather than the files themselves. Two submissions
 	// differ if their attachments differ, which is all the fingerprint needs,
 	// and the durable row does not carry inlined uploads to learn it.
@@ -1417,7 +1477,7 @@ func digestWSAttachments(attachments []json.RawMessage) string {
 func (s wsSubmission) encode() []byte {
 	payload, err := json.Marshal(s)
 	if err != nil {
-		return []byte(s.Kind + "\x00" + s.SessionID + "\x00" + s.Text + "\x00" + s.MessageID)
+		return []byte(s.Kind + "\x00" + s.SessionID + "\x00" + s.Text + "\x00" + s.TurnID)
 	}
 	return payload
 }
@@ -1522,12 +1582,22 @@ func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAd
 		message = string(apperror.CodeOf(runErr))
 	}
 	switch err := h.sessionRuntime.FinishRun(ctx, admission.Handle, status, message); {
+	case err == nil:
+		if h.agentService != nil && runErr != nil && !errors.Is(runErr, context.Canceled) {
+			h.agentService.EnsureTerminalContextLifecycle(
+				ctx,
+				admission.RunID,
+				admission.Handle.BotID,
+				admission.Handle.SessionID,
+				runErr,
+			)
+		}
 	case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
 		// Expected, not a failure: this process was superseded mid-run, so the
 		// terminal write was refused and the reaper names the outcome instead.
 		h.logger.Warn("skip finishing runtime run after ownership loss",
 			slog.String("run_id", admission.RunID))
-	case err != nil:
+	default:
 		h.logger.Error("finish runtime run failed",
 			slog.Any("error", err),
 			slog.String("run_id", admission.RunID),
@@ -1553,13 +1623,21 @@ func (h *LocalChannelHandler) abortWSRun(ctx context.Context, writer *wsWriter, 
 	ref := wsTurn(msg.InvocationID, sessionID).withRun(runID)
 
 	controller := h.sessionRuntimeController()
-	if controller == nil || sessionID == "" {
+	if sessionID == "" || (h.agentService == nil && controller == nil) {
 		if controlID != "" {
 			sendWSControlAck(writer, ref, "abort", controlID, false, "")
 		}
 		return
 	}
-	applied, err := controller.AbortControl(ctx, botID, sessionID, runID, controlID)
+	var (
+		applied bool
+		err     error
+	)
+	if h.agentService != nil {
+		applied, err = h.agentService.AbortRuntimeRun(ctx, botID, sessionID, runID, controlID)
+	} else {
+		applied, err = controller.AbortControl(ctx, botID, sessionID, runID, controlID)
+	}
 	if err != nil {
 		h.logger.Warn("route ws abort failed",
 			slog.Any("error", err),
@@ -2264,7 +2342,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		case "retry_message":
 			sessionID := strings.TrimSpace(msg.SessionID)
 			ref := wsTurn(msg.InvocationID, sessionID)
-			messageID := strings.TrimSpace(msg.MessageID)
+			targetTurnID := strings.TrimSpace(msg.TurnID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if ref.InvocationID == "" {
 				sendWSError(writer, ref, "invocation_id is required")
@@ -2272,10 +2350,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if sessionID == "" {
 				sendWSError(writer, ref, "session_id is required")
-				continue
-			}
-			if messageID == "" {
-				sendWSError(writer, ref, "message_id is required")
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2292,16 +2366,21 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					continue
 				}
 			}
+			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
+			if resolveErr != nil {
+				sendWSError(writer, ref, resolveErr.Error())
+				continue
+			}
 
 			retrySubmission := wsSubmission{
 				Kind:      "retry_message",
 				SessionID: sessionID,
-				MessageID: messageID,
+				TurnID:    targetTurnID,
 			}.encode()
 			retryInput := application.RetryLatestMessageInput{
 				BotID:                  botID,
 				SessionID:              sessionID,
-				MessageID:              messageID,
+				TargetTurnID:           targetTurnID,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
 				ChatToken:              bearerToken,
@@ -2313,7 +2392,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			retryAdmission := &wsReplacementAdmission{
 				kind: sessionruntime.RunOperationRetry,
 				prepareAnchor: func(ctx context.Context) (string, error) {
-					return h.agentService.PrepareRetryLatestMessageOperation(ctx, sessionID, messageID)
+					return h.agentService.PrepareRetryLatestTurnOperation(ctx, sessionID, targetTurnID)
 				},
 			}
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws retry stream error", retrySubmission, retryAdmission.build, nil,
@@ -2330,7 +2409,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			text := strings.TrimSpace(msg.Text)
 			sessionID := strings.TrimSpace(msg.SessionID)
 			ref := wsTurn(msg.InvocationID, sessionID)
-			messageID := strings.TrimSpace(msg.MessageID)
+			targetTurnID := strings.TrimSpace(msg.TurnID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if ref.InvocationID == "" {
 				sendWSError(writer, ref, "invocation_id is required")
@@ -2338,10 +2417,6 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			}
 			if sessionID == "" {
 				sendWSError(writer, ref, "session_id is required")
-				continue
-			}
-			if messageID == "" {
-				sendWSError(writer, ref, "message_id is required")
 				continue
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
@@ -2371,18 +2446,23 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					continue
 				}
 			}
+			targetTurnID, resolveErr := h.resolveWSTargetTurnID(c.Request().Context(), sessionID, targetTurnID, msg.MessageID)
+			if resolveErr != nil {
+				sendWSError(writer, ref, resolveErr.Error())
+				continue
+			}
 
 			editSubmission := wsSubmission{
 				Kind:        "edit_message",
 				SessionID:   sessionID,
 				Text:        text,
-				MessageID:   messageID,
+				TurnID:      targetTurnID,
 				Attachments: digestWSAttachments(msg.Attachments),
 			}.encode()
 			editInput := application.EditLatestMessageInput{
 				BotID:                  botID,
 				SessionID:              sessionID,
-				MessageID:              messageID,
+				TargetTurnID:           targetTurnID,
 				Text:                   text,
 				ActorChannelIdentityID: channelIdentityID,
 				ActorUserID:            channelIdentityID,
@@ -2397,7 +2477,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				botID:   botID,
 				kind:    sessionruntime.RunOperationEdit,
 				prepareAnchor: func(ctx context.Context) (string, error) {
-					return h.agentService.PrepareEditLatestMessageOperation(ctx, sessionID, messageID)
+					return h.agentService.PrepareEditLatestTurnOperation(ctx, sessionID, targetTurnID)
 				},
 				replacementUserTurn: &chatview.UITurn{
 					Role:         "user",

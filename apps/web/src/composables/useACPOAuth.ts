@@ -2,7 +2,6 @@ import { computed, onUnmounted, ref } from 'vue'
 import {
   getBotsByBotIdAcpClaudeCodeOauthAuthorize,
   getBotsByBotIdAcpClaudeCodeOauthStatus,
-  getBotsByBotIdAcpCodexOauthAuthorize,
   getBotsByBotIdAcpCodexOauthStatus,
   postBotsByBotIdAcpClaudeCodeOauthExchange,
   postBotsByBotIdAcpCodexOauthDeviceAuthorize,
@@ -31,12 +30,7 @@ interface OAuthStatusLoadOptions {
   silent?: boolean
 }
 
-interface AuthorizeCodexOptions {
-  timeoutMs?: number
-}
-
 type ACPCodexOAuthDeviceState = 'pending' | 'writing' | 'success' | 'error' | 'cancelled' | 'expired'
-export type ACPCodexDeviceOpenResult = 'opened' | 'popup_blocked' | 'copy_failed'
 
 export interface ACPCodexOAuthDeviceSession {
   bot_id: string
@@ -56,12 +50,17 @@ export interface ACPCodexOAuthDeviceSession {
  * Bot-scoped ACP OAuth flows for Codex and Claude Code, shared by the
  * bot settings card and the onboarding wizard. All endpoints require a live
  * bot + managed workspace, so `getBotId` must resolve to an existing bot id.
+ *
+ * Codex authorizes through the device-code flow only. The redirect/popup
+ * variant was removed from the product: it depended on a popup surviving the
+ * round trip (blocked in the desktop shell and by strict browsers) while the
+ * device code works from any surface, so keeping both only offered users a way
+ * to pick the one that fails.
  */
 export function useACPOAuth(getBotId: () => string) {
   const codexStatus = ref<ACPCodexOAuthStatus | null>(null)
   const codexStatusBotId = ref('')
   const codexStatusLoading = ref(false)
-  const authorizingCodex = ref(false)
   const authorizingCodexDevice = ref(false)
   const codexDeviceSession = ref<ACPCodexOAuthDeviceSession | null>(null)
 
@@ -79,10 +78,8 @@ export function useACPOAuth(getBotId: () => string) {
     return status === 'pending' || status === 'writing'
   })
 
-  const codexDeviceVerificationReady = computed(() => codexDevicePending.value)
-
   const codexAuthorizing = computed(() =>
-    authorizingCodex.value || authorizingCodexDevice.value || codexDevicePending.value,
+    authorizingCodexDevice.value || codexDevicePending.value,
   )
 
   function normalizeCodexStatus(data: HandlersAcpCodexOAuthStatus | undefined): ACPCodexOAuthStatus | null {
@@ -155,10 +152,6 @@ export function useACPOAuth(getBotId: () => string) {
     }
   }
 
-  // Teardown for an in-flight Codex authorize flow (listener + poll timer). Set
-  // while a flow runs, invoked on a new flow, on finish, and on unmount so the
-  // 120s poll and message listener never outlive the component.
-  let cancelCodexFlow: (() => void) | null = null
   let codexDevicePollTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   let codexDeviceGeneration = 0
 
@@ -287,113 +280,9 @@ export function useACPOAuth(getBotId: () => string) {
     }
   }
 
-  /** Opens the Codex authorize popup and polls status until a token is stored. */
-  async function authorizeCodex(options: AuthorizeCodexOptions = {}): Promise<boolean> {
-    const botId = getBotId()
-    if (!botId) return false
-    const timeoutMs = options.timeoutMs ?? 120_000
-    cancelCodexFlow?.()
-    clearCodexDeviceAuthorization()
-    authorizingCodex.value = true
-    try {
-      const { data } = await getBotsByBotIdAcpCodexOauthAuthorize({
-        path: { bot_id: botId },
-        throwOnError: true,
-      })
-      if (!data?.auth_url) throw new Error('authorize failed')
-      if (botId !== getBotId()) {
-        authorizingCodex.value = false
-        return false
-      }
-      const popup = window.open(data.auth_url, 'acp-codex-oauth', 'width=600,height=720')
-      if (!popup) {
-        authorizingCodex.value = false
-        return false
-      }
-      return await new Promise<boolean>((resolve) => {
-        const startedAt = Date.now()
-        let completed = false
-        let timer = 0
-        const teardown = () => {
-          window.removeEventListener('message', listener)
-          if (timer) window.clearTimeout(timer)
-          cancelCodexFlow = null
-        }
-        const finish = async (success: boolean) => {
-          if (completed) return
-          completed = true
-          teardown()
-          popup?.close()
-          const stillCurrent = botId === getBotId()
-          if (success && stillCurrent) await loadCodexStatus()
-          authorizingCodex.value = false
-          resolve(success && stillCurrent)
-        }
-        // Abrupt cancel (component unmount / new flow): stop without a status
-        // refetch and resolve false.
-        cancelCodexFlow = () => {
-          if (completed) return
-          completed = true
-          teardown()
-          popup?.close()
-          authorizingCodex.value = false
-          resolve(false)
-        }
-        const poll = () => {
-          timer = window.setTimeout(() => {
-            void (async () => {
-              if (completed) return
-              if (botId !== getBotId()) {
-                await finish(false)
-                return
-              }
-              const status = await loadCodexStatus()
-              if (botId !== getBotId()) {
-                await finish(false)
-                return
-              }
-              if (status?.has_token) {
-                await finish(true)
-                return
-              }
-              // The popup is gone (user closed it, or the success page closed
-              // itself). Re-check status once more so we don't miss a token that
-              // was stored right as the window closed, then stop polling.
-              if (popup?.closed) {
-                const finalStatus = await loadCodexStatus()
-                if (botId !== getBotId()) {
-                  await finish(false)
-                  return
-                }
-                await finish(!!finalStatus?.has_token)
-                return
-              }
-              if (Date.now() - startedAt < timeoutMs) poll()
-              else await finish(false)
-            })()
-          }, 1_500)
-        }
-        const listener = (event: MessageEvent) => {
-          // Only trust same-origin success pings; cross-origin (e.g. desktop)
-          // still completes via the status poll above.
-          if (event.origin !== window.location.origin) return
-          if (event.data?.type === 'memoh-acp-codex-oauth-success' && event.data?.botId === botId) {
-            void finish(true)
-          }
-        }
-        window.addEventListener('message', listener)
-        poll()
-      })
-    } catch {
-      authorizingCodex.value = false
-      return false
-    }
-  }
-
   async function authorizeCodexDevice(): Promise<boolean> {
     const botId = getBotId()
     if (!botId) return false
-    cancelCodexFlow?.()
     clearCodexDeviceAuthorization()
     authorizingCodexDevice.value = true
     try {
@@ -435,28 +324,6 @@ export function useACPOAuth(getBotId: () => string) {
       if (session.bot_id === getBotId()) codexDeviceSession.value = null
       return false
     }
-  }
-
-  async function openCodexDeviceVerification(copyText: (text: string) => Promise<boolean>): Promise<ACPCodexDeviceOpenResult> {
-    const session = codexDeviceSession.value
-    if (!session || session.bot_id !== getBotId() || !codexDeviceVerificationReady.value) return 'copy_failed'
-    const userCode = session?.user_code?.trim()
-    const verificationURL = session?.verification_url?.trim()
-    if (!userCode || !verificationURL) return 'copy_failed'
-
-    const popup = window.open('', 'acp-codex-device-oauth', 'width=960,height=720')
-    const copied = await copyText(userCode)
-    if (!copied) {
-      popup?.close()
-      return 'copy_failed'
-    }
-    if (popup) {
-      popup.location.href = verificationURL
-      popup.focus()
-      return 'opened'
-    }
-    const fallback = window.open(verificationURL, '_blank', 'width=960,height=720')
-    return fallback ? 'opened' : 'popup_blocked'
   }
 
   /** Opens the Claude Code authorize popup; the user then pastes the code into `exchangeClaude`. */
@@ -506,7 +373,6 @@ export function useACPOAuth(getBotId: () => string) {
   }
 
   onUnmounted(() => {
-    cancelCodexFlow?.()
     const deviceSession = codexDeviceSession.value
     clearCodexDeviceAuthorization()
     if (deviceSession) void cancelCodexDeviceSessionOnServer(deviceSession)
@@ -515,12 +381,10 @@ export function useACPOAuth(getBotId: () => string) {
   return {
     codexStatus,
     codexStatusLoading,
-    authorizingCodex,
     authorizingCodexDevice,
     codexAuthorizing,
     codexDeviceSession,
     codexDevicePending,
-    codexDeviceVerificationReady,
     claudeStatus,
     claudeStatusLoading,
     authorizingClaude,
@@ -528,11 +392,9 @@ export function useACPOAuth(getBotId: () => string) {
     claudeSessionId,
     loadCodexStatus,
     loadClaudeStatus,
-    authorizeCodex,
     authorizeCodexDevice,
     cancelCodexDeviceAuthorization,
     clearCodexDeviceAuthorization,
-    openCodexDeviceVerification,
     authorizeClaude,
     exchangeClaude,
   }

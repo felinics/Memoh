@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/models"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/models"
 )
 
 const actionTypeCallback = "callback"
@@ -43,13 +43,10 @@ func reasoningLabel(t *i18n.Localizer, cc command.CurrentContext) string {
 	return reasoning
 }
 
-// appendCurrentContextLines adds the model/heartbeat/reasoning/context summary
+// appendCurrentContextLines adds the model/reasoning/context summary
 // shown after /new resets a session.
 func appendCurrentContextLines(b *strings.Builder, t *i18n.Localizer, cc command.CurrentContext) {
 	fmt.Fprintf(b, "\n\n- %s: %s", t.T("newSession.labelModel"), cc.ChatModel)
-	if hb := strings.TrimSpace(cc.HeartbeatModel); hb != "" && hb != t.T("cmd.common.none") {
-		fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelHeartbeat"), hb)
-	}
 	fmt.Fprintf(b, "\n- %s: %s", t.T("newSession.labelReasoning"), reasoningLabel(t, cc))
 	if cw := strings.TrimSpace(cc.ContextWindow); cw != "" {
 		fmt.Fprintf(b, "\n- %s: %s %s", t.T("newSession.labelContext"), cw, t.T("newSession.contextUnit"))

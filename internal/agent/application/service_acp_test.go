@@ -11,30 +11,231 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/event"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/settings"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 const (
 	storeRoundBotID            = "11111111-1111-1111-1111-111111111111"
 	storeRoundMemoryProviderID = "22222222-2222-2222-2222-222222222222"
 )
+
+func newACPLifecycleService(
+	t *testing.T,
+	pool acpPrompter,
+	messages messagepkg.Service,
+	lifecycles contextLifecycleStore,
+) *Service {
+	t.Helper()
+	return &Service{
+		messageService:    messages,
+		contextLifecycles: lifecycles,
+		acpPool:           pool,
+		botPermissions:    allowWorkspaceExecForBot(lifecycleTestBotID, "user-1"),
+		sessionService: &fakeBackgroundSessionService{
+			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
+				return session.Thread{
+					ID:    sessionID,
+					BotID: lifecycleTestBotID,
+					Type:  session.TypeACPAgent,
+					Metadata: map[string]any{
+						"acp_agent_id":             "codex",
+						"project_path":             "/data/app",
+						"runtime_owner_account_id": "user-1",
+					},
+				}, nil
+			},
+		},
+		logger: slog.New(slog.DiscardHandler),
+	}
+}
+
+func requireACPLifecycle(
+	t *testing.T,
+	store *recordingContextLifecycleStore,
+	wantRunID, wantStatus string,
+) (sqlc.CreateContextLifecycleParams, contextfrag.LifecycleSnapshot) {
+	t.Helper()
+	if len(store.creates) != 1 {
+		t.Fatalf("CreateContextLifecycle calls = %d, want 1", len(store.creates))
+	}
+	row := store.creates[0]
+	if got := pgUUIDString(row.RunID); got != wantRunID {
+		t.Fatalf("lifecycle RunID = %q, want %q", got, wantRunID)
+	}
+	if row.Status != wantStatus {
+		t.Fatalf("lifecycle status = %q, want %q", row.Status, wantStatus)
+	}
+	var snapshot contextfrag.LifecycleSnapshot
+	if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
+		t.Fatalf("decode lifecycle snapshot: %v", err)
+	}
+	return row, snapshot
+}
+
+func TestStreamACPAgentWSPersistsMinimalCompletedLifecycle(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"}}
+	messages := &recordingMessageService{}
+	lifecycles := &recordingContextLifecycleStore{}
+	service := newACPLifecycleService(t, pool, messages, lifecycles)
+
+	err := service.streamACPAgentWS(context.Background(), ChatRequest{
+		BotID:    lifecycleTestBotID,
+		ThreadID: lifecycleTestSessionID,
+		RunID:    lifecycleTestRunID,
+		Query:    "PRIVATE_ACP_PROMPT",
+	}, make(chan WSStreamEvent, 8), make(chan struct{}))
+	if err != nil {
+		t.Fatalf("streamACPAgentWS() error = %v", err)
+	}
+	if pool.input.RunID != lifecycleTestRunID {
+		t.Fatalf("ACP prompt RunID = %q, want admitted RunID %q", pool.input.RunID, lifecycleTestRunID)
+	}
+	row, snapshot := requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusCompleted)
+	if row.ErrorCode.Valid {
+		t.Fatalf("completed lifecycle error code = %#v, want none", row.ErrorCode)
+	}
+	if snapshot.Version != 1 || snapshot.View != "" || snapshot.Counts != (contextfrag.ManifestCounts{}) {
+		t.Fatalf("minimal ACP snapshot = %#v, want empty legacy-context accounting", snapshot)
+	}
+	if snapshot.AssistantMessageID != "message-id" {
+		t.Fatalf("assistant message ID = %q, want message-id", snapshot.AssistantMessageID)
+	}
+	if strings.Contains(string(row.Snapshot), "PRIVATE_ACP_PROMPT") {
+		t.Fatalf("content-light lifecycle leaked prompt: %s", row.Snapshot)
+	}
+	last := messages.persisted[len(messages.persisted)-1]
+	if _, ok := last.Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot); !ok {
+		t.Fatalf("assistant lifecycle metadata = %#v, want snapshot", last.Metadata)
+	}
+}
+
+func TestStreamACPAgentWSMintsRunIdentityAtDirectBoundary(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done"}}
+	lifecycles := &recordingContextLifecycleStore{}
+	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
+
+	if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+		BotID:    lifecycleTestBotID,
+		ThreadID: lifecycleTestSessionID,
+		Query:    "inspect",
+	}, make(chan WSStreamEvent, 8), make(chan struct{})); err != nil {
+		t.Fatalf("streamACPAgentWS() error = %v", err)
+	}
+	if _, err := uuid.Parse(pool.input.RunID); err != nil {
+		t.Fatalf("ACP prompt RunID = %q, want minted UUID: %v", pool.input.RunID, err)
+	}
+	requireACPLifecycle(t, lifecycles, pool.input.RunID, contextLifecycleStatusCompleted)
+}
+
+func TestStreamACPAgentWSProviderFailurePersistsFailedLifecycle(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{err: errors.New("PRIVATE_ACP_PROVIDER_FAILURE")}
+	lifecycles := &recordingContextLifecycleStore{}
+	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
+
+	if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+		BotID:    lifecycleTestBotID,
+		ThreadID: lifecycleTestSessionID,
+		RunID:    lifecycleTestRunID,
+		Query:    "inspect",
+	}, make(chan WSStreamEvent, 8), make(chan struct{})); err != nil {
+		t.Fatalf("streamACPAgentWS() error = %v", err)
+	}
+	row, _ := requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusFailedProvider)
+	if row.ErrorCode.Valid {
+		t.Fatalf("private provider failure became stable error code: %#v", row.ErrorCode)
+	}
+	if strings.Contains(string(row.Snapshot), "PRIVATE_ACP_PROVIDER_FAILURE") {
+		t.Fatalf("content-light lifecycle leaked provider diagnostic: %s", row.Snapshot)
+	}
+}
+
+func TestStreamACPAgentWSExplicitAbortPersistsAbortedLifecycle(t *testing.T) {
+	started := make(chan struct{})
+	pool := &recordingACPPrompter{
+		promptFn: func(ctx context.Context, _ acpagent.PromptInput) (acpclient.PromptResult, error) {
+			close(started)
+			<-ctx.Done()
+			return acpclient.PromptResult{}, context.Cause(ctx)
+		},
+	}
+	lifecycles := &recordingContextLifecycleStore{}
+	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
+	abortCh := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- service.streamACPAgentWS(context.Background(), ChatRequest{
+			BotID:    lifecycleTestBotID,
+			ThreadID: lifecycleTestSessionID,
+			RunID:    lifecycleTestRunID,
+			Query:    "inspect",
+		}, make(chan WSStreamEvent, 8), abortCh)
+	}()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ACP prompt did not start")
+	}
+	close(abortCh)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("streamACPAgentWS() error = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("aborted ACP prompt did not return")
+	}
+	requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusAborted)
+}
+
+func TestStreamACPAgentWSTransformedConfigFailurePersistsStableCode(t *testing.T) {
+	t.Parallel()
+
+	pool := &recordingACPPrompter{err: fmt.Errorf("%w: PRIVATE_CONFIG_DETAIL", acpclient.ErrModelUnavailable)}
+	lifecycles := &recordingContextLifecycleStore{}
+	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
+
+	err := service.streamACPAgentWS(context.Background(), ChatRequest{
+		BotID:    lifecycleTestBotID,
+		ThreadID: lifecycleTestSessionID,
+		RunID:    lifecycleTestRunID,
+		Query:    "inspect",
+	}, make(chan WSStreamEvent, 8), make(chan struct{}))
+	if got := apperror.CodeOf(err); got != apperror.CodeACPModelUnavailable {
+		t.Fatalf("streamACPAgentWS() code = %q, want %q", got, apperror.CodeACPModelUnavailable)
+	}
+	row, _ := requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusFailedProvider)
+	if !row.ErrorCode.Valid || row.ErrorCode.String != string(apperror.CodeACPModelUnavailable) {
+		t.Fatalf("lifecycle error code = %#v, want %q", row.ErrorCode, apperror.CodeACPModelUnavailable)
+	}
+	if strings.Contains(string(row.Snapshot), "PRIVATE_CONFIG_DETAIL") {
+		t.Fatalf("content-light lifecycle leaked config diagnostic: %s", row.Snapshot)
+	}
+}
 
 func TestStreamChatWSRoutesACPAgentSessionToACPPool(t *testing.T) {
 	t.Parallel()
@@ -939,6 +1140,9 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 			StopReason: "end_turn",
 		}),
 		nil,
+		true,
+		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound returned error: %v", err)
@@ -956,6 +1160,16 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	}
 	if assistantMeta["stop_reason"] != "end_turn" {
 		t.Fatalf("stop_reason = %#v, want end_turn", assistantMeta["stop_reason"])
+	}
+	if assistantMeta["acp_turn_outcome"] != "succeeded" {
+		t.Fatalf("ACP outcome metadata = %#v", assistantMeta)
+	}
+	if len(messages.roundOptions) == 0 {
+		t.Fatal("round persisted without atomic options")
+	}
+	publication := messages.roundOptions[len(messages.roundOptions)-1].ACPPublication
+	if publication == nil || publication.CheckpointReset {
+		t.Fatalf("ACP publication = %#v, want resumable checkpoint", publication)
 	}
 }
 
@@ -993,6 +1207,9 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 			StopReason: "end_turn",
 		}),
 		nil,
+		true,
+		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound returned error: %v", err)
@@ -1027,6 +1244,59 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	if got := after.TextContent(); got != "After" {
 		t.Fatalf("last assistant text = %q, want After", got)
 	}
+	if messages.persisted[1].Metadata["acp_turn_outcome"] != nil {
+		t.Fatalf("intermediate assistant unexpectedly claims the turn outcome: %#v", messages.persisted[1].Metadata)
+	}
+	if messages.persisted[3].Metadata["acp_turn_outcome"] != "succeeded" {
+		t.Fatalf("final assistant outcome metadata = %#v", messages.persisted[3].Metadata)
+	}
+	publication := messages.roundOptions[len(messages.roundOptions)-1].ACPPublication
+	if publication == nil || publication.CheckpointReset {
+		t.Fatalf("ACP publication = %#v, want resumable checkpoint", publication)
+	}
+}
+
+func TestPersistACPRoundAttachesLifecycleOnlyToFinalAssistant(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	service := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetManifest(contextfrag.BuildManifest(nil))
+
+	err := service.persistACPRound(
+		context.Background(),
+		ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "inspect"},
+		"codex",
+		"/data/app",
+		withTranscriptOutput(acpclient.PromptResult{
+			Events: []event.StreamEvent{
+				{Type: event.TextDelta, Delta: "Before"},
+				{Type: event.ToolCallStart, ToolCallID: "read-1", ToolName: "read"},
+				{Type: event.ToolCallEnd, ToolCallID: "read-1", ToolName: "read", Result: map[string]any{"ok": true}},
+				{Type: event.TextDelta, Delta: "After"},
+			},
+		}),
+		nil,
+		true,
+		holder,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("persistACPRound() error = %v", err)
+	}
+	if len(messages.persisted) != 4 {
+		t.Fatalf("persisted messages = %d, want user + assistant + tool + assistant", len(messages.persisted))
+	}
+	if _, ok := messages.persisted[1].Metadata[contextfrag.MetadataContextLifecycleKey]; ok {
+		t.Fatalf("first assistant lifecycle metadata leaked from final assistant: %#v", messages.persisted[1].Metadata)
+	}
+	if _, ok := messages.persisted[3].Metadata[contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot); !ok {
+		t.Fatalf("final assistant lifecycle metadata = %#v, want snapshot", messages.persisted[3].Metadata)
+	}
 }
 
 func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
@@ -1051,6 +1321,12 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 			StopReason: "end_turn",
 		}),
 		nil,
+		true,
+		nil,
+		[]messagepkg.ReasoningTimingSegment{{
+			DurationMS: 2000,
+			State:      "completed",
+		}},
 	)
 	if err != nil {
 		t.Fatalf("persistACPRound returned error: %v", err)
@@ -1065,6 +1341,10 @@ func TestPersistACPRoundStoresACPThoughtsAsReasoningParts(t *testing.T) {
 	parts := assistant.ContentParts()
 	if len(parts) < 2 || parts[0].Type != "reasoning" || parts[0].Text != "I should inspect first." {
 		t.Fatalf("assistant parts = %#v, want leading reasoning part", parts)
+	}
+	segments := messagepkg.ReasoningTimingFromMetadata(messages.persisted[1].Metadata)
+	if len(segments) != 1 || segments[0].DurationMS != 2000 {
+		t.Fatalf("assistant reasoning timing = %#v", segments)
 	}
 }
 
@@ -1082,6 +1362,9 @@ func TestPersistACPRoundEmptyTextLeavesAssistantBlank(t *testing.T) {
 		"codex",
 		"/data/app",
 		acpclient.PromptResult{},
+		nil,
+		true,
+		nil,
 		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
@@ -1113,6 +1396,9 @@ func TestPersistACPRoundEmptyOutputKeepsUsage(t *testing.T) {
 				OutputTokens: 4,
 			},
 		},
+		nil,
+		true,
+		nil,
 		nil,
 	); err != nil {
 		t.Fatalf("persistACPRound() error = %v", err)
@@ -1185,6 +1471,12 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	}
 	if got, _ := messages.persisted[1].Metadata["error_code"].(string); got != "acp_runtime_prompt_failed" {
 		t.Fatalf("assistant error code metadata = %#v", messages.persisted[1].Metadata)
+	}
+	if got := messages.persisted[1].Metadata["acp_turn_outcome"]; got != "failed" {
+		t.Fatalf("assistant failure outcome = %#v, want failed", got)
+	}
+	if publication := messages.roundOptions[len(messages.roundOptions)-1].ACPPublication; publication != nil {
+		t.Fatalf("failed turn unexpectedly published head: %#v", publication)
 	}
 	events := drainAgentEvents(t, eventCh)
 	abort := requireStreamEvent(t, events, native.EventAbort)
@@ -1330,33 +1622,16 @@ func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
 		nil,
 	)
 	pool := &recordingACPPrompter{err: feedback}
-	resolver := &Service{
-		messageService: messages,
-		acpPool:        pool,
-		botPermissions: allowWorkspaceExecFor("user-1"),
-		sessionService: &fakeBackgroundSessionService{
-			getFn: func(_ context.Context, sessionID string) (session.Thread, error) {
-				return session.Thread{
-					ID:    sessionID,
-					BotID: "bot-1",
-					Type:  session.TypeACPAgent,
-					Metadata: map[string]any{
-						"acp_agent_id":             "codex",
-						"project_path":             "/data/app",
-						"runtime_owner_account_id": "user-1",
-					},
-				}, nil
-			},
-		},
-		logger: slog.New(slog.DiscardHandler),
-	}
+	lifecycles := &recordingContextLifecycleStore{}
+	resolver := newACPLifecycleService(t, pool, messages, lifecycles)
 
 	eventCh := make(chan WSStreamEvent, 8)
 	err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
-			BotID:    "bot-1",
-			ThreadID: "session-1",
+			BotID:    lifecycleTestBotID,
+			ThreadID: lifecycleTestSessionID,
+			RunID:    lifecycleTestRunID,
 			Query:    "inspect",
 		},
 		eventCh,
@@ -1371,6 +1646,7 @@ func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
 	if len(messages.deleted) != 1 || !slices.Equal(messages.deleted[0], []string{"message-id"}) {
 		t.Fatalf("cleanup calls = %#v, want staged user deletion", messages.deleted)
 	}
+	requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusFailedProvider)
 	events := drainAgentEvents(t, eventCh)
 	if !containsStreamEvent(events, native.EventStart) || containsStreamEvent(events, native.EventAbort) {
 		t.Fatalf("events = %#v, want only startup event before feedback return", events)
@@ -1829,9 +2105,12 @@ type recordingACPPrompter struct {
 	input        acpagent.PromptInput
 	result       acpclient.PromptResult
 	err          error
+	promptFn     func(context.Context, acpagent.PromptInput) (acpclient.PromptResult, error)
 	onPrompt     func()
 	streamEvents []event.StreamEvent
 	afterEvents  func()
+	closed       []string
+	closeErr     error
 }
 
 type storeRoundMemoryProvider struct {
@@ -1857,7 +2136,6 @@ func (*storeRoundSettingsQueries) GetSettingsByBotID(_ context.Context, botID pg
 		BotID:                   botID,
 		Language:                "auto",
 		ReasoningEffort:         "medium",
-		HeartbeatInterval:       30,
 		CompactionTargetPercent: pgtype.Int4{},
 		MemoryProviderID:        flowTestUUID(storeRoundMemoryProviderID),
 	}, nil
@@ -1871,9 +2149,12 @@ func flowTestUUID(value string) pgtype.UUID {
 	return out
 }
 
-func (p *recordingACPPrompter) Prompt(_ context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error) {
+func (p *recordingACPPrompter) Prompt(ctx context.Context, input acpagent.PromptInput) (acpclient.PromptResult, error) {
 	p.calls++
 	p.input = input
+	if p.promptFn != nil {
+		return p.promptFn(ctx, input)
+	}
 	if p.onPrompt != nil {
 		p.onPrompt()
 	}
@@ -1890,6 +2171,11 @@ func (p *recordingACPPrompter) Prompt(_ context.Context, input acpagent.PromptIn
 		p.afterEvents()
 	}
 	return p.result, p.err
+}
+
+func (p *recordingACPPrompter) CloseSession(sessionID string) error {
+	p.closed = append(p.closed, sessionID)
+	return p.closeErr
 }
 
 type fakeBotPermissionChecker struct {
@@ -2071,6 +2357,7 @@ func transcriptModelMessages(result acpclient.PromptResult) []ModelMessage {
 // withTranscriptOutput fills PromptResult.Output from streamed events.
 func withTranscriptOutput(result acpclient.PromptResult) acpclient.PromptResult {
 	result.Output = acpclient.TranscriptFromEvents(result.Events, result.Text)
+	result.CheckpointStaged = true
 	return result
 }
 

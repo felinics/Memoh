@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // recoverWaitingDecision transfers a parked run whose owner lease expired.
@@ -131,7 +131,7 @@ func (m *Manager) reserveRecoveredWaitingDecision(ctx context.Context, run ledge
 		BotID: run.BotID, SessionID: run.SessionID, RunID: run.RunID,
 		TurnID: run.TurnID, Generation: generation, FencingToken: run.FencingToken,
 	}.normalized()
-	lifecycleBase := runtimefence.WithContext(context.Background(), runtimefence.Fence{
+	lifecycleBase := runtimefence.WithContext(context.WithoutCancel(ctx), runtimefence.Fence{
 		BotID: handle.BotID, SessionID: handle.SessionID, Token: handle.FencingToken,
 	})
 	lifecycleCtx, lifecycleCancel := context.WithCancel(lifecycleBase)

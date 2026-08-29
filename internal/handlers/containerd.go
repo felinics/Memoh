@@ -15,16 +15,16 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	displaypkg "github.com/memohai/memoh/internal/display"
-	"github.com/memohai/memoh/internal/httpx"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	displaypkg "github.com/felinics/memoh/internal/display"
+	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type ContainerdHandler struct {
@@ -40,7 +40,6 @@ type ContainerdHandler struct {
 	botService       *bots.Service
 	accountService   *accounts.Service
 	policyService    *policy.Service
-	pluginService    PluginInstallationLister
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
 }

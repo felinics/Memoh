@@ -82,7 +82,7 @@ const props = defineProps<{
   queueSize: number
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const chatStore = useChatStore()
 const chatViewTarget = useChatViewTarget()
 
@@ -118,8 +118,11 @@ const approvalTitle = computed(() => {
   if (isPermissionRequest.value) {
     return permissionTitle.value || t('chat.approval.permissionRequest')
   }
-  if (block.value.toolName === 'exec') return t('bots.toolApproval.toolNames.exec')
-  if (block.value.toolName === 'write') return t('bots.toolApproval.toolNames.write')
+  // An approval names the capability being granted ("Shell command"), not the
+  // per-call verb, whenever the tool has such a name; the rest fall back to the
+  // row label.
+  const capabilityKey = `bots.toolApproval.toolNames.${block.value.toolName}`
+  if (te(capabilityKey)) return t(capabilityKey)
   return actionLabel.value
 })
 const displayTarget = computed(() => {

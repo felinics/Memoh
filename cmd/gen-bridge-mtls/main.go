@@ -20,7 +20,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/config"
+	"github.com/felinics/memoh/internal/config"
 )
 
 const (

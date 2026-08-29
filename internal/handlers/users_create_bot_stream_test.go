@@ -15,16 +15,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
@@ -558,7 +558,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		metadata = []byte(`{}`)
 	}
 	return &createBotStreamRow{scanFunc: func(dest ...any) error {
-		if len(dest) < 19 {
+		if len(dest) < 16 {
 			return pgx.ErrNoRows
 		}
 		*dest[0].(*pgtype.UUID) = botID
@@ -574,22 +574,19 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[13].(*bool) = false
-		*dest[14].(*int32) = 30
-		*dest[15].(*string) = ""
-		if len(dest) == 19 {
-			*dest[16].(*[]byte) = append([]byte(nil), metadata...)
-			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+		if len(dest) == 16 {
+			*dest[13].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+			*dest[15].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			return nil
 		}
-		*dest[16].(*bool) = false
-		*dest[17].(*int32) = 200
-		*dest[18].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
-		*dest[19].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[20].(*[]byte) = append([]byte(nil), metadata...)
-		*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-		*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+		*dest[13].(*bool) = false
+		*dest[14].(*int32) = 200
+		*dest[15].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
+		*dest[16].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+		*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		return nil
 	}}
 }

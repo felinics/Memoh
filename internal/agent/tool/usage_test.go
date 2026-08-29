@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 type usageTestResolver struct{}
@@ -273,7 +273,7 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 		t.Fatalf("Usage should not expose Telegram Markdown math guidance for non-Telegram sessions, got:\n%s", got)
 	}
 
-	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
+	backgroundSession := SessionContext{SessionType: sessionmode.Schedule, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))
 	if strings.Contains(got, "Omit `target`") || strings.Contains(got, "unless the current conversation target is explicit") || !strings.Contains(got, "Specify `platform` and `target`") {
 		t.Fatalf("Usage for background reactions should require explicit target, got:\n%s", got)
@@ -302,7 +302,7 @@ func TestMessageProviderToolDescriptionsGateCurrentConversationTarget(t *testing
 	}
 
 	backgroundTools, err := provider.Tools(context.Background(), SessionContext{
-		SessionType:     sessionmode.Heartbeat,
+		SessionType:     sessionmode.Schedule,
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "chat-1",
 	})
@@ -737,6 +737,12 @@ func TestMemoryProviderUsageGatesSearchMemory(t *testing.T) {
 	for _, want := range []string{"`search_memory`", "durable user preferences", "prior conversations", "latest user message"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with search_memory should mention %q, got:\n%s", want, got)
+		}
+	}
+	got = provider.Usage(context.Background(), SessionContext{}, availableToolsForTest(ToolSearchMemory(), ToolGetMessages()))
+	for _, want := range []string{"`source_refs`", "`get_messages`", "`session_id`", "`message_id`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage with memory/history drill-down should mention %q, got:\n%s", want, got)
 		}
 	}
 }

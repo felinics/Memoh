@@ -6,27 +6,28 @@ import (
 	"strings"
 	"testing"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 // fakeLLM implements adapters.LLM for testing the formation pipeline.
 type fakeLLM struct {
-	extractFacts  []string
-	extractErr    error
-	decideActions []adapters.DecisionAction
-	decideErr     error
-	compactFacts  []string
-	compactErr    error
-	compactFunc   func(adapters.CompactRequest) adapters.CompactResponse
-	extractCalls  int
-	decideCalls   int
-	compactCalls  int
-	compactReqs   []adapters.CompactRequest
+	extractFacts       []string
+	extractFactSources [][]string
+	extractErr         error
+	decideActions      []adapters.DecisionAction
+	decideErr          error
+	compactFacts       []string
+	compactErr         error
+	compactFunc        func(adapters.CompactRequest) adapters.CompactResponse
+	extractCalls       int
+	decideCalls        int
+	compactCalls       int
+	compactReqs        []adapters.CompactRequest
 }
 
 func (f *fakeLLM) Extract(_ context.Context, _ adapters.ExtractRequest) (adapters.ExtractResponse, error) {
 	f.extractCalls++
-	return adapters.ExtractResponse{Facts: f.extractFacts}, f.extractErr
+	return adapters.ExtractResponse{Facts: f.extractFacts, FactSourceMessageIDs: f.extractFactSources}, f.extractErr
 }
 
 func (f *fakeLLM) Decide(_ context.Context, _ adapters.DecideRequest) (adapters.DecideResponse, error) {

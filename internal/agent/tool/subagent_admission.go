@@ -7,9 +7,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
+
+// SubagentTerminal is the terminal audit data returned to the application
+// boundary after the subagent's internal retry loop has ended.
+type SubagentTerminal struct {
+	Cause            error
+	ContextLifecycle *contextfrag.LifecycleSnapshot
+	OutcomeResolved  bool
+	Outcome          SpawnAttemptDisposition
+}
 
 // SubagentAdmitter is the durable admission gate a spawned agent's turn passes
 // through before it executes.
@@ -26,7 +36,7 @@ type SubagentAdmitter interface {
 	// slot, or an error naming why nothing was started. turn.ErrSessionBusy
 	// means the agent is already working; turn.ErrDuplicateTurn means this
 	// task already has a run.
-	AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(error), error)
+	AdmitSubagentRun(ctx context.Context, botID, threadID, invocationID string, submission []byte) (context.Context, SubagentAdmission, func(SubagentTerminal), error)
 }
 
 // SubagentAdmission names what admission allocated for the run. The turn
@@ -76,18 +86,29 @@ func (p *SpawnProvider) admitAgentRun(ctx context.Context, req *agentRequest) (c
 	}
 	req.admission = admission
 	return runCtx, func(result agentRunResult) {
-		if result.Status == string(background.TaskKilled) {
-			// A kill cancels the run's context, which is what the terminal write
-			// reads to record an abort. Passing the cancellation as an error
-			// instead would file a deliberate stop as a failure.
-			finish(nil)
+		terminal := SubagentTerminal{
+			Cause:            result.Cause,
+			ContextLifecycle: result.ContextLifecycle,
+			OutcomeResolved:  result.AttemptResolved,
+			Outcome:          result.AttemptOutcome,
+		}
+		if result.AttemptResolved && result.AttemptOutcome == SpawnAttemptAbort {
+			terminal.Cause = nil
+			finish(terminal)
 			return
 		}
-		if strings.TrimSpace(result.Error) != "" {
-			finish(errors.New(result.Error))
+		if !result.AttemptResolved && result.Status == string(background.TaskKilled) {
+			// A kill is named by the admitted context cancellation, not by a
+			// provider error that may have raced it. The application boundary reads
+			// that owning context before it records the abort.
+			terminal.Cause = nil
+			finish(terminal)
 			return
 		}
-		finish(nil)
+		if terminal.Cause == nil && strings.TrimSpace(result.Error) != "" {
+			terminal.Cause = errors.New(result.Error)
+		}
+		finish(terminal)
 	}, nil
 }
 

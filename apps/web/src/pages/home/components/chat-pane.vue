@@ -1,5 +1,9 @@
 <template>
-  <div class="flex-1 flex flex-col h-full min-w-0 relative">
+  <div
+    ref="rootEl"
+    class="flex-1 flex flex-col h-full min-w-0 relative"
+    v-on="dropHandlers"
+  >
     <div
       v-if="!currentBotId"
       class="flex-1"
@@ -105,8 +109,8 @@
                       :on-open-media="galleryOpenBySrc"
                       :on-reply-click="handleReplyJump"
                       :on-retry-message="handleRetryMessage"
-                      :can-retry-latest-assistant="latestRetryableAssistantId === ((msg.serverId ?? msg.id).trim())"
-                      :can-edit-latest-user="latestEditableUserId === ((msg.serverId ?? msg.id).trim())"
+                      :can-retry-latest-assistant="isRetryableTurn(msg)"
+                      :can-edit-latest-user="isEditableTurn(msg)"
                       :can-fork-assistant="canForkAssistant"
                       :is-scrolling="isScrolling"
                       :is-last-message="msg.id === lastMessageId"
@@ -160,7 +164,7 @@
 
       <ChatForkDialog
         v-model:open="forkDialogOpen"
-        :message-id="pendingForkMessageId"
+        :turn-id="pendingForkTurnId"
       />
 
       <!-- The composer is a single instance reused in both layouts: pinned to
@@ -176,9 +180,12 @@
       <div
         v-if="!activeChatReadOnly"
         class="pointer-events-none absolute z-(--z-panel)"
-        :class="isWelcome
-          ? 'inset-0 flex flex-col items-center justify-start pt-[28dvh]'
-          : 'inset-x-0 bottom-0 pt-2 pb-7'"
+        :class="[
+          isWelcome
+            ? 'inset-0 flex flex-col items-center justify-start pt-[28dvh]'
+            : 'inset-x-0 bottom-0 pt-2 pb-7',
+          { invisible: composerPlacementPending },
+        ]"
         :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
@@ -219,9 +226,10 @@
                the column math is centered, but the eye reads the composer a hair
                right of the message column (the scroll rail eats the right edge),
                so the whole dock unit shifts left a touch to sit where it looks
-               centered. -->
+               centered. Desktop only — mobile has no scroll rail, so there the
+               nudge would just push the composer off centre. -->
           <div
-            class="pointer-events-auto relative mx-auto w-full -translate-x-0.5 px-4 sm:px-6 lg:px-10"
+            class="pointer-events-auto relative mx-auto w-full px-4 sm:px-6 lg:px-10 md:-translate-x-0.5"
             :class="isWelcome ? 'max-w-[44rem]' : 'max-w-[840px]'"
           >
             <Transition
@@ -377,13 +385,26 @@
             >
               <!-- The composer is ALWAYS a two-row card (textarea on top,
                    controls below) — no pill↔multiline morph: a fixed rounded-2xl
-                   box with a minimum height, so its shape never depends on the
-                   content and nothing animates mid-typing. -->
+                   box, so its shape never depends on the content and nothing
+                   animates mid-typing.
+                   Docked (non-welcome) state compresses and quiets: no min
+                   height + tighter padding (p-2.5) + a shorter textarea row
+                   (min-h-10) pull the two rows together — the centered welcome
+                   card keeps the full presence (min-h-28, p-3); docked it sits
+                   under the conversation and should read lighter, with the edge
+                   softened to --border-soft (.chat-composer-docked, style.css).
+                   Mobile radius is DERIVED from the control circles inside:
+                   radius tracks the control radius — 44px controls → 22, i.e.
+                   rounded-3xl (24, nearest rung); the same rule on desktop
+                   (32px controls → 16) is exactly the rounded-2xl the card
+                   already wears. (The concentric alternative, control radius +
+                   padding = 32, read as too round in QA.) -->
               <div
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge relative flex min-h-28 w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer p-3 cursor-text"
+                class="chat-composer-edge relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text max-md:rounded-3xl max-md:p-2.5"
+                :class="isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked'"
                 @click="handleComposerClick"
               >
                 <!-- The attachment row reveals via a grid 0fr↔1fr track so a card
@@ -468,7 +489,8 @@
                   rows="1"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                   :disabled="!currentBotId || activeChatReadOnly || loadingMessages || voiceInputState !== 'idle'"
-                  class="order-none min-h-12 max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
+                  class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
+                  :class="isWelcome ? 'min-h-12' : 'min-h-10'"
                   @keydown="handleComposerKeydown"
                   @paste="handlePaste"
                 />
@@ -491,12 +513,12 @@
                     >
                       <Spinner
                         v-if="agentChanging"
-                        class="size-4"
+                        class="size-4 max-md:size-5"
                       />
                       <Plus
                         v-else
                         :stroke-width="1.5"
-                        class="size-4"
+                        class="size-4 max-md:size-5"
                       />
                     </Button>
                   </DropdownMenuTrigger>
@@ -509,7 +531,7 @@
                        so the switcher only appears while the session is still
                        empty. Showing it disabled in an active chat just dangles
                        a choice that can't be made. -->
-                    <template v-if="canChangeAgent && enabledACPProfiles.length">
+                    <template v-if="canChangeAgent && enabledBotAgents.length">
                       <DropdownMenuLabel>{{ $t('chat.agent') }}</DropdownMenuLabel>
                       <DropdownMenuItem @select="selectMemohAgent">
                         <img
@@ -524,14 +546,17 @@
                         />
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        v-for="profile in enabledACPProfiles"
-                        :key="profile.id"
-                        @select="selectACPAgent(profile)"
+                        v-for="agent in enabledBotAgents"
+                        :key="agent.id"
+                        @select="selectBotAgent(agent)"
                       >
-                        <component :is="acpAgentIcon(profile.id, true)" />
-                        <span class="min-w-0 flex-1 truncate">{{ profile.display_name || profile.id }}</span>
+                        <component
+                          :is="botAgentIcon(agent, true)"
+                          class="size-4 shrink-0"
+                        />
+                        <span class="min-w-0 flex-1 truncate">{{ botAgentName(agent) }}</span>
                         <Check
-                          v-if="activeACPAgentId === normalizedProfileID(profile.id)"
+                          v-if="activeBotAgentID === agent.id"
                           class="ml-auto"
                         />
                       </DropdownMenuItem>
@@ -543,7 +568,7 @@
                        pins its workspace target for life, so the picker gives
                        way to a read-only entry. -->
                     <template v-if="composerFolderPickable">
-                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledBotAgents.length" />
                       <DropdownMenuLabel>{{ $t('chat.folder') }}</DropdownMenuLabel>
                       <DropdownMenuItem @select="clearWorkingFolder">
                         <X class="size-4 shrink-0" />
@@ -567,7 +592,7 @@
                       </DropdownMenuItem>
                     </template>
                     <template v-else-if="composerFolderLocked">
-                      <DropdownMenuSeparator v-if="canChangeAgent && enabledACPProfiles.length" />
+                      <DropdownMenuSeparator v-if="canChangeAgent && enabledBotAgents.length" />
                       <DropdownMenuLabel>{{ $t('chat.folder') }}</DropdownMenuLabel>
                       <DropdownMenuItem disabled>
                         <FolderOpen class="size-4 shrink-0" />
@@ -582,7 +607,7 @@
                         <span class="min-w-0 flex-1 truncate">{{ $t('chat.folderDetachDraft') }}</span>
                       </DropdownMenuItem>
                     </template>
-                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledACPProfiles.length) || showComposerFolderSection" />
+                    <DropdownMenuSeparator v-if="(canChangeAgent && enabledBotAgents.length) || showComposerFolderSection" />
                     <DropdownMenuItem
                       :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                       @select="fileInput?.click()"
@@ -621,7 +646,7 @@
                         size="sm"
                         shape="circle"
                         :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
-                        class="composer-pill-press min-w-0 max-md:h-11"
+                        class="composer-pill-press min-w-0 shrink max-md:h-11"
                         :style="{ maxWidth: `${modelTriggerMaxWidth}px` }"
                       >
                         <!-- One transformable wrapper for the press squish —
@@ -639,73 +664,80 @@
                         </span>
                       </Button>
                     </PopoverTrigger>
+                    <!-- `menu` makes this host transparent: the inner
+                         menuChromeClass div already owns the border/shadow/
+                         radius, so a chromed host would draw a doubled edge
+                         (same pattern as model-select.vue). -->
                     <PopoverContent
+                      menu
                       class="w-80 max-w-[calc(100vw-2rem)] overflow-hidden p-0"
                       align="end"
                       side="top"
                       :side-offset="4"
                     >
-                      <InlineLoadingRow
-                        v-if="composerModelsLoading"
-                        class="px-2 py-3"
-                      >
-                        {{ $t('common.loading') }}
-                      </InlineLoadingRow>
-                      <div
-                        v-else
-                        :class="menuChromeClass"
-                      >
-                        <div
-                          v-if="activeUsesACPComposer && !activeIsPendingACP && acpModes.length"
-                          class="border-b border-border p-3"
+                      <!-- The chrome wrapper covers BOTH branches: with the
+                           host transparent (`menu`), a bare loading row would
+                           float on the chat UI with no surface at all. -->
+                      <div :class="menuChromeClass">
+                        <InlineLoadingRow
+                          v-if="composerModelsLoading"
+                          class="px-2 py-3"
                         >
-                          <div class="mb-2 text-label text-foreground">
-                            {{ $t('chat.sessionMode') }}
-                          </div>
-                          <Select
-                            :model-value="currentACPModeId"
-                            :disabled="activeChatReadOnly || streaming || acpConfigChanging"
-                            @update:model-value="onACPModeSelected"
+                          {{ $t('common.loading') }}
+                        </InlineLoadingRow>
+                        <template v-else>
+                          <div
+                            v-if="activeUsesACPComposer && !activeIsPendingACP && acpModes.length"
+                            class="border-b border-border p-3"
                           >
-                            <SelectTrigger class="w-full">
-                              <SelectValue :placeholder="$t('chat.sessionModePlaceholder')" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem
-                                v-for="mode in acpModes"
-                                :key="mode.id"
-                                :value="mode.id"
-                              >
-                                <div class="min-w-0">
-                                  <div class="truncate">
-                                    {{ mode.name?.trim() || mode.id }}
+                            <div class="mb-2 text-label text-foreground">
+                              {{ $t('chat.sessionMode') }}
+                            </div>
+                            <Select
+                              :model-value="currentACPModeId"
+                              :disabled="activeChatReadOnly || streaming || acpConfigChanging"
+                              @update:model-value="onACPModeSelected"
+                            >
+                              <SelectTrigger class="w-full">
+                                <SelectValue :placeholder="$t('chat.sessionModePlaceholder')" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem
+                                  v-for="mode in acpModes"
+                                  :key="mode.id"
+                                  :value="mode.id"
+                                >
+                                  <div class="min-w-0">
+                                    <div class="truncate">
+                                      {{ mode.name?.trim() || mode.id }}
+                                    </div>
+                                    <div
+                                      v-if="mode.description?.trim()"
+                                      class="text-caption text-muted-foreground"
+                                    >
+                                      {{ mode.description }}
+                                    </div>
                                   </div>
-                                  <div
-                                    v-if="mode.description?.trim()"
-                                    class="text-caption text-muted-foreground"
-                                  >
-                                    {{ mode.description }}
-                                  </div>
-                                </div>
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <p class="mt-2 rounded-md border border-warning-border bg-warning-soft p-2 text-caption text-warning-foreground">
-                            {{ $t('chat.sessionModeCaution') }}
-                          </p>
-                        </div>
-                        <ModelOptions
-                          :model-value="overrideModelId"
-                          :reasoning-effort="overrideReasoningEffort"
-                          :reasoning-options="composerReasoningOptions"
-                          :models="composerModels"
-                          :providers="composerModelProviders"
-                          model-type="chat"
-                          :open="modelPopoverOpen"
-                          show-reasoning
-                          @update:model-value="onComposerModelValueSelected"
-                          @update:reasoning-effort="onComposerReasoningEffortSelected"
-                        />
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p class="mt-2 rounded-md border border-warning-border bg-warning-soft p-2 text-caption text-warning-foreground">
+                              {{ $t('chat.sessionModeCaution') }}
+                            </p>
+                          </div>
+                          <ModelOptions
+                            :model-value="overrideModelId"
+                            :reasoning-effort="overrideReasoningEffort"
+                            :reasoning-options="composerReasoningOptions"
+                            :models="composerModels"
+                            :providers="composerModelProviders"
+                            model-type="chat"
+                            :open="modelPopoverOpen"
+                            show-reasoning
+                            @update:model-value="onComposerModelValueSelected"
+                            @update:reasoning-effort="onComposerReasoningEffortSelected"
+                          />
+                        </template>
                       </div>
                     </PopoverContent>
                   </Popover>
@@ -735,7 +767,7 @@
                     >
                       <Spinner
                         v-if="voiceInputState === 'transcribing'"
-                        class="size-4"
+                        class="size-4 max-md:size-5"
                       />
                       <svg
                         v-else
@@ -744,7 +776,7 @@
                         stroke="currentColor"
                         stroke-width="2.5"
                         stroke-linecap="round"
-                        class="size-4.5"
+                        class="size-4.5 max-md:size-5"
                         :class="voiceInputState === 'recording' ? 'motion-safe:animate-pulse' : undefined"
                         aria-hidden="true"
                       >
@@ -775,7 +807,7 @@
                       @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                     >
                       <span
-                        class="grid size-[18px] shrink-0 place-items-center"
+                        class="grid size-[18px] max-md:size-5 shrink-0 place-items-center"
                         aria-hidden="true"
                       >
                         <svg
@@ -785,7 +817,7 @@
                           stroke-width="2.75"
                           stroke-linecap="round"
                           stroke-linejoin="round"
-                          class="col-start-1 row-start-1 size-[18px] transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
                           :class="streaming ? 'opacity-0' : 'opacity-100'"
                         >
                           <path d="M12 19.5 V5" />
@@ -794,7 +826,7 @@
                         <svg
                           viewBox="0 0 24 24"
                           fill="currentColor"
-                          class="col-start-1 row-start-1 size-4 transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                          class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
                           :class="streaming ? 'opacity-100' : 'opacity-0'"
                         >
                           <rect
@@ -815,12 +847,25 @@
         </div>
       </div>
     </template>
+
+    <!-- Region-scoped drop feedback. Sits OUTSIDE the v-else so it can also
+         cover the "pick a bot" placeholder — where the zone is disabled, so the
+         overlay stays dark and the OS shows its no-drop cursor instead of the
+         drop silently doing nothing. Dropped files land in the attachment tray,
+         unsent: the user still gets to type the message that goes with them. -->
+    <FileDropOverlay
+      :active="dropActive"
+      :bounds="dropBounds"
+      :icon="ImagePlus"
+      :label="$t('chat.dropToAttach')"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, useTemplateRef, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
 import {
+  ImagePlus,
   Paperclip,
   Plus,
   ChevronDown,
@@ -844,10 +889,14 @@ import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
 import { useElementSize, useIntersectionObserver } from '@vueuse/core'
 import { useQuery } from '@pinia/colada'
-import { getAcpProfiles, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
-import type { AcpprofilePublicProfile, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
+import { getAcpProfiles, getBotsByBotIdAgents, getModels, getProviders, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
+import type { AcpprofilePublicProfile, BotagentsBotAgent, ModelsGetResponse, ProvidersGetResponse, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
+import { useFileDropZone } from '@/composables/useFileDropZone'
+import { registerChatFileDropTarget } from '../composables/chat-file-drop-target'
+import { readDroppedFiles } from '@/utils/dropped-files'
 import MessageItem from './message-item.vue'
 import ComposerContinueOn from './composer-continue-on.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
@@ -862,19 +911,22 @@ import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ModelOptions from '@/pages/bots/components/model-options.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, availableEffortsForMode, nearestEffortToMedium, resolveEffortLevels, resolveThinkingMode } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
+import { provideConnectorLogos } from '../composables/useConnectorLogos'
 import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
 import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, acpAgentIcon, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedField, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
@@ -926,7 +978,7 @@ const {
 
 const composerError = ref('')
 const forkDialogOpen = ref(false)
-const pendingForkMessageId = ref('')
+const pendingForkTurnId = ref('')
 const modelPopoverOpen = ref(false)
 const agentPopoverOpen = ref(false)
 const agentChanging = ref(false)
@@ -947,6 +999,9 @@ const paneTarget = computed(() => ({
   viewId: props.tabId.trim() || 'chat',
 }))
 provideChatViewTarget(paneTarget)
+// Resolved once per pane so every tool row below can mark a Connect-It call
+// with its connector's logo without each row running its own lookup.
+provideConnectorLogos(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
@@ -985,6 +1040,17 @@ const isWelcome = computed(() =>
   && !loadingChats.value
   && messages.value.length === 0,
 )
+
+// During boot, "a draft that stays a draft" and "a draft about to be
+// repointed to the most recent session" are indistinguishable until
+// fetchSessions returns (bootstrap auto-picks at the END of the load).
+// isWelcome waits out that window via !loadingChats — but rendering the
+// docked posture meanwhile made a hard refresh of the welcome page flash
+// bottom → center. While placement is undecidable, hide the composer
+// instead: `invisible` keeps layout and the dock measurements alive,
+// where v-if would unmount them. A session panel carries its sessionId
+// from the first frame, so this gate never engages on session routes.
+const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 
 // Rotate the greeting per fresh chat so the entry point feels alive rather than
 // a fixed banner; the pick stays stable while a single welcome screen is shown
@@ -1036,29 +1102,44 @@ const activeSupportsTurnReplacement = computed(() =>
   !activeChatTarget.value.isACP && !activeChatTarget.value.isPendingACP,
 )
 
-const latestRetryableAssistantId = computed(() => {
+// The turn id, not a message id: a turn carries it from admission, so the
+// affordance is live the moment the round exists rather than after the
+// database twin of that round has been fetched back.
+const latestRetryableAssistantTurnId = computed(() => {
   if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
   if (!activeSupportsTurnReplacement.value) return ''
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'assistant' && !message.streaming && !message.__optimistic) {
-      return (message.serverId ?? message.id).trim()
+      return message.turnId?.trim() ?? ''
     }
   }
   return ''
 })
 
-const latestEditableUserId = computed(() => {
+const latestEditableUserTurnId = computed(() => {
   if (streaming.value || loadingMessages.value || activeChatReadOnly.value) return ''
   if (!activeSupportsTurnReplacement.value) return ''
   for (let i = messages.value.length - 1; i >= 0; i--) {
     const message = messages.value[i]
     if (message?.role === 'user' && !message.streaming && !message.__optimistic) {
-      return (message.serverId ?? message.id).trim()
+      return message.turnId?.trim() ?? ''
     }
   }
   return ''
 })
+
+// Both halves of a round share one turn id, so the role decides which
+// affordance a message gets: retry belongs to the reply, edit to the request.
+function isRetryableTurn(message: ChatMessage): boolean {
+  const turnId = latestRetryableAssistantTurnId.value
+  return message.role === 'assistant' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
+}
+
+function isEditableTurn(message: ChatMessage): boolean {
+  const turnId = latestEditableUserTurnId.value
+  return message.role === 'user' && turnId !== '' && turnId === (message.turnId?.trim() ?? '')
+}
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -1095,6 +1176,18 @@ const { data: acpProfileData, isLoading: acpProfilesLoading } = useQuery({
     const { data } = await getAcpProfiles({ throwOnError: true })
     return data
   },
+})
+
+const { data: botAgentData, isLoading: botAgentsLoading } = useQuery({
+  key: () => ['bot-agents', currentBotId.value],
+  query: async () => {
+    const { data } = await getBotsByBotIdAgents({
+      path: { bot_id: currentBotId.value! },
+      throwOnError: true,
+    })
+    return data
+  },
+  enabled: () => !!currentBotId.value,
 })
 
 const currentBot = computed(() => bots.value.find(bot => bot.id === currentBotId.value) ?? null)
@@ -1161,9 +1254,8 @@ interface ForkSourceMeta {
 
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
 const currentBotMetadata = computed(() => currentBot.value?.metadata as Record<string, unknown> | undefined)
-const enabledACPProfiles = computed(() =>
-  acpProfiles.value.filter(profile => isACPAgentEnabled(currentBotMetadata.value, profile.id)),
-)
+const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
+const enabledBotAgents = computed(() => botAgents.value.filter(agent => agent.enabled !== false && !!agent.id))
 
 const activeSessionMetadata = computed<Record<string, unknown>>(() => activeChatTarget.value.metadata)
 const forkSource = computed<ForkSourceMeta | null>(() => {
@@ -1345,6 +1437,11 @@ watch([
     'default',
   )
 }, { immediate: true })
+const activeBotAgentID = computed(() =>
+  activeSession.value?.bot_agent_id?.trim()
+  || chatStore.pendingACPSessionInput?.botAgentId?.trim()
+  || '',
+)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
 const activeACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
 const activeACPProjectMode = computed(() => String(activeSessionMetadata.value.acp_project_mode ?? '').trim())
@@ -1862,7 +1959,52 @@ watch(() => pendingFiles.value.length, (len, prevLen) => {
   }
 })
 
+// Dropping files on the conversation is the Paperclip by another route: they
+// land in the same pending tray, so the attachment cards, previews, and the PDF
+// warning above all follow with no extra wiring. Nothing is sent — the user
+// still writes the message that goes with the files.
+async function handleFilesDrop(transfer: DataTransfer) {
+  const { files, skippedFolders } = await readDroppedFiles(transfer)
+  for (const file of files) pendingFiles.value.push(file)
+  // An attachment is one file, so a folder has nothing to become here. Warned
+  // even when loose files DID land in the same drop: the cards would otherwise
+  // read as "everything arrived" while the folder vanished silently.
+  if (skippedFolders > 0) {
+    toast.warning(t('chat.dropFolderUnsupported'))
+  }
+}
+
+// Same conditions that disable the Paperclip: no bot, a read-only or streaming
+// turn, history still loading. A disabled zone keeps the overlay dark, so the
+// OS no-drop cursor answers instead of a drop that goes nowhere.
+const fileDropDisabled = () => !currentBotId.value || activeChatReadOnly.value || streaming.value || loadingMessages.value
+
+// Root element, exposed through the drop-target registry so the page-level base
+// zone can anchor its overlay over THIS pane (a global drag points at the
+// composer it will land in) instead of floating a third, window-centred anchor.
+const rootEl = useTemplateRef<HTMLElement>('rootEl')
+
+const { active: dropActive, bounds: dropBounds, handlers: dropHandlers } = useFileDropZone({
+  disabled: fileDropDisabled,
+  onDrop: transfer => void handleFilesDrop(transfer),
+})
+
+// While this pane is the focused dock panel it is also the page-level target:
+// files dropped outside every region zone (e.g. the sidebar on a non-Files
+// view) are forwarded by the base zone in main-section into THIS composer's
+// tray. Cleanup runs on blur and on unmount (watcher stop), and the registry's
+// identity guard makes focus handoff between splits order-safe.
+watch(isActive, (focused) => {
+  if (!focused) return
+  onWatcherCleanup(registerChatFileDropTarget({
+    onDrop: transfer => void handleFilesDrop(transfer),
+    disabled: fileDropDisabled,
+    hostEl: () => rootEl.value,
+  }))
+}, { immediate: true })
+
 type DefaultACPSettings = {
+  default_bot_agent_id?: string
   chat_runtime?: string
   chat_acp_agent_id?: string
   chat_acp_project_path?: string
@@ -1884,8 +2026,20 @@ const defaultACPAvailability = computed<DefaultACPAvailability>(() => {
   if (!hasBotPermission(currentBot.value?.current_user_permissions, 'workspace_exec')) {
     return { input: null, messageKey: 'chat.defaultACPNoWorkspaceExec', loading: false }
   }
-  const agentId = normalizeACPAgentID(settings.chat_acp_agent_id)
-  if (!agentId) return { input: null, messageKey: 'chat.defaultACPAgentMissing', loading: false }
+  const botAgentId = settings.default_bot_agent_id?.trim() ?? ''
+  if (!botAgentId) return { input: null, messageKey: 'chat.defaultACPAgentMissing', loading: false }
+  if (!botAgentData.value) {
+    return {
+      input: null,
+      messageKey: botAgentsLoading.value ? 'chat.defaultACPLoading' : 'chat.defaultACPAgentUnavailable',
+      loading: botAgentsLoading.value,
+    }
+  }
+  const agent = botAgents.value.find(item => item.id === botAgentId)
+  if (!agent || agent.enabled === false) {
+    return { input: null, messageKey: 'chat.defaultACPAgentDisabled', loading: false }
+  }
+  const agentId = botAgentProvider(agent)
   if (!acpProfileData.value) {
     return {
       input: null,
@@ -1895,15 +2049,13 @@ const defaultACPAvailability = computed<DefaultACPAvailability>(() => {
   }
   const profile = acpProfiles.value.find(item => normalizeACPAgentID(item.id) === agentId)
   if (!profile) return { input: null, messageKey: 'chat.defaultACPAgentUnavailable', loading: false }
-  if (!isACPAgentEnabled(currentBotMetadata.value, profile.id)) {
-    return { input: null, messageKey: 'chat.defaultACPAgentDisabled', loading: false }
-  }
-  const config = readACPAgentConfig(currentBotMetadata.value, profile.id)
+  const config = readACPAgentConfig(currentBotMetadata.value, agentId)
   if (config.setupModeSet && findMissingRequiredManagedField(profile, config.managed, config.setupMode)) {
     return { input: null, messageKey: 'chat.defaultACPAgentNotConfigured', loading: false }
   }
   return {
     input: {
+      botAgentId,
       agentId,
       projectPath: settings.chat_acp_project_path?.trim() || ACP_DEFAULT_PROJECT_PATH,
       projectMode: settings.chat_acp_project_mode?.trim() || ACP_DEFAULT_PROJECT_MODE,
@@ -1926,17 +2078,9 @@ function clearDefaultACPComposerError() {
   defaultACPComposerError.value = ''
 }
 
-const activeThinkingMode = computed(() => resolveThinkingMode(activeModel.value?.config))
+const activeModelReasoning = computed(() => activeModel.value?.reasoning)
 
-const activeModelSupportsReasoning = computed(() => activeThinkingMode.value !== 'none')
-
-const activeModelClientType = computed(() =>
-  providers.value.find((p) => p.id === activeModel.value?.provider_id)?.client_type,
-)
-
-const availableReasoningEfforts = computed(() =>
-  availableEffortsForMode(activeThinkingMode.value, resolveEffortLevels(activeModel.value?.config, activeModelClientType.value)),
-)
+const activeModelSupportsReasoning = computed(() => activeModelReasoning.value?.supported === true)
 
 // A native composer with no chat model cannot answer, so the trigger says so
 // ("None") instead of the old "Default" placeholder, which named a model that
@@ -1989,7 +2133,9 @@ const modelTriggerLabel = computed(() =>
 const pinnedSubagentModelId = computed(() => resolvePinnedSubagentModelId(
   activeSession.value?.type,
   activeSessionMetadata.value,
-  models.value.map(model => model.id),
+  models.value
+    .map(model => model.id)
+    .filter((id): id is string => !!id),
 ))
 
 function initFromBotSettings() {
@@ -2021,16 +2167,15 @@ watch(pinnedSubagentModelId, (pinned, previous) => {
   if (previous) overrideModelId.value = botSettings.value?.chat_model_id ?? ''
 }, { immediate: true })
 
-watch(availableReasoningEfforts, (efforts) => {
+// Switching models can strand the composer's override on a tier the new model
+// does not offer. An empty override is left alone: it means "inherit the bot's
+// setting", not a stranded value.
+watch(activeModelReasoning, (options) => {
   if (activeUsesACPComposer.value) return
   const current = overrideReasoningEffort.value
-  if (!current || current === REASONING_EFFORT_DISABLE || efforts.includes(current)) return
-  // efforts[0] is always REASONING_EFFORT_DISABLE (availableEffortsForMode
-  // prepends it), so falling back to it silently turned reasoning off whenever a
-  // model lacked the selected tier. Land on the nearest real tier instead.
-  overrideReasoningEffort.value = efforts.includes('medium')
-    ? 'medium'
-    : nearestEffortToMedium(efforts) || REASONING_EFFORT_DISABLE
+  if (!current || !options?.supported) return
+  const next = reconcileStoredEffort(current, options)
+  if (next && next !== current) overrideReasoningEffort.value = next
 }, { immediate: true })
 
 watch(currentBotId, () => {
@@ -2147,11 +2292,8 @@ async function refreshACPComposerConfigAfterSelectionError(result: SendMessageRe
 }
 
 function pendingMatchesDefaultACP(input: ACPAgentSessionInput): boolean {
-  const metadata = activeChatTarget.value.metadata
   return activeChatTarget.value.kind === 'draft-acp'
-    && metadata?.acp_agent_id === input.agentId
-    && metadata?.project_path === (input.projectPath || ACP_DEFAULT_PROJECT_PATH)
-    && metadata?.acp_project_mode === (input.projectMode || ACP_DEFAULT_PROJECT_MODE)
+    && chatStore.pendingACPMatchesInput(input, paneTarget.value)
 }
 
 watch([defaultACPUnavailableMessage, defaultACPLoading, currentBotId, hasExplicitSessionSelection, isActive], ([message, loading, _bot, _explicit, focused]) => {
@@ -2199,10 +2341,6 @@ watch([slashPanelOpen, activeUsesACPComposer, acpOperationScope], ([open, usesAC
   })
 })
 
-function normalizedProfileID(value: unknown): string {
-  return normalizeACPAgentID(value)
-}
-
 // Starting an ACP runtime (spawning the agent process + protocol handshake) has
 // no server-side deadline, so a wedged agent would leave the composer spinning
 // indefinitely — the user's only escape was a full page reload. Bound the switch
@@ -2230,20 +2368,23 @@ function agentSwitchErrorMessage(error: unknown): string {
     : resolveApiErrorMessage(error, t('chat.agentSwitchFailed'))
 }
 
-async function selectACPAgent(profile: AcpprofilePublicProfile) {
-  const agentId = normalizeACPAgentID(profile.id)
-  if (!agentId || agentChanging.value || !canChangeAgent.value) return
+async function selectBotAgent(agent: BotagentsBotAgent) {
+  const botAgentId = agent.id?.trim() ?? ''
+  const agentId = botAgentProvider(agent)
+  if (!botAgentId || !agentId || agentChanging.value || !canChangeAgent.value) return
   agentPopoverOpen.value = false
-  if (activeUsesACPComposer.value && agentId === activeACPAgentId.value) return
+  if (activeUsesACPComposer.value && botAgentId === activeBotAgentID.value) return
   agentChanging.value = true
   composerError.value = ''
   try {
     if (paneTarget.value.sessionId) {
       await withAgentSwitchTimeout(chatStore.updateCurrentSessionAgent({
+        botAgentId,
         agentId,
       }, paneTarget.value))
     } else {
       chatStore.stageACPSession({
+        botAgentId,
         agentId,
       }, {}, paneTarget.value)
       await withAgentSwitchTimeout(chatStore.ensurePendingACPRuntime(paneTarget.value))
@@ -2392,6 +2533,19 @@ watch(inputText, (text) => {
   if (!prefix || text === prefix || text.startsWith(`${prefix} `)) return
   slashPanelSuppressedPrefix.value = ''
 })
+// Mirror of ComposerContinueOn's pill rule: only an explicit non-default
+// selection expands the trigger (unset — including the pre-load window —
+// renders the collapsed default circle; a missing/ghost selection resolves to
+// null here exactly like the child's selectedTarget). The reservation must
+// track which width the control is actually rendering, and on mobile the
+// trigger never expands (see the child's header comment).
+const isMobileShell = useIsMobile()
+const continueOnExpanded = computed(() => (
+  !!selectedWorkspaceTargetId.value
+  && selectedWorkspaceTarget.value?.kind !== 'native'
+  && !isMobileShell.value
+))
+
 const {
   textareaEl,
   composerEl,
@@ -2399,6 +2553,7 @@ const {
   modelTriggerMaxWidth,
 } = useComposerLayout({
   continueOnVisible: showComputersMenu,
+  continueOnExpanded,
 })
 
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)
@@ -2859,11 +3014,11 @@ async function handleForkSourceClick() {
   }
 }
 
-function handleForkMessage(messageId: string) {
+function handleForkMessage(turnId: string) {
   composerError.value = ''
-  const id = messageId.trim()
+  const id = turnId.trim()
   if (!id) return
-  pendingForkMessageId.value = id
+  pendingForkTurnId.value = id
   forkDialogOpen.value = true
 }
 
@@ -2920,10 +3075,10 @@ function handleComposerKeydown(e: KeyboardEvent) {
   handleSend()
 }
 
-async function handleRetryMessage(messageId: string) {
+async function handleRetryMessage(turnId: string) {
   if (composerConfigPending.value) return
   composerError.value = ''
-  const result = await chatStore.retryLatestAssistant(messageId, {
+  const result = await chatStore.retryLatestAssistant(turnId, {
     target: paneTarget.value,
     modelId: overrideModelId.value,
     reasoningEffort: overrideReasoningEffort.value,
@@ -2935,14 +3090,14 @@ async function handleRetryMessage(messageId: string) {
   }
 }
 
-async function handleEditMessage(messageId: string, text: string, done?: (started: boolean) => void) {
+async function handleEditMessage(turnId: string, text: string, done?: (started: boolean) => void) {
   if (composerConfigPending.value) {
     done?.(false)
     return
   }
   composerError.value = ''
   try {
-    const result = await chatStore.editLatestUser(messageId, text, {
+    const result = await chatStore.editLatestUser(turnId, text, {
       target: paneTarget.value,
       modelId: overrideModelId.value,
       reasoningEffort: overrideReasoningEffort.value,

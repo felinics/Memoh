@@ -5,7 +5,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 // TestEditToolWithWriteTitleReclassifiesConsistently locks the edit->write name

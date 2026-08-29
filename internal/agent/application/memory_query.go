@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"strings"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/prune"
-	"github.com/memohai/memoh/internal/textutil"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/prune"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const (
@@ -49,7 +49,7 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 	if s == nil || s.messageService == nil {
 		return builder.Build(req, nil)
 	}
-	loaded, err := s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, defaultMaxContextMinutes)
+	loaded, err := s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, defaultMaxContextMinutes, 0)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("memory query history load failed",

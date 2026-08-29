@@ -7,91 +7,13 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
-// ToolSessionContext carries request-scoped identity for tool execution.
-type ToolSessionContext struct {
-	BotID               string
-	ChatID              string
-	RuntimeID           string
-	RuntimeToken        string `json:"-"`
-	SessionID           string
-	RunID               string
-	ToolCallID          string
-	SessionType         string
-	RouteID             string
-	ChannelIdentityID   string
-	SessionToken        string `json:"-"`
-	CurrentPlatform     string
-	ReplyTarget         string
-	ConversationType    string
-	CanRequestUserInput bool
-	CanListUserInput    bool
-	IsSubagent          bool
-	RuntimeActive       bool
-	SupportsImageInput  bool
-	SupportsFileInput   bool
-	RuntimeFence        runtimefence.Fence          `json:"-"`
-	RunContext          context.Context             `json:"-"`
-	RuntimeGuard        func(context.Context) error `json:"-"`
-}
-
-const runtimeGuardTimeout = 5 * time.Second
-
-// BindRuntimeContext makes a tool request stop when its owning run stops.
-// Runtime-only values remain process-local and are never serialized.
-func BindRuntimeContext(ctx context.Context, session ToolSessionContext) (context.Context, context.CancelFunc) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx = runtimefence.WithContext(ctx, session.RuntimeFence)
-	if session.RunContext == nil {
-		return ctx, func() {}
-	}
-	bound, cancel := context.WithCancel(ctx)
-	stop := context.AfterFunc(session.RunContext, cancel)
-	if session.RunContext.Err() != nil {
-		cancel()
-	}
-	return bound, func() {
-		stop()
-		cancel()
-	}
-}
-
-// ValidateRuntimeGuard performs the last ownership check immediately before
-// a tool effect. The check remains bound to both the request and owning run.
-func ValidateRuntimeGuard(ctx context.Context, session ToolSessionContext) error {
-	if ctx == nil {
-		return errors.New("runtime guard context is required")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if session.RunContext != nil {
-		if err := session.RunContext.Err(); err != nil {
-			return err
-		}
-	}
-	if session.RuntimeGuard == nil {
-		return nil
-	}
-	guardCtx, cancel := context.WithTimeout(ctx, runtimeGuardTimeout)
-	defer cancel()
-	guardCtx = runtimefence.WithContext(guardCtx, session.RuntimeFence)
-	if err := session.RuntimeGuard(guardCtx); err != nil {
-		return err
-	}
-	if session.RunContext != nil {
-		if err := session.RunContext.Err(); err != nil {
-			return err
-		}
-	}
-	return guardCtx.Err()
-}
+// ToolSessionContext is the MCP gateway's compatibility name for the shared
+// tool execution context. The canonical type is owned by internal/toolcontext.
+type ToolSessionContext = toolcontext.Session
 
 // ToolDescriptor is the MCP tools/list item shape used by the gateway.
 type ToolDescriptor struct {

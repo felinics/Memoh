@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -508,7 +508,9 @@ func appendLogError(output string, err error) string {
 	return output + "\n" + line
 }
 
-// Kill cancels a running background task.
+// Kill cancels a running background task. A running agent task records the
+// request without publishing a terminal state: its runtime outcome is the
+// single authority that wakes waiters as killed, failed, or completed.
 func (m *Manager) Kill(taskID string) error {
 	m.mu.Lock()
 	task, ok := m.tasks[taskID]
@@ -521,6 +523,18 @@ func (m *Manager) Kill(taskID string) error {
 		task.mu.Unlock()
 		return fmt.Errorf("task %s is not running (status: %s)", taskID, task.Status)
 	}
+	if task.Kind == KindAgent && task.Status == TaskRunning {
+		if task.stopRequested {
+			task.mu.Unlock()
+			return fmt.Errorf("task %s stop already requested", taskID)
+		}
+		task.stopRequested = true
+		task.mu.Unlock()
+
+		task.Cancel()
+		m.logger.Info("background agent task stop requested", slog.String("task_id", taskID))
+		return nil
+	}
 	task.Status = TaskKilled
 	task.CompletedAt = time.Now()
 	task.signalChangedLocked()
@@ -530,6 +544,19 @@ func (m *Manager) Kill(taskID string) error {
 	m.logger.Info("background task killed", slog.String("task_id", taskID))
 	m.emitTaskEvent(task, TaskEventKilled, "", "")
 	return nil
+}
+
+// AgentTaskStopRequested reports whether Kill has asked a running managed
+// agent to stop. The status intentionally remains running until its runtime
+// publishes the authoritative terminal outcome.
+func (m *Manager) AgentTaskStopRequested(taskID string) bool {
+	task := m.Get(taskID)
+	if task == nil || task.Kind != KindAgent {
+		return false
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	return task.stopRequested
 }
 
 // Get returns a task by ID, or nil if not found.
@@ -698,7 +725,15 @@ func (m *Manager) Cleanup(maxAge time.Duration) {
 	defer m.mu.Unlock()
 	cutoff := time.Now().Add(-maxAge)
 	for id, t := range m.tasks {
-		if t.Status != TaskRunning && t.CompletedAt.Before(cutoff) {
+		// Task lifecycle fields are protected by task.mu, not Manager.mu. Keep
+		// queued and running tasks until their runtime records a terminal state;
+		// queued subagent requests may legitimately wait longer than one cleanup
+		// interval before promotion.
+		t.mu.Lock()
+		terminal := t.Status == TaskCompleted || t.Status == TaskFailed || t.Status == TaskKilled
+		old := !t.CompletedAt.IsZero() && t.CompletedAt.Before(cutoff)
+		t.mu.Unlock()
+		if terminal && old {
 			delete(m.tasks, id)
 		}
 	}

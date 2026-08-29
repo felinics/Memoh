@@ -12,9 +12,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/agent/application"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 const (
@@ -200,14 +201,21 @@ func TestLocalChannelRuntimeContractSendsOnlyErrorsToTheInitiatingSocket(t *test
 
 	script := append(
 		richActiveRunWSContractScript(t),
-		rawRuntimeContractEvent(t, native.StreamEvent{Type: native.EventError, Error: "runtime interrupted"}),
+		rawRuntimeContractEvent(t, native.StreamEvent{
+			Type:  native.EventError,
+			Code:  string(apperror.CodeContextBudgetUnsatisfied),
+			Error: "The model context window is too small for this request.",
+		}),
 	)
 	events := collectRuntimeContractWSEvents(t, script, "error")
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want the error alone", events)
 	}
-	if events[0]["message"] != "runtime interrupted" {
+	if events[0]["message"] != "The model context window is too small for this request." {
 		t.Fatalf("error event = %#v", events[0])
+	}
+	if events[0]["code"] != string(apperror.CodeContextBudgetUnsatisfied) {
+		t.Fatalf("error code = %#v, want %q", events[0]["code"], apperror.CodeContextBudgetUnsatisfied)
 	}
 	// The frame names the run, and only the run: a subscriber that never sent
 	// the submission still has to recognise which turn failed.

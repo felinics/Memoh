@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
 // subagentThreadService is the slice of the thread service the direct-chat
@@ -22,7 +22,7 @@ type subagentThreadService interface {
 // a user chatting with a spawned agent from its own session view — and gives
 // it the same execution surface a parent-driven task gets: the subagent
 // system prompt, the pinned model, and no memory extraction or title rewrite.
-// Turns that already carry a session type (schedules, heartbeats, the spawn
+// Turns that already carry a session type (schedules, the spawn
 // path itself) and turns on non-subagent threads pass through untouched.
 func (s *Service) applySubagentThreadDefaults(ctx context.Context, req ChatRequest) ChatRequest {
 	if strings.TrimSpace(req.SessionType) != "" || strings.TrimSpace(req.ThreadID) == "" {

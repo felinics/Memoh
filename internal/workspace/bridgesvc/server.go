@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,8 +24,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
+
+var errListDirEntryLimit = errors.New("directory listing exceeds the requested entry bound")
 
 const (
 	readMaxLines      = 2000
@@ -217,48 +220,65 @@ func writeFileAtomic(ctx context.Context, targetPath string, content []byte) err
 	return nil
 }
 
-func (s *Server) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
+func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
 	dir := req.GetPath()
 	if dir == "" {
 		dir = "."
 	}
 	dir = s.resolvePath(dir)
 
+	// Without max_entries, listings are unbounded on purpose: general callers
+	// (data export, data counting, secret cleanup) must see every entry,
+	// matching the pre-existing behavior. Callers with a hard ceiling - the
+	// ACP session-state capture - pass max_entries so the walk STOPS at the
+	// bound instead of collecting an attacker-sized tree into memory first.
+	maxEntries := int(req.GetMaxEntries())
 	var all []*pb.FileEntry
+	appendEntry := func(entry *pb.FileEntry) error {
+		if entry == nil {
+			return nil
+		}
+		if maxEntries > 0 && len(all) >= maxEntries {
+			return errListDirEntryLimit
+		}
+		all = append(all, entry)
+		return nil
+	}
 
 	if req.GetRecursive() {
-		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			rel, _ := filepath.Rel(dir, p)
-			if rel == "." {
-				return nil
-			}
+		err := walkDirBatched(ctx, dir, func(rel string, d fs.DirEntry) error {
 			entry, _ := buildFileEntry(rel, d)
-			if entry != nil {
-				all = append(all, entry)
-			}
-			return nil
+			return appendEntry(entry)
 		})
+		if errors.Is(err, errListDirEntryLimit) {
+			return nil, status.Errorf(codes.ResourceExhausted, "recursive listing exceeds %d entries", maxEntries)
+		}
+		if ctxErr := contextStatusError(ctx); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "walk: %v", err)
 		}
+		sort.Slice(all, func(i, j int) bool { return all[i].GetPath() < all[j].GetPath() })
 
 		if threshold := req.GetCollapseThreshold(); threshold > 0 {
 			all = collapseHeavySubdirs(all, int(threshold))
 		}
 	} else {
-		dirEntries, err := os.ReadDir(dir)
+		err := readDirBatched(ctx, dir, func(d fs.DirEntry) error {
+			entry, _ := buildFileEntry(d.Name(), d)
+			return appendEntry(entry)
+		})
 		if err != nil {
+			if errors.Is(err, errListDirEntryLimit) {
+				return nil, status.Errorf(codes.ResourceExhausted, "directory listing exceeds %d entries", maxEntries)
+			}
+			if ctxErr := contextStatusError(ctx); ctxErr != nil {
+				return nil, ctxErr
+			}
 			return nil, status.Errorf(codes.NotFound, "readdir: %v", err)
 		}
-		for _, d := range dirEntries {
-			entry, _ := buildFileEntry(d.Name(), d)
-			if entry != nil {
-				all = append(all, entry)
-			}
-		}
+		sort.Slice(all, func(i, j int) bool { return all[i].GetPath() < all[j].GetPath() })
 	}
 
 	totalCount := int32(min(len(all), math.MaxInt32)) //nolint:gosec // clamped
@@ -288,6 +308,63 @@ func (s *Server) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDir
 		TotalCount: totalCount,
 		Truncated:  truncated,
 	}, nil
+}
+
+const listReadBatchEntries = 256
+
+func readDirBatched(ctx context.Context, dir string, visit func(fs.DirEntry) error) error {
+	file, err := os.Open(dir) //nolint:gosec // dir is resolved by the bridge workspace policy.
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entries, readErr := file.ReadDir(listReadBatchEntries)
+		for _, entry := range entries {
+			if err := visit(entry); err != nil {
+				return err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+func walkDirBatched(ctx context.Context, root string, visit func(string, fs.DirEntry) error) error {
+	directories := []string{root}
+	for len(directories) > 0 {
+		current := directories[len(directories)-1]
+		directories = directories[:len(directories)-1]
+		err := readDirBatched(ctx, current, func(entry fs.DirEntry) error {
+			fullPath := filepath.Join(current, entry.Name())
+			relPath, err := filepath.Rel(root, fullPath)
+			if err != nil {
+				return err
+			}
+			if err := visit(relPath, entry); err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				directories = append(directories, fullPath)
+			}
+			return nil
+		})
+		if err != nil {
+			// Preserve the old WalkDir behavior for an unreadable child while
+			// still surfacing a missing or unreadable requested root.
+			if current == root || errors.Is(err, errListDirEntryLimit) || ctx.Err() != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) Exec(stream pb.ContainerService_ExecServer) error {
@@ -723,6 +800,11 @@ func (s *Server) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
 		if err != nil {
 			return err
 		}
+		if chunk.GetAbort() {
+			// The sender's source failed; the deferred cleanup removes the
+			// temporary file before this status reaches the sender.
+			return status.Error(codes.Aborted, "write aborted by sender")
+		}
 
 		if f == nil {
 			path := chunk.GetPath()
@@ -839,6 +921,9 @@ func (s *Server) Rename(_ context.Context, req *pb.RenameRequest) (*pb.RenameRes
 		return nil, status.Errorf(codes.Internal, "mkdir parent: %v", err)
 	}
 	if err := os.Rename(oldPath, newPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, status.Errorf(codes.NotFound, "rename: %v", err)
+		}
 		return nil, status.Errorf(codes.Internal, "rename: %v", err)
 	}
 	return &pb.RenameResponse{}, nil

@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providertemplates"
-	"github.com/memohai/memoh/internal/registry"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providertemplates"
+	"github.com/felinics/memoh/internal/registry"
 )
 
 // Service handles provider operations.
@@ -278,7 +278,20 @@ const (
 )
 
 // Test probes the provider using the Twilight AI SDK to check
-// reachability and authentication.
+// reachability and authentication. A successful models-list response is
+// conclusive; no follow-up generation probe is made. An earlier fake-model
+// probe was removed (#1042): some OpenAI-compatible gateways validate the
+// model before auth and answer 401 for an unknown model, which the probe
+// misclassified as "Invalid API key" even after the key had authenticated.
+// Per-model availability is covered by models.Service.Test instead.
+//
+// Outcome semantics (#1087) — the models list is only a partial falsifier:
+//   - reachable + 200: verified (ok);
+//   - reachable + 401/403: auth failed (auth_error) — the request carries no
+//     model parameter, so this cannot be confused with "model not found";
+//   - reachable + anything else (404/5xx): unverified, NOT a failure — the
+//     base URL may be wrong, or the provider may not implement model listing;
+//   - unreachable (DNS/TCP): error, the only hard failure kept at this layer.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -300,13 +313,11 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	}
 
 	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
-
 	return TestSDKProvider(ctx, sdkProvider), nil
 }
 
-// TestSDKProvider probes an already-constructed SDK provider and classifies
-// the outcome. The "__ping__" model probe exists to surface authentication
-// failures on endpoints whose models listing does not require auth.
+// TestSDKProvider probes an already-constructed SDK provider using the same
+// model-list semantics as Service.Test.
 func TestSDKProvider(ctx context.Context, sdkProvider sdk.Provider) TestResponse {
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
@@ -321,27 +332,21 @@ func TestSDKProvider(ctx context.Context, sdkProvider sdk.Provider) TestResponse
 			Message:   message,
 		}
 	case sdk.ProviderStatusUnhealthy:
-		status := TestStatusError
 		if strings.Contains(result.Message, "authentication failed") {
-			status = TestStatusAuthError
+			return TestResponse{
+				Status:    TestStatusAuthError,
+				Reachable: true,
+				LatencyMs: time.Since(start).Milliseconds(),
+				Message:   message,
+			}
 		}
 		return TestResponse{
-			Status:    status,
+			Status:    TestStatusUnverified,
 			Reachable: true,
 			LatencyMs: time.Since(start).Milliseconds(),
 			Message:   message,
 		}
 	default:
-		if _, probeErr := sdkProvider.TestModel(ctx, "__ping__"); probeErr != nil {
-			if strings.Contains(probeErr.Error(), "authentication failed") {
-				return TestResponse{
-					Status:    TestStatusAuthError,
-					Reachable: true,
-					LatencyMs: time.Since(start).Milliseconds(),
-					Message:   probeErr.Error(),
-				}
-			}
-		}
 		return TestResponse{
 			Status:    TestStatusOK,
 			Reachable: true,
@@ -349,6 +354,29 @@ func TestSDKProvider(ctx context.Context, sdkProvider sdk.Provider) TestResponse
 			Message:   result.Message,
 		}
 	}
+}
+
+// TestSDKCredentials verifies credentials more strictly than the provider UI
+// probe. Some compatible endpoints expose the model list without requiring
+// authentication, so a synthetic model request is used only to surface an
+// authentication failure; model-not-found and other availability errors do
+// not invalidate an otherwise reachable credential endpoint.
+func TestSDKCredentials(ctx context.Context, sdkProvider sdk.Provider) TestResponse {
+	start := time.Now()
+	resp := TestSDKProvider(ctx, sdkProvider)
+	if resp.Status != TestStatusOK {
+		return resp
+	}
+	if _, err := sdkProvider.TestModel(ctx, "__ping__"); err != nil && strings.Contains(err.Error(), "authentication failed") {
+		return TestResponse{
+			Status:    TestStatusAuthError,
+			Reachable: true,
+			LatencyMs: time.Since(start).Milliseconds(),
+			Message:   err.Error(),
+		}
+	}
+	resp.LatencyMs = time.Since(start).Milliseconds()
+	return resp
 }
 
 // errorDetailer is implemented by transport errors that can expand into a
@@ -446,15 +474,21 @@ func remoteModelsFromCatalog(items []sqlc.TemplateProviderTemplateModel) []Remot
 	for _, model := range items {
 		cfg := providerConfig(model.Config)
 		out = append(out, RemoteModel{
-			ID:               model.ModelID,
-			Name:             model.Name,
-			Description:      configStringPtr(cfg, "description"),
-			Type:             model.Type,
-			Compatibilities:  configStringSlice(cfg, "compatibilities"),
-			ReasoningEfforts: configStringSlice(cfg, "reasoning_efforts"),
-			ThinkingMode:     configString(cfg, "thinking_mode"),
-			ContextWindow:    configIntPtr(cfg, "context_window"),
-			Dimensions:       configIntPtr(cfg, "dimensions"),
+			ID:                  model.ModelID,
+			Name:                model.Name,
+			Description:         configStringPtr(cfg, "description"),
+			Type:                model.Type,
+			Compatibilities:     configStringSlice(cfg, "compatibilities"),
+			ReasoningEfforts:    configStringSlice(cfg, "reasoning_efforts"),
+			ThinkingMode:        configString(cfg, "thinking_mode"),
+			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
+			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
+			ReasoningDefaultOn:  configBoolPtr(cfg, "reasoning_default_on"),
+			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
+			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
+			ContextWindow:       configIntPtr(cfg, "context_window"),
+			Dimensions:          configIntPtr(cfg, "dimensions"),
+			CapabilitiesKnown:   true,
 		})
 	}
 	return out
@@ -469,15 +503,21 @@ func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
 		}
 		cfg := model.Config
 		out = append(out, RemoteModel{
-			ID:               model.ModelID,
-			Name:             model.Name,
-			Description:      configStringPtr(cfg, "description"),
-			Type:             modelType,
-			Compatibilities:  configStringSlice(cfg, "compatibilities"),
-			ReasoningEfforts: configStringSlice(cfg, "reasoning_efforts"),
-			ThinkingMode:     configString(cfg, "thinking_mode"),
-			ContextWindow:    configIntPtr(cfg, "context_window"),
-			Dimensions:       configIntPtr(cfg, "dimensions"),
+			ID:                  model.ModelID,
+			Name:                model.Name,
+			Description:         configStringPtr(cfg, "description"),
+			Type:                modelType,
+			Compatibilities:     configStringSlice(cfg, "compatibilities"),
+			ReasoningEfforts:    configStringSlice(cfg, "reasoning_efforts"),
+			ThinkingMode:        configString(cfg, "thinking_mode"),
+			ReasoningDialect:    configString(cfg, "reasoning_dialect"),
+			ReasoningOffSupport: configString(cfg, "reasoning_off_support"),
+			ReasoningDefaultOn:  configBoolPtr(cfg, "reasoning_default_on"),
+			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
+			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
+			ContextWindow:       configIntPtr(cfg, "context_window"),
+			Dimensions:          configIntPtr(cfg, "dimensions"),
+			CapabilitiesKnown:   true,
 		})
 	}
 	return out
@@ -659,6 +699,29 @@ func configIntPtr(cfg map[string]any, key string) *int {
 	return nil
 }
 
+func configNonNegativeIntPtr(cfg map[string]any, key string) *int {
+	if cfg == nil {
+		return nil
+	}
+	switch value := cfg[key].(type) {
+	case int:
+		if value >= 0 {
+			return &value
+		}
+	case int64:
+		if value >= 0 {
+			out := int(value)
+			return &out
+		}
+	case float64:
+		if value >= 0 {
+			out := int(value)
+			return &out
+		}
+	}
+	return nil
+}
+
 // ProviderConfigString is a public helper for extracting a string from the config JSONB.
 func ProviderConfigString(provider sqlc.Provider, key string) string {
 	return configString(providerConfig(provider.Config), key)
@@ -787,4 +850,17 @@ func metadataSectionSource(metadata map[string]any, section string) string {
 		return ""
 	}
 	return strings.TrimSpace(stringValue(nested, metadataSourceKey))
+}
+
+// configBoolPtr reads an optional boolean, distinguishing "absent" from "false".
+// reasoning_default_on needs that distinction: unknown means the adaptor keeps its
+// conservative behaviour, while an explicit false is a fact about the model.
+func configBoolPtr(cfg map[string]any, key string) *bool {
+	if cfg == nil {
+		return nil
+	}
+	if value, ok := cfg[key].(bool); ok {
+		return &value
+	}
+	return nil
 }

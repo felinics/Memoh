@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"strings"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/media"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/media"
 )
 
 // SessionContext carries request-scoped identity for tool execution.

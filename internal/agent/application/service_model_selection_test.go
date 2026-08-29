@@ -9,34 +9,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/settings"
 )
-
-func TestOffEffortFor(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name   string
-		levels []string
-		want   string
-	}{
-		{"none wins", []string{models.ReasoningEffortNone, "low", "medium"}, models.ReasoningEffortNone},
-		{"minimal when no none", []string{models.ReasoningEffortMinimal, "low", "medium"}, models.ReasoningEffortMinimal},
-		{"empty when only real tiers (omit, do not enable)", []string{"medium", "high", "xhigh"}, ""},
-		{"legacy base yields empty (omit reasoning_effort)", []string{"low", "medium", "high"}, ""},
-		{"empty levels yield empty", nil, ""},
-	}
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := offEffortFor(tt.levels); got != tt.want {
-				t.Fatalf("offEffortFor(%v) = %q, want %q", tt.levels, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestMatchesModelReference_ModelID(t *testing.T) {
 	t.Parallel()
@@ -182,11 +161,12 @@ func TestResolveReasoningConfig(t *testing.T) {
 		},
 	}
 
-	noneEffortModel := models.GetResponse{
+	// A model that advertises it can be turned off, alongside its active tiers.
+	disablableModel := models.GetResponse{
 		Model: models.Model{
 			Config: models.ModelConfig{
 				ThinkingMode:     models.ThinkingModeToggle,
-				ReasoningEfforts: []string{"none", "minimal", "low", "medium", "high"},
+				ReasoningEfforts: []string{models.ReasoningEffortDisable, "minimal", "low", "medium", "high"},
 			},
 		},
 	}
@@ -198,6 +178,17 @@ func TestResolveReasoningConfig(t *testing.T) {
 			Config: models.ModelConfig{
 				ThinkingMode:     models.ThinkingModeToggle,
 				ReasoningEfforts: []string{"low", "medium", "high"},
+			},
+		},
+	}
+	// Legacy Anthropic that also declares it can be turned off. Being turn-off
+	// capable says nothing about which thinking wire the model speaks, so this one
+	// must stay on the budget path.
+	disablableLegacyAnthropicModel := models.GetResponse{
+		Model: models.Model{
+			Config: models.ModelConfig{
+				ThinkingMode:     models.ThinkingModeToggle,
+				ReasoningEfforts: []string{models.ReasoningEffortDisable, "low", "medium", "high"},
 			},
 		},
 	}
@@ -223,31 +214,55 @@ func TestResolveReasoningConfig(t *testing.T) {
 		want          *models.ReasoningConfig
 	}{
 		{
-			name:          "disable overrides bot default",
+			name:          "unsupported disable override falls back to bot default",
 			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
-			requestEffort: reasoningEffortDisable,
-			want:          &models.ReasoningConfig{Disabled: true},
+			requestEffort: models.ReasoningEffortDisable,
+			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
 			name:          "legacy adaptive request enables toggle with default effort",
 			model:         toggleModel,
-			requestEffort: reasoningEffortAdaptive,
+			requestEffort: reasoning.EffortAdaptive,
 			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:          "unsupported none effort falls back to bot default",
+			// A requested "none" is an off request, not an active tier. Treating it as
+			// a tier produced Active with Effort "none" — enabled at no strength —
+			// which wires to the same request as off.
+			name:          "requested none falls back when the model cannot be turned off",
 			model:         toggleModel,
 			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
 			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 		},
 		{
-			name:          "explicit none effort is preserved when model supports it",
-			model:         noneEffortModel,
+			name:          "requested none reads as off, and a disablable model carries the wire value",
+			model:         disablableModel,
 			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			requestEffort: models.ReasoningEffortNone,
-			want:          &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortNone},
+			want:          &models.ReasoningConfig{Disabled: true, OffEffort: models.ReasoningEffortNone},
+		},
+		{
+			name:          "explicit disable reads as off",
+			model:         disablableModel,
+			requestEffort: models.ReasoningEffortDisable,
+			want:          &models.ReasoningConfig{Disabled: true, OffEffort: models.ReasoningEffortNone},
+		},
+		{
+			// A bot parked on off, overridden for one message with a tier the model
+			// does not advertise. The stored value must not be picked up as the active
+			// tier: "disable" is advertisable now, so it would otherwise reach the
+			// provider wire, where no vendor knows the word.
+			name:          "a stored off never becomes the active tier",
+			model:         disablableModel,
+			botSettings:   settings.Settings{ReasoningEffort: models.ReasoningEffortDisable},
+			requestEffort: models.ReasoningEffortXHigh,
+			want: &models.ReasoningConfig{
+				Active:    true,
+				Effort:    models.ReasoningEffortMedium,
+				OffEffort: models.ReasoningEffortNone,
+			},
 		},
 		{
 			name:          "explicit effort is trimmed",
@@ -268,16 +283,16 @@ func TestResolveReasoningConfig(t *testing.T) {
 			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:        "bot effort of disable turns reasoning off",
+			name:        "stale bot disable falls back when the model cannot turn off",
 			model:       toggleModel,
 			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortDisable},
-			want:        &models.ReasoningConfig{Disabled: true},
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
-			name:          "adaptive model can still be disabled",
+			name:          "adaptive model without off support stays active",
 			model:         adaptiveModel,
-			requestEffort: reasoningEffortDisable,
-			want:          &models.ReasoningConfig{Disabled: true},
+			requestEffort: models.ReasoningEffortDisable,
+			want:          &models.ReasoningConfig{Active: true, Adaptive: true, Effort: models.ReasoningEffortMedium},
 		},
 		{
 			name:          "adaptive model honors explicit effort",
@@ -309,6 +324,13 @@ func TestResolveReasoningConfig(t *testing.T) {
 		{
 			name:        "legacy anthropic stays non-adaptive for budget path",
 			model:       legacyAnthropicModel,
+			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
+			clientType:  string(models.ClientTypeAnthropicMessages),
+			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
+		},
+		{
+			name:        "declaring off does not promote a legacy anthropic model to adaptive",
+			model:       disablableLegacyAnthropicModel,
 			botSettings: settings.Settings{ReasoningEffort: models.ReasoningEffortHigh},
 			clientType:  string(models.ClientTypeAnthropicMessages),
 			want:        &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
