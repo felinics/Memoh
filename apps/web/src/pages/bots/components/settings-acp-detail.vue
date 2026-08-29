@@ -414,9 +414,15 @@ const selfModeHint = computed(() => isHermes.value
   ? t('bots.settings.acpHermesSelfModeHint')
   : t('bots.settings.acpSelfModeHint'))
 
-const visibleManagedFields = computed(() =>
-  filterSettingsVisibleManagedFields(props.profile, agent.value.managed, agent.value.setup_mode),
-)
+// 密钥归实例凭据（下方的 API Key 输入/OAuth Connect）管；metadata 里的同名
+// managed 字段在凭据模式下保存时会被服务端剥掉，展示出来只会造成"两个
+// API Key"的困惑。base_url 等非敏感配置仍走 managed 字段。
+const CREDENTIAL_OWNED_FIELDS = new Set(['api_key', 'oauth_token'])
+const visibleManagedFields = computed(() => {
+  const fields = filterSettingsVisibleManagedFields(props.profile, agent.value.managed, agent.value.setup_mode)
+  if (!botAgentId.value) return fields
+  return fields.filter(field => !CREDENTIAL_OWNED_FIELDS.has(normalizeACPAgentID(field.id)))
+})
 
 // 只有走托管 OAuth 的两个 agent、且当前就在 OAuth 模式时,账号卡片才有存在意义。
 const oauthSectionVisible = computed(() =>
