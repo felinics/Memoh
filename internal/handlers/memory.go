@@ -12,11 +12,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/migrate"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // MemoryHandler handles memory CRUD operations scoped by bot.

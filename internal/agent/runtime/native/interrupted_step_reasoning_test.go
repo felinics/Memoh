@@ -3,9 +3,9 @@ package native
 import (
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/messageconv"
+	"github.com/felinics/memoh/internal/messageconv"
 )
 
 // An interrupted step is persisted as a checkpoint and replayed on the next

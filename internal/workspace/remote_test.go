@@ -14,14 +14,14 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/userruntime"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/userruntime"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (

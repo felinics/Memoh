@@ -16,13 +16,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/runtimefence"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

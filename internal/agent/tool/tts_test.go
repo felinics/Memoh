@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/messaging"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type ttsTestSettings struct{}

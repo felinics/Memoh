@@ -8,9 +8,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	dbpkg "github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type Queries struct {

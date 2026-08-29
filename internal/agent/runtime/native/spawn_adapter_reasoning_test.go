@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/models"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // The reasoning decision on the subagent spawn path (#983).

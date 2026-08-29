@@ -12,14 +12,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db"
+	"github.com/felinics/memoh/internal/accounts"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
 )
 
 type ACPRuntimeHandler struct {

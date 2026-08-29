@@ -3,8 +3,8 @@ package application
 import (
 	"strings"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/turn"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // discussAdmission reports the agent-side admission decision made on a

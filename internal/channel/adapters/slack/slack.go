@@ -16,9 +16,9 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/common"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/common"
+	"github.com/felinics/memoh/internal/media"
 )
 
 const (

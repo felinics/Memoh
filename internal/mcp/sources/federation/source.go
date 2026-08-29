@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/toolcontext"
+	mcpgw "github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 const cacheTTL = 5 * time.Second

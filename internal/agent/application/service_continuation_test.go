@@ -5,12 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *testing.T) {

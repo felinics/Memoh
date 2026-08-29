@@ -3,10 +3,10 @@ package contextview
 import (
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 const toolExchangeDropReason = "tool_exchange:stripped"

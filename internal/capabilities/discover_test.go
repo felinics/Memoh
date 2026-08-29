@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func ptrBool(b bool) *bool { return &b }

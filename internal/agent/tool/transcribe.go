@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/attachment"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/attachment"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type TranscriptionProvider struct {

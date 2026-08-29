@@ -1,6 +1,6 @@
 package command
 
-import "github.com/memohai/memoh/internal/i18n"
+import "github.com/felinics/memoh/internal/i18n"
 
 // MenuCommand is one entry for a channel's native slash-command menu (e.g.
 // Telegram's setMyCommands), so users discover and tap commands without typing.

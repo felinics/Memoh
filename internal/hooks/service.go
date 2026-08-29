@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/prune"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/prune"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type ToolRunner interface {

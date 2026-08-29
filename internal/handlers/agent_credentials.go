@@ -7,11 +7,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	"github.com/memohai/memoh/internal/agentcredential"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/accounts"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 // AgentCredentialHandler manages the single credential attached to a Bot

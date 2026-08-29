@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 func appendDiscoveryRoots(roots []Root, extra ...Root) []Root {

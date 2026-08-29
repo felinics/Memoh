@@ -10,12 +10,58 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/models"
 )
+
+type silentTriggerProvider struct {
+	mu       sync.Mutex
+	attempts int
+	started  chan struct{}
+	once     sync.Once
+}
+
+func (*silentTriggerProvider) Name() string { return "silent-trigger" }
+
+func (*silentTriggerProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
+
+func (*silentTriggerProvider) Test(context.Context) *sdk.ProviderTestResult {
+	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+}
+
+func (*silentTriggerProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
+	return &sdk.ModelTestResult{Supported: true}, nil
+}
+
+func (*silentTriggerProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	return nil, errors.New("unexpected non-streaming call")
+}
+
+func (p *silentTriggerProvider) DoStream(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+	p.mu.Lock()
+	p.attempts++
+	p.mu.Unlock()
+	p.once.Do(func() { close(p.started) })
+
+	stream := make(chan sdk.StreamPart)
+	go func() {
+		<-ctx.Done()
+		close(stream)
+	}()
+	return &sdk.StreamResult{Stream: stream}, nil
+}
+
+func (p *silentTriggerProvider) attemptCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.attempts
+}
 
 // recordingTurnEventPublisher stands in for the session-runtime projection
 // sink: it records every published event and can be armed to refuse the Nth
@@ -71,6 +117,112 @@ func scheduleTerminalEvent(t *testing.T, assistantText string) native.StreamEven
 
 func triggerStreamRequest() ChatRequest {
 	return ChatRequest{BotID: "bot-1", ChatID: "bot-1", ThreadID: "session-1", Query: "run scheduled task"}
+}
+
+func TestTriggeredNativeStreamTimesOutSilentProviderWithoutRetry(t *testing.T) {
+	provider := &silentTriggerProvider{started: make(chan struct{})}
+	logger := slog.New(slog.DiscardHandler)
+	svc := &Service{
+		agent:             native.New(native.Deps{Logger: logger}),
+		logger:            logger,
+		messageService:    &recordingMessageService{},
+		streamIdleTimeout: 100 * time.Millisecond,
+	}
+	cfg := triggerResolvedRunConfig(provider, "run scheduled task", time.Now(), sessionmode.Schedule)
+	cfg = svc.prepareRunConfig(context.Background(), cfg)
+	rc := resolvedContext{
+		runConfig: cfg,
+		model:     models.GetResponse{ID: "model-1"},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.runTriggeredNativeStream(
+			context.Background(),
+			cfg,
+			triggerStreamRequest(),
+			rc,
+			sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"},
+			nil,
+			nil,
+		)
+		done <- err
+	}()
+
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("silent provider was not started")
+	}
+
+	select {
+	case err := <-done:
+		if got := apperror.CodeOf(err); got != apperror.CodeAgentResponseTimeout {
+			t.Fatalf("trigger error code = %q, want %q: %v", got, apperror.CodeAgentResponseTimeout, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("triggered stream did not stop after its idle timeout")
+	}
+	if got := provider.attemptCount(); got != 1 {
+		t.Fatalf("provider attempts = %d, want 1; watchdog cancellation must not retry", got)
+	}
+}
+
+func TestTriggeredNativeStreamCallerCancellationWinsOverIdleTimeout(t *testing.T) {
+	provider := &silentTriggerProvider{started: make(chan struct{})}
+	logger := slog.New(slog.DiscardHandler)
+	svc := &Service{
+		agent:             native.New(native.Deps{Logger: logger}),
+		logger:            logger,
+		messageService:    &recordingMessageService{},
+		streamIdleTimeout: time.Second,
+	}
+	cfg := triggerResolvedRunConfig(provider, "run scheduled task", time.Now(), sessionmode.Schedule)
+	cfg = svc.prepareRunConfig(context.Background(), cfg)
+	rc := resolvedContext{
+		runConfig: cfg,
+		model:     models.GetResponse{ID: "model-1"},
+	}
+
+	ctx, cancel := context.WithCancelCause(context.Background())
+	wantCause := errors.New("manual schedule trigger stopped")
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.runTriggeredNativeStream(
+			ctx,
+			cfg,
+			triggerStreamRequest(),
+			rc,
+			sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"},
+			nil,
+			nil,
+		)
+		done <- err
+	}()
+
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		cancel(wantCause)
+		<-done
+		t.Fatal("silent provider was not started")
+	}
+	cancel(wantCause)
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, wantCause) {
+			t.Fatalf("trigger error = %v, want caller cancellation cause", err)
+		}
+		if got := apperror.CodeOf(err); got == apperror.CodeAgentResponseTimeout {
+			t.Fatalf("caller cancellation was rewritten as timeout: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("triggered stream did not stop after caller cancellation")
+	}
+	if got := provider.attemptCount(); got != 1 {
+		t.Fatalf("provider attempts = %d, want 1 after caller cancellation", got)
+	}
 }
 
 func TestConsumeTriggeredStreamProjectsEventsAndBuildsResult(t *testing.T) {
@@ -170,6 +322,33 @@ func TestConsumeTriggeredStreamSurfacesStreamErrorWithoutTerminal(t *testing.T) 
 	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "provider boom") {
 		t.Fatalf("consumeTriggeredStream() error = %v, want the provider error", err)
+	}
+}
+
+func TestConsumeTriggeredStreamKeepsDiagnosticsInternalAndPublishesStableFailure(t *testing.T) {
+	t.Parallel()
+
+	pub := &recordingTurnEventPublisher{}
+	svc := newTriggerStreamService(&recordingMessageService{}, pub)
+
+	events := make(chan native.StreamEvent, 1)
+	events <- native.StreamEvent{Type: native.EventError, Error: "SECRET provider boom"}
+	close(events)
+
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "SECRET provider boom") {
+		t.Fatalf("internal trigger error = %v, want private provider diagnostic", err)
+	}
+	published := pub.published()
+	if len(published) != 1 {
+		t.Fatalf("published events = %#v, want one stable failure", published)
+	}
+	failure := published[0]
+	if failure.Code != string(apperror.CodeAgentResponseInterrupted) {
+		t.Fatalf("published code = %q, want %q", failure.Code, apperror.CodeAgentResponseInterrupted)
+	}
+	if strings.Contains(failure.Error, "SECRET") {
+		t.Fatalf("private diagnostic leaked to runtime projection: %q", failure.Error)
 	}
 }
 

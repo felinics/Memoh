@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/contextview"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/contextview"
 )
 
 func buildProviderSourceFrags(

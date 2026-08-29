@@ -3,7 +3,7 @@ package turn_test
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func TestAdmitContextEntriesEmptyInput(t *testing.T) {

@@ -6,11 +6,11 @@ import (
 	"errors"
 	"strings"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 // SpawnStepCommitFactory builds the per-step persistence callback for one

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/slash"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 func requestedSkillGuardRequest(sessionID string) ChatRequest {

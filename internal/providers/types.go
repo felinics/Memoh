@@ -3,7 +3,7 @@ package providers
 import (
 	"time"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // CreateRequest represents a request to create a new provider.

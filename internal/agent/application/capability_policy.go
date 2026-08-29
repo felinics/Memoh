@@ -3,8 +3,8 @@ package application
 import (
 	"strings"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/models"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/models"
 )
 
 const (

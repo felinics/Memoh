@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func TestACPActivePromptHubDoesNotDropQueuedEvents(t *testing.T) {

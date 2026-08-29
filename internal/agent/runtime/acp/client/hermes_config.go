@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

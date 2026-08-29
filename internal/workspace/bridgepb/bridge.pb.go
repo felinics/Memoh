@@ -2115,7 +2115,7 @@ const file_internal_workspace_bridgepb_bridge_proto_rawDesc = "" +
 	"\x0fReadRawNoFollow\x12 .bridgepb.ReadRawNoFollowRequest\x1a\x13.bridgepb.DataChunk0\x01\x12Q\n" +
 	"\x10WriteRawNoFollow\x12\x1f.bridgepb.WriteRawNoFollowChunk\x1a\x1a.bridgepb.WriteRawResponse(\x01\x12G\n" +
 	"\n" +
-	"DeleteFile\x12\x1b.bridgepb.DeleteFileRequest\x1a\x1c.bridgepb.DeleteFileResponseB6Z4github.com/memohai/memoh/internal/workspace/bridgepbb\x06proto3"
+	"DeleteFile\x12\x1b.bridgepb.DeleteFileRequest\x1a\x1c.bridgepb.DeleteFileResponseB7Z5github.com/felinics/memoh/internal/workspace/bridgepbb\x06proto3"
 
 var (
 	file_internal_workspace_bridgepb_bridge_proto_rawDescOnce sync.Once

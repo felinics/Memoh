@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/memohai/memoh/internal/toolcontext"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 // ToolSessionContext is the MCP gateway's compatibility name for the shared

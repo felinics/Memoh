@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/agent/turn"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
 )
 
 // UIAttachmentsFromTurnAttachments converts turn attachments into the

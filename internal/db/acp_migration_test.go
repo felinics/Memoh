@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	embeddeddb "github.com/memohai/memoh/db"
+	embeddeddb "github.com/felinics/memoh/db"
 )
 
 func TestPostgresACPAgentSessionTypeMigrationFiles(t *testing.T) {

@@ -10,10 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	message "github.com/memohai/memoh/internal/chat/message"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	message "github.com/felinics/memoh/internal/chat/message"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
 
 func TestPostgresForkFromAssistantTurnCopiesVisibleTurns(t *testing.T) {

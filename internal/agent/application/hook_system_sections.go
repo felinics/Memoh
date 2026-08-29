@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/hooks"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/hooks"
 )
 
 const (

@@ -264,7 +264,7 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 import { useSettingsStore } from '@/store/settings'
 import { useUpdateStore } from '@/store/update'
 
-const GITHUB_REPO = 'memohai/memoh'
+const GITHUB_REPO = 'felinics/memoh'
 
 // Release notes are arbitrary upstream markdown and can contain fenced code
 // blocks. markstream 2.0's built-in code block needs the optional stream-diffs

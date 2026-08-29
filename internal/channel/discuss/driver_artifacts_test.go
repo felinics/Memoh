@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type fakeArtifactProvider struct {

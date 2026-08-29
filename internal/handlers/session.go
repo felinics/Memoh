@@ -14,14 +14,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/agentcredential"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/botagents"
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/runtimefence"
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 // SessionHandler handles bot session CRUD endpoints.

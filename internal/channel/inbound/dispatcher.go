@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 // InjectMessage is an alias for turn.InjectMessage, re-exported so

@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 const (

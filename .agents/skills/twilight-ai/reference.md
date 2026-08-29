@@ -6,13 +6,13 @@ Use it when the task needs exact package names, exported types, function signatu
 
 ## Package Map
 
-- `github.com/memohai/twilight-ai/sdk`
-- `github.com/memohai/twilight-ai/provider/openai/completions`
-- `github.com/memohai/twilight-ai/provider/openai/responses`
-- `github.com/memohai/twilight-ai/provider/anthropic/messages`
-- `github.com/memohai/twilight-ai/provider/google/generativeai`
-- `github.com/memohai/twilight-ai/provider/openai/embedding`
-- `github.com/memohai/twilight-ai/provider/google/embedding`
+- `github.com/felinics/twilight/sdk`
+- `github.com/felinics/twilight/provider/openai/completions`
+- `github.com/felinics/twilight/provider/openai/responses`
+- `github.com/felinics/twilight/provider/anthropic/messages`
+- `github.com/felinics/twilight/provider/google/generativeai`
+- `github.com/felinics/twilight/provider/openai/embedding`
+- `github.com/felinics/twilight/provider/google/embedding`
 
 ## Package `sdk`
 

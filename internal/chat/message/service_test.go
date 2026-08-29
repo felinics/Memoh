@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type runtimeSnapshotQueries struct {

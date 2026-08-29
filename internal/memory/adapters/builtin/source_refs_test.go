@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/mcp"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/migrate"
+	"github.com/felinics/memoh/internal/mcp"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
 )
 
 func TestGraphRuntimeAddPersistsSourceMessageIDs(t *testing.T) {

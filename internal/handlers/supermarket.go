@@ -9,12 +9,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/skillpackages"
-	supermarketclient "github.com/memohai/memoh/internal/supermarket"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/skillpackages"
+	supermarketclient "github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type SupermarketHandler struct {

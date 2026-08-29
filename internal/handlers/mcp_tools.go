@@ -7,8 +7,8 @@ import (
 	"github.com/labstack/echo/v4"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/memohai/memoh/internal/auth"
-	mcpgw "github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/auth"
+	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
 
 const (

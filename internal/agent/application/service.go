@@ -20,34 +20,34 @@ import (
 	"sync/atomic"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	turnpkg "github.com/memohai/memoh/internal/agent/turn"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/reasoning"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 const (
@@ -103,33 +103,36 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
-	agent              *native.Agent
-	modelsService      *models.Service
-	queries            dbstore.Queries
-	memoryRegistry     *memprovider.Registry
-	messageService     messagepkg.Service
-	settingsService    *settings.Service
-	accountService     *accounts.Service
-	sessionService     SessionService
-	acpPool            acpPrompter
-	compactionService  compactionRunner
-	eventPublisher     messageevent.Publisher
-	skillLoader        SkillLoader
-	assetLoader        gatewayAssetLoader
-	platformIdentities PlatformIdentitySource
-	botPermissions     botPermissionChecker
-	workspaceTargets   workspaceTargetResolver
-	workdirs           sessionWorkdirResolver
-	pipeline           *timeline.Pipeline
-	streamHTTPClient   *http.Client
-	bgManager          *background.Manager
-	toolApproval       *toolapproval.Service
-	userInput          userInputService
-	hookService        *hooks.Service
-	memoryContextMu    sync.Mutex
-	memoryContextCache *memprovider.MemoryContextCache
-	acpPromptMu        sync.Mutex
-	acpPromptHubs      map[string]*acpActivePromptHub
+	agent                  *native.Agent
+	modelsService          *models.Service
+	queries                dbstore.Queries
+	memoryRegistry         *memprovider.Registry
+	messageService         messagepkg.Service
+	settingsService        *settings.Service
+	accountService         *accounts.Service
+	sessionService         SessionService
+	acpPool                acpPrompter
+	compactionService      compactionRunner
+	eventPublisher         messageevent.Publisher
+	skillLoader            SkillLoader
+	assetLoader            gatewayAssetLoader
+	platformIdentities     PlatformIdentitySource
+	botPermissions         botPermissionChecker
+	workspaceTargets       workspaceTargetResolver
+	workdirs               sessionWorkdirResolver
+	pipeline               *timeline.Pipeline
+	streamHTTPClient       *http.Client
+	nonStreamingHTTPClient *http.Client
+	streamIdleTimeout      time.Duration
+	streamIdleTimeoutMax   time.Duration
+	bgManager              *background.Manager
+	toolApproval           *toolapproval.Service
+	userInput              userInputService
+	hookService            *hooks.Service
+	memoryContextMu        sync.Mutex
+	memoryContextCache     *memprovider.MemoryContextCache
+	acpPromptMu            sync.Mutex
+	acpPromptHubs          map[string]*acpActivePromptHub
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
@@ -170,38 +173,44 @@ func NewService(
 	if clockLocation == nil {
 		clockLocation = time.UTC
 	}
-	// HTTP client with timeouts for LLM provider streaming.
-	// - DialTimeout: fail fast on connection issues
-	// - ResponseHeaderTimeout: catch servers that accept TCP but never respond
-	// - Timeout: overall request lifetime cap (prevents stuck SSE body reads)
+	// Streaming requests keep transport establishment bounded, while the
+	// application idle watchdog owns first-byte and between-event silence. A
+	// client-wide or response-header deadline would otherwise preempt that
+	// policy and turn one intentional timeout into repeated transport retries.
+	streamTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+	}
 	streamHTTPClient := &http.Client{
-		Timeout: 10 * time.Minute, // overall cap, matches the application timeout
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 30 * time.Second,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   10,
-			IdleConnTimeout:       90 * time.Second,
-		},
+		Transport: streamTransport,
+	}
+	nonStreamingTransport := streamTransport.Clone()
+	nonStreamingTransport.ResponseHeaderTimeout = 30 * time.Second
+	nonStreamingHTTPClient := &http.Client{
+		Transport: nonStreamingTransport,
+		Timeout:   10 * time.Minute,
 	}
 
 	return &Service{
-		agent:               a,
-		modelsService:       modelsService,
-		queries:             queries,
-		contextLifecycles:   queries,
-		messageService:      messageService,
-		settingsService:     settingsService,
-		accountService:      accountService,
-		streamHTTPClient:    streamHTTPClient,
-		timeout:             timeout,
-		memorySearchTimeout: defaultMemorySearchTimeout,
-		clockLocation:       clockLocation,
-		logger:              log.With(slog.String("service", "agent/application")),
+		agent:                  a,
+		modelsService:          modelsService,
+		queries:                queries,
+		contextLifecycles:      queries,
+		messageService:         messageService,
+		settingsService:        settingsService,
+		accountService:         accountService,
+		streamHTTPClient:       streamHTTPClient,
+		nonStreamingHTTPClient: nonStreamingHTTPClient,
+		timeout:                timeout,
+		memorySearchTimeout:    defaultMemorySearchTimeout,
+		clockLocation:          clockLocation,
+		logger:                 log.With(slog.String("service", "agent/application")),
 	}
 }
 
@@ -399,6 +408,10 @@ func defaultToolExchangePolicy() *contextfrag.ToolExchangePolicy {
 // request, not the one that went in. Query is deliberately untouched: callers
 // that persist a headerified user message still take it from resolvedContext.
 func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext, ChatRequest, error) {
+	return s.resolveWithHTTPClient(ctx, req, nil)
+}
+
+func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, modelHTTPClient *http.Client) (resolvedContext, ChatRequest, error) {
 	modelQuery := modelQueryText(req)
 	if strings.TrimSpace(modelQuery) == "" && len(req.Attachments) == 0 {
 		return resolvedContext{}, req, errors.New("query or attachments is required")
@@ -429,6 +442,7 @@ func (s *Service) resolve(ctx context.Context, req ChatRequest) (resolvedContext
 		Model:             req.Model,
 		Provider:          req.Provider,
 		ReasoningEffort:   req.ReasoningEffort,
+		HTTPClient:        modelHTTPClient,
 	})
 	if err != nil {
 		s.logger.Error("resolve: buildBaseRunConfig failed",
@@ -692,7 +706,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 	}
-	rc, req, err := s.resolve(ctx, req)
+	rc, req, err := s.resolveWithHTTPClient(ctx, req, s.nonStreamingHTTPClient)
 	if err != nil {
 		return ChatResponse{}, err
 	}
@@ -773,6 +787,7 @@ type baseRunConfigParams struct {
 	Model             string
 	Provider          string
 	ReasoningEffort   string // caller-provided override (empty = use bot default)
+	HTTPClient        *http.Client
 }
 
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
@@ -813,6 +828,10 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 
 	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
 
+	modelHTTPClient := p.HTTPClient
+	if modelHTTPClient == nil {
+		modelHTTPClient = s.streamHTTPClient
+	}
 	sdkModel := models.NewSDKChatModel(models.SDKModelConfig{
 		ModelID:               chatModel.ModelID,
 		ClientType:            provider.ClientType,
@@ -820,7 +839,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		CodexAccountID:        creds.CodexAccountID,
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
-		HTTPClient:            s.streamHTTPClient,
+		HTTPClient:            modelHTTPClient,
 		ReasoningConfig:       reasoningConfig,
 		ReasoningDialect:      chatModel.Config.ReasoningDialect,
 		ReasoningOffSupport:   chatModel.Config.ReasoningOffSupport,

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type fakeHistorySessionLister struct {

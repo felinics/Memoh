@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PUSH: ${{ github.repository == 'memohai/Memoh' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release') }}
+  PUSH: ${{ github.repository == 'felinics/Memoh' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release') }}
   REGISTRY: ghcr.io
 
 permissions:
@@ -235,7 +235,7 @@ jobs:
   merge:
     name: publish ${{ matrix.image }}${{ matrix.variant != '' && format(' ({0})', matrix.variant) || '' }}
     runs-on: ubuntu-latest
-    if: github.repository == 'memohai/Memoh' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
+    if: github.repository == 'felinics/Memoh' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/v') || startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
     needs: [detect-changes, build]
     strategy:
       matrix:

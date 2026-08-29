@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // fakeResetLedger layers the durable reset arbiter over the shared run-ledger

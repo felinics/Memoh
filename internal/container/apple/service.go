@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/acgo"
-	"github.com/memohai/acgo/socktainer"
+	"github.com/felinics/acgo"
+	"github.com/felinics/acgo/socktainer"
 
-	"github.com/memohai/memoh/internal/config"
-	containerapi "github.com/memohai/memoh/internal/container"
+	"github.com/felinics/memoh/internal/config"
+	containerapi "github.com/felinics/memoh/internal/container"
 )
 
 var (

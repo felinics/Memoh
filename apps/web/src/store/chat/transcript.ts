@@ -5,6 +5,7 @@ import type {
   UIMessage,
   UITurn,
 } from '@/composables/api/useChat.types'
+import { parseMemohError } from '@/utils/api-error'
 import {
   messageIdentityId,
   mergeApprovalState,
@@ -579,21 +580,33 @@ export function createTranscriptController({
   }
 
   function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
-    return turn.messages.some(block => block.type !== 'error')
+    return turn.messages.some(block =>
+      block.type !== 'error' || Boolean(block.code || block.content),
+    )
   }
 
   function finishAssistantTurn(turn: ChatAssistantTurn) {
     turn.streaming = false
   }
 
-  function appendAssistantError(assistantTurn: ChatAssistantTurn, errorMessage: string) {
+  function appendAssistantError(assistantTurn: ChatAssistantTurn, errorMessage: string, code?: string) {
     const text = errorMessage.trim()
-    if (!text) return
-    assistantTurn.messages.push({ id: nextAssistantMessageId(assistantTurn), type: 'error', content: text })
+    if (!text && !code) return
+    assistantTurn.messages.push({
+      id: nextAssistantMessageId(assistantTurn),
+      type: 'error',
+      code,
+      content: text,
+    })
   }
 
   function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
+    const parsed = parseMemohError(error)
     if (!hasVisibleAssistantBlocks(assistantTurn)) {
+      if (parsed?.code) {
+        appendAssistantError(assistantTurn, error.message, parsed.code)
+        return
+      }
       const turnId = assistantTurn.turnId?.trim()
       if (turnId) {
         removeRuntimeTurn(turnId)
@@ -604,7 +617,7 @@ export function createTranscriptController({
     }
     if (error.name === 'AbortError') return
     if (assistantTurn.messages.some(block => block.type === 'error')) return
-    appendAssistantError(assistantTurn, error.message)
+    appendAssistantError(assistantTurn, error.message, parsed?.code)
   }
 
   function removeRuntimeTurn(turnId: string) {

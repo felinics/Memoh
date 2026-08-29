@@ -17,7 +17,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

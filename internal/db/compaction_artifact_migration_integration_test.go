@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestCompactionArtifactMigrationPostgresPath(t *testing.T) {

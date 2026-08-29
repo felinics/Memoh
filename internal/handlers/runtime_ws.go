@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 // Each half is reached by asserting the one injected session runtime, and a

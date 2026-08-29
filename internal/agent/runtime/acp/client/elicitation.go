@@ -11,9 +11,9 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/toolcontext"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 // createElicitationRequest accepts the v0.13.5 form shape plus the optional

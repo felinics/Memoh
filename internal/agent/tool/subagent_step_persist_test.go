@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/agent/background"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func newStepPersistProvider(t *testing.T, agent SpawnAgent, admitter SubagentAdmitter) (*SpawnProvider, *fakeAgentMessageService) {

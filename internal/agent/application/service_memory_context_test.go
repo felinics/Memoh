@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/settings"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestLoadMemoryContextMessage_NoProvider(t *testing.T) {

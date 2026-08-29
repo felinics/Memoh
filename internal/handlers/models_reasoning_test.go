@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 type providerModelsReasoningQueries struct {

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestPromptUsageFromACPMapsTokenDetails(t *testing.T) {

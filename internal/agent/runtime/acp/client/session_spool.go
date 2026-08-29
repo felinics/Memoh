@@ -22,7 +22,7 @@ import (
 	"syscall"
 	"time"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 // handoverSessionSpoolSlot releases a finished spool's capture-admission slot

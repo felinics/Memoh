@@ -1,7 +1,7 @@
 package contextlimit
 
 import (
-	textprune "github.com/memohai/memoh/internal/prune"
+	textprune "github.com/felinics/memoh/internal/prune"
 )
 
 // Tier is a named layered truncation policy: MaxBytes/MaxLines are the outer

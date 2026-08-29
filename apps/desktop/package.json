@@ -5,10 +5,10 @@
   "type": "module",
   "description": "Memoh Electron desktop application (self-managed bootstrap reusing @memohai/web components)",
   "author": "Memoh",
-  "homepage": "https://github.com/memohai/Memoh",
+  "homepage": "https://github.com/felinics/Memoh",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/memohai/Memoh.git",
+    "url": "git+https://github.com/felinics/Memoh.git",
     "directory": "apps/desktop"
   },
   "main": "./out/main/index.js",
@@ -29,7 +29,7 @@
     "typecheck:node": "pnpm run prepare:runtime && tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
-    "test:release": "vitest run src/shared/updates.test.ts && node --test scripts/build-env.test.mjs",
+    "test:release": "vitest run src/shared/updates.test.ts src/main/external-links.test.ts && node --test scripts/build-env.test.mjs",
     "icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {

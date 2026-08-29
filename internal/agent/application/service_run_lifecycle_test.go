@@ -11,12 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 const (
@@ -86,6 +86,15 @@ func (a *lifecycleTurnAdmitter) FinishRun(
 	status, message string,
 ) error {
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
+	return a.finishErr
+}
+
+func (a *lifecycleTurnAdmitter) FinishRunWithErrorCode(
+	_ context.Context,
+	handle sessionruntime.RunHandle,
+	status, code string,
+) error {
+	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: code})
 	return a.finishErr
 }
 
@@ -399,6 +408,9 @@ func TestTurnRunFinisherCreatesFallbackOnlyAfterFencedTerminalFinish(t *testing.
 
 			if len(admitter.finishes) != 1 {
 				t.Fatalf("FinishRun calls = %d, want 1", len(admitter.finishes))
+			}
+			if tt.name == "pre-context failure" && admitter.finishes[0].message != string(apperror.CodeWorkspaceUnreachable) {
+				t.Fatalf("stable finish code = %q", admitter.finishes[0].message)
 			}
 			if len(store.creates) != tt.wantCreates {
 				t.Fatalf("lifecycle creates = %d, want %d", len(store.creates), tt.wantCreates)

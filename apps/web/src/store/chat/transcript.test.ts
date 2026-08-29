@@ -331,6 +331,21 @@ describe('chat transcript controller', () => {
     expect(currentBlock.userInput?.answers).toBeUndefined()
   })
 
+  it('keeps a timeout failure as a turn-level error instead of deleting it', () => {
+    const { transcript } = makeTranscript()
+    const failed = assistant('assistant-local')
+    failed.turnId = 'turn-timeout'
+    transcript.appendToView(failed)
+    const error = Object.assign(new Error('The model did not respond in time. Please try again.'), {
+      code: 'agent.response_timeout',
+    })
+    transcript.finalizeStreamFailure(failed, 'bot-1', 'session-1', error)
+
+    expect(transcript.messages).toHaveLength(1)
+    const turn = transcript.messages[0] as ChatAssistantTurn
+    expect(turn.messages.some(block => block.type === 'error' && block.code === 'agent.response_timeout')).toBe(true)
+  })
+
   it('does not inject browser-memory stream errors into authoritative history', () => {
     const { transcript } = makeTranscript()
     transcript.replaceMessages([rawUser('user-1')], 'session-1')

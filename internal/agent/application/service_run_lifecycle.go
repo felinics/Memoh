@@ -13,13 +13,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/runtimefence"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 const (

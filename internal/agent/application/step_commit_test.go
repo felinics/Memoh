@@ -5,14 +5,14 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/runtimefence"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type recordingStepPersister struct {

@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestSpawnRunConfigPreservesAdmittedRunID(t *testing.T) {

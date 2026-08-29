@@ -5,8 +5,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/agentcredential"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agentcredential"
 )
 
 type ACPHandler struct {

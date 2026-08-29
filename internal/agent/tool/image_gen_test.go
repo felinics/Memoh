@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 var testPNGBytes = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}

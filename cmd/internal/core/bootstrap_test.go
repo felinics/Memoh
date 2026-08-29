@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/registry"
+	"github.com/felinics/memoh/internal/registry"
 )
 
 func TestRegistryProviderTemplatesKeepAllProviderFiles(t *testing.T) {

@@ -15,9 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/bots"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/bots"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 func TestReadZipEntriesRejectsZipSlip(t *testing.T) {

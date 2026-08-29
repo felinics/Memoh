@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // Session carries request-scoped identity and runtime ownership for tool

@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/bots"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 func scrubBotForResponse(bot bots.Bot) bots.Bot {

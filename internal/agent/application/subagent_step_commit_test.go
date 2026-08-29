@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"testing"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/runtimefence"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 func subagentRunContext(botID, sessionID string, token int64) context.Context {

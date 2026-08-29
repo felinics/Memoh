@@ -3,7 +3,7 @@ package application
 import (
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 const syntheticToolClosureError = "tool execution interrupted before a response was recorded"

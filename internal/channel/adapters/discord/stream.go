@@ -11,8 +11,8 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 type discordOutboundStream struct {

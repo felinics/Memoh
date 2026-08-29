@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func (s *Service) loadBotSettings(ctx context.Context, botID string) (settings.Settings, error) {

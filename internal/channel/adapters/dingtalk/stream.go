@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 // dingtalkOutboundStream accumulates streaming events and flushes the final message

@@ -6,8 +6,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 func acpFeedbackHTTPError(err error) error {

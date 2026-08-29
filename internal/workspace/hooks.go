@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func (m *Manager) runWorkspaceHook(ctx context.Context, botID, eventName string, extra map[string]any) error {

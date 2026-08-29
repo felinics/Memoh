@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 const testACPUserInputOwnerID = "owner-user"

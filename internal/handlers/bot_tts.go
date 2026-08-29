@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/settings"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // BotAudioHandler handles per-bot speech synthesis requests from the agent tool.

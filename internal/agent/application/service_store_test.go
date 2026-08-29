@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	turnpkg "github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/settings"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestBuildInteractionMetadataIncludesForwardConversation(t *testing.T) {

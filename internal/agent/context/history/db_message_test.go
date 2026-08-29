@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func TestFromDBMessageBuildsDurableRecordScopeAndFrag(t *testing.T) {

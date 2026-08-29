@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"strings"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {

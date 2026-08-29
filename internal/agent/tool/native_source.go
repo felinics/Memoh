@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/toolcontext"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 type NativeToolSourceOptions struct {

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // fakeSubagentAdmitter stands in for the durable admission gate, and it

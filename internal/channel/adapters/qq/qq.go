@@ -11,11 +11,11 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/channel"
-	identitypkg "github.com/memohai/memoh/internal/channel/identities"
-	routepkg "github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/channel"
+	identitypkg "github.com/felinics/memoh/internal/channel/identities"
+	routepkg "github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const (

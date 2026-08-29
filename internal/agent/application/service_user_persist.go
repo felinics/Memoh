@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // ApplyUserMessageHookAndPersistUserTurn applies the normal user-message hook

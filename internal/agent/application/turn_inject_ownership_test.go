@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 type injectOwnershipAdmitter struct {

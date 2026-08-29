@@ -4,7 +4,7 @@
       <Button
         variant="outline"
         as="a"
-        href="https://github.com/memohai/supermarket"
+        href="https://github.com/felinics/supermarket"
         target="_blank"
         rel="noopener noreferrer"
       >

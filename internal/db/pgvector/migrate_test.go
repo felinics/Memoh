@@ -15,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/memohai/memoh/internal/config"
-	pgvectorsqlc "github.com/memohai/memoh/internal/db/pgvector/sqlc"
+	"github.com/felinics/memoh/internal/config"
+	pgvectorsqlc "github.com/felinics/memoh/internal/db/pgvector/sqlc"
 )
 
 func TestPGVectorMigrationsAreVersioned(t *testing.T) {

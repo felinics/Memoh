@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
+	connectsdk "github.com/felinics/connect-it/sdk/go"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	connectsdk "github.com/memohai/connect-it/sdk/go"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 var (

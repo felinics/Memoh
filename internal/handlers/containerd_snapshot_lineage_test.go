@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/workspace"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 func TestSnapshotLineage(t *testing.T) {

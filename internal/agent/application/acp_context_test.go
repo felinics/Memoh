@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func TestRenderACPContextMarkdownIncludesDynamicRuntimeAndMemory(t *testing.T) {

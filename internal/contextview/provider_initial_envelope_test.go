@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 // floorPricedHistory mirrors the application's history estimates, which are

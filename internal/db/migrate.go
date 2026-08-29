@@ -11,7 +11,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
-	"github.com/memohai/memoh/internal/config"
+	"github.com/felinics/memoh/internal/config"
 )
 
 type MigrationStatus struct {

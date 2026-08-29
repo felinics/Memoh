@@ -7,7 +7,7 @@ PURPLE=$(printf '\033[0;35m')
 RED=$(printf '\033[0;31m')
 NC=$(printf '\033[0m')
 
-GITHUB_REPO="memohai/Memoh"
+GITHUB_REPO="felinics/Memoh"
 REPO="https://github.com/${GITHUB_REPO}.git"
 DIR="Memoh"
 COMPOSE_PROJECT_NAME="memoh"

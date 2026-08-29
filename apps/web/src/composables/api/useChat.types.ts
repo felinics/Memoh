@@ -265,6 +265,7 @@ export interface UIAttachmentsMessage {
 export interface UIErrorMessage {
   id: number
   type: 'error'
+  code?: string
   content: string
 }
 
@@ -415,6 +416,7 @@ export interface RuntimeCurrentRunView {
   updated_at: string
   messages: UIMessage[]
   request_user_turn?: UIUserTurn
+  error_code?: string
   error?: string
   steer?: RuntimeSteerState
   operation?: RuntimeRunOperation
@@ -432,6 +434,7 @@ export interface RuntimeSnapshot {
 export interface RuntimeCurrentRunPatch {
   run_id: string
   status?: RuntimeRunStatus
+  error_code?: string
   error?: string
   steer?: RuntimeSteerState
   updated_at?: string

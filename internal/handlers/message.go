@@ -16,17 +16,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/agent/background"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/background"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/media"
 )
 
 // MessageHandler handles bot-scoped messaging endpoints.

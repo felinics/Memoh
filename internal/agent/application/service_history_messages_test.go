@@ -7,19 +7,39 @@ import (
 	"strings"
 	"testing"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	compaction "github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	compaction "github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
+
+func TestDropEmptyHistoryFailures(t *testing.T) {
+	empty := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("")})[0]
+	kept := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("hello")})[0]
+	records := []historyfrag.HistoryRecord{
+		{ModelMessage: empty, Metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout"}},
+		{ModelMessage: kept, Metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout"}},
+		{ModelMessage: empty},
+	}
+	got := dropEmptyHistoryFailures(records)
+	if len(got) != 2 {
+		t.Fatalf("kept %d records, want 2", len(got))
+	}
+	if got[0].ModelMessage.TextContent() != "hello" {
+		t.Fatalf("first kept record = %#v", got[0].ModelMessage)
+	}
+	if strings.TrimSpace(got[1].ModelMessage.TextContent()) != "" || historyErrorCode(got[1].Metadata) != "" {
+		t.Fatalf("empty unmarked assistant should stay, got %#v", got[1])
+	}
+}
 
 func TestProjectInterruptedHistoryReasoning(t *testing.T) {
 	records := []historyfrag.HistoryRecord{{

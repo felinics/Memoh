@@ -10,8 +10,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	skillset "github.com/memohai/memoh/internal/skills"
-	supermarketclient "github.com/memohai/memoh/internal/supermarket"
+	skillset "github.com/felinics/memoh/internal/skills"
+	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 )
 
 type SupermarketRegistryListResponse = supermarketclient.RegistryListResponse

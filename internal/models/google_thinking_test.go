@@ -3,9 +3,9 @@ package models
 import (
 	"testing"
 
-	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
+	googlegenerative "github.com/felinics/twilight/provider/google/generativeai"
 
-	"github.com/memohai/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 func intPtr(v int) *int { return &v }

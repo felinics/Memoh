@@ -11,8 +11,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/auth"
 )
 
 type recordingToolApprovalResponder struct {

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
 // subagentThreadService is the slice of the thread service the direct-chat

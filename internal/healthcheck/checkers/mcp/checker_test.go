@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 type fakeConnectionLister struct {

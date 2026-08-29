@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/migrate"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
-	"github.com/memohai/memoh/internal/memory/wikistore"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
+	"github.com/felinics/memoh/internal/memory/wikistore"
 )
 
 var errForced = errors.New("forced store error for test")

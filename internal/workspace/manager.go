@@ -15,19 +15,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/identity"
-	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/settings"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	workspacetemplates "github.com/memohai/memoh/templates"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/identity"
+	netctl "github.com/felinics/memoh/internal/network"
+	"github.com/felinics/memoh/internal/settings"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	workspacetemplates "github.com/felinics/memoh/templates"
 )
 
 const (

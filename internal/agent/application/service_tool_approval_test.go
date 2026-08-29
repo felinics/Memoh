@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/bots"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 type recordingToolApprovalPermissionChecker struct {

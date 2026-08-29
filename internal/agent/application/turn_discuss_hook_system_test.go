@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"testing"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/contextview"
-	"github.com/memohai/memoh/internal/hooks"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/hooks"
 )
 
 func TestDiscussRetainsResolvedHookSystemSections(t *testing.T) {

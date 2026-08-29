@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type hookToolRunner struct {

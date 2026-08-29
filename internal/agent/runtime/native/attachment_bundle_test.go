@@ -3,7 +3,7 @@ package native
 import (
 	"testing"
 
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestFileAttachmentFromToolAttachment_PreservesInlineBase64(t *testing.T) {

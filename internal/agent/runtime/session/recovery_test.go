@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 var errRecoveryReservation = errors.New("injected recovered-run reservation failure")

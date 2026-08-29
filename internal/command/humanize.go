@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/memohai/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 // humanizeTime renders a timestamp relative to now ("just now", "5m ago",

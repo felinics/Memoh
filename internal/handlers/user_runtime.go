@@ -8,8 +8,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/userruntime"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/userruntime"
 )
 
 // UserRuntimeHandler only manages the long-lived credential used by the

@@ -19,10 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	embeddeddb "github.com/memohai/memoh/db"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/team"
+	embeddeddb "github.com/felinics/memoh/db"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/team"
 )
 
 func sqlState(err error) string {

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 // buildMessagesFromPipeline assembles chat context from the DCP pipeline's

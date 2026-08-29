@@ -1,6 +1,6 @@
 package native
 
-import "github.com/memohai/memoh/internal/agent/event"
+import "github.com/felinics/memoh/internal/agent/event"
 
 // Stream event aliases keep existing consumers source-compatible while the
 // shared event types live in internal/agent/event.

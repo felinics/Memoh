@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	session "github.com/memohai/memoh/internal/chat/thread"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 func TestMemoryProviderFiltersSourceRefsByHistoryVisibility(t *testing.T) {

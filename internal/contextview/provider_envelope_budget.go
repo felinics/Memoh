@@ -3,7 +3,7 @@ package contextview
 import (
 	"fmt"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func providerToolDefsCost(definitions []contextfrag.ToolDefAccounting) int {

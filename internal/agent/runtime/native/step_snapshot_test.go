@@ -8,12 +8,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/models"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func TestBuildGenerateOptionsSetsModelInfoAndLegacyPruneLoopSelectionModeWithoutReselector(t *testing.T) {

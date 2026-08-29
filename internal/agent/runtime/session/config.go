@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	"github.com/memohai/memoh/internal/config"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/config"
 )
 
 // NewManagerFromConfig is the single construction site where the two configured

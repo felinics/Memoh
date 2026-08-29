@@ -3,7 +3,7 @@ package native
 import (
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // interruptedStepCapture retains only the current model call's text and

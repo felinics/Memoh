@@ -12,13 +12,13 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // turnAdmitter is the durable admission gate StartTurn depends on.
@@ -31,6 +31,10 @@ import (
 type turnAdmitter interface {
 	Admit(context.Context, sessionruntime.AdmitInput) (sessionruntime.Admission, error)
 	FinishRun(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error
+}
+
+type codedTurnFinisher interface {
+	FinishRunWithErrorCode(ctx context.Context, handle sessionruntime.RunHandle, status, errorCode string) error
 }
 
 // SetSessionRuntime injects the durable admission gate. Setter injection rather
@@ -161,13 +165,17 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 			lifecycleCause,
 			contextLifecycleCandidateMinimal,
 		)
-		message := ""
-		if cause != nil {
-			message = string(apperror.CodeOf(cause))
-		}
+		errorCode := strings.TrimSpace(string(apperror.CodeOf(cause)))
 		ctx, cancel := context.WithTimeout(writeCtx, terminalWriteTimeout)
 		defer cancel()
-		err := s.sessionRuntime.FinishRun(ctx, handle, status, message)
+		var err error
+		if coded, ok := s.sessionRuntime.(codedTurnFinisher); ok && errorCode != "" {
+			err = coded.FinishRunWithErrorCode(ctx, handle, status, errorCode)
+		} else {
+			// Compatibility implementations still receive only stable codes; raw
+			// provider diagnostics never cross this terminal boundary.
+			err = s.sessionRuntime.FinishRun(ctx, handle, status, errorCode)
+		}
 		switch {
 		case err == nil:
 			if !staged && (status != "" || cause != nil) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/capabilities"
+	"github.com/felinics/memoh/internal/capabilities"
 )
 
 func TestEnrichFileClearsStaleReasoningWhenRegistrySaysNone(t *testing.T) {

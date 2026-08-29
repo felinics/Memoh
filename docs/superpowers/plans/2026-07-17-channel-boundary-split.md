@@ -274,8 +274,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/conversation"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/conversation"
 )
 
 type fakeRunner struct {
@@ -387,9 +387,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/conversation"
+	"github.com/felinics/memoh/internal/conversation/flow"
 )
 
 type Adapter struct {
@@ -651,8 +651,8 @@ package main
 import (
 	"go.uber.org/fx"
 
-	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
-	coremodule "github.com/memohai/memoh/cmd/internal/core"
+	channelmodule "github.com/felinics/memoh/cmd/internal/channel"
+	coremodule "github.com/felinics/memoh/cmd/internal/core"
 )
 
 // cmd/channel is a single-instance assembly-closure verification binary

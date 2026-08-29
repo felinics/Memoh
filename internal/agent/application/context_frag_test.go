@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/contextview"
-	"github.com/memohai/memoh/internal/hooks"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/hooks"
 )
 
 func TestBuildContextFragScopePreservesIMTopology(t *testing.T) {

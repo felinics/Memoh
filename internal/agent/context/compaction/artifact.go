@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 )
 
 const ArtifactVersion = 1

@@ -3,8 +3,8 @@ package handlers
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 func TestCanAccessSessionScopesChatToCreator(t *testing.T) {

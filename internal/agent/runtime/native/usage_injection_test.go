@@ -6,11 +6,11 @@ import (
 	"sync"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 // usageTestProvider is a ToolProvider that also implements tools.ToolUsage. It

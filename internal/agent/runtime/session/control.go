@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func (m *Manager) localControl(runID string) *runControl {
@@ -150,7 +150,7 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 	var releaseErr error
 	for _, ctrl := range controls {
 		runCtx, cancel := ctrl.cleanupContext(ctx)
-		_, err := m.finishRunState(runCtx, ctrl.handle(), RunStatusLost, runtimeOwnerShutdownError)
+		_, err := m.finishRunState(runCtx, ctrl.handle(), RunStatusLost, "", runtimeOwnerShutdownError)
 		cancel()
 		if err == nil || errors.Is(err, ErrRunOwnershipLost) {
 			continue

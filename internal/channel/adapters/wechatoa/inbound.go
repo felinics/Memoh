@@ -15,7 +15,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Request, w http.ResponseWriter) error {

@@ -9,10 +9,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 type ScheduleHandler struct {

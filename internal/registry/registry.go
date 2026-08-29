@@ -12,8 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"gopkg.in/yaml.v3"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 const registryMetadataKey = "registry"

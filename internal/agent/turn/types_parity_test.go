@@ -5,12 +5,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/attachment"
 )
 
 func TestContractTypesAreOwnedByTurn(t *testing.T) {
-	const wantPackage = "github.com/memohai/memoh/internal/agent/turn"
+	const wantPackage = "github.com/felinics/memoh/internal/agent/turn"
 	values := []any{
 		turn.Attachment{},
 		turn.SkillActivation{},

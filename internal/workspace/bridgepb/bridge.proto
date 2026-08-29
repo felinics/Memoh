@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package bridgepb;
 
-option go_package = "github.com/memohai/memoh/internal/workspace/bridgepb";
+option go_package = "github.com/felinics/memoh/internal/workspace/bridgepb";
 
 service ContainerService {
   rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);

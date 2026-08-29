@@ -26,6 +26,7 @@ import { macWindowChromeOptions } from './window-chrome'
 import { maybeSelfInstallMacOS } from './self-install'
 import { DesktopRemoteRuntimeManager } from './remote-runtime'
 import { isTrustedRendererUrl } from './renderer-trust'
+import { normalizeExternalUrl, resolveNavigationGuardAction } from './external-links'
 import { registerDesktopUpdates } from './updates'
 import {
   normalizeBaseUrl,
@@ -270,21 +271,6 @@ function assertTrustedRenderer(event: IpcMainInvokeEvent): void {
   }
 }
 
-function normalizeExternalUrl(rawURL: unknown): { url: string, protocol: string, supported: boolean } {
-  const url = typeof rawURL === 'string' ? rawURL.trim() : ''
-  let protocol = ''
-  try {
-    protocol = new URL(url).protocol
-  } catch {
-    protocol = ''
-  }
-  return {
-    url,
-    protocol,
-    supported: ['http:', 'https:', 'mailto:'].includes(protocol),
-  }
-}
-
 function attachExternalLinkGuards(webContents: Electron.WebContents): void {
   if (guardedExternalLinkWebContents.has(webContents)) return
   guardedExternalLinkWebContents.add(webContents)
@@ -301,16 +287,27 @@ function attachExternalLinkGuards(webContents: Electron.WebContents): void {
     return { action: 'deny' }
   })
 
-  const guardNavigation = (event: Electron.Event, url: string): void => {
-    if (isTrustedRendererNavigation(url)) return
-    event.preventDefault()
-    const external = normalizeExternalUrl(url)
-    if (!external.supported) {
-      console.warn('blocked untrusted navigation URL', external.url || url)
+  // `will-navigate` only ever fires for the main frame, but `will-redirect` fires
+  // for every frame — so this handler must check `isMainFrame` itself. Without it,
+  // a 3xx from a page embedded in the workspace browser panel's <iframe> is read as
+  // an untrusted top-level navigation, and the panel pops out into the OS browser.
+  const guardNavigation = (
+    details: Electron.Event & { url?: string, isMainFrame?: boolean },
+    url: string,
+  ): void => {
+    const action = resolveNavigationGuardAction({
+      url: details.url ?? url,
+      isMainFrame: details.isMainFrame ?? true,
+      isTrustedRenderer: isTrustedRendererNavigation(details.url ?? url),
+    })
+    if (action.kind === 'allow') return
+    details.preventDefault()
+    if (action.kind === 'block') {
+      console.warn('blocked untrusted navigation URL', action.url)
       return
     }
-    void shell.openExternal(external.url).catch((error) => {
-      console.error('failed to open external navigation URL', external.url, error)
+    void shell.openExternal(action.url).catch((error) => {
+      console.error('failed to open external navigation URL', action.url, error)
     })
   }
   webContents.on('will-navigate', guardNavigation)

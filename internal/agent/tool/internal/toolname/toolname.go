@@ -1,8 +1,8 @@
 package toolname
 
 import (
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 // Name identifies a built-in Memoh agent tool. Its raw value is intentionally

@@ -6,9 +6,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 )
 
 func mergeMissingCompactionSummaries(messages []historyfrag.HistoryRecord, summaries []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {

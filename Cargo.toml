@@ -6,7 +6,7 @@ members = ["crates/a11y-cli"]
 edition = "2021"
 rust-version = "1.90"
 license = "Apache-2.0"
-repository = "https://github.com/memohai/memoh"
+repository = "https://github.com/felinics/memoh"
 
 [profile.release]
 opt-level = 3

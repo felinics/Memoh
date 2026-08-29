@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/memohai/memoh/internal/config"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/userruntime"
+	"github.com/felinics/memoh/internal/config"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/userruntime"
 )
 
 func TestWorkspaceTargetContextIsRequestScoped(t *testing.T) {

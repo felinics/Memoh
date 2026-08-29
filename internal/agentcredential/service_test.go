@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/memohai/memoh/internal/config"
+	"github.com/felinics/memoh/internal/config"
 )
 
 func TestServiceEncryptDecrypt(t *testing.T) {

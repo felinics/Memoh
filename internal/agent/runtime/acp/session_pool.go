@@ -20,19 +20,19 @@ import (
 
 	"github.com/google/uuid"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/decision/feedback"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/agentcredential"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/runtimefence"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/decision/feedback"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

@@ -12,17 +12,17 @@ import (
 	"google.golang.org/grpc/health"
 	grpc_health_v1 "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	turntransport "github.com/memohai/memoh/internal/agent/turn/grpctransport"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/email"
-	intrpc "github.com/memohai/memoh/internal/rpc"
-	"github.com/memohai/memoh/internal/rpc/channelruntime"
-	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
-	"github.com/memohai/memoh/internal/rpc/runtimepb"
-	"github.com/memohai/memoh/internal/rpc/serverruntime"
-	"github.com/memohai/memoh/internal/webhooktunnel"
+	"github.com/felinics/memoh/internal/agent/turn"
+	turntransport "github.com/felinics/memoh/internal/agent/turn/grpctransport"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/email"
+	intrpc "github.com/felinics/memoh/internal/rpc"
+	"github.com/felinics/memoh/internal/rpc/channelruntime"
+	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
+	"github.com/felinics/memoh/internal/rpc/runtimepb"
+	"github.com/felinics/memoh/internal/rpc/serverruntime"
+	"github.com/felinics/memoh/internal/webhooktunnel"
 )
 
 type channelRPC struct {

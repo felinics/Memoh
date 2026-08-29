@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 // reserveRuntimeRun writes one live reservation whose owner lease ends at

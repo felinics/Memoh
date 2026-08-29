@@ -3,7 +3,7 @@ package command
 import (
 	"strings"
 
-	emailpkg "github.com/memohai/memoh/internal/email"
+	emailpkg "github.com/felinics/memoh/internal/email"
 )
 
 func (h *Handler) buildEmailGroup() *CommandGroup {

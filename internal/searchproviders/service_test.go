@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/memohai/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestMapSearchProviderWriteError(t *testing.T) {

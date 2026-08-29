@@ -5,8 +5,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/acl"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 // Skill represents a single skill loaded from a bot's container.

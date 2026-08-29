@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	agentevent "github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/agent/turn"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	agentevent "github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/turn"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
 const sessionRuntimeACPAgent = sessionpkg.RuntimeACPAgent

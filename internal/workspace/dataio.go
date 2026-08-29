@@ -16,8 +16,8 @@ import (
 
 	"github.com/containerd/containerd/v2/core/mount"
 
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

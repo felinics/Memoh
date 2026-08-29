@@ -10,7 +10,7 @@ import (
 
 	"github.com/containerd/containerd/v2/core/mount"
 
-	ctr "github.com/memohai/memoh/internal/container"
+	ctr "github.com/felinics/memoh/internal/container"
 )
 
 const unsupportedReasonBackend = "backend_not_supported"

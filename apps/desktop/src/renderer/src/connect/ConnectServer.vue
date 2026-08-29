@@ -52,7 +52,7 @@
       <p>
         {{ t('desktopConnection.fullInstallLead') }}
         <a
-          href="https://github.com/memohai/Memoh#deploy-to-server"
+          href="https://github.com/felinics/Memoh#deploy-to-server"
           target="_blank"
           rel="noreferrer"
           class="underline underline-offset-2 hover:text-foreground"

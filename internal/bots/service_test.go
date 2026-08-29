@@ -11,11 +11,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // fakeRow implements pgx.Row with a custom scan function.
@@ -282,7 +282,7 @@ func TestRunCreateLifecycleRecordsSetupFailureAndLeavesBotReady(t *testing.T) {
 		queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
 			switch {
 			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
-				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/memohai/workspace:latest"},"keep":true}`))
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/felinics/workspace:latest"},"keep":true}`))
 			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
 				events = append(events, "metadata")
 				if got := args[1].(string); got != "test-bot" {
@@ -380,7 +380,7 @@ func TestRunCreateLifecycleClearsSetupFailureAfterSuccess(t *testing.T) {
 		queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
 			switch {
 			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
-				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/memohai/workspace:latest","last_setup_error":{"phase":"setup","message":"old failure","at":"2026-06-08T10:00:00Z"}}}`))
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/felinics/workspace:latest","last_setup_error":{"phase":"setup","message":"old failure","at":"2026-06-08T10:00:00Z"}}}`))
 			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
 				payload, ok := args[6].([]byte)
 				if !ok {
@@ -406,7 +406,7 @@ func TestRunCreateLifecycleClearsSetupFailureAfterSuccess(t *testing.T) {
 	if _, ok := workspace["last_setup_error"]; ok {
 		t.Fatalf("last_setup_error should be cleared, metadata=%#v", metadata)
 	}
-	if workspace["image"] != "ghcr.io/memohai/workspace:latest" {
+	if workspace["image"] != "ghcr.io/felinics/workspace:latest" {
 		t.Fatalf("workspace image was not preserved: %#v", workspace)
 	}
 }

@@ -1,6 +1,6 @@
 package command
 
-import acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
+import acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 
 // InteractiveKind discriminates the structured payload carried by a Result.
 type InteractiveKind string

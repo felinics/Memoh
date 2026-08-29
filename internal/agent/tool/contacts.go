@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 type ContactsProvider struct {

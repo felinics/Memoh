@@ -20,11 +20,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/common"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/textutil"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/common"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const Type channel.ChannelType = "matrix"

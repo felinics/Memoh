@@ -9,15 +9,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
-	modelspkg "github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
+	modelspkg "github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestACPToolProvidersIncludeAskUser(t *testing.T) {

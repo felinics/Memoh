@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
 )
 
 const (

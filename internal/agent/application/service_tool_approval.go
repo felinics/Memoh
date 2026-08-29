@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/bots"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workspace"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/bots"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type ToolApprovalResponseInput struct {
@@ -492,10 +493,18 @@ func (s *Service) continueToolApprovalSession(
 
 	reasoningTiming := newReasoningTimingTracker(nil)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
-	stream := s.agent.Stream(ctx, cfg)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
+	defer idleCancel.Stop()
+	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
+	failureEventForwarded := false
+	var hasVisibleOutput bool
 	for event := range stream {
-		if eventErr := agentStreamEventError(event); eventErr != nil && lifecycleCause == nil {
+		idleCancel.Reset()
+		if event.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 		}
 		if event.IsTerminal() {
@@ -506,19 +515,37 @@ func (s *Service) continueToolApprovalSession(
 				case native.EventAgentEnd:
 					lifecycleCause = nil
 				case native.EventAgentAbort:
-					if context.Cause(ctx) != nil || lifecycleCause == nil {
+					if idleCancel.DidFire() {
+						lifecycleCause = context.Cause(idleCtx)
+					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
 						lifecycleCause = agentAbortCause(ctx)
 					}
 				}
 			}
 		}
-		data, err := json.Marshal(event)
+		if hasVisibleAgentStreamOutput(event) {
+			hasVisibleOutput = true
+		}
+		if event.Type == native.EventAgentAbort && idleCancel.DidFire() && eventCh != nil {
+			if failureData, marshalErr := json.Marshal(agentFailureStreamEvent(context.Cause(idleCtx))); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(failureData):
+					failureEventForwarded = true
+				case <-ctx.Done():
+					lifecycleCause = context.Cause(ctx)
+					return lifecycleCause
+				}
+			}
+		}
+		data, err := json.Marshal(publicAgentStreamEvent(event))
 		if err != nil {
 			continue
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				snap.visibleOutput = hasVisibleOutput
+				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
 				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
 					lifecycleCause = agentAbortCause(ctx)
@@ -536,7 +563,7 @@ func (s *Service) continueToolApprovalSession(
 				stored = true
 			}
 		}
-		if eventCh != nil {
+		if eventCh != nil && shouldForwardAfterIdleFailure(event, failureEventForwarded) {
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
@@ -544,6 +571,23 @@ func (s *Service) continueToolApprovalSession(
 				return lifecycleCause
 			}
 		}
+	}
+	if idleCancel.DidFire() {
+		lifecycleCause = context.Cause(idleCtx)
+		if !stored {
+			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}}, snapshotFailureCode(true, lifecycleCause)); storeErr != nil {
+				s.logger.Error("tool approval timeout persist failed", slog.Any("error", storeErr))
+			}
+		}
+		if eventCh != nil && !failureEventForwarded {
+			if data, marshalErr := json.Marshal(agentFailureStreamEvent(lifecycleCause)); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(data):
+				case <-ctx.Done():
+				}
+			}
+		}
+		return lifecycleCause
 	}
 	if ctx.Err() != nil {
 		lifecycleCause = context.Cause(ctx)

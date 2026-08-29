@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/apperror"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestAgentStreamEventErrorConversion(t *testing.T) {
@@ -39,14 +40,62 @@ func TestAgentStreamEventErrorConversion(t *testing.T) {
 	})
 	t.Run("legacy detail", func(t *testing.T) {
 		err := agentStreamEventError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
-		if err == nil || err.Error() != "provider stopped" {
+		if err == nil || err.Error() != "provider stopped" || apperror.CodeOf(err) != "" {
 			t.Fatalf("agentStreamEventError() = %v", err)
+		}
+		lifecycleErr := agentStreamLifecycleError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
+		if apperror.CodeOf(lifecycleErr) != apperror.CodeAgentResponseInterrupted {
+			t.Fatalf("lifecycle code = %q", apperror.CodeOf(lifecycleErr))
+		}
+		if cause := apperror.CauseOf(lifecycleErr); cause == nil || cause.Error() != "provider stopped" {
+			t.Fatalf("private diagnostic cause = %v", cause)
 		}
 	})
 	t.Run("empty legacy detail", func(t *testing.T) {
 		err := agentStreamEventError(native.StreamEvent{Type: native.EventError})
-		if err == nil || err.Error() != "agent stream failed" {
+		if err == nil || err.Error() != "agent stream failed" || apperror.CodeOf(err) != "" {
 			t.Fatalf("agentStreamEventError() = %v", err)
+		}
+	})
+}
+
+func TestPublicAgentStreamEventRedactsPrivateFailure(t *testing.T) {
+	event := publicAgentStreamEvent(native.StreamEvent{
+		Type: native.EventError, Error: "SECRET provider payload",
+	})
+	if event.Code != string(apperror.CodeAgentResponseInterrupted) {
+		t.Fatalf("public code = %q", event.Code)
+	}
+	if strings.Contains(event.Error, "SECRET") {
+		t.Fatalf("private detail leaked: %q", event.Error)
+	}
+}
+
+func TestAgentFailureStreamEventExposesOnlyStablePublicContract(t *testing.T) {
+	t.Parallel()
+
+	t.Run("timeout", func(t *testing.T) {
+		cause := apperror.Wrap(apperror.CodeAgentResponseTimeout, errors.New("SECRET provider timeout"), nil)
+		event := agentFailureStreamEvent(cause)
+		if event.Type != native.EventError || event.Code != string(apperror.CodeAgentResponseTimeout) {
+			t.Fatalf("timeout event = %#v", event)
+		}
+		definition, _ := apperror.Lookup(apperror.CodeAgentResponseTimeout)
+		if event.Error != definition.Detail {
+			t.Fatalf("timeout detail = %q, want %q", event.Error, definition.Detail)
+		}
+		if strings.Contains(event.Error, "SECRET") {
+			t.Fatalf("private timeout cause leaked: %q", event.Error)
+		}
+	})
+
+	t.Run("uncatalogued failure", func(t *testing.T) {
+		event := agentFailureStreamEvent(errors.New("SECRET provider response"))
+		if event.Code != string(apperror.CodeAgentResponseInterrupted) {
+			t.Fatalf("fallback code = %q", event.Code)
+		}
+		if strings.Contains(event.Error, "SECRET") {
+			t.Fatalf("private failure cause leaked: %q", event.Error)
 		}
 	})
 }
@@ -254,6 +303,7 @@ func TestPersistPartialResultDoesNotStoreUserOnlyFailure(t *testing.T) {
 		0,
 		false,
 		true,
+		"",
 	)
 
 	if len(messages.persisted) != 0 {
@@ -346,6 +396,102 @@ func TestPersistTerminalSnapshotSkipsAbortedSnapshotBeforeVisibleOutput(t *testi
 
 	if len(messages.persisted) != 0 {
 		t.Fatalf("expected pre-output abort not to persist, got %#v", messages.persisted)
+	}
+}
+
+func TestPersistTerminalSnapshotStoresTimeoutBeforeVisibleOutput(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	if err := resolver.persistTerminalSnapshot(
+		context.Background(),
+		ChatRequest{
+			BotID:    "bot-1",
+			ThreadID: "session-1",
+			Query:    "hello",
+		},
+		resolvedContext{},
+		terminalSnapshot{
+			aborted:     true,
+			failureCode: apperror.CodeAgentResponseTimeout,
+		},
+	); err != nil {
+		t.Fatalf("persistTerminalSnapshot returned error: %v", err)
+	}
+
+	if len(messages.persisted) != 2 {
+		t.Fatalf("expected user + timeout assistant, got %#v", messages.persisted)
+	}
+	if messages.persisted[0].Role != "user" || messages.persisted[1].Role != "assistant" {
+		t.Fatalf("persisted roles = %s/%s", messages.persisted[0].Role, messages.persisted[1].Role)
+	}
+	if got, _ := messages.persisted[1].Metadata[messagepkg.HistoryErrorCodeMetadataKey].(string); got != string(apperror.CodeAgentResponseTimeout) {
+		t.Fatalf("error_code = %q, want %q", got, apperror.CodeAgentResponseTimeout)
+	}
+	if messages.persisted[1].Metadata[messagepkg.AgentStepInterruptedMetadataKey] != true {
+		t.Fatalf("expected interrupted metadata on timeout assistant")
+	}
+}
+
+func TestPersistTurnFailureSkipsRetryReplacement(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	persisted, err := resolver.persistTurnFailure(
+		context.Background(),
+		ChatRequest{
+			BotID:           "bot-1",
+			ThreadID:        "session-1",
+			Query:           "hello",
+			SkipHistoryTurn: true,
+		},
+		resolvedContext{},
+		apperror.CodeAgentResponseTimeout,
+	)
+	if err != nil {
+		t.Fatalf("persistTurnFailure returned error: %v", err)
+	}
+	if persisted != nil || len(messages.persisted) != 0 {
+		t.Fatalf("expected retry replacement not to persist a failure turn, got %#v", messages.persisted)
+	}
+}
+
+func TestPersistPartialResultStoresTimeoutWithoutSnapshot(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	resolver := &Service{
+		messageService: messages,
+		logger:         slog.New(slog.DiscardHandler),
+	}
+
+	persisted := resolver.persistPartialResult(
+		context.Background(),
+		ChatRequest{
+			BotID:    "bot-1",
+			ThreadID: "session-1",
+			Query:    "hello",
+		},
+		resolvedContext{},
+		nil,
+		nil,
+		0,
+		true,
+		false,
+		apperror.CodeAgentResponseTimeout,
+	)
+	if len(persisted) == 0 || len(messages.persisted) != 2 {
+		t.Fatalf("expected timeout without snapshot to persist a turn failure, got %#v", messages.persisted)
 	}
 }
 

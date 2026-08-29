@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/runtimefence"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 func TestPostgresPublishBotRuntimeConfigTwoPhase(t *testing.T) {

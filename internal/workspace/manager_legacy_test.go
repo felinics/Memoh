@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	netctl "github.com/felinics/memoh/internal/network"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type legacyRouteTestService struct {

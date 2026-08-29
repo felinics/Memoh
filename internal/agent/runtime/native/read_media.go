@@ -5,11 +5,11 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/models"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *readMediaDecorationState) {

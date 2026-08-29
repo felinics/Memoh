@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // stubMessageService mirrors the production ordering contract of the message

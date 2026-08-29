@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 const (
@@ -3999,6 +3999,30 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	}
 	if snapshot.CurrentRunView.Error != "runtime interrupted" {
 		t.Fatalf("error = %q, want runtime interrupted", snapshot.CurrentRunView.Error)
+	}
+}
+
+func TestRuntimeManagerPublishesStableStreamErrorCode(t *testing.T) {
+	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-coded-error")
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, testSessionID, testRunID)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
+		Type: native.EventError, Code: "agent.response_timeout", Error: "public timeout",
+	}); err != nil {
+		t.Fatalf("handle error event: %v", err)
+	}
+
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CurrentRunView == nil {
+		t.Fatal("current run is nil")
+	}
+	if snapshot.CurrentRunView.ErrorCode != "agent.response_timeout" || snapshot.CurrentRunView.Error != "public timeout" {
+		t.Fatalf("runtime error = code:%q detail:%q", snapshot.CurrentRunView.ErrorCode, snapshot.CurrentRunView.Error)
 	}
 }
 

@@ -3,7 +3,7 @@ package models
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 // Two independent facts decide whether a disabled call must say so on the wire:

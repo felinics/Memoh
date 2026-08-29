@@ -15,20 +15,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/reasoning"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // SpawnAgent is the interface the subagent control tools use to run tasks.

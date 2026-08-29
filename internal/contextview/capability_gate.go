@@ -3,8 +3,8 @@ package contextview
 import (
 	"strings"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 const capabilityGateDropReason = "capability_gated"

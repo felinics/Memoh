@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 // SpoolSessionState drains an ordered database record stream into a reusable,

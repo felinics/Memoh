@@ -13,13 +13,13 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/botbackup"
-	"github.com/memohai/memoh/internal/botbackup/secure"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/botbackup"
+	"github.com/felinics/memoh/internal/botbackup/secure"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type BotBackupHandler struct {

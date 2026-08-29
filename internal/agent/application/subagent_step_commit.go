@@ -10,15 +10,15 @@ import (
 	"sync"
 	"sync/atomic"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/runtimefence"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // SubagentStepCommit returns the per-step persistence callback for one spawned

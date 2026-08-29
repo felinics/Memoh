@@ -5066,7 +5066,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -5353,7 +5353,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -5410,7 +5410,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -18740,6 +18740,9 @@ const docTemplate = `{
                 "background_task": {
                     "$ref": "#/definitions/conversation.UIBackgroundTask"
                 },
+                "code": {
+                    "type": "string"
+                },
                 "content": {
                     "type": "string"
                 },
@@ -18781,13 +18784,15 @@ const docTemplate = `{
                 "text",
                 "reasoning",
                 "tool",
-                "attachments"
+                "attachments",
+                "error"
             ],
             "x-enum-varnames": [
                 "UIMessageText",
                 "UIMessageReasoning",
                 "UIMessageTool",
-                "UIMessageAttachments"
+                "UIMessageAttachments",
+                "UIMessageError"
             ]
         },
         "conversation.UIReasoningTiming": {
@@ -19355,7 +19360,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_memohai_memoh_internal_mcp.Connection": {
+        "github_com_felinics_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
                 "auth_type": {
@@ -22335,7 +22340,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                        "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                     }
                 }
             }

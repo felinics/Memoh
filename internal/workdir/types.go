@@ -14,7 +14,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // Target kinds. These are the workspace target kinds on purpose: a workdir

@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	turnpkg "github.com/memohai/memoh/internal/agent/turn"
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func (s *Service) storeRound(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string) error {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestGenerateSystemPromptIncludesPlatformIdentitiesInChat(t *testing.T) {

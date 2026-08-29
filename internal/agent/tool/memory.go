@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 const maxVisibleMemorySourceRefs = memprovider.MaxSourceRefsPerToolResult

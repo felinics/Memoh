@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/agent/turn"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // toolOutputMaxBytes bounds the tool-result outcome rendered into the summarizer

@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/channel/inbound"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/handlers"
-	intrpc "github.com/memohai/memoh/internal/rpc"
-	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
-	"github.com/memohai/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/channel/inbound"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/handlers"
+	intrpc "github.com/felinics/memoh/internal/rpc"
+	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
+	"github.com/felinics/memoh/internal/skills"
 )
 
 const (

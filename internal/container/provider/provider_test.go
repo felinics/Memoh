@@ -7,8 +7,8 @@ import (
 
 	dockerclient "github.com/docker/docker/client"
 
-	"github.com/memohai/memoh/internal/config"
-	containerapi "github.com/memohai/memoh/internal/container"
+	"github.com/felinics/memoh/internal/config"
+	containerapi "github.com/felinics/memoh/internal/container"
 )
 
 func TestProvideServiceDockerSlot(t *testing.T) {

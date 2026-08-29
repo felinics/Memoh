@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/workspace"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type denyToolApprovalPolicyProvider struct{}

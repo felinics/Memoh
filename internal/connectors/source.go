@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	connectsdk "github.com/memohai/connect-it/sdk/go"
+	connectsdk "github.com/felinics/connect-it/sdk/go"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/toolcontext"
+	mcpgw "github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 const (

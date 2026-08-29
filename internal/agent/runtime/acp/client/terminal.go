@@ -11,9 +11,9 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	"github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (

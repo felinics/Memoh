@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 var errInjectedTerminalLoad = errors.New("injected post-terminal load failure")

@@ -11,7 +11,7 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimage "github.com/docker/docker/api/types/image"
 
-	containerapi "github.com/memohai/memoh/internal/container"
+	containerapi "github.com/felinics/memoh/internal/container"
 )
 
 type testStatusErr struct {

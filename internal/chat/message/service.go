@@ -15,12 +15,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/chat/event"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/chat/event"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // DBService persists and reads bot history messages.

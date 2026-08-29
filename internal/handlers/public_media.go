@@ -16,11 +16,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/channel/publicmedia"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/webhooktunnel"
+	"github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/channel/publicmedia"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/webhooktunnel"
 )
 
 type PublicMediaHandler struct {

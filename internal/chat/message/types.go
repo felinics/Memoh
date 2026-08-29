@@ -8,6 +8,7 @@ import (
 
 const (
 	AgentStepInterruptedMetadataKey     = "agent_step_interrupted"
+	HistoryErrorCodeMetadataKey         = "error_code"
 	AgentStepInterruptedReasoningPrefix = "[Previous assistant response was interrupted during reasoning. Continue from this checkpoint:]\n"
 )
 

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/settings"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestToProviderMessagesKeepsPersistedContentAndSourceAligned(t *testing.T) {

@@ -3,9 +3,9 @@ package tools
 import (
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 )
 
 type ToolOutputLimit = contextlimit.ToolOutputLimit

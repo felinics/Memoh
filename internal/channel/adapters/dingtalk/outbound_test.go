@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 func TestBuildAPIPayloadTextAndMarkdown(t *testing.T) {

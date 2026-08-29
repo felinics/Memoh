@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	sched "github.com/memohai/memoh/internal/schedule"
+	sched "github.com/felinics/memoh/internal/schedule"
 )
 
 type ScheduleProvider struct {

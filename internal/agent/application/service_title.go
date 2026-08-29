@@ -9,16 +9,16 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 const (

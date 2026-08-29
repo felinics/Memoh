@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	textprune "github.com/memohai/memoh/internal/prune"
-	skillset "github.com/memohai/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	textprune "github.com/felinics/memoh/internal/prune"
+	skillset "github.com/felinics/memoh/internal/skills"
 )
 
 //go:embed prompts/*.md

@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (

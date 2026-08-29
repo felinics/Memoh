@@ -3,8 +3,8 @@ package providers
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/registry"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/registry"
 )
 
 func TestRemoteModelsFromTemplateIncludesOptionalDescription(t *testing.T) {

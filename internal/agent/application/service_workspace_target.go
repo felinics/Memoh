@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/workdir"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 var ErrWorkspaceTargetACPUnsupported = errors.New("workspace_target_id is not supported for ACP sessions")

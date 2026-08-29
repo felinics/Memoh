@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/botbackup/secure"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/botbackup/secure"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 // buildSampleBundle assembles a complete plaintext .memoh.zip the way Export

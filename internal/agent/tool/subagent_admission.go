@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // SubagentTerminal is the terminal audit data returned to the application

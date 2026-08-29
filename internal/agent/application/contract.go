@@ -3,7 +3,7 @@ package application
 import (
 	"encoding/json"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // ChatRequest is the application-layer input used while orchestrating a chat

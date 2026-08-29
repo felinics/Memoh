@@ -48,9 +48,9 @@
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
-        v-if="display.errorSuffix"
+        v-if="exitLabel"
         class="font-mono shrink-0"
-      >{{ display.errorSuffix }}</span>
+      >{{ exitLabel }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -108,9 +108,9 @@
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
-        v-if="display.errorSuffix"
+        v-if="exitLabel"
         class="font-mono shrink-0"
-      >{{ display.errorSuffix }}</span>
+      >{{ exitLabel }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -225,6 +225,12 @@ watch(collapseKey, (key) => {
 const expandable = computed(
   () => Boolean(display.value.detail) || display.value.expandable === true,
 )
+
+// A failed command carries its exit status on the collapsed row; every other
+// failure detail stays in the expanded output.
+const exitLabel = computed(() => (
+  display.value.exitCode ? t('chat.tools.exitCode', { code: display.value.exitCode }) : ''
+))
 
 const actionLabel = computed(() => {
   const key = `chat.tools.${display.value.actionKey}`

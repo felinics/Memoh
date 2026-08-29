@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/mcp"
-	sched "github.com/memohai/memoh/internal/schedule"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/mcp"
+	sched "github.com/felinics/memoh/internal/schedule"
 )
 
 func TestNativeToolSourceAllowlistAndCall(t *testing.T) {

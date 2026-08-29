@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestConvertToEnabledGetResponseListFiltersUnavailableCatalogModels(t *testing.T) {

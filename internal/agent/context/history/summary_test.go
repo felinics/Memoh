@@ -3,8 +3,8 @@ package historyfrag
 import (
 	"testing"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/turn"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func TestSummaryRecordIsTypedCoveredAndRenderingEquivalent(t *testing.T) {

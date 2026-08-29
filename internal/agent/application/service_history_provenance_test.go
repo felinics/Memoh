@@ -3,9 +3,9 @@ package application
 import (
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 )
 
 // Capping replayed reasoning rewrites an assistant message's content, and

@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/accounts"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 func testUUID(value string) pgtype.UUID {

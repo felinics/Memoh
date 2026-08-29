@@ -14,12 +14,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/config"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/dbtest"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	"github.com/memohai/memoh/internal/team"
+	"github.com/felinics/memoh/internal/config"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/dbtest"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	"github.com/felinics/memoh/internal/team"
 )
 
 var (

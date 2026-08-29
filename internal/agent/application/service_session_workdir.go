@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 // ErrWorkspaceTargetWorkdirConflict is returned when a request tries to move

@@ -15,16 +15,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {

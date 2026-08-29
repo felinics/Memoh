@@ -3,7 +3,7 @@ package attachment
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/media"
 )
 
 func TestBundleNormalize_DataURLBecomesBase64(t *testing.T) {

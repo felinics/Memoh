@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestWrapPrepareStepWithForkSnapshotDoesNotRewriteToolResults(t *testing.T) {

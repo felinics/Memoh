@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func listResult(total, page, pageSize int) *command.Result {

@@ -7,11 +7,11 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 // ACPRuntimeSummary is the tool-local projection of a booted ACP runtime's

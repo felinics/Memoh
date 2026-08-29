@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestNewSDKChatModelAnthropicMessagesBaseURLGainsV1(t *testing.T) {

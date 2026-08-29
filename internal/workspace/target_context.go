@@ -3,7 +3,7 @@ package workspace
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // WithWorkspaceTarget returns a child context whose workspace operations

@@ -3,7 +3,7 @@ package qq
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 func TestNormalizeConfig(t *testing.T) {

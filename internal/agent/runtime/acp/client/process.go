@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (

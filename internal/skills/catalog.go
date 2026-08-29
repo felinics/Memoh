@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/slash"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 type SafeCatalogItem struct {
