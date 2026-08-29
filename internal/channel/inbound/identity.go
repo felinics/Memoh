@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/identities"
 )
 
 // IdentityDecision indicates whether the inbound message should be stopped with an optional reply.

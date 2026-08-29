@@ -12,11 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/dbtest"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/dbtest"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 var (

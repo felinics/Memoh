@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 // BotUserGrantListResponse wraps the list of workspace user access grants for a bot.

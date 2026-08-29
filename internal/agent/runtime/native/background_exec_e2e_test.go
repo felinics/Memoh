@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/agent/background"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 // ---------------------------------------------------------------------------

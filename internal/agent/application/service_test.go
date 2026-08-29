@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	"github.com/memohai/memoh/internal/models"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/models"
 )
 
 type fakeGatewayAssetLoader struct {

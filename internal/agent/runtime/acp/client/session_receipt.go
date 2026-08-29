@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 const claudeSDKMessageMethod = "_claude/sdkMessage"

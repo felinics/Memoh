@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func TestNewRequestUserTurnNilWithoutPersistedUserMessage(t *testing.T) {

@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/skillpackages"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/skillpackages"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

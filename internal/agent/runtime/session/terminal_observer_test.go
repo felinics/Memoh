@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 func TestFinishRunObservesAuthoritativeLedgerTerminal(t *testing.T) {

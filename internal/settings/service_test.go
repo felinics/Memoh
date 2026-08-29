@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	"github.com/memohai/memoh/internal/botagents"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/reasoning"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 type stubReasoningOptionsResolver struct {

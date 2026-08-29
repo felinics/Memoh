@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/logger"
+	"github.com/felinics/memoh/internal/logger"
 )
 
 const (

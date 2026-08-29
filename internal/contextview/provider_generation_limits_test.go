@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/models"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/models"
 )
 
 type anthropicEnvelopeProbeProvider struct{ *envelopeProbeProvider }

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/schedule"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {

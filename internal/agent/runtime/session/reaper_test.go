@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // fakeLiveness is a scriptable live backend. The reaper reads liveness and

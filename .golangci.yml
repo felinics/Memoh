@@ -100,9 +100,9 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/memohai/memoh)
+        - prefix(github.com/felinics/memoh)
     gofumpt:
       extra-rules: false
     goimports:
       local-prefixes:
-        - github.com/memohai/memoh
+        - github.com/felinics/memoh

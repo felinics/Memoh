@@ -12,12 +12,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 func TestPrepareACPWorkspaceConfigWritesCodexAPIKeyConfig(t *testing.T) {

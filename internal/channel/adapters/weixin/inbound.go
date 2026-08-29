@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 // buildInboundMessage maps a WeixinMessage to a Memoh InboundMessage.

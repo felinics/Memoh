@@ -13,7 +13,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

@@ -128,7 +128,7 @@ const file_internal_rpc_runtimepb_runtime_proto_rawDesc = "" +
 	"\fCallResponse\x12\x18\n" +
 	"\apayload\x18\x01 \x01(\fR\apayload2W\n" +
 	"\x0eRuntimeService\x12E\n" +
-	"\x04Call\x12\x1d.memoh.runtime.v1.CallRequest\x1a\x1e.memoh.runtime.v1.CallResponseB1Z/github.com/memohai/memoh/internal/rpc/runtimepbb\x06proto3"
+	"\x04Call\x12\x1d.memoh.runtime.v1.CallRequest\x1a\x1e.memoh.runtime.v1.CallResponseB2Z0github.com/felinics/memoh/internal/rpc/runtimepbb\x06proto3"
 
 var (
 	file_internal_rpc_runtimepb_runtime_proto_rawDescOnce sync.Once

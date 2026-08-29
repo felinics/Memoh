@@ -3,10 +3,10 @@ package models
 import (
 	"testing"
 
-	anthropicmessages "github.com/memohai/twilight/provider/anthropic/messages"
-	sdk "github.com/memohai/twilight/sdk"
+	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func anthropicTestModel() *sdk.Model {

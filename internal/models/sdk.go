@@ -4,15 +4,15 @@ import (
 	"net/http"
 	"strings"
 
-	anthropicmessages "github.com/memohai/twilight/provider/anthropic/messages"
-	googlegenerative "github.com/memohai/twilight/provider/google/generativeai"
-	openaicodex "github.com/memohai/twilight/provider/openai/codex"
-	openaicompletions "github.com/memohai/twilight/provider/openai/completions"
-	openairesponses "github.com/memohai/twilight/provider/openai/responses"
-	sdk "github.com/memohai/twilight/sdk"
+	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
+	googlegenerative "github.com/felinics/twilight/provider/google/generativeai"
+	openaicodex "github.com/felinics/twilight/provider/openai/codex"
+	openaicompletions "github.com/felinics/twilight/provider/openai/completions"
+	openairesponses "github.com/felinics/twilight/provider/openai/responses"
+	sdk "github.com/felinics/twilight/sdk"
 
-	memohcopilot "github.com/memohai/memoh/internal/copilot"
-	"github.com/memohai/memoh/internal/reasoning"
+	memohcopilot "github.com/felinics/memoh/internal/copilot"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 // SDKModelConfig holds provider and model information resolved from DB,

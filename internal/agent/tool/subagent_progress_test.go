@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/background"
 )
 
 func TestRunSpawnProgressStopsWithParentWhileManagedChildContinues(t *testing.T) {

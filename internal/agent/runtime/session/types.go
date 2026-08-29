@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/runtimefence"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 const (

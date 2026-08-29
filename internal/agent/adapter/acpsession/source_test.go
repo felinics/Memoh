@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/chat/thread"
 )
 
 type fakeThreadGetter struct {

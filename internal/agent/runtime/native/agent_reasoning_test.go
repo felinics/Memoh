@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	anthropicmessages "github.com/memohai/twilight/provider/anthropic/messages"
-	sdk "github.com/memohai/twilight/sdk"
+	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type recordingReasoningProvider struct {

@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 const defaultMaxLookbackDays = 7

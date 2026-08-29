@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // Kind identifies the semantic source and intent of a context fragment.

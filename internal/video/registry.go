@@ -6,11 +6,11 @@ import (
 	"strings"
 	"sync"
 
-	arkvideos "github.com/memohai/twilight/provider/ark/videos"
-	openroutervideos "github.com/memohai/twilight/provider/openrouter/videos"
-	sdk "github.com/memohai/twilight/sdk"
+	arkvideos "github.com/felinics/twilight/provider/ark/videos"
+	openroutervideos "github.com/felinics/twilight/provider/openrouter/videos"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 type ProviderFactory func(config map[string]any) (sdk.VideoProvider, error)

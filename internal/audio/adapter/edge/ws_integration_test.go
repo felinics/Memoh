@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/audio"
 )
 
 // Real Edge TTS integration tests. Not compiled by default (requires -tags=integration).

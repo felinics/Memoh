@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/models"
 )
 
 type silentTriggerProvider struct {

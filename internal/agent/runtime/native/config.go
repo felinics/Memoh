@@ -4,9 +4,9 @@ import (
 	"context"
 	"log/slog"
 
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // ContextViewApplier rebuilds provider-facing fields from the authoritative

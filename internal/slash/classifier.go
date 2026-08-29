@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/memohai/memoh/internal/commandsyntax"
+	"github.com/felinics/memoh/internal/commandsyntax"
 )
 
 type Surface string

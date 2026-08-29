@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 )
 
 const (

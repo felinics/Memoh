@@ -14,11 +14,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/accounts"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 const (

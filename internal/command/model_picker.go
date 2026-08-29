@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 const (

@@ -3,7 +3,7 @@ package native
 import (
 	"sync"
 
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 type toolAbortRegistry struct {

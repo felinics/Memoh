@@ -13,14 +13,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/runtimefence"
-	tzutil "github.com/memohai/memoh/internal/timezone"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/acl"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
+	tzutil "github.com/felinics/memoh/internal/timezone"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // Service provides bot CRUD and membership management.

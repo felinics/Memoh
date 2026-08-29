@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestIdleTimeoutPublishesStableResponseTimeoutCause(t *testing.T) {

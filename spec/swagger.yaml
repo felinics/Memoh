@@ -2318,6 +2318,8 @@ definitions:
         type: array
       background_task:
         $ref: '#/definitions/conversation.UIBackgroundTask'
+      code:
+        type: string
       content:
         type: string
       execution_location:
@@ -2348,12 +2350,14 @@ definitions:
     - reasoning
     - tool
     - attachments
+    - error
     type: string
     x-enum-varnames:
     - UIMessageText
     - UIMessageReasoning
     - UIMessageTool
     - UIMessageAttachments
+    - UIMessageError
   conversation.UIReasoningTiming:
     properties:
       duration_ms:
@@ -2736,7 +2740,7 @@ definitions:
       provider:
         $ref: '#/definitions/fetchproviders.ProviderName'
     type: object
-  github_com_memohai_memoh_internal_mcp.Connection:
+  github_com_felinics_memoh_internal_mcp.Connection:
     properties:
       auth_type:
         type: string
@@ -4721,7 +4725,7 @@ definitions:
     properties:
       items:
         items:
-          $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+          $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         type: array
     type: object
   mcp.MCPServerEntry:
@@ -9305,7 +9309,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+            $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         "400":
           description: Bad Request
           schema:
@@ -9527,7 +9531,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+            $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         "400":
           description: Bad Request
           schema:
@@ -9565,7 +9569,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_memohai_memoh_internal_mcp.Connection'
+            $ref: '#/definitions/github_com_felinics_memoh_internal_mcp.Connection'
         "400":
           description: Bad Request
           schema:

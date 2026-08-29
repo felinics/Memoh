@@ -4,9 +4,9 @@ import (
 	"errors"
 	"sync"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 var errProviderAttemptNotPrepared = errors.New("provider attempt was not prepared")

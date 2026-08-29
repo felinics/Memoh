@@ -9,10 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/memohai/memoh/internal/botagents"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workdir"
 )
 
 var (

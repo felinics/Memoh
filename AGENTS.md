@@ -4,7 +4,7 @@
 
 Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
 
-The public documentation site is maintained separately in `memohai/memoh-docs`.
+The public documentation site is maintained separately in `felinics/memoh-docs`.
 
 ## Architecture Overview
 
@@ -28,7 +28,7 @@ Infrastructure dependencies:
 ### Backend (Go)
 - **Framework**: Echo (HTTP)
 - **Dependency Injection**: Uber FX
-- **AI SDK**: [Twilight AI](https://github.com/memohai/twilight) (Go LLM SDK — OpenAI, Anthropic, Google)
+- **AI SDK**: [Twilight AI](https://github.com/felinics/twilight) (Go LLM SDK — OpenAI, Anthropic, Google)
 - **Database Driver**: pgx/v5 (PostgreSQL)
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
@@ -188,7 +188,7 @@ Memoh/
 │   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
-│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/memohai/ui; its AGENTS.md routes agents to the UI-owned Web guidance
+│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/felinics/ui; its AGENTS.md routes agents to the UI-owned Web guidance
 │   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
 │   ├── icons/                  #   Brand/provider icon library (@memohai/icon)
 │   └── config/                 #   Shared configuration utilities (@memohai/config)

@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const connectingTimeout = 30 * time.Second

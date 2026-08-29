@@ -1,7 +1,7 @@
 package tools
 
 import (
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 )
 
 const (

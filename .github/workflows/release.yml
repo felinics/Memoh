@@ -83,7 +83,7 @@ jobs:
             --clobber
 
   # npm publish jobs authenticate via npm trusted publishing (OIDC), not token
-  # secrets: each published package has memohai/Memoh + this release.yml
+  # secrets: each published package has felinics/Memoh + this release.yml
   # registered as its trusted publisher on npmjs.com, and pnpm exchanges the
   # GitHub OIDC token at publish time (requires id-token: write on the job).
   # The npm-side trusted publisher entry has NO environment name, so these jobs
@@ -114,7 +114,7 @@ jobs:
       # releases intentionally publish the pinned @felinic/ui sources together
       # with the rest of the Memoh npm workspace. In other words,
       # @felinic/ui@<Memoh version> means "the UI package content selected by
-      # this Memoh release", not necessarily a matching tag in memohai/ui.
+      # this Memoh release", not necessarily a matching tag in felinics/ui.
       #
       # Do not remove packages/ui from the version-sync or publish path just
       # because it is a submodule. If @felinic/ui ever moves to an independent
@@ -147,14 +147,14 @@ jobs:
             pkg.version = version;
             // npm provenance (auto-generated for trusted publishing) requires
             // repository.url to exactly match the repo the OIDC token is
-            // minted for — always memohai/Memoh here. Stamp it at release time
+            // minted for — always felinics/Memoh here. Stamp it at release time
             // so a missing/stale field can never fail the publish, and so
-            // packages/ui (a submodule whose own repo is memohai/ui) gets the
+            // packages/ui (a submodule whose own repo is felinics/ui) gets the
             // Memoh URL, matching where the publish actually runs.
             const directory = target.replace(/\/package\.json$/, '');
             pkg.repository = {
               type: 'git',
-              url: 'git+https://github.com/memohai/Memoh.git',
+              url: 'git+https://github.com/felinics/Memoh.git',
               ...(directory === 'package.json' || directory === '' ? {} : { directory }),
             };
             fs.writeFileSync(target, `${JSON.stringify(pkg, null, 2)}\n`);
@@ -212,14 +212,14 @@ jobs:
             pkg.version = version;
             // npm provenance (auto-generated for trusted publishing) requires
             // repository.url to exactly match the repo the OIDC token is
-            // minted for — always memohai/Memoh here. Stamp it at release time
+            // minted for — always felinics/Memoh here. Stamp it at release time
             // so a missing/stale field can never fail the publish, and so
-            // packages/ui (a submodule whose own repo is memohai/ui) gets the
+            // packages/ui (a submodule whose own repo is felinics/ui) gets the
             // Memoh URL, matching where the publish actually runs.
             const directory = target.replace(/\/package\.json$/, '');
             pkg.repository = {
               type: 'git',
-              url: 'git+https://github.com/memohai/Memoh.git',
+              url: 'git+https://github.com/felinics/Memoh.git',
               ...(directory === 'package.json' || directory === '' ? {} : { directory }),
             };
             fs.writeFileSync(target, `${JSON.stringify(pkg, null, 2)}\n`);

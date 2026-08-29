@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 func TestRunControlCommandContextPreservesOwnershipLossCause(t *testing.T) {

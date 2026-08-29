@@ -13,9 +13,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (

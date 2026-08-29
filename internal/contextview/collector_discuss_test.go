@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 func TestDiscussCollector_ComposedMessagesAreAuthoritative(t *testing.T) {

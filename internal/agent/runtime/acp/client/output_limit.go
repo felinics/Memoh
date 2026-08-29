@@ -4,9 +4,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	"github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/prune"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/prune"
 )
 
 type ToolOutputLimit = contextlimit.ToolOutputLimit

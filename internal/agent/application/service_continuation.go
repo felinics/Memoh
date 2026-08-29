@@ -3,9 +3,9 @@ package application
 import (
 	"context"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func (s *Service) prepareContinuationRunConfig(

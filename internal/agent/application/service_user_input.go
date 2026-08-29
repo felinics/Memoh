@@ -8,14 +8,14 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/bots"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workspace"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/bots"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 // userInputService is the slice of *userinput.Service the application depends

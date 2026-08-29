@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 func TestBuiltinProviderNilService(t *testing.T) {

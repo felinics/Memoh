@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func (m *Manager) localControl(runID string) *runControl {

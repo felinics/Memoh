@@ -27,7 +27,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/memohai/memoh/internal/capabilities"
+	"github.com/felinics/memoh/internal/capabilities"
 )
 
 const defaultLitellmURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"

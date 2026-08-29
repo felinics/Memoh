@@ -3,8 +3,8 @@ package feishu
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/partsfixture"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/partsfixture"
 )
 
 // TestCanonicalPartsRendering pins the Feishu adapter's lark_md output for

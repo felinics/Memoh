@@ -11,12 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 const (

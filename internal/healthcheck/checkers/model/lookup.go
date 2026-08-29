@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 // QueriesLookup adapts sqlc.Queries to the BotModelLookup interface.

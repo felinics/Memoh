@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const testBackgroundSummaryPrefix = "[Background tasks]\n"

@@ -3,7 +3,7 @@ package native
 import (
 	"sync"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // injectedMessageState delays the legacy append-only persistence callback

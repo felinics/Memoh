@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	identitypkg "github.com/memohai/memoh/internal/channel/identities"
+	identitypkg "github.com/felinics/memoh/internal/channel/identities"
 )
 
 var qqOpenIDPattern = regexp.MustCompile(`(?i)^[0-9a-f]{32}$`)

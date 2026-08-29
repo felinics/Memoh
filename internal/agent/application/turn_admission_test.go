@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"testing"
 
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // fakeTurnAdmitter captures the Admit input so tests can drive the admission

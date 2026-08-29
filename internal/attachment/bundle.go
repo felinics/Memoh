@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/media"
 )
 
 // Bundle is the internal attachment normalization shape shared across

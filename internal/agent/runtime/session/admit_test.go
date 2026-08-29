@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // fakeLedger is an in-memory ledger with the same guarantees the PostgreSQL

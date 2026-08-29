@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type discussHistoryReader struct {

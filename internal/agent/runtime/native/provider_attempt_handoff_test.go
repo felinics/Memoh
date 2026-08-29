@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestProviderAttemptHandoffRejectsCanceledDispatch(t *testing.T) {

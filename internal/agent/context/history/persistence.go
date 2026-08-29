@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/messageconv"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/messageconv"
 )
 
 // MarshalStoredModelMessage encodes the existing turn message payload used by

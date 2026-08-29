@@ -1312,6 +1312,7 @@ export type ConversationUiMessage = {
     approval?: ConversationUiToolApproval;
     attachments?: Array<ConversationUiAttachment>;
     background_task?: ConversationUiBackgroundTask;
+    code?: string;
     content?: string;
     execution_location?: ConversationUiExecutionLocation;
     id?: number;
@@ -1326,7 +1327,7 @@ export type ConversationUiMessage = {
     user_input?: ConversationUiUserInput;
 };
 
-export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments';
+export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments' | 'error';
 
 export type ConversationUiReasoningTiming = {
     duration_ms?: number;
@@ -1556,7 +1557,7 @@ export type FetchprovidersUpdateRequest = {
     provider?: FetchprovidersProviderName;
 };
 
-export type GithubComMemohaiMemohInternalMcpConnection = {
+export type GithubComFelinicsMemohInternalMcpConnection = {
     auth_type?: string;
     bot_id?: string;
     config?: {
@@ -2699,7 +2700,7 @@ export type McpImportRequest = {
 };
 
 export type McpListResponse = {
-    items?: Array<GithubComMemohaiMemohInternalMcpConnection>;
+    items?: Array<GithubComFelinicsMemohInternalMcpConnection>;
 };
 
 export type McpMcpServerEntry = {
@@ -7611,7 +7612,7 @@ export type PostBotsByBotIdMcpResponses = {
     /**
      * Created
      */
-    201: GithubComMemohaiMemohInternalMcpConnection;
+    201: GithubComFelinicsMemohInternalMcpConnection;
 };
 
 export type PostBotsByBotIdMcpResponse = PostBotsByBotIdMcpResponses[keyof PostBotsByBotIdMcpResponses];
@@ -7886,7 +7887,7 @@ export type GetBotsByBotIdMcpByIdResponses = {
     /**
      * OK
      */
-    200: GithubComMemohaiMemohInternalMcpConnection;
+    200: GithubComFelinicsMemohInternalMcpConnection;
 };
 
 export type GetBotsByBotIdMcpByIdResponse = GetBotsByBotIdMcpByIdResponses[keyof GetBotsByBotIdMcpByIdResponses];
@@ -7931,7 +7932,7 @@ export type PutBotsByBotIdMcpByIdResponses = {
     /**
      * OK
      */
-    200: GithubComMemohaiMemohInternalMcpConnection;
+    200: GithubComFelinicsMemohInternalMcpConnection;
 };
 
 export type PutBotsByBotIdMcpByIdResponse = PutBotsByBotIdMcpByIdResponses[keyof PutBotsByBotIdMcpByIdResponses];

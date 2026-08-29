@@ -9,10 +9,10 @@ import (
 	"net/url"
 	"strings"
 
-	memohcopilot "github.com/memohai/memoh/internal/copilot"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/reasoning"
+	memohcopilot "github.com/felinics/memoh/internal/copilot"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 const (

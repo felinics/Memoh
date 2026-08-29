@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 func TestExecEnvUnsetsInheritedEnvBeforeAppendingOverrides(t *testing.T) {

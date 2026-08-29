@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestTierLimitStringEmptyUnchanged(t *testing.T) {

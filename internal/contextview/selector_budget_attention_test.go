@@ -4,9 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func attentionMessageFrag(id string, msg sdk.Message, tokens int, reasons ...contextfrag.AttentionReason) contextfrag.ContextFrag {

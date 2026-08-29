@@ -17,10 +17,10 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/feishu/wsclient"
-	"github.com/memohai/memoh/internal/channel/common"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/feishu/wsclient"
+	"github.com/felinics/memoh/internal/channel/common"
+	"github.com/felinics/memoh/internal/media"
 )
 
 type assetOpener interface {

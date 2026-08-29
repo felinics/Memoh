@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

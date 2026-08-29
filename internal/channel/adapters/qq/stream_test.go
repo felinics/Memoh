@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 func preparedQQEvent(event channel.StreamEvent) channel.PreparedStreamEvent {

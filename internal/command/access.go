@@ -3,7 +3,7 @@ package command
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/acl"
 )
 
 func (h *Handler) buildAccessGroup() *CommandGroup {

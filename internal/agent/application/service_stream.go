@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/apperror"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // WSStreamEvent represents a raw JSON event forwarded from the agent.

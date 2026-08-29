@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func TestAdmitDiscussMessagesUnderBudgetPassthrough(t *testing.T) {

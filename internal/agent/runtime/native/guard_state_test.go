@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestToolAbortRegistryConcurrentAccess(t *testing.T) {

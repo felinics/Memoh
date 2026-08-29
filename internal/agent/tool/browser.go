@@ -17,12 +17,12 @@ import (
 	"sync"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/gorilla/websocket"
-	sdk "github.com/memohai/twilight/sdk"
 
-	displaypkg "github.com/memohai/memoh/internal/display"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	displaypkg "github.com/felinics/memoh/internal/display"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

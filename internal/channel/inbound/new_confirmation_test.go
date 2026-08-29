@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/channel/route"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/slash"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/channel/route"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 func mustCommandInvocation(t *testing.T, text string) command.Invocation {

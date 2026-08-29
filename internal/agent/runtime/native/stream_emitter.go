@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 // streamEmitterGate bounds callbacks that may outlive the synchronous stream

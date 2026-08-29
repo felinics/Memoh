@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type preparedHistoryContext struct {

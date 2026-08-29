@@ -1,4 +1,4 @@
-module github.com/memohai/memoh
+module github.com/felinics/memoh
 
 go 1.25.7
 
@@ -18,6 +18,10 @@ require (
 	github.com/docker/go-connections v0.6.0
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
+	github.com/felinics/acgo v0.0.0-20260829152557-fc78bf271ef8
+	github.com/felinics/connect-it/sdk/go v0.1.1-0.20260829153217-0dcd18de667d
+	github.com/felinics/dingtalk-stream-sdk-go v0.0.0-20260829152622-ce4b7ea674a5
+	github.com/felinics/twilight v0.6.1-0.20260829152448-3e7b6144320c
 	github.com/go-ego/gse v1.0.2
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -32,10 +36,6 @@ require (
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
 	github.com/line/line-bot-sdk-go/v8 v8.20.1
 	github.com/mailgun/mailgun-go/v5 v5.14.0
-	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
-	github.com/memohai/connect-it/sdk/go v0.1.1-0.20260823104951-478f43caffb2
-	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0

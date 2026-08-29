@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 type acpActivePromptHub struct {

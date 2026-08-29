@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
 )
 
 // fakeStore is an in-memory implementation of the memoryStore interface used by

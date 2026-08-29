@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 const Type channel.ChannelType = "wechatoa"

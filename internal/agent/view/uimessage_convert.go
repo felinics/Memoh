@@ -8,9 +8,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/textutil"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const uiReplyPreviewMaxRunes = 120

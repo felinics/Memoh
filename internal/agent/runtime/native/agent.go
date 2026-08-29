@@ -13,15 +13,15 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // Agent is the core agent that handles LLM interactions.

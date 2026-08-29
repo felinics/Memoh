@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/runtimefence"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // agentStepCommitter bridges Twilight's complete-step barrier to history

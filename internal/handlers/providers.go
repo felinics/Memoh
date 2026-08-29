@@ -12,11 +12,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 type ProvidersHandler struct {

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	textprune "github.com/memohai/memoh/internal/prune"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	textprune "github.com/felinics/memoh/internal/prune"
 )
 
 const (

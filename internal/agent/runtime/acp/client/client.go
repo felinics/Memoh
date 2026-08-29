@@ -15,17 +15,17 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/runtimefence"
-	"github.com/memohai/memoh/internal/toolcontext"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/toolcontext"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 // Type is the channel type identifier for WeChat.

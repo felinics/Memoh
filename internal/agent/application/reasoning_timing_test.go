@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 type reasoningTimingTestClock struct {

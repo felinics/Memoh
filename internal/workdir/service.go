@@ -7,11 +7,11 @@ import (
 	"path"
 	"strings"
 
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	"github.com/memohai/memoh/internal/workspace/vpath"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
 // targetResolver is the slice of *workspace.Manager the workdir service

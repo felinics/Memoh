@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func TestLifecycleHolderKeepsDurableContentLightBudgetAudit(t *testing.T) {

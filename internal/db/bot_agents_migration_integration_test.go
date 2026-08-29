@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/team"
+	"github.com/felinics/memoh/internal/team"
 )
 
 func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {

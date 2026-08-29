@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/models"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func TestRunConfigGenerationLimitsFollowModelAndReasoning(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 func TestLanguageShortcutRegisteredAndUngated(t *testing.T) {

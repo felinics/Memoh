@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/migrate"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
 )
 
 func TestAggregateGraphEdgesMergesNodePairs(t *testing.T) {

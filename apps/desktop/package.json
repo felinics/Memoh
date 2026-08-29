@@ -5,10 +5,10 @@
   "type": "module",
   "description": "Memoh Electron desktop application (self-managed bootstrap reusing @memohai/web components)",
   "author": "Memoh",
-  "homepage": "https://github.com/memohai/Memoh",
+  "homepage": "https://github.com/felinics/Memoh",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/memohai/Memoh.git",
+    "url": "git+https://github.com/felinics/Memoh.git",
     "directory": "apps/desktop"
   },
   "main": "./out/main/index.js",

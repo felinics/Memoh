@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/reasoning"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func TestSettingsReasoningHTTPError(t *testing.T) {

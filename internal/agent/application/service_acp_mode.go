@@ -5,10 +5,10 @@ import (
 	"errors"
 	"strings"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
 var (

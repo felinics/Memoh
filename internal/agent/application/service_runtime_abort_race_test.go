@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestAbortReconciliationPrefersResumedRunSnapshotOverPausedMetadata(t *testing.T) {

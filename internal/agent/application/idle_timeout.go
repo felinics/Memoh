@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 // idleCancel wraps a resettable idle timer. If Reset() is not called before

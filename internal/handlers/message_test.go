@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type testFlusher struct{}

@@ -3,8 +3,8 @@ package native
 import (
 	"testing"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 )
 
 const (

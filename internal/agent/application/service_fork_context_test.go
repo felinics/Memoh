@@ -3,7 +3,7 @@ package application
 import (
 	"testing"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 )
 
 func TestHistorySourceMessageIDsFollowRetainedDatabaseMessages(t *testing.T) {

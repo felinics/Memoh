@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 type Builder struct {

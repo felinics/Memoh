@@ -6,8 +6,8 @@ import (
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const (

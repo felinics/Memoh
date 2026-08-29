@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	dbpkg "github.com/memohai/memoh/internal/db"
+	dbpkg "github.com/felinics/memoh/internal/db"
 
-	"github.com/memohai/memoh/internal/channel/identities"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 func setupIntegrationTest(t *testing.T) (*identities.Service, dbstore.Queries, func()) {

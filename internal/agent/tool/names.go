@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"github.com/memohai/memoh/internal/agent/tool/internal/toolname"
+	"github.com/felinics/memoh/internal/agent/tool/internal/toolname"
 )
 
 // ToolName identifies a built-in Memoh agent tool.

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 func TestParseFileFallbacks(t *testing.T) {

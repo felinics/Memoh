@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/apperror"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/apperror"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type forkAnchorMessageService struct {

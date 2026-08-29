@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"strings"
 
-	turnpkg "github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/apperror"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 type RetryLatestMessageInput struct {

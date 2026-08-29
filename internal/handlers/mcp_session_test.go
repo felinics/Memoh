@@ -14,7 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	mcptools "github.com/memohai/memoh/internal/mcp"
+	mcptools "github.com/felinics/memoh/internal/mcp"
 )
 
 // newStdioPipePair returns the two pipe ends an in-container process would

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight/sdk"
 )
 
 // canonicalizeProviderToolSchemas mirrors Twilight's buildConfig schema

@@ -17,7 +17,7 @@ import (
 	"path"
 	"strings"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 type primaryStateValidator struct {

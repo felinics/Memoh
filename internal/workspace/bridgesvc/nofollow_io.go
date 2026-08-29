@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 var errNoFollowUnsupported = errors.New("descriptor-anchored nofollow I/O is unsupported on this platform")

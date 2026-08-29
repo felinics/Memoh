@@ -3,7 +3,7 @@ package contextfrag
 import (
 	"encoding/json"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // EstimateBytesPerToken is the byte-per-token heuristic shared by every

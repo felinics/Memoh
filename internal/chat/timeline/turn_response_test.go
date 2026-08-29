@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func TestDecodeTurnResponseEntryUsesVisibleText(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/storage"
+	"github.com/felinics/memoh/internal/storage"
 )
 
 type memoryProvider struct {

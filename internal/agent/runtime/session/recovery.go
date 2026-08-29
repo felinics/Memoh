@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // recoverWaitingDecision transfers a parked run whose owner lease expired.

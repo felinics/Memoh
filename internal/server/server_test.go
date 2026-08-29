@@ -13,7 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {

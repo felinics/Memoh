@@ -19,11 +19,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/accounts"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 const (

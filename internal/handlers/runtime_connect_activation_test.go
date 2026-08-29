@@ -16,9 +16,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"google.golang.org/grpc"
 
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/userruntime"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/userruntime"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const runtimeConnectTestID = "11111111-1111-4111-8111-111111111111"

@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
-	anthropicmessages "github.com/memohai/twilight/provider/anthropic/messages"
-	googlegenerative "github.com/memohai/twilight/provider/google/generativeai"
-	openaicodex "github.com/memohai/twilight/provider/openai/codex"
-	openaicompletions "github.com/memohai/twilight/provider/openai/completions"
-	openairesponses "github.com/memohai/twilight/provider/openai/responses"
-	sdk "github.com/memohai/twilight/sdk"
+	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
+	googlegenerative "github.com/felinics/twilight/provider/google/generativeai"
+	openaicodex "github.com/felinics/twilight/provider/openai/codex"
+	openaicompletions "github.com/felinics/twilight/provider/openai/completions"
+	openairesponses "github.com/felinics/twilight/provider/openai/responses"
+	sdk "github.com/felinics/twilight/sdk"
 
-	memohcopilot "github.com/memohai/memoh/internal/copilot"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	memohcopilot "github.com/felinics/memoh/internal/copilot"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 const probeTimeout = DefaultProviderProbeTimeout

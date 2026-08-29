@@ -5,8 +5,8 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/memohai/memoh/internal/mcp"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/mcp"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 const OpenVikingType = "openviking"

@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	turnpkg "github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/contextview"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/contextview"
 )
 
 const triggerTestContextWindow = 128000

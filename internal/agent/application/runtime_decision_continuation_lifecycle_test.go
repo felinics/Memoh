@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 type unavailableContinuationMessageService struct {

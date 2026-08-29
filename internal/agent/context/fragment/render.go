@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // BuildManifest creates a non-sensitive summary from fragments.

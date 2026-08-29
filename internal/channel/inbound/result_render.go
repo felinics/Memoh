@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/models"
+	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/models"
 )
 
 const actionTypeCallback = "callback"

@@ -22,8 +22,8 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
-	"github.com/memohai/memoh/internal/config"
-	containerapi "github.com/memohai/memoh/internal/container"
+	"github.com/felinics/memoh/internal/config"
+	containerapi "github.com/felinics/memoh/internal/container"
 )
 
 const (

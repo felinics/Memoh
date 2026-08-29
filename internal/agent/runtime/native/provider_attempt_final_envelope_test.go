@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/models"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func oversizedPrefixRunConfig(provider sdk.Provider, plan *contextfrag.ContextBudgetPlan) RunConfig {

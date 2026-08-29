@@ -21,12 +21,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/skillpackages"
-	supermarketclient "github.com/memohai/memoh/internal/supermarket"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/skillpackages"
+	supermarketclient "github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 const validSkillArtifactContent = "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"

@@ -9,12 +9,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/acl"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // --- fake services ---

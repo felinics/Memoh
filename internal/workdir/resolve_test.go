@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 func TestResolveForSessionNative(t *testing.T) {

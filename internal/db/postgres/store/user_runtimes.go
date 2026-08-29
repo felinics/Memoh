@@ -3,9 +3,9 @@ package postgresstore
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 func (s *Store) CreateUserRuntime(ctx context.Context, input dbstore.CreateUserRuntimeInput) (dbstore.UserRuntimeRecord, error) {

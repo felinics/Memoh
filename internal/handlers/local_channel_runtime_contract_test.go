@@ -12,10 +12,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/agent/application"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 const (

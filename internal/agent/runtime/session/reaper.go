@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // Error codes written to session_runs.error_code by the reaper. They are the

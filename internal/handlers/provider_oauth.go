@@ -7,9 +7,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 type ProviderOAuthHandler struct {

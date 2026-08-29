@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/memohai/memoh/internal/rpc/runtimepb"
+	"github.com/felinics/memoh/internal/rpc/runtimepb"
 )
 
 func callWith(t *testing.T, handlerErr error) error {

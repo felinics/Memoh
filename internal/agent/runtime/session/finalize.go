@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 )
 
 // finalizeLedgerRun records the run's terminal state durably, fenced by the

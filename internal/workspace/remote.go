@@ -10,11 +10,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/userruntime"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/userruntime"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (

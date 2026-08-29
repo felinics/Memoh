@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 func TestAdaptInbound_FallsBackToText_WhenPartsEmpty(t *testing.T) {

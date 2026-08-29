@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 const discussIdleTimeout = 10 * time.Minute

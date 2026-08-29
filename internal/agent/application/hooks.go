@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func (s *Service) applyUserMessageHook(ctx context.Context, req ChatRequest) (ChatRequest, error) {

@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
 
 const (

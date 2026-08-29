@@ -3,7 +3,7 @@ package adapters
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 const ToolSearchMemory = "search_memory"

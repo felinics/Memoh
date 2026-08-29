@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestTokensFromBytes(t *testing.T) {

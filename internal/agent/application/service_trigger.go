@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/event"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/schedule"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 // attachCurrentTurnPrompt routes a trigger's rich prompt through Query so the

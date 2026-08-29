@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/config"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	memseg "github.com/memohai/memoh/internal/memory/segment"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/felinics/memoh/internal/config"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	memseg "github.com/felinics/memoh/internal/memory/segment"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
 )
 
 // fileRuntime implements a file-backed memory runtime. It serves markdown files

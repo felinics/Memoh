@@ -10,9 +10,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/channel/publicmedia"
-	"github.com/memohai/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/channel/publicmedia"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 type Server struct {

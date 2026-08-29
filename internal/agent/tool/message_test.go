@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/media"
-	"github.com/memohai/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 func TestChannelAttachmentsToToolAttachments_NormalizesLocalPath(t *testing.T) {

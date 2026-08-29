@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel/channeltest"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/channel/channeltest"
+	"github.com/felinics/memoh/internal/media"
 )
 
 func TestPrepareOutboundMessage_ContainerPathFallsBackToIngestContainerFile(t *testing.T) {

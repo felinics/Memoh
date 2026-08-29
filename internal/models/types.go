@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 type ModelType string

@@ -4,120 +4,120 @@
 # matching pattern, so domain rules below override the backend defaults.
 
 # Repository governance and shared development infrastructure
-/.github/                        @memohai/maintainers
-/.agents/                        @memohai/maintainers
-/.claude/                        @memohai/maintainers
-/.husky/                         @memohai/maintainers
-/.vscode/                        @memohai/maintainers
-/.zed/                           @memohai/maintainers
-/AGENTS.md                       @memohai/maintainers
-/CLAUDE.md                       @memohai/maintainers
-/CONTRIBUTING.md                 @memohai/maintainers
-/LICENSE                         @memohai/maintainers
-/README*.md                      @memohai/maintainers
-/.gitattributes                  @memohai/maintainers
-/.gitignore                      @memohai/maintainers
-/.gitmodules                     @memohai/maintainers
-/.golangci.yml                   @memohai/maintainers
-/bump.config.ts                  @memohai/maintainers
-/go.mod                          @memohai/maintainers
-/mise.toml                       @memohai/maintainers
-/package.json                    @memohai/maintainers
-/pnpm-workspace.yaml             @memohai/maintainers
-/scripts/                        @memohai/maintainers
-/assets/                         @memohai/maintainers
-/docs/                           @memohai/maintainers
+/.github/                        @felinics/maintainers
+/.agents/                        @felinics/maintainers
+/.claude/                        @felinics/maintainers
+/.husky/                         @felinics/maintainers
+/.vscode/                        @felinics/maintainers
+/.zed/                           @felinics/maintainers
+/AGENTS.md                       @felinics/maintainers
+/CLAUDE.md                       @felinics/maintainers
+/CONTRIBUTING.md                 @felinics/maintainers
+/LICENSE                         @felinics/maintainers
+/README*.md                      @felinics/maintainers
+/.gitattributes                  @felinics/maintainers
+/.gitignore                      @felinics/maintainers
+/.gitmodules                     @felinics/maintainers
+/.golangci.yml                   @felinics/maintainers
+/bump.config.ts                  @felinics/maintainers
+/go.mod                          @felinics/maintainers
+/mise.toml                       @felinics/maintainers
+/package.json                    @felinics/maintainers
+/pnpm-workspace.yaml             @felinics/maintainers
+/scripts/                        @felinics/maintainers
+/assets/                         @felinics/maintainers
+/docs/                           @felinics/maintainers
 
 # Backend defaults and API contracts
-/.air.toml                       @memohai/backend
-/cmd/                            @memohai/backend
-/conf/                           @memohai/backend
-/db/                             @memohai/backend
-/internal/                       @memohai/backend
-/packages/sdk/                   @memohai/backend
-/openapi-ts.config.ts            @memohai/backend
-/sqlc.yaml                       @memohai/backend
+/.air.toml                       @felinics/backend
+/cmd/                            @felinics/backend
+/conf/                           @felinics/backend
+/db/                             @felinics/backend
+/internal/                       @felinics/backend
+/packages/sdk/                   @felinics/backend
+/openapi-ts.config.ts            @felinics/backend
+/sqlc.yaml                       @felinics/backend
 
 # Agent loop, orchestration, context, and approval flow
-/internal/agent/                 @memohai/agent-loop
-/internal/chat/                  @memohai/agent-loop
-/internal/healthcheck/checkers/mcp/ @memohai/agent-loop
-/internal/heartbeat/             @memohai/agent-loop
-/internal/hooks/                 @memohai/agent-loop
-/internal/mcp/                   @memohai/agent-loop
-/internal/memory/                @memohai/agent-loop
-/internal/prune/                 @memohai/agent-loop
-/internal/schedule/              @memohai/agent-loop
-/internal/skills/                @memohai/agent-loop
+/internal/agent/                 @felinics/agent-loop
+/internal/chat/                  @felinics/agent-loop
+/internal/healthcheck/checkers/mcp/ @felinics/agent-loop
+/internal/heartbeat/             @felinics/agent-loop
+/internal/hooks/                 @felinics/agent-loop
+/internal/mcp/                   @felinics/agent-loop
+/internal/memory/                @felinics/agent-loop
+/internal/prune/                 @felinics/agent-loop
+/internal/schedule/              @felinics/agent-loop
+/internal/skills/                @felinics/agent-loop
 
 # Channels, messaging, identities, and commands
-/internal/acl/                   @memohai/channel
-/internal/channel/               @memohai/channel
-/internal/channelaccess/         @memohai/channel
-/internal/chat/event/            @memohai/channel
-/internal/chat/message/          @memohai/channel
-/internal/command/               @memohai/channel
-/internal/commandsyntax/         @memohai/channel
-/internal/email/                 @memohai/channel
-/internal/healthcheck/checkers/channel/ @memohai/channel
-/internal/i18n/                  @memohai/channel
-/internal/identity/              @memohai/channel
-/internal/messageconv/           @memohai/channel
-/internal/messaging/             @memohai/channel
-/internal/slash/                 @memohai/channel
-/internal/webhooktunnel/         @memohai/channel
+/internal/acl/                   @felinics/channel
+/internal/channel/               @felinics/channel
+/internal/channelaccess/         @felinics/channel
+/internal/chat/event/            @felinics/channel
+/internal/chat/message/          @felinics/channel
+/internal/command/               @felinics/channel
+/internal/commandsyntax/         @felinics/channel
+/internal/email/                 @felinics/channel
+/internal/healthcheck/checkers/channel/ @felinics/channel
+/internal/i18n/                  @felinics/channel
+/internal/identity/              @felinics/channel
+/internal/messageconv/           @felinics/channel
+/internal/messaging/             @felinics/channel
+/internal/slash/                 @felinics/channel
+/internal/webhooktunnel/         @felinics/channel
 
 # Workspace runtime, ACP, containers, display, and bridge tooling
-/.dockerignore                   @memohai/runtime
-/Cargo.toml                      @memohai/runtime
-/DEPLOYMENT.md                   @memohai/runtime
-/docker-compose*.yml             @memohai/runtime
-/crates/                         @memohai/runtime
-/devenv/                         @memohai/runtime
-/docker/                         @memohai/runtime
-/packages/runtime/               @memohai/runtime
-/cmd/bridge/                     @memohai/runtime
-/cmd/gen-bridge-mtls/            @memohai/runtime
-/internal/agent/adapter/acpprofile/ @memohai/runtime
-/internal/agent/decision/feedback/ @memohai/runtime
-/internal/agent/runtime/acp/     @memohai/runtime
-/internal/agent/runtime/session/ @memohai/runtime
-/internal/boot/                  @memohai/runtime
-/internal/container/             @memohai/runtime
-/internal/display/               @memohai/runtime
-/internal/network/               @memohai/runtime
-/internal/storage/               @memohai/runtime
-/internal/userruntime/           @memohai/runtime
-/internal/workspace/             @memohai/runtime
-/internal/workspacetemplate/     @memohai/runtime
+/.dockerignore                   @felinics/runtime
+/Cargo.toml                      @felinics/runtime
+/DEPLOYMENT.md                   @felinics/runtime
+/docker-compose*.yml             @felinics/runtime
+/crates/                         @felinics/runtime
+/devenv/                         @felinics/runtime
+/docker/                         @felinics/runtime
+/packages/runtime/               @felinics/runtime
+/cmd/bridge/                     @felinics/runtime
+/cmd/gen-bridge-mtls/            @felinics/runtime
+/internal/agent/adapter/acpprofile/ @felinics/runtime
+/internal/agent/decision/feedback/ @felinics/runtime
+/internal/agent/runtime/acp/     @felinics/runtime
+/internal/agent/runtime/session/ @felinics/runtime
+/internal/boot/                  @felinics/runtime
+/internal/container/             @felinics/runtime
+/internal/display/               @felinics/runtime
+/internal/network/               @felinics/runtime
+/internal/storage/               @felinics/runtime
+/internal/userruntime/           @felinics/runtime
+/internal/workspace/             @felinics/runtime
+/internal/workspacetemplate/     @felinics/runtime
 
 # Domain-specific repository scripts. Unlisted setup and release scripts keep
 # the maintainers default declared above.
-/scripts/db-*.sh                          @memohai/backend
-/scripts/sync-openrouter-models.sh        @memohai/backend
-/scripts/display-*                        @memohai/runtime
-/scripts/gen-bridge-mtls.sh                @memohai/runtime
-/scripts/prepare-dev-workspace-image.sh    @memohai/runtime
-/scripts/check-patched-deps.mjs            @memohai/web
-/scripts/check-ui-contract.mjs             @memohai/web
-/scripts/ui-*-baseline.json                @memohai/web
-/scripts/desktop-*.sh                      @memohai/desktop
+/scripts/db-*.sh                          @felinics/backend
+/scripts/sync-openrouter-models.sh        @felinics/backend
+/scripts/display-*                        @felinics/runtime
+/scripts/gen-bridge-mtls.sh                @felinics/runtime
+/scripts/prepare-dev-workspace-image.sh    @felinics/runtime
+/scripts/check-patched-deps.mjs            @felinics/web
+/scripts/check-ui-contract.mjs             @felinics/web
+/scripts/ui-*-baseline.json                @felinics/web
+/scripts/desktop-*.sh                      @felinics/desktop
 
 # Web client and shared browser-facing packages
-/apps/web/                       @memohai/web
-/packages/icons/                 @memohai/web
-/packages/ui                     @memohai/web
-/patches/                        @memohai/web
+/apps/web/                       @felinics/web
+/packages/icons/                 @felinics/web
+/packages/ui                     @felinics/web
+/patches/                        @felinics/web
 
 # Desktop client and native packaging
-/apps/desktop/                   @memohai/desktop
+/apps/desktop/                   @felinics/desktop
 
 # Shared frontend configuration requests both teams for review. CODEOWNERS
 # approval semantics remain any-one-of while review enforcement is advisory.
-/packages/config/                @memohai/web @memohai/desktop
-/eslint.config.mjs               @memohai/web @memohai/desktop
-/tsconfig.json                   @memohai/web @memohai/desktop
-/vitest.config.ts                @memohai/web @memohai/desktop
+/packages/config/                @felinics/web @felinics/desktop
+/eslint.config.mjs               @felinics/web @felinics/desktop
+/tsconfig.json                   @felinics/web @felinics/desktop
+/vitest.config.ts                @felinics/web @felinics/desktop
 
 # Generated outputs and machine-maintained lock files intentionally have no
 # code owner. Review their source definitions, generators, or manifests instead.
@@ -139,6 +139,6 @@
 /apps/desktop/icon-tools/pnpm-lock.yaml
 
 # These icon components are hand-maintained exceptions inside generated output.
-/packages/icons/src/icons/Codex.vue       @memohai/web
-/packages/icons/src/icons/CodexColor.vue  @memohai/web
-/packages/icons/src/icons/Misskey.vue     @memohai/web
+/packages/icons/src/icons/Codex.vue       @felinics/web
+/packages/icons/src/icons/CodexColor.vue  @felinics/web
+/packages/icons/src/icons/Misskey.vue     @felinics/web

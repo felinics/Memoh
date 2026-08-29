@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/providertemplates"
+	"github.com/felinics/memoh/internal/providertemplates"
 )
 
 type ProviderTemplatesHandler struct {

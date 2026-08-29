@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // TestAnthropicGenerationLimitsMatchTheAdapterDefaults binds the mirrored

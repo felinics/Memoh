@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/hooks"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/hooks"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 const defaultMemorySearchTimeout = 1200 * time.Millisecond

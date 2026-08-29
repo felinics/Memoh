@@ -180,7 +180,7 @@ services:
   # Connect-It at startup and presented by the Memoh server as its bearer
   # token — the install script generates and persists all of these values.
   connect-it:
-    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.3.0}"
+    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.0}"
     container_name: memoh-connect-it
     profiles: [connectors]
     environment:

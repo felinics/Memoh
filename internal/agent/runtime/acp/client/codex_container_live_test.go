@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func TestCodexACPLiveContainerAPIKey(t *testing.T) {

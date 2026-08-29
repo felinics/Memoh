@@ -1,7 +1,7 @@
 package turn
 
 import (
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 // The turn port re-exports the agent context ledger's estimation vocabulary

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 func TestElicitationFormMappingRoundTrip(t *testing.T) {

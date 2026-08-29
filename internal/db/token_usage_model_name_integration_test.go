@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 // TestTokenUsageModelNameFallsBackToModelID exercises the real SQL label

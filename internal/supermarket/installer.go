@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/skillpackages"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/skillpackages"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 const maxConcurrentPackagePreparations = 2

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"reflect"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 // providerStepBudgetEnvelope resolves the step selection budget with the same

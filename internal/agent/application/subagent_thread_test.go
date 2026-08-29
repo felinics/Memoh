@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
-	session "github.com/memohai/memoh/internal/chat/thread"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 // fakeSubagentThreadService extends the background fake with the subagent

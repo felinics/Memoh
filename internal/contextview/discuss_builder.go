@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 // DiscussSDKContextBuilder assembles typed source fragments for a discuss

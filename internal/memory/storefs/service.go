@@ -17,10 +17,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/memohai/memoh/internal/config"
-	memslug "github.com/memohai/memoh/internal/memory/slug"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/config"
+	memslug "github.com/felinics/memoh/internal/memory/slug"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (

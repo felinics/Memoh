@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5"
-	sdk "github.com/memohai/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/background"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/agent/background"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type fakeSpawnAgent struct {

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/migrate"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
 )
 
 // ---- NodeSpec <-> wire record helpers ----

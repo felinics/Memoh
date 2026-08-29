@@ -23,8 +23,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
-	"github.com/memohai/memoh/internal/workspace/bridgesvc"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridgesvc"
 )
 
 type failAfterDataReader struct {

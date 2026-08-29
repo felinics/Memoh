@@ -8,10 +8,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/botagents"
-	"github.com/memohai/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 type BotAgentsHandler struct {

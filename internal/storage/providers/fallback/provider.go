@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/memohai/memoh/internal/storage"
+	"github.com/felinics/memoh/internal/storage"
 )
 
 var (

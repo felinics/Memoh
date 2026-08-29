@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type reasoningCommandQueries struct {

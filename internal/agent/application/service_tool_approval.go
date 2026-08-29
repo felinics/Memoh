@@ -8,15 +8,15 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/bots"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workspace"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/bots"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type ToolApprovalResponseInput struct {
