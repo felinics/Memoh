@@ -1,20 +1,25 @@
 import { computed, getCurrentScope, onScopeDispose, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import {
   deleteFollowUpQueueItem,
+  deleteSteerQueueItem,
+  fetchSteerQueue,
   fetchFollowUpQueue,
   queueItemText,
   reorderFollowUpQueue,
+  reorderSteerQueue,
   promoteFollowUpQueueItemToSteer,
+  updateSteerQueueItem,
   updateFollowUpQueueItem,
   type SessionQueueItem,
 } from '@/composables/api/useChat.chat-api'
 
 export interface EditableFollowUpQueueItem extends SessionQueueItem {
   text: string
+  queueKind: 'follow-up' | 'steer'
 }
 
-function editable(item: SessionQueueItem): EditableFollowUpQueueItem {
-  return { ...item, text: queueItemText(item) }
+function editable(item: SessionQueueItem, queueKind: EditableFollowUpQueueItem['queueKind']): EditableFollowUpQueueItem {
+  return { ...item, text: queueItemText(item), queueKind }
 }
 
 export function useSessionFollowUpQueue(
@@ -46,8 +51,19 @@ export function useSessionFollowUpQueue(
     }
     loading.value = true
     try {
-      const result = await fetchFollowUpQueue(bot, session)
-      if (version === requestVersion) items.value = result.map(editable)
+      const [followUps, steers] = await Promise.all([
+        fetchFollowUpQueue(bot, session),
+        fetchSteerQueue(bot, session),
+      ])
+      if (version === requestVersion) {
+        // Steers are always consumed before follow-ups. Keeping both in one
+        // visual list makes a promoted follow-up stay visible immediately,
+        // while the server APIs and pending order remain separate.
+        items.value = [
+          ...steers.map(item => editable(item, 'steer')),
+          ...followUps.map(item => editable(item, 'follow-up')),
+        ]
+      }
     } finally {
       if (version === requestVersion) loading.value = false
     }
@@ -65,9 +81,11 @@ export function useSessionFollowUpQueue(
     }
     markBusy(id, true)
     try {
-      const updated = await updateFollowUpQueueItem(bot, session, id, text)
+      const updated = item.queueKind === 'steer'
+        ? await updateSteerQueueItem(bot, session, id, text)
+        : await updateFollowUpQueueItem(bot, session, id, text)
       const index = items.value.findIndex(entry => entry.item_id === id)
-      if (index >= 0) items.value[index] = editable(updated)
+      if (index >= 0) items.value[index] = editable(updated, item.queueKind)
     } catch (error) {
       await refresh()
       throw error
@@ -83,7 +101,8 @@ export function useSessionFollowUpQueue(
     if (!bot || !session || !id) return
     markBusy(id, true)
     try {
-      await deleteFollowUpQueueItem(bot, session, id)
+      if (item.queueKind === 'steer') await deleteSteerQueueItem(bot, session, id)
+      else await deleteFollowUpQueueItem(bot, session, id)
       items.value = items.value.filter(entry => entry.item_id !== id)
     } finally {
       markBusy(id, false)
@@ -98,7 +117,9 @@ export function useSessionFollowUpQueue(
     markBusy(id, true)
     try {
       await promoteFollowUpQueueItemToSteer(bot, session, id)
-      items.value = items.value.filter(entry => entry.item_id !== id)
+      const index = items.value.findIndex(entry => entry.item_id === id)
+      if (index >= 0) items.value[index] = editable(items.value[index]!, 'steer')
+      await refresh()
     } catch (error) {
       await refresh()
       throw error
@@ -114,13 +135,17 @@ export function useSessionFollowUpQueue(
     ordered.splice(oldIndex, 1)
     ordered.splice(newIndex, 0, moved)
     items.value = ordered
-    const beforeId = ordered[newIndex + 1]?.item_id ?? ''
+    const beforeId = ordered
+      .slice(newIndex + 1)
+      .find(entry => entry.queueKind === moved.queueKind)?.item_id ?? ''
     const bot = String(toValue(botId) ?? '').trim()
     const session = String(toValue(sessionId) ?? '').trim()
     if (!bot || !session) return
     markBusy(moved.item_id, true)
     try {
-      items.value = (await reorderFollowUpQueue(bot, session, moved.item_id, beforeId)).map(editable)
+      items.value = moved.queueKind === 'steer'
+        ? (await reorderSteerQueue(bot, session, moved.item_id, beforeId)).map(item => editable(item, 'steer'))
+        : (await reorderFollowUpQueue(bot, session, moved.item_id, beforeId)).map(item => editable(item, 'follow-up'))
     } catch (error) {
       await refresh()
       throw error

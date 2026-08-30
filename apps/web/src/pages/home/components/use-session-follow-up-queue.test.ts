@@ -3,10 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   fetchFollowUpQueue: vi.fn(),
+  fetchSteerQueue: vi.fn(),
   updateFollowUpQueueItem: vi.fn(),
+  updateSteerQueueItem: vi.fn(),
   deleteFollowUpQueueItem: vi.fn(),
+  deleteSteerQueueItem: vi.fn(),
   promoteFollowUpQueueItemToSteer: vi.fn(),
   reorderFollowUpQueue: vi.fn(),
+  reorderSteerQueue: vi.fn(),
   queueItemText: (item: { text?: string }) => item.text ?? '',
 }))
 vi.mock('@/composables/api/useChat.chat-api', () => api)
@@ -20,6 +24,7 @@ describe('useSessionFollowUpQueue', () => {
 
   it('edits and removes follow-up items through follow-up APIs only', async () => {
     api.fetchFollowUpQueue.mockResolvedValue([item('f1', 'follow')])
+    api.fetchSteerQueue.mockResolvedValue([])
     api.updateFollowUpQueueItem.mockResolvedValue(item('f1', 'edited'))
     api.deleteFollowUpQueueItem.mockResolvedValue(undefined)
     const queue = useSessionFollowUpQueue(ref('bot'), ref('session'))
@@ -37,6 +42,7 @@ describe('useSessionFollowUpQueue', () => {
 
   it('sends the item after the dropped row as the before reference, or empty for append', async () => {
     api.fetchFollowUpQueue.mockResolvedValue([item('f1', 'one'), item('f2', 'two'), item('f3', 'three')])
+    api.fetchSteerQueue.mockResolvedValue([])
     api.reorderFollowUpQueue.mockResolvedValue([])
     const queue = useSessionFollowUpQueue(ref('bot'), ref('session'))
     await nextTick()
@@ -45,8 +51,13 @@ describe('useSessionFollowUpQueue', () => {
     expect(api.reorderFollowUpQueue).toHaveBeenCalledWith('bot', 'session', 'f1', '')
   })
 
-  it('removes a follow-up only after the server atomically promotes it', async () => {
-    api.fetchFollowUpQueue.mockResolvedValue([item('f1', 'steer this')])
+  it('keeps a promoted steer visible through the separate steer queue', async () => {
+    api.fetchFollowUpQueue
+      .mockResolvedValueOnce([item('f1', 'steer this')])
+      .mockResolvedValueOnce([])
+    api.fetchSteerQueue
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([item('f1', 'steer this')])
     api.promoteFollowUpQueueItemToSteer.mockResolvedValue(item('f1', 'steer this'))
     const queue = useSessionFollowUpQueue(ref('bot'), ref('session'))
     await nextTick()
@@ -55,12 +66,14 @@ describe('useSessionFollowUpQueue', () => {
     await queue.steer(queue.items.value[0]!)
 
     expect(api.promoteFollowUpQueueItemToSteer).toHaveBeenCalledWith('bot', 'session', 'f1')
-    expect(queue.items.value).toHaveLength(0)
+    expect(queue.items.value).toHaveLength(1)
+    expect(queue.items.value[0]?.queueKind).toBe('steer')
     expect(api.deleteFollowUpQueueItem).not.toHaveBeenCalled()
   })
 
   it('keeps the follow-up visible when promotion fails', async () => {
     api.fetchFollowUpQueue.mockResolvedValue([item('f1', 'keep me')])
+    api.fetchSteerQueue.mockResolvedValue([])
     api.promoteFollowUpQueueItemToSteer.mockRejectedValue(new Error('no active run'))
     const queue = useSessionFollowUpQueue(ref('bot'), ref('session'))
     await nextTick()
@@ -79,6 +92,7 @@ describe('useSessionFollowUpQueue', () => {
       api.fetchFollowUpQueue
         .mockResolvedValueOnce([item('f1', 'follow-up')])
         .mockResolvedValueOnce([])
+      api.fetchSteerQueue.mockResolvedValue([])
       const initialFetchCount = api.fetchFollowUpQueue.mock.calls.length
 
       const queue = scope.run(() => useSessionFollowUpQueue(ref('bot'), ref('session'), ref(true)))!

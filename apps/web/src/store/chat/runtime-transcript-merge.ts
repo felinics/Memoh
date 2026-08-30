@@ -13,6 +13,7 @@ export function markRuntimeTurn(
     turn.turnId = slice.turnId
   }
   turn.runtimeRunId = slice.runId
+  if (turn.role === 'user' && slice.continuation) turn.runtimeContinuation = true
   turn.__optimistic = false
   if (turn.role === 'assistant') turn.streaming = slice.streaming
   return turn

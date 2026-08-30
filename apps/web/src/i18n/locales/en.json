@@ -673,6 +673,7 @@
       "followUpPlaceholder": "Write the next message…",
       "enqueueSteer": "Add to current response",
       "enqueueFollowUp": "Add to up next",
+      "steerQueued": "Added to the current response queue",
       "steerFailed": "Could not steer the current response. The message is still queued.",
       "reorder": "Reorder",
       "remove": "Remove",

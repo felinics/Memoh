@@ -253,4 +253,89 @@ describe('runtime client', () => {
     expect(onProjection).toHaveBeenCalledTimes(2)
     expect(frames).toHaveLength(1)
   })
+
+  it('flushes a full run-view steer update without waiting for an animation frame', () => {
+    const onProjection = vi.fn()
+    const frames: Array<() => void> = []
+    const client = createRuntimeClient({
+      send: () => {},
+      onProjection,
+      scheduleFrame: callback => frames.push(callback),
+    })
+    client.subscribe('session-1')
+    client.onConnected()
+    client.handleEvent(snapshot())
+
+    client.handleEvent({
+      ...delta(4),
+      delta: {
+        current_run_view: {
+          run_id: 'run-1',
+          turn_id: 'turn-1',
+          status: 'running',
+          generation: 'generation-1',
+          started_at: '2026-07-27T08:00:00.000Z',
+          updated_at: '2026-07-27T08:00:00.000Z',
+          messages: [],
+          steer_turns: [{
+            item_id: 'steer-1',
+            status: 'claimed',
+            text: 'change direction',
+            after_message_id: -1,
+            timestamp: '2026-07-27T08:00:00.000Z',
+          }],
+        },
+      },
+    })
+
+    expect(onProjection).toHaveBeenCalledTimes(2)
+    expect(frames).toHaveLength(0)
+    expect(onProjection.mock.calls[1]![1].current.currentRunView?.steer_turns).toHaveLength(1)
+  })
+
+  it('flushes a claimed steer upsert before the next streamed model delta', () => {
+    const onProjection = vi.fn()
+    const frames: Array<() => void> = []
+    const client = createRuntimeClient({
+      send: () => {},
+      onProjection,
+      scheduleFrame: callback => frames.push(callback),
+    })
+    client.subscribe('session-1')
+    client.onConnected()
+    client.handleEvent({
+      ...snapshot(),
+      snapshot: {
+        ...snapshot().snapshot,
+        current_run_view: {
+          run_id: 'run-1',
+          turn_id: 'turn-1',
+          status: 'running',
+          generation: 'generation-1',
+          started_at: '2026-07-27T08:00:00.000Z',
+          updated_at: '2026-07-27T08:00:00.000Z',
+          messages: [],
+        },
+      },
+    })
+
+    client.handleEvent({
+      ...delta(4),
+      delta: {
+        steer_turn_upserts: [{
+          item_id: 'steer-1',
+          status: 'claimed',
+          text: 'change direction',
+          after_message_id: -1,
+          timestamp: '2026-07-27T08:00:00.000Z',
+        }],
+      },
+    })
+
+    expect(onProjection).toHaveBeenCalledTimes(2)
+    expect(frames).toHaveLength(0)
+    expect(onProjection.mock.calls[1]![1].current.currentRunView?.steer_turns).toEqual([
+      expect.objectContaining({ item_id: 'steer-1', status: 'claimed' }),
+    ])
+  })
 })

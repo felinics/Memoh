@@ -113,6 +113,7 @@ export interface ChatUserTurn {
   // Live turns do not carry one until their settled twin arrives.
   turnPosition?: number
   runtimeRunId?: string
+  runtimeContinuation?: boolean
   // Set by createOptimisticUserTurn / createOptimisticAssistantTurn and
   // cleared as soon as the server twin replaces the optimistic row in
   // mergeMessages. mergeMessages keys off this flag to decide which side of
@@ -134,6 +135,7 @@ export interface ChatAssistantTurn {
   turnId?: string
   turnPosition?: number
   runtimeRunId?: string
+  runtimeContinuation?: boolean
   // See ChatUserTurn.__optimistic.
   __optimistic?: boolean
 }

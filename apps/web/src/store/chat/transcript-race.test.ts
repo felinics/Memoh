@@ -136,6 +136,20 @@ describe('chat transcript projection identity', () => {
     expect(transcript.messages[1]?.turnId ?? '').toBe('')
   })
 
+  it('marks a server-owned continuation user turn for immediate layout handoff', () => {
+    const { transcript } = makeTranscript()
+    transcript.applyRuntimeTranscript(sliceFor('turn-continuation', 'continuation:item-1', {
+      continuation: true,
+      turns: [rawUser('runtime-user', 'follow-up input'), rawAssistant('runtime-assistant')],
+    }))
+
+    expect(transcript.messages[0]).toMatchObject({
+      role: 'user',
+      text: 'follow-up input',
+      runtimeContinuation: true,
+    })
+  })
+
   it('treats the acceptance as a no-op once the frame already bound the pair', () => {
     const { transcript } = makeTranscript()
     const { userTurn, assistantTurn } = appendUnboundOptimisticPair(transcript)

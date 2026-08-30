@@ -233,7 +233,10 @@ func (s *Service) runQueueContinuation(parent context.Context, runID string, ite
 		runCtx,
 		handle,
 		func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
-			return sessionruntime.RunAdmissionView{RequestUserTurn: &requestUserTurn}, nil
+			return sessionruntime.RunAdmissionView{
+				RequestUserTurn:      &requestUserTurn,
+				SourceFollowUpItemID: string(item.ID),
+			}, nil
 		},
 		cancelCause,
 		abortCh,

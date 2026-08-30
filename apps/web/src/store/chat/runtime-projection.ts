@@ -16,6 +16,7 @@ export interface RuntimeTranscriptSlice {
   // for frames from before this field existed or from the rare pre-ledger run;
   // the transcript falls back to turnId-only matching for those.
   invocationId: string
+  continuation?: boolean
   status: RuntimeCurrentRunView['status'] | null
   operation: RuntimeRunOperation | null
   turns: UITurn[]
@@ -109,6 +110,7 @@ function emptyTranscript(): RuntimeTranscriptSlice {
     runId: '',
     turnId: '',
     invocationId: '',
+    continuation: false,
     status: null,
     operation: null,
     turns: [],
@@ -201,6 +203,7 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
     runId: run.run_id,
     turnId,
     invocationId: run.invocation_id?.trim() ?? '',
+    continuation: Boolean(run.source_follow_up_item_id?.trim()),
     status: run.status,
     operation: run.operation ? { ...run.operation } : null,
     turns,

@@ -673,6 +673,7 @@
       "followUpPlaceholder": "输入下一条消息…",
       "enqueueSteer": "插入当前回复",
       "enqueueFollowUp": "添加到接下来",
+      "steerQueued": "已加入当前回复队列",
       "steerFailed": "无法插入当前回复，消息仍保留在队列中。",
       "reorder": "调整顺序",
       "remove": "删除",

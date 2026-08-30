@@ -93,6 +93,7 @@ describe('runtime projection', () => {
     const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
       run_id: 'continuation-run',
       turn_id: 'continuation-turn',
+      source_follow_up_item_id: 'follow-up-item-1',
       request_user_turn: {
         turn_id: 'continuation-turn',
         role: 'user',
@@ -114,6 +115,7 @@ describe('runtime projection', () => {
         messages: [],
       }),
     ])
+    expect(state.transcript.continuation).toBe(true)
   })
 
   it('projects every applied steer as a distinct live user turn', () => {

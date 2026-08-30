@@ -408,6 +408,8 @@ export interface RuntimeCurrentRunView {
   // The originating send's client-issued id, echoed so live frames can be
   // matched to the local optimistic turn by reading, not by timing inference.
   invocation_id?: string
+  /** Server-owned continuation source; absent for ordinary runs. */
+  source_follow_up_item_id?: string
   generation: string
   status: RuntimeRunStatus
   owner_id?: string

@@ -647,6 +647,7 @@
       "followUpPlaceholder": "次のメッセージを入力…",
       "enqueueSteer": "現在の応答に追加",
       "enqueueFollowUp": "次のメッセージに追加",
+      "steerQueued": "現在の応答キューに追加済み",
       "steerFailed": "現在の応答に追加できませんでした。メッセージはキューに残っています。",
       "reorder": "並べ替え",
       "remove": "削除",

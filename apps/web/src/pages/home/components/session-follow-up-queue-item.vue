@@ -19,19 +19,30 @@
       @blur="emit('save', draft)"
     />
     <Button
+      v-if="item.queueKind !== 'steer'"
       type="button"
       variant="ghost"
       size="icon-sm"
-      :disabled="busy"
       :title="$t('chat.queue.enqueueSteer')"
       :aria-label="$t('chat.queue.enqueueSteer')"
       class="size-7 shrink-0 text-muted-foreground"
+      :disabled="busy"
       @pointerdown.prevent
       @click="emit('steer')"
     >
       <CornerDownLeft class="size-3.5" />
     </Button>
+    <span
+      v-else
+      data-queue-steer-status
+      class="grid size-7 shrink-0 place-items-center text-success-foreground"
+      :title="$t('chat.queue.steerQueued')"
+      :aria-label="$t('chat.queue.steerQueued')"
+    >
+      <CircleCheck class="size-3.5" />
+    </span>
     <Button
+      v-if="item.queueKind !== 'steer'"
       type="button"
       variant="ghost"
       size="icon-sm"
@@ -48,7 +59,7 @@
 </template>
 
 <script setup lang="ts">
-import { CornerDownLeft, GripVertical, Trash2 } from 'lucide-vue-next'
+import { CircleCheck, CornerDownLeft, GripVertical, Trash2 } from 'lucide-vue-next'
 import { Button, Input } from '@felinic/ui'
 import { ref, watch } from 'vue'
 import type { EditableFollowUpQueueItem } from './use-session-follow-up-queue'

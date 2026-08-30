@@ -263,6 +263,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		var terminalEventSeen bool
 		var agentStreamErr error
 		var failureEventForwarded bool
+		var deferredRuntimeTerminal *native.StreamEvent
 		for event := range eventCh {
 			idleCancel.Reset() // each event resets the idle timer
 
@@ -323,8 +324,16 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			if err != nil {
 				continue
 			}
+			// A durable queue step must commit before its terminal runtime event
+			// marks the live projection completed. Otherwise CommitStep cannot
+			// publish the claimed steer or create the follow-up continuation: the
+			// manager quite correctly rejects a queue mutation against a terminal
+			// run. Non-terminal events retain their low-latency publication path.
 			if streamReq.PublishRuntimeEvents && s.publishTurnEvent != nil {
-				if publishErr := s.publishTurnEvent(streamCtx, streamReq.RunHandle, event); publishErr != nil {
+				if event.IsTerminal() && stepCommitter != nil {
+					terminal := event
+					deferredRuntimeTerminal = &terminal
+				} else if publishErr := s.publishTurnEvent(streamCtx, streamReq.RunHandle, event); publishErr != nil {
 					s.logger.Warn("continuation runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
 				}
 			}
@@ -420,6 +429,11 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 						slog.String("chat_id", streamReq.ChatID),
 					)
 				}
+			}
+		}
+		if deferredRuntimeTerminal != nil && streamReq.PublishRuntimeEvents && s.publishTurnEvent != nil {
+			if publishErr := s.publishTurnEvent(context.WithoutCancel(streamCtx), streamReq.RunHandle, *deferredRuntimeTerminal); publishErr != nil {
+				s.logger.Warn("continuation terminal runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
 			}
 		}
 		if commitErr := stepCommitter.err(); commitErr != nil && streamCtx.Err() == nil {

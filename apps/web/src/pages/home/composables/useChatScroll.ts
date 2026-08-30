@@ -562,6 +562,22 @@ export function useChatScroll(options: UseChatScrollOptions) {
     return rollback
   }
 
+  // A follow-up continuation is a new user turn created by the server after
+  // the previous run reaches its final boundary. It must use the same
+  // position-aware reserve handover as a normal send; otherwise the previous
+  // turn's pin reserve remains between the two turns and the continuation
+  // appears far below its predecessor. A pending send pin owns this boundary
+  // already, so this is intentionally a no-op in that case.
+  function pinAfterFollowUp(anchorId: string): () => void {
+    if (pinPending) return () => {}
+    const rollback = armPin(anchorId.trim() || null)
+    void nextTick(() => {
+      if (!pinPending) return
+      onContentChanged()
+    })
+    return rollback
+  }
+
   function startScrollTween(
     root: HTMLElement,
     getTarget: () => number,
@@ -1203,6 +1219,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     followBottom,
     pinAfterSend,
     pinAfterSteer,
+    pinAfterFollowUp,
 
     // lifecycle hooks — call sites live in chat-pane.vue's own onActivated/onDeactivated
     onActivatedRestoreScroll,

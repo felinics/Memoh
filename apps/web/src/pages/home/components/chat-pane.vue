@@ -2928,6 +2928,7 @@ const {
   markEscaped,
   pinAfterSend,
   pinAfterSteer,
+  pinAfterFollowUp,
   onActivatedRestoreScroll,
   onDeactivatedResetScroll,
   onMessageActive,
@@ -2949,9 +2950,13 @@ const {
 // the projection. Seed the set from the current projection so a pane that is
 // mounted with an already-visible steer does not replay the handoff.
 const seenProvisionalSteerIds = new Set<string>()
+const seenContinuationUserIds = new Set<string>()
 for (const message of messages.value) {
   if (message.role === 'user' && message.turnId?.startsWith('queue-steer:')) {
     seenProvisionalSteerIds.add(message.id)
+  }
+  if (message.role === 'user' && message.runtimeContinuation) {
+    seenContinuationUserIds.add(message.id)
   }
 }
 watch(
@@ -2973,6 +2978,38 @@ watch(
       if (anchorId) {
         pinAfterSteer(anchorId)
       }
+      break
+    }
+  },
+  { flush: 'sync' },
+)
+
+// A follow-up continuation is admitted as a server-owned user turn after the
+// previous run's final boundary. Pin it as soon as it enters the projection so
+// the old turn's reserve is retired before the new input is painted. Without
+// this handover the continuation inherits the previous reserve as visible
+// blank space and looks detached from the turn that queued it.
+watch(
+  () => messages.value.map(message => `${message.id}\u0000${message.role}\u0000${message.turnId ?? ''}\u0000${message.runtimeRunId ?? ''}\u0000${message.runtimeContinuation ? 'continuation' : ''}`),
+  () => {
+    const continuations = messages.value.filter(message =>
+      message.role === 'user'
+      && !!message.runtimeRunId
+      && message.runtimeContinuation === true
+      && !!message.turnId
+      && !message.turnId.startsWith('queue-steer:'),
+    )
+    const fresh = continuations.filter(message => !seenContinuationUserIds.has(message.id))
+    for (const message of continuations) seenContinuationUserIds.add(message.id)
+    const continuation = fresh[fresh.length - 1]
+    if (!continuation) return
+    const index = messages.value.indexOf(continuation)
+    if (index < 0) return
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const previous = messages.value[cursor]
+      if (previous?.role !== 'user') continue
+      const anchorId = previous.id.trim()
+      if (anchorId) pinAfterFollowUp(anchorId)
       break
     }
   },

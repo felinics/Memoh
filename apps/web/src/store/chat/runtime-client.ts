@@ -195,6 +195,8 @@ export function createRuntimeClient({ send, onProjection, scheduleFrame }: Runti
     // arrive as upserts. All must be visible before any model output delta,
     // even when the model responds within the same animation frame.
     if (event.delta.current_run_view?.request_user_turn
+      || (event.delta.current_run_view?.user_turns?.length ?? 0) > 0
+      || (event.delta.current_run_view?.steer_turns?.length ?? 0) > 0
       || (event.delta.user_turn_upserts?.length ?? 0) > 0
       || (event.delta.steer_turn_upserts?.length ?? 0) > 0) {
       flushDeltaBatch(sid)

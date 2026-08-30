@@ -265,15 +265,19 @@ type CurrentRunView struct {
 	// while waiting for the acceptance that names the two. Subscribers that did
 	// not originate the run see an id unknown to them and treat the turn as
 	// foreign — which is the correct standalone rendering for cross-device runs.
-	InvocationID        string               `json:"invocation_id,omitempty"`
-	Generation          string               `json:"generation"`
-	Status              string               `json:"status"`
-	OwnerID             string               `json:"owner_id,omitempty"`
-	OwnerLeaseExpiresAt *time.Time           `json:"owner_lease_expires_at,omitempty"`
-	StartedAt           time.Time            `json:"started_at"`
-	UpdatedAt           time.Time            `json:"updated_at"`
-	Messages            []chatview.UIMessage `json:"messages"`
-	RequestUserTurn     *chatview.UITurn     `json:"request_user_turn,omitempty"`
+	InvocationID string `json:"invocation_id,omitempty"`
+	// SourceFollowUpItemID identifies a server-owned continuation run. It is
+	// explicit runtime metadata so clients do not infer continuation identity
+	// from the implementation-specific invocation id prefix.
+	SourceFollowUpItemID string               `json:"source_follow_up_item_id,omitempty"`
+	Generation           string               `json:"generation"`
+	Status               string               `json:"status"`
+	OwnerID              string               `json:"owner_id,omitempty"`
+	OwnerLeaseExpiresAt  *time.Time           `json:"owner_lease_expires_at,omitempty"`
+	StartedAt            time.Time            `json:"started_at"`
+	UpdatedAt            time.Time            `json:"updated_at"`
+	Messages             []chatview.UIMessage `json:"messages"`
+	RequestUserTurn      *chatview.UITurn     `json:"request_user_turn,omitempty"`
 	// UserTurns is the authoritative ordered set of user inputs already
 	// admitted into this run. It starts with RequestUserTurn when one exists and
 	// grows when a durable steer is applied. RequestUserTurn remains on the wire
@@ -305,8 +309,9 @@ type SteerTurnView struct {
 // a durable history row; ordinary sends still persist user + assistant
 // together when the run reaches a terminal result.
 type RunAdmissionView struct {
-	RequestUserTurn *chatview.UITurn
-	Operation       *RunOperationView
+	RequestUserTurn      *chatview.UITurn
+	Operation            *RunOperationView
+	SourceFollowUpItemID string
 }
 
 type RunOperationView struct {
