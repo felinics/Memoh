@@ -413,6 +413,9 @@ async function disconnectCredential() {
       throwOnError: true,
     })
     await queryCache.invalidateQueries({ key: credentialQueryKey.value })
+    // 实例行上的 agent_credential_id 是各就绪守卫的依据，断开后必须同步刷新，
+    // 否则该 Agent 在列表/选择器里仍显示为已配置。
+    await queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   } finally {
@@ -442,7 +445,7 @@ const oauthSectionVisible = computed(() =>
 )
 
 function commitForm() {
-  const credentialAttached = credentialJustAttached.value || !!(attachedCredential.value || props.agent?.agent_credential_id)
+  const credentialAttached = props.credentialStore === true && (credentialJustAttached.value || !!(attachedCredential.value || props.agent?.agent_credential_id))
   if (agent.value.enabled && findMissingRequiredManagedFieldWithCredential(props.profile, agent.value.managed, agent.value.setup_mode, credentialAttached)) {
     return
   }

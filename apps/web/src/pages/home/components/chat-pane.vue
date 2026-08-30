@@ -1253,6 +1253,7 @@ interface ForkSourceMeta {
 }
 
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
+const acpCredentialStoreOn = computed(() => acpProfileData.value?.credential_store_configured === true)
 const currentBotMetadata = computed(() => currentBot.value?.metadata as Record<string, unknown> | undefined)
 const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
 const enabledBotAgents = computed(() => botAgents.value.filter(agent => agent.enabled !== false && !!agent.id))
@@ -2050,7 +2051,7 @@ const defaultACPAvailability = computed<DefaultACPAvailability>(() => {
   const profile = acpProfiles.value.find(item => normalizeACPAgentID(item.id) === agentId)
   if (!profile) return { input: null, messageKey: 'chat.defaultACPAgentUnavailable', loading: false }
   const config = readACPAgentConfig(currentBotMetadata.value, agentId)
-  if (config.setupModeSet && findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setupMode, !!agent.agent_credential_id)) {
+  if (config.setupModeSet && findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setupMode, acpCredentialStoreOn.value && !!agent.agent_credential_id)) {
     return { input: null, messageKey: 'chat.defaultACPAgentNotConfigured', loading: false }
   }
   return {

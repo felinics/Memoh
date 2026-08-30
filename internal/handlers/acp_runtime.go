@@ -77,7 +77,10 @@ func (h *ACPRuntimeHandler) credentialAttached(ctx context.Context, botID, botAg
 	if h.credentials == nil || !h.credentials.Configured() || strings.TrimSpace(botAgentID) == "" {
 		return false
 	}
-	_, err := h.credentials.GetForBotAgent(ctx, botID, botAgentID)
+	// Resolve (decrypt) rather than just read the row: after a restart with a
+	// different-but-valid key the row still exists, but the runtime would fail
+	// on the unopenable ciphertext — preflight must fail the same way.
+	_, err := h.credentials.ResolveForBotAgent(ctx, botID, botAgentID)
 	return err == nil
 }
 

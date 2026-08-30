@@ -250,7 +250,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		if err != nil {
 			return Settings{}, err
 		}
-		if err := s.botAgents.ValidateConfiguration(agent, normalizeJSONObject(botRow.Metadata)); err != nil {
+		if err := s.botAgents.ValidateConfiguration(ctx, agent, normalizeJSONObject(botRow.Metadata)); err != nil {
 			return Settings{}, err
 		}
 		descriptor, err := botagents.DescriptorFor(agent)

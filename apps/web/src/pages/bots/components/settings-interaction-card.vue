@@ -116,6 +116,7 @@ const props = defineProps<{
   botAgents: BotagentsBotAgent[]
   botMetadata?: Record<string, unknown>
   acpProfiles: AcpprofilePublicProfile[]
+  credentialStore?: boolean
 }>()
 
 const { t } = useI18n()
@@ -128,7 +129,7 @@ function isAgentConfigured(agent: BotagentsBotAgent): boolean {
   const profile = props.acpProfiles.find(item => normalizeACPAgentID(item.id) === provider)
   if (!profile || !isACPAgentEnabled(props.botMetadata, provider)) return false
   const config = readACPAgentConfig(props.botMetadata, provider)
-  return !config.setupModeSet || findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setupMode, !!agent.agent_credential_id) === null
+  return !config.setupModeSet || findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setupMode, props.credentialStore === true && !!agent.agent_credential_id) === null
 }
 
 const selectableAgents = computed(() => props.botAgents.filter(agent =>

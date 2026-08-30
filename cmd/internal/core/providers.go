@@ -248,7 +248,13 @@ func provideSettingsService(
 func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries, credentialService *agentcredential.Service) *botagents.Service {
 	service := botagents.NewService(log, queries)
 	service.SetCredentialReleaser(credentialService)
-	service.SetCredentialStoreProbe(credentialService.Configured)
+	service.SetCredentialVerifier(func(ctx context.Context, botID, botAgentID string) bool {
+		if !credentialService.Configured() {
+			return false
+		}
+		_, err := credentialService.ResolveForBotAgent(ctx, botID, botAgentID)
+		return err == nil
+	})
 	return service
 }
 

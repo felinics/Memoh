@@ -54,10 +54,10 @@ type transactionalQueries interface {
 }
 
 type Service struct {
-	queries              queries
-	logger               *slog.Logger
-	releaser             credentialReleaser
-	credentialStoreReady func() bool
+	queries            queries
+	logger             *slog.Logger
+	releaser           credentialReleaser
+	credentialVerifier func(ctx context.Context, botID, botAgentID string) bool
 }
 
 // credentialReleaser revokes a credential that lost its referencing Agent row,
@@ -74,25 +74,28 @@ func (s *Service) SetCredentialReleaser(releaser credentialReleaser) {
 	}
 }
 
-// SetCredentialStoreProbe reports whether the encrypted credential store can
-// decrypt at runtime. Preflight only lets an attached credential satisfy
-// secret fields while that holds: after a restart without the encryption key
-// the metadata secrets are already scrubbed, and passing preflight would just
-// move the failure to the first runtime start.
-func (s *Service) SetCredentialStoreProbe(probe func() bool) {
+// SetCredentialVerifier installs the per-instance decryptability check used
+// by preflight. It must actually open the ciphertext: after a restart with a
+// different-but-valid encryption key the credential row still exists and the
+// key shape is fine, but every runtime start would fail — preflight has to
+// fail the same way instead of deferring the error.
+func (s *Service) SetCredentialVerifier(verifier func(ctx context.Context, botID, botAgentID string) bool) {
 	if s != nil {
-		s.credentialStoreReady = probe
+		s.credentialVerifier = verifier
 	}
 }
 
-func (s *Service) storeReady() bool {
-	return s != nil && s.credentialStoreReady != nil && s.credentialStoreReady()
+func (s *Service) credentialUsable(ctx context.Context, agent BotAgent) bool {
+	if s == nil || s.credentialVerifier == nil || agent.AgentCredentialID == "" {
+		return false
+	}
+	return s.credentialVerifier(ctx, agent.BotID, agent.ID)
 }
 
 // ValidateConfiguration is the credential-store-aware preflight; see the
 // package-level ValidateConfigurationWithStore for the pure form.
-func (s *Service) ValidateConfiguration(agent BotAgent, botMetadata map[string]any) error {
-	return ValidateConfigurationWithStore(agent, botMetadata, s.storeReady())
+func (s *Service) ValidateConfiguration(ctx context.Context, agent BotAgent, botMetadata map[string]any) error {
+	return ValidateConfigurationWithStore(agent, botMetadata, s.credentialUsable(ctx, agent))
 }
 
 func NewService(log *slog.Logger, q queries) *Service {

@@ -210,7 +210,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
 		}
-		if configErr := h.botAgents.ValidateConfiguration(agent, bot.Metadata); configErr != nil {
+		if configErr := h.botAgents.ValidateConfiguration(c.Request().Context(), agent, bot.Metadata); configErr != nil {
 			if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 				return publicErr
 			}
@@ -756,7 +756,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
 			}
-			if configErr := h.botAgents.ValidateConfiguration(agent, bot.Metadata); configErr != nil {
+			if configErr := h.botAgents.ValidateConfiguration(c.Request().Context(), agent, bot.Metadata); configErr != nil {
 				if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 					return publicErr
 				}

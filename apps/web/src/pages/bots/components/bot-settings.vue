@@ -57,6 +57,7 @@
         :bot-agents="botAgents"
         :bot-metadata="bot?.metadata"
         :acp-profiles="acpProfiles"
+        :credential-store="acpProfileData?.credential_store_configured === true"
       />
 
       <SettingsContextCard
