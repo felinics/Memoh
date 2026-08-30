@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/route"
@@ -63,6 +64,7 @@ type UsersHandler struct {
 	acpWorkspace   botCreateWorkspace
 	runtimeResets  runtimeResetService
 	credentials    *agentcredential.Service
+	botAgents      *botagents.Service
 	logger         *slog.Logger
 }
 
@@ -85,6 +87,34 @@ func NewUsersHandler(log *slog.Logger, service *accounts.Service, botService *bo
 
 func (h *UsersHandler) SetRuntimeResetService(closer runtimeResetService) {
 	h.runtimeResets = closer
+}
+
+// SetBotAgentsService lets metadata updates know which providers already
+// migrated to instance credentials (and may therefore drop legacy secrets).
+func (h *UsersHandler) SetBotAgentsService(service *botagents.Service) {
+	h.botAgents = service
+}
+
+// migratedProviders lists the ACP providers of this bot that have at least
+// one instance with an attached credential.
+func (h *UsersHandler) migratedProviders(ctx context.Context, botID string) map[string]bool {
+	if h.botAgents == nil {
+		return nil
+	}
+	agents, err := h.botAgents.List(ctx, botID)
+	if err != nil {
+		return nil
+	}
+	migrated := map[string]bool{}
+	for _, agent := range agents {
+		if agent.AgentCredentialID == "" {
+			continue
+		}
+		if descriptor, descErr := botagents.DescriptorFor(agent); descErr == nil {
+			migrated[acpprofile.NormalizeAgentID(descriptor.Provider)] = true
+		}
+	}
+	return migrated
 }
 
 func (h *UsersHandler) SetCredentialService(service *agentcredential.Service) {
@@ -840,7 +870,11 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 		}
 		pending := bot
 		if managedCredentialStore {
-			pending.Metadata = req.Metadata
+			// The request was scrubbed above, so no new plaintext secret can
+			// enter metadata — but providers whose instances have no attached
+			// credential still authenticate through their legacy metadata
+			// secret, and replacing metadata verbatim would destroy it.
+			pending.Metadata = acpprofile.MergeSensitiveFieldsExceptProviders(bot.Metadata, req.Metadata, h.migratedProviders(c.Request().Context(), bot.ID))
 		} else {
 			pending.Metadata = acpprofile.MergeSensitiveFieldsForUpdate(bot.Metadata, req.Metadata)
 		}

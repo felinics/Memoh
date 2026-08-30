@@ -252,8 +252,7 @@ func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries, credenti
 		if !credentialService.Configured() {
 			return false
 		}
-		_, err := credentialService.ResolveForBotAgent(ctx, botID, botAgentID)
-		return err == nil
+		return credentialService.VerifyUsableForBotAgent(ctx, botID, botAgentID)
 	})
 	return service
 }

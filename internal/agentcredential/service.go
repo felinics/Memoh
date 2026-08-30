@@ -94,6 +94,41 @@ func (s *Service) ResolveForBotAgent(ctx context.Context, botID, botAgentID stri
 	return ResolvedCredential{PublicCredential: publicFromJoinRow(row), AgentProvider: row.AgentProvider, Secret: secret}, nil
 }
 
+// VerifyUsableForBotAgent reports whether the attached credential would
+// actually work at runtime start: it must decrypt with the current key, and
+// for Hermes its provider must match the configured managed provider —
+// applyAgentCredential rejects mismatches, so preflight has to as well
+// instead of reducing the credential to a boolean.
+func (s *Service) VerifyUsableForBotAgent(ctx context.Context, botID, botAgentID string) bool {
+	resolved, err := s.ResolveForBotAgent(ctx, botID, botAgentID)
+	if err != nil {
+		return false
+	}
+	if acpprofile.NormalizeAgentID(resolved.AgentProvider) != acpprofile.AgentHermesID {
+		return true
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return false
+	}
+	bot, err := s.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return false
+	}
+	var metadata map[string]any
+	if len(bot.Metadata) > 0 {
+		if json.Unmarshal(bot.Metadata, &metadata) != nil {
+			return false
+		}
+	}
+	setup := acpprofile.ParseAgentSetup(metadata, acpprofile.AgentHermesID)
+	managedProvider := strings.TrimSpace(setup.Managed["provider"])
+	if managedProvider == "" {
+		return true
+	}
+	return acpprofile.HermesCredentialProviderFor(managedProvider) == resolved.Provider
+}
+
 // AttachToBotAgent encrypts a new secret, points the Bot Agent instance at it,
 // and revokes the replaced credential once no other instance references it.
 // The instance's provider is read inside the transaction and gates auth-kind

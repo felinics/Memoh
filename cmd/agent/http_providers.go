@@ -101,10 +101,11 @@ func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botSe
 	return handler
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, credentialService *agentcredential.Service) *handlers.UsersHandler {
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, credentialService *agentcredential.Service, botAgentService *botagents.Service) *handlers.UsersHandler {
 	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaceManager)
 	handler.SetRuntimeResetService(acpPool)
 	handler.SetCredentialService(credentialService)
+	handler.SetBotAgentsService(botAgentService)
 	return handler
 }
 

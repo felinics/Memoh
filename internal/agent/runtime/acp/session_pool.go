@@ -1619,7 +1619,13 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		switch {
 		case errors.Is(resolveErr, agentcredential.ErrNotFound):
 			// Agent not connected yet: run on whatever the legacy bot
-			// metadata still provides instead of failing the start.
+			// metadata still provides instead of failing the start. A
+			// leftover per-instance durable home (disconnect purge that
+			// could not reach the workspace) must be removed first, or the
+			// lease would stage the disconnected account's auth.json.
+			if err := p.purgeInstanceDurableAuthBeforeStart(startCtx, h); err != nil {
+				return fail(err)
+			}
 		case resolveErr != nil:
 			return fail(resolveErr)
 		default:
@@ -2472,6 +2478,36 @@ func (p *SessionPool) CloseAll() {
 	}
 }
 
+// purgeInstanceDurableAuthBeforeStart is the guaranteed backstop for the
+// best-effort disconnect purge: at start time the workspace bridge is
+// reachable by definition, so failing to remove a leftover instance auth is a
+// hard error rather than a silent stage of a disconnected account.
+func (p *SessionPool) purgeInstanceDurableAuthBeforeStart(ctx context.Context, h *runtimeHandle) error {
+	if h.botAgentID == "" || !isCodexProfileID(h.agentID) {
+		return nil
+	}
+	runner, ok := p.runner.(workspaceClientRunner)
+	if !ok {
+		return nil
+	}
+	dir, err := client.CodexInstanceDurableDir(h.botAgentID)
+	if err != nil {
+		return err
+	}
+	bridgeClient, err := runner.MCPClient(ctx, h.botID)
+	if err != nil {
+		return fmt.Errorf("purge disconnected instance auth: %w", err)
+	}
+	if err := bridgeClient.DeleteFile(ctx, dir, true); err != nil {
+		return fmt.Errorf("purge disconnected instance auth: %w", err)
+	}
+	return nil
+}
+
+func isCodexProfileID(agentID string) bool {
+	return acpprofile.NormalizeAgentID(agentID) == acpprofile.AgentCodexID
+}
+
 // PurgeBotAgentDurableAuth removes the per-instance durable Codex home
 // (/data/.codex/agents/<bot_agent_id>) after a credential is disconnected or
 // the instance is deleted. Without this, the staged auth.json would keep
@@ -2985,33 +3021,6 @@ func (p *SessionPool) reconcileCodexOAuthRotation(ctx context.Context, h *runtim
 	return &onDisk
 }
 
-// hermesCredentialProviderFor maps the Hermes managed provider selection to
-// the credential provider whose key it consumes. Custom endpoints speak the
-// OpenAI wire protocol and take an OpenAI-style key.
-func hermesCredentialProviderFor(managedProvider string) string {
-	switch strings.ToLower(strings.TrimSpace(managedProvider)) {
-	case "openrouter":
-		return agentcredential.ProviderOpenRouter
-	case "gemini", "google", "google-gemini", "google-ai-studio":
-		return agentcredential.ProviderGoogle
-	default:
-		return agentcredential.ProviderOpenAI
-	}
-}
-
-// hermesManagedProviderForCredential is the inverse: the managed provider
-// value Hermes config understands for a credential provider.
-func hermesManagedProviderForCredential(credentialProvider string) string {
-	switch credentialProvider {
-	case agentcredential.ProviderGoogle:
-		return "gemini"
-	case agentcredential.ProviderOpenRouter:
-		return "openrouter"
-	default:
-		return "openai"
-	}
-}
-
 // applyAgentCredential projects a decrypted credential onto the agent setup.
 // API keys and the Claude Code OAuth token ride the existing managed-field
 // path; Codex ChatGPT credentials are returned separately because they are
@@ -3027,8 +3036,8 @@ func applyAgentCredential(profile acpprofile.Profile, setup acpprofile.AgentSetu
 			// provider; a Google key labelled OPENROUTER_API_KEY authenticates
 			// nothing. Refuse mismatches instead of silently mislabelling.
 			if managedProvider := strings.TrimSpace(setup.Managed["provider"]); managedProvider == "" {
-				setup.Managed["provider"] = hermesManagedProviderForCredential(credential.Provider)
-			} else if hermesCredentialProviderFor(managedProvider) != credential.Provider {
+				setup.Managed["provider"] = acpprofile.HermesManagedProviderForCredential(credential.Provider)
+			} else if acpprofile.HermesCredentialProviderFor(managedProvider) != credential.Provider {
 				return setup, "", nil, agentcredential.ErrIncompatible
 			}
 		}

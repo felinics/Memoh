@@ -77,11 +77,9 @@ func (h *ACPRuntimeHandler) credentialAttached(ctx context.Context, botID, botAg
 	if h.credentials == nil || !h.credentials.Configured() || strings.TrimSpace(botAgentID) == "" {
 		return false
 	}
-	// Resolve (decrypt) rather than just read the row: after a restart with a
-	// different-but-valid key the row still exists, but the runtime would fail
-	// on the unopenable ciphertext — preflight must fail the same way.
-	_, err := h.credentials.ResolveForBotAgent(ctx, botID, botAgentID)
-	return err == nil
+	// Verify usability (decrypt + Hermes provider match) rather than just
+	// read the row: preflight must fail the same way the runtime start would.
+	return h.credentials.VerifyUsableForBotAgent(ctx, botID, botAgentID)
 }
 
 func newACPRuntimeHandler(pool acpRuntimePool, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service) *ACPRuntimeHandler {

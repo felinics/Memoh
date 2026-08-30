@@ -174,6 +174,33 @@ func MissingRequiredManagedFieldForPreflight(profile Profile, setup AgentSetup) 
 	return MissingRequiredManagedField(profile, setup)
 }
 
+// HermesCredentialProviderFor maps the Hermes managed provider selection to
+// the credential provider whose key it consumes; custom endpoints speak the
+// OpenAI wire protocol.
+func HermesCredentialProviderFor(managedProvider string) string {
+	switch strings.ToLower(strings.TrimSpace(managedProvider)) {
+	case "openrouter":
+		return "openrouter"
+	case "gemini", "google", "google-gemini", "google-ai-studio":
+		return "google"
+	default:
+		return "openai"
+	}
+}
+
+// HermesManagedProviderForCredential is the inverse mapping, in Hermes' own
+// provider naming.
+func HermesManagedProviderForCredential(credentialProvider string) string {
+	switch credentialProvider {
+	case "google":
+		return "gemini"
+	case "openrouter":
+		return "openrouter"
+	default:
+		return "openai"
+	}
+}
+
 func managedFieldOrFallback(profile Profile, fieldID string, fallback ManagedField) ManagedField {
 	fieldID = NormalizeAgentID(fieldID)
 	for _, field := range profile.ManagedFields {
@@ -565,7 +592,18 @@ func ScrubMetadataForExport(metadata map[string]any) (map[string]any, bool) {
 	return cloned, changed
 }
 
+// MergeSensitiveFieldsForUpdate re-injects existing sensitive managed fields
+// into an update whose request omitted or masked them.
 func MergeSensitiveFieldsForUpdate(existing, incoming map[string]any) map[string]any {
+	return MergeSensitiveFieldsExceptProviders(existing, incoming, nil)
+}
+
+// MergeSensitiveFieldsExceptProviders behaves like
+// MergeSensitiveFieldsForUpdate but skips the given providers: once a
+// provider has an attached encrypted credential its legacy metadata secret is
+// migrated and may be scrubbed, while unmigrated providers must keep theirs —
+// dropping them would silently destroy the only working secret.
+func MergeSensitiveFieldsExceptProviders(existing, incoming map[string]any, skipProviders map[string]bool) map[string]any {
 	merged := cloneMap(incoming)
 	existingACP, okExistingACP := metadataRecord(existing[MetadataKeyACP])
 	incomingACP, okIncomingACP := metadataRecord(merged[MetadataKeyACP])
@@ -593,6 +631,9 @@ func MergeSensitiveFieldsForUpdate(existing, incoming map[string]any) map[string
 		}
 		existingManaged, ok := metadataRecord(existingAgent["managed"])
 		if !ok {
+			continue
+		}
+		if skipProviders[NormalizeAgentID(rawAgentID)] {
 			continue
 		}
 		profile, _ := Lookup(rawAgentID)
