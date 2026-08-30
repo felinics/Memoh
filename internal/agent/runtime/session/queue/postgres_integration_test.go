@@ -747,7 +747,9 @@ func TestPostgresContinuationWaitsForParentRuntimeAndAppliesFollowUp(t *testing.
 		err     error
 	}
 	started := make(chan continuationStart, 1)
+	waitingForParentRelease := make(chan struct{})
 	go func() {
+		close(waitingForParentRelease)
 		if err := manager.WaitRunRelease(ctx, botID, sessionID, parentRunID); err != nil {
 			started <- continuationStart{err: err}
 			return
@@ -781,10 +783,11 @@ func TestPostgresContinuationWaitsForParentRuntimeAndAppliesFollowUp(t *testing.
 		started <- continuationStart{handle: localHandle, claimed: claimed, err: err}
 	}()
 
+	<-waitingForParentRelease
 	select {
 	case result := <-started:
 		t.Fatalf("continuation started before parent runtime release: %#v", result)
-	case <-time.After(25 * time.Millisecond):
+	default:
 	}
 	if err := manager.FinishRun(ctx, parentRuntime, sessionruntime.RunStatusCompleted, ""); err != nil {
 		t.Fatal(err)

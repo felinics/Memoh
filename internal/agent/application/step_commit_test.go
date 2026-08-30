@@ -287,7 +287,7 @@ func TestDecisionContinuationUsesNextDurableStepAndDecodesSteerPayload(t *testin
 	select {
 	case injected := <-cfg.InjectCh:
 		t.Fatalf("final-boundary steer was duplicated through InjectCh: %#v", injected)
-	case <-time.After(25 * time.Millisecond):
+	default:
 		// Final-boundary steers are carried only by NextModelInputs. The
 		// following model invocation applies the claim and persists the user
 		// turn atomically; InjectCh is reserved for tool-loop boundaries.

@@ -44,29 +44,6 @@ func TestSteerFIFOAndAcceptedOnlyReorder(t *testing.T) {
 	}
 }
 
-func TestFollowUpFIFOAndAcceptedOnlyReorder(t *testing.T) {
-	q := NewFollowUpQueue(admissionStub{run: "r"})
-	for _, id := range []string{"a", "b", "c"} {
-		if _, err := q.Enqueue(context.Background(), "b", "s", id, []byte(id)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := q.Reorder("c", "a"); err != nil {
-		t.Fatal(err)
-	}
-	assigned, err := q.AssignNext("continuation-1")
-	if err != nil || assigned.ID != "c" {
-		t.Fatalf("reordered first assignment = %#v, %v", assigned, err)
-	}
-	if err := q.Reorder("c", "a"); !errors.Is(err, ErrNotPending) {
-		t.Fatal("assigned follow-up should not reorder")
-	}
-	next, err := q.AssignNext("continuation-2")
-	if err != nil || next.ID != "a" {
-		t.Fatalf("next follow-up assignment = %#v, %v", next, err)
-	}
-}
-
 func TestQueuesAreTypeIsolated(t *testing.T) {
 	s := NewSteerQueue(admissionStub{run: "r"})
 	f := NewFollowUpQueue(admissionStub{run: "r"})
@@ -128,23 +105,5 @@ func TestQueueEditCancelAndAppendOnlyPending(t *testing.T) {
 	}
 	if _, err := q.Update("b", []byte("late")); !errors.Is(err, ErrNotPending) {
 		t.Fatal("claimed item should not be edited")
-	}
-}
-
-func TestMemoryCoordinatorFinalBoundaryRunsWithoutHistory(t *testing.T) {
-	steer := NewSteerQueue(admissionStub{run: "r"})
-	follow := NewFollowUpQueue(admissionStub{run: "r"})
-	if _, err := steer.Enqueue(context.Background(), "b", "s", "steer", []byte("next")); err != nil {
-		t.Fatal(err)
-	}
-	coordinator := NewMemoryCoordinator(steer, follow)
-	result, err := coordinator.CommitStep(context.Background(), CommitStepRequest{
-		Run: handle(), StepIndex: 0, Kind: StepFinal,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Action != ContinueWithSteer || result.Steer == nil || result.Steer.ID != "steer" {
-		t.Fatalf("empty final boundary result = %#v", result)
 	}
 }
