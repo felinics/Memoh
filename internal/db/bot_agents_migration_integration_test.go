@@ -18,7 +18,8 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		dsn := teamMigrationDSN(t)
 		pool := freshMigratedDB(t)
 
-		stepDown(t, dsn, 1)
+		// Cross the newer session input queues migration before reverting Bot Agents.
+		stepDown(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, false)
 
 		const (
@@ -74,7 +75,7 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 			t.Fatalf("seed schedule: %v", err)
 		}
 
-		stepUp(t, dsn, 1)
+		stepUp(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, true)
 		assertBotAgentConstraintsValidated(t, ctx, pool, false)
 
@@ -108,9 +109,9 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 			t.Fatalf("Native bot created %d persisted Agent rows, want 0", nativeRows)
 		}
 
-		stepDown(t, dsn, 1)
+		stepDown(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, false)
-		stepUp(t, dsn, 1)
+		stepUp(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, true)
 		assertBotAgentConstraintsValidated(t, ctx, pool, false)
 	})

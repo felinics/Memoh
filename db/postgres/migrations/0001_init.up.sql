@@ -2404,7 +2404,10 @@ CREATE POLICY session_follow_up_queue_team_all ON public.session_follow_up_queue
 CREATE POLICY session_queue_step_commits_team_all ON public.session_queue_step_commits USING (team_id = public.memoh_current_team_id()) WITH CHECK (team_id = public.memoh_current_team_id());
 ALTER TABLE public.session_runs
     ADD CONSTRAINT session_runs_source_follow_up_item_fkey FOREIGN KEY (team_id, source_follow_up_item_id)
-    REFERENCES public.session_follow_up_queue(team_id, item_id) ON DELETE RESTRICT;
+    REFERENCES public.session_follow_up_queue(team_id, item_id) ON DELETE RESTRICT
+    -- Validation would scan FORCE RLS tables without a team context during
+    -- restricted-role migrations; new writes remain enforced.
+    NOT VALID;
 
 ALTER TABLE public.tool_approval_requests
     ADD COLUMN IF NOT EXISTS run_id UUID,

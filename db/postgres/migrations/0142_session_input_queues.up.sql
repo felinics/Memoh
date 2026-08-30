@@ -61,4 +61,5 @@ CREATE POLICY session_queue_step_commits_team_all ON public.session_queue_step_c
 ALTER TABLE public.session_runs ADD COLUMN IF NOT EXISTS source_follow_up_item_id UUID;
 CREATE UNIQUE INDEX IF NOT EXISTS session_runs_source_follow_up_unique ON public.session_runs(team_id, source_follow_up_item_id) WHERE source_follow_up_item_id IS NOT NULL;
 ALTER TABLE public.session_runs DROP CONSTRAINT IF EXISTS session_runs_source_follow_up_item_fkey;
-ALTER TABLE public.session_runs ADD CONSTRAINT session_runs_source_follow_up_item_fkey FOREIGN KEY (team_id, source_follow_up_item_id) REFERENCES public.session_follow_up_queue(team_id, item_id) ON DELETE RESTRICT;
+-- Avoid validating FORCE RLS tables without a team context for restricted migration roles.
+ALTER TABLE public.session_runs ADD CONSTRAINT session_runs_source_follow_up_item_fkey FOREIGN KEY (team_id, source_follow_up_item_id) REFERENCES public.session_follow_up_queue(team_id, item_id) ON DELETE RESTRICT NOT VALID;
