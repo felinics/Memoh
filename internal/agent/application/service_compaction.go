@@ -43,6 +43,14 @@ func hardCompactionThreshold(contextTokenBudget int) int {
 	return max(1, contextTokenBudget*compactionHardThresholdPercent/100)
 }
 
+// CompactionMarks is the read-side mirror of the trigger derivation above: it
+// reports where the async trigger and hard backstop sit for a given budget so
+// UI surfaces label the same levels the turn path acts on. Both marks are zero
+// when no usable budget is known.
+func CompactionMarks(userThreshold, contextTokenBudget int) (autoTokens, hardTokens int) {
+	return autoCompactionThreshold(userThreshold, contextTokenBudget), hardCompactionThreshold(contextTokenBudget)
+}
+
 func compactionTargetTokens(targetPercent *int, contextTokenBudget int) int {
 	if contextTokenBudget <= 0 {
 		return 0

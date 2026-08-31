@@ -19772,6 +19772,20 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.CompactionInfo": {
+            "type": "object",
+            "properties": {
+                "auto_tokens": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "hard_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.ConnectorCredentialRequest": {
             "type": "object",
             "properties": {
@@ -20043,6 +20057,12 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/contextfrag.KindBreakdown"
                     }
+                },
+                "budget_plan": {
+                    "$ref": "#/definitions/contextfrag.ContextBudgetPlan"
+                },
+                "compaction": {
+                    "$ref": "#/definitions/handlers.CompactionInfo"
                 },
                 "context_window": {
                     "type": "integer"

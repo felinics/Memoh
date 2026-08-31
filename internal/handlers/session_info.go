@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
@@ -52,10 +54,20 @@ type SessionInfoResponse struct {
 }
 
 type ContextUsage struct {
-	UsedTokens    int64                       `json:"used_tokens"`
-	ContextWindow *int64                      `json:"context_window,omitempty"`
-	Breakdown     []contextfrag.KindBreakdown `json:"breakdown,omitempty"`
-	ToolDefs      []ToolDefBucket             `json:"tool_defs,omitempty"`
+	UsedTokens    int64                          `json:"used_tokens"`
+	ContextWindow *int64                         `json:"context_window,omitempty"`
+	Breakdown     []contextfrag.KindBreakdown    `json:"breakdown,omitempty"`
+	ToolDefs      []ToolDefBucket                `json:"tool_defs,omitempty"`
+	BudgetPlan    *contextfrag.ContextBudgetPlan `json:"budget_plan,omitempty"`
+	Compaction    *CompactionInfo                `json:"compaction,omitempty"`
+}
+
+// CompactionInfo reports where compaction fires for this session. Marks are
+// omitted when no token budget is known, so the UI never draws a guessed level.
+type CompactionInfo struct {
+	Enabled    bool  `json:"enabled"`
+	AutoTokens int64 `json:"auto_tokens,omitempty"`
+	HardTokens int64 `json:"hard_tokens,omitempty"`
 }
 
 type ToolDefBucket struct {
@@ -152,7 +164,8 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		usedTokens = latestUsage
 	}
 
-	contextWindow := h.resolveContextWindow(c, bot.ID)
+	botSettings, hasSettings := h.loadBotSettings(ctx, bot.ID)
+	contextWindow := h.resolveContextWindow(c, botSettings)
 
 	cacheRow, err := h.queries.GetSessionCacheStats(ctx, pgSessionID)
 	if err != nil {
@@ -176,10 +189,17 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	var breakdown []contextfrag.KindBreakdown
 	var toolDefs []ToolDefBucket
+	var budgetPlan *contextfrag.ContextBudgetPlan
 	if load, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, 1); err != nil {
 		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
 	} else {
-		breakdown, toolDefs = latestContextComposition(load.Turns)
+		breakdown, toolDefs, budgetPlan = latestContextComposition(load.Turns)
+	}
+
+	var compactionInfo *CompactionInfo
+	if hasSettings {
+		info := contextCompactionInfo(botSettings, budgetPlan, contextWindow)
+		compactionInfo = &info
 	}
 
 	resp := SessionInfoResponse{
@@ -189,6 +209,8 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 			ContextWindow: contextWindow,
 			Breakdown:     breakdown,
 			ToolDefs:      toolDefs,
+			BudgetPlan:    budgetPlan,
+			Compaction:    compactionInfo,
 		},
 		CacheStats: CacheStats{
 			CacheReadTokens:  cacheRow.CacheReadTokens,
@@ -215,14 +237,45 @@ func (h *SessionInfoHandler) resolveCurrentUserPermissions(c echo.Context, chann
 	return perms, nil
 }
 
-func (h *SessionInfoHandler) resolveContextWindow(c echo.Context, botID string) *int64 {
+// loadBotSettings resolves bot settings once per request: both the context
+// window fallback and the compaction marks read from the same snapshot.
+func (h *SessionInfoHandler) loadBotSettings(ctx context.Context, botID string) (settings.Settings, bool) {
+	if h.settingsService == nil {
+		return settings.Settings{}, false
+	}
+	botSettings, err := h.settingsService.GetBot(ctx, botID)
+	if err != nil {
+		return settings.Settings{}, false
+	}
+	return botSettings, true
+}
+
+// contextCompactionInfo mirrors the turn-time compaction levels for display.
+// The persisted plan window is the budget the turn actually ran against; the
+// resolved model window only stands in before any turn recorded a plan.
+func contextCompactionInfo(botSettings settings.Settings, plan *contextfrag.ContextBudgetPlan, contextWindow *int64) CompactionInfo {
+	info := CompactionInfo{Enabled: botSettings.CompactionEnabled}
+	tokenBudget := 0
+	switch {
+	case plan != nil && plan.Window > 0:
+		tokenBudget = plan.Window
+	case contextWindow != nil && *contextWindow > 0:
+		tokenBudget = int(*contextWindow)
+	}
+	if tokenBudget <= 0 {
+		return info
+	}
+	autoTokens, hardTokens := application.CompactionMarks(botSettings.CompactionThreshold, tokenBudget)
+	info.AutoTokens = int64(autoTokens)
+	info.HardTokens = int64(hardTokens)
+	return info
+}
+
+func (h *SessionInfoHandler) resolveContextWindow(c echo.Context, botSettings settings.Settings) *int64 {
 	modelIDStr := strings.TrimSpace(c.QueryParam("model_id"))
 
-	if modelIDStr == "" && h.settingsService != nil {
-		s, err := h.settingsService.GetBot(c.Request().Context(), botID)
-		if err == nil && s.ChatModelID != "" {
-			modelIDStr = s.ChatModelID
-		}
+	if modelIDStr == "" {
+		modelIDStr = botSettings.ChatModelID
 	}
 
 	if modelIDStr == "" || h.modelsService == nil {

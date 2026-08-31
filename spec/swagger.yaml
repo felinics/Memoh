@@ -3133,6 +3133,15 @@ definitions:
       type:
         type: string
     type: object
+  handlers.CompactionInfo:
+    properties:
+      auto_tokens:
+        type: integer
+      enabled:
+        type: boolean
+      hard_tokens:
+        type: integer
+    type: object
   handlers.ConnectorCredentialRequest:
     properties:
       auth_method:
@@ -3322,6 +3331,10 @@ definitions:
         items:
           $ref: '#/definitions/contextfrag.KindBreakdown'
         type: array
+      budget_plan:
+        $ref: '#/definitions/contextfrag.ContextBudgetPlan'
+      compaction:
+        $ref: '#/definitions/handlers.CompactionInfo'
       context_window:
         type: integer
       tool_defs:

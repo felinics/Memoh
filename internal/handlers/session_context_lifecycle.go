@@ -319,9 +319,9 @@ func legacyLifecycleTurnsFromRows(rows []sqlc.ListRecentAssistantMessagesBySessi
 	return turns
 }
 
-func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindBreakdown, []ToolDefBucket) {
+func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindBreakdown, []ToolDefBucket, *contextfrag.ContextBudgetPlan) {
 	if len(turns) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	snapshot := turns[0].Snapshot
 	var buckets []ToolDefBucket
@@ -347,7 +347,7 @@ func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindB
 			return buckets[i].Provider < buckets[j].Provider
 		})
 	}
-	return snapshot.Breakdown, buckets
+	return snapshot.Breakdown, buckets, snapshot.BudgetPlan
 }
 
 func aggregateContextLifecycle(turns []ContextLifecycleTurn) ContextLifecycleAggregates {

@@ -102,6 +102,35 @@ func TestUnifiedCompactionController(t *testing.T) {
 	}
 }
 
+func TestCompactionMarks(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		threshold int
+		budget    int
+		wantAuto  int
+		wantHard  int
+	}{
+		{name: "zero budget yields no marks", threshold: 90000},
+		{name: "negative budget yields no marks", threshold: 90000, budget: -1},
+		{name: "unset threshold uses soft and hard shares", budget: 200000, wantAuto: 100000, wantHard: 150000},
+		{name: "threshold below hard share is honored", threshold: 90000, budget: 200000, wantAuto: 90000, wantHard: 150000},
+		{name: "threshold above hard share is capped", threshold: 500000, budget: 200000, wantAuto: 150000, wantHard: 150000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			auto, hard := CompactionMarks(tc.threshold, tc.budget)
+			if auto != tc.wantAuto || hard != tc.wantHard {
+				t.Fatalf("CompactionMarks(%d, %d) = (%d, %d), want (%d, %d)",
+					tc.threshold, tc.budget, auto, hard, tc.wantAuto, tc.wantHard)
+			}
+		})
+	}
+}
+
 type controllerQueries struct {
 	*compactionConfigQueries
 	settings sqlc.GetSettingsByBotIDRow
