@@ -123,6 +123,10 @@ func (r botRuntimeResets) BeginBotHistoryReset(ctx context.Context, botID string
 	}, nil
 }
 
+func provideExternalAgentCodexServerHandler(handler *handlers.ExternalAgentCodexHandler) *handlers.ExternalAgentCodexHandler {
+	return handler
+}
+
 func provideProviderOAuthHandler(providersService *providers.Service) *handlers.ProviderOAuthHandler {
 	return handlers.NewProviderOAuthHandler(providersService)
 }

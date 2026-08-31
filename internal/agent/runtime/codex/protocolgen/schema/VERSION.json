@@ -1,0 +1,16 @@
+{
+  "codexVersion": "0.151.0",
+  "command": "codex app-server generate-json-schema --out <dir>",
+  "files": [
+    "codex_app_server_protocol.v2.schemas.json",
+    "ServerRequest.json",
+    "ClientNotification.json",
+    "CommandExecutionRequestApprovalResponse.json",
+    "FileChangeRequestApprovalResponse.json",
+    "PermissionsRequestApprovalResponse.json",
+    "ToolRequestUserInputResponse.json",
+    "McpServerElicitationRequestResponse.json",
+    "ChatgptAuthTokensRefreshResponse.json"
+  ],
+  "notes": "v2-only snapshot. Regenerate with the pinned codex CLI via `mise run codex-schema-sync`; any diff means the pinned binary and this snapshot disagree and the generated Go under internal/agent/runtime/codex/protocol must be re-reviewed."
+}
