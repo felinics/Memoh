@@ -384,10 +384,18 @@ func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Thread) func(tool
 	defaultFn := func(req toolapproval.Request) bool {
 		return toolapproval.CanApprove(req.Status)
 	}
-	if h == nil || h.toolApproval == nil || !session.IsACPRuntime(sess) {
+	if h == nil || h.toolApproval == nil || !session.UsesDecisionWaiter(sess) {
 		return defaultFn
 	}
 	return h.toolApproval.CanRespond
+}
+
+func (h *MessageHandler) userInputCanRespondFn(sess session.Thread) func(userinput.Request) bool {
+	// nil keeps mergeUserInputs' native default: a pending row can respond.
+	if h == nil || h.userInput == nil || !session.UsesDecisionWaiter(sess) {
+		return nil
+	}
+	return h.userInput.CanRespond
 }
 
 func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, sess session.Thread, items []chatview.UITurn) {
@@ -427,7 +435,7 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(sess))
 	}
 	if len(requests) > 0 {
-		mergeUserInputs(items, requests, h.userInput.CanRespond)
+		mergeUserInputs(items, requests, h.userInputCanRespondFn(sess))
 	}
 }
 

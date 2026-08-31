@@ -20,7 +20,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 	existingMetadata := mustJSON(map[string]any{
 		acpprofile.MetadataKeyACP: map[string]any{
 			"agents": map[string]any{
-				acpprofile.AgentCodexID: map[string]any{
+				"codex": map[string]any{
 					"enabled": true,
 					"managed": map[string]any{
 						"api_key":  "sk-existing-secret",
@@ -56,7 +56,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 		Metadata: map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{
+					"codex": map[string]any{
 						"enabled": true,
 						"managed": map[string]any{
 							"api_key":  "sk-...cret",
@@ -75,7 +75,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 	if err := json.Unmarshal(persisted, &saved); err != nil {
 		t.Fatalf("decode persisted metadata: %v", err)
 	}
-	setup := acpprofile.ParseAgentSetup(saved, acpprofile.AgentCodexID)
+	setup := acpprofile.ParseAgentSetup(saved, "codex")
 	if got := setup.Managed["api_key"]; got != "sk-existing-secret" {
 		t.Fatalf("persisted api_key = %q, want existing secret preserved", got)
 	}
@@ -83,7 +83,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 		t.Fatalf("persisted base_url = %q, want new non-sensitive value", got)
 	}
 
-	respSetup := acpprofile.ParseAgentSetup(resp.Metadata, acpprofile.AgentCodexID)
+	respSetup := acpprofile.ParseAgentSetup(resp.Metadata, "codex")
 	if got := respSetup.Managed["api_key"]; got != "sk-existing-secret" {
 		t.Fatalf("response api_key = %q, want service to return persisted metadata", got)
 	}

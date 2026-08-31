@@ -120,24 +120,24 @@ func (q *abortLifecycleQueries) GetSessionRun(context.Context, pgtype.UUID) (sql
 	return q.sessionRun, q.sessionRunErr
 }
 
-func (q *abortLifecycleQueries) GetPendingToolApprovalByRun(
+func (q *abortLifecycleQueries) ListPendingToolApprovalsByRun(
 	context.Context,
 	pgtype.UUID,
-) (sqlc.ToolApprovalRequest, error) {
+) ([]sqlc.ToolApprovalRequest, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.pendingReads++
 	if !q.pending || q.pendingUntil > 0 && q.pendingReads > q.pendingUntil {
-		return sqlc.ToolApprovalRequest{}, pgx.ErrNoRows
+		return nil, nil
 	}
-	return sqlc.ToolApprovalRequest{}, nil
+	return []sqlc.ToolApprovalRequest{{}}, nil
 }
 
-func (*abortLifecycleQueries) GetPendingUserInputByRun(
+func (*abortLifecycleQueries) ListPendingUserInputsByRun(
 	context.Context,
 	pgtype.UUID,
-) (sqlc.UserInputRequest, error) {
-	return sqlc.UserInputRequest{}, pgx.ErrNoRows
+) ([]sqlc.UserInputRequest, error) {
+	return nil, nil
 }
 
 func (q *abortLifecycleQueries) recordedUpserts() []sqlc.UpsertAbortedContextLifecycleParams {

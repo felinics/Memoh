@@ -12,7 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/workspace"
 )
 
-var ErrWorkspaceTargetACPUnsupported = errors.New("workspace_target_id is not supported for ACP sessions")
+var ErrExternalAgentWorkspaceTargetUnsupported = errors.New("workspace_target_id is not supported for external agent sessions")
 
 // ValidateWorkspaceTarget validates a user-selected Computer without changing
 // the Bot's Primary target. It is used by handlers before creating a session.
@@ -116,9 +116,9 @@ func workspaceTargetFromRunConfig(cfg native.RunConfig) *WorkspaceTarget {
 	}
 }
 
-func rejectACPWorkspaceTarget(req ChatRequest) error {
+func rejectExternalAgentWorkspaceTarget(req ChatRequest) error {
 	if strings.TrimSpace(req.WorkspaceTargetID) == "" {
 		return nil
 	}
-	return ErrWorkspaceTargetACPUnsupported
+	return ErrExternalAgentWorkspaceTargetUnsupported
 }

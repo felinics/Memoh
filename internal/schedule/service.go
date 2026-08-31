@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/workdir"
 )
 
@@ -33,13 +34,13 @@ type SessionSpec struct {
 	BotAgentID string
 	// Title labels the session in user-facing lists (the schedule name).
 	Title string
-	// RuntimeType is RuntimeModel ("" means model) or RuntimeACPAgent.
+	// RuntimeType selects the Native or External Agent runtime.
 	RuntimeType string
 	// ACPAgentID names the agent when RuntimeType is RuntimeACPAgent.
 	ACPAgentID string
 	// WorkdirID optionally binds the session to a bot workdir.
 	WorkdirID string
-	// OwnerUserID becomes the session creator and, for ACP sessions, the
+	// OwnerUserID becomes the session creator and, for External Agent sessions, the
 	// runtime owner account.
 	OwnerUserID string
 }
@@ -325,18 +326,16 @@ const scheduleTokenTTL = 10 * time.Minute
 // This prevents unbounded Generate() calls from hanging forever.
 const scheduleRunTimeout = 5 * time.Minute
 
-// scheduleACPRunTimeout is the cap for runs that may execute through an ACP
-// agent (an explicit ACP schedule, or an existing-session target whose
-// runtime is unknown until fire time). Coding-agent runs routinely outlast
-// the native chat cap.
-const scheduleACPRunTimeout = 30 * time.Minute
+// scheduleAgentRunTimeout is the cap for External Agent runs and existing
+// sessions whose runtime is resolved only when the fire starts.
+const scheduleAgentRunTimeout = 30 * time.Minute
 
 // runTimeoutFor picks the execution cap for one fire. Existing-session
-// schedules get the generous cap because the pinned session may run an ACP
-// agent.
+// schedules get the generous cap because the pinned session may run an
+// External Agent.
 func runTimeoutFor(sched Schedule) time.Duration {
-	if sched.RuntimeType == RuntimeACPAgent || sched.RunTarget == RunTargetExistingSession {
-		return scheduleACPRunTimeout
+	if runtimekind.IsExternal(sched.RuntimeType) || sched.RunTarget == RunTargetExistingSession {
+		return scheduleAgentRunTimeout
 	}
 	return scheduleRunTimeout
 }

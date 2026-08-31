@@ -17,6 +17,8 @@ func TestSessionRunFinishingMigrationRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	pool := freshMigratedDB(t)
 	dsn := teamMigrationDSN(t)
+	// Later migrations may exist; isolate the 0143 down/up pair this test owns.
+	migrateTo(t, dsn, 143)
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		t.Fatalf("acquire connection: %v", err)
@@ -107,6 +109,7 @@ func TestSessionRunFinishingMigrationRoundTrip(t *testing.T) {
 	if predicate := sessionRunIndexPredicate(t, ctx, conn, "idx_session_runs_recovery"); !strings.Contains(predicate, "finishing") {
 		t.Fatalf("upgraded recovery index excludes finishing: %s", predicate)
 	}
+	migrateUpAll(t, dsn)
 }
 
 func sessionRunIndexPredicate(t *testing.T, ctx context.Context, conn *pgxpool.Conn, name string) string {

@@ -1,6 +1,6 @@
 #!/bin/sh
 TOOLKIT="${MEMOH_TOOLKIT_DIR:-/opt/memoh/toolkit}"
-CODEX="$TOOLKIT/acp/lib/node_modules/@openai/codex/bin/codex.js"
+CODEX="$TOOLKIT/agents/lib/node_modules/@openai/codex/bin/codex.js"
 TOOLKIT_CA_BUNDLE="$TOOLKIT/certs/ca-certificates.crt"
 
 if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "$TOOLKIT_CA_BUNDLE" ]; then

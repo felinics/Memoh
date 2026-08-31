@@ -245,7 +245,7 @@ func TestPostgresRuntimeFenceClaimedInputRemainsRespondableAfterExpiry(t *testin
 	target := createRuntimeFenceUserInput(t, ctx, inputs, botID, sessionID, "claimed-expiring-input", &expiresAt)
 	fence := nextRuntimeFence(t, ctx, queries, botID, sessionID)
 	if err := runtimefence.ActivateWithOptions(ctx, store, fence, runtimefence.ActivationOptions{
-		PreserveDecision: &runtimefence.PreservedDecision{Kind: runtimefence.DecisionUserInput, ID: target.ID},
+		PreserveDecisions: []runtimefence.PreservedDecision{{Kind: runtimefence.DecisionUserInput, ID: target.ID}},
 	}); err != nil {
 		t.Fatalf("claim expiring input: %v", err)
 	}

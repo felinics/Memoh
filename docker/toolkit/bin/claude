@@ -1,0 +1,34 @@
+#!/bin/sh
+TOOLKIT="${MEMOH_TOOLKIT_DIR:-/opt/memoh/toolkit}"
+CLAUDE="$TOOLKIT/agents/bin/claude"
+TOOLKIT_CA_BUNDLE="$TOOLKIT/certs/ca-certificates.crt"
+
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "$TOOLKIT_CA_BUNDLE" ]; then
+  export SSL_CERT_FILE="$TOOLKIT_CA_BUNDLE"
+fi
+
+fallback_claude() {
+  old_ifs="$IFS"
+  IFS=:
+  for dir in $PATH; do
+    IFS="$old_ifs"
+    [ -n "$dir" ] || dir=.
+    case "$dir" in
+      "$TOOLKIT/bin") ;;
+      *)
+        if [ -x "$dir/claude" ]; then
+          exec "$dir/claude" "$@"
+        fi
+        ;;
+    esac
+    IFS=:
+  done
+  IFS="$old_ifs"
+}
+
+if [ ! -x "$CLAUDE" ]; then
+  fallback_claude "$@"
+  echo "claude is not installed in the Memoh workspace toolkit and no fallback claude command was found: $CLAUDE" >&2
+  exit 127
+fi
+exec "$CLAUDE" "$@"

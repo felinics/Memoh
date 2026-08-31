@@ -33,7 +33,10 @@ type PreservedDecision struct {
 }
 
 type ActivationOptions struct {
-	PreserveDecision       *PreservedDecision
+	// PreserveDecisions carries every decision the reclaiming owner keeps
+	// alive; a turn can park on several approvals and user inputs at once,
+	// and any pending decision not listed here is superseded.
+	PreserveDecisions      []PreservedDecision
 	ReclaimWaitingDecision *WaitingDecisionReclaim
 }
 

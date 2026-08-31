@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -488,18 +488,30 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 		Language:           "en",
 		ReasoningEffort:    "medium",
 		ChatRuntime:        ChatRuntimeACPAgent,
-		ChatAcpAgentID:     pgtype.Text{String: "Codex", Valid: true},
+		ChatAcpAgentID:     pgtype.Text{String: "custom-agent", Valid: true},
 		ChatAcpProjectPath: "/data/app",
 		ChatAcpProjectMode: "project",
 	})
 	if got.ChatRuntime != ChatRuntimeACPAgent {
 		t.Fatalf("ChatRuntime = %q, want %q", got.ChatRuntime, ChatRuntimeACPAgent)
 	}
-	if got.ChatACPAgentID != "codex" {
-		t.Fatalf("ChatACPAgentID = %q, want codex", got.ChatACPAgentID)
+	if got.ChatACPAgentID != "custom-agent" {
+		t.Fatalf("ChatACPAgentID = %q, want custom-agent", got.ChatACPAgentID)
 	}
 	if got.ChatACPProjectPath != "/data/app" {
 		t.Fatalf("ChatACPProjectPath = %q, want /data/app", got.ChatACPProjectPath)
+	}
+
+	// A stored borrowed-shape row (acp_agent + a direct agent id) is
+	// projected as the direct runtime it means.
+	borrowed := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
+		Language:        "en",
+		ReasoningEffort: "medium",
+		ChatRuntime:     ChatRuntimeACPAgent,
+		ChatAcpAgentID:  pgtype.Text{String: "Codex", Valid: true},
+	})
+	if borrowed.ChatRuntime != ChatRuntimeCodex || borrowed.ChatACPAgentID != "" {
+		t.Fatalf("borrowed shape projected as (%q, %q), want (%q, \"\")", borrowed.ChatRuntime, borrowed.ChatACPAgentID, ChatRuntimeCodex)
 	}
 
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
@@ -514,11 +526,11 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 func TestValidateChatRuntimeSettings(t *testing.T) {
 	t.Parallel()
 
-	metadata := []byte(`{"acp":{"agents":{"codex":{"enabled":true,"setup_mode":"api_key","managed":{"api_key":"sk-test"}}}}}`)
+	metadata := []byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{"command":"my-agent-acp","api_key":"sk-test"}}}}}`)
 	valid := Settings{
 		ChatModelID:        "11111111-1111-1111-1111-111111111111",
 		ChatRuntime:        ChatRuntimeACPAgent,
-		ChatACPAgentID:     "codex",
+		ChatACPAgentID:     "acp",
 		ChatACPProjectPath: DefaultACPProjectPath,
 		ChatACPProjectMode: DefaultACPProjectMode,
 	}
@@ -533,18 +545,18 @@ func TestValidateChatRuntimeSettings(t *testing.T) {
 	}
 
 	disabled := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"codex":{"enabled":false}}}}`), disabled); feedbackCode(err) != acpfeedback.CodeAgentNotEnabled {
-		t.Fatalf("validateChatRuntimeSettings disabled agent code = %q, want %q", feedbackCode(err), acpfeedback.CodeAgentNotEnabled)
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":false}}}}`), disabled); feedbackCode(err) != agentfeedback.CodeAgentNotEnabled {
+		t.Fatalf("validateChatRuntimeSettings disabled agent code = %q, want %q", feedbackCode(err), agentfeedback.CodeAgentNotEnabled)
 	}
 
 	missingKey := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"codex":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey); feedbackCode(err) != acpfeedback.CodeAgentNotConfigured {
-		t.Fatalf("validateChatRuntimeSettings missing api key code = %q, want %q", feedbackCode(err), acpfeedback.CodeAgentNotConfigured)
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey); feedbackCode(err) != agentfeedback.CodeAgentNotConfigured {
+		t.Fatalf("validateChatRuntimeSettings missing api key code = %q, want %q", feedbackCode(err), agentfeedback.CodeAgentNotConfigured)
 	}
 }
 
 func feedbackCode(err error) string {
-	var feedback *acpfeedback.Error
+	var feedback *agentfeedback.Error
 	if errors.As(err, &feedback) {
 		return feedback.Code
 	}

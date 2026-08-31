@@ -22,7 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
 	acpprofileadapter "github.com/felinics/memoh/internal/agent/adapter/acpprofile"
-	acpsessionadapter "github.com/felinics/memoh/internal/agent/adapter/acpsession"
+	agentsessionadapter "github.com/felinics/memoh/internal/agent/adapter/agentsession"
 	channelcontactadapter "github.com/felinics/memoh/internal/agent/adapter/channelcontact"
 	channelidentityadapter "github.com/felinics/memoh/internal/agent/adapter/channelidentity"
 	channelmessagingadapter "github.com/felinics/memoh/internal/agent/adapter/channelmessaging"
@@ -35,6 +35,7 @@ import (
 	agentpayload "github.com/felinics/memoh/internal/agent/event/payload"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
@@ -248,12 +249,12 @@ func provideSettingsService(
 
 func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries, credentialService *agentcredential.Service) *botagents.Service {
 	service := botagents.NewService(log, queries)
-	service.SetCredentialReleaser(credentialService)
-	service.SetCredentialVerifier(func(ctx context.Context, botID, botAgentID string) bool {
-		if !credentialService.Configured() {
-			return false
+	service.SetCredentialResolver(func(ctx context.Context, botID, botAgentID string) string {
+		credential, err := credentialService.ResolveForBotAgent(ctx, botID, botAgentID)
+		if err != nil {
+			return ""
 		}
-		return credentialService.VerifyUsableForBotAgent(ctx, botID, botAgentID)
+		return credential.AuthKind
 	})
 	return service
 }
@@ -449,6 +450,7 @@ func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec 
 		BotID:           spec.BotID,
 		BotAgentID:      spec.BotAgentID,
 		Type:            sessionpkg.TypeSchedule,
+		RuntimeType:     strings.TrimSpace(spec.RuntimeType),
 		Title:           spec.Title,
 		CreatedByUserID: spec.OwnerUserID,
 		// Schedule sessions surface in the sidebar so the user can open the
@@ -550,15 +552,14 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager, credentialService *agentcredential.Service) *acpagent.SessionPool {
-	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
+	pool := acpagent.NewSessionPool(log, runner, botService, agentsessionadapter.NewSource(sessionService))
 	pool.SetSessionRuntime(sessionRuntime)
-	pool.SetSessionStateStore(acpsessionadapter.NewStateStore(queries))
+	pool.SetSessionStateStore(agentsessionadapter.NewStateStore(queries))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
 	pool.SetUserInputService(userInput)
-	pool.SetCredentialService(credentialService)
 	containerdHandler.SetACPRuntimeResolver(pool)
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -573,7 +574,11 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, cfg config.Config) *application.Service {
+func provideDirectAgentDrivers() external.Drivers {
+	return nil
+}
+
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, directAgents external.Drivers, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, cfg config.Config) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
 	service.SetContextAbsoluteMaxTokens(cfg.Agent.EffectiveContextAbsoluteMaxTokens())
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
@@ -608,6 +613,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	service.SetToolApprovalService(toolApproval)
 	service.SetUserInputService(userInput)
 	service.SetACPSessionPool(acpPool)
+	service.SetExternalRuntimes(directAgents...)
 	if bgManager != nil {
 		bgManager.SetEventFunc(func(evt background.TaskEvent) {
 			if eventHub == nil {
@@ -819,22 +825,6 @@ func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.
 	return media.NewService(log, storageProvider)
 }
 
-func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, credentialService *agentcredential.Service) *handlers.ACPCodexOAuthHandler {
-	handler := handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
-	handler.SetRuntimeResetService(acpPool)
-	handler.SetCredentialService(credentialService)
-	handler.SetAgentRuntimeCloser(acpPool)
-	return handler
-}
-
-func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, credentialService *agentcredential.Service) *handlers.ACPClaudeCodeOAuthHandler {
-	handler := handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
-	handler.SetRuntimeResetService(acpPool)
-	handler.SetCredentialService(credentialService)
-	handler.SetAgentRuntimeCloser(acpPool)
-	return handler
-}
-
 func provideAudioRegistry() *audiopkg.Registry {
 	return audiopkg.NewRegistry()
 }
@@ -883,10 +873,6 @@ func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg conf
 
 func defaultProviderOAuthCallbackURL() string {
 	return "http://localhost:1455/auth/callback"
-}
-
-func defaultACPCodexOAuthCallbackURL() string {
-	return defaultProviderOAuthCallbackURL()
 }
 
 func startProviderTemplateSync(
@@ -1176,9 +1162,7 @@ func provideTurnService(service *application.Service) turn.Service {
 	return service
 }
 
-// applicationBotPermissionChecker duplicates the Channel module's inbound
-// permission glue; both adapt bots/accounts onto the same
-// HasBotPermission shape.
+// applicationBotPermissionChecker adapts bot permissions to the application port.
 type applicationBotPermissionChecker struct {
 	bots     *bots.Service
 	accounts *accounts.Service

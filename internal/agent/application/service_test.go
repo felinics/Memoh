@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -71,7 +71,7 @@ func TestPrepareGatewayAttachments_InlineAssetToBase64(t *testing.T) {
 	}
 }
 
-func TestPrepareACPImages_InlineStoredAsset(t *testing.T) {
+func TestPrepareRuntimeImagesInlineStoredAsset(t *testing.T) {
 	t.Parallel()
 
 	resolver := &Service{
@@ -85,7 +85,7 @@ func TestPrepareACPImages_InlineStoredAsset(t *testing.T) {
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "image",
@@ -94,13 +94,13 @@ func TestPrepareACPImages_InlineStoredAsset(t *testing.T) {
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
 	images := prepared.Images
 	if len(images) != 1 {
-		t.Fatalf("prepareACPAttachments().Images = %#v, want one image", images)
+		t.Fatalf("prepareRuntimeAttachments().Images = %#v, want one image", images)
 	}
-	if images[0].Data != base64.StdEncoding.EncodeToString([]byte("image-binary")) || images[0].MimeType != "image/png" {
+	if !bytes.Equal(images[0].Data, []byte("image-binary")) || images[0].MimeType != "image/png" {
 		t.Fatalf("prepared image = %#v, want inline PNG", images[0])
 	}
 }
@@ -265,7 +265,7 @@ func TestPrepareACPAttachments_UsesFileAndReplyReferences(t *testing.T) {
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "file",
@@ -280,7 +280,7 @@ func TestPrepareACPAttachments_UsesFileAndReplyReferences(t *testing.T) {
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
 	if len(prepared.Images) != 0 || len(prepared.Context) != 2 || len(prepared.References) != 2 {
 		t.Fatalf("prepared attachments = %#v, want two file references", prepared)
@@ -304,7 +304,7 @@ func TestPrepareACPAttachments_PreservesLongPasteFile(t *testing.T) {
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "file",
@@ -314,7 +314,7 @@ func TestPrepareACPAttachments_PreservesLongPasteFile(t *testing.T) {
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
 	if len(prepared.References) != 1 || prepared.Context[0].Path != "/data/.memoh/media/aa/pasted-text.txt" {
 		t.Fatalf("prepared attachments = %#v, want pasted text path", prepared)
@@ -335,7 +335,7 @@ func TestPrepareACPAttachments_FallsBackWhenStoredImageCannotInline(t *testing.T
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "image",
@@ -344,7 +344,7 @@ func TestPrepareACPAttachments_FallsBackWhenStoredImageCannotInline(t *testing.T
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
 	if len(prepared.Images) != 0 || len(prepared.References) != 1 || prepared.Context[0].Path != "/data/.memoh/media/aa/large.png" {
 		t.Fatalf("prepared attachments = %#v, want image file fallback", prepared)
@@ -368,7 +368,7 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				Name:   "broken.png",
 				Base64: "data:image/png;base64,not-valid***",
 			},
-			wantCode: acpfeedback.CodeAttachmentInvalid,
+			wantCode: agentfeedback.CodeAttachmentInvalid,
 		},
 		{
 			name: "stored file without reachable path",
@@ -385,17 +385,17 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				Name:        "missing.pdf",
 				ContentHash: "missing",
 			},
-			wantCode: acpfeedback.CodeAttachmentUnavailable,
+			wantCode: agentfeedback.CodeAttachmentUnavailable,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := tt.resolver.prepareACPAttachments(context.Background(), ChatRequest{
+			_, err := tt.resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 				BotID:       "bot-1",
 				Attachments: []ChatAttachment{tt.input},
 			})
-			var feedback *acpfeedback.Error
+			var feedback *agentfeedback.Error
 			if !errors.As(err, &feedback) || feedback.Code != tt.wantCode || feedback.HTTPStatus != 400 {
 				t.Fatalf("error = %#v, want feedback code %q with status 400", err, tt.wantCode)
 			}

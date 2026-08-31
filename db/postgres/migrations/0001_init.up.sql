@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS bots (
   command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
   chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
-  chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent')),
+  chat_runtime TEXT NOT NULL DEFAULT 'model' CHECK (chat_runtime IN ('model', 'acp_agent', 'codex', 'claude-code')),
   chat_acp_agent_id TEXT,
   chat_acp_project_path TEXT NOT NULL DEFAULT '/data',
   chat_acp_project_mode TEXT NOT NULL DEFAULT 'project' CHECK (chat_acp_project_mode IN ('project', 'none')),
@@ -535,7 +535,7 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   channel_type TEXT,
   type TEXT NOT NULL DEFAULT 'chat' CHECK (type IN ('chat', 'schedule', 'subagent', 'discuss', 'acp_agent')),
   session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
-  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code')),
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   -- visibility says whether the session belongs in user-facing session
   -- lists. Distinct from session_mode on purpose: schedule-created sessions
@@ -609,7 +609,7 @@ CREATE TABLE IF NOT EXISTS bot_history_messages (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   usage JSONB,
   session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
-  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent')),
+  runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code')),
   model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   compact_id UUID,
   event_id UUID REFERENCES bot_session_events(id) ON DELETE SET NULL,
@@ -897,7 +897,7 @@ CREATE TABLE IF NOT EXISTS schedule (
   -- once schedule.team_id exists — see the deferred block near the end.
   run_target TEXT NOT NULL DEFAULT 'new_session' CHECK (run_target IN ('new_session', 'existing_session')),
   target_session_id UUID,
-  runtime_type TEXT CHECK (runtime_type IS NULL OR runtime_type IN ('model', 'acp_agent')),
+  runtime_type TEXT CHECK (runtime_type IS NULL OR runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code')),
   bot_agent_id UUID,
   acp_agent_id TEXT,
   model_id UUID,
@@ -917,6 +917,7 @@ CREATE TABLE IF NOT EXISTS schedule (
   CONSTRAINT schedule_acp_fields_check CHECK (
     run_target <> 'new_session'
     OR (runtime_type = 'acp_agent' AND acp_agent_id IS NOT NULL AND model_id IS NULL)
+    OR (runtime_type IN ('codex', 'claude-code') AND bot_agent_id IS NOT NULL AND acp_agent_id IS NULL AND model_id IS NULL)
     OR (COALESCE(runtime_type, 'model') = 'model' AND bot_agent_id IS NULL AND acp_agent_id IS NULL AND acp_model_id IS NULL)
   ),
   CONSTRAINT schedule_model_exclusive_check CHECK (
@@ -2593,19 +2594,20 @@ ALTER TABLE public.schedule
     ADD CONSTRAINT schedule_workdir_id_fkey
     FOREIGN KEY (team_id, workdir_id)
     REFERENCES public.bot_workdirs(team_id, id) ON DELETE SET NULL (workdir_id);
--- ACP runtimes use a fresh process-local home for every process. Persist the
--- resumable protocol session separately from the runtime home so a later
--- process can reconstruct the adapter's JSONL transcript before issuing
--- session/resume. Snapshots are staged by run: canonical history promotes a
--- staged version by committing the session's publication head in the same
--- transaction as the round's messages.
-CREATE TABLE IF NOT EXISTS public.acp_session_states (
+-- Runtimes that own native session state (ACP agents, codex, claude-code)
+-- use a fresh process-local home for every process. Persist the resumable
+-- native session separately from the runtime home so a later process can
+-- reconstruct the runtime's JSONL transcript before resuming. Snapshots are
+-- staged by run: canonical history promotes a staged version by committing
+-- the session's publication head in the same transaction as the round's
+-- messages.
+CREATE TABLE IF NOT EXISTS public.agent_session_states (
     team_id               UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                                       REFERENCES public.teams(id) ON DELETE RESTRICT,
     session_id            UUID        NOT NULL,
     through_run_id        UUID        NOT NULL,
     agent_id              TEXT        NOT NULL,
-    acp_session_id        TEXT        NOT NULL,
+    agent_session_id        TEXT        NOT NULL,
     cwd                   TEXT        NOT NULL,
     transcript_path       TEXT        NOT NULL,
     runtime_fencing_token BIGINT      NOT NULL,
@@ -2615,19 +2617,19 @@ CREATE TABLE IF NOT EXISTS public.acp_session_states (
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (team_id, session_id, through_run_id),
-    CONSTRAINT acp_session_states_session_id_fkey
+    CONSTRAINT agent_session_states_session_id_fkey
         FOREIGN KEY (team_id, session_id)
         REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
-    CONSTRAINT acp_session_states_run_fkey
+    CONSTRAINT agent_session_states_run_fkey
         FOREIGN KEY (team_id, session_id, through_run_id)
         REFERENCES public.session_runs(team_id, session_id, run_id) ON DELETE CASCADE,
-    CONSTRAINT acp_session_states_agent_id_check
+    CONSTRAINT agent_session_states_agent_id_check
         CHECK (btrim(agent_id) <> '' AND octet_length(btrim(agent_id)) <= 256),
-    CONSTRAINT acp_session_states_acp_session_id_check
-        CHECK (btrim(acp_session_id) <> '' AND octet_length(btrim(acp_session_id)) <= 1024),
-    CONSTRAINT acp_session_states_cwd_check
+    CONSTRAINT agent_session_states_agent_session_id_check
+        CHECK (btrim(agent_session_id) <> '' AND octet_length(btrim(agent_session_id)) <= 1024),
+    CONSTRAINT agent_session_states_cwd_check
         CHECK (btrim(cwd) <> '' AND octet_length(btrim(cwd)) <= 16384),
-    CONSTRAINT acp_session_states_transcript_path_check
+    CONSTRAINT agent_session_states_transcript_path_check
         CHECK (
             transcript_path <> ''
             AND octet_length(transcript_path) <= 4096
@@ -2637,13 +2639,13 @@ CREATE TABLE IF NOT EXISTS public.acp_session_states (
             AND transcript_path !~ '(^|/)\.\.?(/|$)'
             AND transcript_path !~ E'[\r\n]'
         ),
-    CONSTRAINT acp_session_states_runtime_fencing_token_check
+    CONSTRAINT agent_session_states_runtime_fencing_token_check
         CHECK (runtime_fencing_token > 0),
-    CONSTRAINT acp_session_states_file_count_check
+    CONSTRAINT agent_session_states_file_count_check
         CHECK (file_count > 0 AND file_count <= 1024),
-    CONSTRAINT acp_session_states_record_count_check
+    CONSTRAINT agent_session_states_record_count_check
         CHECK (record_count > 0 AND record_count <= 2000000),
-    CONSTRAINT acp_session_states_file_shapes_check
+    CONSTRAINT agent_session_states_file_shapes_check
         CHECK (jsonb_typeof(file_shapes) = 'array')
 );
 
@@ -2654,7 +2656,7 @@ CREATE TABLE IF NOT EXISTS public.acp_session_states (
 -- rewrite. Lines reference the session directly (not a version header)
 -- because versions share them; version membership is defined by the header's
 -- file_shapes.
-CREATE TABLE IF NOT EXISTS public.acp_session_state_lines (
+CREATE TABLE IF NOT EXISTS public.agent_session_state_lines (
     team_id       UUID   NOT NULL DEFAULT public.memoh_current_team_id()
                           REFERENCES public.teams(id) ON DELETE RESTRICT,
     session_id    UUID   NOT NULL,
@@ -2668,10 +2670,10 @@ CREATE TABLE IF NOT EXISTS public.acp_session_state_lines (
     content       TEXT   NOT NULL,
     content_bytes INTEGER NOT NULL,
     PRIMARY KEY (team_id, session_id, file_path, line_number),
-    CONSTRAINT acp_session_state_lines_session_fkey
+    CONSTRAINT agent_session_state_lines_session_fkey
         FOREIGN KEY (team_id, session_id)
         REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
-    CONSTRAINT acp_session_state_lines_file_path_check
+    CONSTRAINT agent_session_state_lines_file_path_check
         CHECK (
             file_path <> ''
             AND octet_length(file_path) <= 4096
@@ -2681,13 +2683,13 @@ CREATE TABLE IF NOT EXISTS public.acp_session_state_lines (
             AND file_path !~ '(^|/)\.\.?(/|$)'
             AND file_path !~ E'[\r\n]'
         ),
-    CONSTRAINT acp_session_state_lines_content_size_check
+    CONSTRAINT agent_session_state_lines_content_size_check
         CHECK (
             content_bytes = octet_length(content)
             AND content_bytes > 0
             AND content_bytes <= 8388608
         ),
-    CONSTRAINT acp_session_state_lines_line_number_check
+    CONSTRAINT agent_session_state_lines_line_number_check
         CHECK (line_number > 0)
 );
 
@@ -2697,7 +2699,7 @@ CREATE TABLE IF NOT EXISTS public.acp_session_state_lines (
 -- "ghost transcript" that history does not contain. checkpoint_reset = true
 -- means the head is canonical but nothing is resumable (the profile cannot
 -- snapshot, or the runtime deliberately started fresh).
-CREATE TABLE IF NOT EXISTS public.acp_session_publications (
+CREATE TABLE IF NOT EXISTS public.agent_session_publications (
     team_id          UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                                  REFERENCES public.teams(id) ON DELETE RESTRICT,
     session_id       UUID        NOT NULL,
@@ -2705,53 +2707,53 @@ CREATE TABLE IF NOT EXISTS public.acp_session_publications (
     checkpoint_reset BOOLEAN     NOT NULL DEFAULT false,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (team_id, session_id),
-    CONSTRAINT acp_session_publications_session_fkey
+    CONSTRAINT agent_session_publications_session_fkey
         FOREIGN KEY (team_id, session_id)
         REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
-    CONSTRAINT acp_session_publications_run_fkey
+    CONSTRAINT agent_session_publications_run_fkey
         FOREIGN KEY (team_id, session_id, run_id)
         REFERENCES public.session_runs(team_id, session_id, run_id) ON DELETE CASCADE
 );
 
-ALTER TABLE public.acp_session_publications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.acp_session_publications FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_session_publications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_session_publications FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY acp_session_publications_team_select ON public.acp_session_publications
+CREATE POLICY agent_session_publications_team_select ON public.agent_session_publications
     FOR SELECT USING (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_publications_team_insert ON public.acp_session_publications
+CREATE POLICY agent_session_publications_team_insert ON public.agent_session_publications
     FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_publications_team_update ON public.acp_session_publications
+CREATE POLICY agent_session_publications_team_update ON public.agent_session_publications
     FOR UPDATE
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_publications_team_delete ON public.acp_session_publications
+CREATE POLICY agent_session_publications_team_delete ON public.agent_session_publications
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
-ALTER TABLE public.acp_session_states ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.acp_session_states FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.acp_session_state_lines ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.acp_session_state_lines FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_session_states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_session_states FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_session_state_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_session_state_lines FORCE ROW LEVEL SECURITY;
 
-CREATE POLICY acp_session_states_team_select ON public.acp_session_states
+CREATE POLICY agent_session_states_team_select ON public.agent_session_states
     FOR SELECT USING (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_states_team_insert ON public.acp_session_states
+CREATE POLICY agent_session_states_team_insert ON public.agent_session_states
     FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_states_team_update ON public.acp_session_states
+CREATE POLICY agent_session_states_team_update ON public.agent_session_states
     FOR UPDATE
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_states_team_delete ON public.acp_session_states
+CREATE POLICY agent_session_states_team_delete ON public.agent_session_states
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
-CREATE POLICY acp_session_state_lines_team_select ON public.acp_session_state_lines
+CREATE POLICY agent_session_state_lines_team_select ON public.agent_session_state_lines
     FOR SELECT USING (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_state_lines_team_insert ON public.acp_session_state_lines
+CREATE POLICY agent_session_state_lines_team_insert ON public.agent_session_state_lines
     FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_state_lines_team_update ON public.acp_session_state_lines
+CREATE POLICY agent_session_state_lines_team_update ON public.agent_session_state_lines
     FOR UPDATE
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY acp_session_state_lines_team_delete ON public.acp_session_state_lines
+CREATE POLICY agent_session_state_lines_team_delete ON public.agent_session_state_lines
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
 -- ---------------------------------------------------------------------------

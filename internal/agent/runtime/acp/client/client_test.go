@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -79,6 +78,7 @@ func TestRunnerRequiresACPCommand(t *testing.T) {
 
 	_, err := runner.Run(context.Background(), RunRequest{
 		BotID:   "bot-1",
+		AgentID: acpprofile.AgentACPID,
 		Task:    "fix tests",
 		Timeout: 2 * time.Second,
 	})
@@ -113,6 +113,7 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	startupCtx, cancelStartup := context.WithCancel(context.Background())
 	sess, err := runner.StartSession(startupCtx, StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
@@ -172,106 +173,12 @@ func TestRunnerStartSessionStreamsEvents(t *testing.T) {
 	}
 }
 
-func TestRunnerStartSessionPrefersResumeForPersistedState(t *testing.T) {
-	requireAnchoredSessionRestorePlatform(t)
-
-	runner, agentPath := newSessionResumeTestRunner(t)
-	capturePath := filepath.Join(t.TempDir(), "lifecycle.json")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_RESUME", "1")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_LOAD", "1")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_MODELS", "1")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_SESSION_LIFECYCLE_FILE", capturePath)
-	state := fakeCodexSessionState(t)
-	stateHeader := state.State()
-
-	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
-		BotID:       "bot-1",
-		ProjectPath: "/data/project",
-		Command:     agentPath,
-		Timeout:     10 * time.Second,
-		Resume:      state,
-	}, nil)
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	defer func() { _ = sess.Close() }()
-	if got := sess.ID(); got != stateHeader.SessionID {
-		t.Fatalf("Session.ID() = %q, want %q", got, stateHeader.SessionID)
-	}
-	if model := sess.ModelState(); !model.Supported || model.CurrentModelID != "gpt-5.1-codex" {
-		t.Fatalf("resumed model state = %#v", model)
-	}
-	assertFakeSessionLifecycle(t, capturePath, "resume", stateHeader.SessionID)
-}
-
-func TestRunnerStartSessionFallsBackToLoadWithoutReplayingHistory(t *testing.T) {
-	requireAnchoredSessionRestorePlatform(t)
-
-	runner, agentPath := newSessionResumeTestRunner(t)
-	capturePath := filepath.Join(t.TempDir(), "lifecycle.json")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_LOAD", "1")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_REPLAY_HISTORY", "1")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_SESSION_LIFECYCLE_FILE", capturePath)
-	state := fakeCodexSessionState(t)
-	stateHeader := state.State()
-	var streamedMu sync.Mutex
-	var streamed []event.StreamEvent
-
-	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
-		BotID:       "bot-1",
-		ProjectPath: "/data/project",
-		Command:     agentPath,
-		Timeout:     10 * time.Second,
-		Resume:      state,
-	}, EventSinkFunc(func(ev event.StreamEvent) {
-		streamedMu.Lock()
-		streamed = append(streamed, ev)
-		streamedMu.Unlock()
-	}))
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	defer func() { _ = sess.Close() }()
-	assertFakeSessionLifecycle(t, capturePath, "load", stateHeader.SessionID)
-	streamedMu.Lock()
-	defer streamedMu.Unlock()
-	if len(streamed) != 0 {
-		t.Fatalf("session/load replay leaked into startup sink: %#v", streamed)
-	}
-}
-
-func TestRunnerStartSessionDoesNotReplaceUnsupportedResumeWithNewSession(t *testing.T) {
-	requireAnchoredSessionRestorePlatform(t)
-
-	runner, agentPath := newSessionResumeTestRunner(t)
-	capturePath := filepath.Join(t.TempDir(), "lifecycle.json")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_SESSION_LIFECYCLE_FILE", capturePath)
-	state := fakeCodexSessionState(t)
-
-	_, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
-		BotID:       "bot-1",
-		ProjectPath: "/data/project",
-		Command:     agentPath,
-		Timeout:     10 * time.Second,
-		Resume:      state,
-	}, nil)
-	if !errors.Is(err, ErrSessionResumeUnsupported) {
-		t.Fatalf("StartSession() error = %v, want ErrSessionResumeUnsupported", err)
-	}
-	if _, statErr := os.Stat(capturePath); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("unsupported resume invoked an ACP lifecycle method: %v", statErr)
-	}
-}
-
 func TestRunnerStartSessionRejectsUnsupportedProtocolVersion(t *testing.T) {
-	runner, agentPath := newSessionResumeTestRunner(t)
+	runner, agentPath := newStartSessionTestRunner(t)
 	t.Setenv("MEMOH_ACP_FAKE_AGENT_PROTOCOL_VERSION", "2")
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
@@ -283,11 +190,11 @@ func TestRunnerStartSessionRejectsUnsupportedProtocolVersion(t *testing.T) {
 }
 
 func TestRunnerStartSessionRejectsEmptyNewSessionID(t *testing.T) {
-	runner, agentPath := newSessionResumeTestRunner(t)
+	runner, agentPath := newStartSessionTestRunner(t)
 	t.Setenv("MEMOH_ACP_FAKE_AGENT_EMPTY_SESSION_ID", "1")
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
@@ -299,12 +206,12 @@ func TestRunnerStartSessionRejectsEmptyNewSessionID(t *testing.T) {
 }
 
 func TestSessionCloseRequiresAdvertisedCapability(t *testing.T) {
-	runner, agentPath := newSessionResumeTestRunner(t)
+	runner, agentPath := newStartSessionTestRunner(t)
 	capturePath := filepath.Join(t.TempDir(), "close")
 	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE", capturePath)
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
@@ -324,14 +231,14 @@ func TestSessionCloseRequiresAdvertisedCapability(t *testing.T) {
 func TestSessionCloseUsesAdvertisedCapability(t *testing.T) {
 	type contextKey struct{}
 
-	runner, agentPath := newSessionResumeTestRunner(t)
+	runner, agentPath := newStartSessionTestRunner(t)
 	capturePath := filepath.Join(t.TempDir(), "close")
 	t.Setenv("MEMOH_ACP_FAKE_AGENT_CLOSE", "1")
 	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_CLOSE_FILE", capturePath)
 
 	startCtx := context.WithValue(context.Background(), contextKey{}, "session-scope")
 	sess, err := runner.StartSession(startCtx, StartRequest{
-		AgentID:     acpprofile.AgentCodexID,
+		AgentID:     acpprofile.AgentACPID,
 		BotID:       "bot-1",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
@@ -351,7 +258,7 @@ func TestSessionCloseUsesAdvertisedCapability(t *testing.T) {
 	}
 }
 
-func newSessionResumeTestRunner(t *testing.T) (*Runner, string) {
+func newStartSessionTestRunner(t *testing.T) (*Runner, string) {
 	t.Helper()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "project"), 0o750); err != nil {
@@ -366,44 +273,6 @@ func newSessionResumeTestRunner(t *testing.T) (*Runner, string) {
 			DefaultWorkDir: root,
 		},
 	}), agentPath
-}
-
-func requireAnchoredSessionRestorePlatform(t *testing.T) {
-	t.Helper()
-	if runtime.GOOS != "linux" {
-		t.Skip("descriptor-anchored ACP session restore is supported by the Linux workspace bridge")
-	}
-}
-
-func fakeCodexSessionState(t *testing.T) *SessionStateSnapshot {
-	t.Helper()
-	const sessionID = "0198a33f-3fe3-7000-8000-000000000001"
-	transcriptPath := "state/sessions/2026/08/12/rollout-2026-08-12T00-00-00-" + sessionID + ".jsonl"
-	return snapshotFromRecordsForTest(t, acpprofile.RuntimeSessionLocatorCodexRollout, []string{"state/sessions"}, SessionState{
-		SessionID:      sessionID,
-		TranscriptPath: transcriptPath,
-	}, []SessionStateRecord{{
-		FilePath: transcriptPath, LineNumber: 1,
-		Content: json.RawMessage(`{"type":"session_meta","payload":{"id":"` + sessionID + `"}}`),
-	}})
-}
-
-func assertFakeSessionLifecycle(t *testing.T, capturePath, method, sessionID string) {
-	t.Helper()
-	raw, err := os.ReadFile(capturePath) //nolint:gosec // test helper reads its own temporary capture.
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got struct {
-		Method    string `json:"method"`
-		SessionID string `json:"session_id"`
-	}
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Method != method || got.SessionID != sessionID {
-		t.Fatalf("ACP lifecycle = %#v, want method %q session %q", got, method, sessionID)
-	}
 }
 
 func TestWriteToolInputTruncatesLargeContent(t *testing.T) {
@@ -447,15 +316,15 @@ func TestSessionPromptBuildsEmbeddedContextResource(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("prompt blocks = %d, want text + resource", len(blocks))
 	}
-	if blocks[0].Text == nil || blocks[0].Text.Text != "inspect the app" {
-		t.Fatalf("first block = %#v, want user text", blocks[0])
+	if blocks[0].Resource == nil || blocks[0].Resource.Resource.TextResourceContents == nil {
+		t.Fatalf("first block = %#v, want embedded text resource", blocks[0])
 	}
-	if blocks[1].Resource == nil || blocks[1].Resource.Resource.TextResourceContents == nil {
-		t.Fatalf("second block = %#v, want embedded text resource", blocks[1])
-	}
-	resource := blocks[1].Resource.Resource.TextResourceContents
+	resource := blocks[0].Resource.Resource.TextResourceContents
 	if resource.Uri != "memoh://context/current-turn" || resource.MimeType == nil || *resource.MimeType != "text/markdown" || resource.Text != markdown {
 		t.Fatalf("resource = %#v, want Memoh markdown context", resource)
+	}
+	if blocks[1].Text == nil || blocks[1].Text.Text != "inspect the app" {
+		t.Fatalf("second block = %#v, want user text", blocks[1])
 	}
 }
 
@@ -578,6 +447,7 @@ func TestRunnerStartSessionSupportsReleaseTerminalWithoutWait(t *testing.T) {
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
@@ -633,6 +503,7 @@ func TestRunnerStartSessionReadsProtocolModelsAndSetsModel(t *testing.T) {
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
@@ -688,6 +559,7 @@ func TestRunnerStartSessionWithoutProtocolModelsDoesNotInventFallback(t *testing
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
@@ -726,6 +598,7 @@ func TestRunnerStartSessionAppliesAndUpdatesReasoningConfig(t *testing.T) {
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:                  "bot-1",
+		AgentID:                acpprofile.AgentACPID,
 		ProjectPath:            "/data/project",
 		Command:                agentPath,
 		DefaultReasoningEffort: "high",
@@ -771,6 +644,7 @@ func TestRunnerRejectsUnconfirmedSessionConfigUpdates(t *testing.T) {
 	})
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     writeFakeAgentScript(t, root),
 		Timeout:     10 * time.Second,
@@ -812,6 +686,7 @@ func TestRunnerRejectsInvalidSessionConfigResponse(t *testing.T) {
 	})
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     writeFakeAgentScript(t, root),
 		Timeout:     10 * time.Second,
@@ -845,6 +720,7 @@ func TestRunnerStartSessionRejectsUnknownDefaultReasoningState(t *testing.T) {
 	})
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:                  "bot-1",
+		AgentID:                acpprofile.AgentACPID,
 		ProjectPath:            "/data/project",
 		Command:                writeFakeAgentScript(t, root),
 		DefaultReasoningEffort: "high",
@@ -877,6 +753,7 @@ func TestRunnerModelSwitchConsumesReasoningConfigUpdate(t *testing.T) {
 	})
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     writeFakeAgentScript(t, root),
 		Timeout:     10 * time.Second,
@@ -917,6 +794,7 @@ func TestRunnerStartSessionSendsNoMCPServers(t *testing.T) {
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
@@ -1020,50 +898,7 @@ func TestRunnerStartGenericACPSessionInjectsHTTPToolServer(t *testing.T) {
 	}
 }
 
-func TestRunnerStartGenericACPSessionSkipsHTTPToolServerWithoutCapability(t *testing.T) {
-	root := t.TempDir()
-	project := filepath.Join(root, "project")
-	if err := os.MkdirAll(project, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	capturePath := filepath.Join(root, "mcp-servers.json")
-	t.Setenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_MCP_FILE", capturePath)
-
-	client := newTestBridgeClient(t, root)
-	agentPath := writeFakeAgentScript(t, root)
-	runner := NewRunner(nil, testWorkspace{
-		client: client,
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendContainer,
-			DefaultWorkDir: root,
-		},
-	})
-
-	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentACPID,
-		BotID:       "bot-1",
-		ProjectPath: "/data/project",
-		Command:     agentPath,
-		Timeout:     10 * time.Second,
-		ToolHTTPURL: "http://memoh.test/bots/bot-1/tools",
-		ToolHTTPHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"1","result":{}}`))
-		}),
-		ToolSession: ToolSessionContext{BotID: "bot-1"},
-	}, nil)
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	defer func() { _ = sess.Close() }()
-
-	servers := readCapturedMCPServers(t, capturePath)
-	if len(servers) != 0 {
-		t.Fatalf("captured MCP servers = %#v, want none without capability", servers)
-	}
-}
-
-func TestRunnerStartSessionInjectsHTTPToolServerForHermesCapabilityQuirk(t *testing.T) {
+func TestRunnerStartSessionInjectsHTTPToolServerForForcedProfile(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "project")
 	if err := os.MkdirAll(project, 0o750); err != nil {
@@ -1079,25 +914,24 @@ func TestRunnerStartSessionInjectsHTTPToolServerForHermesCapabilityQuirk(t *test
 		info: bridge.WorkspaceInfo{
 			Backend:         bridge.WorkspaceBackendContainer,
 			DefaultWorkDir:  root,
-			ACPToolsHTTPURL: "http://memoh.test/bots/bot-hermes/tools",
+			ACPToolsHTTPURL: "http://memoh.test/bots/bot-custom/tools",
 		},
 	})
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
-		AgentID:     acpprofile.AgentHermesID,
-		BotID:       "bot-hermes",
+		AgentID:     acpprofile.AgentACPID,
+		BotID:       "bot-custom",
 		ProjectPath: "/data/project",
 		Command:     agentPath,
-		SetupMode:   SetupModeSelf,
 		Timeout:     10 * time.Second,
-		ToolHTTPURL: "http://memoh.test/bots/bot-hermes/tools",
+		ToolHTTPURL: "http://memoh.test/bots/bot-custom/tools",
 		ToolHTTPHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"1","result":{}}`))
 		}),
 		ToolSession: ToolSessionContext{
-			BotID:       "bot-hermes",
-			SessionID:   "session-hermes",
+			BotID:       "bot-custom",
+			SessionID:   "session-custom",
 			SessionType: "acp_agent",
 		},
 	}, nil)
@@ -1108,10 +942,10 @@ func TestRunnerStartSessionInjectsHTTPToolServerForHermesCapabilityQuirk(t *test
 
 	servers := readCapturedMCPServers(t, capturePath)
 	if len(servers) != 1 {
-		t.Fatalf("captured MCP servers = %#v, want one Memoh tools server for Hermes", servers)
+		t.Fatalf("captured MCP servers = %#v, want one forced Memoh tools server", servers)
 	}
 	rawURL, _ := servers[0]["url"].(string)
-	if servers[0]["type"] != "http" || servers[0]["name"] != "Memoh Tools" || !strings.HasPrefix(rawURL, "http://memoh.test/bots/bot-hermes/tools/") {
+	if servers[0]["type"] != "http" || servers[0]["name"] != "Memoh Tools" || !strings.HasPrefix(rawURL, "http://memoh.test/bots/bot-custom/tools/") {
 		t.Fatalf("captured MCP server = %#v", servers[0])
 	}
 }
@@ -1210,6 +1044,7 @@ func TestSessionCloseCancelsActivePrompt(t *testing.T) {
 
 	sess, err := runner.StartSession(context.Background(), StartRequest{
 		BotID:       "bot-1",
+		AgentID:     acpprofile.AgentACPID,
 		ProjectPath: "/data/project",
 		Command:     agentPath,
 		Timeout:     10 * time.Second,
@@ -1275,9 +1110,9 @@ func TestRunnerStartSessionCancellationStopsStartupProcess(t *testing.T) {
 	go func() {
 		sess, err := runner.StartSession(ctx, StartRequest{
 			BotID:       "bot-1",
+			AgentID:     acpprofile.AgentACPID,
 			ProjectPath: "/data",
 			Command:     "sh",
-			SetupMode:   SetupModeSelf,
 			Timeout:     time.Minute,
 		}, nil)
 		if sess != nil {
@@ -1319,6 +1154,7 @@ func TestRunnerMissingCommandIncludesStderr(t *testing.T) {
 	})
 	_, err := runner.Run(context.Background(), RunRequest{
 		BotID:   "bot-1",
+		AgentID: acpprofile.AgentACPID,
 		Task:    "fix tests",
 		Command: "memoh-definitely-missing-acp-command",
 		Timeout: 10 * time.Second,
@@ -1530,7 +1366,6 @@ func TestCallbackToolApprovalRejectionErrorsUsePromptToolOutputLimit(t *testing.
 				time.Second,
 				nil,
 				nil,
-				true,
 				nil,
 				approval,
 				nil,
@@ -2379,7 +2214,6 @@ func TestCreateTerminalUsesMemohToolApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
-		false,
 		nil,
 		approval,
 		nil,
@@ -2453,7 +2287,6 @@ func TestCreateTerminalRejectedByMemohToolApprovalDoesNotStartTerminal(t *testin
 		time.Second,
 		nil,
 		nil,
-		false,
 		nil,
 		approval,
 		nil,
@@ -2528,7 +2361,6 @@ func TestWriteTextFileUsesMemohToolApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
-		false,
 		nil,
 		approval,
 		nil,
@@ -2596,7 +2428,7 @@ func TestACPFileCallbacksRecheckRuntimeGuardAfterApproval(t *testing.T) {
 			guardCalls := 0
 			callbacks := newClientCallbacks(
 				context.Background(), client, "/data", "/data", time.Second,
-				nil, nil, false, nil, approval, nil,
+				nil, nil, nil, approval, nil,
 				ToolSessionContext{
 					BotID: "bot-1", SessionID: "session-1", RunID: "run-1",
 					RuntimeGuard: func(context.Context) error {
@@ -2629,7 +2461,7 @@ func TestACPCreateTerminalRechecksRuntimeGuardAfterApproval(t *testing.T) {
 	}}
 	callbacks := newClientCallbacks(
 		context.Background(), client, "/workspace", "/workspace", time.Second,
-		nil, nil, false, nil, approval, nil,
+		nil, nil, nil, approval, nil,
 		ToolSessionContext{
 			BotID: "bot-1", SessionID: "session-1", RunID: "run-1",
 			RuntimeGuard: func(context.Context) error { return guardErr },
@@ -2724,7 +2556,7 @@ func TestACPWorkspaceEffectsRejectStaleRedisOwner(t *testing.T) {
 	bridgeClient, bridgeServer := newRecordingBridgeClient(t)
 	approval := &fakeACPToolApproval{decision: toolapproval.Request{ID: "approval-stale-owner", Status: toolapproval.StatusApproved}}
 	callbacks := newClientCallbacks(
-		ctx, bridgeClient, "/data", "/data", time.Second, nil, nil, false, nil, approval, nil,
+		ctx, bridgeClient, "/data", "/data", time.Second, nil, nil, nil, approval, nil,
 		ToolSessionContext{
 			BotID: botID, SessionID: sessionID, RunID: streamA,
 			RuntimeGuard: func(guardCtx context.Context) error {
@@ -2776,7 +2608,6 @@ func TestWriteTextFileWithoutToolSessionIsRejectedWhenApprovalEnabled(t *testing
 		time.Second,
 		nil,
 		nil,
-		false,
 		nil,
 		&fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}},
 		nil,
@@ -2989,7 +2820,6 @@ func TestRequestPermissionGrantDedupesWriteTextFileApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
-		false,
 		nil,
 		approval,
 		nil,
@@ -3057,7 +2887,6 @@ func TestRequestPermissionGrantDedupesCreateTerminalApproval(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
-		false,
 		nil,
 		approval,
 		nil,
@@ -3119,7 +2948,6 @@ func TestRequestPermissionGrantDedupesTerminalWithCwdAndArgs(t *testing.T) {
 		time.Second,
 		nil,
 		nil,
-		false,
 		nil,
 		approval,
 		nil,
@@ -3470,10 +3298,6 @@ func TestFakeACPAgentHelper(_ *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if err := validateFakeAgentHermesHome(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
 	agent := &fakeACPAgent{}
 	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
 	agent.conn = conn
@@ -3488,13 +3312,10 @@ func captureFakeAgentEnv() error {
 	}
 	captured := map[string]string{}
 	for _, key := range []string{
-		"HERMES_HOME",
-		"HERMES_TRACE",
 		"GOOGLE_API_KEY",
 		"GEMINI_API_KEY",
 		"OPENROUTER_API_KEY",
 		"OPENAI_API_KEY",
-		"MEMOH_HERMES_API_KEY",
 	} {
 		if value, ok := os.LookupEnv(key); ok {
 			captured[key] = value
@@ -3505,44 +3326,6 @@ func captureFakeAgentEnv() error {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600) //nolint:gosec // test helper writes to env-provided temp path.
-}
-
-func validateFakeAgentHermesHome() error {
-	if os.Getenv("MEMOH_ACP_FAKE_AGENT_VALIDATE_HERMES_HOME") != "1" {
-		return nil
-	}
-	home := os.Getenv("HERMES_HOME")
-	if strings.TrimSpace(home) == "" {
-		return errors.New("fake Hermes agent missing HERMES_HOME")
-	}
-	config, err := os.ReadFile(filepath.Join(home, "config.yaml")) //nolint:gosec // test helper reads env-provided temp path.
-	if err != nil {
-		return fmt.Errorf("fake Hermes agent read config.yaml: %w", err)
-	}
-	env, err := os.ReadFile(filepath.Join(home, ".env")) //nolint:gosec // test helper reads env-provided temp path.
-	if err != nil {
-		return fmt.Errorf("fake Hermes agent read .env: %w", err)
-	}
-	configText := string(config)
-	for _, item := range []string{
-		`provider: "` + os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_PROVIDER") + `"`,
-		`default: "` + os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_MODEL") + `"`,
-	} {
-		if !strings.Contains(configText, item) {
-			return fmt.Errorf("fake Hermes agent config missing %q", item)
-		}
-	}
-	if secret := os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_SECRET"); secret != "" && strings.Contains(configText, secret) {
-		return errors.New("fake Hermes agent config leaked secret")
-	}
-	envKey := os.Getenv("MEMOH_ACP_FAKE_AGENT_EXPECT_HERMES_ENV_KEY")
-	if envKey == "" {
-		return errors.New("fake Hermes agent expected env key is empty")
-	}
-	if !strings.Contains(string(env), envKey+"=") {
-		return fmt.Errorf("fake Hermes agent .env missing %s", envKey)
-	}
-	return nil
 }
 
 type fakeACPAgent struct {

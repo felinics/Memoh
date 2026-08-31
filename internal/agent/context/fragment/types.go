@@ -27,7 +27,7 @@ const (
 	KindHookContext          Kind = "hook_context"
 	KindInjectedMessage      Kind = "injected_message"
 	KindBackgroundSummary    Kind = "background_summary"
-	KindACPContext           Kind = "acp_context"
+	KindRuntimeContext       Kind = "runtime_context"
 
 	// Reserved for the memory/compaction rewrites. Phase 1 keeps their existing
 	// resolver paths intact while making room for future collectors.
@@ -369,7 +369,7 @@ type ManifestView string
 
 const (
 	ViewRunConfigPreProvider ManifestView = "run_config_pre_provider"
-	ViewACPRuntimePrompt     ManifestView = "acp_runtime_prompt"
+	ViewExternalAgentPrompt  ManifestView = "external_agent_prompt"
 )
 
 // DynamicMutator names a later runtime transform that can change provider params

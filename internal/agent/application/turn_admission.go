@@ -31,6 +31,11 @@ import (
 type turnAdmitter interface {
 	Admit(context.Context, sessionruntime.AdmitInput) (sessionruntime.Admission, error)
 	FinishRun(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error
+	// MarkInlineDecisionRun declares an admitted run's decision semantics:
+	// its runtime blocks inline on decisions, so terminal decision statuses
+	// resume the run (external drivers). Native runs skip the declaration
+	// and resume only through their re-entering stream.
+	MarkInlineDecisionRun(botID, sessionID, runID string)
 }
 
 type codedTurnFinisher interface {

@@ -50,6 +50,9 @@ func (*Catalog) ResolveACPSetupPreflight(agentID string, metadata map[string]any
 }
 
 func (*Catalog) ValidateACPSetup(agentID string, metadata map[string]any) thread.ACPSetupValidation {
+	// The built-in external agents left the ACP pool for their direct runtimes
+	// (migration 0144) and are no longer registered profiles, so new ACP
+	// sessions for them are refused as unknown here.
 	profile, ok := runtimeprofile.Lookup(agentID)
 	if !ok {
 		return thread.ACPSetupValidation{}

@@ -30,6 +30,10 @@ const (
 	Retry               StreamEventType = "retry"
 	Progress            StreamEventType = "progress"
 	Error               StreamEventType = "error"
+	// RuntimeNotice surfaces a runtime-side degradation the user should see
+	// in the conversation (tools unavailable, an interaction declined).
+	// Code carries the machine-readable reason, Delta the human text.
+	RuntimeNotice StreamEventType = "runtime_notice"
 )
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON

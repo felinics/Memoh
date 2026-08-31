@@ -15,12 +15,13 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
-	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/agent/application"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/workdir"
 )
 
@@ -31,11 +32,18 @@ type SessionHandler struct {
 	acpRuntimes    acpSessionRuntimeService
 	runtimeResets  sessionResetService
 	workdirs       sessionWorkdirService
+	agentRuntimes  sessionAgentRuntimeService
 	botAgents      *botagents.Service
-	credentials    *agentcredential.Service
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
+}
+
+// sessionAgentRuntimeService owns external-runtime fork preparation and active
+// run shutdown; satisfied by the agent application service.
+type sessionAgentRuntimeService interface {
+	PrepareExternalFork(ctx context.Context, botID, sessionID, turnID string) (map[string]any, error)
+	AbortSessionRuns(ctx context.Context, botID, sessionID string) error
 }
 
 // sessionWorkdirService validates a workdir binding at session creation.
@@ -47,7 +55,7 @@ type sessionWorkdirService interface {
 // warm agent process and binding a session to a runtime.
 type acpSessionRuntimeService interface {
 	CloseSession(sessionID string) error
-	BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, botAgentID, projectPath, runtimeOwnerAccountID string) error
+	BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error
 }
 
 // sessionResetService is the runtime-agnostic history reset boundary. It is a
@@ -98,8 +106,10 @@ func (h *SessionHandler) SetBotAgents(service *botagents.Service) {
 	h.botAgents = service
 }
 
-func (h *SessionHandler) SetCredentialService(service *agentcredential.Service) {
-	h.credentials = service
+// SetAgentRuntimeService installs the agent application service used for
+// external-runtime fork preparation and active-run shutdown.
+func (h *SessionHandler) SetAgentRuntimeService(service sessionAgentRuntimeService) {
+	h.agentRuntimes = service
 }
 
 // Register registers session routes.
@@ -182,11 +192,41 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "unknown session type")
 	}
 	botAgentID := strings.TrimSpace(req.BotAgentID)
+	var botAgent botagents.BotAgent
+	var botAgentDescriptor botagents.Descriptor
 	if botAgentID != "" {
-		// The persisted BotAgent descriptor is authoritative. Current rows all
-		// resolve to the ACP implementation, while their metadata.provider keeps
-		// the temporary Codex/Claude Code/Hermes identity.
-		req.RuntimeType = session.RuntimeACPAgent
+		if h.botAgents == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "bot agent service not configured")
+		}
+		agent, resolveErr := h.botAgents.GetActive(c.Request().Context(), botID, botAgentID)
+		if resolveErr != nil {
+			if publicErr := botAgentHTTPError(resolveErr); publicErr != nil {
+				return publicErr
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
+		}
+		descriptor, descriptorErr := botagents.DescriptorFor(agent)
+		if descriptorErr != nil {
+			if publicErr := botAgentHTTPError(descriptorErr); publicErr != nil {
+				return publicErr
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
+		}
+		botAgent = agent
+		botAgentDescriptor = descriptor
+		// The persisted BotAgent descriptor is authoritative for the runtime:
+		// ACP rows keep their provider identity in metadata, direct runtimes
+		// (codex) map straight to their session runtime type.
+		switch descriptor.Runtime {
+		case botagents.RuntimeACP:
+			req.RuntimeType = session.RuntimeACPAgent
+		case botagents.RuntimeCodex:
+			req.RuntimeType = session.RuntimeCodex
+		case botagents.RuntimeClaudeCode:
+			req.RuntimeType = session.RuntimeClaudeCode
+		default:
+			return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
+		}
 	}
 	targetType, targetMode, targetRuntimeType, err := session.ResolveDescriptor(sessionType, req.SessionMode, req.RuntimeType)
 	if err != nil {
@@ -200,34 +240,16 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		return err
 	}
 	if botAgentID != "" {
-		if h.botAgents == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "bot agent service not configured")
-		}
-		agent, resolveErr := h.botAgents.GetActive(c.Request().Context(), bot.ID, botAgentID)
-		if resolveErr != nil {
-			if publicErr := botAgentHTTPError(resolveErr); publicErr != nil {
-				return publicErr
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
-		}
-		if configErr := h.botAgents.ValidateConfiguration(c.Request().Context(), agent, bot.Metadata); configErr != nil {
+		if configErr := h.botAgents.ValidateConfiguration(c.Request().Context(), botAgent, bot.Metadata); configErr != nil {
 			if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 				return publicErr
 			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate bot Agent")
 		}
-		descriptor, descriptorErr := botagents.DescriptorFor(agent)
-		if descriptorErr != nil {
-			if publicErr := botAgentHTTPError(descriptorErr); publicErr != nil {
-				return publicErr
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
+		if botAgentDescriptor.Runtime == botagents.RuntimeACP {
+			req.Metadata = mergeSessionMetadata(req.Metadata, map[string]any{"acp_agent_id": botAgentDescriptor.Provider})
+			req.RuntimeMetadata = mergeSessionMetadata(req.RuntimeMetadata, map[string]any{"acp_agent_id": botAgentDescriptor.Provider})
 		}
-		if descriptor.Runtime != botagents.RuntimeACP {
-			return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
-		}
-		req.Metadata = mergeSessionMetadata(req.Metadata, map[string]any{"acp_agent_id": descriptor.Provider})
-		req.RuntimeMetadata = mergeSessionMetadata(req.RuntimeMetadata, map[string]any{"acp_agent_id": descriptor.Provider})
 	}
 	boundWorkdir, err := h.resolveCreateSessionWorkdir(c.Request().Context(), bot.ID, req.WorkdirID, targetRuntimeType)
 	if err != nil {
@@ -275,7 +297,6 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			runtimeID,
 			sess.ID,
 			sessionMetadataString(sess.Metadata, "acp_agent_id"),
-			sess.BotAgentID,
 			sessionMetadataString(sess.Metadata, "project_path"),
 			sessionMetadataString(sess.Metadata, "runtime_owner_account_id"),
 		); bindErr != nil {
@@ -314,7 +335,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 	if sessionID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
-	bot, _, source, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
+	bot, perms, source, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
 		return err
 	}
@@ -339,13 +360,60 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid message_id")
 	}
 
+	// External runtimes fork their own conversation first; the returned
+	// runtime metadata binds the Memoh fork to the runtime-side fork.
+	var runtimeMetadataOverride map[string]any
+	agentRuntimeSource := session.IsACPRuntime(source) || session.IsDirectRuntime(source)
+	if agentRuntimeSource {
+		// Forking an agent-runtime session creates a new workspace execution
+		// surface; read access to the source is not enough.
+		if !bots.HasPermission(perms, bots.PermissionWorkspaceExec) {
+			feedback := externalAgentNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
+			return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		}
+	}
+	if session.IsDirectRuntime(source) {
+		if h.agentRuntimes == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "agent runtime service unavailable")
+		}
+		if turnID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "turn_id is required to fork this session")
+		}
+		override, forkErr := h.agentRuntimes.PrepareExternalFork(c.Request().Context(), bot.ID, sessionID, turnID)
+		if forkErr != nil {
+			switch {
+			case errors.Is(forkErr, application.ErrExternalForkUnsupported):
+				return echo.NewHTTPError(http.StatusConflict, "this session's runtime does not support forking")
+			case errors.Is(forkErr, application.ErrExternalForkAnchorMissing):
+				return echo.NewHTTPError(http.StatusConflict, "fork source turn has no runtime anchor")
+			default:
+				return forkErr
+			}
+		}
+		runtimeMetadataOverride = override
+	}
+	if agentRuntimeSource {
+		// The fork belongs to its creator. The runtime owner is the principal
+		// offline fires and turn-level exec checks authorize against, so
+		// inheriting the source's owner would let the forker keep executing
+		// on the owner's grants after their own are revoked.
+		if runtimeMetadataOverride == nil {
+			runtimeMetadataOverride = make(map[string]any, len(source.RuntimeMetadata)+1)
+			for key, value := range source.RuntimeMetadata {
+				runtimeMetadataOverride[key] = value
+			}
+		}
+		runtimeMetadataOverride["runtime_owner_account_id"] = channelIdentityID
+	}
+
 	forked, err := h.sessionService.ForkFromAssistantTurn(c.Request().Context(), session.ForkFromAssistantInput{
-		BotID:           bot.ID,
-		ThreadID:        source.ID,
-		TurnID:          turnID,
-		MessageID:       legacyMessageID,
-		Title:           strings.TrimSpace(req.Title),
-		CreatedByUserID: channelIdentityID,
+		BotID:                   bot.ID,
+		ThreadID:                source.ID,
+		TurnID:                  turnID,
+		MessageID:               legacyMessageID,
+		Title:                   strings.TrimSpace(req.Title),
+		CreatedByUserID:         channelIdentityID,
+		RuntimeMetadataOverride: runtimeMetadataOverride,
 	})
 	if err != nil {
 		return sessionForkError(err)
@@ -506,15 +574,13 @@ const (
 // schedule+acp_agent — the schedule trigger path creates those sessions —
 // but interactive session creation stays limited to chat and discuss.
 func rejectSystemACPRuntime(mode, runtimeType string) error {
-	if runtimeType != session.RuntimeACPAgent {
-		return nil
+	// Agent runtimes (ACP and direct): the capability table also allows
+	// schedule mode, but those sessions are created by the schedule service —
+	// this user-facing endpoint stays limited to chat and discuss.
+	if runtimekind.IsExternal(runtimeType) && mode != session.TypeChat && mode != session.TypeDiscuss {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("runtime type %q is only supported for %s or %s sessions here", runtimeType, session.TypeChat, session.TypeDiscuss))
 	}
-	switch mode {
-	case session.TypeChat, session.TypeDiscuss:
-		return nil
-	default:
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("runtime type %q is only supported for %s or %s session modes", session.RuntimeACPAgent, session.TypeChat, session.TypeDiscuss))
-	}
+	return nil
 }
 
 func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, bool, error) {
@@ -713,8 +779,43 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusBadRequest, "unknown runtime type")
 			}
 		}
+		var targetAgent botagents.BotAgent
+		var targetAgentDescriptor botagents.Descriptor
 		if targetBotAgentID != "" {
-			targetRuntime = session.RuntimeACPAgent
+			if h.botAgents == nil {
+				return echo.NewHTTPError(http.StatusInternalServerError, "bot agent service not configured")
+			}
+			var resolveErr error
+			if botAgentSelectionExplicit {
+				targetAgent, resolveErr = h.botAgents.GetActive(c.Request().Context(), bot.ID, targetBotAgentID)
+			} else {
+				targetAgent, resolveErr = h.botAgents.Get(c.Request().Context(), bot.ID, targetBotAgentID)
+			}
+			if resolveErr != nil {
+				if publicErr := botAgentHTTPError(resolveErr); publicErr != nil {
+					return publicErr
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
+			}
+			descriptor, descriptorErr := botagents.DescriptorFor(targetAgent)
+			if descriptorErr != nil {
+				if publicErr := botAgentHTTPError(descriptorErr); publicErr != nil {
+					return publicErr
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
+			}
+			targetAgentDescriptor = descriptor
+			// The persisted BotAgent descriptor is authoritative for the runtime.
+			switch descriptor.Runtime {
+			case botagents.RuntimeACP:
+				targetRuntime = session.RuntimeACPAgent
+			case botagents.RuntimeCodex:
+				targetRuntime = session.RuntimeCodex
+			case botagents.RuntimeClaudeCode:
+				targetRuntime = session.RuntimeClaudeCode
+			default:
+				return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
+			}
 		} else if botAgentSelectionExplicit {
 			targetRuntime = session.RuntimeModel
 			if targetType == session.TypeACPAgent {
@@ -740,40 +841,16 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			targetRuntimeMetadata = cloneSessionMetadata(req.RuntimeMetadata)
 		}
 		if targetBotAgentID != "" {
-			if h.botAgents == nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "bot agent service not configured")
-			}
-			var agent botagents.BotAgent
-			var resolveErr error
-			if botAgentSelectionExplicit {
-				agent, resolveErr = h.botAgents.GetActive(c.Request().Context(), bot.ID, targetBotAgentID)
-			} else {
-				agent, resolveErr = h.botAgents.Get(c.Request().Context(), bot.ID, targetBotAgentID)
-			}
-			if resolveErr != nil {
-				if publicErr := botAgentHTTPError(resolveErr); publicErr != nil {
-					return publicErr
-				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent")
-			}
-			if configErr := h.botAgents.ValidateConfiguration(c.Request().Context(), agent, bot.Metadata); configErr != nil {
+			if configErr := h.botAgents.ValidateConfiguration(c.Request().Context(), targetAgent, bot.Metadata); configErr != nil {
 				if publicErr := botAgentHTTPError(configErr); publicErr != nil {
 					return publicErr
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate bot Agent")
 			}
-			descriptor, descriptorErr := botagents.DescriptorFor(agent)
-			if descriptorErr != nil {
-				if publicErr := botAgentHTTPError(descriptorErr); publicErr != nil {
-					return publicErr
-				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "failed to resolve bot Agent runtime")
+			if targetAgentDescriptor.Runtime == botagents.RuntimeACP {
+				targetMetadata = mergeSessionMetadata(targetMetadata, map[string]any{"acp_agent_id": targetAgentDescriptor.Provider})
+				targetRuntimeMetadata = mergeSessionMetadata(targetRuntimeMetadata, map[string]any{"acp_agent_id": targetAgentDescriptor.Provider})
 			}
-			if descriptor.Runtime != botagents.RuntimeACP {
-				return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
-			}
-			targetMetadata = mergeSessionMetadata(targetMetadata, map[string]any{"acp_agent_id": descriptor.Provider})
-			targetRuntimeMetadata = mergeSessionMetadata(targetRuntimeMetadata, map[string]any{"acp_agent_id": descriptor.Provider})
 		}
 		if targetRuntime == session.RuntimeACPAgent {
 			targetMetadata = session.ApplyACPMetadataDefaults(mergeSessionMetadata(targetMetadata, targetRuntimeMetadata))
@@ -802,13 +879,20 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			defer releaseRuntimeReset()
 			c.SetRequest(c.Request().WithContext(resetCtx))
 		}
-		if targetRuntime == session.RuntimeACPAgent {
+		switch {
+		case targetRuntime == session.RuntimeACPAgent:
 			if targetBotAgentID == "" {
 				if err := validateACPCreate(bot, targetMetadata); err != nil {
 					return err
 				}
 			}
-		} else if session.IsACPRuntime(existing) || req.Type != nil || req.RuntimeType != nil || req.RuntimeMetadata != nil {
+		case session.IsDirectRuntimeType(targetRuntime):
+			// Driver-owned keys (the codex thread id) live in runtime
+			// metadata; wiping them silently discards the runtime-side
+			// conversation, so an external target keeps both maps.
+			targetMetadata = session.ApplyExternalMetadataDefaults(targetMetadata)
+			targetRuntimeMetadata = session.ApplyExternalMetadataDefaults(targetRuntimeMetadata)
+		case session.IsACPRuntime(existing) || session.IsDirectRuntime(existing) || req.Type != nil || req.RuntimeType != nil || req.RuntimeMetadata != nil:
 			targetMetadata = stripACPMetadata(targetMetadata)
 			targetRuntimeMetadata = map[string]any{}
 		}
@@ -896,11 +980,25 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 		defer releaseRuntimeReset()
 		c.SetRequest(c.Request().WithContext(resetCtx))
 	}
+	if session.IsDirectRuntime(existing) && h.agentRuntimes == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "agent runtime service unavailable")
+	}
 	if err := h.sessionService.SoftDelete(c.Request().Context(), sessionID); err != nil {
 		if releaseRuntimeReset != nil {
 			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if session.IsDirectRuntime(existing) {
+		// A direct-runtime session being deleted must not leave its active
+		// turn executing against the workspace. Soft-delete FIRST: every new
+		// turn admission starts with a session lookup, so the tombstone is
+		// the admission barrier — then abort whatever is already in flight
+		// (including anything admitted before the tombstone landed) and wait
+		// for the driver call to actually finish.
+		if err := h.agentRuntimes.AbortSessionRuns(c.Request().Context(), botID, sessionID); err != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -976,12 +1074,10 @@ func requiredWritePermissionForSessionType(sessionType string) string {
 
 func requiredReadPermissionForSessionRuntime(sessionType, runtimeType string) string {
 	sessionType = strings.TrimSpace(sessionType)
-	if strings.TrimSpace(runtimeType) == session.RuntimeACPAgent {
+	if runtimekind.RequiresWorkspaceExec(runtimeType) {
 		switch sessionType {
 		case session.TypeACPAgent, session.TypeChat, session.TypeDiscuss:
 			return bots.PermissionWorkspaceExec
-		default:
-			return requiredReadPermissionForSessionType(sessionType)
 		}
 	}
 	return requiredReadPermissionForSessionType(sessionType)
@@ -989,13 +1085,11 @@ func requiredReadPermissionForSessionRuntime(sessionType, runtimeType string) st
 
 func requiredPermissionForSessionRuntime(sessionType, runtimeType string) string {
 	sessionType = strings.TrimSpace(sessionType)
-	if strings.TrimSpace(runtimeType) == session.RuntimeACPAgent {
+	if runtimekind.RequiresWorkspaceExec(runtimeType) {
 		switch sessionType {
 		case session.TypeACPAgent, session.TypeChat, session.TypeDiscuss:
-		default:
-			return requiredWritePermissionForSessionType(sessionType)
+			return bots.PermissionWorkspaceExec
 		}
-		return bots.PermissionWorkspaceExec
 	}
 	return requiredWritePermissionForSessionType(sessionType)
 }
@@ -1011,19 +1105,19 @@ func canAccessSession(sess session.Thread, userID string, perms []string) bool {
 	return bots.HasPermission(perms, requiredReadPermissionForSessionRuntime(sessionMode, runtimeType))
 }
 
-func authorizeACPRuntimeSessionAccess(actorUserID string, perms []string, runtimeOwnerAccountID string) error {
+func authorizeExternalAgentSessionAccess(actorUserID string, perms []string, runtimeOwnerAccountID string) error {
 	actorUserID = strings.TrimSpace(actorUserID)
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
-		feedback := acpRuntimeOwnerMissingFeedback()
+		feedback := externalAgentRuntimeOwnerMissingFeedback()
 		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
 	}
 	// The runtime owner has no standing beyond their live grants: owner and
 	// members alike must hold workspace_exec, so a revoked owner loses
 	// runtime access at decision time (same model as the application-layer
-	// ACP decision authorizers).
+	// External Agent decision authorizers).
 	if actorUserID == "" || !bots.HasPermission(perms, bots.PermissionWorkspaceExec) {
-		feedback := acpNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
+		feedback := externalAgentNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
 		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
 	}
 	return nil
@@ -1042,11 +1136,9 @@ func filterSessionsForPermissions(items []session.Thread, userID string, perms [
 	return out
 }
 
-// resolveCreateSessionWorkdir validates a requested workdir binding: the
-// workdir must exist on this bot and be live, and ACP sessions can only bind
-// native-workspace workdirs — the ACP runtime cannot reach a remote computer
-// yet, so accepting the binding would create a session that fails on its
-// first prompt.
+// resolveCreateSessionWorkdir validates a requested workdir binding. External
+// Agent sessions can only bind native-workspace workdirs until their runtime
+// lifecycles are scoped by workspace target.
 func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID, workdirID, runtimeType string) (*workdir.Workdir, error) {
 	workdirID = strings.TrimSpace(workdirID)
 	if workdirID == "" {
@@ -1059,9 +1151,9 @@ func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID,
 	if err != nil {
 		return nil, workdirHTTPError(h.logger, err)
 	}
-	if runtimeType == session.RuntimeACPAgent && bound.TargetKind == workdir.TargetKindRemote {
+	if (runtimeType == session.RuntimeACPAgent || session.IsDirectRuntimeType(runtimeType)) && bound.TargetKind == workdir.TargetKindRemote {
 		return nil, echo.NewHTTPError(http.StatusBadRequest,
-			"ACP sessions cannot use a remote computer workdir yet; bind a native workspace workdir instead")
+			"external agent sessions cannot use a remote computer workdir yet; bind a native workspace workdir instead")
 	}
 	return &bound, nil
 }
@@ -1074,7 +1166,7 @@ func validateACPCreate(bot bots.Bot, metadata map[string]any) error {
 	if sessionMetadataString(metadata, "project_path") == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, session.ErrACPProjectPathMissing.Error())
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, agentID, false); err != nil {
+	if err := acpAgentSetupHTTPError(bot.Metadata, agentID); err != nil {
 		return err
 	}
 	return nil
@@ -1090,7 +1182,7 @@ func sessionServiceError(err error) error {
 		feedback := acpAgentNotFoundFeedback(err.Error())
 		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
 	case errors.Is(err, session.ErrACPRuntimeOwnerMissing):
-		feedback := acpRuntimeOwnerMissingFeedback()
+		feedback := externalAgentRuntimeOwnerMissingFeedback()
 		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
 	case errors.Is(err, session.ErrACPAgentNotConfigured):
 		feedback := acpAgentNotConfiguredFeedback(err.Error())
@@ -1139,12 +1231,17 @@ func sessionAgentConfigChanged(existing session.Thread, targetMode, targetRuntim
 	if existingMode != strings.TrimSpace(targetMode) || existingRuntime != strings.TrimSpace(targetRuntime) {
 		return true
 	}
-	if strings.TrimSpace(targetRuntime) != session.RuntimeACPAgent {
+	trimmedRuntime := strings.TrimSpace(targetRuntime)
+	if trimmedRuntime != session.RuntimeACPAgent && !session.IsDirectRuntimeType(trimmedRuntime) {
 		return false
 	}
 	existingMetadata := mergeSessionMetadata(existing.Metadata, existing.RuntimeMetadata)
 	targetMetadata = mergeSessionMetadata(targetMetadata, targetRuntimeMetadata)
-	for _, key := range []string{"acp_agent_id", "project_path", "acp_project_mode"} {
+	keys := []string{"acp_agent_id", "project_path", "acp_project_mode"}
+	if session.IsDirectRuntimeType(trimmedRuntime) {
+		keys = []string{"project_path"}
+	}
+	for _, key := range keys {
 		if sessionMetadataString(existingMetadata, key) != sessionMetadataString(targetMetadata, key) {
 			return true
 		}
@@ -1155,7 +1252,7 @@ func sessionAgentConfigChanged(existing session.Thread, targetMode, targetRuntim
 func stripACPMetadata(metadata map[string]any) map[string]any {
 	out := cloneSessionMetadata(metadata)
 	for key := range out {
-		if strings.HasPrefix(key, "acp_") || key == "project_path" || key == "agent_credential_id" {
+		if strings.HasPrefix(key, "acp_") || key == "project_path" {
 			delete(out, key)
 		}
 	}

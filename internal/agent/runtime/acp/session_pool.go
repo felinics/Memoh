@@ -27,9 +27,9 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
-	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -53,9 +53,6 @@ const (
 	decisionQuiesceTimeout = 3 * time.Second
 
 	runtimeIDPrefix = "rt_"
-	// sessionStateIOTimeout bounds 512 MiB bridge/database streaming while
-	// allowing 200-300 MiB transcripts on ordinary container storage.
-	sessionStateIOTimeout = 10 * time.Minute
 )
 
 var (
@@ -96,13 +93,12 @@ type SessionPool struct {
 	runner         sessionRunner
 	bots           botGetter
 	store          SessionDescriptorReader
-	stateStore     SessionStateStore
+	stateStore     agentstate.SessionStateStore
 	sessionRuntime sessionRuntimeCoordinator
 	tools          *mcp.ToolGatewayService
 	contexts       *mcp.ToolSessionContextStore
 	approval       client.ToolApprovalService
 	userInput      sessionUserInputService
-	credentials    *agentcredential.Service
 	timeout        time.Duration
 
 	mu        sync.RWMutex
@@ -131,10 +127,6 @@ type sessionRunner interface {
 	StartSession(ctx context.Context, req client.StartRequest, sink client.EventSink) (*client.Session, error)
 }
 
-type workspaceClientRunner interface {
-	MCPClient(ctx context.Context, botID string) (*bridge.Client, error)
-}
-
 type sessionUserInputService interface {
 	client.UserInputService
 	CancelPendingForSession(context.Context, string, string, string) ([]userinput.Request, error)
@@ -148,7 +140,6 @@ type botGetter interface {
 // to launch an ACP runtime. The Chat domain supplies it through an adapter.
 type SessionDescriptor struct {
 	BotID           string
-	BotAgentID      string
 	SessionType     string
 	Metadata        map[string]any
 	RuntimeMetadata map[string]any
@@ -173,14 +164,7 @@ type runtimeHandle struct {
 	projectPath           string
 	cwd                   string
 	runtimeOwnerAccountID string
-	botAgentID            string
-	credentialID          string
-	credentialVersion     int64
-	disableSessionState   bool
-	sessionStateSupported bool
-	sessionStateLocator   acpprofile.RuntimeSessionLocator
-	sessionStateCursor    client.SessionStateCursor
-	runtimeConfigEpoch    RuntimeConfigEpoch
+	runtimeConfigEpoch    agentstate.RuntimeConfigEpoch
 	// ownerCtx is a value-only context retained for detached runtime cleanup.
 	// Its cancellation and deadline do not describe request liveness.
 	ownerCtx context.Context
@@ -199,7 +183,6 @@ type runtimeHandle struct {
 	active                   *client.ToolSessionContext
 	persistenceFence         runtimefence.Fence
 	startCancel              context.CancelFunc
-	stagingCancel            context.CancelFunc
 	closed                   bool
 	hadPrompt                bool
 	decisionPreCleanupOnce   sync.Once
@@ -216,7 +199,7 @@ type runtimeHandle struct {
 	// is the authority: before every prompt the pool compares nativeHead with
 	// the durable head, and any divergence — a round that never committed,
 	// another server's turn, a history clear — destroys this warm generation.
-	nativeHead      SessionPublicationHead
+	nativeHead      agentstate.SessionPublicationHead
 	nativeHeadFound bool
 }
 
@@ -231,7 +214,6 @@ type PromptInput struct {
 	SessionType              string
 	RouteID                  string
 	AgentID                  string
-	BotAgentID               string
 	ProjectPath              string
 	ModelID                  string
 	ReasoningEffort          string
@@ -265,8 +247,6 @@ type PromptInput struct {
 	// and prompt must still advertise the command, or the turn fails with
 	// ErrAgentCommandUnavailable instead of delivering stale slash text.
 	RequiredCommand string
-
-	disableSessionState bool
 }
 
 // ErrAgentCommandUnavailable reports that PromptInput.RequiredCommand is not
@@ -277,7 +257,6 @@ var ErrAgentCommandUnavailable = client.ErrAgentCommandUnavailable
 type CreateRuntimeInput struct {
 	BotID                 string
 	AgentID               string
-	BotAgentID            string
 	ProjectPath           string
 	RuntimeOwnerAccountID string
 	ToolHTTPURL           string
@@ -290,8 +269,6 @@ type RuntimeStatus struct {
 	RuntimeID             string                        `json:"runtime_id,omitempty"`
 	SessionID             string                        `json:"session_id,omitempty"`
 	AgentID               string                        `json:"agent_id,omitempty"`
-	BotAgentID            string                        `json:"bot_agent_id,omitempty"`
-	CredentialID          string                        `json:"agent_credential_id,omitempty"`
 	ProjectPath           string                        `json:"project_path,omitempty"`
 	RuntimeOwnerAccountID string                        `json:"-"`
 	State                 string                        `json:"state"`
@@ -356,18 +333,10 @@ func (p *SessionPool) SetUserInputService(service sessionUserInputService) {
 	}
 }
 
-// SetCredentialService enables database-backed Agent credentials. It stays
-// optional so embedders without the encrypted store keep the bot-metadata path.
-func (p *SessionPool) SetCredentialService(service *agentcredential.Service) {
-	if p != nil {
-		p.credentials = service
-	}
-}
-
 // SetSessionStateStore enables durable adapter-native ACP session checkpoints.
 // It remains optional so embedders and focused pool tests do not need a
 // PostgreSQL dependency.
-func (p *SessionPool) SetSessionStateStore(store SessionStateStore) {
+func (p *SessionPool) SetSessionStateStore(store agentstate.SessionStateStore) {
 	if p != nil {
 		p.stateStore = store
 	}
@@ -434,7 +403,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 	}
 	agentID := acpprofile.NormalizeAgentID(input.AgentID)
 	if agentID == "" {
-		agentID = acpprofile.AgentCodexID
+		return RuntimeStatus{}, errors.New("ACP agent id is required")
 	}
 	projectPath := strings.TrimSpace(input.ProjectPath)
 	runtimeOwnerAccountID := strings.TrimSpace(input.RuntimeOwnerAccountID)
@@ -449,7 +418,6 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		toolToken:             newRuntimeToolToken(),
 		botID:                 botID,
 		agentID:               agentID,
-		botAgentID:            strings.TrimSpace(input.BotAgentID),
 		projectPath:           projectPath,
 		runtimeOwnerAccountID: runtimeOwnerAccountID,
 		ownerCtx:              context.WithoutCancel(ctx),
@@ -544,7 +512,7 @@ func (p *SessionPool) unboundBudgetLocked(botID string) ([]*runtimeHandle, error
 // session's prompts reuse the warm process. Returns ErrRuntimeBindRejected
 // when the runtime cannot serve this session; callers fall back to a cold
 // start and must not treat that as fatal.
-func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, botAgentID, projectPath, runtimeOwnerAccountID string) error {
+func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
 	if ctx == nil {
 		return errors.New("runtime bind context is required")
 	}
@@ -576,7 +544,7 @@ func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, session
 	}
 	normalizedAgent := acpprofile.NormalizeAgentID(agentID)
 	if normalizedAgent == "" {
-		normalizedAgent = acpprofile.AgentCodexID
+		return errors.New("ACP agent id is required")
 	}
 	projectPath = strings.TrimSpace(projectPath)
 
@@ -593,7 +561,6 @@ func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, session
 	ok := !h.closed && h.session != nil && h.boundSession == "" &&
 		h.agentID == normalizedAgent && h.projectPath == projectPath &&
 		h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
-		h.botAgentID == strings.TrimSpace(botAgentID) &&
 		epochMatches
 	if ok {
 		// Publish the binding on the handle before indexing it. A reset that
@@ -855,15 +822,9 @@ func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (client.Pro
 
 	p.reapIdle(time.Now())
 	if input.ForceFreshRuntime {
+		// Discuss turns inject a complete bounded context into a fresh
+		// process; closing the current runtime is all a fresh start needs.
 		_ = p.CloseSession(input.SessionID) //nolint:contextcheck // lifecycle close uses the handle owner context.
-		// Discuss turns inject a complete bounded context into a fresh process.
-		// Resuming or checkpointing that temporary native session would duplicate
-		// context and could replace a normal chat checkpoint. Note the full
-		// consequence: a completed fresh-runtime turn still publishes a RESET
-		// head for its session (canonical history advanced past anything
-		// resumable), so any prior checkpoint on the same session stops being
-		// cold-resumable by design.
-		input.disableSessionState = true
 		input.ForceFreshRuntime = false
 	}
 	// A handle can be torn down between resolution and use (reaper, agent
@@ -1029,35 +990,16 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		_ = p.teardown(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		return result, false, err
 	}
-	staged, persistErr := p.persistSessionState(ctx, h, sess, input.RunID, toolCtx.RuntimeFence, result.StateReceipt)
-	if persistErr != nil {
-		p.logger.Error("failed to stage ACP session state",
-			slog.String("bot_id", h.botID),
-			slog.String("session_id", h.boundSession),
-			slog.String("run_id", input.RunID),
-			slog.String("runtime_id", h.id),
-			slog.Any("error", persistErr))
-		// A successful native turn without a durable staged snapshot cannot be
-		// published to canonical chat history: a cold restart would otherwise
-		// resume an older native context. Drop the warm process for every staging
-		// failure and return the partial result with an error so the application
-		// persists an explicit failed turn rather than a false success watermark.
-		_ = p.teardown(h) //nolint:contextcheck // failed checkpoint makes the warm native history unusable.
-		return result, false, fmt.Errorf("stage ACP session checkpoint: %w", persistErr)
-	}
-	result.CheckpointStaged = staged
-	// The native conversation has advanced past this run whether or not a
-	// snapshot was staged. Record the head this process now corresponds to;
-	// the application commits the matching durable head with the round, and
-	// the pre-prompt head comparison destroys this generation if it never does.
+	// The native conversation has advanced past this run. ACP publishes only
+	// reset heads (no runtime snapshots are captured); the head still moves
+	// per turn so cross-instance warm-handle fencing keeps working. Record
+	// the head this process now corresponds to; the application commits the
+	// matching durable head with the round, and the pre-prompt head
+	// comparison destroys this generation if it never does.
 	if p.stateStore != nil && strings.TrimSpace(h.boundSession) != "" {
 		if runID, parseErr := uuid.Parse(strings.TrimSpace(input.RunID)); parseErr == nil {
-			kind := SessionPublicationReset
-			if staged {
-				kind = SessionPublicationCheckpoint
-			}
 			h.state.Lock()
-			h.nativeHead = SessionPublicationHead{RunID: runID.String(), Kind: kind}
+			h.nativeHead = agentstate.SessionPublicationHead{RunID: runID.String(), Kind: agentstate.SessionPublicationReset}
 			h.nativeHeadFound = true
 			h.state.Unlock()
 		}
@@ -1116,18 +1058,18 @@ func (p *SessionPool) publicationHeadMatches(ctx context.Context, h *runtimeHand
 	return false, nil
 }
 
-func (p *SessionPool) loadRuntimeConfigEpoch(ctx context.Context, botID, sessionID string) (RuntimeConfigEpoch, error) {
+func (p *SessionPool) loadRuntimeConfigEpoch(ctx context.Context, botID, sessionID string) (agentstate.RuntimeConfigEpoch, error) {
 	if p == nil || p.stateStore == nil {
-		return RuntimeConfigEpoch{}, nil
+		return agentstate.RuntimeConfigEpoch{}, nil
 	}
 	epoch, err := p.stateStore.RuntimeConfigEpoch(ctx, botID, sessionID)
 	if err != nil {
-		return RuntimeConfigEpoch{}, fmt.Errorf("load ACP runtime config epoch: %w", err)
+		return agentstate.RuntimeConfigEpoch{}, fmt.Errorf("load ACP runtime config epoch: %w", err)
 	}
 	return epoch, nil
 }
 
-func publicationHeadsEqual(a SessionPublicationHead, aFound bool, b SessionPublicationHead, bFound bool) bool {
+func publicationHeadsEqual(a agentstate.SessionPublicationHead, aFound bool, b agentstate.SessionPublicationHead, bFound bool) bool {
 	if aFound != bFound {
 		return false
 	}
@@ -1137,165 +1079,6 @@ func publicationHeadsEqual(a SessionPublicationHead, aFound bool, b SessionPubli
 	aRunID, aErr := uuid.Parse(strings.TrimSpace(a.RunID))
 	bRunID, bErr := uuid.Parse(strings.TrimSpace(b.RunID))
 	return aErr == nil && bErr == nil && aRunID == bRunID && a.Kind == b.Kind
-}
-
-func (p *SessionPool) persistSessionState(
-	ctx context.Context,
-	h *runtimeHandle,
-	sess *client.Session,
-	runID string,
-	fence runtimefence.Fence,
-	receipt *client.SessionStateReceipt,
-) (bool, error) {
-	if p == nil || p.stateStore == nil || h == nil || sess == nil {
-		return false, nil
-	}
-	h.state.Lock()
-	disabled := h.disableSessionState
-	supported := h.sessionStateSupported
-	previousCursor := h.sessionStateCursor
-	locator := h.sessionStateLocator
-	sessionID := strings.TrimSpace(h.boundSession)
-	cwd := strings.TrimSpace(h.cwd)
-	h.state.Unlock()
-	if disabled || !supported || sessionID == "" || cwd == "" {
-		return false, nil
-	}
-	if locator == acpprofile.RuntimeSessionLocatorClaudeProject && receipt == nil {
-		// Claude freshness is proven by the raw SDK receipt. Without one (a
-		// non-"success" result subtype, or a receipt-channel inconsistency)
-		// the snapshot cannot be audited as this turn's state, so decline:
-		// the turn stays successful and publishes a reset head instead of an
-		// unprovable checkpoint.
-		p.logger.Warn("ACP turn completed without a session-state receipt; publishing a reset instead",
-			slog.String("bot_id", h.botID),
-			slog.String("session_id", sessionID),
-			slog.String("run_id", runID))
-		return false, nil
-	}
-	if !fence.Valid() {
-		return false, errors.New("runtime persistence fence is required for a durable ACP checkpoint")
-	}
-	runID = strings.TrimSpace(runID)
-	if _, err := uuid.Parse(runID); err != nil {
-		return false, fmt.Errorf("valid run_id is required for a durable ACP checkpoint: %w", err)
-	}
-
-	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionStateIOTimeout)
-	defer cancel()
-	// Staging deliberately survives the request context (a client disconnect
-	// must not lose the checkpoint), but a lifecycle close must be able to
-	// interrupt it: closeHandle cancels this instead of blocking on h.op for
-	// up to the full staging timeout. Re-check closed under the same lock so
-	// a close that already scanned for a cancel hook (and found none) cannot
-	// be outrun by this installation.
-	h.state.Lock()
-	if h.closed {
-		h.state.Unlock()
-		return false, errors.New("ACP runtime closed before checkpoint staging")
-	}
-	h.stagingCancel = cancel
-	h.state.Unlock()
-	defer func() {
-		h.state.Lock()
-		h.stagingCancel = nil
-		h.state.Unlock()
-	}()
-	persistCtx = runtimefence.WithContext(persistCtx, fence)
-	// The canonical head's per-file record counts are the append boundaries:
-	// capture snapshots a running digest at each so the store can prove the
-	// stored prefix is unchanged and persist only each file's tail. This read
-	// is advisory - Replace re-validates every proof inside its transaction.
-	var boundaries map[string]int64
-	if shapes, found, shapeErr := p.stateStore.CanonicalShape(persistCtx, h.botID, sessionID); shapeErr != nil {
-		p.logger.Warn("failed to load canonical ACP state shape; staging a full snapshot",
-			slog.String("bot_id", h.botID), slog.String("session_id", sessionID), slog.Any("error", shapeErr))
-	} else if found {
-		boundaries = make(map[string]int64, len(shapes))
-		for path, shape := range shapes {
-			boundaries[path] = shape.Records
-		}
-	}
-	var snapshot *client.SessionStateSnapshot
-	var captureErr error
-	// Codex emits its terminal protocol notification immediately before its
-	// final rollout flush barrier. Usually the barrier wins the ACP round trip,
-	// but a slow filesystem can briefly expose the previous stable transcript.
-	// Retry only this bounded post-success checkpoint window; never publish a
-	// state until its native completion cursor advances.
-	for attempt := 0; attempt < 4; attempt++ {
-		snapshot, captureErr = sess.SnapshotSessionState(persistCtx, previousCursor, receipt, boundaries)
-		if captureErr == nil {
-			break
-		}
-		if attempt == 3 {
-			return false, fmt.Errorf("capture advanced ACP JSONL: %w", captureErr)
-		}
-		timer := time.NewTimer(time.Duration(attempt+1) * 50 * time.Millisecond)
-		select {
-		case <-persistCtx.Done():
-			timer.Stop()
-			return false, fmt.Errorf("capture advanced ACP JSONL: %w", persistCtx.Err())
-		case <-timer.C:
-		}
-	}
-	defer func() { _ = snapshot.Close() }()
-	state := snapshot.State()
-	records, err := snapshot.Records()
-	if err != nil {
-		return false, err
-	}
-	storeRecords := func(readCtx context.Context) (SessionStateRecord, error) {
-		record, readErr := records(readCtx)
-		if readErr != nil {
-			return SessionStateRecord{}, readErr
-		}
-		return SessionStateRecord{
-			FilePath: record.FilePath, LineNumber: record.LineNumber, Content: record.Content,
-		}, nil
-	}
-	shapes := snapshot.FileShapes()
-	files := make([]PersistedSessionStateFile, 0, len(shapes))
-	for _, shape := range shapes {
-		files = append(files, PersistedSessionStateFile{
-			SessionStateFileShape: SessionStateFileShape{
-				Path: shape.Path, Records: shape.Records, Digest: shape.Digest,
-			},
-			PrefixRecords: shape.PrefixRecords,
-			PrefixDigest:  shape.PrefixDigest,
-		})
-	}
-	if err := p.stateStore.Replace(persistCtx, h.botID, sessionID, PersistedSessionState{
-		AgentID:             h.agentID,
-		ACPSessionID:        state.SessionID,
-		ThroughRunID:        runID,
-		Cwd:                 cwd,
-		TranscriptPath:      state.TranscriptPath,
-		RuntimeFencingToken: fence.Token,
-		FileCount:           snapshot.FileCount(),
-		RecordCount:         snapshot.RecordCount(),
-		Files:               files,
-	}, storeRecords); err != nil {
-		if errors.Is(err, ErrSessionStateDivergent) {
-			// The agent rewrote or removed a canonical file, so this capture
-			// cannot extend the checkpoint without risking the still-canonical
-			// rows. Decline staging: the turn stays successful and publishes an
-			// explicit reset head, the warm runtime keeps its full context, and
-			// once the reset is canonical the next turn stages a fresh full
-			// snapshot safely.
-			p.logger.Warn("ACP session state diverged from the canonical checkpoint; publishing a reset instead",
-				slog.String("bot_id", h.botID),
-				slog.String("session_id", sessionID),
-				slog.String("run_id", runID),
-				slog.Any("error", err))
-			return false, nil
-		}
-		return false, err
-	}
-	h.state.Lock()
-	h.sessionStateCursor = snapshot.Cursor()
-	h.state.Unlock()
-	return true, nil
 }
 
 // applyPromptConfig applies the per-turn composer selection while the caller
@@ -1422,7 +1205,6 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			return err
 		}
 		input.BotID = resolved.BotID
-		input.BotAgentID = resolved.BotAgentID
 		input.AgentID = resolved.AgentID
 		input.ProjectPath = resolved.ProjectPath
 		input.RuntimeOwnerAccountID = resolved.RuntimeOwnerAccountID
@@ -1431,7 +1213,8 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 	identity := func() (agentID, projectPath, runtimeOwnerAccountID string, err error) {
 		agentID = acpprofile.NormalizeAgentID(input.AgentID)
 		if agentID == "" {
-			agentID = acpprofile.AgentCodexID
+			err = errors.New("ACP agent id is required")
+			return
 		}
 		projectPath = strings.TrimSpace(input.ProjectPath)
 		runtimeOwnerAccountID = strings.TrimSpace(input.RuntimeOwnerAccountID)
@@ -1490,11 +1273,9 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 				toolToken:             newRuntimeToolToken(),
 				botID:                 input.BotID,
 				agentID:               agentID,
-				botAgentID:            strings.TrimSpace(input.BotAgentID),
 				projectPath:           projectPath,
 				runtimeOwnerAccountID: runtimeOwnerAccountID,
 				ownerCtx:              context.WithoutCancel(ctx),
-				disableSessionState:   input.disableSessionState,
 				status:                stateStarting,
 				lastActive:            time.Now(),
 				boundSession:          sessionID,
@@ -1523,9 +1304,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 		}
 		h.state.Lock()
 		matches := h.agentID == agentID && h.projectPath == projectPath &&
-			h.runtimeOwnerAccountID == runtimeOwnerAccountID &&
-			h.disableSessionState == input.disableSessionState &&
-			h.botAgentID == strings.TrimSpace(input.BotAgentID)
+			h.runtimeOwnerAccountID == runtimeOwnerAccountID
 		closed := h.closed
 		starting := h.session == nil
 		if matches && !closed {
@@ -1614,48 +1393,12 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(err)
 	}
-	var codexOAuth *client.CodexOAuthCredentials
-	var resolvedCredential agentcredential.ResolvedCredential
-	if mode != client.SetupModeSelf && p.credentials != nil && p.credentials.Configured() && h.botAgentID != "" {
-		var resolveErr error
-		resolvedCredential, resolveErr = p.credentials.ResolveForBotAgent(startCtx, h.botID, h.botAgentID)
-		switch {
-		case errors.Is(resolveErr, agentcredential.ErrNotFound):
-			// Agent not connected yet: run on whatever the legacy bot
-			// metadata still provides instead of failing the start. A
-			// leftover per-instance durable home (disconnect purge that
-			// could not reach the workspace) must be removed first, or the
-			// lease would stage the disconnected account's auth.json.
-			if err := p.purgeInstanceDurableAuthBeforeStart(startCtx, h); err != nil {
-				return fail(err)
-			}
-		case resolveErr != nil:
-			return fail(resolveErr)
-		default:
-			// The probe API accepts acp_agent_id and bot_agent_id
-			// independently; a mismatched pair must not launch one profile
-			// with a credential attached to another instance's profile.
-			if acpprofile.NormalizeAgentID(resolvedCredential.AgentProvider) != h.agentID {
-				return fail(agentcredential.ErrIncompatible)
-			}
-			setup, mode, codexOAuth, err = applyAgentCredential(profile, setup, resolvedCredential)
-			if err != nil {
-				return fail(err)
-			}
-			h.state.Lock()
-			h.credentialID = resolvedCredential.ID
-			h.credentialVersion = resolvedCredential.CredentialVersion
-			h.state.Unlock()
-		}
-	}
 	command, arguments, err := acpprofile.ResolveLaunch(profile, setup)
 	if err != nil {
 		return fail(fmt.Errorf("resolve ACP launch command: %w", err))
 	}
-	supportsSessionState := len(profile.RuntimeStorage.SessionRoots) > 0
 	resolved, err := client.ResolveSessionContext(client.SessionContextInput{
 		AgentID:     h.agentID,
-		BotAgentID:  h.botAgentID,
 		SetupMode:   mode,
 		Backend:     workspaceInfo.Backend,
 		ProjectPath: h.projectPath,
@@ -1663,21 +1406,11 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if err != nil {
 		return fail(fmt.Errorf("resolve ACP session context: %w", err))
 	}
-	if codexOAuth != nil {
-		codexOAuth = p.reconcileCodexOAuthRotation(startCtx, h, resolved, resolvedCredential, codexOAuth)
-	}
-	if err := p.reconcileManagedACPConfig(startCtx, h.botID, profile, setup, mode, resolved, runtimeSyncGuard, codexOAuth); err != nil {
-		return fail(fmt.Errorf("prepare %s managed config: %w", profile.DisplayName, err))
-	}
-	// Managed env (Claude Code BYOK tokens) is injected for every session.
-	// managedProcessEnv returns nil for self mode and for Codex, which is
-	// configured via CODEX_HOME files instead of env.
 	var env []string
 	env, err = managedProcessEnv(profile, setup.Managed, mode)
 	if err != nil {
 		return fail(err)
 	}
-	cleanEnv, unsetEnv := managedEnvControls(profile, mode, resolved.Backend)
 
 	toolHTTPURL, err := p.resolveToolHTTPURL(opts.ToolHTTPURL, workspaceInfo)
 	if err != nil {
@@ -1690,8 +1423,6 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		Command:                command,
 		Args:                   arguments,
 		Env:                    env,
-		CleanEnv:               cleanEnv,
-		UnsetEnv:               unsetEnv,
 		Resolved:               &resolved,
 		SetupMode:              mode,
 		SessionMode:            profile.SessionModeID,
@@ -1709,114 +1440,30 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		RuntimeSyncGuard: runtimeSyncGuard,
 	}
 	var (
-		restoredCursor     client.SessionStateCursor
-		canonicalHead      SessionPublicationHead
+		canonicalHead      agentstate.SessionPublicationHead
 		canonicalHeadFound bool
-		resumeSnapshot     *client.SessionStateSnapshot
 	)
-	defer func() {
-		if resumeSnapshot != nil {
-			_ = resumeSnapshot.Close()
-		}
-	}()
 	boundSession := strings.TrimSpace(h.boundSession)
 	if p.stateStore != nil && boundSession != "" {
 		canonicalHead, canonicalHeadFound, err = p.stateStore.Head(startCtx, h.botID, boundSession)
 		if err != nil {
 			return fail(fmt.Errorf("load ACP session publication head: %w", err))
 		}
-		if canonicalHeadFound {
-			if _, parseErr := uuid.Parse(strings.TrimSpace(canonicalHead.RunID)); parseErr != nil {
-				return fail(fmt.Errorf("%w: canonical ACP publication has invalid run id: %w", ErrSessionStateOutOfSync, parseErr))
-			}
-			if canonicalHead.Kind != SessionPublicationCheckpoint && canonicalHead.Kind != SessionPublicationReset {
-				return fail(fmt.Errorf("%w: canonical ACP publication has unknown kind %q", ErrSessionStateOutOfSync, canonicalHead.Kind))
-			}
-		}
-		if canonicalHeadFound && canonicalHead.Kind == SessionPublicationCheckpoint && !h.disableSessionState {
-			if !supportsSessionState {
-				return fail(fmt.Errorf("%w: current ACP profile cannot restore canonical checkpoint %s", ErrSessionStateOutOfSync, canonicalHead.RunID))
-			}
-			loadCtx, cancelLoad := context.WithTimeout(startCtx, sessionStateIOTimeout)
-			var persisted PersistedSessionState
-			found, loadErr := p.stateStore.Load(loadCtx, h.botID, boundSession, func(
-				consumeCtx context.Context,
-				state PersistedSessionState,
-				records SessionStateRecordReader,
-			) error {
-				persisted = state
-				if strings.TrimSpace(state.ThroughRunID) != strings.TrimSpace(canonicalHead.RunID) {
-					return fmt.Errorf(
-						"%w: loaded ACP checkpoint %s does not match canonical head %s",
-						ErrSessionStateOutOfSync,
-						state.ThroughRunID,
-						canonicalHead.RunID,
-					)
-				}
-				sameAgent := acpprofile.NormalizeAgentID(state.AgentID) == h.agentID
-				sameCwd := strings.TrimSpace(state.Cwd) == strings.TrimSpace(resolved.ProjectPath)
-				if !sameAgent || !sameCwd {
-					return fmt.Errorf(
-						"%w: canonical ACP checkpoint does not match current agent/workdir (agent_matches=%t, cwd_matches=%t)",
-						ErrSessionStateOutOfSync,
-						sameAgent,
-						sameCwd,
-					)
-				}
-				clientRecords := func(readCtx context.Context) (client.SessionStateRecord, error) {
-					record, readErr := records(readCtx)
-					if readErr != nil {
-						return client.SessionStateRecord{}, readErr
-					}
-					return client.SessionStateRecord{
-						FilePath: record.FilePath, LineNumber: record.LineNumber, Content: record.Content,
-					}, nil
-				}
-				var spoolErr error
-				resumeSnapshot, spoolErr = client.SpoolSessionState(
-					consumeCtx,
-					profile.RuntimeStorage.SessionLocator,
-					profile.RuntimeStorage.SessionRoots,
-					client.SessionState{
-						SessionID: state.ACPSessionID, TranscriptPath: state.TranscriptPath,
-					},
-					clientRecords,
-					state.FileCount,
-					state.RecordCount,
-				)
-				return spoolErr
-			})
-			cancelLoad()
-			if loadErr != nil {
-				return fail(fmt.Errorf("load ACP session checkpoint: %w", loadErr))
-			}
-			if !found {
-				return fail(fmt.Errorf("%w: canonical ACP checkpoint %s is unavailable", ErrSessionStateOutOfSync, canonicalHead.RunID))
-			}
-			if resumeSnapshot == nil || persisted.ACPSessionID == "" {
-				return fail(fmt.Errorf("%w: canonical ACP checkpoint did not produce a resumable snapshot", ErrSessionStateOutOfSync))
-			}
-			startReq.Resume = resumeSnapshot
+		if canonicalHeadFound && canonicalHead.Kind == agentstate.SessionPublicationCheckpoint {
+			// Snapshot capture was removed with the last locator-declaring
+			// profiles; a checkpoint head can only be a legacy row from before
+			// that. Start fresh instead of failing the session forever.
+			p.logger.Warn("ACP canonical head is a legacy checkpoint; starting a fresh native session",
+				slog.String("bot_id", h.botID),
+				slog.String("session_id", boundSession),
+				slog.String("run_id", canonicalHead.RunID))
 		}
 	}
 
-	runnerCtx := startCtx
-	cancelRunner := func() {}
-	if startReq.Resume != nil {
-		runnerCtx, cancelRunner = context.WithTimeout(startCtx, sessionStateIOTimeout)
-	}
-	sess, err := p.runner.StartSession(runnerCtx, startReq, opts.Sink)
-	cancelRunner()
+	sess, err := p.runner.StartSession(startCtx, startReq, opts.Sink)
 	if err != nil {
-		if startCtx.Err() != nil {
-			return fail(err)
-		}
-		if startReq.Resume != nil && sessionResumeIsOutOfSync(err) {
-			return fail(fmt.Errorf("%w: restore canonical ACP checkpoint: %w", ErrSessionStateOutOfSync, err))
-		}
 		return fail(err)
 	}
-	restoredCursor = sess.RestoredSessionStateCursor()
 	// Startup performs several protocol round trips after the guarded runtime
 	// staging read. Revalidate both the bot write guard and the complete epoch
 	// pair before publishing this process as reusable.
@@ -1835,7 +1482,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		_ = sess.Close()
 		return fail(fmt.Errorf(
 			"%w: runtime configuration changed during startup (expected=%+v, actual=%+v)",
-			ErrRuntimeConfigStale,
+			agentstate.ErrRuntimeConfigStale,
 			epoch,
 			finalEpoch,
 		))
@@ -1852,9 +1499,6 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	}
 	h.session = sess
 	h.cwd = resolved.ProjectPath
-	h.sessionStateSupported = supportsSessionState
-	h.sessionStateLocator = profile.RuntimeStorage.SessionLocator
-	h.sessionStateCursor = restoredCursor
 	h.nativeHead = canonicalHead
 	h.nativeHeadFound = canonicalHeadFound
 	h.status = stateIdle
@@ -1863,12 +1507,6 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	h.defaultModelID = strings.TrimSpace(sess.ModelState().CurrentModelID)
 	h.state.Unlock()
 	return nil
-}
-
-func sessionResumeIsOutOfSync(err error) bool {
-	return errors.Is(err, client.ErrSessionStateRestoreInvalid) ||
-		errors.Is(err, client.ErrSessionResumeUnsupported) ||
-		errors.Is(err, client.ErrSessionResumeRejected)
 }
 
 // RuntimeStatus reports the runtime state for a session, returning an idle
@@ -1917,8 +1555,6 @@ func (*SessionPool) statusOf(h *runtimeHandle) RuntimeStatus {
 		RuntimeID:             h.id,
 		SessionID:             h.boundSession,
 		AgentID:               h.agentID,
-		BotAgentID:            h.botAgentID,
-		CredentialID:          h.credentialID,
 		ProjectPath:           h.projectPath,
 		RuntimeOwnerAccountID: h.runtimeOwnerAccountID,
 		State:                 h.status,
@@ -2192,7 +1828,6 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 	sess := h.session
 	cancel := h.startCancel
 	h.startCancel = nil
-	stagingCancel := h.stagingCancel
 	bound := h.boundSession
 	activeSession := ""
 	fence := h.persistenceFence
@@ -2211,12 +1846,6 @@ func (p *SessionPool) closeHandle(h *runtimeHandle) error {
 
 	if cancel != nil {
 		cancel()
-	}
-	if stagingCancel != nil {
-		// An in-flight checkpoint staging runs detached from the request
-		// context; interrupt it so the prompt holder releases h.op promptly
-		// instead of streaming a snapshot this closed generation cannot use.
-		stagingCancel()
 	}
 	if sess != nil {
 		sess.CancelPrompt()
@@ -2299,7 +1928,6 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	h.session = nil
 	cancel := h.startCancel
 	h.startCancel = nil
-	stagingCancel := h.stagingCancel
 	bound := h.boundSession
 	activeSession := ""
 	fence := h.persistenceFence
@@ -2316,12 +1944,6 @@ func (p *SessionPool) teardown(h *runtimeHandle) error {
 	h.active = nil
 	closing := h.closeStarted
 	h.state.Unlock()
-	if stagingCancel != nil {
-		// Checkpoint staging runs detached from the request context; interrupt
-		// it so the prompt holder releases h.op and its spool slot promptly
-		// instead of streaming a snapshot this closed generation cannot use.
-		stagingCancel()
-	}
 	sessionID := strings.TrimSpace(bound)
 	if sessionID == "" {
 		sessionID = activeSession
@@ -2481,94 +2103,6 @@ func (p *SessionPool) CloseAll() {
 	}
 }
 
-// purgeInstanceDurableAuthBeforeStart is the guaranteed backstop for the
-// best-effort disconnect purge: at start time the workspace bridge is
-// reachable by definition, so failing to remove a leftover instance auth is a
-// hard error rather than a silent stage of a disconnected account.
-func (p *SessionPool) purgeInstanceDurableAuthBeforeStart(ctx context.Context, h *runtimeHandle) error {
-	if h.botAgentID == "" || !isCodexProfileID(h.agentID) {
-		return nil
-	}
-	runner, ok := p.runner.(workspaceClientRunner)
-	if !ok {
-		return nil
-	}
-	dir, err := client.CodexInstanceDurableDir(h.botAgentID)
-	if err != nil {
-		return err
-	}
-	bridgeClient, err := runner.MCPClient(ctx, h.botID)
-	if err != nil {
-		return fmt.Errorf("purge disconnected instance auth: %w", err)
-	}
-	if err := bridgeClient.DeleteFile(ctx, dir, true); err != nil {
-		return fmt.Errorf("purge disconnected instance auth: %w", err)
-	}
-	return nil
-}
-
-func isCodexProfileID(agentID string) bool {
-	return acpprofile.NormalizeAgentID(agentID) == acpprofile.AgentCodexID
-}
-
-// PurgeBotAgentDurableAuth removes the per-instance durable Codex home
-// (/data/.codex/agents/<bot_agent_id>) after a credential is disconnected or
-// the instance is deleted. Without this, the staged auth.json would keep
-// authenticating to an account the user explicitly disconnected. Best-effort:
-// a missing workspace or directory is not an error.
-func (p *SessionPool) PurgeBotAgentDurableAuth(ctx context.Context, botID, botAgentID string) error {
-	if p == nil {
-		return nil
-	}
-	runner, ok := p.runner.(workspaceClientRunner)
-	if !ok {
-		return nil
-	}
-	dir, err := client.CodexInstanceDurableDir(botAgentID)
-	if err != nil {
-		return err
-	}
-	bridgeClient, err := runner.MCPClient(ctx, botID)
-	if err != nil {
-		return nil
-	}
-	if err := bridgeClient.DeleteFile(ctx, dir, true); err != nil {
-		p.logger.Warn("purge Codex instance durable auth failed", slog.String("bot_id", botID), slog.String("bot_agent_id", botAgentID), slog.Any("error", err))
-	}
-	return nil
-}
-
-// CloseBotAgentInstanceRuntimes tears down every runtime bound to one Bot
-// Agent instance, e.g. after its credential changed. Sibling instances of the
-// same provider and legacy sessions (no instance binding) stay untouched.
-func (p *SessionPool) CloseBotAgentInstanceRuntimes(botID, botAgentID string) error {
-	if p == nil {
-		return nil
-	}
-	botID = strings.TrimSpace(botID)
-	botAgentID = strings.TrimSpace(botAgentID)
-	if botID == "" || botAgentID == "" {
-		return nil
-	}
-	p.mu.RLock()
-	handles := make([]*runtimeHandle, 0)
-	for _, h := range p.runtimes {
-		if h == nil || h.botID != botID || h.botAgentID != botAgentID {
-			continue
-		}
-		handles = append(handles, h)
-	}
-	p.mu.RUnlock()
-
-	var firstErr error
-	for _, h := range handles {
-		if err := p.teardown(h); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
-}
-
 func (p *SessionPool) CloseBotAgentRuntimes(botID, agentID string) error {
 	if p == nil {
 		return nil
@@ -2656,7 +2190,6 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 		input.BotID = sess.BotID
 	}
 	input.SessionType = sess.SessionType
-	input.BotAgentID = strings.TrimSpace(sess.BotAgentID)
 	if sess.Metadata == nil {
 		sess.Metadata = map[string]any{}
 	}
@@ -2688,7 +2221,7 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 			feedback.CodeAgentNotFound,
 			"unknown_agent",
 			http.StatusBadRequest,
-			"chat.acp.agentNotFound",
+			"chat.externalAgent.agentNotFound",
 			fmt.Sprintf("Unknown ACP agent %q", agentID),
 			map[string]string{"agent_id": agentID},
 		)
@@ -2706,7 +2239,7 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 			feedback.CodeAgentNotEnabled,
 			"agent_not_enabled",
 			http.StatusForbidden,
-			"chat.acp.agentNotEnabled",
+			"chat.externalAgent.agentNotEnabled",
 			fmt.Sprintf("ACP agent %q is not enabled for this bot", agentID),
 			map[string]string{"agent_id": agentID},
 		)
@@ -2727,7 +2260,7 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 			feedback.CodeAgentNotConfigured,
 			reason,
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			fmt.Sprintf("%s %s", profile.DisplayName, reason),
 			map[string]string{"agent_id": agentID, "setup_mode": string(mode)},
 		)
@@ -2738,7 +2271,7 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 			feedback.CodeAgentNotConfigured,
 			reason,
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			fmt.Sprintf("%s %s", profile.DisplayName, reason),
 			map[string]string{"agent_id": agentID, "workspace_backend": workspaceInfo.Backend},
 		)
@@ -2749,7 +2282,7 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 				feedback.CodeAgentNotConfigured,
 				"missing_managed_field",
 				http.StatusBadRequest,
-				"chat.acp.agentNotConfigured",
+				"chat.externalAgent.agentNotConfigured",
 				err.Error(),
 				map[string]string{"agent_id": agentID},
 			)
@@ -2945,136 +2478,12 @@ func (p *SessionPool) toolHTTPHandler(h *runtimeHandle) http.Handler {
 	})
 }
 
-func (p *SessionPool) reconcileManagedACPConfig(ctx context.Context, botID string, profile acpprofile.Profile, setup acpprofile.AgentSetup, mode client.SetupMode, resolved client.ResolvedSessionContext, guard client.RuntimeSyncGuard, codexOAuth *client.CodexOAuthCredentials) error {
-	if mode == client.SetupModeSelf {
-		return nil
-	}
-	runner, hasWorkspaceClient := p.runner.(workspaceClientRunner)
-	if !hasWorkspaceClient {
-		return nil
-	}
-	write := func(writeCtx context.Context) error {
-		return client.WriteManagedACPConfig(writeCtx, client.ManagedACPConfigRequest{
-			Profile:    profile,
-			Setup:      setup,
-			Mode:       mode,
-			Resolved:   resolved,
-			CodexOAuth: codexOAuth,
-		}, func() (*bridge.Client, error) {
-			return runner.MCPClient(writeCtx, botID)
-		})
-	}
-	if guard == nil {
-		return write(ctx)
-	}
-	return guard(ctx, write)
-}
-
 func (p *SessionPool) runtimeSyncGuard(botID string, expectedBotEpoch int64) client.RuntimeSyncGuard {
 	if p == nil || p.stateStore == nil {
 		return nil
 	}
 	return func(ctx context.Context, fn func(context.Context) error) error {
-		err := p.stateStore.GuardRuntimeSync(ctx, botID, expectedBotEpoch, fn)
-		if errors.Is(err, ErrRuntimeConfigStale) {
-			return errors.Join(client.ErrRuntimeSyncGuardRejected, client.ErrRuntimeSyncGenerationStale, err)
-		}
-		if errors.Is(err, ErrRuntimeConfigResetInProgress) {
-			return errors.Join(client.ErrRuntimeSyncGuardRejected, client.ErrRuntimeSyncResetInProgress, err)
-		}
-		return err
-	}
-}
-
-// reconcileCodexOAuthRotation keeps the encrypted credential and the durable
-// auth.json monotonic in both directions. The runtime lease writes a token that
-// Codex refreshed back to the durable file (RuntimeSyncCodexAuth); without this
-// the next start would overwrite that newer token with the stale database copy
-// and break the refresh chain. A different account_id means the user switched
-// credentials, so the database still wins.
-func (p *SessionPool) reconcileCodexOAuthRotation(ctx context.Context, h *runtimeHandle, resolved client.ResolvedSessionContext, credential agentcredential.ResolvedCredential, fromStore *client.CodexOAuthCredentials) *client.CodexOAuthCredentials {
-	if fromStore == nil || p.credentials == nil || credential.ID == "" {
-		return fromStore
-	}
-	runner, ok := p.runner.(workspaceClientRunner)
-	if !ok {
-		return fromStore
-	}
-	bridgeClient, err := runner.MCPClient(ctx, h.botID)
-	if err != nil {
-		return fromStore
-	}
-	durableDir := strings.TrimSpace(resolved.CodexDurableDir)
-	if durableDir == "" {
-		durableDir = client.CodexManagedConfigDir
-	}
-	onDisk, err := client.ReadCodexOAuthCredentials(ctx, bridgeClient, durableDir)
-	if err != nil {
-		return fromStore
-	}
-	if onDisk.AccountID != fromStore.AccountID || !onDisk.LastRefresh.After(fromStore.LastRefresh) {
-		return fromStore
-	}
-	metadata := make(map[string]any, len(credential.AccountMetadata)+2)
-	for key, value := range credential.AccountMetadata {
-		metadata[key] = value
-	}
-	metadata["account_id"] = onDisk.AccountID
-	metadata["last_refresh"] = onDisk.LastRefresh.UTC().Format(time.RFC3339Nano)
-	secret := map[string]string{
-		"access_token": onDisk.AccessToken, "id_token": onDisk.IDToken,
-		"refresh_token": onDisk.RefreshToken, "account_id": onDisk.AccountID,
-	}
-	if _, err := p.credentials.UpdateSecretCAS(ctx, credential.ID, credential.CredentialVersion, secret, metadata, credential.ExpiresAt); err != nil && !errors.Is(err, agentcredential.ErrNotFound) {
-		p.logger.Warn("persist rotated Codex credential failed", slog.String("runtime_id", h.id), slog.String("credential_id", credential.ID), slog.Any("error", err))
-	}
-	onDisk.BaseURL = fromStore.BaseURL
-	return &onDisk
-}
-
-// applyAgentCredential projects a decrypted credential onto the agent setup.
-// API keys and the Claude Code OAuth token ride the existing managed-field
-// path; Codex ChatGPT credentials are returned separately because they are
-// written into the durable auth.json rather than a managed field.
-func applyAgentCredential(profile acpprofile.Profile, setup acpprofile.AgentSetup, credential agentcredential.ResolvedCredential) (acpprofile.AgentSetup, client.SetupMode, *client.CodexOAuthCredentials, error) {
-	if setup.Managed == nil {
-		setup.Managed = map[string]string{}
-	}
-	switch credential.AuthKind {
-	case agentcredential.AuthKindOpenAIAPIKey, agentcredential.AuthKindAnthropicAPIKey, agentcredential.AuthKindGoogleAPIKey, agentcredential.AuthKindOpenRouterAPIKey:
-		if profile.ID == acpprofile.AgentHermesID {
-			// Hermes writes the key under the env var of the configured
-			// provider; a Google key labelled OPENROUTER_API_KEY authenticates
-			// nothing. Refuse mismatches instead of silently mislabelling.
-			if managedProvider := strings.TrimSpace(setup.Managed["provider"]); managedProvider == "" {
-				setup.Managed["provider"] = acpprofile.HermesManagedProviderForCredential(credential.Provider)
-			} else if acpprofile.HermesCredentialProviderFor(managedProvider) != credential.Provider {
-				return setup, "", nil, agentcredential.ErrIncompatible
-			}
-		}
-		setup.Managed["api_key"] = credential.Secret["api_key"]
-		return setup, client.SetupModeAPIKey, nil, nil
-	case agentcredential.AuthKindClaudeCodeOAuth:
-		setup.Managed["oauth_token"] = credential.Secret["oauth_token"]
-		return setup, client.SetupModeOAuth, nil, nil
-	case agentcredential.AuthKindOpenAICodexOAuth:
-		expiresAt := time.Time{}
-		if credential.ExpiresAt != nil {
-			expiresAt = *credential.ExpiresAt
-		}
-		lastRefresh := time.Time{}
-		if raw, ok := credential.AccountMetadata["last_refresh"].(string); ok {
-			if parsed, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw)); parseErr == nil {
-				lastRefresh = parsed
-			}
-		}
-		return setup, client.SetupModeOAuth, &client.CodexOAuthCredentials{
-			AccessToken: credential.Secret["access_token"], IDToken: credential.Secret["id_token"],
-			RefreshToken: credential.Secret["refresh_token"], AccountID: credential.Secret["account_id"],
-			BaseURL: setup.Managed["base_url"], ExpiresAt: expiresAt, LastRefresh: lastRefresh,
-		}, nil
-	default:
-		return setup, "", nil, agentcredential.ErrIncompatible
+		return p.stateStore.GuardRuntimeSync(ctx, botID, expectedBotEpoch, fn)
 	}
 }
 
@@ -3083,8 +2492,8 @@ func runtimeOwnerMissingError() *feedback.Error {
 		feedback.CodeRuntimeOwnerMissing,
 		"missing_runtime_owner",
 		http.StatusConflict,
-		"chat.acp.runtimeOwnerMissing",
-		"ACP runtime owner is missing; recreate or reauthorize the ACP session",
+		"chat.externalAgent.runtimeOwnerMissing",
+		"External Agent runtime owner is missing; start a new External Agent session",
 		nil,
 	)
 }
@@ -3186,13 +2595,6 @@ func appendBoundedPromptEvents(events []event.StreamEvent, incoming ...event.Str
 
 const maxCollectedPromptToolEvents = 4096
 
-func managedEnvControls(profile acpprofile.Profile, mode client.SetupMode, backend client.WorkspaceBackend) (bool, []string) {
-	if profile.ID != acpprofile.AgentHermesID || mode == client.SetupModeSelf {
-		return false, nil
-	}
-	return backend == client.WorkspaceBackendContainer, client.HermesManagedUnsetEnvKeys()
-}
-
 func profileSupportsSetupMode(profile acpprofile.Profile, mode client.SetupMode) bool {
 	if len(profile.SetupModes) == 0 {
 		return true
@@ -3221,48 +2623,11 @@ func profileSupportsBackend(profile acpprofile.Profile, backend string) bool {
 	return false
 }
 
-func managedProcessEnv(profile acpprofile.Profile, values map[string]string, mode client.SetupMode) ([]string, error) {
-	switch profile.ID {
-	case acpprofile.AgentClaudeCodeID:
-		env := []string{
-			"ANTHROPIC_AUTH_TOKEN=",
-			"CLAUDE_CODE_USE_BEDROCK=",
-			"CLAUDE_CODE_USE_VERTEX=",
-			"CLAUDE_CODE_USE_FOUNDRY=",
-			// Claude Code does not think unless given a budget; this is the
-			// counterpart of Codex's model_reasoning_effort in config.toml so
-			// managed sessions stream reasoning by default.
-			"MAX_THINKING_TOKENS=16000",
-		}
-		switch mode {
-		case client.SetupModeAPIKey:
-			apiKey := strings.TrimSpace(values["api_key"])
-			if apiKey == "" {
-				return nil, fmt.Errorf("api_key required for %s api_key setup", profile.DisplayName)
-			}
-			env = append(env,
-				"CLAUDE_CODE_OAUTH_TOKEN=",
-				"ANTHROPIC_API_KEY="+apiKey,
-			)
-		case client.SetupModeOAuth:
-			token := strings.TrimSpace(values["oauth_token"])
-			if token == "" {
-				return nil, fmt.Errorf("oauth_token required for %s oauth setup", profile.DisplayName)
-			}
-			env = append(env,
-				"ANTHROPIC_API_KEY=",
-				"CLAUDE_CODE_OAUTH_TOKEN="+token,
-			)
-		default:
-			return nil, nil
-		}
-		if baseURL := strings.TrimSpace(values["base_url"]); baseURL != "" {
-			env = append(env, "ANTHROPIC_BASE_URL="+baseURL)
-		}
-		return env, nil
-	default:
-		return nil, nil
-	}
+// managedProcessEnv assembles per-agent process environment for managed
+// setups. No registered profile injects credentials through the environment,
+// so this is a declaration-driven no-op kept as the extension point.
+func managedProcessEnv(_ acpprofile.Profile, _ map[string]string, _ client.SetupMode) ([]string, error) {
+	return nil, nil
 }
 
 func metadataString(metadata map[string]any, key string) string {

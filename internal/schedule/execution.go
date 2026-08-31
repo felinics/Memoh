@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/workdir"
 )
 
@@ -62,21 +63,21 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		return ExecutionConfig{}, invalidRequest("model_id and acp_model_id are mutually exclusive")
 	}
 
-	targetIsACP := false
+	targetIsAgent := false
 	switch out.RunTarget {
 	case RunTargetExistingSession:
 		if out.RuntimeType != "" || out.BotAgentID != "" || out.ACPAgentID != "" || out.WorkdirID != "" {
 			return ExecutionConfig{}, invalidRequest("existing_session inherits runtime and workdir from the target session; runtime_type, bot_agent_id, acp_agent_id, and workdir_id must be empty")
 		}
-		acp, err := s.validateTargetSession(ctx, botID, out.TargetSessionID)
+		agentTarget, err := s.validateTargetSession(ctx, botID, out.TargetSessionID)
 		if err != nil {
 			return ExecutionConfig{}, err
 		}
-		targetIsACP = acp
-		if targetIsACP && out.ModelID != "" {
-			return ExecutionConfig{}, invalidRequest("target session runs an ACP agent; use acp_model_id instead of model_id")
+		targetIsAgent = agentTarget
+		if targetIsAgent && out.ModelID != "" {
+			return ExecutionConfig{}, invalidRequest("target session runs an external agent; use acp_model_id instead of model_id")
 		}
-		if !targetIsACP && out.ACPModelID != "" {
+		if !targetIsAgent && out.ACPModelID != "" {
 			return ExecutionConfig{}, invalidRequest("target session runs the native model runtime; use model_id instead of acp_model_id")
 		}
 	case RunTargetNewSession:
@@ -84,7 +85,10 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 			return ExecutionConfig{}, invalidRequest("target_session_id is only valid with the existing_session run target")
 		}
 		if out.BotAgentID != "" {
-			if out.RuntimeType != "" && out.RuntimeType != RuntimeACPAgent {
+			// The bot agent decides the actual runtime below; an explicit
+			// runtime_type may only name an agent runtime and is checked
+			// against the resolved one after resolution.
+			if out.RuntimeType != "" && !runtimekind.IsExternal(out.RuntimeType) {
 				return ExecutionConfig{}, invalidRequest("bot_agent_id conflicts with the selected runtime_type")
 			}
 			resolved, err := s.resolveBotAgentExecution(ctx, botID, out)
@@ -105,6 +109,13 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 			if out.ModelID != "" {
 				return ExecutionConfig{}, invalidRequest("ACP schedules use acp_model_id; model_id is only valid for the native model runtime")
 			}
+		case botagents.RuntimeCodex, botagents.RuntimeClaudeCode:
+			if out.BotAgentID == "" {
+				return ExecutionConfig{}, invalidRequestf("runtime_type %q requires bot_agent_id", out.RuntimeType)
+			}
+			if out.ACPAgentID != "" || out.ModelID != "" {
+				return ExecutionConfig{}, invalidRequest("direct external agent schedules carry no acp_agent_id or model_id")
+			}
 		default:
 			return ExecutionConfig{}, invalidRequestf("unknown runtime_type %q", out.RuntimeType)
 		}
@@ -120,17 +131,17 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 			return ExecutionConfig{}, err
 		}
 	}
-	if err := s.requireResolvableModel(ctx, botID, out, targetIsACP); err != nil {
+	if err := s.requireResolvableModel(ctx, botID, out, targetIsAgent); err != nil {
 		return ExecutionConfig{}, err
 	}
 	// Native efforts come from a fixed tier vocabulary, plus the "disable"
 	// sentinel that turns reasoning off for the run — the same on/off value
-	// bot settings and the chat composer store. ACP efforts are
-	// agent-defined (each agent reports its own set at runtime), so only a
-	// shape check applies here; the agent rejects unknown values at run
-	// time with a stable error.
-	acpRun := out.RuntimeType == RuntimeACPAgent || targetIsACP
-	if out.ReasoningEffort != "" && !acpRun &&
+	// bot settings and the chat composer store. Agent runtime efforts (ACP
+	// and the direct external agents) are agent-defined — each reports its
+	// own set at runtime — so only a shape check applies here; the agent
+	// rejects unknown values at run time with a stable error.
+	agentRun := runtimekind.ResolvesOwnModel(out.RuntimeType) || targetIsAgent
+	if out.ReasoningEffort != "" && !agentRun &&
 		!models.IsValidReasoningEffort(out.ReasoningEffort) &&
 		!models.IsReasoningDisabled(out.ReasoningEffort) {
 		return ExecutionConfig{}, invalidRequestf("unknown reasoning_effort %q", out.ReasoningEffort)
@@ -167,12 +178,23 @@ func (s *Service) resolveBotAgentExecution(ctx context.Context, botID string, ex
 	if err != nil {
 		return ExecutionConfig{}, err
 	}
-	if descriptor.Runtime != botagents.RuntimeACP {
+	declared := strings.TrimSpace(exec.RuntimeType)
+	exec.BotAgentID = agent.ID
+	switch descriptor.Runtime {
+	case botagents.RuntimeACP:
+		exec.RuntimeType = RuntimeACPAgent
+		exec.ACPAgentID = descriptor.Provider
+	case botagents.RuntimeCodex, botagents.RuntimeClaudeCode:
+		// Direct external agents carry the runtime type on the schedule row
+		// itself; the fire dispatches through the external driver with no
+		// acp_agent_id and no native model.
+		exec.RuntimeType = descriptor.Runtime
+	default:
 		return ExecutionConfig{}, botagents.ErrInvalidRuntime
 	}
-	exec.BotAgentID = agent.ID
-	exec.RuntimeType = RuntimeACPAgent
-	exec.ACPAgentID = descriptor.Provider
+	if declared != "" && declared != exec.RuntimeType {
+		return ExecutionConfig{}, invalidRequest("bot_agent_id conflicts with the selected runtime_type")
+	}
 	return exec, nil
 }
 
@@ -189,8 +211,12 @@ func (s *Service) resolveBotAgentExecution(ctx context.Context, botID string, ex
 // Only the native runtime is checked: an ACP agent brings its own model, and
 // an existing session can still fall back to the model that produced its
 // latest round.
-func (s *Service) requireResolvableModel(ctx context.Context, botID string, exec ExecutionConfig, targetIsACP bool) error {
-	if exec.RunTarget != RunTargetNewSession || exec.RuntimeType == RuntimeACPAgent || targetIsACP {
+func (s *Service) requireResolvableModel(ctx context.Context, botID string, exec ExecutionConfig, targetIsAgent bool) error {
+	if exec.RunTarget != RunTargetNewSession ||
+		runtimekind.ResolvesOwnModel(exec.RuntimeType) ||
+		targetIsAgent {
+		// Agent runtimes resolve their model inside the agent; only the
+		// native model runtime needs a resolvable Memoh model row.
 		return nil
 	}
 	if exec.ModelID != "" {
@@ -214,9 +240,9 @@ func (s *Service) requireResolvableModel(ctx context.Context, botID string, exec
 }
 
 // validateTargetSession checks that the target session exists on this bot
-// and is a kind a schedule can append to, and reports whether it runs an
-// ACP agent.
-func (s *Service) validateTargetSession(ctx context.Context, botID, sessionID string) (isACP bool, err error) {
+// and is a kind a schedule can append to, and reports whether it runs on an
+// agent runtime (ACP or a direct external agent).
+func (s *Service) validateTargetSession(ctx context.Context, botID, sessionID string) (isAgent bool, err error) {
 	if sessionID == "" {
 		return false, ErrTargetSessionRequired
 	}
@@ -243,17 +269,17 @@ func (s *Service) validateTargetSession(ctx context.Context, botID, sessionID st
 	default:
 		return false, invalidRequestf("target session has mode %q; only chat or schedule sessions can host scheduled runs", sess.SessionMode)
 	}
-	return isACPSessionRow(sess.RuntimeType, sess.Type), nil
+	return isAgentRuntimeSessionRow(sess.RuntimeType, sess.Type), nil
 }
 
-// isACPSessionRow mirrors the chat/thread runtime resolution for stored
-// rows: an explicit runtime_type wins, with the legacy acp_agent type as
-// fallback for rows that predate the split descriptor.
-func isACPSessionRow(runtimeType, legacyType string) bool {
-	if rt := strings.TrimSpace(runtimeType); rt != "" {
-		return rt == RuntimeACPAgent
+// isAgentRuntimeSessionRow mirrors the chat/thread runtime resolution for
+// stored rows: an explicit runtime_type wins, with the legacy acp_agent type
+// as fallback for rows that predate the split descriptor.
+func isAgentRuntimeSessionRow(runtimeType, legacyType string) bool {
+	if strings.TrimSpace(runtimeType) == "" {
+		return strings.TrimSpace(legacyType) == RuntimeACPAgent
 	}
-	return strings.TrimSpace(legacyType) == RuntimeACPAgent
+	return runtimekind.IsExternal(runtimeType)
 }
 
 func (s *Service) validateNativeModel(ctx context.Context, modelID string) error {
@@ -288,11 +314,10 @@ func (s *Service) validateWorkdirBinding(ctx context.Context, botID, workdirID, 
 	if err != nil {
 		return err
 	}
-	// The ACP runtime runs inside the native workspace and cannot reach a
-	// remote runtime's filesystem — same policy as interactive session
-	// creation.
-	if runtimeType == RuntimeACPAgent && wd.TargetKind == workdir.TargetKindRemote {
-		return invalidRequest("ACP schedules cannot bind a remote workdir")
+	// External Agents run inside the native workspace and cannot reach a
+	// remote runtime's filesystem — same policy as interactive sessions.
+	if runtimekind.IsExternal(runtimeType) && wd.TargetKind == workdir.TargetKindRemote {
+		return invalidRequest("external Agent schedules cannot bind a remote workdir")
 	}
 	return nil
 }

@@ -1079,7 +1079,7 @@ func TestChannelInboundProcessorAutoCreatesDefaultACPSession(t *testing.T) {
 	processor.SetACPProfileResolver(testACPProfiles{})
 	processor.SetDefaultChatRuntime(fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
 		Runtime:     sessionpkg.RuntimeACPAgent,
-		ACPAgentID:  "codex",
+		ACPAgentID:  "custom-agent",
 		ProjectPath: "/data/app",
 		ProjectMode: sessionpkg.DefaultACPProjectMode,
 	}})
@@ -1115,8 +1115,8 @@ func TestChannelInboundProcessorAutoCreatesDefaultACPSession(t *testing.T) {
 	if permChecker.account != "account-user-acp" {
 		t.Fatalf("permission principal = %q, want account user", permChecker.account)
 	}
-	if got := newSessionMetadataString(ensurer.lastSpec.Metadata, "acp_agent_id"); got != "codex" {
-		t.Fatalf("acp_agent_id = %q, want codex", got)
+	if got := newSessionMetadataString(ensurer.lastSpec.Metadata, "acp_agent_id"); got != "custom-agent" {
+		t.Fatalf("acp_agent_id = %q, want custom-agent", got)
 	}
 	if gateway.gotReq.ThreadID != "created-session" {
 		t.Fatalf("StreamChat session = %q, want created-session", gateway.gotReq.ThreadID)
@@ -1137,7 +1137,7 @@ func TestChannelInboundProcessorDefaultACPRequiresWorkspaceExec(t *testing.T) {
 	processor.SetACPProfileResolver(testACPProfiles{})
 	processor.SetDefaultChatRuntime(fakeDefaultChatRuntimeReader{settings: DefaultChatRuntimeSettings{
 		Runtime:    sessionpkg.RuntimeACPAgent,
-		ACPAgentID: "codex",
+		ACPAgentID: "custom-agent",
 	}})
 	processor.SetBotPermissionChecker(&fakeBotPermissionChecker{allowed: false})
 	sender := &fakeReplySender{}

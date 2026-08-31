@@ -8,9 +8,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 )
 
@@ -19,13 +20,14 @@ import (
 // disconnects, GET reports the redacted state.
 type AgentCredentialHandler struct {
 	service        *agentcredential.Service
+	agents         *botagents.Service
 	botService     *bots.Service
 	accountService *accounts.Service
-	runtimes       *acpagent.SessionPool
+	runtimes       external.Drivers
 }
 
-func NewAgentCredentialHandler(service *agentcredential.Service, botService *bots.Service, accountService *accounts.Service, runtimes *acpagent.SessionPool) *AgentCredentialHandler {
-	return &AgentCredentialHandler{service: service, botService: botService, accountService: accountService, runtimes: runtimes}
+func NewAgentCredentialHandler(service *agentcredential.Service, agents *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *AgentCredentialHandler {
+	return &AgentCredentialHandler{service: service, agents: agents, botService: botService, accountService: accountService, runtimes: runtimes}
 }
 
 func (h *AgentCredentialHandler) Register(e *echo.Echo) {
@@ -89,6 +91,13 @@ func (h *AgentCredentialHandler) Put(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return apperror.New(apperror.CodeAgentCredentialRequestInvalid, nil)
 	}
+	agent, err := h.agents.Get(c.Request().Context(), botID, botAgentID)
+	if err != nil {
+		return mapAgentCredentialError(agentcredential.ErrNotFound)
+	}
+	if !botagents.AcceptsCredential(agent, req.AuthKind) {
+		return mapAgentCredentialError(agentcredential.ErrIncompatible)
+	}
 	credential, err := h.service.AttachToBotAgent(c.Request().Context(), channelIdentityID, botID, botAgentID, agentcredential.CreateRequest{
 		Provider: agentcredential.ProviderForAuthKind(req.AuthKind),
 		AuthKind: req.AuthKind,
@@ -97,7 +106,7 @@ func (h *AgentCredentialHandler) Put(c echo.Context) error {
 	if err != nil {
 		return mapAgentCredentialError(err)
 	}
-	h.closeRuntimes(botID, botAgentID)
+	h.closeRuntimes(agent.Runtime, botID, botAgentID)
 	return c.JSON(http.StatusOK, credential)
 }
 
@@ -114,15 +123,20 @@ func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	agent, err := h.agents.Get(c.Request().Context(), botID, botAgentID)
+	if err != nil {
+		return mapAgentCredentialError(agentcredential.ErrNotFound)
+	}
+	if err := h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID); err != nil {
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
+		return apperror.Wrap(apperror.CodeAgentCredentialMaterializationFailed, err, nil)
+	}
 	if err := h.service.DetachFromBotAgent(c.Request().Context(), botID, botAgentID); err != nil {
 		return mapAgentCredentialError(err)
 	}
-	h.closeRuntimes(botID, botAgentID)
-	if h.runtimes != nil {
-		// Disconnect must also invalidate the staged Codex auth, or the next
-		// managed start would keep using the durable token on disk.
-		_ = h.runtimes.PurgeBotAgentDurableAuth(c.Request().Context(), botID, botAgentID)
-	}
+	h.closeRuntimes(agent.Runtime, botID, botAgentID)
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -142,11 +156,8 @@ func (h *AgentCredentialHandler) requireBotManage(c echo.Context) (string, strin
 	return botID, botAgentID, nil
 }
 
-func (h *AgentCredentialHandler) closeRuntimes(botID, botAgentID string) {
-	if h.runtimes == nil {
-		return
-	}
-	_ = h.runtimes.CloseBotAgentInstanceRuntimes(botID, botAgentID)
+func (h *AgentCredentialHandler) closeRuntimes(runtimeType, botID, botAgentID string) {
+	h.runtimes.ResetBotAgent(runtimeType, botID, botAgentID)
 }
 
 func mapAgentCredentialError(err error) error {

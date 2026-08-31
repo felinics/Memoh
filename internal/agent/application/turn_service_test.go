@@ -95,6 +95,8 @@ func (a *scriptedAdmitter) FinishRun(_ context.Context, handle sessionruntime.Ru
 	return nil
 }
 
+func (*scriptedAdmitter) MarkInlineDecisionRun(string, string, string) {}
+
 func (a *scriptedAdmitter) PublishAgentEvent(
 	_ context.Context,
 	_ sessionruntime.RunHandle,

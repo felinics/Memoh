@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -121,9 +120,7 @@ func canExposeAskUserTool(session SessionContext) bool {
 	if session.CanAskUser() {
 		return true
 	}
-	// ACP agents such as Hermes discover MCP tools before a prompt is active,
-	// then cache that tool surface for later prompt turns. Let discovery see
-	// ask_user for interactive ACP sessions; execution still requires
-	// CanRequestUserInput so non-active/background calls cannot hang.
-	return session.CanListUserInput && strings.EqualFold(strings.TrimSpace(session.SessionType), sessionmode.ACPAgent)
+	// External agents can cache MCP tools before a prompt is active. Execution
+	// still requires CanRequestUserInput so an idle tool call cannot block.
+	return session.CanListUserInput && sessionmode.IsInteractive(session.SessionType)
 }

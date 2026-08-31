@@ -813,3 +813,5 @@ func TestBudgetOverAbortKeepsAbortTraceInSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func (*lifecycleTurnAdmitter) MarkInlineDecisionRun(string, string, string) {}

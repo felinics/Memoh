@@ -19,7 +19,7 @@ import (
 	"unicode"
 
 	"github.com/felinics/memoh/internal/acl"
-	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/attachment"
@@ -34,6 +34,7 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/runtimekind"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
 )
@@ -4049,8 +4050,8 @@ func looksLikeApprovalID(value string) bool {
 }
 
 // resolveNewSessionSpecParsed determines the session mode/runtime for /new.
-// /new chat → chat+model, /new codex → default-mode+ACP, /new chat codex →
-// chat+ACP, /new discuss codex → discuss+ACP.
+// /new chat → chat+model; a named Agent selects either its direct runtime or
+// the generic ACP runtime while the explicit/default channel mode stays intact.
 func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage, profiles turn.ACPProfileResolver) (NewSessionSpec, error) {
 	operands := newSessionOperands(parsed)
 	explicit := ""
@@ -4083,6 +4084,18 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 			mode = sessionpkg.TypeDiscuss
 		}
 	default:
+		if direct := normalizeACPAgentID(explicit); sessionpkg.IsDirectRuntimeType(direct) {
+			// A bare direct external agent name ("/new codex") is a valid
+			// operand even though it has no ACP profile.
+			agentID = direct
+			switch {
+			case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
+				mode = sessionpkg.TypeChat
+			default:
+				mode = sessionpkg.TypeDiscuss
+			}
+			break
+		}
 		profile := resolveACPProfile(profiles, explicit)
 		if !profile.Known {
 			return NewSessionSpec{}, fmt.Errorf("unknown session type %q — use /new, /new chat, or /new discuss", explicit)
@@ -4107,13 +4120,22 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 	if agentID == "" {
 		return spec, nil
 	}
+	// Direct external agents (codex, claude-code) are addressed by their
+	// runtime name and never live in the ACP profile registry.
+	if sessionpkg.IsDirectRuntimeType(agentID) {
+		spec.Runtime = agentID
+		if mode != sessionpkg.TypeChat {
+			spec.Type = sessionpkg.TypeDiscuss
+		}
+		return spec, nil
+	}
 	profile := resolveACPProfile(profiles, agentID)
 	if !profile.Known {
-		return NewSessionSpec{}, acpfeedback.New(
-			acpfeedback.CodeAgentNotFound,
+		return NewSessionSpec{}, agentfeedback.New(
+			agentfeedback.CodeAgentNotFound,
 			"unknown_agent",
 			http.StatusBadRequest,
-			"chat.acp.agentNotFound",
+			"chat.externalAgent.agentNotFound",
 			fmt.Sprintf("Unknown ACP agent %q.", agentID),
 			map[string]string{"agent_id": agentID},
 		)
@@ -4130,8 +4152,8 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 }
 
 // newSessionOperands applies /new's grammar after the shared syntax parser.
-// Mentions address chat participants rather than naming a session mode or ACP
-// profile, and callback flags control execution rather than session semantics.
+// Mentions address chat participants rather than naming a session mode or
+// Agent, and callback flags control execution rather than session semantics.
 func newSessionOperands(parsed command.ParsedCommand) []string {
 	values := make([]string, 0, 1+len(parsed.Args))
 	values = append(values, parsed.Action)
@@ -4208,6 +4230,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 			}
 			return err
 		}
+	}
+	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		if err := p.requireWorkspaceExecForACP(ctx, identity); err != nil {
 			if feedback := acpFeedbackFromError(err); feedback != nil {
 				return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
@@ -4262,7 +4286,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		})
 	}
 
-	if spec.Runtime == sessionpkg.RuntimeACPAgent {
+	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, spec.RuntimeOwnerAccountID)
 	}
 	if strings.TrimSpace(spec.CreatedByUserID) == "" {
@@ -4355,6 +4379,9 @@ func newSessionConfirmModeText(spec NewSessionSpec) string {
 			return mode + " " + agentID
 		}
 	}
+	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
+		return mode + " " + spec.Runtime
+	}
 	return mode
 }
 
@@ -4367,12 +4394,17 @@ func newSessionModeKey(spec NewSessionSpec) string {
 
 func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
 	mode := loc.T(newSessionModeKey(spec))
-	if spec.Runtime != sessionpkg.RuntimeACPAgent {
+	runtime := ""
+	switch {
+	case spec.Runtime == sessionpkg.RuntimeACPAgent:
+		runtime = newSessionACPRuntimeLabel(spec, profiles)
+		if runtime == "" {
+			runtime = "ACP"
+		}
+	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
+		runtime = spec.Runtime
+	default:
 		return mode
-	}
-	runtime := newSessionACPRuntimeLabel(spec, profiles)
-	if runtime == "" {
-		runtime = "ACP"
 	}
 	return loc.T("newSession.modeWithRuntime", map[string]any{
 		"mode":    mode,
@@ -4415,32 +4447,26 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if err != nil {
 		return NewSessionSpec{}, err
 	}
-	if strings.TrimSpace(defaults.Runtime) != sessionpkg.RuntimeACPAgent {
+	defaultRuntime := strings.TrimSpace(defaults.Runtime)
+	directDefault := runtimekind.IsDirect(defaultRuntime)
+	if !directDefault && defaultRuntime != sessionpkg.RuntimeACPAgent {
 		return spec, nil
 	}
 	agentID := normalizeACPAgentID(defaults.ACPAgentID)
+	if directDefault {
+		// A direct default is fully described by its runtime.
+		agentID = defaultRuntime
+	}
 	if agentID == "" {
-		return NewSessionSpec{}, acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+		return NewSessionSpec{}, agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_agent_id",
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			"External agent is selected as the default chat runtime, but no agent is configured.",
 			nil,
 		)
 	}
-	profile := resolveACPProfile(p.acpProfiles, agentID)
-	if !profile.Known {
-		return NewSessionSpec{}, acpfeedback.New(
-			acpfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.acp.agentNotFound",
-			"Configured ACP agent was not found.",
-			map[string]string{"agent_id": agentID},
-		)
-	}
-	agentID = profile.ID
 	if p.permissionChecker == nil {
 		return NewSessionSpec{}, p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
 	}
@@ -4451,6 +4477,32 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if projectPath == "" {
 		projectPath = sessionpkg.DefaultACPProjectPath
 	}
+
+	// Direct external agents have no ACP profile to resolve; only real ACP
+	// providers go through the profile registry.
+	if directDefault {
+		spec.Runtime = defaultRuntime
+		spec.Type = sessionpkg.TypeChat
+		spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
+		spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, "")
+		spec.Metadata = map[string]any{
+			"project_path": projectPath,
+		}
+		return spec, nil
+	}
+
+	profile := resolveACPProfile(p.acpProfiles, agentID)
+	if !profile.Known {
+		return NewSessionSpec{}, agentfeedback.New(
+			agentfeedback.CodeAgentNotFound,
+			"unknown_agent",
+			http.StatusBadRequest,
+			"chat.externalAgent.agentNotFound",
+			"Configured ACP agent was not found.",
+			map[string]string{"agent_id": agentID},
+		)
+	}
+	agentID = profile.ID
 	projectMode := strings.TrimSpace(defaults.ProjectMode)
 	if projectMode == "" {
 		projectMode = sessionpkg.DefaultACPProjectMode
@@ -4525,22 +4577,22 @@ func metadataString(metadata map[string]any, key string) string {
 func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) error {
 	agentID := acpNewSessionAgentID(spec)
 	if agentID == "" {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_agent_id",
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			"ACP agent id is required for external-agent sessions.",
 			nil,
 		)
 	}
 	profile := resolveACPProfile(p.acpProfiles, agentID)
 	if !profile.Known {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotFound,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotFound,
 			"unknown_agent",
 			http.StatusBadRequest,
-			"chat.acp.agentNotFound",
+			"chat.externalAgent.agentNotFound",
 			"Configured ACP agent was not found.",
 			map[string]string{"agent_id": agentID},
 		)
@@ -4550,11 +4602,11 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 		projectPath = sessionpkg.DefaultACPProjectPath
 	}
 	if !strings.HasPrefix(projectPath, "/") {
-		return acpfeedback.New(
-			acpfeedback.CodeProjectPathInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectPathInvalid,
 			"project_path_must_be_absolute",
 			http.StatusBadRequest,
-			"chat.acp.projectPathInvalid",
+			"chat.externalAgent.projectPathInvalid",
 			"ACP project path must be absolute.",
 			map[string]string{"agent_id": agentID},
 		)
@@ -4566,20 +4618,20 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	switch projectMode {
 	case sessionpkg.DefaultACPProjectMode:
 	case "none":
-		return acpfeedback.New(
-			acpfeedback.CodeProjectModeInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectModeInvalid,
 			"none_not_supported_for_new_session",
 			http.StatusBadRequest,
-			"chat.acp.projectModeInvalid",
+			"chat.externalAgent.projectModeInvalid",
 			"acp_project_mode=none is not supported for channel-created ACP sessions.",
 			map[string]string{"agent_id": agentID, "project_mode": projectMode},
 		)
 	default:
-		return acpfeedback.New(
-			acpfeedback.CodeProjectModeInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectModeInvalid,
 			"unknown_project_mode",
 			http.StatusBadRequest,
-			"chat.acp.projectModeInvalid",
+			"chat.externalAgent.projectModeInvalid",
 			"Unknown ACP project mode.",
 			map[string]string{"agent_id": agentID, "project_mode": projectMode},
 		)
@@ -4593,41 +4645,26 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	}
 	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
 	if strings.TrimSpace(spec.BotAgentID) == "" && !setup.Enabled {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotEnabled,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotEnabled,
 			"agent_not_enabled",
 			http.StatusForbidden,
-			"chat.acp.agentNotEnabled",
+			"chat.externalAgent.agentNotEnabled",
 			"ACP agent is not enabled for this bot.",
 			map[string]string{"agent_id": agentID},
 		)
 	}
-	if field := setup.MissingManagedField; field != nil && (strings.TrimSpace(spec.BotAgentID) == "" || !credentialOwnedManagedField(field.ID)) {
-		// Persisted Bot Agent sessions carry their secret in the encrypted
-		// credential store, so only the secret fields defer to it; missing
-		// non-secret configuration (e.g. the Hermes provider/model) still
-		// rejects here instead of failing on the first turn.
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+	if field := setup.MissingManagedField; field != nil {
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_managed_field",
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			"ACP agent setup is incomplete.",
 			map[string]string{"agent_id": agentID, "field_id": field.ID, "field_label": field.Label},
 		)
 	}
 	return nil
-}
-
-// credentialOwnedManagedField reports whether the encrypted credential store
-// supplies this managed field for instance-bound sessions.
-func credentialOwnedManagedField(fieldID string) bool {
-	switch strings.ToLower(strings.TrimSpace(fieldID)) {
-	case "api_key", "oauth_token":
-		return true
-	default:
-		return false
-	}
 }
 
 func (p *ChannelInboundProcessor) requireWorkspaceExecForACP(ctx context.Context, identity InboundIdentity) error {
@@ -4667,8 +4704,13 @@ func (p *ChannelInboundProcessor) requireACPRuntimeActor(_ context.Context, iden
 	return p.missingWorkspaceExecFeedback("runtime_owner_mismatch", "This ACP runtime belongs to another user.")
 }
 
+// sessionUsesACPRuntime reports a session that runs on an agent runtime with
+// workspace access — ACP or a direct external agent — and therefore needs the
+// runtime-owner workspace-exec gate before a turn starts. The name predates
+// the direct runtimes; every caller wants "agent runtime", not "ACP".
 func sessionUsesACPRuntime(sess SessionResult) bool {
-	return strings.TrimSpace(sess.Runtime) == sessionpkg.RuntimeACPAgent || strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent
+	return runtimekind.RequiresWorkspaceExec(sess.Runtime) ||
+		strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent
 }
 
 func sessionSupportsRequestedSkills(sess SessionResult) bool {
@@ -4701,23 +4743,23 @@ func isGroupConversation(msg channel.InboundMessage) bool {
 	return !isLocalChannelType(msg.Channel) && !channel.IsPrivateConversationType(msg.Conversation.Type)
 }
 
-func groupChatACPUnsupportedFeedback() *acpfeedback.Error {
-	return acpfeedback.New(
-		acpfeedback.CodeGroupChatUnsupported,
+func groupChatACPUnsupportedFeedback() *agentfeedback.Error {
+	return agentfeedback.New(
+		agentfeedback.CodeGroupChatUnsupported,
 		"group_chat_acp_unsupported",
 		http.StatusBadRequest,
-		"chat.acp.groupChatUnsupported",
+		"chat.externalAgent.groupChatUnsupported",
 		"Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex to create a discuss external-agent session.",
 		nil,
 	)
 }
 
-func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message string) *acpfeedback.Error {
-	return acpfeedback.New(
-		acpfeedback.CodeNoWorkspaceExec,
+func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message string) *agentfeedback.Error {
+	return agentfeedback.New(
+		agentfeedback.CodeNoWorkspaceExec,
 		reason,
 		http.StatusForbidden,
-		"chat.acp.noWorkspaceExec",
+		"chat.externalAgent.noWorkspaceExec",
 		message,
 		nil,
 	)
@@ -4744,28 +4786,32 @@ func (p *ChannelInboundProcessor) sendACPFeedbackError(ctx context.Context, send
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-func acpFeedbackFromError(err error) *acpfeedback.Error {
-	var feedback *acpfeedback.Error
+func acpFeedbackFromError(err error) *agentfeedback.Error {
+	var feedback *agentfeedback.Error
 	if errors.As(err, &feedback) {
 		return feedback
 	}
 	switch {
 	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired):
-		return acpfeedback.New(acpfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.acp.agentNotConfigured", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPUnknownAgent):
-		return acpfeedback.New(acpfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.acp.agentNotFound", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.externalAgent.agentNotFound", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
-		return acpfeedback.New(acpfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.acp.agentNotEnabled", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.externalAgent.agentNotEnabled", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
-		return acpfeedback.New(acpfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.acp.agentNotConfigured", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
-		return acpfeedback.New(acpfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.acp.runtimeOwnerMissing", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.externalAgent.runtimeOwnerMissing", err.Error(), nil)
 	default:
 		return nil
 	}
 }
 
 func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {
+	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
+		cc.ChatModel = spec.Runtime
+		return cc
+	}
 	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return cc
 	}

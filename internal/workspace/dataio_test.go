@@ -21,10 +21,10 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridgesvc"
 )
 
-func TestTarGzDirSkipsHermesSecrets(t *testing.T) {
+func TestTarGzDirSkipsRuntimeSecrets(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceArchiveFixture(t, root)
-	writeTestSymlink(t, root, "../.memoh-hermes/.env", "notes/env-link")
+	writeTestSymlink(t, root, "../.codex/auth.json", "notes/auth-link")
 
 	var buf bytes.Buffer
 	if err := tarGzDir(&buf, root, false); err != nil {
@@ -37,10 +37,10 @@ func TestTarGzDirSkipsHermesSecrets(t *testing.T) {
 	assertWorkspaceUserDataInArchive(t, names)
 }
 
-func TestExportDataViaGRPCSkipsHermesSecrets(t *testing.T) {
+func TestExportDataViaGRPCSkipsRuntimeSecrets(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceArchiveFixture(t, root)
-	writeTestSymlink(t, root, "../.memoh-hermes/.env", "notes/env-link")
+	writeTestSymlink(t, root, "../.codex/auth.json", "notes/auth-link")
 
 	client := newDataIOTestBridgeClient(t, root)
 	manager := &Manager{service: &dataIOBridgeProvider{client: client}}
@@ -60,11 +60,11 @@ func TestExportDataViaGRPCSkipsHermesSecrets(t *testing.T) {
 	assertWorkspaceUserDataInArchive(t, names)
 }
 
-func TestImportDataViaGRPCSkipsHermesSecrets(t *testing.T) {
+func TestImportDataViaGRPCSkipsRuntimeSecrets(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceSecretFixture(t, root)
-	writeTestFile(t, root, ".memoh-hermes/mcp-tokens/stale-target.json", `{"refresh_token":"old"}`)
-	writeTestFile(t, root, ".hermes/auth/stale-target.json", `{"refresh_token":"old"}`)
+	writeTestFile(t, root, ".codex/auth/stale-target.json", `{"refresh_token":"old"}`)
+	writeTestFile(t, root, ".claude/projects/stale/session.jsonl", `{"message":"old"}`)
 	client := newDataIOTestBridgeClient(t, root)
 	manager := &Manager{service: &dataIOBridgeProvider{client: client}}
 	raw := buildWorkspaceArchive(t, workspaceArchiveFixture())
@@ -74,16 +74,16 @@ func TestImportDataViaGRPCSkipsHermesSecrets(t *testing.T) {
 	}
 
 	assertWorkspaceSecretsMissingOnDisk(t, root)
-	assertPathMissing(t, root, ".memoh-hermes/mcp-tokens/stale-target.json")
-	assertPathMissing(t, root, ".hermes/auth/stale-target.json")
+	assertPathMissing(t, root, ".codex/auth/stale-target.json")
+	assertPathMissing(t, root, ".claude/projects/stale/session.jsonl")
 	assertWorkspaceUserDataOnDisk(t, root)
 }
 
-func TestUntarGzDirSkipsHermesSecrets(t *testing.T) {
+func TestUntarGzDirSkipsRuntimeSecrets(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceSecretFixture(t, root)
-	writeTestFile(t, root, ".memoh-hermes/mcp-tokens/stale-target.json", `{"refresh_token":"old"}`)
-	writeTestFile(t, root, ".hermes/auth/stale-target.json", `{"refresh_token":"old"}`)
+	writeTestFile(t, root, ".codex/auth/stale-target.json", `{"refresh_token":"old"}`)
+	writeTestFile(t, root, ".claude/projects/stale/session.jsonl", `{"message":"old"}`)
 	raw := buildWorkspaceArchive(t, workspaceArchiveFixture())
 
 	if err := untarGzDir(bytes.NewReader(raw), root, false); err != nil {
@@ -91,8 +91,8 @@ func TestUntarGzDirSkipsHermesSecrets(t *testing.T) {
 	}
 
 	assertWorkspaceSecretsMissingOnDisk(t, root)
-	assertPathMissing(t, root, ".memoh-hermes/mcp-tokens/stale-target.json")
-	assertPathMissing(t, root, ".hermes/auth/stale-target.json")
+	assertPathMissing(t, root, ".codex/auth/stale-target.json")
+	assertPathMissing(t, root, ".claude/projects/stale/session.jsonl")
 	assertWorkspaceUserDataOnDisk(t, root)
 }
 
@@ -120,7 +120,10 @@ func TestPreservedDataKeepsCredentialsAndSkipsRuntimeFiles(t *testing.T) {
 	if !hasArchiveName(names, ".codex/auth.json") {
 		t.Fatalf("archive did not preserve Codex credentials: %v", names)
 	}
-	for _, path := range []string{".memoh-hermes/sessions/latest.json", ".memoh-hermes/state.db", "runtime.sock"} {
+	if !hasArchiveName(names, ".claude/.credentials.json") {
+		t.Fatalf("archive did not preserve Claude credentials: %v", names)
+	}
+	for _, path := range []string{".codex/sessions/latest.json", ".claude/projects/workspace/session.jsonl", ".codex/state.db", "runtime.sock"} {
 		if hasArchiveName(names, path) {
 			t.Fatalf("archive included runtime file %s: %v", path, names)
 		}
@@ -131,38 +134,27 @@ func TestPreservedDataKeepsCredentialsAndSkipsRuntimeFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPathContent(t, restored, ".codex/auth.json", `{"OPENAI_API_KEY":"secret"}`)
+	assertPathContent(t, restored, ".claude/.credentials.json", `{"claudeAiOauth":"secret"}`)
 }
 
 func workspaceArchiveFixture() map[string]string {
 	files := workspaceSecretFiles()
-	files[".memoh-hermes/config.yaml"] = "model:\n  provider: openrouter\n"
-	files[".hermes/config.yaml"] = "model:\n  provider: openrouter\n"
 	files[".codex/config.toml"] = "model = \"gpt-5.4-codex\"\n"
+	files[".claude/settings.json"] = `{"permissions":{"defaultMode":"default"}}`
 	files["notes/readme.txt"] = "hello\n"
 	return files
 }
 
 func workspaceSecretFiles() map[string]string {
-	return map[string]string{
-		".memoh-hermes/.env":                       "OPENROUTER_API_KEY=secret\n",
-		".memoh-hermes/auth.json":                  `{"token":"secret"}`,
-		".memoh-hermes/auth/google_oauth.json":     `{"refresh_token":"secret"}`,
-		".memoh-hermes/mcp-tokens/github.json":     `{"refresh_token":"secret"}`,
-		".memoh-hermes/sessions/latest.json":       `{"token":"secret"}`,
-		".memoh-hermes/state.db":                   "secret",
-		".memoh-hermes/state.db-wal":               "secret",
-		".memoh-hermes/accounts/default/.env":      "OPENAI_API_KEY=secret\n",
-		".memoh-hermes/accounts/default/auth.json": `{"token":"secret"}`,
-		".hermes/.env":                             "OPENAI_API_KEY=secret\n",
-		".hermes/auth.json":                        `{"token":"secret"}`,
-		".hermes/auth/google_oauth.json":           `{"refresh_token":"secret"}`,
-		".hermes/mcp-tokens/github.json":           `{"refresh_token":"secret"}`,
-		".hermes/sessions/latest.json":             `{"token":"secret"}`,
-		".hermes/state.db-shm":                     "secret",
-		".hermes/accounts/default/.env":            "OPENAI_API_KEY=secret\n",
-		".hermes/accounts/default/auth.json":       `{"token":"secret"}`,
+	return map[string]string{ //nolint:gosec // synthetic credentials exercise archive redaction
 		".codex/auth.json":                         `{"OPENAI_API_KEY":"secret"}`,
 		".codex/auth/token.json":                   `{"token":"secret"}`,
+		".codex/sessions/latest.json":              `{"message":"private runtime transcript"}`,
+		".codex/state.db":                          "runtime state",
+		".claude/.credentials.json":                `{"claudeAiOauth":"secret"}`,
+		".claude/projects/workspace/session.jsonl": `{"message":"private runtime transcript"}`,
+		".memoh-hermes/.env":                       "OPENAI_API_KEY=legacy-secret\n",
+		".hermes/auth.json":                        `{"token":"legacy-secret"}`,
 	}
 }
 
@@ -184,21 +176,21 @@ func assertNoWorkspaceSecretsInArchive(t *testing.T, names []string) {
 	t.Helper()
 	for path := range workspaceSecretFiles() {
 		if hasArchiveName(names, path) {
-			t.Fatalf("archive leaked ACP secret %s: %v", path, names)
+			t.Fatalf("archive leaked runtime secret %s: %v", path, names)
 		}
 	}
 }
 
 func assertNoWorkspaceSecretAliasesInArchive(t *testing.T, names []string) {
 	t.Helper()
-	if hasArchiveName(names, "notes/env-link") {
-		t.Fatalf("archive included symlink alias to ACP secret: %v", names)
+	if hasArchiveName(names, "notes/auth-link") {
+		t.Fatalf("archive included symlink alias to runtime secret: %v", names)
 	}
 }
 
 func assertWorkspaceUserDataInArchive(t *testing.T, names []string) {
 	t.Helper()
-	for _, path := range []string{".memoh-hermes/config.yaml", ".hermes/config.yaml", ".codex/config.toml", "notes/readme.txt"} {
+	for _, path := range []string{".codex/config.toml", ".claude/settings.json", "notes/readme.txt"} {
 		if !hasArchiveName(names, path) {
 			t.Fatalf("archive names = %v, want %s", names, path)
 		}
@@ -214,9 +206,8 @@ func assertWorkspaceSecretsMissingOnDisk(t *testing.T, root string) {
 
 func assertWorkspaceUserDataOnDisk(t *testing.T, root string) {
 	t.Helper()
-	assertPathContent(t, root, ".memoh-hermes/config.yaml", "model:\n  provider: openrouter\n")
-	assertPathContent(t, root, ".hermes/config.yaml", "model:\n  provider: openrouter\n")
 	assertPathContent(t, root, ".codex/config.toml", "model = \"gpt-5.4-codex\"\n")
+	assertPathContent(t, root, ".claude/settings.json", `{"permissions":{"defaultMode":"default"}}`)
 	assertPathContent(t, root, "notes/readme.txt", "hello\n")
 }
 

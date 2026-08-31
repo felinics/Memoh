@@ -30,7 +30,6 @@ type terminalManager struct {
 	defaultCwd string
 	timeout    int32
 	baseEnv    []string
-	cleanEnv   bool
 	unsetEnv   []string
 	events     *toolEventEmitter
 	limit      ToolOutputLimit
@@ -80,7 +79,7 @@ type terminal struct {
 	onDone      func(*terminal)
 }
 
-func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaultCwd string, timeoutSeconds int32, baseEnv []string, cleanEnv bool, unsetEnv []string, events *toolEventEmitter) *terminalManager { //nolint:contextcheck // terminal streams must live for the ACP turn, not a single RPC callback.
+func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaultCwd string, timeoutSeconds int32, baseEnv []string, unsetEnv []string, events *toolEventEmitter) *terminalManager { //nolint:contextcheck // terminal streams must live for the ACP turn, not a single RPC callback.
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultTerminalTimeout
 	}
@@ -94,7 +93,6 @@ func newTerminalManager(ctx context.Context, client *bridge.Client, root, defaul
 		defaultCwd: defaultCwd,
 		timeout:    timeoutSeconds,
 		baseEnv:    append([]string(nil), baseEnv...),
-		cleanEnv:   cleanEnv,
 		unsetEnv:   append([]string(nil), unsetEnv...),
 		events:     events,
 		terminals:  map[string]*terminal{},
@@ -204,7 +202,6 @@ func (m *terminalManager) CreateTerminal(ctx context.Context, p acp.CreateTermin
 	}
 	stream, err := m.client.ExecStreamWithOptions(execCtx, command, cwd, m.timeout, bridge.ExecOptions{ //nolint:contextcheck // execution outlives the create RPC but not its owning run.
 		Env:      env,
-		CleanEnv: m.cleanEnv,
 		UnsetEnv: m.unsetEnv,
 	})
 	if err != nil {

@@ -406,6 +406,42 @@ func stepUp(t *testing.T, dsn string, n int) {
 	}
 }
 
+// migrateTo positions the schema at exactly the given migration version
+// (applying or rolling back as needed). Version-anchored tests stay valid
+// when new migrations land on top of the chain.
+func migrateTo(t *testing.T, dsn string, version uint) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate to %d: %v", version, err)
+	}
+}
+
+// migrateUpAll applies every remaining migration up to the chain head.
+func migrateUpAll(t *testing.T, dsn string) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate up: %v", err)
+	}
+}
+
 // tryStepDown steps n migrations down and RETURNS any error (instead of failing
 // the test), so callers can assert a fail-closed down gate.
 func tryStepDown(t *testing.T, dsn string, n int) error {

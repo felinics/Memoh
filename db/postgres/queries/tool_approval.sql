@@ -85,14 +85,13 @@ SELECT *
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
--- name: GetPendingToolApprovalByRun :one
+-- name: ListPendingToolApprovalsByRun :many
 SELECT *
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $1
   AND status = 'pending'
-ORDER BY created_at DESC, short_id DESC
-LIMIT 1;
+ORDER BY created_at ASC, short_id ASC;
 
 -- name: ClaimToolApprovalRequestForRuntime :one
 UPDATE tool_approval_requests
@@ -194,7 +193,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
   AND status = 'pending'
   AND runtime_fencing_token IS NOT NULL
-  AND id IS DISTINCT FROM sqlc.narg(preserve_id)::uuid
+  AND id != ALL(sqlc.arg(preserve_ids)::uuid[])
 RETURNING *;
 
 -- name: ListPendingToolApprovalsBySession :many

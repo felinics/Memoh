@@ -602,3 +602,5 @@ func TestAdmitTriggeredRunWithoutViewKeepsEmptyProjection(t *testing.T) {
 		t.Fatalf("request user turn = %#v, want nil without a view factory", view.RequestUserTurn)
 	}
 }
+
+func (*fakeTriggeredAdmitter) MarkInlineDecisionRun(string, string, string) {}

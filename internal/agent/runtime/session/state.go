@@ -60,6 +60,18 @@ func pendingDecisionEvent(event native.StreamEvent) bool {
 	return status == "" || strings.EqualFold(status, "pending")
 }
 
+// decisionEventID identifies the decision an approval or user-input event
+// belongs to, pairing its pending event with the later terminal status.
+func decisionEventID(event native.StreamEvent) string {
+	if id := strings.TrimSpace(event.ApprovalID); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(event.UserInputID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(event.ToolCallID)
+}
+
 func runtimeRunPatch(snapshot Snapshot, status, runError, steer, lease bool) RuntimeDelta {
 	run := snapshot.CurrentRunView
 	if run == nil {

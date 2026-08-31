@@ -256,6 +256,7 @@ func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
 		sessionService: acpRuntimeSessionServiceForTest("user-1"),
 		logger:         slog.New(slog.DiscardHandler),
 	}
+	resolver.SetACPSessionPool(&recordingACPPrompter{})
 	preflightCalled := false
 	postPersistCalled := false
 
@@ -273,8 +274,8 @@ func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
 			return nil
 		},
 	)
-	if got := apperror.CodeOf(err); got != apperror.CodeACPTurnReplacementUnsupported {
-		t.Fatalf("error code = %q, want %q", got, apperror.CodeACPTurnReplacementUnsupported)
+	if got := apperror.CodeOf(err); got != apperror.CodeExternalAgentTurnReplacementUnsupported {
+		t.Fatalf("error code = %q, want %q", got, apperror.CodeExternalAgentTurnReplacementUnsupported)
 	}
 	if preflightCalled || postPersistCalled {
 		t.Fatalf("replacement hooks ran for ACP: preflight=%v postPersist=%v", preflightCalled, postPersistCalled)

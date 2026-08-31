@@ -103,11 +103,12 @@ func (s *Service) reconcileAbortedContextLifecycle(
 					return
 				}
 
-				_, currentPending, decisionErr := s.PendingRuntimeDecision(ctx, runID)
+				pendingTargets, decisionErr := s.PendingRuntimeDecisions(ctx, runID)
 				if decisionErr != nil {
 					s.recordContextLifecyclePersistenceError(decisionErr, runID, botID, sessionID, contextLifecycleStatusAborted)
 					return
 				}
+				currentPending := len(pendingTargets) > 0
 				if !pendingKnown || pendingDecision && !currentPending {
 					metadataFallbackAt = time.Now().Add(abortedContextLifecycleMetadataFallback)
 				}

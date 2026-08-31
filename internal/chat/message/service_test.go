@@ -239,15 +239,15 @@ func (q *clearHistoryQueries) ClearHistoryBySession(_ context.Context, id pgtype
 	return nil
 }
 
-func (*clearHistoryQueries) DeleteACPSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error) {
+func (*clearHistoryQueries) DeleteAgentSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error) {
 	return 0, nil
 }
 
-func (*clearHistoryQueries) DeleteACPSessionStatesBySession(context.Context, pgtype.UUID) (int64, error) {
+func (*clearHistoryQueries) DeleteAgentSessionStatesBySession(context.Context, pgtype.UUID) (int64, error) {
 	return 0, nil
 }
 
-func (*clearHistoryQueries) DeleteACPSessionStateLinesBySession(context.Context, pgtype.UUID) (int64, error) {
+func (*clearHistoryQueries) DeleteAgentSessionStateLinesBySession(context.Context, pgtype.UUID) (int64, error) {
 	return 0, nil
 }
 

@@ -3,17 +3,13 @@ package agentcredential
 import "time"
 
 const ( //nolint:gosec // Stable authentication-kind identifiers, not credential values.
-	ProviderOpenAI     = "openai"
-	ProviderAnthropic  = "anthropic"
-	ProviderGoogle     = "google"
-	ProviderOpenRouter = "openrouter"
+	ProviderOpenAI    = "openai"
+	ProviderAnthropic = "anthropic"
 
 	AuthKindOpenAIAPIKey     = "openai_api_key" //nolint:gosec // Stable authentication-kind identifier.
 	AuthKindOpenAICodexOAuth = "openai_codex_oauth"
 	AuthKindAnthropicAPIKey  = "anthropic_api_key" //nolint:gosec // Stable authentication-kind identifier.
 	AuthKindClaudeCodeOAuth  = "claude_code_oauth"
-	AuthKindGoogleAPIKey     = "google_api_key"
-	AuthKindOpenRouterAPIKey = "openrouter_api_key" //nolint:gosec // Stable authentication-kind identifier.
 )
 
 // PublicCredential is the redacted view of a stored credential. The secret
@@ -45,9 +41,6 @@ type CreateRequest struct {
 
 type ResolvedCredential struct {
 	PublicCredential
-	// AgentProvider is the ACP profile id of the Bot Agent instance this
-	// credential is attached to; runtime starts must match it against the
-	// profile they are about to launch.
-	AgentProvider string
-	Secret        map[string]string
+	AgentRuntime string
+	Secret       map[string]string
 }

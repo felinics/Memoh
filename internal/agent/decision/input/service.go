@@ -63,17 +63,12 @@ func (s *Service) HasWaiter(requestID string) bool {
 	return s != nil && s.waiter != nil && s.waiter.Has(requestID)
 }
 
-// CanRespond reports whether the UI should offer a response action for this
-// request in the current server process. ACP/MCP requests are consumed by an
-// in-process waiter, so a pending DB row alone is not enough.
+// CanRespond reports whether a waiter-backed request can accept a response in
+// this process. Native chat requests are DB-deferred and must not use this
+// helper; callers classify by the session's runtime (UsesDecisionWaiter), the
+// same way tool approvals do.
 func (s *Service) CanRespond(req Request) bool {
-	if req.Status != StatusPending {
-		return false
-	}
-	if IsProcessLocalACPRequest(req) {
-		return s.HasWaiter(req.ID)
-	}
-	return true
+	return req.Status == StatusPending && s.HasWaiter(req.ID)
 }
 
 func (s *Service) notifyResolved(req Request) {
@@ -840,21 +835,6 @@ func canceledResult(reason string) map[string]any {
 		"status":      StatusCanceled,
 		"reason":      reason,
 		"instruction": cancelInstruction,
-	}
-}
-
-// IsProcessLocalACPRequest reports whether the blocked consumer is an ACP
-// JSON-RPC request in this server process. Its durable row may outlive a browser
-// refresh, but it cannot outlive the ACP process and its registered waiter.
-func IsProcessLocalACPRequest(req Request) bool {
-	if req.ProviderMetadata == nil {
-		return false
-	}
-	switch strings.TrimSpace(stringValue(req.ProviderMetadata["source"])) {
-	case ProviderSourceACPMCP, ProviderSourceACPElicitation:
-		return true
-	default:
-		return false
 	}
 }
 

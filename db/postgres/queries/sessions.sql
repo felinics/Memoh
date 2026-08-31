@@ -134,7 +134,10 @@ created_session AS (
     fp.runtime_type,
     -- A fork of a user-visible session is itself user-visible.
     fp.visibility,
-    fp.runtime_metadata,
+    -- External runtimes fork their own runtime-side session: the caller
+    -- passes the new driver-owned keys (e.g. the forked codex thread id) so
+    -- the two Memoh sessions never share one runtime session.
+    COALESCE(sqlc.narg(runtime_metadata_override), fp.runtime_metadata) AS runtime_metadata,
     sqlc.arg(title),
     jsonb_set(
       pm.value,
@@ -234,6 +237,7 @@ copied_assets AS (
 SELECT cs.*
 FROM created_session cs
 CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts;
+
 
 -- name: GetSessionByID :one
 SELECT *
@@ -414,6 +418,23 @@ SET metadata = sqlc.arg(metadata), updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id) AND deleted_at IS NULL
 RETURNING *;
 
+-- name: UpdateSessionRuntimeMetadata :one
+-- The runtime_type guard makes the merge a no-op when the session was
+-- concurrently switched to another runtime: driver-owned keys must never be
+-- written into a session that no longer belongs to that driver. The fencing
+-- guard rejects a superseded owner's late write: after a cluster ownership
+-- handoff the old owner's turn still finishes and reports its runtime
+-- metadata, and letting it land would point the session at a stale runtime
+-- thread. A NULL token skips the guard for callers outside any run.
+UPDATE bot_sessions
+SET runtime_metadata = sqlc.arg(runtime_metadata), updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND runtime_type = sqlc.arg(runtime_type)
+  AND (sqlc.narg(fencing_token)::bigint IS NULL OR runtime_fencing_token <= sqlc.narg(fencing_token)::bigint)
+  AND deleted_at IS NULL
+RETURNING *;
+
 -- name: UpdateSessionMetadataWithRuntimeFence :one
 UPDATE bot_sessions
 SET metadata = sqlc.arg(metadata), updated_at = now()
@@ -453,20 +474,20 @@ WITH invalidated_session AS MATERIALIZED (
   RETURNING id
 ),
 deleted_acp_states AS (
-  DELETE FROM acp_session_states state
+  DELETE FROM agent_session_states state
   USING invalidated_session invalidated
   WHERE state.team_id = public.memoh_current_team_id()
     AND state.session_id = invalidated.id
   RETURNING state.session_id
 ),
 deleted_acp_lines AS (
-  DELETE FROM acp_session_state_lines line
+  DELETE FROM agent_session_state_lines line
   USING invalidated_session invalidated
   WHERE line.team_id = public.memoh_current_team_id()
     AND line.session_id = invalidated.id
   RETURNING line.session_id
 )
-DELETE FROM acp_session_publications publication
+DELETE FROM agent_session_publications publication
 USING invalidated_session invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
@@ -566,20 +587,20 @@ invalidated_sessions AS MATERIALIZED (
   RETURNING session.id
 ),
 deleted_acp_states AS (
-  DELETE FROM acp_session_states state
+  DELETE FROM agent_session_states state
   USING invalidated_sessions invalidated
   WHERE state.team_id = public.memoh_current_team_id()
     AND state.session_id = invalidated.id
   RETURNING state.session_id
 ),
 deleted_acp_lines AS (
-  DELETE FROM acp_session_state_lines line
+  DELETE FROM agent_session_state_lines line
   USING invalidated_sessions invalidated
   WHERE line.team_id = public.memoh_current_team_id()
     AND line.session_id = invalidated.id
   RETURNING line.session_id
 )
-DELETE FROM acp_session_publications publication
+DELETE FROM agent_session_publications publication
 USING invalidated_sessions invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id

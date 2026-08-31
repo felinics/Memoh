@@ -253,8 +253,11 @@ created_session AS (
     fp.runtime_type,
     -- A fork of a user-visible session is itself user-visible.
     fp.visibility,
-    fp.runtime_metadata,
-    $5,
+    -- External runtimes fork their own runtime-side session: the caller
+    -- passes the new driver-owned keys (e.g. the forked codex thread id) so
+    -- the two Memoh sessions never share one runtime session.
+    COALESCE($5, fp.runtime_metadata) AS runtime_metadata,
+    $6,
     jsonb_set(
       pm.value,
       '{forked_from}',
@@ -265,7 +268,7 @@ created_session AS (
       true
     ),
     fp.next_turn_position_value,
-    $6::uuid,
+    $7::uuid,
     -- A fork continues the source conversation, so it stays in the same
     -- workdir (and therefore the same working directory).
     fp.workdir_id
@@ -356,12 +359,13 @@ CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_ass
 `
 
 type ForkSessionFromAssistantTurnParams struct {
-	SessionID       pgtype.UUID `json:"session_id"`
-	BotID           pgtype.UUID `json:"bot_id"`
-	TurnID          pgtype.UUID `json:"turn_id"`
-	Metadata        []byte      `json:"metadata"`
-	Title           string      `json:"title"`
-	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+	SessionID               pgtype.UUID `json:"session_id"`
+	BotID                   pgtype.UUID `json:"bot_id"`
+	TurnID                  pgtype.UUID `json:"turn_id"`
+	Metadata                []byte      `json:"metadata"`
+	RuntimeMetadataOverride []byte      `json:"runtime_metadata_override"`
+	Title                   string      `json:"title"`
+	CreatedByUserID         pgtype.UUID `json:"created_by_user_id"`
 }
 
 type ForkSessionFromAssistantTurnRow struct {
@@ -398,6 +402,7 @@ func (q *Queries) ForkSessionFromAssistantTurn(ctx context.Context, arg ForkSess
 		arg.BotID,
 		arg.TurnID,
 		arg.Metadata,
+		arg.RuntimeMetadataOverride,
 		arg.Title,
 		arg.CreatedByUserID,
 	)
@@ -1191,20 +1196,20 @@ WITH invalidated_session AS MATERIALIZED (
   RETURNING id
 ),
 deleted_acp_states AS (
-  DELETE FROM acp_session_states state
+  DELETE FROM agent_session_states state
   USING invalidated_session invalidated
   WHERE state.team_id = public.memoh_current_team_id()
     AND state.session_id = invalidated.id
   RETURNING state.session_id
 ),
 deleted_acp_lines AS (
-  DELETE FROM acp_session_state_lines line
+  DELETE FROM agent_session_state_lines line
   USING invalidated_session invalidated
   WHERE line.team_id = public.memoh_current_team_id()
     AND line.session_id = invalidated.id
   RETURNING line.session_id
 )
-DELETE FROM acp_session_publications publication
+DELETE FROM agent_session_publications publication
 USING invalidated_session invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
@@ -1242,20 +1247,20 @@ invalidated_sessions AS MATERIALIZED (
   RETURNING session.id
 ),
 deleted_acp_states AS (
-  DELETE FROM acp_session_states state
+  DELETE FROM agent_session_states state
   USING invalidated_sessions invalidated
   WHERE state.team_id = public.memoh_current_team_id()
     AND state.session_id = invalidated.id
   RETURNING state.session_id
 ),
 deleted_acp_lines AS (
-  DELETE FROM acp_session_state_lines line
+  DELETE FROM agent_session_state_lines line
   USING invalidated_sessions invalidated
   WHERE line.team_id = public.memoh_current_team_id()
     AND line.session_id = invalidated.id
   RETURNING line.session_id
 )
-DELETE FROM acp_session_publications publication
+DELETE FROM agent_session_publications publication
 USING invalidated_sessions invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
@@ -1348,6 +1353,69 @@ func (q *Queries) UpdateSessionMetadataWithRuntimeFence(ctx context.Context, arg
 		arg.ID,
 		arg.BotID,
 		arg.RuntimeFencingToken,
+	)
+	var i BotSession
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.RouteID,
+		&i.ChannelType,
+		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
+		&i.Visibility,
+		&i.Title,
+		&i.Metadata,
+		&i.NextTurnPosition,
+		&i.CompactionEpoch,
+		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
+		&i.ParentSessionID,
+		&i.CreatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.TeamID,
+		&i.WorkdirID,
+		&i.BotAgentID,
+	)
+	return i, err
+}
+
+const updateSessionRuntimeMetadata = `-- name: UpdateSessionRuntimeMetadata :one
+UPDATE bot_sessions
+SET runtime_metadata = $1, updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND runtime_type = $3
+  AND ($4::bigint IS NULL OR runtime_fencing_token <= $4::bigint)
+  AND deleted_at IS NULL
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
+`
+
+type UpdateSessionRuntimeMetadataParams struct {
+	RuntimeMetadata []byte      `json:"runtime_metadata"`
+	ID              pgtype.UUID `json:"id"`
+	RuntimeType     string      `json:"runtime_type"`
+	FencingToken    pgtype.Int8 `json:"fencing_token"`
+}
+
+// The runtime_type guard makes the merge a no-op when the session was
+// concurrently switched to another runtime: driver-owned keys must never be
+// written into a session that no longer belongs to that driver. The fencing
+// guard rejects a superseded owner's late write: after a cluster ownership
+// handoff the old owner's turn still finishes and reports its runtime
+// metadata, and letting it land would point the session at a stale runtime
+// thread. A NULL token skips the guard for callers outside any run.
+func (q *Queries) UpdateSessionRuntimeMetadata(ctx context.Context, arg UpdateSessionRuntimeMetadataParams) (BotSession, error) {
+	row := q.db.QueryRow(ctx, updateSessionRuntimeMetadata,
+		arg.RuntimeMetadata,
+		arg.ID,
+		arg.RuntimeType,
+		arg.FencingToken,
 	)
 	var i BotSession
 	err := row.Scan(

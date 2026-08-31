@@ -190,12 +190,12 @@ func createDefaultAgentFixture(t *testing.T, ctx context.Context, pool *pgxpool.
 		), created_bot AS (
 			INSERT INTO bots (id, team_id, owner_user_id, name, status, metadata)
 			SELECT $4, $3, user_id, $2, 'ready',
-				'{"acp":{"agents":{"codex":{"enabled":true,"setup_mode":"self"}}}}'::jsonb
+				'{"external_agents":{"codex":{"auth":"chatgpt"}}}'::jsonb
 			FROM created_member
 			RETURNING id
 		)
 		INSERT INTO bot_agents (id, team_id, bot_id, name, runtime, enabled, metadata)
-		SELECT $5, $3, id, 'Codex', 'acp', true, '{"provider":"codex"}'::jsonb
+		SELECT $5, $3, id, 'Codex', 'codex', true, '{"provider":"codex"}'::jsonb
 		FROM created_bot`,
 		userID, name, team.DefaultTeamID, botID, agentID,
 	); err != nil {

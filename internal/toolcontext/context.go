@@ -33,12 +33,16 @@ type Session struct {
 	// ReasoningStoredEffort and ReasoningRequestedEffort are unresolved turn
 	// inputs. A tool that selects another model must resolve them against that
 	// model instead of inheriting the parent runtime's provider-specific result.
-	ReasoningStoredEffort     string
-	ReasoningRequestedEffort  string
-	CanRequestUserInput       bool
-	CanListUserInput          bool
-	IsSubagent                bool
-	RuntimeActive             bool
+	ReasoningStoredEffort    string
+	ReasoningRequestedEffort string
+	CanRequestUserInput      bool
+	CanListUserInput         bool
+	IsSubagent               bool
+	RuntimeActive            bool
+	// RequireActiveRun declares that this session's tool surface exists only
+	// for the duration of a runtime turn. Workspace tool-gateway mounts set it;
+	// the general HTTP tool API remains available outside a turn.
+	RequireActiveRun          bool
 	SupportsImageInput        bool
 	SupportsFileInput         bool
 	ContextBudgetMaxTokens    int
@@ -166,6 +170,9 @@ func Merge(base, latest Session) Session {
 	}
 	if latest.RuntimeActive {
 		merged.RuntimeActive = true
+	}
+	if latest.RequireActiveRun {
+		merged.RequireActiveRun = true
 	}
 	if latest.SupportsImageInput {
 		merged.SupportsImageInput = true

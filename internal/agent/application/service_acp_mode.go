@@ -69,7 +69,7 @@ func (s *Service) ConfigureACPMode(ctx context.Context, input ACPModeRequest) (A
 	if botID == "" || strings.TrimSpace(sess.BotID) != botID {
 		return ACPModeState{}, toolapproval.ErrForbidden
 	}
-	if err := s.authorizeACPToolApprovalResponse(ctx, toolapproval.Request{
+	if err := s.authorizeExternalAgentToolApprovalResponse(ctx, toolapproval.Request{
 		BotID:     botID,
 		SessionID: sessionID,
 		Operation: toolapproval.OperationPermission,
@@ -82,7 +82,7 @@ func (s *Service) ConfigureACPMode(ctx context.Context, input ACPModeRequest) (A
 		return ACPModeState{}, err
 	}
 
-	metadata := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
+	metadata := runtimeSessionMeta(sess)
 	prompt := acpagent.PromptInput{
 		BotID:                 botID,
 		SessionID:             sessionID,

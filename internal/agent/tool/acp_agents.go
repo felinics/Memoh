@@ -41,9 +41,8 @@ type ACPRuntimePool interface {
 	CloseAgentRuntime(botID, runtimeID string) error
 }
 
-// ACPAgentsProvider exposes the bot's ACP agents (Codex, Claude Code, ...)
-// so the agent can pick one — plus its model and reasoning effort — when
-// creating scheduled tasks.
+// ACPAgentsProvider exposes the bot's generic ACP agents so the agent can pick
+// one — plus its model and reasoning effort — when creating scheduled tasks.
 type ACPAgentsProvider struct {
 	pool    ACPRuntimePool
 	queries dbstore.Queries
@@ -69,14 +68,14 @@ func (p *ACPAgentsProvider) Tools(_ context.Context, session SessionContext) ([]
 	return []sdk.Tool{
 		{
 			Name: ToolListACPAgents().String(),
-			Description: "List ACP coding agents (e.g. Codex) enabled for this bot. Without arguments this returns the agent catalog instantly. " +
+			Description: "List generic ACP agents enabled for this bot. Without arguments this returns the agent catalog instantly. " +
 				"Pass agent_id to also fetch that agent's available models and reasoning efforts — this boots a temporary agent runtime and can take many seconds, so only do it when you actually need model/effort ids (e.g. for create_schedule).",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"agent_id": map[string]any{
 						"type":        "string",
-						"description": "Optional ACP agent id from the catalog (e.g. \"codex\"). When set, the response includes that agent's models and reasoning efforts.",
+						"description": "Optional ACP agent id from the catalog. When set, the response includes that agent's models and reasoning efforts.",
 					},
 				},
 			},

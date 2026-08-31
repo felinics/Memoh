@@ -85,7 +85,9 @@ RUN chmod 0755 /opt/memoh/scripts/*.sh \
   && test -x /opt/memoh/toolkit/bin/node \
   && test -x /opt/memoh/toolkit/bin/python3 \
   && test -x /opt/memoh/toolkit/bin/uv \
-  && test -x /opt/memoh/toolkit/display/bin/a11y-cli
+  && test -x /opt/memoh/toolkit/display/bin/a11y-cli \
+  && /opt/memoh/toolkit/bin/codex --version >/dev/null \
+  && /opt/memoh/toolkit/bin/claude --version >/dev/null
 
 # Standalone bridge-over-TCP image used only by live ACP tests.
 FROM workspace AS toolkit-acp-bridge-live

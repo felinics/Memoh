@@ -229,6 +229,7 @@ func TestStreamChatWSRejectsACPRequestedSkillsBeforePool(t *testing.T) {
 		acpPool:        pool,
 		sessionService: acpRuntimeSessionServiceForTest("user-1"),
 	}
+	resolver.SetACPSessionPool(pool)
 
 	err := resolver.StreamChatWS(
 		context.Background(),

@@ -285,10 +285,14 @@ const updateBotAgent = `-- name: UpdateBotAgent :one
 UPDATE bot_agents
 SET name = $1,
     enabled = $2,
+    metadata = CASE
+      WHEN $3::boolean THEN $4::jsonb
+      ELSE bot_agents.metadata
+    END,
     updated_at = now()
 WHERE bot_agents.team_id = public.memoh_current_team_id()
-  AND bot_agents.bot_id = $3
-  AND bot_agents.id = $4
+  AND bot_agents.bot_id = $5
+  AND bot_agents.id = $6
   AND bot_agents.deleted_at IS NULL
   AND (
     $2::boolean
@@ -296,7 +300,7 @@ WHERE bot_agents.team_id = public.memoh_current_team_id()
       SELECT 1
       FROM bots
       WHERE bots.team_id = public.memoh_current_team_id()
-        AND bots.id = $3
+        AND bots.id = $5
         AND bots.default_bot_agent_id = bot_agents.id
     )
   )
@@ -304,16 +308,20 @@ RETURNING team_id, id, bot_id, name, runtime, enabled, metadata, created_at, upd
 `
 
 type UpdateBotAgentParams struct {
-	Name    string      `json:"name"`
-	Enabled bool        `json:"enabled"`
-	BotID   pgtype.UUID `json:"bot_id"`
-	ID      pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	Enabled     bool        `json:"enabled"`
+	MetadataSet bool        `json:"metadata_set"`
+	Metadata    []byte      `json:"metadata"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	ID          pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateBotAgent(ctx context.Context, arg UpdateBotAgentParams) (BotAgent, error) {
 	row := q.db.QueryRow(ctx, updateBotAgent,
 		arg.Name,
 		arg.Enabled,
+		arg.MetadataSet,
+		arg.Metadata,
 		arg.BotID,
 		arg.ID,
 	)

@@ -89,25 +89,26 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 	if err != nil {
 		return fmt.Errorf("invalid runtime fence session id: %w", err)
 	}
-	var preserveToolApprovalID, preserveUserInputID pgtype.UUID
-	if preserved := options.PreserveDecision; preserved != nil {
+	preserveToolApprovalIDs := make([]pgtype.UUID, 0, len(options.PreserveDecisions))
+	preserveUserInputIDs := make([]pgtype.UUID, 0, len(options.PreserveDecisions))
+	for _, preserved := range options.PreserveDecisions {
 		preserveID, parseErr := dbpkg.ParseUUID(preserved.ID)
 		if parseErr != nil {
 			return fmt.Errorf("invalid preserved runtime decision id: %w", parseErr)
 		}
 		switch strings.TrimSpace(preserved.Kind) {
 		case DecisionToolApproval:
-			preserveToolApprovalID = preserveID
+			preserveToolApprovalIDs = append(preserveToolApprovalIDs, preserveID)
 		case DecisionUserInput:
-			preserveUserInputID = preserveID
+			preserveUserInputIDs = append(preserveUserInputIDs, preserveID)
 		default:
 			return fmt.Errorf("unsupported preserved runtime decision kind %q", preserved.Kind)
 		}
 	}
 	var reclaimRunID pgtype.UUID
 	if reclaim := options.ReclaimWaitingDecision; reclaim != nil {
-		if options.PreserveDecision == nil {
-			return errors.New("waiting-decision reclaim requires a preserved decision")
+		if len(options.PreserveDecisions) == 0 {
+			return errors.New("waiting-decision reclaim requires at least one preserved decision")
 		}
 		if reclaim.PreviousToken <= 0 || fence.Token <= reclaim.PreviousToken {
 			return errors.New("waiting-decision reclaim fencing tokens are invalid")
@@ -157,8 +158,8 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 		case current == fence.Token:
 			return nil
 		}
-		if preserved := options.PreserveDecision; preserved != nil {
-			if err := claimPreservedDecision(ctx, txQueries, *preserved, preserveToolApprovalID, preserveUserInputID, pgBotID, pgSessionID, fence.Token); err != nil {
+		for _, preserved := range options.PreserveDecisions {
+			if err := claimPreservedDecision(ctx, txQueries, preserved, pgBotID, pgSessionID, fence.Token); err != nil {
 				return err
 			}
 		}
@@ -200,10 +201,10 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 			return errors.New("persistence store does not support superseding tool approvals")
 		}
 		if _, err := toolSuperseder.SupersedePendingToolApprovalsBySession(ctx, sqlc.SupersedePendingToolApprovalsBySessionParams{
-			Reason:     "tool approval cancelled: superseded by a newer runtime run",
-			BotID:      pgBotID,
-			SessionID:  pgSessionID,
-			PreserveID: preserveToolApprovalID,
+			Reason:      "tool approval cancelled: superseded by a newer runtime run",
+			BotID:       pgBotID,
+			SessionID:   pgSessionID,
+			PreserveIds: preserveToolApprovalIDs,
 		}); err != nil {
 			return fmt.Errorf("cancel superseded tool approvals: %w", err)
 		}
@@ -212,10 +213,10 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 			return errors.New("persistence store does not support superseding user inputs")
 		}
 		if _, err := userInputSuperseder.SupersedePendingUserInputsBySession(ctx, sqlc.SupersedePendingUserInputsBySessionParams{
-			ResultJson: inputResult,
-			BotID:      pgBotID,
-			SessionID:  pgSessionID,
-			PreserveID: preserveUserInputID,
+			ResultJson:  inputResult,
+			BotID:       pgBotID,
+			SessionID:   pgSessionID,
+			PreserveIds: preserveUserInputIDs,
 		}); err != nil {
 			return fmt.Errorf("cancel superseded user inputs: %w", err)
 		}
@@ -231,10 +232,14 @@ func claimPreservedDecision(
 	ctx context.Context,
 	queries dbstore.Queries,
 	preserved PreservedDecision,
-	toolApprovalID, userInputID, botID, sessionID pgtype.UUID,
+	botID, sessionID pgtype.UUID,
 	token int64,
 ) error {
 	claimToken := pgtype.Int8{Int64: token, Valid: true}
+	preservedID, err := dbpkg.ParseUUID(preserved.ID)
+	if err != nil {
+		return fmt.Errorf("invalid preserved runtime decision id: %w", err)
+	}
 	switch strings.TrimSpace(preserved.Kind) {
 	case DecisionToolApproval:
 		claimer, ok := queries.(preservedToolApprovalClaimer)
@@ -243,7 +248,7 @@ func claimPreservedDecision(
 		}
 		_, err := claimer.ClaimToolApprovalRequestForRuntime(ctx, sqlc.ClaimToolApprovalRequestForRuntimeParams{
 			RuntimeFencingToken: claimToken,
-			ID:                  toolApprovalID,
+			ID:                  preservedID,
 			BotID:               botID,
 			SessionID:           sessionID,
 		})
@@ -260,7 +265,7 @@ func claimPreservedDecision(
 		}
 		_, err := claimer.ClaimUserInputRequestForRuntime(ctx, sqlc.ClaimUserInputRequestForRuntimeParams{
 			RuntimeFencingToken: claimToken,
-			ID:                  userInputID,
+			ID:                  preservedID,
 			BotID:               botID,
 			SessionID:           sessionID,
 		})

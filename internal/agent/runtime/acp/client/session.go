@@ -32,35 +32,16 @@ type ToolSessionContext = toolcontext.Session
 // knows nothing about the persistence implementation behind this callback.
 type RuntimeSyncGuard func(context.Context, func(context.Context) error) error
 
-// ErrRuntimeSyncGuardRejected identifies a durable generation/reset guard
-// rejection. Unlike an ordinary best-effort artifact sync failure, continuing
-// the native conversation after this error could advance stale configuration.
-var (
-	ErrRuntimeSyncGuardRejected = errors.New("ACP runtime synchronization guard rejected the process")
-	// ErrRuntimeSyncGenerationStale is permanent for this process. A
-	// bot-scoped reset in progress is transient and intentionally keeps the
-	// periodic loop alive for a later retry.
-	ErrRuntimeSyncGenerationStale = errors.New("ACP runtime synchronization generation is stale")
-	ErrRuntimeSyncResetInProgress = errors.New("ACP runtime synchronization reset is in progress")
-)
-
 type StartRequest struct {
 	AgentID     string
 	BotID       string
 	ProjectPath string
-	// Resume restores a reusable host-spooled adapter-native session into the
-	// fresh process-owned runtime directory and reconnects to it through ACP. A
-	// non-nil value is a strict resume request: unsupported or missing native
-	// state is an error and never falls back to a divergent new session. The
-	// caller owns the snapshot and must close it after all startup fallbacks.
-	Resume    *SessionStateSnapshot
-	Command   string
-	Args      []string
-	Env       []string
-	CleanEnv  bool
-	UnsetEnv  []string
-	Resolved  *ResolvedSessionContext
-	SetupMode SetupMode
+	Command     string
+	Args        []string
+	Env         []string
+	UnsetEnv    []string
+	Resolved    *ResolvedSessionContext
+	SetupMode   SetupMode
 	// SessionMode, when set, is pinned via session/set_mode right after the
 	// session is created (see acpprofile.Profile.SessionModeID).
 	SessionMode string
@@ -86,13 +67,6 @@ type PromptResult struct {
 	Text       string              `json:"text,omitempty"`
 	Events     []event.StreamEvent `json:"events,omitempty"`
 	Usage      *sdk.Usage          `json:"usage,omitempty"`
-	// CheckpointStaged is set by SessionPool only after this exact run's native
-	// state has been durably staged. The application uses it to choose between
-	// publishing a resumable checkpoint head and an explicit reset head.
-	CheckpointStaged bool `json:"-"`
-	// StateReceipt is an opaque agent-native acknowledgement used only to
-	// validate the durable JSONL snapshot for this prompt.
-	StateReceipt *SessionStateReceipt `json:"-"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
 }
@@ -127,8 +101,6 @@ type Session struct {
 	callbacks                 *clientCallbacks
 	conn                      *clientConnection
 	sessionID                 acp.SessionId
-	sessionStateLocator       acpprofile.RuntimeSessionLocator
-	restoredSessionCursor     SessionStateCursor
 	projectPath               string
 	modelSelector             modelSelector
 	modelState                ModelState
@@ -162,12 +134,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if strings.TrimSpace(req.BotID) == "" {
 		return nil, errors.New("bot_id is required")
 	}
-	// Codex was the only ACP runtime before profiles were introduced, and the
-	// direct Runner API historically allowed callers (including embedders) to
-	// omit AgentID. Keep that compatibility default while still rejecting any
-	// explicit unknown profile in prepareRuntimeLease.
 	if strings.TrimSpace(req.AgentID) == "" {
-		req.AgentID = acpprofile.AgentCodexID
+		return nil, errors.New("ACP agent id is required")
 	}
 
 	info, err := r.workspace.WorkspaceInfo(ctx, req.BotID)
@@ -251,6 +219,13 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 					slog.Any("error", err),
 				)
 			}
+			if sink != nil {
+				sink.EmitStreamEvent(event.StreamEvent{
+					Type:  event.RuntimeNotice,
+					Code:  "tools_unavailable",
+					Delta: "Memoh tools are unavailable for this session: tool bridge failed to start",
+				})
+			}
 			toolHTTPURL = ""
 		} else {
 			toolHTTPStop = stop
@@ -260,12 +235,9 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
 		Backend:          backend,
 		BotID:            req.BotID,
-		BotAgentID:       resolvedBotAgentID(req.Resolved),
 		AgentID:          req.AgentID,
 		SetupMode:        req.SetupMode,
-		Resume:           req.Resume,
 		Env:              req.Env,
-		CleanEnv:         req.CleanEnv,
 		UnsetEnv:         req.UnsetEnv,
 		NoTimeout:        true,
 		Logger:           r.logger,
@@ -290,7 +262,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if preflightGateway == nil {
 		preflightGateway = req.ToolGateway
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, req.CleanEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
 	callbacks.userInput = req.UserInput
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
@@ -366,13 +338,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			)
 		}
 	}
-	sessionStateLocator := acpprofile.RuntimeSessionLocatorNone
-	if proc.lease != nil {
-		if locator, locatorErr := proc.lease.sessionStateLocator(); locatorErr == nil {
-			sessionStateLocator = locator
-		}
-	}
-	sess, err := startOrResumeSession(ctx, conn, callbacks, initResp.AgentCapabilities, req.Resume, projectPath, mcpServers, toolSession, sessionStateLocator)
+	sess, err := startSession(ctx, conn, projectPath, mcpServers)
 	if err != nil {
 		callbacks.close()
 		_ = proc.Close()
@@ -397,8 +363,6 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		callbacks:                 callbacks,
 		conn:                      conn,
 		sessionID:                 sess.SessionId,
-		sessionStateLocator:       sessionStateLocator,
-		restoredSessionCursor:     cursorFromSnapshot(req.Resume),
 		projectPath:               projectPath,
 		reasoningConfigFallbackID: strings.TrimSpace(req.ReasoningConfigID),
 		embeddedContext:           initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
@@ -439,84 +403,26 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	return clientSession, nil
 }
 
-var (
-	ErrSessionResumeUnsupported = errors.New("ACP agent does not support session resume or load")
-	// ErrSessionResumeRejected means a process started but rejected the exact
-	// durable native session selected by canonical history. Callers must not
-	// silently replace it with a new session because that would fork history.
-	ErrSessionResumeRejected = errors.New("ACP agent rejected the durable session resume")
-)
-
-// startOrResumeSession selects exactly one ACP lifecycle operation. The process
-// launcher has already materialized persisted state before starting the
-// adapter, so session/resume can locate it even when an adapter scans its home
-// during initialization. Resume is preferred because session/load replays
-// history notifications intended for a UI client; the fallback suppresses the
-// startup sink so replay cannot be mistaken for output from the new turn.
-func startOrResumeSession(
+// startSession creates a fresh ACP session. Every process starts from a
+// clean runtime home; conversation continuity is Memoh's context document,
+// not adapter-native session state.
+func startSession(
 	ctx context.Context,
 	conn *clientConnection,
-	callbacks *clientCallbacks,
-	capabilities acp.AgentCapabilities,
-	resume *SessionStateSnapshot,
 	projectPath string,
 	mcpServers []acp.McpServer,
-	toolSession ToolSessionContext,
-	locator acpprofile.RuntimeSessionLocator,
 ) (sessionResponse, error) {
-	meta := sessionLifecycleMeta(locator)
-	if resume == nil {
-		resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
-			Meta:       meta,
-			Cwd:        projectPath,
-			McpServers: mcpServers,
-		})
-		if err != nil {
-			return sessionResponse{}, fmt.Errorf("create ACP session: %w", err)
-		}
-		if strings.TrimSpace(string(resp.SessionId)) == "" {
-			return sessionResponse{}, errors.New("create ACP session: agent returned an empty session id")
-		}
-		return resp, nil
+	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
+		Cwd:        projectPath,
+		McpServers: mcpServers,
+	})
+	if err != nil {
+		return sessionResponse{}, fmt.Errorf("create ACP session: %w", err)
 	}
-
-	sessionID := strings.TrimSpace(resume.State().SessionID)
-	if sessionID == "" {
-		return sessionResponse{}, fmt.Errorf("%w: session id is required", ErrSessionResumeRejected)
+	if strings.TrimSpace(string(resp.SessionId)) == "" {
+		return sessionResponse{}, errors.New("create ACP session: agent returned an empty session id")
 	}
-	if capabilities.SessionCapabilities.Resume != nil {
-		resp, err := conn.ResumeSession(ctx, acp.ResumeSessionRequest{
-			Meta:       meta,
-			Cwd:        projectPath,
-			McpServers: mcpServers,
-			SessionId:  acp.SessionId(sessionID),
-		})
-		if err != nil {
-			return sessionResponse{}, fmt.Errorf("%w: resume ACP session: %w", ErrSessionResumeRejected, err)
-		}
-		resp.SessionId = acp.SessionId(sessionID)
-		return resp, nil
-	}
-	if capabilities.LoadSession {
-		// load replays the historical session/update stream. No prompt collector
-		// exists yet, and clearing the startup sink prevents those notifications
-		// from being projected as fresh output by the caller.
-		if callbacks != nil {
-			callbacks.setPromptState(nil, nil, toolSession)
-		}
-		resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
-			Meta:       meta,
-			Cwd:        projectPath,
-			McpServers: mcpServers,
-			SessionId:  acp.SessionId(sessionID),
-		})
-		if err != nil {
-			return sessionResponse{}, fmt.Errorf("%w: load ACP session: %w", ErrSessionResumeRejected, err)
-		}
-		resp.SessionId = acp.SessionId(sessionID)
-		return resp, nil
-	}
-	return sessionResponse{}, ErrSessionResumeUnsupported
+	return resp, nil
 }
 
 // pinSessionMode forces the agent session into the requested permission mode
@@ -694,48 +600,6 @@ func (s *Session) ProjectPath() string {
 	return s.projectPath
 }
 
-// SnapshotSessionState captures the adapter-native JSONL files needed to
-// reconstruct this session in a later process. The process owns path discovery
-// and validation; callers only persist the returned opaque, ordered state.
-func (s *Session) SnapshotSessionState(
-	ctx context.Context,
-	previous SessionStateCursor,
-	receipt *SessionStateReceipt,
-	boundaries map[string]int64,
-) (*SessionStateSnapshot, error) {
-	if s == nil {
-		return nil, ErrSessionNotInitialized
-	}
-	s.mu.Lock()
-	proc := s.proc
-	sessionID := s.sessionID
-	closed := s.closed
-	s.mu.Unlock()
-	if closed {
-		return nil, ErrSessionClosed
-	}
-	if proc == nil || sessionID == "" {
-		return nil, ErrSessionNotInitialized
-	}
-	return proc.SnapshotSessionState(ctx, string(sessionID), previous, receipt, boundaries)
-}
-
-// RestoredSessionStateCursor is the bounded freshness cursor computed while
-// the reusable resume snapshot was spooled and verified.
-func (s *Session) RestoredSessionStateCursor() SessionStateCursor {
-	if s == nil {
-		return SessionStateCursor{}
-	}
-	return s.restoredSessionCursor
-}
-
-func cursorFromSnapshot(snapshot *SessionStateSnapshot) SessionStateCursor {
-	if snapshot == nil {
-		return SessionStateCursor{}
-	}
-	return snapshot.Cursor()
-}
-
 // CancelPrompt asks an in-flight prompt to unwind without closing the ACP
 // session. Pool shutdown uses this before waiting for the per-runtime operation
 // lock: a prompt that already completed can finish its durable snapshot, while
@@ -803,7 +667,6 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 	s.promptToken = promptToken
 	conn := s.conn
 	sessionID := s.sessionID
-	sessionStateLocator := s.sessionStateLocator
 	callbacks := s.callbacks
 	proc := s.proc
 	defaultSink := s.defaultSink
@@ -850,61 +713,24 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		return PromptResult{}, ErrAgentCommandUnavailable
 	}
 
-	stateReceiptCollector, receiptErr := callbacks.beginSessionStateReceipt(sessionStateLocator, string(sessionID))
-	if receiptErr != nil {
-		return PromptResult{}, fmt.Errorf("prepare ACP session-state receipt: %w", receiptErr)
-	}
-
 	resp, err := conn.Prompt(promptCtx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    promptBlocks,
 	})
-	stateReceipt, receiptErr := callbacks.finishSessionStateReceipt(stateReceiptCollector, err == nil)
-	var runtimeGuardErr error
-	if proc != nil {
-		if syncErr := proc.SyncPromptState(promptCtx); syncErr != nil && s.logger != nil {
-			if errors.Is(syncErr, ErrRuntimeSyncGuardRejected) {
-				runtimeGuardErr = syncErr
-			} else {
-				s.logger.Warn("failed to synchronize ACP prompt runtime state",
-					slog.String("session_id", string(sessionID)),
-					slog.Any("error", syncErr))
-			}
-		} else if errors.Is(syncErr, ErrRuntimeSyncGuardRejected) {
-			runtimeGuardErr = syncErr
-		}
-	}
 	collected := collector.result()
 	usage := promptUsageFromACP(resp.Usage)
 	result := PromptResult{
-		StopReason:   string(resp.StopReason),
-		Text:         collected.Text,
-		Events:       collected.Events,
-		Usage:        usage,
-		StateReceipt: stateReceipt,
-		Output:       attachUsageToLastAssistant(collected.Output, usage),
+		StopReason: string(resp.StopReason),
+		Text:       collected.Text,
+		Events:     collected.Events,
+		Usage:      usage,
+		Output:     attachUsageToLastAssistant(collected.Output, usage),
 	}
 	if err != nil {
 		if proc != nil {
 			return result, proc.errorWithStderr(fmt.Errorf("send ACP prompt: %w", err))
 		}
 		return result, fmt.Errorf("send ACP prompt: %w", err)
-	}
-	if runtimeGuardErr != nil {
-		return result, runtimeGuardErr
-	}
-	if receiptErr != nil {
-		// A missing or inconsistent receipt only degrades resumability - the
-		// pool declines staging without one and the turn publishes a reset
-		// head. Failing the prompt here would discard a legitimately completed
-		// turn's output (Claude emits non-"success" result subtypes for
-		// refusals and turn limits), which is strictly worse.
-		if s.logger != nil {
-			s.logger.Warn("ACP session-state receipt unavailable; this turn will not stage a checkpoint",
-				slog.String("session_id", string(sessionID)),
-				slog.Any("error", receiptErr))
-		}
-		result.StateReceipt = nil
 	}
 	return result, nil
 }
@@ -954,9 +780,6 @@ func (s *Session) promptBlocks(prompt string, resources []PromptResource, images
 			blocks = append(blocks, acp.TextBlock(prompt))
 		}
 	case s != nil && s.embeddedContext:
-		if prompt != "" {
-			blocks = append(blocks, acp.TextBlock(prompt))
-		}
 		for _, resource := range cleaned {
 			mimeType := resource.MimeType
 			blocks = append(blocks, acp.ResourceBlock(acp.EmbeddedResourceResource{
@@ -966,6 +789,9 @@ func (s *Session) promptBlocks(prompt string, resources []PromptResource, images
 					Text:     resource.Text,
 				},
 			}))
+		}
+		if prompt != "" {
+			blocks = append(blocks, acp.TextBlock(prompt))
 		}
 	default:
 		var sb strings.Builder

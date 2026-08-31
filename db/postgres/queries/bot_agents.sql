@@ -56,6 +56,10 @@ LIMIT 1;
 UPDATE bot_agents
 SET name = sqlc.arg(name),
     enabled = sqlc.arg(enabled),
+    metadata = CASE
+      WHEN sqlc.arg(metadata_set)::boolean THEN sqlc.arg(metadata)::jsonb
+      ELSE bot_agents.metadata
+    END,
     updated_at = now()
 WHERE bot_agents.team_id = public.memoh_current_team_id()
   AND bot_agents.bot_id = sqlc.arg(bot_id)

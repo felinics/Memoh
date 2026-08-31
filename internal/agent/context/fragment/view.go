@@ -7,7 +7,7 @@ type Intent string
 const (
 	IntentRunConfigPreProvider Intent = "run_config_pre_provider"
 	IntentDiscussReply         Intent = "discuss_reply"
-	IntentACPRuntimePrompt     Intent = "acp_runtime_prompt"
+	IntentExternalAgentPrompt  Intent = "external_agent_prompt"
 )
 
 func (i Intent) ManifestView() ManifestView {
@@ -17,8 +17,8 @@ func (i Intent) ManifestView() ManifestView {
 type RenderTarget string
 
 const (
-	RenderSDKMessages    RenderTarget = "sdk_messages"
-	RenderACPFullContext RenderTarget = "acp_full_context"
+	RenderSDKMessages        RenderTarget = "sdk_messages"
+	RenderRuntimeFullContext RenderTarget = "runtime_full_context"
 )
 
 // NormalizeContextRefs fills durable refs and canonical hashes for fragments

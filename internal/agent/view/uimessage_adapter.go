@@ -33,6 +33,7 @@ func UIStreamEventFromAgentEvent(ev event.StreamEvent) UIMessageStreamEvent {
 		UserInputID: ev.UserInputID,
 		ShortID:     ev.ShortID,
 		Status:      ev.Status,
+		Code:        ev.Code,
 		Metadata:    ev.Metadata,
 	}
 }

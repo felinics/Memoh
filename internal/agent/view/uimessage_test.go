@@ -700,6 +700,7 @@ func TestUIMessageStreamConverterKeepsReasoningBeforeText(t *testing.T) {
 
 func TestUIMessageStreamConverterUserInputRequest(t *testing.T) {
 	converter := NewUIMessageStreamConverter()
+	before := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "Before the question."})
 	messages := converter.HandleEvent(UIMessageStreamEvent{
 		Type:        "user_input_request",
 		ToolName:    "ask_user",
@@ -747,6 +748,13 @@ func TestUIMessageStreamConverterUserInputRequest(t *testing.T) {
 	}
 	if msg.Running == nil || *msg.Running {
 		t.Fatalf("expected tool to stop running while waiting: %#v", msg)
+	}
+	if len(before) != 1 || before[0].ID >= msg.ID {
+		t.Fatalf("leading text/card ids = %#v/%d, want text before card", before, msg.ID)
+	}
+	after := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "After the answer."})
+	if len(after) != 1 || after[0].Content != "After the answer." || after[0].ID <= msg.ID {
+		t.Fatalf("trailing text = %#v, want a new block after the card", after)
 	}
 }
 

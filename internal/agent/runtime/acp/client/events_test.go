@@ -101,7 +101,7 @@ func TestACPGenericExecuteTerminalTitles(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.title, func(t *testing.T) {
 			t.Parallel()
-			mapper := newACPToolEventMapper(acpprofile.QuirksFor(acpprofile.AgentHermesID))
+			mapper := newACPToolEventMapper(acpprofile.QuirksFor(acpprofile.AgentACPID))
 			events := mapper.eventsFromNotification(acp.SessionNotification{
 				Update: acp.StartToolCall(
 					acp.ToolCallId("call-1"),

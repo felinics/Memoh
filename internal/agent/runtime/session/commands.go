@@ -366,7 +366,13 @@ func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error
 	if ctrl.cancel != nil {
 		ctrl.cancel()
 	}
-	if waitingDecision {
+	if waitingDecision && !ctrl.resumesOnTerminalDecision() {
+		// A native parked run has no live stream to observe the cancel; the
+		// terminal write must happen here. An inline runtime's turn is still
+		// alive blocked on its waiter — the cancel unwinds it and the turn's
+		// own FinishRun records the abort AFTER the driver actually returns,
+		// so the ledger's terminal state is a truthful "driver stopped"
+		// signal for deletion barriers on any instance.
 		if err := m.FinishRun(context.WithoutCancel(ctx), ctrl.handle(), RunStatusAborted, ""); err != nil {
 			return false, err
 		}

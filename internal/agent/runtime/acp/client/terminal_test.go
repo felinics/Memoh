@@ -129,7 +129,7 @@ func TestCreateTerminalHonorsOutputByteLimitRequest(t *testing.T) {
 			t.Parallel()
 
 			root := t.TempDir()
-			manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 5, nil, true, nil, nil)
+			manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 5, nil, nil, nil)
 			term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
 				Command:         "printf",
 				Args:            []string{"HEAD" + strings.Repeat("x", 5000) + "TAIL"},
@@ -170,7 +170,7 @@ func TestCreateTerminalStopsWhenOwningRunIsCanceled(t *testing.T) {
 
 	root := t.TempDir()
 	runCtx, cancelRun := context.WithCancel(context.Background())
-	manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 30, nil, true, nil, nil)
+	manager := newTerminalManager(context.Background(), newTestBridgeClient(t, root), "/data", "/data", 30, nil, nil, nil)
 	term, err := manager.CreateTerminal(context.Background(), acp.CreateTerminalRequest{
 		Command: "sleep",
 		Args:    []string{"30"},

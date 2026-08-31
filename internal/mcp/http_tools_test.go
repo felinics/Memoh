@@ -135,3 +135,30 @@ func callToolRequest(name string) *sdkmcp.ServerRequest[*sdkmcp.CallToolParamsRa
 		},
 	}
 }
+
+// A workspace tool-gateway mount outlives the turns it serves. Between turns
+// its session carries no RunID; RequireActiveRun keeps that idle window to
+// tools/list — a call with no owning run is refused before any tool effect.
+func TestToolGatewayMiddlewareRefusesIdleMountCalls(t *testing.T) {
+	source := &fenceCapturingToolSource{}
+	service := NewToolGatewayService(nil, []ToolSource{source})
+	idle := ToolGatewayMiddleware(service, nil, ToolSessionContext{
+		BotID: "bot-1", RequireActiveRun: true,
+	})(nil)
+	if _, err := idle(context.Background(), "tools/call", callToolRequest("fenced_tool")); err == nil {
+		t.Fatal("idle mount tools/call succeeded, want refusal")
+	}
+	if source.calls != 0 {
+		t.Fatalf("tool source calls = %d, want zero for idle mount", source.calls)
+	}
+
+	active := ToolGatewayMiddleware(service, nil, ToolSessionContext{
+		BotID: "bot-1", RunID: "run-1", RequireActiveRun: true,
+	})(nil)
+	if _, err := active(context.Background(), "tools/call", callToolRequest("fenced_tool")); err != nil {
+		t.Fatalf("active turn tools/call error = %v", err)
+	}
+	if source.calls != 1 {
+		t.Fatalf("tool source calls = %d, want one for the active turn", source.calls)
+	}
+}

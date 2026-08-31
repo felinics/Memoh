@@ -37,6 +37,8 @@ func (*fakeTurnAdmitter) FinishRun(context.Context, sessionruntime.RunHandle, st
 	return nil
 }
 
+func (*fakeTurnAdmitter) MarkInlineDecisionRun(string, string, string) {}
+
 func TestAdmitTurnRunProjectsRequestUserTurn(t *testing.T) {
 	t.Parallel()
 

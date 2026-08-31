@@ -74,6 +74,7 @@ type SessionService interface {
 	Get(ctx context.Context, sessionID string) (session.Thread, error)
 	UpdateTitle(ctx context.Context, sessionID, title string) (session.Thread, error)
 	UpdateMetadata(ctx context.Context, sessionID string, metadata map[string]any) (session.Thread, error)
+	MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeType string, delta map[string]any) (session.Thread, error)
 }
 
 // SetSessionService configures the session service used for auto title generation.

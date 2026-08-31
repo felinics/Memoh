@@ -13,16 +13,11 @@ import (
 )
 
 type ProviderOAuthHandler struct {
-	service       *providers.Service
-	acpCodexOAuth *ACPCodexOAuthHandler
+	service *providers.Service
 }
 
 func NewProviderOAuthHandler(service *providers.Service) *ProviderOAuthHandler {
 	return &ProviderOAuthHandler{service: service}
-}
-
-func (h *ProviderOAuthHandler) SetACPCodexOAuthHandler(handler *ACPCodexOAuthHandler) {
-	h.acpCodexOAuth = handler
 }
 
 func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
@@ -145,9 +140,6 @@ func (h *ProviderOAuthHandler) Callback(c echo.Context) error {
 	}
 	if state == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "state is required")
-	}
-	if h.acpCodexOAuth != nil && h.acpCodexOAuth.HandlesCallbackState(state) {
-		return h.acpCodexOAuth.Callback(c)
 	}
 	providerID, err := h.service.HandleOAuthCallback(c.Request().Context(), state, code)
 	if err != nil {

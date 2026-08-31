@@ -67,11 +67,12 @@ func (s *Service) respondUserInput(ctx context.Context, input UserInputResponseI
 // user's click as soon as the decision commits, without imposing the command
 // acknowledgement deadline on the following model call.
 type CommittedUserInputResponse struct {
-	request      userinput.Request
-	input        UserInputResponseInput
-	runID        string
-	activePrompt *acpActivePromptSubscription
-	ackOnly      bool
+	request         userinput.Request
+	input           UserInputResponseInput
+	runID           string
+	activePrompt    *externalAgentActivePromptSubscription
+	isExternalAgent bool
+	ackOnly         bool
 }
 
 func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputResponseInput) (CommittedUserInputResponse, error) {
@@ -88,16 +89,19 @@ func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputRe
 		return CommittedUserInputResponse{}, err
 	}
 
-	isProcessLocalACP := userinput.IsProcessLocalACPRequest(target)
-	if isProcessLocalACP {
-		if err := s.authorizeACPUserInputResponse(ctx, target, input); err != nil {
+	isProcessLocalExternalAgent, err := s.isExternalAgentUserInputSession(ctx, firstNonEmpty(target.SessionID, input.ThreadID))
+	if err != nil {
+		return CommittedUserInputResponse{}, err
+	}
+	if isProcessLocalExternalAgent {
+		if err := s.authorizeExternalAgentUserInputResponse(ctx, target, input); err != nil {
 			return CommittedUserInputResponse{}, err
 		}
 	}
-	if !isProcessLocalACP {
+	if !isProcessLocalExternalAgent {
 		ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
 	}
-	if isProcessLocalACP && !s.userInput.CanRespond(target) {
+	if isProcessLocalExternalAgent && !s.userInput.CanRespond(target) {
 		if _, err := s.userInput.Cancel(ctx, userinput.CancelInput{
 			RequestID:              target.ID,
 			ActorChannelIdentityID: input.ActorChannelIdentityID,
@@ -105,11 +109,11 @@ func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputRe
 		}); err != nil && !errors.Is(err, userinput.ErrAlreadyDecided) {
 			return CommittedUserInputResponse{}, err
 		}
-		return CommittedUserInputResponse{request: target, input: input, ackOnly: true}, nil
+		return CommittedUserInputResponse{request: target, input: input, isExternalAgent: true, ackOnly: true}, nil
 	}
-	var activePrompt *acpActivePromptSubscription
-	if isProcessLocalACP && !input.SuppressActivePromptAttach {
-		activePrompt, _ = s.subscribeACPActivePrompt(
+	var activePrompt *externalAgentActivePromptSubscription
+	if isProcessLocalExternalAgent && !input.SuppressActivePromptAttach {
+		activePrompt, _ = s.subscribeExternalAgentActivePrompt(
 			firstNonEmpty(target.BotID, input.BotID),
 			firstNonEmpty(target.SessionID, input.ThreadID),
 		)
@@ -143,15 +147,16 @@ func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputRe
 		if activePrompt != nil {
 			activePrompt.release()
 		}
-		if isProcessLocalACP && errors.Is(err, userinput.ErrAlreadyDecided) {
-			return CommittedUserInputResponse{request: target, input: input, ackOnly: true}, nil
+		if isProcessLocalExternalAgent && errors.Is(err, userinput.ErrAlreadyDecided) {
+			return CommittedUserInputResponse{request: target, input: input, isExternalAgent: true, ackOnly: true}, nil
 		}
 		return CommittedUserInputResponse{}, err
 	}
 	return CommittedUserInputResponse{
-		request:      resolved,
-		input:        input,
-		activePrompt: activePrompt,
+		request:         resolved,
+		input:           input,
+		activePrompt:    activePrompt,
+		isExternalAgent: isProcessLocalExternalAgent,
 	}, nil
 }
 
@@ -172,13 +177,13 @@ func (s *Service) continueCommittedUserInputResponse(
 	if committed.ackOnly {
 		return emitApprovalAck(ctx, eventCh)
 	}
-	if userinput.IsProcessLocalACPRequest(resolved) {
-		// An ACP/MCP waiter is blocked on this request and resumes the run
-		// itself. When this response stream has reattached to the active ACP
+	if committed.isExternalAgent {
+		// A waiter inside the running turn is blocked on this request and
+		// resumes the run itself. When this response stream has reattached to the active ACP
 		// prompt, forward that live continuation so refreshes observe the same
 		// loading/progress shape as native deferred requests.
 		if committed.activePrompt != nil {
-			return forwardACPActivePrompt(ctx, committed.activePrompt, eventCh, acpActivePromptForwardOptions{
+			return forwardExternalAgentActivePrompt(ctx, committed.activePrompt, eventCh, externalAgentActivePromptForwardOptions{
 				SkipToolCallID:  resolved.ToolCallID,
 				SkipUserInputID: resolved.ID,
 			})
@@ -199,7 +204,22 @@ func (s *Service) continueCommittedUserInputResponse(
 	return s.storeUserInputResultAndContinue(ctx, resolved, committed.input, toolResult, runID, lifecycle, eventCh)
 }
 
-func (s *Service) authorizeACPUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {
+// isExternalAgentUserInputSession classifies a request by its session's runtime, the
+// same way isExternalAgentToolApprovalSession does for approvals: a decision-waiter
+// runtime consumes the answer inside the blocked turn, so it must not become
+// a native model continuation.
+func (s *Service) isExternalAgentUserInputSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.sessionService == nil {
+		return false, nil
+	}
+	sess, err := s.sessionService.Get(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return sessionpkg.UsesDecisionWaiter(sess), nil
+}
+
+func (s *Service) authorizeExternalAgentUserInputResponse(ctx context.Context, target userinput.Request, input UserInputResponseInput) error {
 	if s == nil || s.sessionService == nil {
 		return errors.New("session service not configured")
 	}
@@ -208,7 +228,7 @@ func (s *Service) authorizeACPUserInputResponse(ctx context.Context, target user
 	if err != nil {
 		return err
 	}
-	if !sessionpkg.IsACPRuntime(sess) {
+	if !sessionpkg.UsesDecisionWaiter(sess) {
 		return nil
 	}
 	botID := firstNonEmpty(target.BotID, input.BotID)
@@ -225,8 +245,7 @@ func (s *Service) authorizeACPUserInputResponse(ctx context.Context, target user
 	if actorID == "" {
 		return userinput.ErrForbidden
 	}
-	acpMeta := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
-	runtimeOwnerID := metadataString(acpMeta, "runtime_owner_account_id")
+	runtimeOwnerID := metadataString(runtimeSessionMeta(sess), "runtime_owner_account_id")
 	if runtimeOwnerID == "" {
 		return userinput.ErrForbidden
 	}

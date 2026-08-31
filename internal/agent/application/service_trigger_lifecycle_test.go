@@ -13,7 +13,9 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
@@ -337,7 +339,7 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 	lifecycles := &recordingContextLifecycleStore{}
 	service := newACPLifecycleService(t, pool, messages, lifecycles)
 
-	result, err := service.triggerScheduleACP(
+	result, err := service.triggerScheduleRuntime(
 		context.Background(),
 		lifecycleTestBotID,
 		schedule.TriggerPayload{
@@ -349,17 +351,13 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 		},
 		"",
 		lifecycleTestRunID,
-		ACPSessionExecutionInfo{
-			AgentID:               "codex",
-			ProjectPath:           "/data/app",
-			RuntimeOwnerAccountID: "user-1",
-		},
+		acpagent.NewDriver(pool),
 	)
 	if err != nil {
-		t.Fatalf("triggerScheduleACP() error = %v", err)
+		t.Fatalf("triggerScheduleRuntime() error = %v", err)
 	}
 	if result.Status != "ok" || result.Text != "done" {
-		t.Fatalf("triggerScheduleACP() result = %#v, want completed output", result)
+		t.Fatalf("triggerScheduleRuntime() result = %#v, want completed output", result)
 	}
 	if pool.input.RunID != lifecycleTestRunID || pool.input.SessionID != lifecycleTestSessionID {
 		t.Fatalf("ACP prompt identity = (run %q, session %q), want (%q, %q)", pool.input.RunID, pool.input.SessionID, lifecycleTestRunID, lifecycleTestSessionID)
@@ -370,5 +368,44 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 	}
 	if snapshot.AssistantMessageID != "message-id" {
 		t.Fatalf("assistant message ID = %q, want message-id", snapshot.AssistantMessageID)
+	}
+}
+
+type incompleteScheduleDriver struct {
+	input external.PromptInput
+}
+
+func (*incompleteScheduleDriver) RuntimeType() string { return "codex" }
+
+func (d *incompleteScheduleDriver) Prompt(_ context.Context, input external.PromptInput) (external.PromptResult, error) {
+	d.input = input
+	return external.PromptResult{Text: "partial", Output: []sdk.Message{sdk.AssistantMessage("partial")}}, nil
+}
+
+func TestTriggerScheduleRuntimeRejectsIncompleteTurn(t *testing.T) {
+	driver := &incompleteScheduleDriver{}
+	messages := &recordingMessageService{}
+	lifecycles := &recordingContextLifecycleStore{}
+	service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, lifecycles)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := service.triggerScheduleRuntime(
+		ctx,
+		lifecycleTestBotID,
+		schedule.TriggerPayload{SessionID: lifecycleTestSessionID, Command: "run scheduled task", OwnerUserID: "user-1"},
+		"",
+		lifecycleTestRunID,
+		driver,
+	)
+	if err == nil {
+		t.Fatal("triggerScheduleRuntime() error = nil, want incomplete-turn failure")
+	}
+	if driver.input.CanRequestUserInput {
+		t.Fatal("scheduled external runtime was marked interactive")
+	}
+	_, snapshot := requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusAborted)
+	if snapshot.AssistantMessageID != "message-id" {
+		t.Fatalf("aborted lifecycle assistant message ID = %q, want message-id", snapshot.AssistantMessageID)
 	}
 }

@@ -147,14 +147,15 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		return
 	}
 
-	if strings.TrimSpace(resolved.RuntimeType) == sessionpkg.RuntimeACPAgent {
+	if runtimeType := strings.TrimSpace(resolved.RuntimeType); runtimeType == sessionpkg.RuntimeACPAgent ||
+		sessionpkg.IsDirectRuntimeType(runtimeType) {
 		if !cmd.DiscussAddressed {
 			if h.emit(turn.DiscussEventSkipped, nil) {
 				h.contentLightTerminal = true
 			}
 			return
 		}
-		s.pumpDiscussACP(ctx, cmd, h)
+		s.pumpDiscussAgent(ctx, cmd, h)
 		return
 	}
 	s.pumpDiscussNative(ctx, cmd, h, resolved)
@@ -517,13 +518,13 @@ func discussCompactableTokens(messages []turn.DiscussMessage) int {
 	return total
 }
 
-func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
+func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
 	// ACP resolution carries no model window, so the prompt is budgeted by
 	// the absolute cap before any concatenation (CM-ADM-001).
 	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, s.contextAbsoluteMaxTokens())
 	if admission.ProtectedOverflow {
 		s.logger.Error("context_admission_rejected",
-			slog.String("path", "discuss_acp"),
+			slog.String("path", "discuss_agent"),
 			slog.String("bot_id", cmd.BotID),
 			slog.String("session_id", cmd.ThreadID),
 			slog.Int("estimated_tokens", admission.EstimatedTokens),
@@ -544,7 +545,7 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 	}
 	if admission.DroppedMessages > 0 {
 		s.logger.Info("context_admission",
-			slog.String("path", "discuss_acp"),
+			slog.String("path", "discuss_agent"),
 			slog.String("bot_id", cmd.BotID),
 			slog.String("session_id", cmd.ThreadID),
 			slog.Int("estimated_tokens", admission.EstimatedTokens),
@@ -552,7 +553,7 @@ func (s *Service) pumpDiscussACP(ctx context.Context, cmd turn.StartTurnCommand,
 			slog.Int("budget_tokens", admission.BudgetTokens),
 			slog.Int("dropped_messages", admission.DroppedMessages))
 	}
-	prompt := discussACPFullContextPrompt(admitted)
+	prompt := discussAgentFullContextPrompt(admitted)
 	if strings.TrimSpace(prompt) == "" {
 		// No composable context: end without a skip marker so the caller
 		// does not advance its consumed cursor (pre-port semantics).
@@ -764,10 +765,10 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 	}
 }
 
-// discussACPFullContextPrompt renders the composed context into the single
+// discussAgentFullContextPrompt renders the composed context into the single
 // reset-each-turn prompt used by external ACP runtimes. ACP does not receive
 // native ToolUsage, so its stable preamble owns the send-only output contract.
-func discussACPFullContextPrompt(messages []turn.DiscussMessage) string {
+func discussAgentFullContextPrompt(messages []turn.DiscussMessage) string {
 	var b strings.Builder
 	b.WriteString("You are replying in a discuss-mode conversation. The runtime is reset each turn, so use the complete context below as the source of truth.\n\n")
 	b.WriteString("IMPORTANT: You MUST use the `send` tool to speak in the observed conversation. Ordinary text output is internal and invisible to everyone.\n\n")

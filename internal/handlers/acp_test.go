@@ -17,7 +17,7 @@ func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/acp/profiles", nil)
 	rec := httptest.NewRecorder()
 
-	if err := NewACPHandler(nil).ListProfiles(e.NewContext(req, rec)); err != nil {
+	if err := NewACPHandler().ListProfiles(e.NewContext(req, rec)); err != nil {
 		t.Fatalf("ListProfiles() error = %v", err)
 	}
 	if rec.Code != http.StatusOK {
@@ -28,26 +28,18 @@ func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	wantIDs := []string{
-		acpprofile.AgentACPID,
-		acpprofile.AgentClaudeCodeID,
-		acpprofile.AgentCodexID,
-		acpprofile.AgentHermesID,
+	if len(resp.Items) != 1 {
+		t.Fatalf("profiles len = %d, want 1", len(resp.Items))
 	}
-	if len(resp.Items) != len(wantIDs) {
-		t.Fatalf("profiles len = %d, want %d", len(resp.Items), len(wantIDs))
+	if resp.Items[0].ID != acpprofile.AgentACPID {
+		t.Fatalf("profile id = %q, want %q", resp.Items[0].ID, acpprofile.AgentACPID)
 	}
-	for i, wantID := range wantIDs {
-		if resp.Items[i].ID != wantID {
-			t.Fatalf("profile[%d] id = %q, want %q", i, resp.Items[i].ID, wantID)
-		}
-	}
-	if len(resp.Items[2].ManagedFields) == 0 {
+	if len(resp.Items[0].ManagedFields) == 0 {
 		t.Fatalf("managed fields should be exposed for schema-driven UI")
 	}
 
 	raw := rec.Body.String()
-	for _, forbidden := range []string{"codex-acp", "claude-agent-acp", "hermes-acp", "npx", "uvx", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "HERMES_HOME"} {
+	for _, forbidden := range []string{"codex-acp", "claude-agent-acp", "npx", "uvx", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
 		if jsonContainsSubstring(raw, forbidden) {
 			t.Fatalf("profiles response leaked unsafe implementation detail %q: %s", forbidden, raw)
 		}

@@ -1,9 +1,19 @@
 package botagents
 
-import "time"
+import (
+	"time"
 
+	"github.com/felinics/memoh/internal/runtimekind"
+)
+
+// BotAgent runtimes: RuntimeACP is bot-agent-domain vocabulary (the ACP row
+// kind, distinct from the session runtime "acp_agent"); the direct kinds
+// are pinned to the shared runtime vocabulary — a direct agent's runtime IS
+// its session runtime type.
 const (
 	RuntimeACP          = "acp"
+	RuntimeCodex        = string(runtimekind.Codex)
+	RuntimeClaudeCode   = string(runtimekind.ClaudeCode)
 	MetadataProviderKey = "provider"
 )
 
@@ -31,8 +41,9 @@ type CreateRequest struct {
 }
 
 type UpdateRequest struct {
-	Name    *string `json:"name,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
+	Name     *string        `json:"name,omitempty"`
+	Enabled  *bool          `json:"enabled,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ListResponse struct {

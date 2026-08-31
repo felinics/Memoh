@@ -108,6 +108,9 @@ func TestRunControlCommandContextPropagatesCancellationCauseBeforeDeadline(t *te
 type fakeDecisionStore struct {
 	mu     sync.Mutex
 	target DecisionTarget
+	// extraTargets joins target in PendingRuntimeDecisions for multi-decision
+	// recovery cases.
+	extraTargets []DecisionTarget
 }
 
 func (f *fakeDecisionStore) ResolveRuntimeDecision(context.Context, string, string) (DecisionTarget, error) {
@@ -116,10 +119,10 @@ func (f *fakeDecisionStore) ResolveRuntimeDecision(context.Context, string, stri
 	return f.target, nil
 }
 
-func (f *fakeDecisionStore) PendingRuntimeDecision(context.Context, string) (DecisionTarget, bool, error) {
+func (f *fakeDecisionStore) PendingRuntimeDecisions(context.Context, string) ([]DecisionTarget, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.target, true, nil
+	return append([]DecisionTarget{f.target}, f.extraTargets...), nil
 }
 
 func (f *fakeDecisionStore) setStatus(status string) {

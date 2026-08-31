@@ -3,14 +3,18 @@ package settings
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 const (
 	DefaultLanguage          = "auto"
 	DefaultCommandUILanguage = "auto"
 	DefaultReasoningEffort   = "medium"
-	ChatRuntimeModel         = "model"
-	ChatRuntimeACPAgent      = "acp_agent"
+	ChatRuntimeModel         = string(runtimekind.Model)
+	ChatRuntimeACPAgent      = string(runtimekind.ACPAgent)
+	ChatRuntimeCodex         = string(runtimekind.Codex)
+	ChatRuntimeClaudeCode    = string(runtimekind.ClaudeCode)
 	DefaultACPProjectPath    = "/data"
 	DefaultACPProjectMode    = "project"
 )

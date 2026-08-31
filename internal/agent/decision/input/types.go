@@ -9,8 +9,14 @@ import (
 const (
 	ToolNameAskUser = "ask_user"
 
-	ProviderSourceACPMCP         = "acp_mcp"
-	ProviderSourceACPElicitation = "acp_elicitation"
+	// Provider sources record which surface created a request, for audit and
+	// display only. Nothing classifies on them: whether an answer feeds an
+	// in-process waiter or a native continuation is decided by the session's
+	// runtime (runtimekind.UsesDecisionWaiter), the same as tool approvals.
+	ProviderSourceACPMCP           = "acp_mcp"
+	ProviderSourceACPElicitation   = "acp_elicitation"
+	ProviderSourceCodexUserInput   = "codex_request_user_input"
+	ProviderSourceCodexElicitation = "codex_mcp_elicitation"
 
 	StatusPending   = "pending"
 	StatusSubmitted = "submitted"

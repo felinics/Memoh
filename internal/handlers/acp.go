@@ -6,16 +6,11 @@ import (
 	"github.com/labstack/echo/v4"
 
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
-	"github.com/felinics/memoh/internal/agentcredential"
 )
 
-type ACPHandler struct {
-	credentials *agentcredential.Service
-}
+type ACPHandler struct{}
 
-func NewACPHandler(credentials *agentcredential.Service) *ACPHandler {
-	return &ACPHandler{credentials: credentials}
-}
+func NewACPHandler() *ACPHandler { return &ACPHandler{} }
 
 func (h *ACPHandler) Register(e *echo.Echo) {
 	e.GET("/acp/profiles", h.ListProfiles)
@@ -27,9 +22,6 @@ func (h *ACPHandler) Register(e *echo.Echo) {
 // @Tags acp
 // @Success 200 {object} acpprofile.ProfilesResponse
 // @Router /acp/profiles [get].
-func (h *ACPHandler) ListProfiles(c echo.Context) error {
-	return c.JSON(http.StatusOK, acpprofile.ProfilesResponse{
-		Items:                     acpprofile.List(),
-		CredentialStoreConfigured: h.credentials.Configured(),
-	})
+func (*ACPHandler) ListProfiles(c echo.Context) error {
+	return c.JSON(http.StatusOK, acpprofile.ProfilesResponse{Items: acpprofile.List()})
 }

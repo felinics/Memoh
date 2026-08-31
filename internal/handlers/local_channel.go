@@ -465,7 +465,7 @@ func slashUserMessage(code string) string {
 	case slash.CodeInvalidQuickActionScope:
 		return "This quick action cannot be scoped to a session."
 	case slash.CodePermissionSessionRequired:
-		return "Open an external-Agent session before using /permission."
+		return "Open an External Agent session before using /permission."
 	case slash.CodePermissionModeUnsupported:
 		return "This Agent does not declare selectable session modes."
 	case slash.CodePermissionModeUnavailable:
@@ -2206,20 +2206,20 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					continue
 				}
 			}
-			acpInfo, err := h.authorizeWSACPExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
+			runtimeInfo, err := h.authorizeWSRuntimeExecution(c.Request().Context(), channelIdentityID, botID, sessionID)
 			if err != nil {
 				sendWSErrorFromError(writer, ref, err)
 				releaseActiveWSTurnNow()
 				continue
 			}
-			if acpInfo.IsACP && len(requestedSkillContexts) > 0 {
+			if runtimeInfo.RequiresWorkspaceExec && len(requestedSkillContexts) > 0 {
 				sendWSCommandError(writer, msg, slash.CodeUnsupportedSkillSlashContext)
 				releaseActiveWSTurnNow()
 				continue
 			}
 			streamToken := bearerToken
-			if acpInfo.IsACP {
-				streamToken = h.issueRuntimeOwnerBearerToken(acpInfo.RuntimeOwnerAccountID, bearerToken)
+			if runtimeInfo.RequiresWorkspaceExec {
+				streamToken = h.issueRuntimeOwnerBearerToken(runtimeInfo.RuntimeOwnerAccountID, bearerToken)
 			}
 			var ingestedActivationAttachments []turn.Attachment
 			userMessagePersisted := false
@@ -2543,22 +2543,22 @@ func (h *LocalChannelHandler) wsSessionSupportsRequestedSkills(ctx context.Conte
 	return sessionpkg.SupportsSkillActivation(sess.SessionMode, sess.Type, sess.RuntimeType), nil
 }
 
-func (h *LocalChannelHandler) authorizeWSACPExecution(ctx context.Context, channelIdentityID, botID, sessionID string) (application.ACPSessionExecutionInfo, error) {
+func (h *LocalChannelHandler) authorizeWSRuntimeExecution(ctx context.Context, channelIdentityID, botID, sessionID string) (application.RuntimeSessionExecutionInfo, error) {
 	if h == nil || h.agentService == nil {
-		return application.ACPSessionExecutionInfo{}, nil
+		return application.RuntimeSessionExecutionInfo{}, nil
 	}
-	info, err := h.agentService.ACPSessionExecutionInfo(ctx, sessionID)
-	if err != nil || !info.IsACP {
+	info, err := h.agentService.RuntimeSessionExecutionInfo(ctx, sessionID)
+	if err != nil || !info.RequiresWorkspaceExec {
 		return info, err
 	}
 	if strings.TrimSpace(info.RuntimeOwnerAccountID) == "" {
-		feedback := acpRuntimeOwnerMissingFeedback()
+		feedback := externalAgentRuntimeOwnerMissingFeedback()
 		return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
 	}
 	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
 	if err != nil {
 		if isHTTPStatus(err, http.StatusForbidden) {
-			feedback := acpNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
+			feedback := externalAgentNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
 			return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
 		}
 		return info, err
@@ -2570,7 +2570,7 @@ func (h *LocalChannelHandler) authorizeWSACPExecution(ctx context.Context, chann
 	if err != nil {
 		return info, err
 	}
-	if err := authorizeACPRuntimeSessionAccess(channelIdentityID, perms, info.RuntimeOwnerAccountID); err != nil {
+	if err := authorizeExternalAgentSessionAccess(channelIdentityID, perms, info.RuntimeOwnerAccountID); err != nil {
 		return info, err
 	}
 	return info, nil

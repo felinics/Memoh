@@ -36,7 +36,7 @@ func (a *Activator) ReclaimWaitingDecision(
 	ctx context.Context,
 	botID, sessionID, runID, ownerID, liveGeneration string,
 	previousToken, newToken int64,
-	decisionKind, decisionID string,
+	decisions []PreservedDecision,
 ) error {
 	if a == nil || a.queries == nil {
 		return ErrTransactionsUnsupported
@@ -44,7 +44,7 @@ func (a *Activator) ReclaimWaitingDecision(
 	return ActivateWithOptions(ctx, a.queries, Fence{
 		BotID: botID, SessionID: sessionID, Token: newToken,
 	}, ActivationOptions{
-		PreserveDecision: &PreservedDecision{Kind: decisionKind, ID: decisionID},
+		PreserveDecisions: decisions,
 		ReclaimWaitingDecision: &WaitingDecisionReclaim{
 			RunID: runID, OwnerID: ownerID, PreviousToken: previousToken,
 			LiveGeneration: liveGeneration,

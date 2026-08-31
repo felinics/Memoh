@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
@@ -20,26 +20,16 @@ type BotAgentsHandler struct {
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
-	durableAuth    durableAuthPurger
+	runtimes       external.Drivers
 }
 
-// durableAuthPurger removes an instance's staged Codex auth after the
-// instance (and with it the credential binding) is deleted.
-type durableAuthPurger interface {
-	PurgeBotAgentDurableAuth(ctx context.Context, botID, botAgentID string) error
-}
-
-// SetDurableAuthPurger wires the ACP pool's per-instance auth cleanup.
-func (h *BotAgentsHandler) SetDurableAuthPurger(purger durableAuthPurger) {
-	h.durableAuth = purger
-}
-
-func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service) *BotAgentsHandler {
+func NewBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *BotAgentsHandler {
 	return &BotAgentsHandler{
 		service:        service,
 		botService:     botService,
 		accountService: accountService,
 		logger:         log.With(slog.String("handler", "bot_agents")),
+		runtimes:       runtimes,
 	}
 }
 
@@ -48,8 +38,39 @@ func (h *BotAgentsHandler) Register(e *echo.Echo) {
 	group.POST("", h.Create)
 	group.GET("", h.List)
 	group.GET("/:id", h.Get)
+	group.GET("/:id/models", h.ListModels)
 	group.PATCH("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
+}
+
+// ListModels godoc
+// @Summary List models available to a bot Agent
+// @Tags bot-agents
+// @Param bot_id path string true "Bot ID"
+// @Param id path string true "Agent ID"
+// @Success 200 {object} external.ModelCatalog
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
+// @Router /bots/{bot_id}/agents/{id}/models [get].
+func (h *BotAgentsHandler) ListModels(c echo.Context) error {
+	botID, err := h.authorize(c, bots.PermissionWorkspaceExec)
+	if err != nil {
+		return err
+	}
+	agent, err := h.service.GetActive(c.Request().Context(), botID, strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		return h.publicError("list models", err)
+	}
+	catalog, err := h.runtimes.ModelCatalog(c.Request().Context(), agent.Runtime, botID, agent.ID)
+	if err != nil {
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
+		h.logger.Error("bot Agent model catalog failed", slog.String("runtime", agent.Runtime), slog.Any("error", err))
+		return apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": agent.Runtime})
+	}
+	return c.JSON(http.StatusOK, catalog)
 }
 
 // Create godoc
@@ -127,7 +148,7 @@ func (h *BotAgentsHandler) Get(c echo.Context) error {
 
 // Update godoc
 // @Summary Update a bot Agent
-// @Description Rename, enable, or disable an Agent; runtime metadata is immutable
+// @Description Update an Agent's name, availability, or runtime configuration
 // @Tags bot-agents
 // @Accept json
 // @Produce json
@@ -153,6 +174,9 @@ func (h *BotAgentsHandler) Update(c echo.Context) error {
 	if err != nil {
 		return h.publicError("update", err)
 	}
+	if req.Metadata != nil {
+		h.runtimes.ResetBotAgent(agent.Runtime, botID, agent.ID)
+	}
 	return c.JSON(http.StatusOK, agent)
 }
 
@@ -173,11 +197,18 @@ func (h *BotAgentsHandler) Delete(c echo.Context) error {
 		return err
 	}
 	botAgentID := strings.TrimSpace(c.Param("id"))
-	if err := h.service.Delete(c.Request().Context(), botID, botAgentID); err != nil {
+	err = h.service.Delete(c.Request().Context(), botID, botAgentID, func(agent botagents.BotAgent) error {
+		purgeErr := h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID)
+		if purgeErr != nil && apperror.CodeOf(purgeErr) == "" {
+			return apperror.Wrap(apperror.CodeAgentCredentialMaterializationFailed, purgeErr, nil)
+		}
+		return purgeErr
+	})
+	if err != nil {
+		if apperror.CodeOf(err) != "" {
+			return err
+		}
 		return h.publicError("delete", err)
-	}
-	if h.durableAuth != nil {
-		_ = h.durableAuth.PurgeBotAgentDurableAuth(c.Request().Context(), botID, botAgentID)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -211,7 +242,7 @@ func botAgentHTTPError(err error) error {
 		return apperror.New(apperror.CodeBotAgentNotFound, nil)
 	case errors.Is(err, botagents.ErrNameTaken):
 		return apperror.New(apperror.CodeBotAgentNameTaken, nil)
-	case errors.Is(err, botagents.ErrInvalidRuntime):
+	case errors.Is(err, botagents.ErrInvalidRuntime), errors.Is(err, botagents.ErrProviderDirectRuntime):
 		return apperror.New(apperror.CodeBotAgentInvalidRuntime, nil)
 	case errors.Is(err, botagents.ErrInvalidMetadata):
 		return apperror.New(apperror.CodeBotAgentInvalidMetadata, nil)

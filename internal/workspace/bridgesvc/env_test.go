@@ -9,19 +9,19 @@ import (
 
 func TestExecEnvUnsetsInheritedEnvBeforeAppendingOverrides(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "host-secret")
-	t.Setenv("HERMES_HOME", "/host/hermes")
+	t.Setenv("CUSTOM_AGENT_HOME", "/host/custom-agent")
 	env := execEnv(&pb.ExecInput{
-		Env:      []string{"HERMES_HOME=/data/.memoh-hermes", "PATH=/toolkit"},
-		UnsetEnv: []string{"OPENAI_API_KEY", "HERMES_*"},
+		Env:      []string{"CUSTOM_AGENT_HOME=/data/.custom-agent", "PATH=/toolkit"},
+		UnsetEnv: []string{"OPENAI_API_KEY", "CUSTOM_AGENT_*"},
 	})
 	if hasEnvValue(env, "OPENAI_API_KEY", "host-secret") {
 		t.Fatalf("host OPENAI_API_KEY leaked: %v", env)
 	}
-	if hasEnvValue(env, "HERMES_HOME", "/host/hermes") {
-		t.Fatalf("host HERMES_HOME leaked: %v", env)
+	if hasEnvValue(env, "CUSTOM_AGENT_HOME", "/host/custom-agent") {
+		t.Fatalf("host CUSTOM_AGENT_HOME leaked: %v", env)
 	}
-	if !hasEnvValue(env, "HERMES_HOME", "/data/.memoh-hermes") {
-		t.Fatalf("explicit HERMES_HOME missing: %v", env)
+	if !hasEnvValue(env, "CUSTOM_AGENT_HOME", "/data/.custom-agent") {
+		t.Fatalf("explicit CUSTOM_AGENT_HOME missing: %v", env)
 	}
 }
 

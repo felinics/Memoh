@@ -16,7 +16,6 @@ import (
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
-	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
@@ -25,7 +24,6 @@ import (
 
 type ACPRuntimeHandler struct {
 	pool           acpRuntimePool
-	credentials    *agentcredential.Service
 	sessionService *session.Service
 	botService     *bots.Service
 	accountService *accounts.Service
@@ -47,7 +45,6 @@ type acpRuntimePool interface {
 
 type acpRuntimeCreateRequest struct {
 	AgentID     string `json:"acp_agent_id"`
-	BotAgentID  string `json:"bot_agent_id,omitempty"`
 	ProjectPath string `json:"project_path,omitempty"`
 }
 
@@ -65,21 +62,6 @@ type acpRuntimeModeRequest struct {
 
 func NewACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service) *ACPRuntimeHandler {
 	return newACPRuntimeHandler(pool, sessionService, botService, accountService)
-}
-
-// SetCredentialService lets runtime preflight recognize instance-attached
-// encrypted credentials instead of trusting scrubbed bot metadata alone.
-func (h *ACPRuntimeHandler) SetCredentialService(service *agentcredential.Service) {
-	h.credentials = service
-}
-
-func (h *ACPRuntimeHandler) credentialAttached(ctx context.Context, botID, botAgentID string) bool {
-	if h.credentials == nil || !h.credentials.Configured() || strings.TrimSpace(botAgentID) == "" {
-		return false
-	}
-	// Verify usability (decrypt + Hermes provider match) rather than just
-	// read the row: preflight must fail the same way the runtime start would.
-	return h.credentials.VerifyUsableForBotAgent(ctx, botID, botAgentID)
 }
 
 func newACPRuntimeHandler(pool acpRuntimePool, sessionService *session.Service, botService *bots.Service, accountService *accounts.Service) *ACPRuntimeHandler {
@@ -135,7 +117,7 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	if agentID == "" {
 		return apperror.New(apperror.CodeACPRequestInvalid, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, agentID, h.credentialAttached(c.Request().Context(), bot.ID, req.BotAgentID)); err != nil {
+	if err := acpAgentSetupHTTPError(bot.Metadata, agentID); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	projectPath := strings.TrimSpace(req.ProjectPath)
@@ -145,7 +127,6 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	status, err := h.pool.CreateRuntime(c.Request().Context(), acpagent.CreateRuntimeInput{
 		BotID:                 bot.ID,
 		AgentID:               agentID,
-		BotAgentID:            strings.TrimSpace(req.BotAgentID),
 		ProjectPath:           projectPath,
 		RuntimeOwnerAccountID: channelIdentityID,
 		ToolHTTPURL:           buildACPMCPToolsURL(c, bot.ID),
@@ -361,7 +342,7 @@ func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 	}
 	botID := bot.ID
 	acpMeta := acpRuntimeSessionMetadata(sess)
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id"), h.credentialAttached(c.Request().Context(), bot.ID, sess.BotAgentID)); err != nil {
+	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
@@ -413,7 +394,7 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id"), h.credentialAttached(c.Request().Context(), bot.ID, sess.BotAgentID)); err != nil {
+	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetModel(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -462,7 +443,7 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id"), h.credentialAttached(c.Request().Context(), bot.ID, sess.BotAgentID)); err != nil {
+	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetReasoning(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -511,7 +492,7 @@ func (h *ACPRuntimeHandler) SetMode(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id"), h.credentialAttached(c.Request().Context(), bot.ID, sess.BotAgentID)); err != nil {
+	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetMode(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{

@@ -1,4 +1,4 @@
-// Package feedback defines stable user-facing Agent Control Protocol errors.
+// Package feedback defines stable user-facing External Agent errors.
 package feedback
 
 import (

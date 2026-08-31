@@ -140,7 +140,7 @@ func (q *Queries) GetAgentCredential(ctx context.Context, id pgtype.UUID) (Agent
 }
 
 const getBotAgentCredential = `-- name: GetBotAgentCredential :one
-SELECT c.id, c.team_id, c.owner_user_id, c.provider, c.auth_kind, c.label, c.encrypted_payload, c.encryption_nonce, c.key_version, c.account_metadata, c.expires_at, c.credential_version, c.revoked_at, c.created_at, c.updated_at, (a.metadata->>'provider')::text AS agent_provider
+SELECT c.id, c.team_id, c.owner_user_id, c.provider, c.auth_kind, c.label, c.encrypted_payload, c.encryption_nonce, c.key_version, c.account_metadata, c.expires_at, c.credential_version, c.revoked_at, c.created_at, c.updated_at, a.runtime::text AS agent_runtime
 FROM bot_agents a
 JOIN agent_credentials c
   ON c.team_id = a.team_id AND c.id = a.agent_credential_id
@@ -171,7 +171,7 @@ type GetBotAgentCredentialRow struct {
 	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	AgentProvider     string             `json:"agent_provider"`
+	AgentRuntime      string             `json:"agent_runtime"`
 }
 
 func (q *Queries) GetBotAgentCredential(ctx context.Context, arg GetBotAgentCredentialParams) (GetBotAgentCredentialRow, error) {
@@ -193,13 +193,13 @@ func (q *Queries) GetBotAgentCredential(ctx context.Context, arg GetBotAgentCred
 		&i.RevokedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.AgentProvider,
+		&i.AgentRuntime,
 	)
 	return i, err
 }
 
-const getBotAgentProvider = `-- name: GetBotAgentProvider :one
-SELECT (metadata->>'provider')::text AS provider
+const getBotAgentRuntime = `-- name: GetBotAgentRuntime :one
+SELECT runtime
 FROM bot_agents
 WHERE bot_id = $1
   AND id = $2
@@ -207,16 +207,16 @@ WHERE bot_id = $1
   AND deleted_at IS NULL
 `
 
-type GetBotAgentProviderParams struct {
+type GetBotAgentRuntimeParams struct {
 	BotID      pgtype.UUID `json:"bot_id"`
 	BotAgentID pgtype.UUID `json:"bot_agent_id"`
 }
 
-func (q *Queries) GetBotAgentProvider(ctx context.Context, arg GetBotAgentProviderParams) (string, error) {
-	row := q.db.QueryRow(ctx, getBotAgentProvider, arg.BotID, arg.BotAgentID)
-	var provider string
-	err := row.Scan(&provider)
-	return provider, err
+func (q *Queries) GetBotAgentRuntime(ctx context.Context, arg GetBotAgentRuntimeParams) (string, error) {
+	row := q.db.QueryRow(ctx, getBotAgentRuntime, arg.BotID, arg.BotAgentID)
+	var runtime string
+	err := row.Scan(&runtime)
+	return runtime, err
 }
 
 const revokeAgentCredentialByID = `-- name: RevokeAgentCredentialByID :one

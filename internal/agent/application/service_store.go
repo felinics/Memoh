@@ -22,15 +22,16 @@ func (s *Service) storeRound(ctx context.Context, req ChatRequest, messages []Mo
 }
 
 type storeRoundOptions struct {
-	AllowPendingToolCalls         bool
-	SkipMemory                    bool
-	AllowEmptyAssistantText       bool
-	MessageMetadataByIndex        map[int]map[string]any
-	ReasoningTiming               []messagepkg.ReasoningTimingSegment
-	RequireCompletePersist        bool
-	CleanupACPDecisionProjections bool
-	ACPPublication                *messagepkg.ACPPublication
-	ContextLifecycle              *contextfrag.LifecycleHolder
+	AllowPendingToolCalls             bool
+	SkipMemory                        bool
+	AllowEmptyAssistantText           bool
+	MessageMetadataByIndex            map[int]map[string]any
+	ReasoningTiming                   []messagepkg.ReasoningTimingSegment
+	RequireCompletePersist            bool
+	CleanupRuntimeDecisionProjections bool
+	AgentPublication                  *messagepkg.AgentPublication
+	AgentTurnID                       string
+	ContextLifecycle                  *contextfrag.LifecycleHolder
 }
 
 func (s *Service) storeRoundWithOptions(ctx context.Context, req ChatRequest, messages []ModelMessage, modelID string, opts storeRoundOptions) error {
@@ -211,18 +212,18 @@ func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, mess
 	if err != nil {
 		return nil, fmt.Errorf("prepare messages for persistence: %w", err)
 	}
-	// A successful ACP checkpoint is published by metadata on the final
-	// assistant row. Persist the complete round and that watermark in one
-	// transaction, otherwise a partially-written round could make a staged
-	// native snapshot visible before all canonical messages exist.
+	// Persist the complete round and any runtime checkpoint watermark in one
+	// transaction so a staged snapshot cannot become canonical before every
+	// message in its round exists.
 	if opts.RequireCompletePersist {
 		atomic, ok := s.messageService.(messagepkg.AtomicRoundPersister)
 		if !ok {
 			return nil, errors.New("complete round persistence requires an atomic message persister")
 		}
 		persisted, handled, persistErr := atomic.PersistRound(ctx, persistInputs, messagepkg.RoundPersistenceOptions{
-			CleanupACPDecisionProjections: opts.CleanupACPDecisionProjections,
-			ACPPublication:                opts.ACPPublication,
+			CleanupRuntimeDecisionProjections: opts.CleanupRuntimeDecisionProjections,
+			AgentPublication:                  opts.AgentPublication,
+			AgentTurnID:                       opts.AgentTurnID,
 		})
 		if persistErr != nil {
 			return persisted, persistErr

@@ -46,7 +46,7 @@ WHERE agent_credential_id = $1
   AND deleted_at IS NULL;
 
 -- name: GetBotAgentCredential :one
-SELECT c.*, (a.metadata->>'provider')::text AS agent_provider
+SELECT c.*, a.runtime::text AS agent_runtime
 FROM bot_agents a
 JOIN agent_credentials c
   ON c.team_id = a.team_id AND c.id = a.agent_credential_id
@@ -84,8 +84,8 @@ RETURNING (
     WHERE prev.id = bot_agents.id
 ) AS previous_credential_id;
 
--- name: GetBotAgentProvider :one
-SELECT (metadata->>'provider')::text AS provider
+-- name: GetBotAgentRuntime :one
+SELECT runtime
 FROM bot_agents
 WHERE bot_id = $1
   AND id = sqlc.arg(bot_agent_id)

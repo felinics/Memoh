@@ -33,14 +33,6 @@ func (c *clientConnection) NewSession(ctx context.Context, params acp.NewSession
 	return acp.SendRequest[sessionResponse](c.conn, ctx, acp.AgentMethodSessionNew, params)
 }
 
-func (c *clientConnection) ResumeSession(ctx context.Context, params acp.ResumeSessionRequest) (sessionResponse, error) {
-	return acp.SendRequest[sessionResponse](c.conn, ctx, acp.AgentMethodSessionResume, params)
-}
-
-func (c *clientConnection) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (sessionResponse, error) {
-	return acp.SendRequest[sessionResponse](c.conn, ctx, acp.AgentMethodSessionLoad, params)
-}
-
 func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return acp.PromptResponse{}, err
@@ -170,12 +162,6 @@ func (c *clientConnection) handle(ctx context.Context, method string, params jso
 		c.client.logger.Debug("ACP client method called", slog.String("method", method))
 	}
 	switch method {
-	case claudeSDKMessageMethod:
-		// This is a Claude Agent ACP extension notification, not an ACP
-		// request. Parsing failures are latched by the active prompt receipt
-		// collector and checked after the prompt response notification barrier.
-		c.client.recordClaudeSDKMessage(params)
-		return nil, nil
 	case acp.ClientMethodFsReadTextFile:
 		var p acp.ReadTextFileRequest
 		if err := decodeACPParams(params, &p); err != nil {

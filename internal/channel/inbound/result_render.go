@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/i18n"
@@ -170,7 +170,7 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 	return applyMessageFormat(msg, rc.Caps)
 }
 
-func renderACPFeedbackText(feedback *acpfeedback.Error, t *i18n.Localizer) string {
+func renderACPFeedbackText(feedback *agentfeedback.Error, t *i18n.Localizer) string {
 	if feedback == nil {
 		return ""
 	}

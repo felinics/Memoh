@@ -1,26 +1,18 @@
 package client
 
 import (
-	"strings"
 	"unicode/utf8"
 
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/prune"
 )
 
 type ToolOutputLimit = contextlimit.ToolOutputLimit
 
 func LimitStreamEvent(ev event.StreamEvent, limit ToolOutputLimit) event.StreamEvent {
-	if !hasToolOutputLimit(limit) || ev.Type != event.ToolCallEnd {
-		return ev
-	}
-	label := "tool result (" + ev.ToolName + ")"
-	ev.Result = contextlimit.LimitToolOutput(ev.Result, label, limit)
-	if strings.TrimSpace(ev.Error) != "" {
-		ev.Error = contextlimit.LimitString(ev.Error, label, limit)
-	}
-	return ev
+	return external.LimitStreamEvent(ev, limit)
 }
 
 func hasToolOutputLimit(limit ToolOutputLimit) bool {

@@ -24,11 +24,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 var (
@@ -70,9 +70,7 @@ func (s *Service) GetForBotAgent(ctx context.Context, botID, botAgentID string) 
 	return publicFromJoinRow(row), nil
 }
 
-// ResolveForBotAgent decrypts the credential attached to a Bot Agent instance
-// for runtime use. ErrNotFound means the Agent has no credential; callers fall
-// back to the legacy bot-metadata configuration in that case.
+// ResolveForBotAgent decrypts the credential attached to a Bot Agent instance.
 func (s *Service) ResolveForBotAgent(ctx context.Context, botID, botAgentID string) (ResolvedCredential, error) {
 	if !s.Configured() {
 		return ResolvedCredential{}, ErrEncryptionUnavailable
@@ -84,49 +82,14 @@ func (s *Service) ResolveForBotAgent(ctx context.Context, botID, botAgentID stri
 	if row.RevokedAt.Valid {
 		return ResolvedCredential{}, ErrRevoked
 	}
-	if !Compatible(row.AgentProvider, row.AuthKind) {
+	if !Compatible(row.AgentRuntime, row.AuthKind) {
 		return ResolvedCredential{}, ErrIncompatible
 	}
 	secret, err := s.decrypt(row.EncryptedPayload, row.EncryptionNonce, row.KeyVersion)
 	if err != nil {
 		return ResolvedCredential{}, err
 	}
-	return ResolvedCredential{PublicCredential: publicFromJoinRow(row), AgentProvider: row.AgentProvider, Secret: secret}, nil
-}
-
-// VerifyUsableForBotAgent reports whether the attached credential would
-// actually work at runtime start: it must decrypt with the current key, and
-// for Hermes its provider must match the configured managed provider —
-// applyAgentCredential rejects mismatches, so preflight has to as well
-// instead of reducing the credential to a boolean.
-func (s *Service) VerifyUsableForBotAgent(ctx context.Context, botID, botAgentID string) bool {
-	resolved, err := s.ResolveForBotAgent(ctx, botID, botAgentID)
-	if err != nil {
-		return false
-	}
-	if acpprofile.NormalizeAgentID(resolved.AgentProvider) != acpprofile.AgentHermesID {
-		return true
-	}
-	botUUID, err := db.ParseUUID(botID)
-	if err != nil {
-		return false
-	}
-	bot, err := s.queries.GetBotByID(ctx, botUUID)
-	if err != nil {
-		return false
-	}
-	var metadata map[string]any
-	if len(bot.Metadata) > 0 {
-		if json.Unmarshal(bot.Metadata, &metadata) != nil {
-			return false
-		}
-	}
-	setup := acpprofile.ParseAgentSetup(metadata, acpprofile.AgentHermesID)
-	managedProvider := strings.TrimSpace(setup.Managed["provider"])
-	if managedProvider == "" {
-		return true
-	}
-	return acpprofile.HermesCredentialProviderFor(managedProvider) == resolved.Provider
+	return ResolvedCredential{PublicCredential: publicFromJoinRow(row), AgentRuntime: row.AgentRuntime, Secret: secret}, nil
 }
 
 // AttachToBotAgent encrypts a new secret, points the Bot Agent instance at it,
@@ -165,14 +128,14 @@ func (s *Service) AttachToBotAgent(ctx context.Context, ownerUserID, botID, botA
 
 	var created dbsqlc.AgentCredential
 	attach := func(q dbstore.Queries) error {
-		agentProvider, providerErr := q.GetBotAgentProvider(ctx, dbsqlc.GetBotAgentProviderParams{BotID: botUUID, BotAgentID: agentUUID})
+		agentRuntime, providerErr := q.GetBotAgentRuntime(ctx, dbsqlc.GetBotAgentRuntimeParams{BotID: botUUID, BotAgentID: agentUUID})
 		if errors.Is(providerErr, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		if providerErr != nil {
 			return providerErr
 		}
-		if !Compatible(agentProvider, req.AuthKind) {
+		if !Compatible(agentRuntime, req.AuthKind) {
 			return ErrIncompatible
 		}
 		row, createErr := q.CreateAgentCredential(ctx, dbsqlc.CreateAgentCredentialParams{
@@ -224,19 +187,6 @@ func (s *Service) DetachFromBotAgent(ctx context.Context, botID, botAgentID stri
 	return s.inTx(ctx, detach)
 }
 
-// ReleaseCredential revokes a credential that lost its referencing Bot Agent
-// row through deletion, once nothing else points at it.
-func (s *Service) ReleaseCredential(ctx context.Context, credentialID string) error {
-	if s == nil || s.queries == nil {
-		return nil
-	}
-	id, err := db.ParseUUID(credentialID)
-	if err != nil {
-		return ErrInvalidRequest
-	}
-	return revokeIfOrphan(ctx, s.queries, id)
-}
-
 // UpdateSecretCAS persists a rotated secret guarded by credential_version so a
 // concurrent rotation (or revoke) loses cleanly instead of overwriting.
 func (s *Service) UpdateSecretCAS(ctx context.Context, credentialID string, expectedVersion int64, secret map[string]string, accountMetadata map[string]any, expiresAt *time.Time) (PublicCredential, error) {
@@ -268,15 +218,13 @@ func (s *Service) UpdateSecretCAS(ctx context.Context, credentialID string, expe
 	return publicFromRow(row), nil
 }
 
-// Compatible reports whether an auth kind can drive the given ACP profile.
-func Compatible(agentID, authKind string) bool {
-	switch acpprofile.NormalizeAgentID(agentID) {
-	case acpprofile.AgentCodexID:
+// Compatible reports whether an auth kind can drive the Agent runtime.
+func Compatible(agentRuntime, authKind string) bool {
+	switch strings.ToLower(strings.TrimSpace(agentRuntime)) {
+	case string(runtimekind.Codex):
 		return authKind == AuthKindOpenAIAPIKey || authKind == AuthKindOpenAICodexOAuth
-	case acpprofile.AgentClaudeCodeID:
+	case string(runtimekind.ClaudeCode):
 		return authKind == AuthKindAnthropicAPIKey || authKind == AuthKindClaudeCodeOAuth
-	case acpprofile.AgentHermesID:
-		return authKind == AuthKindOpenAIAPIKey || authKind == AuthKindGoogleAPIKey || authKind == AuthKindOpenRouterAPIKey
 	default:
 		return false
 	}
@@ -350,12 +298,12 @@ func (s *Service) decrypt(ciphertext, nonce []byte, keyVersion int32) (map[strin
 // ProviderForAuthKind maps an auth kind to its provider so API callers only
 // submit the kind.
 func ProviderForAuthKind(kind string) string {
-	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic, AuthKindGoogleAPIKey: ProviderGoogle, AuthKindOpenRouterAPIKey: ProviderOpenRouter}
+	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic}
 	return want[normalize(kind)]
 }
 
 func validProviderKind(provider, kind string) bool {
-	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic, AuthKindGoogleAPIKey: ProviderGoogle, AuthKindOpenRouterAPIKey: ProviderOpenRouter}
+	want := map[string]string{AuthKindOpenAIAPIKey: ProviderOpenAI, AuthKindOpenAICodexOAuth: ProviderOpenAI, AuthKindAnthropicAPIKey: ProviderAnthropic, AuthKindClaudeCodeOAuth: ProviderAnthropic}
 	return want[kind] == provider
 }
 

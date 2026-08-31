@@ -58,37 +58,44 @@ func (s *Service) ResolveRuntimeDecision(ctx context.Context, commandType, decis
 	}
 }
 
-// PendingRuntimeDecision resolves the one durable decision that parked runID.
-// It is used only by expired-owner recovery, where preserving the exact row is
-// required before advancing the run's fencing token.
-func (s *Service) PendingRuntimeDecision(ctx context.Context, runID string) (sessionruntime.DecisionTarget, bool, error) {
+// PendingRuntimeDecisions resolves every durable decision that parked runID.
+// It is used only by expired-owner recovery, where preserving the exact rows
+// is required before advancing the run's fencing token — a turn can park on
+// several approvals and user inputs at once, and dropping any of them here
+// would supersede a decision the user can still answer.
+func (s *Service) PendingRuntimeDecisions(ctx context.Context, runID string) ([]sessionruntime.DecisionTarget, error) {
 	if s == nil || s.queries == nil {
-		return sessionruntime.DecisionTarget{}, false, errors.New("runtime decision store is not configured")
+		return nil, errors.New("runtime decision store is not configured")
 	}
 	id, err := db.ParseUUID(runID)
 	if err != nil {
-		return sessionruntime.DecisionTarget{}, false, err
+		return nil, err
 	}
-	approval, approvalErr := s.queries.GetPendingToolApprovalByRun(ctx, id)
-	input, inputErr := s.queries.GetPendingUserInputByRun(ctx, id)
-	approvalFound := approvalErr == nil
-	inputFound := inputErr == nil
-	if approvalErr != nil && !errors.Is(approvalErr, pgx.ErrNoRows) {
-		return sessionruntime.DecisionTarget{}, false, fmt.Errorf("read pending tool approval for run: %w", approvalErr)
+	approvals, err := s.queries.ListPendingToolApprovalsByRun(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read pending tool approvals for run: %w", err)
 	}
-	if inputErr != nil && !errors.Is(inputErr, pgx.ErrNoRows) {
-		return sessionruntime.DecisionTarget{}, false, fmt.Errorf("read pending user input for run: %w", inputErr)
+	inputs, err := s.queries.ListPendingUserInputsByRun(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read pending user inputs for run: %w", err)
 	}
-	if approvalFound && inputFound {
-		return sessionruntime.DecisionTarget{}, false, errors.New("run has multiple pending runtime decisions")
+	out := make([]sessionruntime.DecisionTarget, 0, len(approvals)+len(inputs))
+	for _, approval := range approvals {
+		out = append(out, toolApprovalDecisionTarget(approval))
 	}
-	if approvalFound {
-		return toolApprovalDecisionTarget(approval), true, nil
+	for _, input := range inputs {
+		out = append(out, userInputDecisionTarget(input))
 	}
-	if inputFound {
-		return userInputDecisionTarget(input), true, nil
+	// Recovery decides by session runtime whether the parked run is
+	// resumable at all; every pending decision here shares one session.
+	if len(out) > 0 && s.sessionService != nil {
+		if sess, sessErr := s.sessionService.Get(ctx, out[0].SessionID); sessErr == nil {
+			for i := range out {
+				out[i].SessionRuntime = sess.RuntimeType
+			}
+		}
 	}
-	return sessionruntime.DecisionTarget{}, false, nil
+	return out, nil
 }
 
 func runtimeDecisionReadError(err error) error {

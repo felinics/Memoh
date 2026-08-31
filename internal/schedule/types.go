@@ -3,6 +3,8 @@ package schedule
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 // Run targets: where one fire of a schedule executes.
@@ -15,12 +17,11 @@ const (
 	RunTargetExistingSession = "existing_session"
 )
 
-// Runtime types mirror the bot_sessions vocabulary. The values are stable DB
-// vocabulary shared with internal/chat/thread; duplicated here so the
-// schedule domain does not import the chat packages.
+// Runtime types are the bot_sessions vocabulary, pinned to the shared
+// runtimekind table (the schedule domain cannot import the chat packages).
 const (
-	RuntimeModel    = "model"
-	RuntimeACPAgent = "acp_agent"
+	RuntimeModel    = string(runtimekind.Model)
+	RuntimeACPAgent = string(runtimekind.ACPAgent)
 )
 
 // ExecutionConfig is the per-schedule execution parameter block: where a
@@ -43,8 +44,8 @@ type ExecutionConfig struct {
 	ACPAgentID string `json:"acp_agent_id,omitempty"`
 	// ModelID is a native model UUID override (models.id).
 	ModelID string `json:"model_id,omitempty"`
-	// ACPModelID is an agent-reported model identifier override for ACP
-	// runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+	// ACPModelID is an agent-reported model identifier override for External
+	// Agent runs. Mutually exclusive with ModelID.
 	ACPModelID string `json:"acp_model_id,omitempty"`
 	// ReasoningEffort overrides the reasoning effort for this schedule.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`

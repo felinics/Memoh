@@ -316,28 +316,37 @@ WITH target_sessions AS MATERIALIZED (
 invalidated_sessions AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1,
-      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint,
+      -- Runtime continuity anchors (codex_thread_id, claude_session_id, and
+      -- whatever future drivers store) must die with the history they resume,
+      -- or the next turn replays the cleared conversation from the runtime's
+      -- own thread. Identity keys survive: keep only acp_agent_id.
+      runtime_metadata = CASE
+        WHEN session.runtime_metadata ? 'acp_agent_id'
+          THEN jsonb_build_object('acp_agent_id', session.runtime_metadata->'acp_agent_id')
+        ELSE '{}'::jsonb
+      END
   FROM target_sessions target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
 ),
 deleted_acp_states AS (
-  DELETE FROM acp_session_states state
+  DELETE FROM agent_session_states state
   USING invalidated_sessions invalidated
   WHERE state.team_id = public.memoh_current_team_id()
     AND state.session_id = invalidated.id
   RETURNING state.session_id
 ),
 deleted_acp_lines AS (
-  DELETE FROM acp_session_state_lines line
+  DELETE FROM agent_session_state_lines line
   USING invalidated_sessions invalidated
   WHERE line.team_id = public.memoh_current_team_id()
     AND line.session_id = invalidated.id
   RETURNING line.session_id
 ),
 deleted_acp_publications AS (
-  DELETE FROM acp_session_publications publication
+  DELETE FROM agent_session_publications publication
   USING invalidated_sessions invalidated
   WHERE publication.team_id = public.memoh_current_team_id()
     AND publication.session_id = invalidated.id
@@ -394,28 +403,35 @@ WITH target_session AS MATERIALIZED (
 invalidated_session AS (
   UPDATE bot_sessions session
   SET compaction_epoch = session.compaction_epoch + 1,
-      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint,
+      -- Same anchor scrub as ClearHistoryByBot: continuity keys die with the
+      -- history, identity (acp_agent_id) survives.
+      runtime_metadata = CASE
+        WHEN session.runtime_metadata ? 'acp_agent_id'
+          THEN jsonb_build_object('acp_agent_id', session.runtime_metadata->'acp_agent_id')
+        ELSE '{}'::jsonb
+      END
   FROM target_session target
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
 ),
 deleted_acp_state AS (
-  DELETE FROM acp_session_states state
+  DELETE FROM agent_session_states state
   USING invalidated_session invalidated
   WHERE state.team_id = public.memoh_current_team_id()
     AND state.session_id = invalidated.id
   RETURNING state.session_id
 ),
 deleted_acp_lines AS (
-  DELETE FROM acp_session_state_lines line
+  DELETE FROM agent_session_state_lines line
   USING invalidated_session invalidated
   WHERE line.team_id = public.memoh_current_team_id()
     AND line.session_id = invalidated.id
   RETURNING line.session_id
 ),
 deleted_acp_publications AS (
-  DELETE FROM acp_session_publications publication
+  DELETE FROM agent_session_publications publication
   USING invalidated_session invalidated
   WHERE publication.team_id = public.memoh_current_team_id()
     AND publication.session_id = invalidated.id
@@ -2349,6 +2365,34 @@ func (q *Queries) GetMessageByIDBySession(ctx context.Context, arg GetMessageByI
 		&i.Platform,
 	)
 	return i, err
+}
+
+const getTurnAgentTurnID = `-- name: GetTurnAgentTurnID :one
+SELECT COALESCE(message.metadata->>'agent_turn_id', '')::text AS agent_turn_id
+FROM bot_history_messages message
+WHERE message.team_id = public.memoh_current_team_id()
+  AND message.bot_id = $1
+  AND message.session_id = $2
+  AND message.turn_id = $3
+  AND message.role = 'assistant'
+  AND btrim(COALESCE(message.metadata->>'agent_turn_id', '')) <> ''
+ORDER BY message.created_at DESC, message.id DESC
+LIMIT 1
+`
+
+type GetTurnAgentTurnIDParams struct {
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+	TurnID    pgtype.UUID `json:"turn_id"`
+}
+
+// The anchor for turn-level runtime operations (codex thread/fork
+// lastTurnId): the newest assistant message of the turn that recorded one.
+func (q *Queries) GetTurnAgentTurnID(ctx context.Context, arg GetTurnAgentTurnIDParams) (string, error) {
+	row := q.db.QueryRow(ctx, getTurnAgentTurnID, arg.BotID, arg.SessionID, arg.TurnID)
+	var agent_turn_id string
+	err := row.Scan(&agent_turn_id)
+	return agent_turn_id, err
 }
 
 const getVisibleHistoryTurnByMessage = `-- name: GetVisibleHistoryTurnByMessage :one
@@ -6113,6 +6157,42 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const setRoundAgentTurnID = `-- name: SetRoundAgentTurnID :execrows
+UPDATE bot_history_messages
+SET metadata = COALESCE(metadata, '{}'::jsonb)
+    || jsonb_build_object('agent_turn_id', $1::text)
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $2
+  AND session_id = $3
+  AND run_id = $4
+  AND role = 'assistant'
+`
+
+type SetRoundAgentTurnIDParams struct {
+	AgentTurnID string      `json:"agent_turn_id"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	SessionID   pgtype.UUID `json:"session_id"`
+	RunID       pgtype.UUID `json:"run_id"`
+}
+
+// Record the runtime's own turn id on the round's assistant messages,
+// written in the same transaction as the round so an anchor never outlives
+// a round that failed to commit. Message metadata is the anchor's home
+// because a fork copies messages (metadata included) — the anchor follows
+// the turn into the fork with no extra bookkeeping.
+func (q *Queries) SetRoundAgentTurnID(ctx context.Context, arg SetRoundAgentTurnIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setRoundAgentTurnID,
+		arg.AgentTurnID,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const supersedeHistoryTurn = `-- name: SupersedeHistoryTurn :one

@@ -177,12 +177,12 @@ func createCredentialFixture(t *testing.T, ctx context.Context, pool *pgxpool.Po
 			RETURNING id
 		), codex_agent AS (
 			INSERT INTO bot_agents (id, team_id, bot_id, name, runtime, enabled, metadata)
-			SELECT $5, $3, id, 'Codex', 'acp', true, '{"provider":"codex"}'::jsonb
+			SELECT $5, $3, id, 'Codex', 'codex', true, '{"provider":"codex"}'::jsonb
 			FROM created_bot
 			RETURNING bot_id
 		)
 		INSERT INTO bot_agents (id, team_id, bot_id, name, runtime, enabled, metadata)
-		SELECT $6, $3, bot_id, 'Claude Code', 'acp', true, '{"provider":"claude-code"}'::jsonb
+		SELECT $6, $3, bot_id, 'Claude Code', 'claude-code', true, '{"provider":"claude-code"}'::jsonb
 		FROM codex_agent`,
 		uid, name, team.DefaultTeamID, bid, codex, claude,
 	); err != nil {

@@ -17,6 +17,10 @@ const (
 	UIMessageTool        UIMessageType = "tool"
 	UIMessageAttachments UIMessageType = "attachments"
 	UIMessageError       UIMessageType = "error"
+	// UIMessageNotice is an inline runtime degradation notice (tools
+	// unavailable, an interaction declined). Name carries the machine code,
+	// Content the human-readable text.
+	UIMessageNotice UIMessageType = "notice"
 )
 
 // UIAttachment is the normalized attachment shape used by the web frontend.
@@ -167,6 +171,7 @@ type UIMessageStreamEvent struct {
 	UserInputID string
 	ShortID     int
 	Status      string
+	Code        string
 	Metadata    map[string]any
 }
 

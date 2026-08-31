@@ -13,7 +13,7 @@ func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
 		Metadata: map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{
+					"codex": map[string]any{
 						"enabled": true,
 						"managed": map[string]any{
 							"api_key":  "sk-original-secret",
@@ -26,7 +26,7 @@ func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
 	}
 
 	resp := scrubBotForResponse(original)
-	setup := acpprofile.ParseAgentSetup(resp.Metadata, acpprofile.AgentCodexID)
+	setup := acpprofile.ParseAgentSetup(resp.Metadata, "codex")
 	if got := setup.Managed["api_key"]; got == "" || got == "sk-original-secret" {
 		t.Fatalf("scrubbed api_key = %q, want masked non-empty value", got)
 	}
@@ -34,7 +34,7 @@ func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
 		t.Fatalf("base_url = %q, want non-sensitive value preserved", got)
 	}
 
-	originalSetup := acpprofile.ParseAgentSetup(original.Metadata, acpprofile.AgentCodexID)
+	originalSetup := acpprofile.ParseAgentSetup(original.Metadata, "codex")
 	if got := originalSetup.Managed["api_key"]; got != "sk-original-secret" {
 		t.Fatalf("original api_key = %q, want original metadata left untouched", got)
 	}
@@ -47,7 +47,7 @@ func TestScrubBotsForResponseScrubsEachItem(t *testing.T) {
 			Metadata: map[string]any{
 				acpprofile.MetadataKeyACP: map[string]any{
 					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{
+						"codex": map[string]any{
 							"managed": map[string]any{"api_key": "sk-one-secret"},
 						},
 					},
@@ -59,7 +59,7 @@ func TestScrubBotsForResponseScrubsEachItem(t *testing.T) {
 			Metadata: map[string]any{
 				acpprofile.MetadataKeyACP: map[string]any{
 					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{
+						"codex": map[string]any{
 							"managed": map[string]any{"api_key": "sk-two-secret"},
 						},
 					},
@@ -73,7 +73,7 @@ func TestScrubBotsForResponseScrubsEachItem(t *testing.T) {
 		t.Fatalf("response len = %d, want %d", len(resp), len(items))
 	}
 	for _, item := range resp {
-		setup := acpprofile.ParseAgentSetup(item.Metadata, acpprofile.AgentCodexID)
+		setup := acpprofile.ParseAgentSetup(item.Metadata, "codex")
 		if got := setup.Managed["api_key"]; got == "" || got == "sk-one-secret" || got == "sk-two-secret" {
 			t.Fatalf("bot %s api_key = %q, want masked", item.ID, got)
 		}

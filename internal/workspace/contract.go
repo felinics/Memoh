@@ -12,8 +12,13 @@ import (
 )
 
 const (
-	WorkspaceContractPath           = "/opt/memoh/workspace-contract.json"
-	CurrentWorkspaceContractVersion = 2
+	WorkspaceContractPath = "/opt/memoh/workspace-contract.json"
+	// v3: the direct external agent runtimes replaced the ACP wrappers —
+	// bin/claude joined the required executables, bin/codex-acp and
+	// bin/claude-agent-acp left the toolkit. v2 images fail those checks, so
+	// the incompatibility must surface as a version mismatch, not as a
+	// confusing missing-file error.
+	CurrentWorkspaceContractVersion = 3
 	WorkspaceToolkitDir             = "/opt/memoh/toolkit"
 	WorkspaceScriptsDir             = "/opt/memoh/scripts"
 	WorkspaceInitPath               = "/usr/bin/tini"
@@ -44,9 +49,7 @@ var requiredWorkspaceExecutables = []string{
 	WorkspaceToolkitDir + "/bin/python3",
 	WorkspaceToolkitDir + "/bin/uv",
 	WorkspaceToolkitDir + "/bin/codex",
-	WorkspaceToolkitDir + "/bin/codex-acp",
-	WorkspaceToolkitDir + "/bin/claude-agent-acp",
-	WorkspaceToolkitDir + "/bin/hermes-acp",
+	WorkspaceToolkitDir + "/bin/claude",
 	WorkspaceToolkitDir + "/display/bin/a11y-cli",
 	WorkspaceScriptsDir + "/display-prepare.sh",
 	WorkspaceScriptsDir + "/display-apply-style.sh",

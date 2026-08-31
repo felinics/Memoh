@@ -262,14 +262,15 @@ var errMountNotSupported = errors.New("snapshot mount not supported on this back
 
 // Workspace archive filtering is intentionally enforced at this layer because
 // container backups can bypass higher-level bot/profile metadata scrub. Keep
-// these ACP home prefixes in sync with agent/runtime/acp/client managed/self
-// home locations; workspace stays agent-agnostic otherwise, so do not import
-// the Agent runtime client here.
+// these runtime-home prefixes in sync with the ACP and direct-runtime config
+// locations; workspace stays agent-agnostic otherwise, so do not import a
+// runtime package here.
 var (
-	workspaceACPSecretDirPrefixes = []string{".memoh-hermes/", ".hermes/", ".codex/"}
-	workspaceACPSecretDirNames    = map[string]struct{}{
+	workspaceRuntimeHomePrefixes   = []string{".codex/", ".claude/", ".memoh-hermes/", ".hermes/"}
+	workspaceRuntimeSecretDirNames = map[string]struct{}{
 		"auth":       {},
 		"mcp-tokens": {},
+		"projects":   {},
 		"sessions":   {},
 	}
 )
@@ -598,7 +599,7 @@ func (m *Manager) importDataViaGRPC(
 	defer func() { _ = gr.Close() }()
 
 	if !preserveCredentials {
-		if err := cleanWorkspaceACPSecretsViaGRPC(ctx, client); err != nil {
+		if err := cleanWorkspaceRuntimeSecretsViaGRPC(ctx, client); err != nil {
 			return err
 		}
 	}
@@ -710,26 +711,26 @@ func tarGzDir(w io.Writer, dir string, preserveCredentials bool) error {
 func shouldSkipWorkspaceArchivePath(rel string, isDir, preserveCredentials bool) bool {
 	rel = filepath.ToSlash(filepath.Clean(rel))
 	rel = strings.TrimPrefix(rel, "/")
-	sub, ok := workspaceACPSecretSubpath(rel)
+	sub, ok := workspaceRuntimeHomeSubpath(rel)
 	if !ok {
 		return false
 	}
 	if preserveCredentials {
 		if isDir {
-			return workspaceACPRuntimeDirSubpath(sub)
+			return workspaceRuntimeStateDirSubpath(sub)
 		}
-		return workspaceACPRuntimeDirSubpath(filepath.ToSlash(filepath.Dir(sub))) ||
+		return workspaceRuntimeStateDirSubpath(filepath.ToSlash(filepath.Dir(sub))) ||
 			sub == "state.db" || strings.HasPrefix(sub, "state.db-")
 	}
 	if isDir {
-		return workspaceACPSecretDirSubpath(sub)
+		return workspaceRuntimeSecretDirSubpath(sub)
 	}
 	switch {
-	case sub == ".env", sub == "auth.json":
+	case sub == ".env", sub == "auth.json", sub == ".credentials.json":
 		return true
-	case strings.HasSuffix(sub, "/.env"), strings.HasSuffix(sub, "/auth.json"):
+	case strings.HasSuffix(sub, "/.env"), strings.HasSuffix(sub, "/auth.json"), strings.HasSuffix(sub, "/.credentials.json"):
 		return true
-	case workspaceACPSecretDirSubpath(filepath.ToSlash(filepath.Dir(sub))):
+	case workspaceRuntimeSecretDirSubpath(filepath.ToSlash(filepath.Dir(sub))):
 		return true
 	case sub == "state.db", strings.HasPrefix(sub, "state.db-"):
 		return true
@@ -742,30 +743,30 @@ func isWorkspaceArchiveRegularMode(mode string) bool {
 	return strings.HasPrefix(mode, "-")
 }
 
-func workspaceACPSecretDirSubpath(sub string) bool {
+func workspaceRuntimeSecretDirSubpath(sub string) bool {
 	sub = strings.Trim(strings.TrimSpace(filepath.ToSlash(sub)), "/")
 	if sub == "" || sub == "." {
 		return false
 	}
 	for _, part := range strings.Split(sub, "/") {
-		if _, ok := workspaceACPSecretDirNames[part]; ok {
+		if _, ok := workspaceRuntimeSecretDirNames[part]; ok {
 			return true
 		}
 	}
 	return false
 }
 
-func workspaceACPRuntimeDirSubpath(sub string) bool {
+func workspaceRuntimeStateDirSubpath(sub string) bool {
 	for _, part := range strings.Split(strings.Trim(filepath.ToSlash(sub), "/"), "/") {
-		if part == "sessions" {
+		if part == "sessions" || part == "projects" {
 			return true
 		}
 	}
 	return false
 }
 
-func workspaceACPSecretSubpath(rel string) (string, bool) {
-	for _, prefix := range workspaceACPSecretDirPrefixes {
+func workspaceRuntimeHomeSubpath(rel string) (string, bool) {
+	for _, prefix := range workspaceRuntimeHomePrefixes {
 		if strings.HasPrefix(rel, prefix) {
 			return strings.TrimPrefix(rel, prefix), true
 		}
@@ -773,10 +774,10 @@ func workspaceACPSecretSubpath(rel string) (string, bool) {
 	return "", false
 }
 
-func cleanWorkspaceACPSecretsViaGRPC(ctx context.Context, client *bridge.Client) error {
+func cleanWorkspaceRuntimeSecretsViaGRPC(ctx context.Context, client *bridge.Client) error {
 	entries, err := client.ListDirAll(ctx, containerDataDir, true)
 	if err != nil {
-		return fmt.Errorf("list workspace for ACP secret cleanup: %w", err)
+		return fmt.Errorf("list workspace for runtime secret cleanup: %w", err)
 	}
 	for _, entry := range entries {
 		relPath := strings.TrimPrefix(entry.GetPath(), "/")
@@ -785,14 +786,14 @@ func cleanWorkspaceACPSecretsViaGRPC(ctx context.Context, client *bridge.Client)
 		}
 		absPath := containerDataDir + "/" + strings.TrimPrefix(relPath, "/")
 		if err := client.DeleteFile(ctx, absPath, entry.GetIsDir()); err != nil {
-			return fmt.Errorf("delete workspace ACP secret %s: %w", absPath, err)
+			return fmt.Errorf("delete workspace runtime secret %s: %w", absPath, err)
 		}
 	}
 	return nil
 }
 
-func cleanWorkspaceACPSecretsInDir(root string) error {
-	for _, prefix := range workspaceACPSecretDirPrefixes {
+func cleanWorkspaceRuntimeSecretsInDir(root string) error {
+	for _, prefix := range workspaceRuntimeHomePrefixes {
 		base := filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(prefix, "/")))
 		if _, err := os.Stat(base); err != nil {
 			if os.IsNotExist(err) {
@@ -843,8 +844,8 @@ func untarGzDir(r io.Reader, dst string, preserveCredentials bool) error {
 	defer func() { _ = root.Close() }()
 
 	if !preserveCredentials {
-		if err := cleanWorkspaceACPSecretsInDir(dst); err != nil {
-			return fmt.Errorf("clean ACP secrets: %w", err)
+		if err := cleanWorkspaceRuntimeSecretsInDir(dst); err != nil {
+			return fmt.Errorf("clean runtime secrets: %w", err)
 		}
 	}
 

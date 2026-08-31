@@ -166,3 +166,29 @@ func TestRepairToolCallClosures_DoesNotMatchReusedIDAcrossUserTurns(t *testing.T
 		}
 	}
 }
+
+func TestRepairToolCallClosures_UsesResolvedUserInputResult(t *testing.T) {
+	t.Parallel()
+
+	call := projectedAskUserCall("ask-1")
+	part := call.Content[0].(sdk.ToolCallPart)
+	part.ProviderMetadata["user_input"] = map[string]any{
+		"status":  "submitted",
+		"answers": []any{map[string]any{"question_id": "q1"}},
+	}
+	call.Content[0] = part
+	messages := sdkMessagesToModelMessages([]sdk.Message{
+		call,
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "done"}}},
+	})
+
+	repaired := repairToolCallClosures(messages, syntheticToolClosureError)
+	results := extractToolResultParts(repaired[1])
+	if len(results) != 1 || results[0].IsError {
+		t.Fatalf("resolved ask_user result = %#v", results)
+	}
+	result, ok := results[0].Result.(map[string]any)
+	if !ok || result["status"] != "submitted" || result["answers"] == nil {
+		t.Fatalf("resolved ask_user payload = %#v", results[0].Result)
+	}
+}

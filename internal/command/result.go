@@ -1,6 +1,6 @@
 package command
 
-import acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+import agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 
 // InteractiveKind discriminates the structured payload carried by a Result.
 type InteractiveKind string
@@ -30,7 +30,7 @@ type Result struct {
 	Text          string
 	Interactive   *Interactive
 	Locale        string
-	FeedbackError *acpfeedback.Error
+	FeedbackError *agentfeedback.Error
 }
 
 // Interactive carries optional structured data for rich rendering. Exactly one

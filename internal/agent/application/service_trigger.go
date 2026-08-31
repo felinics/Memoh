@@ -4,15 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
-	"github.com/felinics/memoh/internal/agent/event"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
@@ -70,14 +65,15 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	defer func() { finish(triggeredRunTerminal{cause: err}) }()
 	ctx = runCtx
 
-	// Sessions with an ACP runtime execute through the session pool; the
-	// schedule's model/effort overrides ride the per-prompt input.
-	acpInfo, err := s.ACPSessionExecutionInfo(ctx, payload.SessionID)
+	// Runtime sessions (ACP, codex, claude-code) must never silently degrade
+	// to the built-in model: resolve the driver and run the scheduled turn
+	// through it.
+	dispatch, err := s.resolveRuntimeDispatch(ctx, ChatRequest{BotID: botID, ThreadID: payload.SessionID})
 	if err != nil {
 		return schedule.TriggerResult{}, err
 	}
-	if acpInfo.IsACP {
-		return s.triggerScheduleACP(ctx, botID, payload, token, admission.RunID, acpInfo)
+	if dispatch.kind == dispatchExternal {
+		return s.triggerScheduleRuntime(ctx, botID, payload, token, admission.RunID, dispatch.driver)
 	}
 
 	req := ChatRequest{
@@ -164,137 +160,6 @@ func (s *Service) runTriggeredNativeStream(
 		reasoningTiming,
 		idleCancel,
 	)
-}
-
-// triggerScheduleACP runs one schedule fire through the ACP session pool.
-// The run is non-interactive: no user input requests, no streaming consumer
-// — events are dropped and only the final result is reported back to the
-// schedule log. The round persists into the session history exactly like an
-// interactive ACP turn so the produced conversation can be opened and
-// continued.
-func (s *Service) triggerScheduleACP(ctx context.Context, botID string, payload schedule.TriggerPayload, token, runID string, info ACPSessionExecutionInfo) (schedule.TriggerResult, error) {
-	if s.acpPool == nil {
-		return schedule.TriggerResult{}, errors.New("ACP session pool is not configured")
-	}
-	runtimeOwner := strings.TrimSpace(info.RuntimeOwnerAccountID)
-	if runtimeOwner == "" {
-		return schedule.TriggerResult{}, errors.New("ACP runtime owner is missing; recreate the schedule or its session")
-	}
-	if err := s.requireACPRuntimeOwnerWorkspaceExec(ctx, botID, runtimeOwner); err != nil {
-		return schedule.TriggerResult{}, err
-	}
-
-	req := ChatRequest{
-		BotID:           botID,
-		ChatID:          botID,
-		ThreadID:        payload.SessionID,
-		RunID:           runID,
-		Query:           payload.Command,
-		RawQuery:        payload.Command,
-		UserID:          payload.OwnerUserID,
-		Token:           token,
-		Model:           payload.ACPModelID,
-		ReasoningEffort: payload.ReasoningEffort,
-		SessionType:     sessionmode.Schedule,
-	}
-
-	schedulePrompt := native.GenerateSchedulePrompt(native.Schedule{
-		ID:          payload.ID,
-		Name:        payload.Name,
-		Description: payload.Description,
-		Pattern:     payload.Pattern,
-		MaxCalls:    payload.MaxCalls,
-		Command:     payload.Command,
-	})
-	contextSections, memoryTrace := s.buildACPContextSections(ctx, req, info.AgentID, info.ProjectPath)
-	contextMarkdown, contextURI, contextManifest := acpContextViaContextView(ctx, s.logger, contextSections, req.Query)
-	contextLifecycle := contextfrag.NewLifecycleHolder()
-	if contextManifest != nil {
-		contextLifecycle.SetManifest(*contextManifest)
-	}
-	if memoryTrace != nil {
-		contextLifecycle.SetMemoryRecall(*memoryTrace)
-	}
-	terminal := s.contextLifecycleTerminal(ctx, native.RunConfig{
-		RunID: runID,
-		Identity: native.SessionContext{
-			BotID:     botID,
-			SessionID: payload.SessionID,
-		},
-		ContextLifecycle: contextLifecycle,
-	})
-	var lifecycleCause error
-	defer func() { terminal(lifecycleCause) }()
-
-	// Fail closed like the chat path: proceeding after an uncertain eager
-	// insert would race the background cleanup goroutine against this round's
-	// own user message and could delete the canonical turn's user row.
-	var leadingErr error
-	req, _, leadingErr = s.persistACPLeadingUserMessage(context.WithoutCancel(ctx), req)
-	if leadingErr != nil {
-		return schedule.TriggerResult{}, fmt.Errorf("persist scheduled ACP user message: %w", leadingErr)
-	}
-
-	reasoningTiming := newReasoningTimingTracker(nil)
-	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, strings.TrimSpace(payload.ReasoningEffort))
-	defer idleCancel.Stop()
-	result, promptErr := s.acpPool.Prompt(idleCtx, acpagent.PromptInput{
-		BotID:             botID,
-		ChatID:            botID,
-		SessionID:         payload.SessionID,
-		RunID:             runID,
-		SessionType:       sessionmode.Schedule,
-		AgentID:           info.AgentID,
-		ProjectPath:       info.ProjectPath,
-		ModelID:           strings.TrimSpace(payload.ACPModelID),
-		ReasoningEffort:   strings.TrimSpace(payload.ReasoningEffort),
-		Prompt:            schedulePrompt,
-		ChannelIdentityID: strings.TrimSpace(payload.OwnerUserID),
-		SessionToken:      token,
-		// Nobody is on the other end of a scheduled run.
-		CanRequestUserInput:       false,
-		SupportsImageInput:        false,
-		ToolOutputLimit:           s.toolOutputLimit(),
-		ContextURI:                contextURI,
-		ContextMarkdown:           contextMarkdown,
-		ContextBudgetMaxTokens:    s.acpContextBudgetDefault(ctx, botID),
-		ContextToolExchangePolicy: defaultToolExchangePolicy(),
-		RuntimeOwnerAccountID:     runtimeOwner,
-		Sink: acpclient.EventSinkFunc(func(ev event.StreamEvent) {
-			idleCancel.Reset()
-			if ev.Type == native.EventToolCallStart {
-				idleCancel.RecordToolCall()
-			}
-			reasoningTiming.observe(ev)
-		}),
-	})
-	lifecycleCause = promptErr
-	if promptErr != nil {
-		s.cancelPendingACPApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
-		failedResult, _ := acpFailureResult(ensureACPPromptOutput(result), promptErr)
-		if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, failedResult, promptErr, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); err != nil {
-			lifecycleCause = runtimeHistoryError(err)
-			s.logger.Error("ACP schedule failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
-		}
-		return schedule.TriggerResult{}, promptErr
-	}
-
-	result = ensureACPPromptOutput(result)
-	if err := s.persistACPRound(context.WithoutCancel(ctx), req, info.AgentID, info.ProjectPath, result, nil, true, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentEnd)); err != nil {
-		lifecycleCause = runtimeHistoryError(err)
-		s.logger.Error("ACP schedule persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
-		return schedule.TriggerResult{}, err
-	}
-
-	var usageJSON []byte
-	if result.Usage != nil {
-		usageJSON, _ = json.Marshal(result.Usage)
-	}
-	return schedule.TriggerResult{
-		Status:     "ok",
-		Text:       strings.TrimSpace(result.Text),
-		UsageBytes: usageJSON,
-	}, nil
 }
 
 // consumeTriggeredStream drains a triggered (non-interactive) run's event

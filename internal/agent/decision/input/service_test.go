@@ -194,29 +194,20 @@ func TestServiceCanRespond(t *testing.T) {
 	t.Parallel()
 
 	svc := NewService(nil, nil)
-	plain := Request{ID: "plain-1", Status: StatusPending}
-	if !svc.CanRespond(plain) {
-		t.Fatal("plain pending request should be answerable")
+	pending := Request{ID: "req-1", Status: StatusPending}
+	if svc.CanRespond(pending) {
+		t.Fatal("waiter-backed request without a live waiter should not be answerable")
 	}
-
-	acp := Request{
-		ID:               "acp-1",
-		Status:           StatusPending,
-		ProviderMetadata: map[string]any{"source": ProviderSourceACPMCP},
-	}
-	if svc.CanRespond(acp) {
-		t.Fatal("ACP/MCP request without a live waiter should not be answerable")
-	}
-	release := svc.RegisterWaiter(acp.ID)
-	if !svc.CanRespond(acp) {
-		t.Fatal("ACP/MCP request with a live waiter should be answerable")
+	release := svc.RegisterWaiter(pending.ID)
+	if !svc.CanRespond(pending) {
+		t.Fatal("waiter-backed request with a live waiter should be answerable")
 	}
 	release()
-	if svc.CanRespond(acp) {
-		t.Fatal("ACP/MCP request should stop being answerable after waiter release")
+	if svc.CanRespond(pending) {
+		t.Fatal("request should stop being answerable after waiter release")
 	}
 
-	terminal := acp
+	terminal := pending
 	terminal.Status = StatusSubmitted
 	release = svc.RegisterWaiter(terminal.ID)
 	defer release()

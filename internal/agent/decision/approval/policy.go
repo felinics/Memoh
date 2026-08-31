@@ -181,7 +181,7 @@ func readString(m map[string]any, key string) string {
 }
 
 func approvalPaths(args map[string]any) []string {
-	keys := []string{"path", "file_path", "filePath", "file", "filename", "old_path", "new_path"}
+	keys := []string{"path", "file_path", "filePath", "file", "filename", "old_path", "new_path", "notebook_path"}
 	seen := map[string]struct{}{}
 	var out []string
 	for _, key := range keys {

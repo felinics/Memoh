@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	acpfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
 
 // feedbackStatusPrefix marks a gRPC status message that carries a JSON
-// *acpfeedback.Error. Typed errors lose their identity across the process
+// *agentfeedback.Error. Typed errors lose their identity across the process
 // boundary; without this envelope the channel process can never render the
 // localized ACP guidance (agent not configured, login expired, …) and users
 // would see a bare "internal turn operation failed" instead.
@@ -21,29 +21,29 @@ const feedbackStatusPrefix = "memoh-acp-feedback:"
 // table mirrors acpFeedbackFromError in internal/channel/inbound: session
 // sentinels compared via errors.Is cannot survive serialization, so they
 // are converted to feedback errors before crossing the wire.
-func feedbackFromError(err error) *acpfeedback.Error {
-	var feedback *acpfeedback.Error
+func feedbackFromError(err error) *agentfeedback.Error {
+	var feedback *agentfeedback.Error
 	if errors.As(err, &feedback) {
 		return feedback
 	}
 	switch {
 	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired):
-		return acpfeedback.New(acpfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.acp.agentNotConfigured", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPUnknownAgent):
-		return acpfeedback.New(acpfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.acp.agentNotFound", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.externalAgent.agentNotFound", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
-		return acpfeedback.New(acpfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.acp.agentNotEnabled", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.externalAgent.agentNotEnabled", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
-		return acpfeedback.New(acpfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.acp.agentNotConfigured", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
-		return acpfeedback.New(acpfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.acp.runtimeOwnerMissing", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.externalAgent.runtimeOwnerMissing", err.Error(), nil)
 	default:
 		return nil
 	}
 }
 
 // encodeFeedback packs a feedback error into a status message.
-func encodeFeedback(feedback *acpfeedback.Error) (string, bool) {
+func encodeFeedback(feedback *agentfeedback.Error) (string, bool) {
 	data, err := json.Marshal(feedback)
 	if err != nil {
 		return "", false
@@ -53,12 +53,12 @@ func encodeFeedback(feedback *acpfeedback.Error) (string, bool) {
 
 // decodeFeedback recovers a feedback error from a status message, returning
 // nil when the message does not carry the envelope.
-func decodeFeedback(message string) *acpfeedback.Error {
+func decodeFeedback(message string) *agentfeedback.Error {
 	rest, ok := strings.CutPrefix(message, feedbackStatusPrefix)
 	if !ok {
 		return nil
 	}
-	var feedback acpfeedback.Error
+	var feedback agentfeedback.Error
 	if err := json.Unmarshal([]byte(rest), &feedback); err != nil {
 		return nil
 	}

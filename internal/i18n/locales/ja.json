@@ -42,7 +42,7 @@
     "tip": "ヒント: {model} または {reasoning} でいつでも調整できます。"
   },
   "chat": {
-    "acp": {
+    "externalAgent": {
       "agentNotConfigured": "このBotの外部Agent設定が完了していません。",
       "agentNotFound": "選択された外部Agentは利用できません。",
       "agentNotEnabled": "選択された外部AgentはこのBotで無効になっています。",

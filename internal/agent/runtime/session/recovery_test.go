@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 var errRecoveryReservation = errors.New("injected recovered-run reservation failure")
@@ -154,7 +155,7 @@ func (f *waitingDecisionRecoveryFence) ReclaimWaitingDecision(
 	_ context.Context,
 	botID, sessionID, runID, ownerID, liveGeneration string,
 	previousToken, newToken int64,
-	_ string, decisionID string,
+	decisions []runtimefence.PreservedDecision,
 ) error {
 	f.runs.mu.Lock()
 	f.decisions.mu.Lock()
@@ -165,15 +166,28 @@ func (f *waitingDecisionRecoveryFence) ReclaimWaitingDecision(
 		run.State != ledger.StateWaitingDecision || run.FencingToken != previousToken {
 		return ErrRunOwnershipLost
 	}
-	if f.decisions.target.ID != decisionID || f.decisions.target.RunID != runID ||
+	expected := map[string]bool{f.decisions.target.ID: true}
+	for _, extra := range f.decisions.extraTargets {
+		expected[extra.ID] = true
+	}
+	if len(decisions) != len(expected) ||
+		f.decisions.target.RunID != runID ||
 		f.decisions.target.FencingToken != previousToken {
 		return ErrCommandTargetMismatch
+	}
+	for _, preserved := range decisions {
+		if !expected[preserved.ID] {
+			return ErrCommandTargetMismatch
+		}
 	}
 	run.OwnerID = ownerID
 	run.FencingToken = newToken
 	run.LiveGeneration = liveGeneration
 	run.OwnerSince = time.Now().UTC()
 	f.decisions.target.FencingToken = newToken
+	for i := range f.decisions.extraTargets {
+		f.decisions.extraTargets[i].FencingToken = newToken
+	}
 	f.mu.Lock()
 	f.reclaims = append(f.reclaims, [2]int64{previousToken, newToken})
 	f.mu.Unlock()
@@ -269,5 +283,72 @@ func TestWaitingDecisionRecoveryRetriesAfterFenceCommitWhenLiveReservationFails(
 	}
 	if got := fence.recordedReclaims(); len(got) != 2 || got[0] != [2]int64{5, 6} || got[1] != [2]int64{6, 7} {
 		t.Fatalf("reclaims = %+v, want [[5 6] [6 7]]", got)
+	}
+}
+
+// A turn can park on an approval and a user input at once. Recovery used to
+// read exactly one pending decision and error on the pair — the reaper then
+// retried forever and the run stayed in waiting_decision with a dead owner.
+// Both decisions must be preserved through the reclaimed fence.
+func TestWaitingDecisionRecoveryPreservesParallelDecisions(t *testing.T) {
+	type contextKey struct{}
+	const (
+		runID     = "run-parallel-recovery"
+		sessionID = "session-parallel-recovery"
+	)
+	key := Key{BotID: testBotID, SessionID: sessionID}
+	runs := newFakeLedger()
+	runs.insertClaimed(runID, sessionID, 5, "generation-old")
+	if _, applied, err := runs.SetWaitingDecision(context.Background(), runID, 5); err != nil || !applied {
+		t.Fatalf("park run: applied=%v err=%v", applied, err)
+	}
+	runs.mu.Lock()
+	runs.token = 5
+	runs.mu.Unlock()
+	decisions := &fakeDecisionStore{
+		target: DecisionTarget{
+			Type: CommandToolApprovalResponse, ID: "decision-approval",
+			BotID: testBotID, SessionID: sessionID, RunID: runID, TurnID: runID + "-turn",
+			Status: "pending", FencingToken: 5,
+		},
+		extraTargets: []DecisionTarget{{
+			Type: CommandUserInputResponse, ID: "decision-input",
+			BotID: testBotID, SessionID: sessionID, RunID: runID, TurnID: runID + "-turn",
+			Status: "pending", FencingToken: 5,
+		}},
+	}
+	candidate := LeaseCandidate{
+		Key: key, RunID: runID, FencingToken: 5, ExpiresAt: time.Now().Add(-time.Minute),
+	}
+	backend := newRetryingRecoveryBackend("generation-new", candidate)
+	fence := &waitingDecisionRecoveryFence{runs: runs, decisions: decisions}
+	manager := NewManager(backend, Options{
+		OwnerID: "owner-parallel-recovery", OwnerLeaseTTL: time.Hour, Ledger: runs, Fence: fence,
+	})
+	t.Cleanup(func() {
+		manager.forgetLocalControl(context.Background(), runID)
+		_ = backend.Close()
+	})
+	manager.SetDecisionStore(decisions)
+	reaper := newTestReaperWithLiveness(t, runs, backend, "generation-new")
+	reaper.SetWaitingDecisionRecoverer(manager.recoverWaitingDecision)
+	reaper.tick(context.WithValue(context.Background(), contextKey{}, "reaper-scope"))
+
+	run, err := runs.Get(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != ledger.StateWaitingDecision || run.FencingToken != 6 {
+		t.Fatalf("recovered run = %+v, want waiting_decision at token 6", run)
+	}
+	if got := len(fence.recordedReclaims()); got != 1 {
+		t.Fatalf("reclaims = %d, want exactly one covering both decisions", got)
+	}
+	decisions.mu.Lock()
+	approvalToken := decisions.target.FencingToken
+	inputToken := decisions.extraTargets[0].FencingToken
+	decisions.mu.Unlock()
+	if approvalToken != 6 || inputToken != 6 {
+		t.Fatalf("preserved decision tokens = approval:%d input:%d, want both 6", approvalToken, inputToken)
 	}
 }

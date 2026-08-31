@@ -610,61 +610,6 @@ func (q *Queries) GetPendingUserInputByReplyMessage(ctx context.Context, arg Get
 	return i, err
 }
 
-const getPendingUserInputByRun = `-- name: GetPendingUserInputByRun :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
-FROM user_input_requests
-WHERE team_id = public.memoh_current_team_id()
-  AND run_id = $1
-  AND status = 'pending'
-  AND (expires_at IS NULL OR expires_at > now())
-ORDER BY created_at DESC, short_id DESC
-LIMIT 1
-`
-
-func (q *Queries) GetPendingUserInputByRun(ctx context.Context, runID pgtype.UUID) (UserInputRequest, error) {
-	row := q.db.QueryRow(ctx, getPendingUserInputByRun, runID)
-	var i UserInputRequest
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.RouteID,
-		&i.ChannelIdentityID,
-		&i.WorkspaceTargetID,
-		&i.ToolCallID,
-		&i.ToolName,
-		&i.ShortID,
-		&i.Status,
-		&i.RuntimeFencingToken,
-		&i.ResponseControlID,
-		&i.ResponsePayloadHash,
-		&i.InputJson,
-		&i.UiPayloadJson,
-		&i.InteractionJson,
-		&i.InteractionRevision,
-		&i.ResultJson,
-		&i.ProviderMetadata,
-		&i.RequestedByChannelIdentityID,
-		&i.RespondedByChannelIdentityID,
-		&i.AssistantMessageID,
-		&i.ToolResultMessageID,
-		&i.PromptMessageID,
-		&i.PromptExternalMessageID,
-		&i.SourcePlatform,
-		&i.ReplyTarget,
-		&i.ConversationType,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.RespondedAt,
-		&i.CanceledAt,
-		&i.UpdatedAt,
-		&i.TeamID,
-		&i.RunID,
-		&i.TurnID,
-	)
-	return i, err
-}
-
 const getPendingUserInputBySessionShortID = `-- name: GetPendingUserInputBySessionShortID :one
 SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 FROM user_input_requests
@@ -899,6 +844,73 @@ func (q *Queries) GetUserInputRequestBySessionToolCall(ctx context.Context, arg 
 		&i.TurnID,
 	)
 	return i, err
+}
+
+const listPendingUserInputsByRun = `-- name: ListPendingUserInputsByRun :many
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
+FROM user_input_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
+ORDER BY created_at ASC, short_id ASC
+`
+
+func (q *Queries) ListPendingUserInputsByRun(ctx context.Context, runID pgtype.UUID) ([]UserInputRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingUserInputsByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserInputRequest
+	for rows.Next() {
+		var i UserInputRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.WorkspaceTargetID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.ShortID,
+			&i.Status,
+			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
+			&i.InputJson,
+			&i.UiPayloadJson,
+			&i.InteractionJson,
+			&i.InteractionRevision,
+			&i.ResultJson,
+			&i.ProviderMetadata,
+			&i.RequestedByChannelIdentityID,
+			&i.RespondedByChannelIdentityID,
+			&i.AssistantMessageID,
+			&i.ToolResultMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.RespondedAt,
+			&i.CanceledAt,
+			&i.UpdatedAt,
+			&i.TeamID,
+			&i.RunID,
+			&i.TurnID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPendingUserInputsBySession = `-- name: ListPendingUserInputsBySession :many
@@ -1209,15 +1221,15 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = $3
   AND status = 'pending'
   AND runtime_fencing_token IS NOT NULL
-  AND id IS DISTINCT FROM $4::uuid
+  AND id != ALL($4::uuid[])
 RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, input_json, ui_payload_json, interaction_json, interaction_revision, result_json, provider_metadata, requested_by_channel_identity_id, responded_by_channel_identity_id, assistant_message_id, tool_result_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, expires_at, created_at, responded_at, canceled_at, updated_at, team_id, run_id, turn_id
 `
 
 type SupersedePendingUserInputsBySessionParams struct {
-	ResultJson []byte      `json:"result_json"`
-	BotID      pgtype.UUID `json:"bot_id"`
-	SessionID  pgtype.UUID `json:"session_id"`
-	PreserveID pgtype.UUID `json:"preserve_id"`
+	ResultJson  []byte        `json:"result_json"`
+	BotID       pgtype.UUID   `json:"bot_id"`
+	SessionID   pgtype.UUID   `json:"session_id"`
+	PreserveIds []pgtype.UUID `json:"preserve_ids"`
 }
 
 func (q *Queries) SupersedePendingUserInputsBySession(ctx context.Context, arg SupersedePendingUserInputsBySessionParams) ([]UserInputRequest, error) {
@@ -1225,7 +1237,7 @@ func (q *Queries) SupersedePendingUserInputsBySession(ctx context.Context, arg S
 		arg.ResultJson,
 		arg.BotID,
 		arg.SessionID,
-		arg.PreserveID,
+		arg.PreserveIds,
 	)
 	if err != nil {
 		return nil, err

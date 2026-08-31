@@ -168,6 +168,13 @@ func ToolGatewayMiddleware(gateway *ToolGatewayService, contexts *ToolSessionCon
 				if strings.TrimSpace(session.RuntimeID) != "" && !session.RuntimeActive {
 					return nil, errors.New("ACP runtime is not processing a prompt")
 				}
+				if session.RequireActiveRun && strings.TrimSpace(session.RunID) == "" {
+					// A workspace mount outlives the turns it serves; between
+					// turns it must answer tools/list (runtimes probe it at
+					// startup) but never execute tools with no run to own the
+					// call.
+					return nil, errors.New("tool gateway mount is idle: no active turn")
+				}
 				callReq, ok := req.(*sdkmcp.ServerRequest[*sdkmcp.CallToolParamsRaw])
 				if !ok || callReq == nil || callReq.Params == nil {
 					return nil, errors.New("tools/call params is required")

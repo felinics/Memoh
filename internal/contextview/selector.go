@@ -13,7 +13,7 @@ func (*FragmentSelector) ProfileFor(intent contextfrag.Intent) IntentProfile {
 			MustKeepFrag:    mustKeepProviderSystemFrag,
 			SlotTrustFloors: map[contextfrag.Slot]contextfrag.TrustLevel{contextfrag.SlotSystem: contextfrag.TrustWorkspace},
 		}
-	case contextfrag.IntentACPRuntimePrompt:
+	case contextfrag.IntentExternalAgentPrompt:
 		// ACP system slots describe document position rather than instruction
 		// authority, so external sections may legitimately occupy them and keep
 		// their own per-section budgets.

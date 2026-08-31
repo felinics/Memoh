@@ -30,6 +30,7 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
@@ -103,36 +104,36 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
-	agent                  *native.Agent
-	modelsService          *models.Service
-	queries                dbstore.Queries
-	memoryRegistry         *memprovider.Registry
-	messageService         messagepkg.Service
-	settingsService        *settings.Service
-	accountService         *accounts.Service
-	sessionService         SessionService
-	acpPool                acpPrompter
-	compactionService      compactionRunner
-	eventPublisher         messageevent.Publisher
-	skillLoader            SkillLoader
-	assetLoader            gatewayAssetLoader
-	platformIdentities     PlatformIdentitySource
-	botPermissions         botPermissionChecker
-	workspaceTargets       workspaceTargetResolver
-	workdirs               sessionWorkdirResolver
-	pipeline               *timeline.Pipeline
-	streamHTTPClient       *http.Client
-	nonStreamingHTTPClient *http.Client
-	streamIdleTimeout      time.Duration
-	streamIdleTimeoutMax   time.Duration
-	bgManager              *background.Manager
-	toolApproval           *toolapproval.Service
-	userInput              userInputService
-	hookService            *hooks.Service
-	memoryContextMu        sync.Mutex
-	memoryContextCache     *memprovider.MemoryContextCache
-	acpPromptMu            sync.Mutex
-	acpPromptHubs          map[string]*acpActivePromptHub
+	agent                   *native.Agent
+	modelsService           *models.Service
+	queries                 dbstore.Queries
+	memoryRegistry          *memprovider.Registry
+	messageService          messagepkg.Service
+	settingsService         *settings.Service
+	accountService          *accounts.Service
+	sessionService          SessionService
+	acpPool                 acpPrompter
+	externalDrivers         map[string]external.Driver
+	compactionService       compactionRunner
+	eventPublisher          messageevent.Publisher
+	skillLoader             SkillLoader
+	assetLoader             gatewayAssetLoader
+	platformIdentities      PlatformIdentitySource
+	botPermissions          botPermissionChecker
+	workspaceTargets        workspaceTargetResolver
+	workdirs                sessionWorkdirResolver
+	pipeline                *timeline.Pipeline
+	streamHTTPClient        *http.Client
+	nonStreamingHTTPClient  *http.Client
+	streamIdleTimeout       time.Duration
+	streamIdleTimeoutMax    time.Duration
+	bgManager               *background.Manager
+	toolApproval            *toolapproval.Service
+	userInput               userInputService
+	hookService             *hooks.Service
+	memoryContextMu         sync.Mutex
+	memoryContextCache      *memprovider.MemoryContextCache
+	externalAgentPromptHubs sync.Map
 	// continueUserInputFn overrides the application resume after a user input
 	// response; nil means storeUserInputResultAndContinue. Test seam.
 	continueUserInputFn               func(ctx context.Context, req userinput.Request, input UserInputResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error
@@ -686,13 +687,17 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
 		return ChatResponse{}, err
 	}
-	if isACP, err := s.isACPAgentSession(ctx, req); err != nil {
+	dispatch, err := s.resolveRuntimeDispatch(ctx, req)
+	if err != nil {
 		return ChatResponse{}, err
-	} else if isACP {
-		if err := rejectACPWorkspaceTarget(req); err != nil {
-			return ChatResponse{}, err
-		}
-	} else {
+	}
+	switch dispatch.kind {
+	case dispatchExternal:
+		// Chat surfaces stream; the synchronous path never carried runtime
+		// turns and silently running the native model here would be wrong
+		// (the pre-unification ACP path used to degrade exactly that way).
+		return ChatResponse{}, errors.New("runtime sessions support only streaming chat surfaces")
+	default:
 		var err error
 		ctx, req, err = s.prepareWorkspaceRequest(ctx, req)
 		if err != nil {
@@ -703,7 +708,6 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
-	var err error
 	if !req.UserMessagePersisted {
 		req, err = s.applyUserMessageHook(ctx, req)
 		if err != nil {
@@ -1203,7 +1207,9 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 	}
 
 	sessionType, runtimeType := s.resolveRunConfigSessionDescriptor(ctx, sessionID)
-	if runtimeType == sessionpkg.RuntimeACPAgent {
+	if runtimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(runtimeType) {
+		// Agent runtimes (ACP and the direct external agents) resolve their
+		// own model and prompt; only the identity travels in the run config.
 		cfg := native.RunConfig{
 			SessionType: sessionType,
 			Identity: native.SessionContext{

@@ -387,6 +387,11 @@ type DecisionTarget struct {
 	FencingToken int64
 	ControlID    string
 	PayloadHash  string
+	// SessionRuntime is the session's runtime type. Recovery needs it to
+	// tell a native parked run (resumable: the decision continuation is
+	// rebuilt from the database) from an inline waiter run (codex, claude,
+	// ACP), whose blocked turn died with its owner and cannot be resumed.
+	SessionRuntime string
 }
 
 func (t DecisionTarget) normalized() DecisionTarget {
@@ -410,11 +415,11 @@ func (t DecisionTarget) runtimeOwned() bool {
 
 // DecisionStore is implemented by the application layer over the PostgreSQL
 // decision tables. RouteDecisionResponse uses ResolveRuntimeDecision for every
-// transport; recovery uses PendingRuntimeDecision to preserve exactly the
-// decision that parked a run while advancing its fencing token.
+// transport; recovery uses PendingRuntimeDecisions to preserve every decision
+// that parked a run while advancing its fencing token.
 type DecisionStore interface {
 	ResolveRuntimeDecision(ctx context.Context, commandType, decisionID string) (DecisionTarget, error)
-	PendingRuntimeDecision(ctx context.Context, runID string) (DecisionTarget, bool, error)
+	PendingRuntimeDecisions(ctx context.Context, runID string) ([]DecisionTarget, error)
 }
 
 // DecisionResponse is one transport-neutral answer. ControlID is minted by the

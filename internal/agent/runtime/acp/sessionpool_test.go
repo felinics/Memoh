@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +18,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -30,6 +30,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/config"
@@ -71,7 +72,6 @@ func newFakeScriptPoolForBot(t *testing.T, bot bots.Bot) (*SessionPool, string) 
 		t.Fatal(err)
 	}
 	writeSessionPoolFakeAgentScript(t, binDir, "codex-acp")
-	writeSessionPoolFakeAgentScript(t, binDir, "hermes-acp")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	runner := client.NewRunner(nil, sessionPoolWorkspace{
 		client: newSessionPoolBridgeClient(t, root),
@@ -93,7 +93,7 @@ func TestSessionPoolPromptColdStartsBindsAndReuses(t *testing.T) {
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
 		RunID:                 "run-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		Prompt:                "first prompt",
 		RuntimeOwnerAccountID: "user-1",
@@ -165,7 +165,7 @@ func TestSessionPoolPromptForceFreshRuntimeReplacesBoundRuntime(t *testing.T) {
 	input := PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		Prompt:                "first prompt",
 		RuntimeOwnerAccountID: "user-1",
@@ -195,137 +195,41 @@ func TestSessionPoolPromptForceFreshRuntimeReplacesBoundRuntime(t *testing.T) {
 	}
 }
 
-func TestSessionPoolRestoresOnlyMatchingDurableACPState(t *testing.T) {
-	baseState := PersistedSessionState{
-		AgentID:        acpprofile.AgentCodexID,
-		ACPSessionID:   "native-session-1",
-		ThroughRunID:   "22222222-2222-4222-8222-222222222222",
-		Cwd:            "/data/project",
-		TranscriptPath: "state/sessions/2026/08/12/rollout-native-session-1.jsonl",
-		FileCount:      1,
-		RecordCount:    1,
-	}
-	baseRecords := []SessionStateRecord{{
-		FilePath: baseState.TranscriptPath, LineNumber: 1,
-		Content: json.RawMessage(`{"type":"session_meta","payload":{"id":"native-session-1"}}`),
-	}}
-
-	tests := []struct {
-		name        string
-		mutate      func(*PersistedSessionState)
-		forceFresh  bool
-		wantResume  bool
-		wantLoads   int
-		wantSyncErr bool
-	}{
-		{name: "matching", wantResume: true, wantLoads: 1},
-		{name: "different agent", mutate: func(state *PersistedSessionState) { state.AgentID = acpprofile.AgentClaudeCodeID }, wantLoads: 1, wantSyncErr: true},
-		{name: "different cwd", mutate: func(state *PersistedSessionState) { state.Cwd = "/data/other" }, wantLoads: 1, wantSyncErr: true},
-		{name: "force fresh bypasses state", forceFresh: true, wantLoads: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			state := baseState
-			if tt.mutate != nil {
-				tt.mutate(&state)
-			}
-			store := &recordingSessionStateStore{state: state, records: baseRecords, found: true}
-			runner := &recordingRunner{
-				info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-				startErr: errors.New("started"),
-			}
-			pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test"})})
-			pool.SetSessionStateStore(store)
-
-			_, err := pool.Prompt(context.Background(), PromptInput{
-				BotID:                 "bot-1",
-				SessionID:             "session-1",
-				AgentID:               acpprofile.AgentCodexID,
-				ProjectPath:           "/data/project",
-				Prompt:                "continue",
-				RuntimeOwnerAccountID: "user-1",
-				ForceFreshRuntime:     tt.forceFresh,
-			})
-			if tt.wantSyncErr {
-				if !errors.Is(err, ErrSessionStateOutOfSync) {
-					t.Fatalf("Prompt() error = %v, want ErrSessionStateOutOfSync", err)
-				}
-			} else if err == nil || err.Error() != "started" {
-				t.Fatalf("Prompt() error = %v, want runner sentinel", err)
-			}
-			if store.loadCalls != tt.wantLoads {
-				t.Fatalf("state Load calls = %d, want %d", store.loadCalls, tt.wantLoads)
-			}
-			if got := runner.req.Resume != nil; got != tt.wantResume {
-				t.Fatalf("runner Resume present = %v, want %v", got, tt.wantResume)
-			}
-			if tt.wantResume {
-				resumeState := runner.req.Resume.State()
-				if resumeState.SessionID != baseState.ACPSessionID || resumeState.TranscriptPath != baseState.TranscriptPath {
-					t.Fatalf("runner Resume = %#v", resumeState)
-				}
-			}
-		})
-	}
-}
-
-func TestSessionPoolCheckpointsJSONLAfterSuccessfulPrompt(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("strict anchored checkpoint I/O requires Linux openat2")
-	}
-	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_WRITE_STATE", "1")
+func TestSessionPoolRecordsResetHeadAfterSuccessfulPrompt(t *testing.T) {
 	pool := newFakeScriptPool(t)
+	pool.timeout = time.Hour
 	store := &recordingSessionStateStore{}
 	pool.SetSessionStateStore(store)
-	fence := runtimefence.Fence{BotID: "bot-1", SessionID: "session-1", Token: 17}
-	runID := "33333333-3333-4333-8333-333333333333"
 
-	result, err := pool.Prompt(runtimefence.WithContext(context.Background(), fence), PromptInput{
-		BotID:                 fence.BotID,
-		SessionID:             fence.SessionID,
+	runID := uuid.NewString()
+	if _, err := pool.Prompt(context.Background(), PromptInput{
+		BotID:                 "bot-1",
+		SessionID:             "session-1",
 		RunID:                 runID,
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
-		Prompt:                "remember this turn",
+		Prompt:                "advance the native session",
 		RuntimeOwnerAccountID: "user-1",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-	if !strings.Contains(result.Text, "session-pool-ok") {
-		t.Fatalf("Prompt() result = %#v", result)
-	}
-	if !result.CheckpointStaged {
-		t.Fatal("successful durable prompt did not report a staged checkpoint")
-	}
-	// The handle's native head must have advanced to the staged run so the
-	// next prompt matches once the application commits the same durable head.
-	handle := pool.sessionHandle(fence.SessionID)
+	handle := pool.sessionHandle("session-1")
 	if handle == nil {
-		t.Fatal("staged prompt lost its runtime handle")
+		t.Fatal("prompt did not bind a runtime")
 	}
 	handle.state.Lock()
 	nativeHead, nativeHeadFound := handle.nativeHead, handle.nativeHeadFound
 	handle.state.Unlock()
-	if !nativeHeadFound || nativeHead.RunID != runID || nativeHead.Kind != SessionPublicationCheckpoint {
-		t.Fatalf("native head = %#v found=%v, want staged checkpoint run", nativeHead, nativeHeadFound)
+	// No snapshots are captured: every completed turn records a reset head so
+	// warm-handle fencing still tracks canonical history per turn.
+	if !nativeHeadFound || nativeHead.RunID != runID || nativeHead.Kind != agentstate.SessionPublicationReset {
+		t.Fatalf("native head = %#v found=%v, want reset head for run", nativeHead, nativeHeadFound)
 	}
-	store.setHead(SessionPublicationHead{RunID: runID, Kind: SessionPublicationCheckpoint}, true)
-	if store.headCalls != 2 || store.loadCalls != 0 || store.replaceCalls != 1 {
-		t.Fatalf("state store calls = head:%d load:%d replace:%d, want 2/0/1", store.headCalls, store.loadCalls, store.replaceCalls)
-	}
-	if store.replaceFence != fence {
-		t.Fatalf("Replace fence = %#v, want %#v", store.replaceFence, fence)
-	}
-	state := store.replaced
-	if state.AgentID != acpprofile.AgentCodexID || state.ACPSessionID != "session-pool-fake-session" || state.ThroughRunID != runID || state.Cwd != "/data/project" {
-		t.Fatalf("checkpoint identity = %#v", state)
-	}
-	if state.FileCount != 1 || state.RecordCount != 3 || len(store.replacedRecords) != 3 {
-		t.Fatalf("checkpoint counts/records = %#v/%#v", state, store.replacedRecords)
-	}
-	if !strings.Contains(string(store.replacedRecords[1].Content), "remember this turn") {
-		t.Fatalf("checkpoint prompt line = %s", store.replacedRecords[1].Content)
+	store.mu.Lock()
+	replaceCalls := store.replaceCalls
+	store.mu.Unlock()
+	if replaceCalls != 0 {
+		t.Fatalf("store.Replace was called %d times, want none", replaceCalls)
 	}
 }
 
@@ -337,7 +241,7 @@ func TestSessionPoolPromptSupportsImageOnly(t *testing.T) {
 	result, err := pool.Prompt(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		Images:                []client.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
 		RuntimeOwnerAccountID: "user-1",
@@ -356,7 +260,7 @@ func TestSessionPoolPromptKeepsRuntimeWhenImageCapabilityUnsupported(t *testing.
 	_, err := pool.Prompt(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		Prompt:                "inspect",
 		Images:                []client.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
@@ -376,7 +280,7 @@ func TestSessionPoolPromptFallsBackToAttachmentReferenceWhenImageUnsupported(t *
 	result, err := pool.Prompt(context.Background(), PromptInput{
 		BotID:                    "bot-1",
 		SessionID:                "session-1",
-		AgentID:                  acpprofile.AgentCodexID,
+		AgentID:                  acpprofile.AgentACPID,
 		ProjectPath:              "/data/project",
 		Prompt:                   "inspect the image",
 		Images:                   []client.PromptImage{{Data: "aW1hZ2U=", MimeType: "image/png"}},
@@ -400,7 +304,7 @@ func TestSessionPoolPromptSupportsAttachmentOnly(t *testing.T) {
 	result, err := pool.Prompt(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		AttachmentReferences:  []string{"/data/.memoh/media/aa/pasted-text.txt"},
 		ContextURI:            "memoh://context/current-turn",
@@ -425,7 +329,7 @@ func TestSessionPoolRejectsInvalidImageBeforeStartingRuntime(t *testing.T) {
 	_, err := pool.Prompt(context.Background(), PromptInput{
 		BotID:     "bot-1",
 		SessionID: "session-1",
-		AgentID:   acpprofile.AgentCodexID,
+		AgentID:   acpprofile.AgentACPID,
 		Images:    []client.PromptImage{{Data: "not-valid***", MimeType: "image/png"}},
 	})
 	if !errors.Is(err, client.ErrInvalidPromptImage) {
@@ -443,7 +347,7 @@ func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
 	status, err := pool.Ensure(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -467,85 +371,13 @@ func TestSessionPoolEnsureStartsRuntimeAndReportsModels(t *testing.T) {
 	}
 }
 
-func TestSessionPoolStartRuntimeReconcilesManagedCodexAPIKeyConfig(t *testing.T) {
-	pool, root := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "api_key", map[string]any{
-		"api_key":  "sk-container-byok",
-		"base_url": "https://proxy.example.com/v1",
-	}))
-
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("Ensure() error = %v", err)
-	}
-
-	config := readSessionPoolFile(t, root, ".codex", "config.toml")
-	for _, want := range []string{
-		`model_provider = "OpenAI"`,
-		`model_reasoning_summary = "detailed"`,
-		`hide_agent_reasoning = false`,
-		`show_raw_agent_reasoning = false`,
-		`base_url = "https://proxy.example.com/v1"`,
-	} {
-		if !strings.Contains(config, want) {
-			t.Fatalf("Codex config missing %q:\n%s", want, config)
-		}
-	}
-	auth := readSessionPoolFile(t, root, ".codex", "auth.json")
-	if !strings.Contains(auth, `"OPENAI_API_KEY": "sk-container-byok"`) {
-		t.Fatalf("Codex auth missing managed key:\n%s", auth)
-	}
-}
-
-func TestSessionPoolStartRuntimeReconcilesCodexOAuthConfigWithoutOverwritingAuth(t *testing.T) {
-	pool, root := newFakeScriptPoolForBot(t, enabledACPBot("bot-1", "oauth", nil))
-	authPath := filepath.Join(root, ".codex", "auth.json")
-	if err := os.MkdirAll(filepath.Dir(authPath), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	const existingAuth = `{"auth_mode":"chatgpt","tokens":{"id_token":"id.jwt.token","access_token":"access.jwt.token","refresh_token":"refresh-token","account_id":"account-123"}}`
-	if err := os.WriteFile(authPath, []byte(existingAuth), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := pool.Ensure(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
-		ProjectPath:           "/data/project",
-		RuntimeOwnerAccountID: "user-1",
-	}); err != nil {
-		t.Fatalf("Ensure() error = %v", err)
-	}
-
-	config := readSessionPoolFile(t, root, ".codex", "config.toml")
-	for _, want := range []string{
-		`model_provider = "chatgpt-http"`,
-		`model_reasoning_summary = "detailed"`,
-		`hide_agent_reasoning = false`,
-		`show_raw_agent_reasoning = false`,
-		`requires_openai_auth = true`,
-	} {
-		if !strings.Contains(config, want) {
-			t.Fatalf("Codex OAuth config missing %q:\n%s", want, config)
-		}
-	}
-	if got := readSessionPoolFile(t, root, ".codex", "auth.json"); got != existingAuth {
-		t.Fatalf("OAuth auth.json was overwritten:\n%s", got)
-	}
-}
-
 func TestSessionPoolCreateRuntimeGeneratesIDAndReportsModels(t *testing.T) {
 	t.Setenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_MODELS", "1")
 	pool := newFakeScriptPool(t)
 
 	status, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
 		BotID:                 "bot-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -582,7 +414,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 
 	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
 		BotID:                 "bot-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -597,7 +429,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 		context.WithValue(context.Background(), contextKey{}, "bind-scope"),
 	)
 	defer cancelBind()
-	if err := pool.BindRuntime(bindCtx, "bot-1", created.RuntimeID, "session-1", acpprofile.AgentCodexID, "", "/data/project", "user-1"); err != nil {
+	if err := pool.BindRuntime(bindCtx, "bot-1", created.RuntimeID, "session-1", acpprofile.AgentACPID, "/data/project", "user-1"); err != nil {
 		t.Fatalf("BindRuntime() error = %v", err)
 	}
 	cancelBind()
@@ -622,7 +454,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 	status, err := pool.Ensure(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -640,7 +472,7 @@ func TestSessionPoolBindRuntimeAttachesWarmProcessToSession(t *testing.T) {
 	}
 
 	// A bound runtime cannot be bound again.
-	if err := pool.BindRuntime(context.Background(), "bot-1", created.RuntimeID, "session-2", acpprofile.AgentCodexID, "", "/data/project", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-1", created.RuntimeID, "session-2", acpprofile.AgentACPID, "/data/project", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("second BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 }
@@ -651,7 +483,7 @@ func TestSessionPoolSetRuntimeModelEmptyResetsToDefault(t *testing.T) {
 
 	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
 		BotID:                 "bot-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -681,7 +513,7 @@ func TestSessionPoolSetRuntimeReasoningUpdatesEffort(t *testing.T) {
 
 	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
 		BotID:                 "bot-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -703,7 +535,7 @@ func TestSessionPoolBindRuntimeRejectsMismatches(t *testing.T) {
 	pending := &runtimeHandle{
 		id:                    newRuntimeID(),
 		botID:                 "bot-2",
-		agentID:               acpprofile.AgentCodexID,
+		agentID:               acpprofile.AgentACPID,
 		projectPath:           "/data",
 		runtimeOwnerAccountID: "user-1",
 		session:               live,
@@ -717,35 +549,35 @@ func TestSessionPoolBindRuntimeRejectsMismatches(t *testing.T) {
 		botID, sessionID, agent, path string
 		wantErr                       error
 	}{
-		{"cross bot", "bot-1", "real", acpprofile.AgentCodexID, "/data", ErrRuntimeNotFound},
-		{"wrong agent", "bot-2", "real", acpprofile.AgentClaudeCodeID, "/data", ErrRuntimeBindRejected},
-		{"wrong project", "bot-2", "real", acpprofile.AgentCodexID, "/other", ErrRuntimeBindRejected},
+		{"cross bot", "bot-1", "real", acpprofile.AgentACPID, "/data", ErrRuntimeNotFound},
+		{"wrong agent", "bot-2", "real", "other-agent", "/data", ErrRuntimeBindRejected},
+		{"wrong project", "bot-2", "real", acpprofile.AgentACPID, "/other", ErrRuntimeBindRejected},
 	}
 	for _, tc := range cases {
-		if err := pool.BindRuntime(context.Background(), tc.botID, pending.id, tc.sessionID, tc.agent, "", tc.path, "user-1"); !errors.Is(err, tc.wantErr) {
+		if err := pool.BindRuntime(context.Background(), tc.botID, pending.id, tc.sessionID, tc.agent, tc.path, "user-1"); !errors.Is(err, tc.wantErr) {
 			t.Fatalf("%s: BindRuntime() error = %v, want %v", tc.name, err, tc.wantErr)
 		}
 	}
-	if err := pool.BindRuntime(context.Background(), "bot-2", "rt_missing", "real", acpprofile.AgentCodexID, "", "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", "rt_missing", "real", acpprofile.AgentACPID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("missing runtime: BindRuntime() error = %v, want ErrRuntimeNotFound", err)
 	}
 
 	// Session already served by another runtime.
 	other := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", boundSession: "real", status: stateIdle}
 	injectRuntime(pool, other)
-	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real", acpprofile.AgentCodexID, "", "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real", acpprofile.AgentACPID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("occupied session: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 
 	// A still-starting runtime (no live process yet) is not bindable.
-	starting := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", agentID: acpprofile.AgentCodexID, projectPath: "/data", status: stateStarting}
+	starting := &runtimeHandle{id: newRuntimeID(), botID: "bot-2", agentID: acpprofile.AgentACPID, projectPath: "/data", status: stateStarting}
 	injectRuntime(pool, starting)
-	if err := pool.BindRuntime(context.Background(), "bot-2", starting.id, "real-2", acpprofile.AgentCodexID, "", "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
+	if err := pool.BindRuntime(context.Background(), "bot-2", starting.id, "real-2", acpprofile.AgentACPID, "/data", "user-1"); !errors.Is(err, ErrRuntimeBindRejected) {
 		t.Fatalf("starting runtime: BindRuntime() error = %v, want ErrRuntimeBindRejected", err)
 	}
 
 	// Everything matching succeeds.
-	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real-2", acpprofile.AgentCodexID, "", "/data", "user-1"); err != nil {
+	if err := pool.BindRuntime(context.Background(), "bot-2", pending.id, "real-2", acpprofile.AgentACPID, "/data", "user-1"); err != nil {
 		t.Fatalf("matching BindRuntime() error = %v", err)
 	}
 	if pool.sessionHandle("real-2") != pending {
@@ -758,7 +590,7 @@ func TestSessionPoolOwnedGateHasZeroSideEffectsAcrossBots(t *testing.T) {
 	foreign := &runtimeHandle{
 		id:           newRuntimeID(),
 		botID:        "bot-2",
-		agentID:      acpprofile.AgentCodexID,
+		agentID:      acpprofile.AgentACPID,
 		projectPath:  "/data",
 		session:      &client.Session{},
 		status:       stateIdle,
@@ -776,7 +608,7 @@ func TestSessionPoolOwnedGateHasZeroSideEffectsAcrossBots(t *testing.T) {
 	if err := pool.CloseRuntime("bot-1", foreign.id); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("CloseRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
 	}
-	if err := pool.BindRuntime(context.Background(), "bot-1", foreign.id, "my-session", acpprofile.AgentCodexID, "", "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
+	if err := pool.BindRuntime(context.Background(), "bot-1", foreign.id, "my-session", acpprofile.AgentACPID, "/data", "user-1"); !errors.Is(err, ErrRuntimeNotFound) {
 		t.Fatalf("BindRuntime(cross bot) error = %v, want ErrRuntimeNotFound", err)
 	}
 	if _, ok := pool.ResolveRuntimeToolContext("bot-1", foreign.id, "runtime-token-1"); ok {
@@ -809,7 +641,7 @@ func TestSessionPoolCloseBotAgentRuntimesDoesNotWaitForActivePrompt(t *testing.T
 	active := &runtimeHandle{
 		id:           newRuntimeID(),
 		botID:        "bot-1",
-		agentID:      acpprofile.AgentHermesID,
+		agentID:      acpprofile.AgentACPID,
 		projectPath:  "/data",
 		session:      &client.Session{},
 		status:       stateActive,
@@ -826,7 +658,7 @@ func TestSessionPoolCloseBotAgentRuntimesDoesNotWaitForActivePrompt(t *testing.T
 
 	done := make(chan error, 1)
 	go func() {
-		done <- pool.CloseBotAgentRuntimes("bot-1", acpprofile.AgentHermesID)
+		done <- pool.CloseBotAgentRuntimes("bot-1", acpprofile.AgentACPID)
 	}()
 
 	select {
@@ -857,7 +689,7 @@ func TestSessionPoolUnboundCapEvictsOldestIdle(t *testing.T) {
 		injectRuntime(pool, &runtimeHandle{
 			id:         fmt.Sprintf("rt_old-%d", i),
 			botID:      "bot-1",
-			agentID:    acpprofile.AgentCodexID,
+			agentID:    acpprofile.AgentACPID,
 			status:     stateIdle,
 			lastActive: now.Add(-time.Duration(i+1) * time.Minute),
 		})
@@ -868,7 +700,7 @@ func TestSessionPoolUnboundCapEvictsOldestIdle(t *testing.T) {
 
 	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
 		BotID:                 "bot-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -911,7 +743,7 @@ func TestSessionPoolUnboundCapErrorsWhenAllBusy(t *testing.T) {
 
 	_, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
 		BotID:                 "bot-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -934,7 +766,7 @@ func TestSessionPoolEnsureReplacesMismatchedAgentRuntimeWithoutDeadlock(t *testi
 	injectRuntime(pool, &runtimeHandle{
 		id:           newRuntimeID(),
 		botID:        "bot-1",
-		agentID:      acpprofile.AgentClaudeCodeID,
+		agentID:      acpprofile.AgentACPID,
 		projectPath:  "/data/project",
 		status:       stateIdle,
 		lastActive:   time.Now(),
@@ -947,7 +779,7 @@ func TestSessionPoolEnsureReplacesMismatchedAgentRuntimeWithoutDeadlock(t *testi
 		_, err := pool.Ensure(context.Background(), PromptInput{
 			BotID:                 "bot-1",
 			SessionID:             "session-x",
-			AgentID:               acpprofile.AgentCodexID,
+			AgentID:               acpprofile.AgentACPID,
 			ProjectPath:           "/data/project",
 			RuntimeOwnerAccountID: "user-1",
 		})
@@ -962,7 +794,7 @@ func TestSessionPoolEnsureReplacesMismatchedAgentRuntimeWithoutDeadlock(t *testi
 		t.Fatal("Ensure() deadlocked while replacing a mismatched runtime")
 	}
 	replaced := pool.sessionHandle("session-x")
-	if replaced == nil || replaced.session == nil || replaced.agentID != acpprofile.AgentCodexID {
+	if replaced == nil || replaced.session == nil || replaced.agentID != acpprofile.AgentACPID {
 		t.Fatalf("replaced runtime = %#v, want fresh codex runtime", replaced)
 	}
 }
@@ -974,7 +806,7 @@ func TestSessionPoolSetModelUpdatesRuntimeModel(t *testing.T) {
 	status, err := pool.SetModel(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	}, "gpt-5.1-codex-high")
@@ -996,7 +828,7 @@ func TestSessionPoolSetReasoningUpdatesRuntimeEffort(t *testing.T) {
 	status, err := pool.SetReasoning(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	}, "low")
@@ -1019,7 +851,7 @@ func TestSessionPoolPromptAppliesModelThenReasoningAndSkipsMatchingValues(t *tes
 	input := PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		ModelID:               "gpt-5.1-codex-high",
 		ReasoningEffort:       "xhigh",
@@ -1078,7 +910,7 @@ func TestSessionPoolPromptRejectsUnavailableTurnConfigWithoutDroppingRuntime(t *
 	input := PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		ReasoningEffort:       "ultra",
 		Prompt:                "invalid config",
@@ -1101,7 +933,7 @@ func TestSessionPoolModelTransportFailureDropsUncertainRuntime(t *testing.T) {
 
 	created, err := pool.CreateRuntime(context.Background(), CreateRuntimeInput{
 		BotID:                 "bot-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	})
@@ -1122,7 +954,7 @@ func TestSessionPoolAbortedPromptConfigApplyKeepsRuntime(t *testing.T) {
 	h := &runtimeHandle{
 		id:           newRuntimeID(),
 		botID:        "bot-1",
-		agentID:      acpprofile.AgentCodexID,
+		agentID:      acpprofile.AgentACPID,
 		status:       stateIdle,
 		lastActive:   time.Now(),
 		boundSession: "session-1",
@@ -1157,7 +989,7 @@ func TestSessionPoolCanceledConfigUpdateKeepsRuntime(t *testing.T) {
 	h := &runtimeHandle{
 		id:           newRuntimeID(),
 		botID:        "bot-1",
-		agentID:      acpprofile.AgentCodexID,
+		agentID:      acpprofile.AgentACPID,
 		status:       stateIdle,
 		lastActive:   time.Now(),
 		boundSession: "session-1",
@@ -1226,7 +1058,7 @@ func TestSessionPoolRuntimeStatusReportsActiveDuringColdStart(t *testing.T) {
 		_, err := pool.Prompt(context.Background(), PromptInput{
 			BotID:                 "bot-1",
 			SessionID:             "session-1",
-			AgentID:               "codex",
+			AgentID:               acpprofile.AgentACPID,
 			ProjectPath:           "/data/project",
 			Prompt:                "run",
 			RuntimeOwnerAccountID: "user-1",
@@ -1249,7 +1081,7 @@ func TestSessionPoolRuntimeStatusReportsActiveDuringColdStart(t *testing.T) {
 	if err := <-errCh; err == nil || err.Error() != "released" {
 		t.Fatalf("Prompt() error = %v, want released", err)
 	}
-	status = pool.RuntimeStatus("session-1", "codex", "/data/project")
+	status = pool.RuntimeStatus("session-1", acpprofile.AgentACPID, "/data/project")
 	if status.State != "idle" || status.ACPSession != "" {
 		t.Fatalf("RuntimeStatus after failed start = %#v, want idle without process", status)
 	}
@@ -1279,7 +1111,7 @@ func TestSessionPoolCloseDuringColdStartPreventsReinsert(t *testing.T) {
 		h, err := pool.runtimeForSession(context.Background(), PromptInput{
 			BotID:                 "bot-1",
 			SessionID:             "session-1",
-			AgentID:               "codex",
+			AgentID:               acpprofile.AgentACPID,
 			ProjectPath:           "/data/project",
 			RuntimeOwnerAccountID: "user-1",
 		})
@@ -1365,7 +1197,7 @@ func TestSessionPoolCloseDuringColdStartCancelsStartup(t *testing.T) {
 		h, err := pool.runtimeForSession(context.Background(), PromptInput{
 			BotID:                 "bot-1",
 			SessionID:             "session-1",
-			AgentID:               "codex",
+			AgentID:               acpprofile.AgentACPID,
 			ProjectPath:           "/data/project",
 			RuntimeOwnerAccountID: "user-1",
 		})
@@ -1486,7 +1318,7 @@ func TestSessionPoolCloseSessionCancelsActivePrompt(t *testing.T) {
 		_, err := pool.Prompt(context.Background(), PromptInput{
 			BotID:                 "bot-1",
 			SessionID:             "session-1",
-			AgentID:               acpprofile.AgentCodexID,
+			AgentID:               acpprofile.AgentACPID,
 			ProjectPath:           "/data/project",
 			Prompt:                "hang until close",
 			RuntimeOwnerAccountID: "user-1",
@@ -1554,7 +1386,7 @@ func TestSessionPoolSerializesColdStartForSameSession(t *testing.T) {
 			_, err := pool.Prompt(context.Background(), PromptInput{
 				BotID:                 "bot-1",
 				SessionID:             "session-1",
-				AgentID:               "codex",
+				AgentID:               acpprofile.AgentACPID,
 				ProjectPath:           "/data/project",
 				Prompt:                "same session",
 				RuntimeOwnerAccountID: "user-1",
@@ -1580,54 +1412,12 @@ func TestSessionPoolSerializesColdStartForSameSession(t *testing.T) {
 }
 
 func TestSessionPoolSetupModeResolution(t *testing.T) {
-	missingAPIKey := newSessionPool(nil, &recordingRunner{
+	// Managed-mode validation is declaration-driven: the generic profile
+	// requires an explicit command before any process may start.
+	missingCommand := newSessionPool(nil, &recordingRunner{
 		info: bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-	}, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", nil)})
-	_, err := missingAPIKey.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               "codex",
-		ProjectPath:           "/data/project",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	var feedbackErr *feedback.Error
-	if !errors.As(err, &feedbackErr) || feedbackErr.Code != feedback.CodeAgentNotConfigured || !strings.Contains(feedbackErr.Message, "api_key required") {
-		t.Fatalf("container api_key missing key error = %v", err)
-	}
-
-	apiKeyRunner := &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp"},
-		startErr: errors.New("started"),
-	}
-	apiKeyPool := newSessionPool(nil, apiKeyRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "api_key", map[string]any{"api_key": "sk-test", "base_url": "https://proxy.example.com/v1"})})
-	_, err = apiKeyPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               "codex",
-		ProjectPath:           "/data/project",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("container api_key error = %v, want runner start error", err)
-	}
-	if apiKeyRunner.req.SetupMode != client.SetupModeAPIKey {
-		t.Fatalf("api_key setup mode = %q", apiKeyRunner.req.SetupMode)
-	}
-	if len(apiKeyRunner.req.Env) != 0 {
-		t.Fatalf("api_key mode must use Codex files, not credential env: %v", apiKeyRunner.req.Env)
-	}
-
-	genericRunner := &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		startErr: errors.New("started"),
-	}
-	genericPool := newSessionPool(nil, genericRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentACPID, "api_key", map[string]any{
-		"command":   "custom-acp",
-		"arguments": "--stdio\nvalue with spaces",
-	})})
-	_, err = genericPool.Prompt(context.Background(), PromptInput{
+	}, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentACPID, "api_key", map[string]any{"command": ""})})
+	_, err := missingCommand.Prompt(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
 		AgentID:               acpprofile.AgentACPID,
@@ -1635,197 +1425,28 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		Prompt:                "run",
 		RuntimeOwnerAccountID: "user-1",
 	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("generic ACP error = %v, want runner start error", err)
-	}
-	if genericRunner.req.Command != "custom-acp" {
-		t.Fatalf("generic ACP command = %q", genericRunner.req.Command)
-	}
-	wantGenericArgs := []string{"--stdio", "value with spaces"}
-	if !slices.Equal(genericRunner.req.Args, wantGenericArgs) {
-		t.Fatalf("generic ACP args = %#v, want %#v", genericRunner.req.Args, wantGenericArgs)
+	var feedbackErr *feedback.Error
+	if !errors.As(err, &feedbackErr) || feedbackErr.Code != feedback.CodeAgentNotConfigured || !strings.Contains(feedbackErr.Message, "command required") {
+		t.Fatalf("missing command error = %v", err)
 	}
 
-	oauthRoot := t.TempDir()
-	oauthRunner := &hermesRecordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		client:   newSessionPoolBridgeClient(t, oauthRoot),
-		startErr: errors.New("started"),
-	}
-	oauthPool := newSessionPool(nil, oauthRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "oauth", map[string]any{"provider_id": "provider-1"})})
-	_, err = oauthPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               "codex",
-		ProjectPath:           "/data/project",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("container oauth error = %v, want runner start error", err)
-	}
-	if oauthRunner.req.SetupMode != client.SetupModeOAuth {
-		t.Fatalf("oauth setup mode = %q", oauthRunner.req.SetupMode)
-	}
-
-	selfRunner := &recordingRunner{
+	configuredRunner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
 		startErr: errors.New("started"),
 	}
-	selfPool := newSessionPool(nil, selfRunner, fakeBotGetter{bot: enabledACPBot("bot-1", "self", nil)})
-	_, err = selfPool.Prompt(context.Background(), PromptInput{
+	configured := newSessionPool(nil, configuredRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentACPID, "api_key", map[string]any{"command": "my-agent-acp"})})
+	if _, err := configured.Prompt(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               "codex",
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		Prompt:                "run",
 		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("container self error = %v, want runner start error", err)
+	}); err == nil || err.Error() != "started" {
+		t.Fatalf("configured generic agent error = %v, want runner start error", err)
 	}
-	if selfRunner.req.SetupMode != client.SetupModeSelf {
-		t.Fatalf("self setup mode = %q", selfRunner.req.SetupMode)
-	}
-	if len(selfRunner.req.Env) != 0 {
-		t.Fatalf("self mode injected credential env: %v", selfRunner.req.Env)
-	}
-	if got := selfPool.RuntimeStatus("session-1", "codex", "/data/project"); got.State != "idle" || got.ACPSession != "" {
-		t.Fatalf("RuntimeStatus after failed start = %#v, want idle without process", got)
-	}
-
-	claudeRunner := &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		startErr: errors.New("started"),
-	}
-	claudePool := newSessionPool(nil, claudeRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentClaudeCodeID, "api_key", map[string]any{
-		"api_key":  "sk-ant-test",
-		"base_url": "https://anthropic-proxy.example.com",
-	})})
-	_, err = claudePool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentClaudeCodeID,
-		ProjectPath:           "/data/project",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("container Claude Code api_key error = %v, want runner start error", err)
-	}
-	if claudeRunner.req.Command != "claude-agent-acp" {
-		t.Fatalf("Claude Code command = %q", claudeRunner.req.Command)
-	}
-	if !startRequestEnvHas(claudeRunner.req.Env, "ANTHROPIC_API_KEY", "sk-ant-test") ||
-		!startRequestEnvHas(claudeRunner.req.Env, "ANTHROPIC_BASE_URL", "https://anthropic-proxy.example.com") {
-		t.Fatalf("Claude Code env = %#v, want Anthropic managed env", claudeRunner.req.Env)
-	}
-	if !startRequestEnvHas(claudeRunner.req.Env, "ANTHROPIC_AUTH_TOKEN", "") ||
-		!startRequestEnvHas(claudeRunner.req.Env, "CLAUDE_CODE_OAUTH_TOKEN", "") {
-		t.Fatalf("Claude Code api_key env = %#v, want conflicting auth env cleared", claudeRunner.req.Env)
-	}
-
-	hermesRoot := t.TempDir()
-	hermesRunner := &hermesRecordingRunner{
-		info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendContainer,
-			DefaultWorkDir: "/data",
-		},
-		client:   newSessionPoolBridgeClient(t, hermesRoot),
-		startErr: errors.New("started"),
-	}
-	hermesPool := newSessionPool(nil, hermesRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", map[string]any{
-		"provider": "openrouter",
-		"model":    "anthropic/claude-sonnet-4",
-		"api_key":  "sk-hermes",
-	})})
-	_, err = hermesPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentHermesID,
-		ProjectPath:           "/data/project",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("container Hermes api_key error = %v, want runner start error", err)
-	}
-	if hermesRunner.req.Command != "hermes-acp" {
-		t.Fatalf("Hermes command = %q", hermesRunner.req.Command)
-	}
-	if !hermesRunner.req.CleanEnv {
-		t.Fatalf("Hermes managed CleanEnv = false, want true")
-	}
-	if !hasString(hermesRunner.req.UnsetEnv, "HERMES_*") || !hasString(hermesRunner.req.UnsetEnv, "OPENROUTER_API_KEY") || !hasString(hermesRunner.req.UnsetEnv, "OPENROUTER_BASE_URL") {
-		t.Fatalf("Hermes managed UnsetEnv = %#v", hermesRunner.req.UnsetEnv)
-	}
-	if hermesRunner.req.Resolved == nil || hermesRunner.req.Resolved.HermesHome != client.HermesContainerHome {
-		t.Fatalf("Hermes resolved context = %#v", hermesRunner.req.Resolved)
-	}
-	configPath := filepath.Join(hermesRoot, ".memoh-hermes", "config.yaml")
-	configBytes, readErr := os.ReadFile(configPath) //nolint:gosec // test path is under t.TempDir.
-	if readErr != nil {
-		t.Fatalf("read Hermes config: %v", readErr)
-	}
-	if content := string(configBytes); !strings.Contains(content, `provider: "openrouter"`) || strings.Contains(content, "sk-hermes") {
-		t.Fatalf("Hermes config content =\n%s", content)
-	}
-
-	defaultBackendRoot := t.TempDir()
-	defaultBackendRunner := &hermesRecordingRunner{
-		info: bridge.WorkspaceInfo{
-			DefaultWorkDir: "/data",
-		},
-		client:   newSessionPoolBridgeClient(t, defaultBackendRoot),
-		startErr: errors.New("started"),
-	}
-	defaultBackendPool := newSessionPool(nil, defaultBackendRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", map[string]any{
-		"provider": "gemini",
-		"model":    "gemini-3.5-flash",
-		"api_key":  "AIza-hermes",
-	})})
-	_, err = defaultBackendPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentHermesID,
-		ProjectPath:           "/data/project",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("default backend Hermes api_key error = %v, want runner start error", err)
-	}
-	if defaultBackendRunner.req.Resolved == nil || defaultBackendRunner.req.Resolved.Backend != client.WorkspaceBackendContainer {
-		t.Fatalf("default backend resolved context = %#v, want container backend", defaultBackendRunner.req.Resolved)
-	}
-
-	claudeOAuthRunner := &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
-		startErr: errors.New("started"),
-	}
-	claudeOAuthManaged := map[string]any{ //nolint:gosec // Test fixture token, not a real credential.
-		"oauth_token": "fake-claude-oauth-token",
-		"base_url":    "https://anthropic-proxy.example.com",
-	}
-	claudeOAuthPool := newSessionPool(nil, claudeOAuthRunner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentClaudeCodeID, "oauth", claudeOAuthManaged)})
-	_, err = claudeOAuthPool.Prompt(context.Background(), PromptInput{
-		BotID:                 "bot-1",
-		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentClaudeCodeID,
-		ProjectPath:           "/data/project",
-		Prompt:                "run",
-		RuntimeOwnerAccountID: "user-1",
-	})
-	if err == nil || err.Error() != "started" {
-		t.Fatalf("container Claude Code oauth error = %v, want runner start error", err)
-	}
-	if !startRequestEnvHas(claudeOAuthRunner.req.Env, "CLAUDE_CODE_OAUTH_TOKEN", "fake-claude-oauth-token") ||
-		!startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_BASE_URL", "https://anthropic-proxy.example.com") {
-		t.Fatalf("Claude Code oauth env = %#v, want Claude managed oauth env", claudeOAuthRunner.req.Env)
-	}
-	if !startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_API_KEY", "") ||
-		!startRequestEnvHas(claudeOAuthRunner.req.Env, "ANTHROPIC_AUTH_TOKEN", "") {
-		t.Fatalf("Claude Code oauth env = %#v, want conflicting auth env cleared", claudeOAuthRunner.req.Env)
+	if configuredRunner.req.Command != "my-agent-acp" {
+		t.Fatalf("resolved command = %q, want managed command", configuredRunner.req.Command)
 	}
 }
 
@@ -1834,13 +1455,13 @@ func TestSessionPoolRejectsUnsupportedSetupMode(t *testing.T) {
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data"},
 		startErr: errors.New("started"),
 	}
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "oauth", map[string]any{
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentACPID, "oauth", map[string]any{
 		"oauth_token": "fake",
 	})})
 	_, err := pool.Prompt(context.Background(), PromptInput{
 		BotID:     "bot-1",
 		SessionID: "session-1",
-		AgentID:   acpprofile.AgentHermesID,
+		AgentID:   acpprofile.AgentACPID,
 		Prompt:    "run",
 	})
 	if err == nil || !strings.Contains(err.Error(), `does not support setup mode "oauth"`) {
@@ -1856,11 +1477,11 @@ func TestSessionPoolRejectsUnsupportedBackend(t *testing.T) {
 		info:     bridge.WorkspaceInfo{Backend: "remote", DefaultWorkDir: "/data"},
 		startErr: errors.New("started"),
 	}
-	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentHermesID, "api_key", nil)})
+	pool := newSessionPool(nil, runner, fakeBotGetter{bot: enabledACPAgentBot("bot-1", acpprofile.AgentACPID, "api_key", nil)})
 	_, err := pool.Prompt(context.Background(), PromptInput{
 		BotID:     "bot-1",
 		SessionID: "session-1",
-		AgentID:   acpprofile.AgentHermesID,
+		AgentID:   acpprofile.AgentACPID,
 		Prompt:    "run",
 	})
 	if err == nil || !strings.Contains(err.Error(), `does not support workspace backend "remote"`) {
@@ -1883,21 +1504,6 @@ func TestProfileSupportsBackend(t *testing.T) {
 	}
 }
 
-func TestValidateManagedACPConfigAcceptsHermesOpenAIAPIProvider(t *testing.T) {
-	profile, ok := acpprofile.Lookup(acpprofile.AgentHermesID)
-	if !ok {
-		t.Fatal("missing Hermes profile")
-	}
-	err := client.ValidateManagedACPConfig(profile, acpprofile.AgentSetup{Managed: map[string]string{
-		"provider": "openai-api",
-		"model":    "gpt-5.4",
-		"api_key":  "sk-test",
-	}}, client.SetupModeAPIKey)
-	if err != nil {
-		t.Fatalf("ValidateManagedACPConfig() error = %v, want openai-api accepted", err)
-	}
-}
-
 func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 	runner := &recordingRunner{
 		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp"},
@@ -1912,7 +1518,7 @@ func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 			SessionType: sessionmode.ACPAgent,
 			IsACP:       true,
 			Metadata: map[string]any{
-				"acp_agent_id":             "codex",
+				"acp_agent_id":             acpprofile.AgentACPID,
 				"project_path":             "/data/from-session",
 				"runtime_owner_account_id": "user-1",
 			},
@@ -1930,7 +1536,7 @@ func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 	if err == nil || err.Error() != "started" {
 		t.Fatalf("Prompt() error = %v, want runner start error", err)
 	}
-	if runner.req.AgentID != "codex" {
+	if runner.req.AgentID != acpprofile.AgentACPID {
 		t.Fatalf("runner agent_id = %q, want session metadata codex", runner.req.AgentID)
 	}
 	if runner.req.ProjectPath != "/data/from-session" {
@@ -1958,7 +1564,7 @@ func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 		SessionID:             "session-1",
 		RunID:                 "run-1",
 		RouteID:               "route-1",
-		AgentID:               "codex",
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		Prompt:                "run",
 		ChannelIdentityID:     "user-1",
@@ -2247,7 +1853,7 @@ func TestSessionPoolEnsureRefreshesIdleClock(t *testing.T) {
 	h := &runtimeHandle{
 		id:                    newRuntimeID(),
 		botID:                 "bot-1",
-		agentID:               acpprofile.AgentCodexID,
+		agentID:               acpprofile.AgentACPID,
 		projectPath:           "/data/project",
 		status:                stateIdle,
 		lastActive:            stale,
@@ -2260,7 +1866,7 @@ func TestSessionPoolEnsureRefreshesIdleClock(t *testing.T) {
 	if _, err := pool.Ensure(context.Background(), PromptInput{
 		BotID:                 "bot-1",
 		SessionID:             "session-1",
-		AgentID:               acpprofile.AgentCodexID,
+		AgentID:               acpprofile.AgentACPID,
 		ProjectPath:           "/data/project",
 		RuntimeOwnerAccountID: "user-1",
 	}); err != nil {
@@ -2544,29 +2150,29 @@ func (g fakeSessionGetter) Get(context.Context, string) (SessionDescriptor, erro
 
 type recordingSessionStateStore struct {
 	mu              sync.Mutex
-	head            SessionPublicationHead
+	head            agentstate.SessionPublicationHead
 	headSet         bool
 	headFound       bool
 	headErr         error
 	headCalls       int
-	epoch           RuntimeConfigEpoch
+	epoch           agentstate.RuntimeConfigEpoch
 	epochErr        error
 	epochCalls      int
-	state           PersistedSessionState
-	records         []SessionStateRecord
+	state           agentstate.PersistedSessionState
+	records         []agentstate.SessionStateRecord
 	found           bool
 	loadErr         error
 	replaceErr      error
 	loadCalls       int
 	replaceCalls    int
-	replaced        PersistedSessionState
-	replacedRecords []SessionStateRecord
+	replaced        agentstate.PersistedSessionState
+	replacedRecords []agentstate.SessionStateRecord
 	replaceFence    runtimefence.Fence
 	guardCalls      int
 	guardErr        error
 }
 
-func (s *recordingSessionStateStore) RuntimeConfigEpoch(context.Context, string, string) (RuntimeConfigEpoch, error) {
+func (s *recordingSessionStateStore) RuntimeConfigEpoch(context.Context, string, string) (agentstate.RuntimeConfigEpoch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.epochCalls++
@@ -2584,20 +2190,20 @@ func (s *recordingSessionStateStore) GuardRuntimeSync(ctx context.Context, _ str
 	return fn(ctx)
 }
 
-func (s *recordingSessionStateStore) CanonicalShape(context.Context, string, string) (map[string]SessionStateFileShape, bool, error) {
+func (s *recordingSessionStateStore) CanonicalShape(context.Context, string, string) (map[string]agentstate.SessionStateFileShape, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.found {
 		return nil, false, nil
 	}
-	shapes := make(map[string]SessionStateFileShape, len(s.state.Files))
+	shapes := make(map[string]agentstate.SessionStateFileShape, len(s.state.Files))
 	for _, file := range s.state.Files {
 		shapes[file.Path] = file.SessionStateFileShape
 	}
 	return shapes, true, nil
 }
 
-func (s *recordingSessionStateStore) Head(context.Context, string, string) (SessionPublicationHead, bool, error) {
+func (s *recordingSessionStateStore) Head(context.Context, string, string) (agentstate.SessionPublicationHead, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.headCalls++
@@ -2605,27 +2211,27 @@ func (s *recordingSessionStateStore) Head(context.Context, string, string) (Sess
 		return s.head, s.headFound, s.headErr
 	}
 	if s.found {
-		return SessionPublicationHead{
+		return agentstate.SessionPublicationHead{
 			RunID: s.state.ThroughRunID,
-			Kind:  SessionPublicationCheckpoint,
+			Kind:  agentstate.SessionPublicationCheckpoint,
 		}, true, s.headErr
 	}
-	return SessionPublicationHead{}, false, s.headErr
+	return agentstate.SessionPublicationHead{}, false, s.headErr
 }
 
-func (s *recordingSessionStateStore) Load(ctx context.Context, _, _ string, consume SessionStateRecordConsumer) (bool, error) {
+func (s *recordingSessionStateStore) Load(ctx context.Context, _, _ string, consume agentstate.SessionStateRecordConsumer) (bool, error) {
 	s.mu.Lock()
 	s.loadCalls++
 	state, found, loadErr := s.state, s.found, s.loadErr
-	records := append([]SessionStateRecord(nil), s.records...)
+	records := append([]agentstate.SessionStateRecord(nil), s.records...)
 	s.mu.Unlock()
 	if loadErr != nil || !found {
 		return found, loadErr
 	}
 	index := 0
-	reader := func(context.Context) (SessionStateRecord, error) {
+	reader := func(context.Context) (agentstate.SessionStateRecord, error) {
 		if index == len(records) {
-			return SessionStateRecord{}, io.EOF
+			return agentstate.SessionStateRecord{}, io.EOF
 		}
 		record := records[index]
 		index++
@@ -2634,8 +2240,8 @@ func (s *recordingSessionStateStore) Load(ctx context.Context, _, _ string, cons
 	return true, consume(ctx, state, reader)
 }
 
-func (s *recordingSessionStateStore) Replace(ctx context.Context, _, _ string, state PersistedSessionState, reader SessionStateRecordReader) error {
-	var records []SessionStateRecord
+func (s *recordingSessionStateStore) Replace(ctx context.Context, _, _ string, state agentstate.PersistedSessionState, reader agentstate.SessionStateRecordReader) error {
+	var records []agentstate.SessionStateRecord
 	for {
 		record, err := reader(ctx)
 		if errors.Is(err, io.EOF) {
@@ -2653,14 +2259,6 @@ func (s *recordingSessionStateStore) Replace(ctx context.Context, _, _ string, s
 	s.replacedRecords = records
 	s.replaceFence, _ = runtimefence.FromContext(ctx)
 	return s.replaceErr
-}
-
-func (s *recordingSessionStateStore) setHead(head SessionPublicationHead, found bool) {
-	s.mu.Lock()
-	s.head = head
-	s.headSet = true
-	s.headFound = found
-	s.mu.Unlock()
 }
 
 type fakeToolApprovalService struct {
@@ -2759,13 +2357,6 @@ type recordingRunner struct {
 	startErr error
 }
 
-type hermesRecordingRunner struct {
-	info     bridge.WorkspaceInfo
-	client   *bridge.Client
-	req      client.StartRequest
-	startErr error
-}
-
 type blockingRunner struct {
 	info    bridge.WorkspaceInfo
 	started chan struct{}
@@ -2826,19 +2417,6 @@ func (r *recordingRunner) StartSession(_ context.Context, req client.StartReques
 	return nil, r.startErr
 }
 
-func (r *hermesRecordingRunner) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
-	return r.info, nil
-}
-
-func (r *hermesRecordingRunner) MCPClient(context.Context, string) (*bridge.Client, error) {
-	return r.client, nil
-}
-
-func (r *hermesRecordingRunner) StartSession(_ context.Context, req client.StartRequest, _ client.EventSink) (*client.Session, error) {
-	r.req = req
-	return nil, r.startErr
-}
-
 type sessionPoolWorkspace struct {
 	client *bridge.Client
 	info   bridge.WorkspaceInfo
@@ -2853,12 +2431,18 @@ func (w sessionPoolWorkspace) WorkspaceInfo(context.Context, string) (bridge.Wor
 }
 
 func enabledACPBot(id, mode string, managed map[string]any) bots.Bot {
-	return enabledACPAgentBot(id, acpprofile.AgentCodexID, mode, managed)
+	return enabledACPAgentBot(id, acpprofile.AgentACPID, mode, managed)
 }
 
 func enabledACPAgentBot(id, agentID, mode string, managed map[string]any) bots.Bot {
 	if managed == nil {
 		managed = map[string]any{}
+	}
+	if _, ok := managed["command"]; !ok {
+		// The generic profile requires an explicit launch command; the fake
+		// agent script ships under this name. Pass command: "" to model a
+		// deliberately unconfigured agent.
+		managed["command"] = "codex-acp"
 	}
 	return bots.Bot{
 		ID: id,
@@ -2874,25 +2458,6 @@ func enabledACPAgentBot(id, agentID, mode string, managed map[string]any) bots.B
 			},
 		},
 	}
-}
-
-func startRequestEnvHas(env []string, key, want string) bool {
-	prefix := key + "="
-	for _, item := range env {
-		if strings.HasPrefix(item, prefix) {
-			return strings.TrimPrefix(item, prefix) == want
-		}
-	}
-	return false
-}
-
-func hasString(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
 }
 
 func newSessionPoolBridgeClient(t *testing.T, root string) *bridge.Client {
@@ -2966,16 +2531,6 @@ func (s *sessionPoolExecStream) Recv() (*pb.ExecInput, error) {
 		input.Env[index] = strings.ReplaceAll(item, "/opt/memoh/toolkit/bin", s.binDir)
 	}
 	return input, nil
-}
-
-func readSessionPoolFile(t *testing.T, root string, parts ...string) string {
-	t.Helper()
-	pathParts := append([]string{root}, parts...)
-	content, err := os.ReadFile(filepath.Join(pathParts...)) //nolint:gosec // reads from t.TempDir
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(content)
 }
 
 func waitForSessionPoolFile(t *testing.T, path string, timeout time.Duration) {

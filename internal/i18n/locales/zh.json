@@ -42,7 +42,7 @@
     "tip": "提示：随时用 {model} 或 {reasoning} 调整。"
   },
   "chat": {
-    "acp": {
+    "externalAgent": {
       "agentNotConfigured": "该 Bot 的外部 Agent 配置尚未完成。",
       "agentNotFound": "选中的外部 Agent 不可用。",
       "agentNotEnabled": "该 Bot 已停用选中的外部 Agent。",

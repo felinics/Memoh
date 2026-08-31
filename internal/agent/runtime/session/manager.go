@@ -91,32 +91,37 @@ type localCommandResult struct {
 }
 
 type runControl struct {
-	botID                  string
-	sessionID              string
-	runID                  string
-	turnID                 string
-	generation             string
-	fencingToken           int64
-	abortCh                chan<- struct{}
-	cancel                 context.CancelFunc
-	admissionCancel        context.CancelFunc
-	lifecycleCtx           context.Context
-	lifecycleCancel        context.CancelFunc
-	injectCh               chan<- turn.InjectMessage
-	injectMu               sync.Mutex
-	injectStopped          bool
-	converter              *chatview.UIMessageStreamConverter
-	leaseStop              func()
-	leaseDone              chan struct{}
-	leaseLifecycleMu       sync.Mutex
-	leaseMu                sync.RWMutex
-	leaseValidUntil        time.Time
-	leaseChanged           chan struct{}
-	ready                  chan struct{}
-	readyOnce              sync.Once
-	decisionMu             sync.Mutex
-	decisionReady          chan struct{}
-	decisionReadyOnce      sync.Once
+	botID             string
+	sessionID         string
+	runID             string
+	turnID            string
+	generation        string
+	fencingToken      int64
+	abortCh           chan<- struct{}
+	cancel            context.CancelFunc
+	admissionCancel   context.CancelFunc
+	lifecycleCtx      context.Context
+	lifecycleCancel   context.CancelFunc
+	injectCh          chan<- turn.InjectMessage
+	injectMu          sync.Mutex
+	injectStopped     bool
+	converter         *chatview.UIMessageStreamConverter
+	leaseStop         func()
+	leaseDone         chan struct{}
+	leaseLifecycleMu  sync.Mutex
+	leaseMu           sync.RWMutex
+	leaseValidUntil   time.Time
+	leaseChanged      chan struct{}
+	ready             chan struct{}
+	readyOnce         sync.Once
+	decisionMu        sync.Mutex
+	decisionReady     chan struct{}
+	decisionReadyOnce sync.Once
+	// pendingDecisions tracks every decision that still awaits a terminal
+	// status. decisionInline marks runtimes that block inside the same turn
+	// instead of parking and re-entering through EventAgentStart.
+	pendingDecisions       map[string]struct{}
+	decisionInline         bool
 	abortStateMu           sync.Mutex
 	claimEstablished       bool
 	admissionComplete      bool
@@ -161,16 +166,97 @@ func (c *runControl) handle() RunHandle {
 	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, TurnID: c.turnID, Generation: c.generation, FencingToken: c.fencingToken}
 }
 
-func (c *runControl) beginDecisionWait() {
+func (c *runControl) beginDecisionWait(decisionID string) {
 	if c == nil {
 		return
 	}
 	c.decisionMu.Lock()
 	defer c.decisionMu.Unlock()
-	c.decisionReady = make(chan struct{})
-	c.decisionReadyOnce = sync.Once{}
+	if len(c.pendingDecisions) == 0 {
+		// Recreate the continuation barrier only on the first open decision:
+		// replacing the channel per pending would strand any goroutine
+		// already waiting on the previous one.
+		c.decisionReady = make(chan struct{})
+		c.decisionReadyOnce = sync.Once{}
+	}
+	if c.pendingDecisions == nil {
+		c.pendingDecisions = map[string]struct{}{}
+	}
+	c.pendingDecisions[decisionKey(decisionID)] = struct{}{}
 }
 
+// endDecisionWait records that one pending decision reached a terminal
+// status while the stream is still live (the inline model); a later empty
+// FinishRun must not mistake a run with no open decisions for a parked
+// native stream. It reports whether any decisions remain open.
+func (c *runControl) endDecisionWait(decisionID string) bool {
+	if c == nil {
+		return false
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	delete(c.pendingDecisions, decisionKey(decisionID))
+	return len(c.pendingDecisions) > 0
+}
+
+// clearDecisionWaits drops every open decision: the re-entering stream owns
+// the run again and any decisions it still needs will be raised anew.
+func (c *runControl) clearDecisionWaits() {
+	if c == nil {
+		return
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	c.pendingDecisions = nil
+}
+
+// decisionWaitActive reports at least one decision still pending from this
+// control's point of view — the precondition for parking the run when its
+// stream ends without a terminal status.
+func (c *runControl) decisionWaitActive() bool {
+	if c == nil {
+		return false
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	return len(c.pendingDecisions) > 0
+}
+
+// decisionKey identifies one decision across its pending and terminal
+// events. An event without any id collapses onto a shared key, degrading to
+// the historical single-flag behavior instead of leaking set entries.
+func decisionKey(decisionID string) string {
+	if id := strings.TrimSpace(decisionID); id != "" {
+		return id
+	}
+	return "~unidentified"
+}
+
+// markInlineDecisions declares that this run's runtime blocks inline on
+// decisions, so a terminal decision status resumes the run. Without the
+// declaration the run keeps the native park semantics: only the re-entering
+// EventAgentStart resumes it.
+func (c *runControl) markInlineDecisions() {
+	if c == nil {
+		return
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	c.decisionInline = true
+}
+
+func (c *runControl) resumesOnTerminalDecision() bool {
+	if c == nil {
+		return false
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	return c.decisionInline
+}
+
+// markDecisionReady releases WaitDecisionContinuationReady: the parked
+// stream's terminal persistence is done and the decision's continuation may
+// write its tool result without racing the assistant tool-call write.
 func (c *runControl) markDecisionReady() {
 	if c == nil {
 		return
@@ -1124,6 +1210,20 @@ func (m *Manager) reconcileCanceledRunClaim(ctx context.Context, ctrl *runContro
 	return nil
 }
 
+// MarkInlineDecisionRun declares, before the runtime starts prompting, that
+// this run's runtime blocks inline on decisions: terminal decision statuses
+// resume the run directly. Runs without the declaration keep the native park
+// semantics (only EventAgentStart resumes), so a decision answered faster
+// than the parking FinishRun cannot resume — and then complete — the run
+// underneath the native re-entry. Scope-keyed (run IDs are unique); the
+// caller runs before any decision event, so no generation check is needed.
+func (m *Manager) MarkInlineDecisionRun(botID, sessionID, runID string) {
+	if m == nil {
+		return
+	}
+	m.localControlForScope(botID, sessionID, runID).markInlineDecisions()
+}
+
 func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, message string) error {
 	return m.finishRun(ctx, handle, status, "", message)
 }
@@ -1152,13 +1252,16 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 			return err
 		}
 		if ok && runMatchesHandle(snapshot.CurrentRunView, handle) &&
-			strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision) {
+			strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision) &&
+			ctrl.decisionWaitActive() {
 			// The native stream ends after emitting a deferred decision. That is
 			// a parked execution, not a terminal run: retain ownership and the
 			// command executor so the response can resume this same run.
-			if ctrl != nil {
-				ctrl.markDecisionReady()
-			}
+			// The decisionWaitActive gate keeps an inline runtime whose turn
+			// died after its decision was already decided (or whose terminal
+			// decision event was lost) from being mistaken for a park — that
+			// mistake left runs in waiting_decision forever.
+			ctrl.markDecisionReady()
 			return nil
 		}
 	}
@@ -1586,12 +1689,28 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	switch event.Type {
 	case native.EventToolApprovalRequest, native.EventUserInputRequest:
 		if pendingDecisionEvent(event) {
-			ctrl.beginDecisionWait()
+			ctrl.beginDecisionWait(decisionEventID(event))
 			if err := m.setWaitingDecision(ctx, handle); err != nil {
 				return nil, err
 			}
+		} else if ctrl.resumesOnTerminalDecision() {
+			// Runtimes that block inline on the decision (codex, claude, ACP
+			// gateway tools) continue the same turn — the LAST terminal
+			// status is their resume signal; without this transition their
+			// runs stay in waiting_decision forever, and resuming any
+			// earlier would mark the run running while sibling decisions
+			// still block it. A native run's set is left untouched no matter
+			// when the terminal statuses land: its stream parks with every
+			// raised decision still open, and only the re-entering
+			// EventAgentStart clears them and resumes.
+			if stillWaiting := ctrl.endDecisionWait(decisionEventID(event)); !stillWaiting {
+				if err := m.resumeWaitingDecision(ctx, handle); err != nil {
+					return nil, err
+				}
+			}
 		}
 	case native.EventAgentStart:
+		ctrl.clearDecisionWaits()
 		if err := m.resumeWaitingDecision(ctx, handle); err != nil {
 			return nil, err
 		}
@@ -1627,6 +1746,10 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		terminalProposal = agentTerminalProposal{}
 	}
 
+	// Evaluated after the ledger switch above so a terminal decision event
+	// sees the set it just shrank: the live projection may only leave
+	// waiting_decision when no sibling decision remains open.
+	resumeLiveOnTerminal := ctrl.resumesOnTerminalDecision() && !ctrl.decisionWaitActive()
 	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
 		if !runMatchesHandle(run, handle) || !m.runOwnerMatches(run) || !isEventAcceptingRunStatus(run.Status) {
@@ -1653,6 +1776,10 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		case native.EventToolApprovalRequest, native.EventUserInputRequest:
 			if pendingDecisionEvent(event) {
 				run.Status = RunStatusWaitingDecision
+			} else if resumeLiveOnTerminal && strings.EqualFold(run.Status, RunStatusWaitingDecision) {
+				// The last terminal decision resumes inline runs only; a native
+				// run resumes through its re-entering EventAgentStart.
+				run.Status = RunStatusRunning
 			}
 		case native.EventAgentStart:
 			if strings.EqualFold(run.Status, RunStatusWaitingDecision) {

@@ -27,6 +27,10 @@ func (s sessionWorkdirSessionService) UpdateMetadata(context.Context, string, ma
 	return s.thread, nil
 }
 
+func (s sessionWorkdirSessionService) MergeRuntimeMetadata(context.Context, string, string, map[string]any) (sessionpkg.Thread, error) {
+	return s.thread, nil
+}
+
 type fakeSessionWorkdirResolver struct {
 	resolved workdir.Resolved
 	err      error

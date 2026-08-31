@@ -51,8 +51,7 @@ func TestCompatibilityMatrix(t *testing.T) {
 		{"codex", AuthKindOpenAICodexOAuth, true},
 		{"claude-code", AuthKindClaudeCodeOAuth, true},
 		{"claude-code", AuthKindOpenAIAPIKey, false},
-		{"hermes", AuthKindGoogleAPIKey, true},
-		{"hermes", AuthKindClaudeCodeOAuth, false},
+		{"claude-code", AuthKindAnthropicAPIKey, true},
 	} {
 		if got := Compatible(tc.agent, tc.kind); got != tc.want {
 			t.Fatalf("Compatible(%q,%q) = %v", tc.agent, tc.kind, got)

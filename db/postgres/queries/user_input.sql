@@ -90,15 +90,14 @@ SELECT *
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
--- name: GetPendingUserInputByRun :one
+-- name: ListPendingUserInputsByRun :many
 SELECT *
 FROM user_input_requests
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $1
   AND status = 'pending'
   AND (expires_at IS NULL OR expires_at > now())
-ORDER BY created_at DESC, short_id DESC
-LIMIT 1;
+ORDER BY created_at ASC, short_id ASC;
 
 -- name: GetRespondableUserInputRequest :one
 SELECT *
@@ -275,7 +274,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
   AND status = 'pending'
   AND runtime_fencing_token IS NOT NULL
-  AND id IS DISTINCT FROM sqlc.narg(preserve_id)::uuid
+  AND id != ALL(sqlc.arg(preserve_ids)::uuid[])
 RETURNING *;
 
 -- name: FailUserInputRequest :one

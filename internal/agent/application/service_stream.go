@@ -175,20 +175,22 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			errCh <- err
 			return
 		}
-		if ok, err := s.isACPAgentSession(ctx, streamReq); err != nil {
-			s.logger.Error("StreamChat: ACP session check failed",
+		dispatch, err := s.resolveRuntimeDispatch(ctx, streamReq)
+		if err != nil {
+			s.logger.Error("StreamChat: runtime dispatch failed",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("session_id", streamReq.ThreadID),
 				slog.Any("error", err),
 			)
 			errCh <- err
 			return
-		} else if ok {
-			if err := rejectACPWorkspaceTarget(streamReq); err != nil {
+		}
+		if dispatch.kind == dispatchExternal {
+			if err := rejectExternalAgentWorkspaceTarget(streamReq); err != nil {
 				errCh <- err
 				return
 			}
-			s.streamACPAgentChunks(ctx, streamReq, chunkCh, errCh)
+			s.streamRuntimeChunks(ctx, dispatch.driver, streamReq, chunkCh, errCh)
 			return
 		}
 		streamCtx, preparedReq, prepareErr := s.prepareWorkspaceRequest(ctx, streamReq)
@@ -201,7 +203,6 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
-		var err error
 		if !streamReq.UserMessagePersisted {
 			streamReq, err = s.applyUserMessageHook(streamCtx, streamReq)
 			if err != nil {
@@ -512,24 +513,26 @@ func (s *Service) streamChatWSResultWithHooks(
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
 		return nil, err
 	}
-	if ok, err := s.isACPAgentSession(ctx, req); err != nil {
-		s.logger.Error("StreamChatWS: ACP session check failed",
+	dispatch, err := s.resolveRuntimeDispatch(ctx, req)
+	if err != nil {
+		s.logger.Error("StreamChatWS: runtime dispatch failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.ThreadID),
 			slog.Any("error", err),
 		)
 		return nil, err
-	} else if ok {
-		if err := rejectACPWorkspaceTarget(req); err != nil {
+	}
+	if dispatch.kind == dispatchExternal {
+		if err := rejectExternalAgentWorkspaceTarget(req); err != nil {
 			return nil, err
 		}
-		// Hooks currently mean retry/edit turn replacement. ACP runtimes have
-		// no rewind primitive, so running the turn would leave their in-process
-		// context inconsistent with the visible history.
+		// Hooks currently mean retry/edit turn replacement. Runtimes that own
+		// their conversation context have no rewind primitive, so running the
+		// turn would leave that context inconsistent with the visible history.
 		if preflight != nil || postPersist != nil {
-			return nil, apperror.New(apperror.CodeACPTurnReplacementUnsupported, nil)
+			return nil, apperror.New(apperror.CodeExternalAgentTurnReplacementUnsupported, nil)
 		}
-		return nil, s.streamACPAgentWS(ctx, req, eventCh, abortCh)
+		return nil, s.streamRuntimeWS(ctx, dispatch.driver, req, eventCh, abortCh)
 	}
 	var prepareErr error
 	ctx, req, prepareErr = s.prepareWorkspaceRequest(ctx, req)
@@ -546,7 +549,6 @@ func (s *Service) streamChatWSResultWithHooks(
 	if req.RawQuery == "" {
 		req.RawQuery = strings.TrimSpace(req.Query)
 	}
-	var err error
 	if !req.UserMessagePersisted && !req.ReusePersistedUserMessage {
 		req, err = s.applyUserMessageHook(ctx, req)
 		if err != nil {

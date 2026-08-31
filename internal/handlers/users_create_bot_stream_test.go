@@ -38,7 +38,7 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 			ownerID: ownerID,
 			botID:   botID,
 		}))),
-		acpWorkspace: &createBotStreamWorkspace{},
+		workspaceSetup: &createBotStreamWorkspace{},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -129,7 +129,7 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 			ownerID: ownerID,
 			botID:   botID,
 		}))),
-		acpWorkspace: &createBotStreamWorkspace{events: []workspace.ContainerSetupEvent{
+		workspaceSetup: &createBotStreamWorkspace{events: []workspace.ContainerSetupEvent{
 			{Type: "pulling", Image: "debian:bookworm-slim"},
 			{Type: "pull_progress", Layers: []ctr.LayerStatus{{Ref: "layer-1", Offset: 10, Total: 100}}},
 			{Type: "creating"},
@@ -197,10 +197,10 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	}
 
 	handler := &UsersHandler{
-		logger:       slog.Default(),
-		service:      newTestCreateBotAccountService(ownerID),
-		botService:   bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
-		acpWorkspace: &createBotStreamWorkspace{err: errors.New("image pull failed")},
+		logger:         slog.Default(),
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{err: errors.New("image pull failed")},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -257,10 +257,10 @@ func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T
 		errors.New("missing /opt/memoh/toolkit/bin/node"),
 	)
 	handler := &UsersHandler{
-		logger:       slog.Default(),
-		service:      newTestCreateBotAccountService(ownerID),
-		botService:   bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
-		acpWorkspace: &createBotStreamWorkspace{err: setupErr},
+		logger:         slog.Default(),
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{err: setupErr},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -291,64 +291,6 @@ func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T
 	}
 	if streamDB.status != bots.BotStatusReady {
 		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
-	}
-}
-
-func TestCreateBotStreamReportsACPConfigWriteError(t *testing.T) {
-	ownerID := "00000000-0000-0000-0000-000000000106"
-	botID := "00000000-0000-0000-0000-000000000206"
-	handler := &UsersHandler{
-		logger:  slog.Default(),
-		service: newTestCreateBotAccountService(ownerID),
-		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(&createBotStreamDB{
-			ownerID: ownerID,
-			botID:   botID,
-		}))),
-		acpWorkspace: &createBotStreamWorkspace{mcpErr: errors.New("bridge unavailable")},
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
-		"name": "hermes-stream-bot",
-		"display_name": "Hermes Stream Bot",
-		"acl_preset": "allow_all",
-		"wait_for_ready": true,
-		"metadata": {
-			"acp": {
-				"agents": {
-					"hermes": {
-						"enabled": true,
-						"setup_mode": "api_key",
-						"managed": {
-							"provider": "openrouter",
-							"model": "nousresearch/hermes",
-							"api_key": "secret-value"
-						}
-					}
-				}
-			}
-		}
-	}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAccept, "text/event-stream")
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(echo.New(), req, rec, ownerID)
-
-	if err := handler.CreateBot(ctx); err != nil {
-		t.Fatalf("CreateBot() error = %v", err)
-	}
-
-	events := decodeSSEEvents(t, rec.Body.String())
-	errorEvent, ok := findEventType(events, "error")
-	if !ok {
-		t.Fatalf("missing ACP config error event: %#v", events)
-	}
-	message, _ := errorEvent["message"].(string)
-	if !strings.Contains(message, "write ACP workspace config: bridge unavailable") {
-		t.Fatalf("error message = %q, want ACP config details", message)
-	}
-	last := events[len(events)-1]
-	if last["type"] != "ready" {
-		t.Fatalf("last event type = %#v, want ready after ACP config warning; events=%#v", last["type"], events)
 	}
 }
 
@@ -464,15 +406,6 @@ func newTestCreateBotAccountService(userID string) *accounts.Service {
 type createBotStreamWorkspace struct {
 	events []workspace.ContainerSetupEvent
 	err    error
-	mcpErr error
-}
-
-func (w *createBotStreamWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
-	return nil, w.mcpErr
-}
-
-func (*createBotStreamWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
-	return bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer}, nil
 }
 
 func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(_ context.Context, _ string, progress workspace.ContainerSetupProgress) error {

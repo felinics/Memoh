@@ -197,18 +197,18 @@ func TestActivateWithOptionsPreservesOnlyTheSelectedDecisionKind(t *testing.T) {
 			}
 			err := ActivateWithOptions(context.Background(), queries, Fence{
 				BotID: testBotID, SessionID: testSessionID, Token: 7,
-			}, ActivationOptions{PreserveDecision: &PreservedDecision{Kind: tt.kind, ID: decisionID}})
+			}, ActivationOptions{PreserveDecisions: []PreservedDecision{{Kind: tt.kind, ID: decisionID}}})
 			if err != nil {
 				t.Fatalf("ActivateWithOptions() error = %v", err)
 			}
 			if !queries.toolApprovalCanceled || !queries.userInputCanceled {
 				t.Fatal("activation did not run both superseded-decision cleanup queries")
 			}
-			if queries.toolApprovalCancel.PreserveID.Valid != tt.wantToolPreserved {
-				t.Fatalf("tool approval preserve id valid = %v, want %v", queries.toolApprovalCancel.PreserveID.Valid, tt.wantToolPreserved)
+			if (len(queries.toolApprovalCancel.PreserveIds) > 0) != tt.wantToolPreserved {
+				t.Fatalf("tool approval preserve ids = %v, want preserved=%v", queries.toolApprovalCancel.PreserveIds, tt.wantToolPreserved)
 			}
-			if queries.userInputCancel.PreserveID.Valid != tt.wantInputPreserved {
-				t.Fatalf("user input preserve id valid = %v, want %v", queries.userInputCancel.PreserveID.Valid, tt.wantInputPreserved)
+			if (len(queries.userInputCancel.PreserveIds) > 0) != tt.wantInputPreserved {
+				t.Fatalf("user input preserve ids = %v, want preserved=%v", queries.userInputCancel.PreserveIds, tt.wantInputPreserved)
 			}
 			if queries.toolApprovalClaimed != tt.wantToolPreserved {
 				t.Fatalf("tool approval claimed = %v, want %v", queries.toolApprovalClaimed, tt.wantToolPreserved)
@@ -216,11 +216,11 @@ func TestActivateWithOptionsPreservesOnlyTheSelectedDecisionKind(t *testing.T) {
 			if queries.userInputClaimed != tt.wantInputPreserved {
 				t.Fatalf("user input claimed = %v, want %v", queries.userInputClaimed, tt.wantInputPreserved)
 			}
-			if tt.wantToolPreserved && queries.toolApprovalCancel.PreserveID.String() != decisionID {
-				t.Fatalf("tool approval preserve id = %q", queries.toolApprovalCancel.PreserveID.String())
+			if tt.wantToolPreserved && queries.toolApprovalCancel.PreserveIds[0].String() != decisionID {
+				t.Fatalf("tool approval preserve id = %q", queries.toolApprovalCancel.PreserveIds[0].String())
 			}
-			if tt.wantInputPreserved && queries.userInputCancel.PreserveID.String() != decisionID {
-				t.Fatalf("user input preserve id = %q", queries.userInputCancel.PreserveID.String())
+			if tt.wantInputPreserved && queries.userInputCancel.PreserveIds[0].String() != decisionID {
+				t.Fatalf("user input preserve id = %q", queries.userInputCancel.PreserveIds[0].String())
 			}
 			if tt.wantToolPreserved && (!queries.toolApprovalClaim.RuntimeFencingToken.Valid || queries.toolApprovalClaim.RuntimeFencingToken.Int64 != 7) {
 				t.Fatalf("tool approval claim token = %#v", queries.toolApprovalClaim.RuntimeFencingToken)

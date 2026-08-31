@@ -100,6 +100,19 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		c.reasoning = nil
 		return nil
 
+	case "runtime_notice":
+		if strings.TrimSpace(event.Delta) == "" {
+			return nil
+		}
+		// Notice blocks are their own kind: terminal-snapshot alignment
+		// matches by kind, so they never shift text/tool block matching.
+		return []UIMessage{{
+			ID:      c.allocBlockID(UIMessageNotice, ""),
+			Type:    UIMessageNotice,
+			Name:    strings.TrimSpace(event.Code),
+			Content: strings.TrimSpace(event.Delta),
+		}}
+
 	case "tool_call_start", "tool_call_input_start", "tool_call_metadata":
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
@@ -202,6 +215,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "user_input_request":
+		c.finalizeTextBlock()
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
 			state = &uiToolStreamState{

@@ -88,10 +88,10 @@ func TestCreateNormalizesDescriptor(t *testing.T) {
 	service := NewService(slog.Default(), fake)
 
 	created, err := service.Create(context.Background(), testBotID, CreateRequest{
-		Name:    "  Primary Codex  ",
+		Name:    "  Primary Agent  ",
 		Runtime: " ACP ",
 		Metadata: map[string]any{
-			MetadataProviderKey: " CODEX ",
+			MetadataProviderKey: " ACP ",
 			"future":            "kept",
 		},
 	})
@@ -101,14 +101,14 @@ func TestCreateNormalizesDescriptor(t *testing.T) {
 	if created.ID != testAgentID {
 		t.Fatalf("Create() ID = %q, want %q", created.ID, testAgentID)
 	}
-	if fake.createParams.Name != "Primary Codex" || fake.createParams.Runtime != RuntimeACP {
+	if fake.createParams.Name != "Primary Agent" || fake.createParams.Runtime != RuntimeACP {
 		t.Fatalf("Create() params = %#v", fake.createParams)
 	}
 	var metadata map[string]any
 	if err := json.Unmarshal(fake.createParams.Metadata, &metadata); err != nil {
 		t.Fatalf("decode metadata: %v", err)
 	}
-	if metadata[MetadataProviderKey] != "codex" || metadata["future"] != "kept" {
+	if metadata[MetadataProviderKey] != "acp" || metadata["future"] != "kept" {
 		t.Fatalf("normalized metadata = %#v", metadata)
 	}
 }
@@ -120,10 +120,10 @@ func TestCreateRejectsUnsupportedDescriptors(t *testing.T) {
 		req  CreateRequest
 		want error
 	}{
-		{name: "native row", req: CreateRequest{Name: "Native", Runtime: "native", Metadata: map[string]any{"provider": "codex"}}, want: ErrInvalidRuntime},
+		{name: "native row", req: CreateRequest{Name: "Native", Runtime: "native", Metadata: map[string]any{"provider": "acp"}}, want: ErrInvalidRuntime},
 		{name: "unknown provider", req: CreateRequest{Name: "Other", Runtime: RuntimeACP, Metadata: map[string]any{"provider": "other"}}, want: ErrInvalidMetadata},
 		{name: "missing provider", req: CreateRequest{Name: "Other", Runtime: RuntimeACP, Metadata: map[string]any{}}, want: ErrInvalidMetadata},
-		{name: "blank name", req: CreateRequest{Name: " ", Runtime: RuntimeACP, Metadata: map[string]any{"provider": "codex"}}, want: ErrInvalidMetadata},
+		{name: "blank name", req: CreateRequest{Name: " ", Runtime: RuntimeACP, Metadata: map[string]any{"provider": "acp"}}, want: ErrInvalidMetadata},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -157,8 +157,15 @@ func TestUpdateAndDeleteProtectDefaultAgent(t *testing.T) {
 	if _, err := service.Update(context.Background(), testBotID, testAgentID, UpdateRequest{Enabled: &falseValue}); !errors.Is(err, ErrDefaultInUse) {
 		t.Fatalf("Update() error = %v, want %v", err, ErrDefaultInUse)
 	}
-	if err := service.Delete(context.Background(), testBotID, testAgentID); !errors.Is(err, ErrDefaultInUse) {
+	deleteHookCalled := false
+	if err := service.Delete(context.Background(), testBotID, testAgentID, func(BotAgent) error {
+		deleteHookCalled = true
+		return nil
+	}); !errors.Is(err, ErrDefaultInUse) {
 		t.Fatalf("Delete() error = %v, want %v", err, ErrDefaultInUse)
+	}
+	if deleteHookCalled {
+		t.Fatal("Delete() ran beforeCommit for a protected default Agent")
 	}
 }
 
@@ -177,7 +184,7 @@ func TestUpdateAndDeleteLockBotBeforeAgentMutation(t *testing.T) {
 	assertEvents(t, updateFake.events, []string{"transaction", "lock-bot", "update-agent"})
 
 	deleteFake := &fakeQueries{transactions: true}
-	if err := NewService(slog.Default(), deleteFake).Delete(context.Background(), testBotID, testAgentID); err != nil {
+	if err := NewService(slog.Default(), deleteFake).Delete(context.Background(), testBotID, testAgentID, nil); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 	assertEvents(t, deleteFake.events, []string{"transaction", "lock-bot", "delete-agent"})
@@ -199,13 +206,28 @@ func TestDescriptorForUsesTemporaryMetadataProvider(t *testing.T) {
 	descriptor, err := DescriptorFor(BotAgent{
 		ID:       testAgentID,
 		Runtime:  " ACP ",
-		Metadata: map[string]any{"provider": " Claude-Code "},
+		Metadata: map[string]any{"provider": " ACP "},
 	})
 	if err != nil {
 		t.Fatalf("DescriptorFor() error = %v", err)
 	}
-	if descriptor.BotAgentID != testAgentID || descriptor.Runtime != RuntimeACP || descriptor.Provider != "claude-code" {
+	if descriptor.BotAgentID != testAgentID || descriptor.Runtime != RuntimeACP || descriptor.Provider != "acp" {
 		t.Fatalf("DescriptorFor() = %#v", descriptor)
+	}
+}
+
+func TestACPRejectsDirectRuntimeProviders(t *testing.T) {
+	// codex and claude-code moved to direct runtimes (migration 0144): the
+	// ACP shape must refuse them with a pointer to the new runtimes.
+	for _, provider := range []string{"codex", "Claude-Code"} {
+		_, err := DescriptorFor(BotAgent{
+			ID:       testAgentID,
+			Runtime:  "acp",
+			Metadata: map[string]any{"provider": provider},
+		})
+		if !errors.Is(err, ErrProviderDirectRuntime) {
+			t.Fatalf("DescriptorFor(%s) error = %v, want ErrProviderDirectRuntime", provider, err)
+		}
 	}
 }
 
@@ -217,7 +239,7 @@ func testRow(enabled bool) sqlc.BotAgent {
 		Name:      "Primary Codex",
 		Runtime:   RuntimeACP,
 		Enabled:   enabled,
-		Metadata:  []byte(`{"provider":"codex"}`),
+		Metadata:  []byte(`{"provider":"acp"}`),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -225,40 +247,4 @@ func testRow(enabled bool) sqlc.BotAgent {
 
 func testUUID(value string) pgtype.UUID {
 	return pgtype.UUID{Bytes: uuid.MustParse(value), Valid: true}
-}
-
-func TestValidateConfigurationCredentialSuppliesOnlySecrets(t *testing.T) {
-	hermes := BotAgent{
-		ID:                "a0000000-0000-4000-8000-000000000001",
-		Runtime:           RuntimeACP,
-		Metadata:          map[string]any{"provider": "hermes"},
-		AgentCredentialID: "c0000000-0000-4000-8000-000000000001",
-	}
-	// Hermes api_key mode with a credential attached: the secret is satisfied,
-	// but the required model field must still come from metadata.
-	incomplete := map[string]any{"acp": map[string]any{"agents": map[string]any{"hermes": map[string]any{
-		"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"provider": "gemini"},
-	}}}}
-	var configErr *ConfigurationError
-	if err := ValidateConfigurationWithStore(hermes, incomplete, true); !errors.As(err, &configErr) || configErr.Field != "model" {
-		t.Fatalf("ValidateConfiguration(missing model) = %v, want ConfigurationError{model}", err)
-	}
-	complete := map[string]any{"acp": map[string]any{"agents": map[string]any{"hermes": map[string]any{
-		"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"provider": "gemini", "model": "gemini-3.5-flash"},
-	}}}}
-	if err := ValidateConfigurationWithStore(hermes, complete, true); err != nil {
-		t.Fatalf("ValidateConfiguration(credential supplies api_key) = %v, want nil", err)
-	}
-	// Without a credential the secret requirement stays enforced.
-	hermes.AgentCredentialID = ""
-	if err := ValidateConfigurationWithStore(hermes, complete, true); !errors.As(err, &configErr) || configErr.Field != "api_key" {
-		t.Fatalf("ValidateConfiguration(no credential) = %v, want ConfigurationError{api_key}", err)
-	}
-	// An attached credential cannot satisfy anything while the store cannot
-	// decrypt (e.g. the encryption key was removed): the runtime would fail
-	// on the missing secret, so preflight must fail first.
-	hermes.AgentCredentialID = "c0000000-0000-4000-8000-000000000001"
-	if err := ValidateConfigurationWithStore(hermes, complete, false); !errors.As(err, &configErr) || configErr.Field != "api_key" {
-		t.Fatalf("ValidateConfiguration(store unavailable) = %v, want ConfigurationError{api_key}", err)
-	}
 }

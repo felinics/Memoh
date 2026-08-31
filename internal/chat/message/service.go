@@ -21,6 +21,7 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 // DBService persists and reads bot history messages.
@@ -304,7 +305,7 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 			txService := *s
 			txService.queries = queries
 			txService.publisher = nil
-			if options.CleanupACPDecisionProjections {
+			if options.CleanupRuntimeDecisionProjections {
 				pgBotID, parseErr := dbpkg.ParseUUID(botID)
 				if parseErr != nil {
 					return parseErr
@@ -315,9 +316,9 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 				}
 				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(inputs[0].RunID))
 				if parseErr != nil {
-					return fmt.Errorf("ACP projection cleanup requires run_id: %w", parseErr)
+					return fmt.Errorf("runtime projection cleanup requires run_id: %w", parseErr)
 				}
-				if _, deleteErr := queries.DeleteACPDecisionProjectionsByRun(ctx, sqlc.DeleteACPDecisionProjectionsByRunParams{
+				if _, deleteErr := queries.DeleteRuntimeDecisionProjectionsByRun(ctx, sqlc.DeleteRuntimeDecisionProjectionsByRunParams{
 					BotID: pgBotID, SessionID: pgSessionID, RunID: pgRunID,
 				}); deleteErr != nil {
 					return deleteErr
@@ -343,7 +344,29 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 					return err
 				}
 			}
-			if options.ACPPublication != nil {
+			if runtimeTurnID := strings.TrimSpace(options.AgentTurnID); runtimeTurnID != "" {
+				pgBotID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(inputs[0].BotID))
+				if parseErr != nil {
+					return parseErr
+				}
+				pgSessionID, parseErr := dbpkg.ParseUUID(sessionID)
+				if parseErr != nil {
+					return parseErr
+				}
+				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(inputs[0].RunID))
+				if parseErr != nil {
+					return fmt.Errorf("runtime turn anchor requires run_id: %w", parseErr)
+				}
+				if _, anchorErr := queries.SetRoundAgentTurnID(ctx, sqlc.SetRoundAgentTurnIDParams{
+					AgentTurnID: runtimeTurnID,
+					BotID:       pgBotID,
+					SessionID:   pgSessionID,
+					RunID:       pgRunID,
+				}); anchorErr != nil {
+					return fmt.Errorf("record runtime turn anchor: %w", anchorErr)
+				}
+			}
+			if options.AgentPublication != nil {
 				pgBotID, parseErr := dbpkg.ParseUUID(botID)
 				if parseErr != nil {
 					return parseErr
@@ -352,18 +375,18 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 				if parseErr != nil {
 					return parseErr
 				}
-				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(options.ACPPublication.RunID))
+				pgRunID, parseErr := dbpkg.ParseUUID(strings.TrimSpace(options.AgentPublication.RunID))
 				if parseErr != nil {
-					return fmt.Errorf("ACP publication requires run_id: %w", parseErr)
+					return fmt.Errorf("runtime publication requires run_id: %w", parseErr)
 				}
-				moved, upsertErr := queries.UpsertACPSessionPublication(ctx, sqlc.UpsertACPSessionPublicationParams{
+				moved, upsertErr := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
 					SessionID:       pgSessionID,
 					BotID:           pgBotID,
 					RunID:           pgRunID,
-					CheckpointReset: options.ACPPublication.CheckpointReset,
+					CheckpointReset: options.AgentPublication.CheckpointReset,
 				})
 				if upsertErr != nil {
-					return fmt.Errorf("publish ACP session head: %w", upsertErr)
+					return fmt.Errorf("publish runtime session head: %w", upsertErr)
 				}
 				if moved == 0 {
 					// The guarded insert matched no run: the session's fencing
@@ -939,13 +962,16 @@ func normalizeSessionMode(mode string) string {
 	}
 }
 
+// normalizeRuntimeType validates against the shared runtime vocabulary.
+// Dropping a valid runtime here silently stamps the row 'model' and hides it
+// from every runtime_type <> 'model' consumer, e.g. runtime session state
+// reconciliation.
 func normalizeRuntimeType(runtimeType string) string {
-	switch strings.TrimSpace(runtimeType) {
-	case "model", "acp_agent":
-		return strings.TrimSpace(runtimeType)
-	default:
+	kind, ok := runtimekind.Normalize(runtimeType)
+	if !ok {
 		return ""
 	}
+	return string(kind)
 }
 
 func legacySessionMode(typ string) string {

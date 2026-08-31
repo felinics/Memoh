@@ -75,9 +75,7 @@ func (f *fakeUserInputService) CanRespond(req userinput.Request) bool {
 	if f.canRespondSet {
 		return f.canRespond
 	}
-	if userinput.IsProcessLocalACPRequest(req) {
-		return false
-	}
+	// Default mirrors a live waiter: a pending row can accept a response.
 	return req.Status == userinput.StatusPending
 }
 
@@ -695,11 +693,11 @@ func TestRespondUserInputACPRequestReattachesActivePrompt(t *testing.T) {
 		},
 	}
 	attachACPUserInputAuth(resolver)
-	hub := resolver.registerACPActivePrompt("bot-1", "session-1")
+	hub := resolver.registerExternalAgentActivePrompt("bot-1", "session-1")
 	if hub == nil {
 		t.Fatal("expected active ACP prompt hub")
 	}
-	defer resolver.unregisterACPActivePrompt("bot-1", "session-1", hub)
+	defer resolver.unregisterExternalAgentActivePrompt("bot-1", "session-1", hub)
 
 	eventCh := make(chan WSStreamEvent, 8)
 	done := make(chan error, 1)
@@ -781,11 +779,11 @@ func TestRespondUserInputACPRequestCanSuppressActivePromptReattach(t *testing.T)
 		},
 	}
 	attachACPUserInputAuth(resolver)
-	hub := resolver.registerACPActivePrompt("bot-1", "session-1")
+	hub := resolver.registerExternalAgentActivePrompt("bot-1", "session-1")
 	if hub == nil {
 		t.Fatal("expected active ACP prompt hub")
 	}
-	defer resolver.unregisterACPActivePrompt("bot-1", "session-1", hub)
+	defer resolver.unregisterExternalAgentActivePrompt("bot-1", "session-1", hub)
 
 	eventCh := make(chan WSStreamEvent, 4)
 	err := resolver.respondUserInput(context.Background(), UserInputResponseInput{
@@ -818,6 +816,9 @@ func TestRespondUserInputACPRequestWithoutWaiterCancelsInsteadOfSubmitting(t *te
 			ProviderMetadata: map[string]any{"source": userinput.ProviderSourceACPMCP},
 		},
 		resolved: resolved,
+		// The blocked waiter is gone (process restart, prompt settled).
+		canRespondSet: true,
+		canRespond:    false,
 	}
 	resolver := &Service{
 		userInput: fake,

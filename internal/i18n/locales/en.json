@@ -42,7 +42,7 @@
     "tip": "Tip: adjust anytime with {model} or {reasoning}."
   },
   "chat": {
-    "acp": {
+    "externalAgent": {
       "agentNotConfigured": "External agent setup is incomplete for this bot.",
       "agentNotFound": "The selected external agent is unavailable.",
       "agentNotEnabled": "The selected external agent is disabled for this bot.",

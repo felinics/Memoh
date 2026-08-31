@@ -82,3 +82,5 @@ func TestRunEndStopsDirectInjectBeforeSessionFinishes(t *testing.T) {
 		t.Fatal("session inject did not finish before channel close")
 	}
 }
+
+func (*injectOwnershipAdmitter) MarkInlineDecisionRun(string, string, string) {}

@@ -81,7 +81,7 @@ func (c *recordingACPSessionCloser) BeginSessionHistoryReset(ctx context.Context
 	return context.WithValue(ctx, sessionDeleteResetCtxKey{}, true), release, nil
 }
 
-func (*recordingACPSessionCloser) BindRuntime(context.Context, string, string, string, string, string, string, string) error {
+func (*recordingACPSessionCloser) BindRuntime(context.Context, string, string, string, string, string, string) error {
 	return nil
 }
 

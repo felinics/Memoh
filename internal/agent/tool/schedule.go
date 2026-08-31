@@ -55,7 +55,7 @@ func (*ScheduleProvider) Usage(_ context.Context, _ SessionContext, available Av
 			execHints = append(execHints, "a specific model (`model_id` from "+ref+")")
 		}
 		if ref, ok := available.Ref(ToolListACPAgents()); ok {
-			execHints = append(execHints, "an ACP coding agent (`acp_agent_id` from "+ref+")")
+			execHints = append(execHints, "an ACP agent (`acp_agent_id` from "+ref+")")
 		}
 		if ref, ok := available.Ref(ToolListWorkdirs()); ok {
 			execHints = append(execHints, "a workdir (`workdir_id` from "+ref+")")
@@ -131,7 +131,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 		},
 		{
 			Name: ToolCreateSchedule().String(), Description: "Create a new cron-scheduled task. Fill `command` with a natural-language instruction; when the cron `pattern` fires, the task runs and you receive a message containing that `command`. Include explicit platform and target in delivery instructions when results should be sent to a person or channel. Set `max_calls` to null for unlimited runs. " +
-				"By default each fire runs in a fresh session with the bot's default model. Optional execution parameters: `session_id` runs every fire inside that existing session (its runtime and workdir are inherited; only model/effort overrides apply). For fresh sessions, `acp_agent_id` (from list_acp_agents) runs fires through an ACP coding agent — combine with `acp_model_id`; `model_id` (a model_uuid from list_models) picks a native model instead; `workdir_id` (from list_workdirs) pins the session's working directory. `reasoning_effort` overrides the effort in both modes.",
+				"By default each fire runs in a fresh session with the bot's default model. Optional execution parameters: `session_id` runs every fire inside that existing session (its runtime and workdir are inherited; only model/effort overrides apply). For fresh sessions, `acp_agent_id` (from list_acp_agents) runs fires through an ACP agent — combine with `acp_model_id`; `model_id` (a model_uuid from list_models) picks a native model instead; `workdir_id` (from list_workdirs) pins the session's working directory. `reasoning_effort` overrides the effort in both modes.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

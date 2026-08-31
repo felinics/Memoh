@@ -8,13 +8,10 @@ import (
 
 const legacyAgentMethodSessionSetModel = "session/set_model"
 
-// sessionResponse unifies the response shapes returned by session/new,
-// session/resume, and session/load while retaining the dedicated model
-// selector used by agents that still implement the former models +
-// session/set_model protocol. Resume and load responses omit sessionId, so the
-// caller fills it from the persisted session state after the request succeeds.
-// Keeping this compatibility DTO at the wire boundary prevents the legacy
-// shape from leaking into the pool or UI.
+// sessionResponse is the session/new response shape, retaining the dedicated
+// model selector used by agents that still implement the former models +
+// session/set_model protocol. Keeping this compatibility DTO at the wire
+// boundary prevents the legacy shape from leaking into the pool or UI.
 type sessionResponse struct {
 	Meta          map[string]any            `json:"_meta,omitempty"`
 	ConfigOptions []acp.SessionConfigOption `json:"configOptions,omitempty"`

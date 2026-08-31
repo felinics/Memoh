@@ -11,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 // recoverWaitingDecision transfers a parked run whose owner lease expired.
@@ -42,18 +43,37 @@ func (m *Manager) recoverWaitingDecision(ctx context.Context, candidate LeaseCan
 	if run.State != ledger.StateWaitingDecision {
 		return false, nil
 	}
-	target, found, err := decisions.PendingRuntimeDecision(ctx, run.RunID)
+	targets, err := decisions.PendingRuntimeDecisions(ctx, run.RunID)
 	if err != nil {
 		return false, err
 	}
-	target = target.normalized()
-	if !found {
+	if len(targets) == 0 {
 		return false, nil
 	}
-	if !target.runtimeOwned() || target.RunID != run.RunID || target.TurnID != run.TurnID ||
-		target.BotID != run.BotID || target.SessionID != run.SessionID ||
-		target.FencingToken != run.FencingToken {
-		return false, ErrCommandTargetMismatch
+	// Only a native parked run is worth reclaiming: its decision
+	// continuation is rebuilt from the database by the answering pipeline.
+	// An inline waiter run (codex, claude, ACP gateway tools) blocked its
+	// turn inside the dead owner's process; preserving its decisions would
+	// fake a resumable run whose answers have nowhere to go. Declining here
+	// lets the reaper's default path mark the run lost — answers then land
+	// on the honest CanRespond=false cancellation.
+	if runtimekind.UsesDecisionWaiter(targets[0].SessionRuntime) {
+		return false, nil
+	}
+	preserved := make([]runtimefence.PreservedDecision, 0, len(targets))
+	for i, target := range targets {
+		target = target.normalized()
+		targets[i] = target
+		if !target.runtimeOwned() || target.RunID != run.RunID || target.TurnID != run.TurnID ||
+			target.BotID != run.BotID || target.SessionID != run.SessionID ||
+			target.FencingToken != run.FencingToken {
+			return false, ErrCommandTargetMismatch
+		}
+		decisionKind, kindErr := recoveryDecisionKind(target.Type)
+		if kindErr != nil {
+			return false, kindErr
+		}
+		preserved = append(preserved, runtimefence.PreservedDecision{Kind: decisionKind, ID: target.ID})
 	}
 
 	ref, live, err := m.distributed.LoadRunRef(ctx, Key{BotID: run.BotID, SessionID: run.SessionID}, run.RunID)
@@ -85,15 +105,11 @@ func (m *Manager) recoverWaitingDecision(ctx context.Context, candidate LeaseCan
 	if liveGeneration == "" {
 		return false, errors.New("waiting-decision recovery generation is empty")
 	}
-	decisionKind, err := recoveryDecisionKind(target.Type)
-	if err != nil {
-		return false, err
-	}
 	if err := reclaimer.ReclaimWaitingDecision(
 		ctx,
 		run.BotID, run.SessionID, run.RunID, m.ownerID, liveGeneration,
 		run.FencingToken, newToken,
-		decisionKind, target.ID,
+		preserved,
 	); err != nil {
 		return false, err
 	}

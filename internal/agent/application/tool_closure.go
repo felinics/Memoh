@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 const syntheticToolClosureError = "tool execution interrupted before a response was recorded"
@@ -167,7 +169,7 @@ func filterToolMessageToPendingCalls(msg ModelMessage, pending map[string]pendin
 }
 
 // normalizeDecisionProjectionResults repairs the one ordering exception made
-// by ACP decision persistence. The projection is stored while the turn is
+// by External Agent decision persistence. The projection is stored while the turn is
 // waiting, before earlier narration is flushed; move its real result directly
 // behind the projection and drop duplicate legacy projection rows. IDs are
 // scoped to one user turn so adapter-local counters can safely restart.
@@ -180,16 +182,20 @@ func normalizeDecisionProjectionResults(messages []ModelMessage) []ModelMessage 
 		case "assistant":
 			for _, call := range extractAssistantToolCallParts(msg) {
 				if isDecisionProjection(call) {
-					projected[projectedToolCallKey{segment, strings.TrimSpace(call.ToolCallID)}] = struct{}{}
+					key := projectedToolCallKey{segment, strings.TrimSpace(call.ToolCallID)}
+					projected[key] = struct{}{}
+					if _, exists := results[key]; !exists {
+						if result, ok := resolvedUserInputResult(call); ok {
+							results[key] = result
+						}
+					}
 				}
 			}
 		case "tool":
 			for _, result := range extractToolResultParts(msg) {
 				key := projectedToolCallKey{segment, strings.TrimSpace(result.ToolCallID)}
 				if _, ok := projected[key]; ok {
-					if _, exists := results[key]; !exists {
-						results[key] = result
-					}
+					results[key] = result
 				}
 			}
 		default:
@@ -260,6 +266,28 @@ func isDecisionProjection(call sdk.ToolCallPart) bool {
 	_, userInput := call.ProviderMetadata["user_input"]
 	_, approval := call.ProviderMetadata["approval"]
 	return userInput || approval
+}
+
+func resolvedUserInputResult(call sdk.ToolCallPart) (sdk.ToolResultPart, bool) {
+	metadata, ok := call.ProviderMetadata["user_input"].(map[string]any)
+	if !ok {
+		return sdk.ToolResultPart{}, false
+	}
+	status, _ := metadata["status"].(string)
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" || status == userinput.StatusPending {
+		return sdk.ToolResultPart{}, false
+	}
+	result := map[string]any{"status": status}
+	if answers := metadata["answers"]; answers != nil {
+		result["answers"] = answers
+	}
+	return sdk.ToolResultPart{
+		ToolCallID: strings.TrimSpace(call.ToolCallID),
+		ToolName:   strings.TrimSpace(call.ToolName),
+		Result:     result,
+		IsError:    status == userinput.StatusExpired || status == userinput.StatusFailed,
+	}, true
 }
 
 func modelMessageWithParts(original ModelMessage, sdkMsg sdk.Message, parts []sdk.MessagePart) *ModelMessage {

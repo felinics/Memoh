@@ -50,20 +50,23 @@ CREATE TABLE bot_sessions (
   id UUID PRIMARY KEY,
   bot_id UUID NOT NULL,
   team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
-  runtime_fencing_token BIGINT NOT NULL DEFAULT 0
+  runtime_fencing_token BIGINT NOT NULL DEFAULT 0,
+  -- ClearHistoryBySession/ByBot scrub runtime continuity anchors alongside
+  -- the epoch bump; the fixture carries the column those queries touch.
+  runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE acp_session_states (
+CREATE TABLE agent_session_states (
   team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
   session_id UUID NOT NULL
 );
 
-CREATE TABLE acp_session_state_lines (
+CREATE TABLE agent_session_state_lines (
   team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
   session_id UUID NOT NULL
 );
 
-CREATE TABLE acp_session_publications (
+CREATE TABLE agent_session_publications (
   team_id UUID NOT NULL DEFAULT public.memoh_current_team_id(),
   session_id UUID NOT NULL
 );
@@ -124,7 +127,7 @@ CREATE TABLE bot_history_messages (
 		`, sessionID, botID, foreignSessionID, foreignBotID, repairSessionID, repairBotID, clearedSessionID, clearedBotID); err != nil {
 		t.Fatalf("insert sessions: %v", err)
 	}
-	for _, table := range []string{"acp_session_states", "acp_session_state_lines", "acp_session_publications"} {
+	for _, table := range []string{"agent_session_states", "agent_session_state_lines", "agent_session_publications"} {
 		if _, err := tx.Exec(ctx,
 			"INSERT INTO "+pgx.Identifier{table}.Sanitize()+" (session_id) VALUES ($1), ($2)",
 			sessionID, foreignSessionID,
@@ -279,9 +282,9 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", sessionID, 1)
 	// The session clear must also drop that session's ACP state while the
 	// foreign session's rows survive.
-	assertRowCount(t, ctx, tx, "acp_session_states", 1)
-	assertRowCount(t, ctx, tx, "acp_session_state_lines", 1)
-	assertRowCount(t, ctx, tx, "acp_session_publications", 1)
+	assertRowCount(t, ctx, tx, "agent_session_states", 1)
+	assertRowCount(t, ctx, tx, "agent_session_state_lines", 1)
+	assertRowCount(t, ctx, tx, "agent_session_publications", 1)
 
 	parsedForeignBotID, err := ParseUUID(foreignBotID)
 	if err != nil {
@@ -293,9 +296,9 @@ VALUES ($1, $2, 'ok', 'log-only artifact')
 	assertRowCount(t, ctx, tx, "bot_history_messages", 1)
 	assertRowCount(t, ctx, tx, "bot_history_message_compacts", 3)
 	assertCompactionEpoch(t, ctx, tx, "bot_sessions", foreignSessionID, 1)
-	assertRowCount(t, ctx, tx, "acp_session_states", 0)
-	assertRowCount(t, ctx, tx, "acp_session_state_lines", 0)
-	assertRowCount(t, ctx, tx, "acp_session_publications", 0)
+	assertRowCount(t, ctx, tx, "agent_session_states", 0)
+	assertRowCount(t, ctx, tx, "agent_session_state_lines", 0)
+	assertRowCount(t, ctx, tx, "agent_session_publications", 0)
 
 	parsedRepairSessionID, err := ParseUUID(repairSessionID)
 	if err != nil {
