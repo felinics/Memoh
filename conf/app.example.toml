@@ -117,7 +117,7 @@ driver = "postgres"
 # - apple: macOS Apple Container backend via socktainer.
 backend = "docker"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "memohai/workspace:debian"
+default_image = "memohai/workspace:debian-latest"
 # Workspace image pull policy: if_not_present, always, or never.
 # The selected container backend applies it before creating the workspace.
 image_pull_policy = "if_not_present"

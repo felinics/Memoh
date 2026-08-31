@@ -52,7 +52,7 @@ driver = "postgres"
 # runtime bind mounts and Docker socket access.
 backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "memohai/workspace:debian"
+default_image = "memohai/workspace:debian-latest"
 image_pull_policy = "if_not_present"
 # containerd snapshotter and CNI settings for bot workspace containers.
 snapshotter = "overlayfs"

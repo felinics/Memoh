@@ -44,9 +44,9 @@ const (
 	DefaultPGVectorSSLMode       = "disable"
 	DefaultRuntimeDir            = "/opt/memoh/runtime"
 	DefaultBridgePath            = DefaultRuntimeDir + "/bridge"
-	DefaultWorkspaceImage        = "memohai/workspace:debian"
+	DefaultWorkspaceImage        = "memohai/workspace:debian-latest"
 	DefaultBaseImage             = DefaultWorkspaceImage
-	DefaultWorkspaceMirrorImage  = "memoh.cn/memohai/workspace:debian"
+	DefaultWorkspaceMirrorImage  = "memoh.cn/memohai/workspace:debian-latest"
 	DefaultTimezone              = "UTC"
 	DefaultAgentToolOutputBytes  = 64 * 1024
 	DefaultAgentToolOutputLines  = 2000

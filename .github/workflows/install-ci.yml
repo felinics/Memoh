@@ -1,0 +1,39 @@
+name: Installer CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "conf/app.docker.toml"
+      - "docker-compose.yml"
+      - "scripts/install.sh"
+      - "scripts/test-install-*.sh"
+      - ".github/workflows/install-ci.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "conf/app.docker.toml"
+      - "docker-compose.yml"
+      - "scripts/install.sh"
+      - "scripts/test-install-*.sh"
+      - ".github/workflows/install-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Root execution guard
+        run: scripts/test-install-root-guard.sh
+      - name: Workspace image release alignment
+        run: scripts/test-install-workspace-image.sh

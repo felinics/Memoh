@@ -45,7 +45,7 @@ driver = "postgres"
 # available for custom deployments, but its runtime paths must match the host.
 backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "memohai/workspace:debian"
+default_image = "memohai/workspace:debian-latest"
 image_pull_policy = "if_not_present"
 # containerd snapshotter used by workspace containers.
 snapshotter = "overlayfs"
