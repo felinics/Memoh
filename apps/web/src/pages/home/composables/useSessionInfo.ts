@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -8,6 +8,7 @@ import type { HandlersSessionInfoResponse } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
 import { useChatViewTarget } from './useChatViewContext'
+import { computeContextComposition } from './context-categories'
 
 interface UseSessionInfoOptions {
   botId?: Ref<string | null | undefined>
@@ -56,6 +57,14 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   })
 
   const usedTokens = computed(() => info.value?.context_usage?.used_tokens ?? 0)
+  // The fragment estimate is the basis the backend budgets and compacts on,
+  // and the only one ACP sessions report; provider-reported usage stays the
+  // fallback for a status that carries no breakdown.
+  const composition = computed(() => computeContextComposition(info.value?.context_usage))
+  const estimatedTokens = computed(() => {
+    const c = composition.value
+    return c && c.categories.length > 0 ? c.totalTokens : null
+  })
   const contextWindow = computed(() => {
     const fromStatus = info.value?.context_usage?.context_window
     if (fromStatus != null && fromStatus > 0) return fromStatus
@@ -64,7 +73,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   })
   const contextPercent = computed(() => {
     if (contextWindow.value == null || contextWindow.value <= 0) return 0
-    return (usedTokens.value / contextWindow.value) * 100
+    return ((estimatedTokens.value ?? usedTokens.value) / contextWindow.value) * 100
   })
 
   // Compaction lives here (not in a component) so every surface that offers
@@ -99,6 +108,18 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
       finish()
     }
   }
+
+  // A finished turn rewrites the context but nothing else refetches the
+  // status, so the ring would keep showing the pre-turn percentage. The key is
+  // the 3-element prefix (no `exact`), which matches every overrideModelId
+  // variant of the finished Session — same reach as triggerCompact's.
+  // Scoped to this instance's Session because invalidation is not deduped:
+  // every instance that fires issues its own request for the same entry.
+  watch(storeRefs.streamingSessionId, (now, prev) => {
+    if (prev && prev !== now && prev === sessionId.value) {
+      queryCache.invalidateQueries({ key: ['session-status', currentBotId.value ?? '', prev] })
+    }
+  })
 
   return {
     info,
