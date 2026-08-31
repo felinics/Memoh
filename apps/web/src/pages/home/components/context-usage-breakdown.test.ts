@@ -3,7 +3,7 @@
 import { createApp } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ContextCategoryStat } from '../composables/context-categories'
+import type { ContextCategoryStat, ContextComposition } from '../composables/context-categories'
 import ContextUsageBreakdown from './context-usage-breakdown.vue'
 
 const mounted: { app: ReturnType<typeof createApp>, root: HTMLDivElement }[] = []
@@ -16,8 +16,7 @@ afterEach(() => {
 })
 
 function mountBreakdown(props: {
-  categories: ContextCategoryStat[]
-  totalTokens: number
+  composition: ContextComposition
   contextWindow: number | null
 }): HTMLDivElement {
   const root = document.createElement('div')
@@ -71,10 +70,11 @@ const categories: ContextCategoryStat[] = [
   { id: 'system', tokens: 1000, colorClass: 'bg-accent-gray' },
   { id: 'tools', tokens: 3000, colorClass: 'bg-accent-purple' },
 ]
+const composition: ContextComposition = { categories, totalTokens: 4000 }
 
 describe('context-usage-breakdown', () => {
   it('renders one bar segment per category with its color class and window-relative width', () => {
-    const root = mountBreakdown({ categories, totalTokens: 4000, contextWindow: 10_000 })
+    const root = mountBreakdown({ composition, contextWindow: 10_000 })
     const bars = segments(root)
 
     expect(bars).toHaveLength(2)
@@ -85,7 +85,7 @@ describe('context-usage-breakdown', () => {
   })
 
   it('falls back to totalTokens as the bar denominator when no context window is known', () => {
-    const root = mountBreakdown({ categories, totalTokens: 4000, contextWindow: null })
+    const root = mountBreakdown({ composition, contextWindow: null })
     const bars = segments(root)
 
     expect(nth(bars, 0).style.width).toBe('25%')
@@ -94,8 +94,7 @@ describe('context-usage-breakdown', () => {
 
   it('scales against totalTokens when the estimate overflows the context window', () => {
     const root = mountBreakdown({
-      categories: [{ id: 'system', tokens: 6000, colorClass: 'bg-accent-gray' }],
-      totalTokens: 6000,
+      composition: { categories: [{ id: 'system', tokens: 6000, colorClass: 'bg-accent-gray' }], totalTokens: 6000 },
       contextWindow: 4000,
     })
 
@@ -103,7 +102,7 @@ describe('context-usage-breakdown', () => {
   })
 
   it('lists legend rows in category order with swatches and formatted counts', () => {
-    const root = mountBreakdown({ categories, totalTokens: 4000, contextWindow: 10_000 })
+    const root = mountBreakdown({ composition, contextWindow: 10_000 })
     const rows = legendRows(root)
 
     expect(rows.slice(0, 2).map(rowText)).toEqual([
@@ -115,7 +114,7 @@ describe('context-usage-breakdown', () => {
   })
 
   it('appends a muted free-space row when a context window is known', () => {
-    const root = mountBreakdown({ categories, totalTokens: 4000, contextWindow: 10_000 })
+    const root = mountBreakdown({ composition, contextWindow: 10_000 })
     const rows = legendRows(root)
 
     expect(rows).toHaveLength(3)
@@ -125,13 +124,13 @@ describe('context-usage-breakdown', () => {
   })
 
   it('clamps the free-space row at zero when the estimate exceeds the window', () => {
-    const root = mountBreakdown({ categories, totalTokens: 12_000, contextWindow: 10_000 })
+    const root = mountBreakdown({ composition: { categories, totalTokens: 12_000 }, contextWindow: 10_000 })
 
     expect(rowText(nth(legendRows(root), 2))).toEqual(['Free space', '0'])
   })
 
   it('omits the free-space row when no context window is known', () => {
-    const root = mountBreakdown({ categories, totalTokens: 4000, contextWindow: null })
+    const root = mountBreakdown({ composition, contextWindow: null })
     const rows = legendRows(root)
 
     expect(rows).toHaveLength(2)

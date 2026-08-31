@@ -70,10 +70,12 @@ import { useI18n } from 'vue-i18n'
 import { Popover, PopoverContent, PopoverTrigger } from '@felinic/ui'
 import SessionInfoPanel from './session-info-panel.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
+import { contextPressureToneClass } from '../composables/context-categories'
 
 defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{
+  visible?: boolean
   overrideModelId?: string
   fallbackContextWindow?: number | null
 }>()
@@ -81,9 +83,11 @@ const props = defineProps<{
 const { t } = useI18n()
 const open = ref(false)
 
+const visibleRef = computed(() => props.visible ?? true)
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 const { contextPercent, sessionId } = useSessionInfo({
+  visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,
 })
@@ -96,11 +100,7 @@ const dashOffset = computed(() => {
   return circumference.value * (1 - pct / 100)
 })
 
-const ringColorClass = computed(() => {
-  if (contextPercent.value >= 90) return 'text-destructive'
-  if (contextPercent.value >= 70) return 'text-warning'
-  return 'text-foreground'
-})
+const ringColorClass = computed(() => contextPressureToneClass(contextPercent.value, 'text'))
 
 let openTimer: ReturnType<typeof setTimeout> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null

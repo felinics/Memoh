@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeContextComposition, formatTokenCount } from './context-categories'
+import { computeContextComposition, contextPressureToneClass, formatTokenCount } from './context-categories'
 import type { ContextfragKind, ContextfragKindBreakdown, HandlersContextUsage, HandlersToolDefBucket } from '@memohai/sdk'
 
 function frag(kind: ContextfragKind, tokenEstimate?: number): ContextfragKindBreakdown {
@@ -51,6 +51,18 @@ describe('computeContextComposition', () => {
         { id: 'other', tokens: 395, colorClass: 'bg-accent-blue' },
       ],
       totalTokens: 1535,
+    })
+  })
+
+  it('folds an empty-string kind into other and counts it in totalTokens', () => {
+    const input = usage({ breakdown: [frag('' as ContextfragKind, 7), frag('system_prompt', 10)] })
+
+    expect(computeContextComposition(input)).toEqual({
+      categories: [
+        { id: 'system', tokens: 10, colorClass: 'bg-accent-gray' },
+        { id: 'other', tokens: 7, colorClass: 'bg-accent-blue' },
+      ],
+      totalTokens: 17,
     })
   })
 
@@ -141,6 +153,28 @@ describe('computeContextComposition', () => {
     })
 
     expect(computeContextComposition(input)?.totalTokens).toBe(175)
+  })
+})
+
+describe('contextPressureToneClass', () => {
+  it('stays neutral below the warning threshold', () => {
+    expect(contextPressureToneClass(69.9, 'text')).toBe('text-foreground')
+    expect(contextPressureToneClass(69.9, 'bg')).toBe('bg-foreground')
+  })
+
+  it('warns from 70 inclusive', () => {
+    expect(contextPressureToneClass(70, 'text')).toBe('text-warning')
+    expect(contextPressureToneClass(70, 'bg')).toBe('bg-warning')
+  })
+
+  it('stays warning below the destructive threshold', () => {
+    expect(contextPressureToneClass(89.9, 'text')).toBe('text-warning')
+    expect(contextPressureToneClass(89.9, 'bg')).toBe('bg-warning')
+  })
+
+  it('turns destructive from 90 inclusive', () => {
+    expect(contextPressureToneClass(90, 'text')).toBe('text-destructive')
+    expect(contextPressureToneClass(90, 'bg')).toBe('bg-destructive')
   })
 })
 

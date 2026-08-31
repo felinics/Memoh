@@ -2,7 +2,7 @@
   <div class="space-y-1.5 text-body">
     <div class="flex h-1.5 w-full overflow-hidden rounded-full bg-accent">
       <div
-        v-for="category in categories"
+        v-for="category in composition.categories"
         :key="category.id"
         class="h-full"
         :class="category.colorClass"
@@ -32,11 +32,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { formatTokenCount } from '../composables/context-categories'
-import type { ContextCategoryId, ContextCategoryStat } from '../composables/context-categories'
+import type { ContextCategoryId, ContextComposition } from '../composables/context-categories'
 
 const props = defineProps<{
-  categories: ContextCategoryStat[]
-  totalTokens: number
+  composition: ContextComposition
   contextWindow: number | null
 }>()
 
@@ -47,14 +46,14 @@ interface LegendRow {
   muted: boolean
 }
 
-const denominator = computed(() => Math.max(props.contextWindow ?? 0, props.totalTokens))
+const denominator = computed(() => Math.max(props.contextWindow ?? 0, props.composition.totalTokens))
 
 function segmentWidth(tokens: number): string {
   return denominator.value > 0 ? `${(tokens / denominator.value) * 100}%` : '0%'
 }
 
 const legendRows = computed<LegendRow[]>(() => {
-  const rows: LegendRow[] = props.categories.map(category => ({
+  const rows: LegendRow[] = props.composition.categories.map(category => ({
     id: category.id,
     colorClass: category.colorClass,
     tokens: category.tokens,
@@ -64,7 +63,7 @@ const legendRows = computed<LegendRow[]>(() => {
     rows.push({
       id: 'free',
       colorClass: 'bg-accent',
-      tokens: Math.max(0, props.contextWindow - props.totalTokens),
+      tokens: Math.max(0, props.contextWindow - props.composition.totalTokens),
       muted: true,
     })
   }

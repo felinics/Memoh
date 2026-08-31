@@ -46,7 +46,8 @@ const KIND_CATEGORY: Record<ContextfragKind, ContextCategoryId> = {
 }
 
 function categoryForKind(kind: ContextfragKind | undefined): ContextCategoryId {
-  return (kind && KIND_CATEGORY[kind]) ?? 'other'
+  if (!kind) return 'other'
+  return KIND_CATEGORY[kind] ?? 'other'
 }
 
 export function computeContextComposition(usage: HandlersContextUsage | null | undefined): ContextComposition | null {
@@ -73,6 +74,13 @@ export function computeContextComposition(usage: HandlersContextUsage | null | u
   }
 
   return { categories, totalTokens }
+}
+
+// Every class is a literal so the Tailwind scanner can see it.
+export function contextPressureToneClass(percent: number, kind: 'text' | 'bg'): string {
+  if (percent >= 90) return kind === 'text' ? 'text-destructive' : 'bg-destructive'
+  if (percent >= 70) return kind === 'text' ? 'text-warning' : 'bg-warning'
+  return kind === 'text' ? 'text-foreground' : 'bg-foreground'
 }
 
 export function formatTokenCount(n: number): string {

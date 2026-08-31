@@ -33,10 +33,10 @@
                     {{ $t('chat.infoContextTokensEstimateNoWindow', { used: formatTokenCount(composition.totalTokens) }) }}
                   </template>
                   <span
-                    v-if="estimatePercent != null"
+                    v-if="contextWindow != null"
                     class="font-normal ml-1"
-                    :class="estimatePercentColor"
-                  >({{ estimatePercent.toFixed(1) }}%)</span>
+                    :class="contextPercentColor"
+                  >({{ contextPercent.toFixed(1) }}%)</span>
                 </template>
                 <template v-else-if="contextWindow != null">
                   {{ $t('chat.infoContextTokens', { used: formatTokenCount(usedTokens), window: formatTokenCount(contextWindow) }) }}
@@ -49,8 +49,7 @@
             </div>
             <ContextUsageBreakdown
               v-if="composition"
-              :categories="composition.categories"
-              :total-tokens="composition.totalTokens"
+              :composition="composition"
               :context-window="contextWindow"
             />
             <div
@@ -132,7 +131,7 @@ import { computed, toRef } from 'vue'
 import { ScrollArea, Button } from '@felinic/ui'
 import { Sparkles, Minimize2 } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
-import { computeContextComposition, formatTokenCount } from '../composables/context-categories'
+import { contextPressureToneClass, formatTokenCount } from '../composables/context-categories'
 import SubagentList from './subagent-list.vue'
 import ContextUsageBreakdown from './context-usage-breakdown.vue'
 
@@ -146,35 +145,17 @@ const visibleRef = toRef(props, 'visible')
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 
-const { info, usedTokens, contextWindow, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
+const { info, usedTokens, composition, contextWindow, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
   visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,
 })
 
-const composition = computed(() => {
-  const result = computeContextComposition(info.value?.context_usage)
-  return result && result.categories.length > 0 ? result : null
-})
+const contextPercentColor = computed(() =>
+  contextPercent.value >= 70 ? contextPressureToneClass(contextPercent.value, 'text') : 'text-muted-foreground',
+)
 
-const estimatePercent = computed(() => {
-  const total = composition.value?.totalTokens
-  if (total == null || contextWindow.value == null || contextWindow.value <= 0) return null
-  return (total / contextWindow.value) * 100
-})
-
-const estimatePercentColor = computed(() => {
-  const percent = estimatePercent.value ?? 0
-  if (percent >= 90) return 'text-destructive'
-  if (percent >= 70) return 'text-warning'
-  return 'text-muted-foreground'
-})
-
-const contextBarColor = computed(() => {
-  if (contextPercent.value >= 90) return 'bg-destructive'
-  if (contextPercent.value >= 70) return 'bg-warning'
-  return 'bg-foreground'
-})
+const contextBarColor = computed(() => contextPressureToneClass(contextPercent.value, 'bg'))
 
 const cacheHitRate = computed(() => {
   const rate = info.value?.cache_stats?.cache_hit_rate ?? 0

@@ -642,6 +642,7 @@
                   <!-- shrink-0 keeps the model name the one that truncates. -->
                   <SessionInfoRing
                     class="shrink-0"
+                    :visible="isVisible"
                     :override-model-id="overrideModelId"
                     :fallback-context-window="sessionFallbackContextWindow"
                   />

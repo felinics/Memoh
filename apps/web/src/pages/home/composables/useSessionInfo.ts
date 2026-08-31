@@ -60,11 +60,11 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   // The fragment estimate is the basis the backend budgets and compacts on,
   // and the only one ACP sessions report; provider-reported usage stays the
   // fallback for a status that carries no breakdown.
-  const composition = computed(() => computeContextComposition(info.value?.context_usage))
-  const estimatedTokens = computed(() => {
-    const c = composition.value
-    return c && c.categories.length > 0 ? c.totalTokens : null
+  const composition = computed(() => {
+    const raw = computeContextComposition(info.value?.context_usage)
+    return raw && raw.categories.length > 0 ? raw : null
   })
+  const estimatedTokens = computed(() => composition.value?.totalTokens ?? null)
   const contextWindow = computed(() => {
     const fromStatus = info.value?.context_usage?.context_window
     if (fromStatus != null && fromStatus > 0) return fromStatus
@@ -124,6 +124,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   return {
     info,
     usedTokens,
+    composition,
     contextWindow,
     contextPercent,
     currentBotId,
