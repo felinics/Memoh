@@ -54,10 +54,10 @@ EOF
 chmod +x "$FAKEBIN/id" "$FAKEBIN/docker" "$FAKEBIN/git" "$FAKEBIN/curl"
 
 read_workspace_image() {
-  awk '
-    /^\[container\]$/ { in_container = 1; next }
-    /^\[/ { in_container = 0 }
-    in_container && /^[[:space:]]*default_image[[:space:]]*=/ {
+  section=$2
+  awk -v target_section="[$section]" '
+    /^\[[^]]+\]$/ { in_section = ($0 == target_section); next }
+    in_section && /^[[:space:]]*default_image[[:space:]]*=/ {
       value = substr($0, index($0, "=") + 1)
       gsub(/^[[:space:]\"]+|[[:space:]\"]+$/, "", value)
       print value
@@ -93,9 +93,42 @@ prepare_upgrade() {
   rm -f "$home/memoh/config.toml.bak"
 }
 
+prepare_legacy_upgrade() {
+  home=$1
+  image=$2
+  mkdir -p "$home/memoh"
+  cat > "$home/memoh/config.toml" <<EOF
+[admin]
+username = "admin"
+password = "admin123"
+
+[auth]
+jwt_secret = "test-secret"
+
+[database]
+driver = "postgres"
+
+[container]
+backend = "containerd"
+
+[workspace]
+default_image = "$image"
+image_pull_policy = "if_not_present"
+snapshotter = "overlayfs"
+data_root = "/opt/memoh/data"
+bridge_path = "/opt/memoh/runtime/bridge"
+
+[postgres]
+password = "memoh123"
+
+[pgvector]
+password = "memoh123"
+EOF
+}
+
 FRESH_HOME="$TMPDIR/fresh"
 MEMOH_INSTALL_MODE=fresh run_installer "$FRESH_HOME" v0.19.0 "$TMPDIR/fresh.out"
-fresh_image=$(read_workspace_image "$FRESH_HOME/memoh/config.toml")
+fresh_image=$(read_workspace_image "$FRESH_HOME/memoh/config.toml" container)
 [ "$fresh_image" = "memohai/workspace:0.19.0-debian" ] || {
   echo "fresh install workspace image = $fresh_image" >&2
   cat "$TMPDIR/fresh.out" >&2
@@ -106,7 +139,7 @@ grep -q "MEMOH_INSTALLER_WORKSPACE_IMAGE='memohai/workspace:0.19.0-debian'" "$FR
 
 FALLBACK_HOME="$TMPDIR/fallback"
 MEMOH_INSTALL_MODE=fresh run_installer "$FALLBACK_HOME" "" "$TMPDIR/fallback.out"
-fallback_image=$(read_workspace_image "$FALLBACK_HOME/memoh/config.toml")
+fallback_image=$(read_workspace_image "$FALLBACK_HOME/memoh/config.toml" container)
 [ "$fallback_image" = "memohai/workspace:debian-latest" ] || {
   echo "fallback workspace image = $fallback_image" >&2
   cat "$TMPDIR/fallback.out" >&2
@@ -118,7 +151,7 @@ MANAGED_HOME="$TMPDIR/managed"
 prepare_upgrade "$MANAGED_HOME" "memohai/workspace:debian"
 MEMOH_INSTALL_MODE=upgrade run_installer "$MANAGED_HOME" v0.19.0 "$TMPDIR/managed-19.out"
 MEMOH_INSTALL_MODE=upgrade run_installer "$MANAGED_HOME" v0.20.0 "$TMPDIR/managed-20.out"
-managed_image=$(read_workspace_image "$MANAGED_HOME/memoh/config.toml")
+managed_image=$(read_workspace_image "$MANAGED_HOME/memoh/config.toml" container)
 [ "$managed_image" = "memohai/workspace:0.20.0-debian" ] || {
   echo "managed upgrade workspace image = $managed_image" >&2
   cat "$TMPDIR/managed-20.out" >&2
@@ -131,18 +164,33 @@ prepare_upgrade "$MISSING_HOME" "memohai/workspace:debian"
 sed -i.bak '/^[[:space:]]*default_image[[:space:]]*=/d' "$MISSING_HOME/memoh/config.toml"
 rm "$MISSING_HOME/memoh/config.toml.bak"
 MEMOH_INSTALL_MODE=upgrade run_installer "$MISSING_HOME" v0.20.0 "$TMPDIR/missing.out"
-missing_image=$(read_workspace_image "$MISSING_HOME/memoh/config.toml")
+missing_image=$(read_workspace_image "$MISSING_HOME/memoh/config.toml" container)
 [ "$missing_image" = "memohai/workspace:0.20.0-debian" ] || {
   echo "missing default workspace image = $missing_image" >&2
   cat "$TMPDIR/missing.out" >&2
   exit 1
 }
 
+LEGACY_HOME="$TMPDIR/legacy"
+prepare_legacy_upgrade "$LEGACY_HOME" "memohai/workspace:debian"
+MEMOH_INSTALL_MODE=upgrade run_installer "$LEGACY_HOME" v0.20.0 "$TMPDIR/legacy.out"
+legacy_image=$(read_workspace_image "$LEGACY_HOME/memoh/config.toml" workspace)
+[ "$legacy_image" = "memohai/workspace:0.20.0-debian" ] || {
+  echo "legacy workspace image = $legacy_image" >&2
+  cat "$TMPDIR/legacy.out" >&2
+  exit 1
+}
+if [ -n "$(read_workspace_image "$LEGACY_HOME/memoh/config.toml" container)" ]; then
+  echo "legacy workspace image was duplicated into [container]" >&2
+  cat "$LEGACY_HOME/memoh/config.toml" >&2
+  exit 1
+fi
+
 CUSTOM_HOME="$TMPDIR/custom"
 prepare_upgrade "$CUSTOM_HOME" "registry.example/workspace:gold"
 printf "MEMOH_INSTALLER_WORKSPACE_IMAGE='memohai/workspace:0.19.0-debian'\n" > "$CUSTOM_HOME/memoh/.env"
 MEMOH_INSTALL_MODE=upgrade run_installer "$CUSTOM_HOME" v0.20.0 "$TMPDIR/custom.out"
-custom_image=$(read_workspace_image "$CUSTOM_HOME/memoh/config.toml")
+custom_image=$(read_workspace_image "$CUSTOM_HOME/memoh/config.toml" container)
 [ "$custom_image" = "registry.example/workspace:gold" ] || {
   echo "custom upgrade workspace image = $custom_image" >&2
   cat "$TMPDIR/custom.out" >&2

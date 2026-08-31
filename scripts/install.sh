@@ -74,8 +74,10 @@ EXISTING_DOCKER_NETWORK=false
 EXISTING_WORKSPACE_FILES=false
 EXISTING_REPO_DIR=false
 EXISTING_WORKSPACE_IMAGE=""
+EXISTING_WORKSPACE_IMAGE_SECTION="container"
 EXISTING_INSTALLER_WORKSPACE_IMAGE=""
 WORKSPACE_IMAGE=""
+WORKSPACE_IMAGE_SECTION="container"
 WORKSPACE_IMAGE_MANAGED=false
 
 # Parse flags
@@ -183,6 +185,12 @@ read_toml_value() {
     return 1
   fi
   printf '%s' "$value" | sed 's/\\"/"/g; s/\\\\/\\/g'
+}
+
+toml_section_exists() {
+  file="$1"
+  section="$2"
+  [ -f "$file" ] && grep -q "^[[:space:]]*\[$section\][[:space:]]*$" "$file"
 }
 
 normalize_database_driver() {
@@ -339,6 +347,7 @@ detect_existing_installation() {
   EXISTING_WORKSPACE_FILES=false
   EXISTING_REPO_DIR=false
   EXISTING_WORKSPACE_IMAGE=""
+  EXISTING_WORKSPACE_IMAGE_SECTION="container"
   EXISTING_INSTALLER_WORKSPACE_IMAGE=""
 
   if [ -d "$WORKSPACE/$DIR" ]; then
@@ -396,7 +405,13 @@ detect_existing_installation() {
 load_existing_settings() {
   if [ -n "$EXISTING_CONFIG_SOURCE" ]; then
     value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "container" "default_image" || true)
-    [ -n "$value" ] && EXISTING_WORKSPACE_IMAGE="$value"
+    if [ -n "$value" ]; then
+      EXISTING_WORKSPACE_IMAGE="$value"
+    elif toml_section_exists "$EXISTING_CONFIG_SOURCE" "workspace"; then
+      EXISTING_WORKSPACE_IMAGE_SECTION="workspace"
+      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "workspace" "default_image" || true)
+      [ -n "$value" ] && EXISTING_WORKSPACE_IMAGE="$value"
+    fi
 
     value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "admin" "username" || true)
     [ -n "$value" ] && ADMIN_USER="$value"
@@ -508,10 +523,12 @@ select_workspace_image() {
   fi
 
   WORKSPACE_IMAGE="$release_workspace_image"
+  WORKSPACE_IMAGE_SECTION="container"
   WORKSPACE_IMAGE_MANAGED=true
   if [ "$INSTALL_MODE" != "upgrade" ]; then
     return
   fi
+  WORKSPACE_IMAGE_SECTION="$EXISTING_WORKSPACE_IMAGE_SECTION"
 
   case "$EXISTING_WORKSPACE_IMAGE" in
     ""|memohai/workspace:debian|docker.io/memohai/workspace:debian|memohai/workspace:debian-latest|docker.io/memohai/workspace:debian-latest)
@@ -937,10 +954,10 @@ else
   rm -f config.toml.bak
 fi
 
-set_toml_string_value config.toml "container" "default_image" "$WORKSPACE_IMAGE"
-configured_workspace_image=$(read_toml_value config.toml "container" "default_image" || true)
+set_toml_string_value config.toml "$WORKSPACE_IMAGE_SECTION" "default_image" "$WORKSPACE_IMAGE"
+configured_workspace_image=$(read_toml_value config.toml "$WORKSPACE_IMAGE_SECTION" "default_image" || true)
 if [ "$configured_workspace_image" != "$WORKSPACE_IMAGE" ]; then
-  echo "${RED}Error: failed to configure [container].default_image in config.toml.${NC}"
+  echo "${RED}Error: failed to configure [${WORKSPACE_IMAGE_SECTION}].default_image in config.toml.${NC}"
   exit 1
 fi
 if [ "$WORKSPACE_IMAGE_MANAGED" = true ]; then
