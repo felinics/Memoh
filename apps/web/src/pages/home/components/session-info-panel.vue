@@ -25,17 +25,36 @@
             <div class="flex items-center justify-between">
               <span class="text-muted-foreground">{{ $t('chat.infoContextUsage') }}</span>
               <span class="font-medium text-foreground tabular-nums">
-                <template v-if="contextWindow != null">
-                  {{ formatTokenCount(usedTokens) }} / {{ formatTokenCount(contextWindow) }}
+                <template v-if="composition">
+                  <template v-if="contextWindow != null">
+                    {{ $t('chat.infoContextTokensEstimate', { used: formatTokenCount(composition.totalTokens), window: formatTokenCount(contextWindow) }) }}
+                  </template>
+                  <template v-else>
+                    {{ $t('chat.infoContextTokensEstimateNoWindow', { used: formatTokenCount(composition.totalTokens) }) }}
+                  </template>
+                  <span
+                    v-if="estimatePercent != null"
+                    class="font-normal ml-1"
+                    :class="estimatePercentColor"
+                  >({{ estimatePercent.toFixed(1) }}%)</span>
+                </template>
+                <template v-else-if="contextWindow != null">
+                  {{ $t('chat.infoContextTokens', { used: formatTokenCount(usedTokens), window: formatTokenCount(contextWindow) }) }}
                   <span class="text-muted-foreground font-normal ml-1">({{ contextPercent.toFixed(1) }}%)</span>
                 </template>
                 <template v-else>
-                  {{ formatTokenCount(usedTokens) }} / --
+                  {{ $t('chat.infoContextTokensNoWindow', { used: formatTokenCount(usedTokens) }) }}
                 </template>
               </span>
             </div>
+            <ContextUsageBreakdown
+              v-if="composition"
+              :categories="composition.categories"
+              :total-tokens="composition.totalTokens"
+              :context-window="contextWindow"
+            />
             <div
-              v-if="contextWindow != null && contextWindow > 0"
+              v-else-if="contextWindow != null && contextWindow > 0"
               class="h-1.5 w-full overflow-hidden rounded-full bg-accent"
             >
               <div
@@ -113,7 +132,9 @@ import { computed, toRef } from 'vue'
 import { ScrollArea, Button } from '@felinic/ui'
 import { Sparkles, Minimize2 } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
+import { computeContextComposition, formatTokenCount } from '../composables/context-categories'
 import SubagentList from './subagent-list.vue'
+import ContextUsageBreakdown from './context-usage-breakdown.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -131,6 +152,24 @@ const { info, usedTokens, contextWindow, contextPercent, sessionId, isCompacting
   fallbackContextWindow: fallbackContextWindowRef,
 })
 
+const composition = computed(() => {
+  const result = computeContextComposition(info.value?.context_usage)
+  return result && result.categories.length > 0 ? result : null
+})
+
+const estimatePercent = computed(() => {
+  const total = composition.value?.totalTokens
+  if (total == null || contextWindow.value == null || contextWindow.value <= 0) return null
+  return (total / contextWindow.value) * 100
+})
+
+const estimatePercentColor = computed(() => {
+  const percent = estimatePercent.value ?? 0
+  if (percent >= 90) return 'text-destructive'
+  if (percent >= 70) return 'text-warning'
+  return 'text-muted-foreground'
+})
+
 const contextBarColor = computed(() => {
   if (contextPercent.value >= 90) return 'bg-destructive'
   if (contextPercent.value >= 70) return 'bg-warning'
@@ -143,11 +182,4 @@ const cacheHitRate = computed(() => {
 })
 
 const skills = computed(() => info.value?.skills ?? [])
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
-}
-
 </script>
