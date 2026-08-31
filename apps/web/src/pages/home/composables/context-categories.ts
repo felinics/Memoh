@@ -1,4 +1,4 @@
-import type { ContextfragKind, HandlersContextUsage } from '@memohai/sdk'
+import type { ContextfragKind, ContextfragKindBreakdown } from '@memohai/sdk'
 
 export const CONTEXT_CATEGORY_IDS = ['system', 'rules', 'tools', 'skills', 'memory', 'summary', 'conversation', 'other'] as const
 export type ContextCategoryId = (typeof CONTEXT_CATEGORY_IDS)[number]
@@ -50,7 +50,12 @@ function categoryForKind(kind: ContextfragKind | undefined): ContextCategoryId {
   return KIND_CATEGORY[kind] ?? 'other'
 }
 
-export function computeContextComposition(usage: HandlersContextUsage | null | undefined): ContextComposition | null {
+export interface ContextCompositionSource {
+  breakdown?: ContextfragKindBreakdown[]
+  tool_defs?: Array<{ token_estimate?: number }>
+}
+
+export function computeContextComposition(usage: ContextCompositionSource | null | undefined): ContextComposition | null {
   if (!usage) return null
   const breakdown = usage.breakdown ?? []
   const toolDefs = usage.tool_defs ?? []
