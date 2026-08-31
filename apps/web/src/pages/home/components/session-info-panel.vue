@@ -93,6 +93,18 @@
           {{ $t('chat.compactNow') }}
         </Button>
 
+        <!-- Context Inspector -->
+        <Button
+          variant="ghost"
+          size="sm"
+          class="mt-1 w-full"
+          :disabled="!sessionId"
+          @click="emit('openLifecycle')"
+        >
+          <ScanSearch class="size-3.5" />
+          {{ $t('chat.lifecycle.title') }}
+        </Button>
+
         <!-- Subagents -->
         <div class="mt-4">
           <SubagentList />
@@ -131,7 +143,7 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import { ScrollArea, Button } from '@felinic/ui'
-import { Sparkles, Minimize2 } from 'lucide-vue-next'
+import { Sparkles, Minimize2, ScanSearch } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass, formatTokenCount } from '../composables/context-categories'
 import SubagentList from './subagent-list.vue'
@@ -165,4 +177,6 @@ const cacheHitRate = computed(() => {
 })
 
 const skills = computed(() => info.value?.skills ?? [])
+
+const emit = defineEmits<{ openLifecycle: [] }>()
 </script>

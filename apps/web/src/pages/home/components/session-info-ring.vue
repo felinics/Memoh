@@ -59,9 +59,14 @@
         :visible="open"
         :override-model-id="overrideModelId"
         :fallback-context-window="fallbackContextWindow"
+        @open-lifecycle="openLifecycle"
       />
     </PopoverContent>
   </Popover>
+  <!-- Sibling of the Popover: the modal's pointer-events lock closes the
+       hover popover, which unmounts the panel — a dialog nested there would
+       unmount with it. -->
+  <ContextLifecycleDialog v-model:open="lifecycleOpen" />
 </template>
 
 <script setup lang="ts">
@@ -69,6 +74,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Popover, PopoverContent, PopoverTrigger } from '@felinic/ui'
 import SessionInfoPanel from './session-info-panel.vue'
+import ContextLifecycleDialog from './context-lifecycle-dialog.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass } from '../composables/context-categories'
 
@@ -82,6 +88,13 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const open = ref(false)
+const lifecycleOpen = ref(false)
+
+function openLifecycle() {
+  clearTimers()
+  open.value = false
+  lifecycleOpen.value = true
+}
 
 const visibleRef = computed(() => props.visible ?? true)
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
