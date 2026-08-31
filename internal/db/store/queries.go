@@ -52,6 +52,7 @@ type Queries interface {
 	AssignFollowUpQueueItem(ctx context.Context, arg dbsqlc.AssignFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
 	ClaimAssignedFollowUpQueueItem(ctx context.Context, arg dbsqlc.ClaimAssignedFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
 	ClaimSteerQueueItem(ctx context.Context, arg dbsqlc.ClaimSteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
+	ClaimNextSteerQueueItem(ctx context.Context, arg dbsqlc.ClaimNextSteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
 	ReclaimAssignedFollowUpQueueItem(ctx context.Context, arg dbsqlc.ReclaimAssignedFollowUpQueueItemParams) (dbsqlc.SessionFollowUpQueue, error)
 	ReclaimSteerQueueItem(ctx context.Context, arg dbsqlc.ReclaimSteerQueueItemParams) (dbsqlc.SessionSteerQueue, error)
 	ListPendingFollowUpQueue(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.SessionFollowUpQueue, error)

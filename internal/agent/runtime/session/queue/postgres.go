@@ -74,21 +74,12 @@ func (s *PostgresStore) EnqueueSteer(ctx context.Context, botID, sessionID, item
 	if err != nil {
 		return SteerItem{}, err
 	}
-	existing, err := s.q.GetSteerQueueItemByInvocation(ctx, dbsqlc.GetSteerQueueItemByInvocationParams{SessionID: sid, InvocationID: invocationID})
-	if err == nil {
-		if !jsonPayloadEqual(existing.Payload, payload) {
-			return SteerItem{}, ErrInvocationConflict
-		}
-		return steerFromRow(existing), nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return SteerItem{}, err
-	}
 	row, err := s.q.EnqueueSteerQueueItem(ctx, dbsqlc.EnqueueSteerQueueItemParams{ItemID: id, BotID: b, SessionID: sid, InvocationID: invocationID, Payload: payload})
 	if errors.Is(err, pgx.ErrNoRows) {
-		// DO NOTHING is intentional: a concurrent retry with the same
-		// invocation must be compared against the durable payload instead of
-		// being silently accepted as a different request.
+		// DO NOTHING is intentional: a retry with the same invocation must be
+		// compared against the durable payload instead of being silently
+		// accepted as a different request. The common first-submit path stays
+		// one SQL round trip; only a conflict/replay needs the lookup below.
 		existing, lookupErr := s.q.GetSteerQueueItemByInvocation(ctx, dbsqlc.GetSteerQueueItemByInvocationParams{SessionID: sid, InvocationID: invocationID})
 		if lookupErr == nil {
 			if !jsonPayloadEqual(existing.Payload, payload) {
@@ -121,16 +112,6 @@ func (s *PostgresStore) EnqueueFollowUp(ctx context.Context, botID, sessionID, i
 	}
 	id, err := db.ParseUUID(itemID)
 	if err != nil {
-		return FollowUpItem{}, err
-	}
-	existing, err := s.q.GetFollowUpQueueItemByInvocation(ctx, dbsqlc.GetFollowUpQueueItemByInvocationParams{SessionID: sid, InvocationID: invocationID})
-	if err == nil {
-		if !jsonPayloadEqual(existing.Payload, payload) {
-			return FollowUpItem{}, ErrInvocationConflict
-		}
-		return followFromRow(existing), nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
 		return FollowUpItem{}, err
 	}
 	row, err := s.q.EnqueueFollowUpQueueItem(ctx, dbsqlc.EnqueueFollowUpQueueItemParams{ItemID: id, BotID: b, SessionID: sid, InvocationID: invocationID, Payload: payload})
@@ -552,6 +533,35 @@ func (s *PostgresStore) ClaimSteer(ctx context.Context, itemID string, run sessi
 		return SteerItem{}, err
 	}
 	row, err := s.q.ClaimSteerQueueItem(ctx, dbsqlc.ClaimSteerQueueItemParams{QueueItemID: id, ExecutionRunID: rid, ExecutionOwnerID: pgtype.Text{String: run.OwnerID, Valid: true}, ExecutionFencingToken: pgtype.Int8{Int64: run.FencingToken, Valid: true}})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SteerItem{}, ErrNotPending
+	}
+	if err != nil {
+		return SteerItem{}, err
+	}
+	return steerFromRow(row), nil
+}
+
+// ClaimNextSteer claims the earliest accepted steer for a run in one SQL
+// statement. CommitStep already owns the session reconciliation lock, so there
+// is no need to list the whole queue and issue one claim statement per item.
+func (s *PostgresStore) ClaimNextSteer(ctx context.Context, sessionID string, run sessionruntime.RunHandle) (SteerItem, error) {
+	if err := validateRunHandle(run); err != nil {
+		return SteerItem{}, err
+	}
+	sid, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return SteerItem{}, err
+	}
+	rid, err := db.ParseUUID(run.RunID)
+	if err != nil {
+		return SteerItem{}, err
+	}
+	row, err := s.q.ClaimNextSteerQueueItem(ctx, dbsqlc.ClaimNextSteerQueueItemParams{
+		SessionID: sid, ExecutionRunID: rid,
+		ExecutionOwnerID:      pgtype.Text{String: run.OwnerID, Valid: true},
+		ExecutionFencingToken: pgtype.Int8{Int64: run.FencingToken, Valid: true},
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SteerItem{}, ErrNotPending
 	}

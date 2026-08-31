@@ -177,21 +177,14 @@ func (c *PostgresCoordinator) CommitStep(ctx context.Context, req CommitStepRequ
 			result = CommitStepResult{Action: ParkDecision}
 			return persistCommitStepResult(ctx, txq, runID, req.StepIndex, commitHash, result)
 		}
-		pending, e := store.PendingSteer(ctx, req.Run.SessionID)
-		if e != nil {
-			return e
-		}
-		for _, item := range pending {
-			if item.TargetRunID != req.Run.RunID {
-				continue
-			}
-			claimed, e := store.ClaimSteer(ctx, string(item.ID), req.Run)
-			if e != nil {
-				return e
-			}
+		claimed, claimErr := store.ClaimNextSteer(ctx, req.Run.SessionID, req.Run)
+		if claimErr == nil {
 			ref := SteerClaimRef{ItemID: claimed.ID, RunID: req.Run.RunID, OwnerID: req.Run.OwnerID, FencingToken: req.Run.FencingToken}
 			result = CommitStepResult{Action: ContinueWithSteer, Steer: &claimed, SteerClaim: &ref}
 			return persistCommitStepResult(ctx, txq, runID, req.StepIndex, commitHash, result)
+		}
+		if !errors.Is(claimErr, ErrNotPending) {
+			return claimErr
 		}
 		if req.Kind == StepToolLoop {
 			result = CommitStepResult{Action: Continue}

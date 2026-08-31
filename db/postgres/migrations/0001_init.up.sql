@@ -2346,6 +2346,7 @@ CREATE TABLE IF NOT EXISTS public.session_steer_queue (
 CREATE UNIQUE INDEX IF NOT EXISTS session_steer_queue_invocation_unique ON public.session_steer_queue(team_id, session_id, invocation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS session_steer_queue_team_item_unique ON public.session_steer_queue(team_id, item_id);
 CREATE INDEX IF NOT EXISTS session_steer_queue_pending_order ON public.session_steer_queue(team_id, session_id, position) WHERE status = 'accepted';
+CREATE INDEX IF NOT EXISTS session_steer_queue_append_order ON public.session_steer_queue(team_id, session_id, position DESC);
 
 CREATE TABLE IF NOT EXISTS public.session_follow_up_queue (
     item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2371,6 +2372,7 @@ CREATE TABLE IF NOT EXISTS public.session_follow_up_queue (
 CREATE UNIQUE INDEX IF NOT EXISTS session_follow_up_queue_invocation_unique ON public.session_follow_up_queue(team_id, session_id, invocation_id);
 CREATE UNIQUE INDEX IF NOT EXISTS session_follow_up_queue_team_item_unique ON public.session_follow_up_queue(team_id, item_id);
 CREATE INDEX IF NOT EXISTS session_follow_up_queue_pending_order ON public.session_follow_up_queue(team_id, session_id, position) WHERE status = 'accepted' AND assigned_run_id IS NULL;
+CREATE INDEX IF NOT EXISTS session_follow_up_queue_append_order ON public.session_follow_up_queue(team_id, session_id, position DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS session_runs_source_follow_up_unique ON public.session_runs(team_id, source_follow_up_item_id) WHERE source_follow_up_item_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS public.session_queue_step_commits (

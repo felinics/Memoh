@@ -199,23 +199,12 @@ func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
 	}
 	var item queue.SteerItem
 	err = h.inTransaction(c.Request().Context(), func(q dbstore.Queries) error {
-		botUUID, e := db.ParseUUID(botID)
-		if e != nil {
-			return e
-		}
-		sessionUUID, e := db.ParseUUID(sid)
-		if e != nil {
-			return e
-		}
-		if _, e = q.LockSessionForQueueAdmission(c.Request().Context(), dbsqlc.LockSessionForQueueAdmissionParams{BotID: botUUID, SessionID: sessionUUID}); e != nil {
-			return e
-		}
 		payload, marshalErr := json.Marshal(map[string]string{"text": strings.TrimSpace(req.Text)})
 		if marshalErr != nil {
 			return marshalErr
 		}
-		item, e = queue.NewPostgresStore(q).EnqueueSteer(c.Request().Context(), botID, sid, uuid.NewString(), req.InvocationID, payload)
-		return e
+		item, err = queue.NewPostgresStore(q).EnqueueSteer(c.Request().Context(), botID, sid, uuid.NewString(), req.InvocationID, payload)
+		return err
 	})
 	if errors.Is(err, queue.ErrNoActiveRun) || errors.Is(err, pgx.ErrNoRows) {
 		return apperror.New(apperror.CodeQueueNoActiveRun, nil)
@@ -251,23 +240,12 @@ func (h *SessionQueueHandler) EnqueueFollowUp(c echo.Context) error {
 	}
 	var item queue.FollowUpItem
 	err = h.inTransaction(c.Request().Context(), func(q dbstore.Queries) error {
-		botUUID, e := db.ParseUUID(botID)
-		if e != nil {
-			return e
-		}
-		sessionUUID, e := db.ParseUUID(sid)
-		if e != nil {
-			return e
-		}
-		if _, e = q.LockSessionForQueueAdmission(c.Request().Context(), dbsqlc.LockSessionForQueueAdmissionParams{BotID: botUUID, SessionID: sessionUUID}); e != nil {
-			return e
-		}
 		payload, marshalErr := json.Marshal(map[string]string{"text": strings.TrimSpace(req.Text)})
 		if marshalErr != nil {
 			return marshalErr
 		}
-		item, e = queue.NewPostgresStore(q).EnqueueFollowUp(c.Request().Context(), botID, sid, uuid.NewString(), req.InvocationID, payload)
-		return e
+		item, err = queue.NewPostgresStore(q).EnqueueFollowUp(c.Request().Context(), botID, sid, uuid.NewString(), req.InvocationID, payload)
+		return err
 	})
 	if errors.Is(err, queue.ErrNoActiveRun) || errors.Is(err, pgx.ErrNoRows) {
 		return apperror.New(apperror.CodeQueueNoActiveRun, nil)
@@ -350,7 +328,7 @@ func (h *SessionQueueHandler) ListFollowUp(c echo.Context) error {
 // @Failure 409 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue/reorder [put].
 func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	_, sid, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -360,9 +338,6 @@ func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
 	}
 	var items []queue.SteerItem
 	err = h.inTransaction(c.Request().Context(), func(q dbstore.Queries) error {
-		if err := lockQueueSession(c.Request().Context(), q, botID, sid); err != nil {
-			return err
-		}
 		var reorderErr error
 		items, reorderErr = queue.NewPostgresStore(q).ReorderSteer(c.Request().Context(), sid, req.Item, req.Before)
 		return reorderErr
@@ -392,7 +367,7 @@ func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
 // @Failure 409 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/reorder [put].
 func (h *SessionQueueHandler) ReorderFollowUp(c echo.Context) error {
-	botID, sid, err := h.authorize(c)
+	_, sid, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
@@ -402,9 +377,6 @@ func (h *SessionQueueHandler) ReorderFollowUp(c echo.Context) error {
 	}
 	var items []queue.FollowUpItem
 	err = h.inTransaction(c.Request().Context(), func(q dbstore.Queries) error {
-		if err := lockQueueSession(c.Request().Context(), q, botID, sid); err != nil {
-			return err
-		}
 		var reorderErr error
 		items, reorderErr = queue.NewPostgresStore(q).ReorderFollowUp(c.Request().Context(), sid, req.Item, req.Before)
 		return reorderErr

@@ -345,6 +345,63 @@ func (q *Queries) ClaimAssignedFollowUpQueueItem(ctx context.Context, arg ClaimA
 	return i, err
 }
 
+const claimNextSteerQueueItem = `-- name: ClaimNextSteerQueueItem :one
+WITH candidate AS MATERIALIZED (
+  SELECT q.item_id
+  FROM session_steer_queue AS q
+  WHERE q.team_id=public.memoh_current_team_id()
+    AND q.session_id=$4
+    AND q.target_run_id=$1
+    AND q.status='accepted'
+  ORDER BY q.position, q.item_id
+  LIMIT 1
+  FOR UPDATE
+)
+UPDATE session_steer_queue AS target
+SET status='claimed', claim_run_id=$1, claim_owner_id=$2, claim_fencing_token=$3, updated_at=now()
+FROM candidate
+WHERE target.team_id=public.memoh_current_team_id()
+  AND target.item_id=candidate.item_id
+  AND EXISTS (SELECT 1 FROM session_runs run WHERE run.team_id=public.memoh_current_team_id() AND run.run_id=$1 AND run.owner_id=$2 AND run.fencing_token=$3 AND run.state IN ('accepted','running','waiting_decision'))
+  AND NOT EXISTS (SELECT 1 FROM session_steer_queue claimed WHERE claimed.team_id=public.memoh_current_team_id() AND claimed.claim_run_id=$1 AND claimed.status='claimed')
+  AND NOT EXISTS (SELECT 1 FROM session_follow_up_queue claimed WHERE claimed.team_id=public.memoh_current_team_id() AND claimed.claim_run_id=$1 AND claimed.status='claimed')
+RETURNING target.item_id, target.team_id, target.bot_id, target.session_id, target.target_run_id, target.invocation_id, target.payload, target.status, target.position, target.claim_run_id, target.claim_owner_id, target.claim_fencing_token, target.created_at, target.updated_at
+`
+
+type ClaimNextSteerQueueItemParams struct {
+	ExecutionRunID        pgtype.UUID `json:"execution_run_id"`
+	ExecutionOwnerID      pgtype.Text `json:"execution_owner_id"`
+	ExecutionFencingToken pgtype.Int8 `json:"execution_fencing_token"`
+	SessionID             pgtype.UUID `json:"session_id"`
+}
+
+func (q *Queries) ClaimNextSteerQueueItem(ctx context.Context, arg ClaimNextSteerQueueItemParams) (SessionSteerQueue, error) {
+	row := q.db.QueryRow(ctx, claimNextSteerQueueItem,
+		arg.ExecutionRunID,
+		arg.ExecutionOwnerID,
+		arg.ExecutionFencingToken,
+		arg.SessionID,
+	)
+	var i SessionSteerQueue
+	err := row.Scan(
+		&i.ItemID,
+		&i.TeamID,
+		&i.BotID,
+		&i.SessionID,
+		&i.TargetRunID,
+		&i.InvocationID,
+		&i.Payload,
+		&i.Status,
+		&i.Position,
+		&i.ClaimRunID,
+		&i.ClaimOwnerID,
+		&i.ClaimFencingToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimSteerQueueItem = `-- name: ClaimSteerQueueItem :one
 UPDATE session_steer_queue AS target SET status='claimed', claim_run_id=$1, claim_owner_id=$2, claim_fencing_token=$3, updated_at=now()
 WHERE target.team_id=public.memoh_current_team_id() AND target.item_id=$4 AND target.target_run_id=$1 AND target.status='accepted'

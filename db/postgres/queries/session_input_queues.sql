@@ -87,6 +87,27 @@ WHERE target.team_id=public.memoh_current_team_id() AND target.item_id=sqlc.arg(
   AND NOT EXISTS (SELECT 1 FROM session_steer_queue claimed WHERE claimed.team_id=public.memoh_current_team_id() AND claimed.claim_run_id=sqlc.arg(execution_run_id) AND claimed.status='claimed')
   AND NOT EXISTS (SELECT 1 FROM session_follow_up_queue claimed WHERE claimed.team_id=public.memoh_current_team_id() AND claimed.claim_run_id=sqlc.arg(execution_run_id) AND claimed.status='claimed')
 RETURNING *;
+-- name: ClaimNextSteerQueueItem :one
+WITH candidate AS MATERIALIZED (
+  SELECT q.item_id
+  FROM session_steer_queue AS q
+  WHERE q.team_id=public.memoh_current_team_id()
+    AND q.session_id=sqlc.arg(session_id)
+    AND q.target_run_id=sqlc.arg(execution_run_id)
+    AND q.status='accepted'
+  ORDER BY q.position, q.item_id
+  LIMIT 1
+  FOR UPDATE
+)
+UPDATE session_steer_queue AS target
+SET status='claimed', claim_run_id=sqlc.arg(execution_run_id), claim_owner_id=sqlc.arg(execution_owner_id), claim_fencing_token=sqlc.arg(execution_fencing_token), updated_at=now()
+FROM candidate
+WHERE target.team_id=public.memoh_current_team_id()
+  AND target.item_id=candidate.item_id
+  AND EXISTS (SELECT 1 FROM session_runs run WHERE run.team_id=public.memoh_current_team_id() AND run.run_id=sqlc.arg(execution_run_id) AND run.owner_id=sqlc.arg(execution_owner_id) AND run.fencing_token=sqlc.arg(execution_fencing_token) AND run.state IN ('accepted','running','waiting_decision'))
+  AND NOT EXISTS (SELECT 1 FROM session_steer_queue claimed WHERE claimed.team_id=public.memoh_current_team_id() AND claimed.claim_run_id=sqlc.arg(execution_run_id) AND claimed.status='claimed')
+  AND NOT EXISTS (SELECT 1 FROM session_follow_up_queue claimed WHERE claimed.team_id=public.memoh_current_team_id() AND claimed.claim_run_id=sqlc.arg(execution_run_id) AND claimed.status='claimed')
+RETURNING target.*;
 -- name: ClaimAssignedFollowUpQueueItem :one
 UPDATE session_follow_up_queue AS target SET status='claimed', claim_run_id=sqlc.arg(execution_run_id), claim_owner_id=sqlc.arg(execution_owner_id), claim_fencing_token=sqlc.arg(execution_fencing_token), updated_at=now()
 WHERE target.team_id=public.memoh_current_team_id() AND target.item_id=sqlc.arg(queue_item_id) AND target.assigned_run_id=sqlc.arg(execution_run_id) AND target.status='accepted'
