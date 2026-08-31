@@ -443,7 +443,13 @@ snapshot clones, unbounded queries) maps to a requirement in §4 and a roadmap i
       never advances on recompose) — CM-CMP-001. Landed as
       `Service.maybeSyncCompactDiscuss` + the worker recompose loop; the
       recompose signal travels the existing opaque event vocabulary, so no
-      transport change.
+      transport change. **Split-mode upgrade ordering:** a pre-recompose
+      Channel binary decodes the nil-payload recompose event as a failed
+      stream event; without the failed-native-turn cursor guard it advances
+      the cursor and silently consumes the trigger message, and with that
+      guard it merely fails closed and retries after the summary lands.
+      Upgrade Channel before (or together with) Server; embedded all-in-one
+      deployments upgrade atomically and are unaffected.
 - [x] Compaction failure / cooldown / disabled settings / missing summarizer →
       the turn proceeds with the L1 admission-trimmed context — CM-CMP-001
 - [x] Same synchronous backstop for the pipeline chat path (pressure measured in
