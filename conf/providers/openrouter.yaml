@@ -599,6 +599,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "google/gemma-4-31b-it:free"
     name: "Google: Gemma 4 31B (free)"
     type: chat
@@ -918,6 +920,8 @@ models:
     config:
       compatibilities: [vision, tool-call]
       context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "mistralai/mistral-medium-3-5"
     name: "Mistral: Mistral Medium 3.5"
     type: chat
@@ -2135,12 +2139,16 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 2000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "x-ai/grok-4.20-multi-agent"
     name: "xAI: Grok 4.20 Multi-Agent"
     type: chat
     config:
       compatibilities: [vision, reasoning]
       context_window: 2000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "x-ai/grok-4.3"
     name: "xAI: Grok 4.3"
     type: chat
