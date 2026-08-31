@@ -73,10 +73,14 @@ const durationMs = computed(() => {
 
 const label = computed(() => {
   if (props.streaming) return t('chat.thinkingInProgress')
-  if (durationMs.value > 0) {
-    return t('chat.process.thoughtSeconds', { seconds: Math.max(1, Math.round(durationMs.value / 1000)) })
+  // The floor is thoughtBriefly, not 1s: a sub-second duration means the
+  // provider buffered the reasoning and delivered it in one burst, so the
+  // measured interval is delivery time, not thinking time. Rounding it up to
+  // "1s" overstates a thought that may have taken the model far longer.
+  if (durationMs.value >= 1000) {
+    return t('chat.process.thoughtSeconds', { seconds: Math.round(durationMs.value / 1000) })
   }
-  // No measured duration (historical block, or a sub-second thought) — a worded
+  // No measured duration (historical block) or a sub-second thought — a worded
   // phrase reads more naturally than a bare "Thought" or a fake "0s".
   return t('chat.process.thoughtBriefly')
 })

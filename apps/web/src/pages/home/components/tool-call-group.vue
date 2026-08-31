@@ -36,7 +36,7 @@
       </div>
       <span
         class="min-w-0 truncate tracking-[0.01em]"
-        :class="running ? 'tool-shimmer-text' : ''"
+        :class="anyToolRunning || active ? 'tool-shimmer-text' : ''"
       >{{ headerLabel }}</span>
       <ExpandChevron
         :open="open"
@@ -124,9 +124,8 @@ const connectors = computed(() => {
 
 // Open state is purely user-driven and persisted across the post-turn refetch:
 // a process is collapsed until the user opens it, then stays as they left it
-// (no auto-open while streaming, no auto-close on completion). The header still
-// acts as a live ticker via `running`/`headerLabel`, so the user can follow
-// progress without the body being forced open.
+// (no auto-open while streaming, no auto-close on completion). The header
+// tracks progress live while streaming, without forcing the body open.
 const collapseKey = computed(() => groupCollapseKey(props.messageId, props.items))
 const open = ref(getCollapseOpen(collapseKey.value) ?? false)
 watch(collapseKey, (key) => {
@@ -137,8 +136,10 @@ function toggle() {
   setCollapseOpen(collapseKey.value, open.value)
 }
 
+// Any tool still executing (a live foreground tool during streaming, or a
+// background task outliving the turn). Drives the shimmer only; the label
+// choice is `active`-gated (see headerLabel).
 const anyToolRunning = computed(() => toolItems.value.some(tool => tool.running))
-const running = computed(() => props.active === true || anyToolRunning.value)
 
 function basename(path: string): string {
   if (!path) return ''
@@ -218,5 +219,10 @@ const tickerLabel = computed(() => {
   return aggregateLabel.value
 })
 
-const headerLabel = computed(() => (running.value ? tickerLabel.value : aggregateLabel.value))
+// The header is a live ticker ONLY while the turn itself is streaming (`active`).
+// A still-running background task inside a finished turn must not keep the
+// ticker alive: "Thinking…" is a claim about the model, and a background
+// command the model started before finishing says nothing about the model.
+// The background tool's own row already shows its running state.
+const headerLabel = computed(() => (props.active ? tickerLabel.value : aggregateLabel.value))
 </script>

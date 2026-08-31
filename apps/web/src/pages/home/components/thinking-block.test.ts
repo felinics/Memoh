@@ -161,4 +161,29 @@ describe('ThinkingBlock', () => {
 
     expect(disclosureButton(historical.root).textContent).toContain('Thought for 4s')
   })
+
+  it('shows the worded label instead of a rounded-up 1s for buffered sub-second reasoning', () => {
+    const messageId = 'buffered-reasoning-message'
+    const blockIdentity = { id: 1, type: 'reasoning' }
+    markReasoningSeen(messageId, blockIdentity)
+    finalizeReasoning(messageId, blockIdentity)
+
+    const buffered = mountThinkingBlock(
+      'a long reasoning text the provider delivered in a single burst',
+      false,
+      messageId,
+      {
+        duration_ms: 488,
+      },
+    )
+
+    expect(disclosureButton(buffered.root).textContent).toContain('Thought briefly')
+    expect(disclosureButton(buffered.root).textContent).not.toContain('Thought for 1s')
+  })
+
+  it('keeps the worded label when no duration was measured at all', () => {
+    const historical = mountThinkingBlock('legacy reasoning without timing', false, 'legacy-reasoning-message')
+
+    expect(disclosureButton(historical.root).textContent).toContain('Thought briefly')
+  })
 })
