@@ -21,7 +21,7 @@ export function useContextLifecycle(options: UseContextLifecycleOptions) {
   const botId = options.botId ?? computed(() => viewTarget.value.botId || storeRefs.currentBotId.value)
   const sessionId = options.sessionId ?? computed(() => viewTarget.value.sessionId)
 
-  const { data, status, asyncStatus } = useQuery({
+  const { data, status } = useQuery({
     key: () => ['context-lifecycle', botId.value ?? '', sessionId.value ?? ''],
     query: async () => {
       const { data } = await getBotsByBotIdSessionsBySessionIdContextLifecycle({
@@ -38,5 +38,5 @@ export function useContextLifecycle(options: UseContextLifecycleOptions) {
     refetchOnWindowFocus: false,
   })
 
-  return { data, status, asyncStatus }
+  return { data, status }
 }

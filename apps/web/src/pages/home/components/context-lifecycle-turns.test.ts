@@ -79,12 +79,14 @@ async function mountTurns(turns: HandlersContextLifecycleTurn[]): Promise<HTMLDi
             selection: 'Selection',
             selectedCount: '{n} selected',
             droppedCount: '{n} dropped',
+            truncatedCount: '{n} truncated',
             dropReasons: 'Drop reasons',
             trust: 'Trust',
             trustSystem: 'System',
             trustWorkspace: 'Workspace',
             trustUser: 'User',
             trustExternal: 'External',
+            unknown: 'Unknown',
             mutations: 'Mutations',
             steps: 'Steps',
             window: 'Window',
@@ -217,7 +219,7 @@ describe('context-lifecycle-turns', () => {
       snapshot: { ...richTurn.snapshot, trust_breakdown: [{ trust: 'system', token_estimate: 1000 }, { token_estimate: 5 }] },
     }])
 
-    expect(texts(root, '[data-testid="trust-label"]')).toEqual(['System', 'unknown'])
+    expect(texts(root, '[data-testid="trust-label"]')).toEqual(['System', 'Unknown'])
   })
 
   it('lists window, stable prefix and cache metrics, omitting zero values', async () => {
@@ -238,7 +240,7 @@ describe('context-lifecycle-turns', () => {
     const root = await mountTurns([richTurn])
 
     expect(texts(root, '[data-testid="step-label"]')).toEqual(['#0', '#1'])
-    expect(texts(root, '[data-testid="step-value"]')).toEqual(['', '2 dropped · 1 · reselected'])
+    expect(texts(root, '[data-testid="step-value"]')).toEqual(['', '2 dropped · 1 truncated · reselected'])
   })
 
   it('omits the steps block for a single clean step', async () => {

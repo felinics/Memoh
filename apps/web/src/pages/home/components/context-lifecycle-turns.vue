@@ -251,7 +251,7 @@ function selectionText(snapshot: ContextfragLifecycleSnapshot): string {
 function dropReasonRows(snapshot: ContextfragLifecycleSnapshot): LabeledValue[] {
   return groupDroppedDecisions(snapshot.selection_decisions).map(group => ({
     key: group.reason,
-    label: group.reason,
+    label: group.reason === 'unknown' ? t('chat.lifecycle.unknown') : group.reason,
     value: `${group.count} · ${formatTokenCount(group.tokens)}`,
   }))
 }
@@ -262,7 +262,7 @@ function trustRows(snapshot: ContextfragLifecycleSnapshot): LabeledValue[] {
     const labelKey = TRUST_LABEL_KEY[trust]
     return {
       key: trust || `trust-${index}`,
-      label: labelKey ? t(labelKey) : trust || 'unknown',
+      label: labelKey ? t(labelKey) : trust || t('chat.lifecycle.unknown'),
       value: formatTokenCount(entry.token_estimate ?? 0),
     }
   })
@@ -302,7 +302,7 @@ function stepRows(snapshot: ContextfragLifecycleSnapshot): LabeledValue[] {
     label: `#${step.step_index ?? index}`,
     value: [
       (step.dropped ?? 0) > 0 ? t('chat.lifecycle.droppedCount', { n: step.dropped }) : '',
-      (step.truncated ?? 0) > 0 ? String(step.truncated) : '',
+      (step.truncated ?? 0) > 0 ? t('chat.lifecycle.truncatedCount', { n: step.truncated }) : '',
       step.reselection_outcome?.trim() ?? '',
     ].filter(Boolean).join(' · '),
   }))
