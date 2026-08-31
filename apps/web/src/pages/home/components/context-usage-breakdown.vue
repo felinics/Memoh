@@ -1,12 +1,24 @@
 <template>
   <div class="space-y-1.5 text-body">
-    <div class="flex h-1.5 w-full overflow-hidden rounded-full bg-accent">
+    <div class="relative flex h-1.5 w-full overflow-hidden rounded-full bg-accent">
       <div
         v-for="category in composition.categories"
         :key="category.id"
         class="h-full"
         :class="category.colorClass"
         :style="{ width: segmentWidth(category.tokens) }"
+      />
+      <template v-if="showReserve">
+        <div class="h-full flex-1" />
+        <div
+          class="h-full bg-border"
+          :style="{ width: segmentWidth(reserveTokens) }"
+        />
+      </template>
+      <div
+        v-if="autoCompactMark"
+        class="absolute inset-y-0 w-px bg-muted-foreground"
+        :style="{ left: autoCompactMark.left }"
       />
     </div>
     <div>
@@ -26,6 +38,12 @@
         >{{ formatTokenCount(row.tokens) }}</span>
       </div>
     </div>
+    <p
+      v-if="autoCompactMark"
+      class="text-caption text-muted-foreground"
+    >
+      {{ $t('chat.infoAutoCompactAt', { tokens: autoCompactMark.tokens }) }}
+    </p>
   </div>
 </template>
 
@@ -34,23 +52,36 @@ import { computed } from 'vue'
 import { formatTokenCount } from '../composables/context-categories'
 import type { ContextCategoryId, ContextComposition } from '../composables/context-categories'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   composition: ContextComposition
   contextWindow: number | null
-}>()
+  outputReserve?: number | null
+  autoCompactTokens?: number | null
+}>(), {
+  outputReserve: null,
+  autoCompactTokens: null,
+})
 
 interface LegendRow {
-  id: ContextCategoryId | 'free'
+  id: ContextCategoryId | 'reserve' | 'free'
   colorClass: string
   tokens: number
   muted: boolean
 }
 
-const denominator = computed(() => Math.max(props.contextWindow ?? 0, props.composition.totalTokens))
+const showReserve = computed(() => props.contextWindow != null && props.outputReserve != null)
+const reserveTokens = computed(() => (props.contextWindow == null ? 0 : props.outputReserve ?? 0))
+const denominator = computed(() => Math.max(props.contextWindow ?? 0, props.composition.totalTokens + reserveTokens.value))
 
 function segmentWidth(tokens: number): string {
   return denominator.value > 0 ? `${(tokens / denominator.value) * 100}%` : '0%'
 }
+
+const autoCompactMark = computed(() => {
+  if (props.contextWindow == null || props.autoCompactTokens == null) return null
+  const ratio = denominator.value > 0 ? Math.min(props.autoCompactTokens / denominator.value, 1) : 0
+  return { left: `${ratio * 100}%`, tokens: formatTokenCount(props.autoCompactTokens) }
+})
 
 const legendRows = computed<LegendRow[]>(() => {
   const rows: LegendRow[] = props.composition.categories.map(category => ({
@@ -59,14 +90,21 @@ const legendRows = computed<LegendRow[]>(() => {
     tokens: category.tokens,
     muted: false,
   }))
-  if (props.contextWindow != null) {
+  if (props.contextWindow == null) return rows
+  if (showReserve.value) {
     rows.push({
-      id: 'free',
-      colorClass: 'bg-accent',
-      tokens: Math.max(0, props.contextWindow - props.composition.totalTokens),
+      id: 'reserve',
+      colorClass: 'bg-border',
+      tokens: reserveTokens.value,
       muted: true,
     })
   }
+  rows.push({
+    id: 'free',
+    colorClass: 'bg-accent',
+    tokens: Math.max(0, props.contextWindow - props.composition.totalTokens - reserveTokens.value),
+    muted: true,
+  })
   return rows
 })
 </script>

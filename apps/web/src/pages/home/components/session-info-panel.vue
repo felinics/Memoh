@@ -51,6 +51,8 @@
               v-if="composition"
               :composition="composition"
               :context-window="contextWindow"
+              :output-reserve="outputReserve"
+              :auto-compact-tokens="autoCompactTokens"
             />
             <div
               v-else-if="contextWindow != null && contextWindow > 0"
@@ -145,7 +147,7 @@ const visibleRef = toRef(props, 'visible')
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 
-const { info, usedTokens, composition, contextWindow, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
+const { info, usedTokens, composition, contextWindow, outputReserve, autoCompactTokens, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
   visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,

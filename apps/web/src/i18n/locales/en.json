@@ -1104,6 +1104,7 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
+    "infoAutoCompactAt": "Auto-compact at ~{tokens}",
     "contextBreakdown": {
       "system": "System prompt",
       "rules": "Workspace rules",
@@ -1113,6 +1114,7 @@
       "summary": "Summary",
       "conversation": "Conversation",
       "other": "Other",
+      "reserve": "Output reserve",
       "free": "Free space"
     },
     "infoCacheHitRate": "Cache Hit Rate",

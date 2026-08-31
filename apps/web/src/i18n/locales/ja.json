@@ -1082,6 +1082,7 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
+    "infoAutoCompactAt": "~{tokens} で自動圧縮",
     "contextBreakdown": {
       "system": "システムプロンプト",
       "rules": "ワークスペースルール",
@@ -1091,6 +1092,7 @@
       "summary": "サマリー",
       "conversation": "会話",
       "other": "その他",
+      "reserve": "出力リザーブ",
       "free": "空き容量"
     },
     "infoCacheHitRate": "キャッシュヒット率",

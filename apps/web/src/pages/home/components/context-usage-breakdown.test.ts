@@ -18,6 +18,8 @@ afterEach(() => {
 function mountBreakdown(props: {
   composition: ContextComposition
   contextWindow: number | null
+  outputReserve?: number | null
+  autoCompactTokens?: number | null
 }): HTMLDivElement {
   const root = document.createElement('div')
   document.body.append(root)
@@ -37,8 +39,10 @@ function mountBreakdown(props: {
             summary: 'Summary',
             conversation: 'Conversation',
             other: 'Other',
+            reserve: 'Output reserve',
             free: 'Free space',
           },
+          infoAutoCompactAt: 'Auto-compact at ~{tokens}',
         },
       },
     },
@@ -135,5 +139,73 @@ describe('context-usage-breakdown', () => {
 
     expect(rows).toHaveLength(2)
     expect(root.textContent).not.toContain('Free space')
+  })
+
+  it('pins the output reserve band to the end of the track behind a flexible free gap', () => {
+    const root = mountBreakdown({ composition, contextWindow: 10_000, outputReserve: 2000 })
+    const bars = segments(root)
+
+    expect(bars).toHaveLength(4)
+    expect(nth(bars, 2).classList.contains('flex-1')).toBe(true)
+    expect(nth(bars, 3).classList.contains('bg-border')).toBe(true)
+    expect(nth(bars, 3).style.width).toBe('20%')
+  })
+
+  it('grows the bar denominator so the reserve still fits when the estimate overflows the window', () => {
+    const root = mountBreakdown({
+      composition: { categories: [{ id: 'system', tokens: 6000, colorClass: 'bg-accent-gray' }], totalTokens: 6000 },
+      contextWindow: 4000,
+      outputReserve: 2000,
+    })
+    const bars = segments(root)
+
+    expect(nth(bars, 0).style.width).toBe('75%')
+    expect(nth(bars, 2).style.width).toBe('25%')
+  })
+
+  it('subtracts the reserve from the free-space row and lists it above', () => {
+    const root = mountBreakdown({ composition, contextWindow: 10_000, outputReserve: 2000 })
+    const rows = legendRows(root)
+
+    expect(rows).toHaveLength(4)
+    expect(rowText(nth(rows, 2))).toEqual(['Output reserve', '2.0K'])
+    expect(nth(rows, 2).firstElementChild?.classList.contains('bg-border')).toBe(true)
+    expect(nth(rows, 2).lastElementChild?.classList.contains('text-muted-foreground')).toBe(true)
+    expect(rowText(nth(rows, 3))).toEqual(['Free space', '4.0K'])
+  })
+
+  it('omits the reserve band and row when no output reserve is reported', () => {
+    const root = mountBreakdown({ composition, contextWindow: 10_000 })
+
+    expect(segments(root)).toHaveLength(2)
+    expect(legendRows(root)).toHaveLength(3)
+    expect(root.textContent).not.toContain('Output reserve')
+  })
+
+  it('marks the auto-compact threshold on the track and captions it', () => {
+    const root = mountBreakdown({ composition, contextWindow: 10_000, autoCompactTokens: 8000 })
+    const tick = root.querySelector<HTMLElement>('.w-px')
+
+    expect(tick?.classList.contains('bg-muted-foreground')).toBe(true)
+    expect(tick?.style.left).toBe('80%')
+    expect(root.lastElementChild?.classList.contains('text-caption')).toBe(true)
+    expect(root.lastElementChild?.textContent?.trim()).toBe('Auto-compact at ~8.0K')
+  })
+
+  it('clamps the auto-compact mark to the end of the track', () => {
+    const root = mountBreakdown({ composition, contextWindow: 10_000, autoCompactTokens: 20_000 })
+
+    expect(root.querySelector<HTMLElement>('.w-px')?.style.left).toBe('100%')
+  })
+
+  it('drops the reserve band, reserve row and auto-compact mark when no context window is known', () => {
+    const root = mountBreakdown({ composition, contextWindow: null, outputReserve: 2000, autoCompactTokens: 8000 })
+
+    expect(segments(root)).toHaveLength(2)
+    expect(nth(segments(root), 0).style.width).toBe('25%')
+    expect(legendRows(root)).toHaveLength(2)
+    expect(root.querySelector('.w-px')).toBeNull()
+    expect(root.textContent).not.toContain('Output reserve')
+    expect(root.textContent).not.toContain('Auto-compact')
   })
 })

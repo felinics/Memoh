@@ -65,11 +65,25 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     return raw && raw.categories.length > 0 ? raw : null
   })
   const estimatedTokens = computed(() => composition.value?.totalTokens ?? null)
+  // The budget plan's window is the denominator the backend actually budgets
+  // and compacts against, so it wins over the status-level window; both marks
+  // below are only meaningful against it.
   const contextWindow = computed(() => {
+    const planned = info.value?.context_usage?.budget_plan?.window
+    if (planned != null && planned > 0) return planned
     const fromStatus = info.value?.context_usage?.context_window
     if (fromStatus != null && fromStatus > 0) return fromStatus
     const fallback = options.fallbackContextWindow?.value
     return fallback != null && fallback > 0 ? fallback : null
+  })
+  const outputReserve = computed(() => {
+    const reserve = info.value?.context_usage?.budget_plan?.output_reserve
+    return reserve != null && reserve > 0 ? reserve : null
+  })
+  const autoCompactTokens = computed(() => {
+    const compaction = info.value?.context_usage?.compaction
+    if (compaction?.enabled !== true) return null
+    return compaction.auto_tokens != null && compaction.auto_tokens > 0 ? compaction.auto_tokens : null
   })
   const contextPercent = computed(() => {
     if (contextWindow.value == null || contextWindow.value <= 0) return 0
@@ -126,6 +140,8 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     usedTokens,
     composition,
     contextWindow,
+    outputReserve,
+    autoCompactTokens,
     contextPercent,
     currentBotId,
     sessionId,
