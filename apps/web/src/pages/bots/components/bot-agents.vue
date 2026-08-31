@@ -3,7 +3,7 @@
     <PageShell
       v-if="view === 'list'"
       variant="tab"
-      :title="t('bots.tabs.acp')"
+      :title="t('bots.tabs.agents')"
     >
       <template #actions>
         <Button @click="addOpen = true">
@@ -12,26 +12,34 @@
         </Button>
       </template>
 
-      <div
-        v-if="agentsLoading && agents.length === 0"
-        class="space-y-3"
-      >
-        <Skeleton
+      <SettingsSection v-if="agentsLoading && agents.length === 0">
+        <SettingsRow
           v-for="n in 2"
           :key="n"
-          class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
-        />
-      </div>
+        >
+          <template #leading>
+            <Skeleton class="size-8 rounded-full" />
+          </template>
+          <template #content>
+            <div class="space-y-2">
+              <Skeleton class="h-4 w-32" />
+              <Skeleton class="h-3 w-20" />
+            </div>
+          </template>
+          <Skeleton class="h-5 w-9 rounded-full" />
+        </SettingsRow>
+      </SettingsSection>
 
-      <Empty
-        v-else-if="agents.length === 0"
-        class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
-      >
-        <EmptyHeader>
-          <EmptyTitle>{{ t('bots.agent.emptyTitle') }}</EmptyTitle>
-          <EmptyDescription>{{ t('bots.agent.emptyDescription') }}</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
+      <SettingsSection v-else-if="agents.length === 0">
+        <div class="flex flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+          <div>
+            <p class="text-control font-medium text-foreground">
+              {{ t('bots.agent.emptyTitle') }}
+            </p>
+            <p class="mt-1 text-body text-muted-foreground">
+              {{ t('bots.agent.emptyDescription') }}
+            </p>
+          </div>
           <Button
             variant="outline"
             @click="addOpen = true"
@@ -39,62 +47,42 @@
             <Plus />
             {{ t('bots.agent.add') }}
           </Button>
-        </EmptyContent>
-      </Empty>
+        </div>
+      </SettingsSection>
 
-      <div
-        v-else
-        class="space-y-3"
-      >
-        <div
+      <SettingsSection v-else>
+        <SettingsRow
           v-for="agent in agents"
           :key="agent.id"
-          class="relative flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3.5 transition-colors hover:bg-accent/30 dark:hover:bg-accent"
+          :label="botAgentName(agent)"
+          :description="providerLabel(agent)"
         >
-          <button
-            type="button"
-            class="absolute inset-0 rounded-[var(--radius-menu-shell)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            :aria-label="botAgentName(agent)"
-            @click="openAgent(agent)"
-          />
-
-          <span class="pointer-events-none relative flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
-            <component
-              :is="botAgentIcon(agent, true)"
-              class="size-5"
-            />
-            <StatusDot
-              v-if="agentRowState(agent) === 'on_ready'"
-              status="success"
-              class="absolute -bottom-0.5 -right-0.5 size-2.5! ring-2 ring-card"
-            />
-          </span>
-
-          <span class="pointer-events-none relative min-w-0 flex-1">
-            <span class="block truncate text-sm font-medium text-foreground">
-              {{ botAgentName(agent) }}
+          <template #leading>
+            <span class="flex size-9 items-center justify-center">
+              <component
+                :is="botAgentIcon(agent, true)"
+                class="size-5"
+              />
             </span>
-            <span class="mt-0.5 block truncate text-xs text-muted-foreground">
-              {{ providerLabel(agent) }}
-            </span>
-          </span>
+          </template>
 
-          <div class="relative flex shrink-0 items-center gap-3">
+          <div class="flex items-center gap-2">
             <Badge
-              v-if="agentRowState(agent) === 'on_needs_config'"
-              variant="outline"
+              v-if="agent.enabled !== false && agentNeedsConfig(agent)"
+              variant="warning"
               size="sm"
-              class="border-warning/30 text-warning"
             >
               {{ t('bots.agent.statusNeedsConfig') }}
             </Badge>
-            <Badge
-              v-else-if="agentRowState(agent) === 'off'"
-              variant="outline"
-              size="sm"
+
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="t('common.edit')"
+              @click="openAgent(agent)"
             >
-              {{ t('bots.agent.statusOff') }}
-            </Badge>
+              <Settings />
+            </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
@@ -102,7 +90,6 @@
                   variant="ghost"
                   size="icon-sm"
                   :aria-label="t('common.actions')"
-                  @click.stop
                 >
                   <MoreHorizontal />
                 </Button>
@@ -118,7 +105,6 @@
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <ChevronRight class="size-4 text-muted-foreground/60" />
             <Switch
               :model-value="agent.enabled !== false"
               :disabled="busyAgentIDs.has(agent.id ?? '')"
@@ -126,8 +112,8 @@
               @update:model-value="(value) => setAgentEnabled(agent, !!value)"
             />
           </div>
-        </div>
-      </div>
+        </SettingsRow>
+      </SettingsSection>
 
       <AddBotAgentDialog
         v-model:open="addOpen"
@@ -150,49 +136,49 @@
       />
     </PageShell>
 
-    <section
+    <DetailPane
       v-else
-      class="mx-auto max-w-3xl pt-6 pb-8"
+      width="narrow"
+      :back-label="t('bots.tabs.agents')"
+      @back="closeDetail"
     >
-      <Button
-        variant="ghost"
-        class="mb-6 text-foreground/85"
-        @click="closeDetail()"
-      >
-        <ChevronLeft class="size-4" />
-        {{ t('bots.tabs.acp') }}
-      </Button>
+      <SettingsShell width="narrow">
+        <div class="space-y-8">
+          <SettingsSection v-if="selectedAgent">
+            <SettingsRow
+              :label="t('common.name')"
+              :description="t('bots.agent.nameDescription')"
+              stack="sm"
+            >
+              <Input
+                v-model="selectedName"
+                class="w-full sm:w-56"
+                :aria-label="t('common.name')"
+                @blur="saveSelectedName"
+                @keydown.enter.prevent="saveSelectedName"
+              />
+            </SettingsRow>
+          </SettingsSection>
 
-      <SettingsSection
-        v-if="selectedAgent"
-        class="mb-8"
-      >
-        <SettingsRow
-          :label="t('common.name')"
-          :description="t('bots.agent.nameDescription')"
-          stack="sm"
-        >
-          <Input
-            v-model="selectedName"
-            class="w-full sm:w-56"
-            :aria-label="t('common.name')"
-            @blur="saveSelectedName"
-            @keydown.enter.prevent="saveSelectedName"
+          <SettingsAcpDetail
+            v-if="selectedAgent && selectedProfile"
+            :key="`${botId}:${selectedAgent.id}:${selectedProfile.id}`"
+            :bot-id="botId"
+            :profile="selectedProfile"
+            :form="form"
+            @commit="persistACPForm"
           />
-        </SettingsRow>
-      </SettingsSection>
 
-      <SettingsAcpDetail
-        v-if="selectedAgent && selectedProfile"
-        :key="`${botId}:${selectedAgent.id}:${selectedProfile.id}`"
-        :bot-id="botId"
-        :profile="selectedProfile"
-        :form="form"
-        :agent="selectedAgent"
-        :credential-store="profileData?.credential_store_configured === true"
-        @commit="persistACPForm"
-      />
-    </section>
+          <SettingsDirectAgentDetail
+            v-else-if="selectedAgent && selectedDirectRuntime"
+            :key="`${botId}:${selectedAgent.id}:${selectedDirectRuntime}`"
+            :bot-id="botId"
+            :agent="selectedAgent"
+            @authorized="refreshDirectRuntimeModels"
+          />
+        </div>
+      </SettingsShell>
+    </DetailPane>
   </SwapTransition>
 </template>
 
@@ -204,26 +190,22 @@ import {
   Badge,
   Button,
   ConfirmDeleteDialog,
+  DetailPane,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
   Input,
   PageShell,
   SettingsRow,
   SettingsSection,
+  SettingsShell,
   Skeleton,
-  StatusDot,
   SwapTransition,
   Switch,
   toast,
 } from '@felinic/ui'
-import { ChevronLeft, ChevronRight, MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
+import { MoreHorizontal, Plus, Settings, Trash2 } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdAgentsById,
   getAcpProfiles,
@@ -238,13 +220,16 @@ import {
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
+import SettingsDirectAgentDetail from './settings-direct-agent-detail.vue'
 import AddBotAgentDialog from './add-bot-agent-dialog.vue'
+import { externalAgentModelsQueryKey } from '@/composables/useAgentModelCatalog'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
+  acpAgentDisplayName,
   emptyACPAgentForm,
   ensureACPAgentForm,
-  findMissingRequiredManagedFieldWithCredential,
+  findMissingRequiredManagedField,
   normalizeACPAgentID,
   normalizeACPForm,
   readACPConfig,
@@ -252,7 +237,15 @@ import {
   type ACPAgentForm,
   type ACPForm,
 } from '@/utils/acp'
-import { botAgentIcon, botAgentName, botAgentProvider } from '@/utils/bot-agent'
+import {
+  BOT_AGENT_RUNTIME_CLAUDE_CODE,
+  BOT_AGENT_RUNTIME_CODEX,
+  botAgentIcon,
+  botAgentName,
+  botAgentProvider,
+  isDirectBotAgentConfigured,
+  normalizeBotAgentRuntime,
+} from '@/utils/bot-agent'
 import { useChatStore } from '@/store/chat-list'
 
 const props = defineProps<{ botId: string }>()
@@ -282,8 +275,6 @@ const { data: profileData } = useQuery({
   },
 })
 const profiles = computed<AcpprofilePublicProfile[]>(() => profileData.value?.items ?? [])
-// 服务端 store 不可用时，agent_credential_id 只是历史残留，不构成可用授权。
-const credentialStoreOn = computed(() => profileData.value?.credential_store_configured === true)
 
 const { data: agentData, isLoading: agentsLoading } = useQuery({
   key: () => ['bot-agents', botIdRef.value],
@@ -313,6 +304,10 @@ const selectedProfile = computed(() => {
   const provider = botAgentProvider(selectedAgent.value)
   return profiles.value.find(profile => normalizeACPAgentID(profile.id) === provider) ?? null
 })
+const selectedDirectRuntime = computed(() => {
+  const runtime = normalizeBotAgentRuntime(selectedAgent.value?.runtime)
+  return runtime === BOT_AGENT_RUNTIME_CODEX || runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE ? runtime : ''
+})
 
 const { mutateAsync: updateAgent } = useMutation({
   mutation: async ({ agent, body }: { agent: BotagentsBotAgent; body: { name?: string; enabled?: boolean } }) => {
@@ -334,12 +329,28 @@ const { mutateAsync: updateBot } = useMutation({
     const { data } = await putBotsById({ path: { id: props.botId }, body, throwOnError: true })
     return data
   },
+  onSuccess: (data) => {
+    // Both save paths compose the full metadata tree from botMetadata; write
+    // the server's result back immediately so the next save composes on the
+    // fresh tree instead of a stale snapshot (invalidation refetch is async).
+    if (data) queryCache.setQueryData(['bot', props.botId], data)
+  },
   onSettled: () => {
     void queryCache.invalidateQueries({ key: ['bot', props.botId] })
     void queryCache.invalidateQueries({ key: getBotsQueryKey() })
     void chatStore.refreshBots().catch(() => {})
   },
 })
+
+// Serializes every bot-metadata save on this page: the ACP form and the
+// direct-agent panel each write the whole metadata tree, so two concurrent
+// PUTs would overwrite each other's subtree with a stale snapshot.
+let botMetadataSaveChain: Promise<unknown> = Promise.resolve()
+function withBotMetadataSaveLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = botMetadataSaveChain.then(task, task)
+  botMetadataSaveChain = run.catch(() => undefined)
+  return run
+}
 
 watch([bot, profiles], ([value, list]) => {
   applyMetadataToForm(value?.metadata as Record<string, unknown> | undefined, list)
@@ -360,7 +371,8 @@ function profileFor(agent: BotagentsBotAgent): AcpprofilePublicProfile | null {
 
 function providerLabel(agent: BotagentsBotAgent): string {
   const profile = profileFor(agent)
-  return profile?.display_name?.trim() || botAgentProvider(agent)
+  const provider = botAgentProvider(agent)
+  return profile?.display_name?.trim() || acpAgentDisplayName(provider, provider)
 }
 
 function agentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
@@ -368,16 +380,13 @@ function agentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
 }
 
 function agentNeedsConfig(agent: BotagentsBotAgent): boolean {
+  const directConfigured = isDirectBotAgentConfigured(agent)
+  if (directConfigured !== null) return !directConfigured
   const profile = profileFor(agent)
   if (!profile) return true
   const config = agentForm(profile)
   if (config.setup_mode === 'self') return false
-  return findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setup_mode, credentialStoreOn.value && !!agent.agent_credential_id) !== null
-}
-
-function agentRowState(agent: BotagentsBotAgent): 'off' | 'on_needs_config' | 'on_ready' {
-  if (agent.enabled === false) return 'off'
-  return agentNeedsConfig(agent) ? 'on_needs_config' : 'on_ready'
+  return findMissingRequiredManagedField(profile, config.managed, config.setup_mode) !== null
 }
 
 function openAgent(agent: BotagentsBotAgent) {
@@ -449,7 +458,7 @@ async function persistACPForm() {
     const provider = botAgentProvider(agent)
     const profile = profileFor(agent)
     const config = provider ? normalized.agents[provider] : undefined
-    if (profile && config && !findMissingRequiredManagedFieldWithCredential(profile, config.managed, config.setup_mode, credentialStoreOn.value && !!agent.agent_credential_id)) {
+    if (profile && config && !findMissingRequiredManagedField(profile, config.managed, config.setup_mode)) {
       config.enabled = true
     }
   }
@@ -457,7 +466,7 @@ async function persistACPForm() {
   if (snapshot === lastPersistedSnapshot.value) return
   persistRunning.value = true
   try {
-    await updateBot({ metadata: withACPMetadata(botMetadata.value, normalized, profiles.value) })
+    await withBotMetadataSaveLock(() => updateBot({ metadata: withACPMetadata(botMetadata.value, normalized, profiles.value) }))
     lastPersistedSnapshot.value = snapshot
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
@@ -469,6 +478,13 @@ async function persistACPForm() {
       void persistACPForm()
     }
   }
+}
+
+function refreshDirectRuntimeModels() {
+  const runtime = selectedDirectRuntime.value
+  const agentID = selectedAgent.value?.id
+  if (!runtime || !agentID) return
+  void queryCache.invalidateQueries({ key: externalAgentModelsQueryKey(runtime, props.botId, agentID) })
 }
 
 function closeDetail() {

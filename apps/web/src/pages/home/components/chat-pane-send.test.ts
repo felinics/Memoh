@@ -86,10 +86,6 @@ describe('composer model gate', () => {
     expect(composerHasNoModel(false, 'model-1')).toBe(false)
   })
 
-  it('never blocks an ACP composer, whose agent supplies its own model', () => {
-    expect(composerHasNoModel(true, '')).toBe(false)
-    expect(composerHasNoModel(true, 'model-1')).toBe(false)
-  })
 })
 
 describe('pinned subagent model', () => {

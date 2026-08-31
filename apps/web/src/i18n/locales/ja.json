@@ -201,7 +201,6 @@
       "runtime_conflict": "Agent ランタイムはこの操作を実行できる状態ではありません。更新してからもう一度お試しください。",
       "runtime_limit_reached": "実行中の Agent ランタイムが多すぎます。1 つ終了してからもう一度お試しください。",
       "operation_failed": "Agent ランタイムの操作に失敗しました。もう一度お試しください。",
-      "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。",
       "model_selection_unsupported": "この外部Agentはモデルの切り替えに対応していません。",
       "model_id_required": "モデルを選択して、もう一度お試しください。",
       "model_unavailable": "選択したモデルはこの外部Agentで利用できなくなりました。",
@@ -212,6 +211,9 @@
       "mode_id_required": "セッションモードを選択して、もう一度お試しください。",
       "mode_unavailable": "選択したセッションモードはこの外部 Agent で利用できなくなりました。",
       "config_update_failed": "外部Agentに選択した設定を適用できませんでした。もう一度お試しください。"
+    },
+    "external_agent": {
+      "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。"
     },
     "agent_credential": {
       "not_found": "この Agent アカウントは利用できません。別のアカウントを選択してください。",
@@ -235,6 +237,10 @@
       "access_denied": "コンテキストライフサイクルの診断情報を表示する権限がありません。",
       "not_found": "会話が見つかりませんでした。",
       "load_failed": "コンテキストライフサイクルの診断情報を読み込めませんでした。しばらくしてからもう一度お試しください。"
+    },
+    "external_runtime": {
+      "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
+      "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。"
     }
   },
   "auth": {
@@ -818,8 +824,8 @@
       "list_skills": "スキルを一覧表示",
       "list_models": "モデルを一覧表示",
       "list_workdirs": "作業ディレクトリを一覧表示",
-      "list_acp_agents": "コーディングAgentを一覧表示",
-      "list_acp_agents_one": "コーディングAgentを確認",
+      "list_acp_agents": "ACP Agent を一覧表示",
+      "list_acp_agents_one": "ACP Agent を確認",
       "browser_action": "ブラウザー {action}",
       "browser_observe": "ブラウザー {action} を観察",
       "computer_observe": "デスクトップ {action} を観察",
@@ -1004,13 +1010,13 @@
     "sessionModeCaution": "セッションモードを切り替えると、外部 Agent が実行できる操作が変わる場合があります。ツールの承認は別途必要です。",
     "sessionModeChanged": "セッションモードを切り替えました。ツールの承認は引き続き別途必要です。",
     "noModels": "利用可能なモデルはありません",
-    "defaultACPLoading": "デフォルトAgentはまだ読み込み中です。少し待ってからもう一度お試しください。",
-    "defaultACPNoWorkspaceExec": "デフォルトAgentは有効ですが、Workspaceコマンドを実行する権限がありません。",
-    "defaultACPAgentMissing": "デフォルトAgentは有効ですが、Agentが選択されていません。",
-    "defaultACPAgentUnavailable": "デフォルトAgentは有効ですが、選択されたAgentを利用できません。",
-    "defaultACPAgentDisabled": "デフォルトAgentは有効ですが、選択されたAgentは無効です。",
-    "defaultACPAgentNotConfigured": "デフォルトAgentは有効ですが、選択されたAgentの設定が完了していません。",
-    "acp": {
+    "defaultExternalAgentLoading": "デフォルトAgentはまだ読み込み中です。少し待ってからもう一度お試しください。",
+    "defaultAgentNoWorkspaceExec": "デフォルトAgentは有効ですが、Workspaceコマンドを実行する権限がありません。",
+    "defaultAgentMissing": "デフォルトAgentは有効ですが、Agentが選択されていません。",
+    "defaultAgentUnavailable": "デフォルトAgentは有効ですが、選択されたAgentを利用できません。",
+    "defaultAgentDisabled": "デフォルトAgentは有効ですが、選択されたAgentは無効です。",
+    "defaultAgentNotConfigured": "デフォルトAgentは有効ですが、選択されたAgentの設定が完了していません。",
+    "externalAgent": {
       "agentNotConfigured": "このBotの外部Agent設定が完了していません。",
       "agentCommandStale": "Agentはこのコマンドを提供しなくなりました。コマンドピッカーを開き直して再試行してください。",
       "agentNotFound": "選択された外部Agentは利用できません。",
@@ -1234,7 +1240,8 @@
         "jitter": "ジッター",
         "rtt": "RTT"
       }
-    }
+    },
+    "modelDefaultNamed": "デフォルト（{model}）"
   },
   "models": {
     "title": "モデル",
@@ -1909,7 +1916,8 @@
     "agentCreate": {
       "typeAriaLabel": "エージェントの種類",
       "oauthSettingsHint": "認可は作成後に行います。Bot の設定でいつでも完了できます。",
-      "requiredError": "「{field}」を入力してください"
+      "requiredError": "「{field}」を入力してください",
+      "directSetupHint": "Codex と Claude Code はここでの設定は不要です。作成後に Bot の設定ページでサインインまたは API Key を設定してください。"
     },
     "createBotLocalHint": "ローカル Botはこのコンピューター上のフォルダーを使用し、サンドボックス化されていません。",
     "create": {
@@ -2137,7 +2145,7 @@
       "desktop": "Desktop",
       "toolApproval": "Toolの承認",
       "hooks": "Hooks",
-      "acp": "エージェント",
+      "agents": "エージェント",
       "network": "ネットワーク",
       "memory": "メモリ",
       "channels": "プラットフォーム",
@@ -2166,14 +2174,40 @@
       "namePlaceholder": "Agent 名を入力",
       "nameRequired": "Agent 名を入力してください。",
       "emptyTitle": "Agent はまだありません",
-      "emptyDescription": "Agent を追加すると、この Bot で Codex、Claude Code、Hermes を利用できます。",
+      "emptyDescription": "Agent を追加すると、この Bot で Codex、Claude Code、またはカスタム ACP Agent を利用できます。",
       "statusNeedsConfig": "設定が必要",
       "statusOff": "無効",
       "deleteTitle": "Agent を削除しますか？",
       "deleteDescription": "「{name}」を削除しますか？既存の会話は関連付けを維持しますが、新しい会話では選択できなくなります。",
       "deleted": "Agent を削除しました",
       "deleteFailed": "Agent を削除できませんでした",
-      "nameDescription": "選択画面や会話で Agent を識別する名前です。"
+      "nameDescription": "選択画面や会話で Agent を識別する名前です。",
+      "runtimeSetup": "Runtime の設定",
+      "authMode": "認証方法",
+      "authChatGPT": "ChatGPT アカウント",
+      "authWorkspace": "Workspace の認証情報",
+      "authOAuthToken": "OAuth Token",
+      "authChatGPTDescription": "ChatGPT のサブスクリプションアカウントで Codex を認証します。",
+      "authWorkspaceDescription": "この Bot の Workspace に保存済みの Claude Code ログインを使用します。",
+      "authOAuthTokenDescription": "Claude Code の setup-token で作成した OAuth Token を使用します。",
+      "authApiKeyDescription": "Memoh に保存し、Runtime に渡す API Key を使用します。",
+      "apiKey": "API Key",
+      "apiKeyDescription": "API Key は暗号化して保存され、Runtime でのみこの Agent に渡されます。",
+      "oauthToken": "OAuth Token",
+      "oauthTokenDescription": "Claude Code の setup-token で作成した Token を貼り付けます。",
+      "defaultModel": "デフォルトモデル",
+      "defaultModelDescription": "任意項目です。空欄の場合は External Agent のデフォルトを使用し、会話中に一時的に変更できます。",
+      "defaultModelPlaceholder": "Runtime のデフォルトを使用",
+      "account": "アカウント",
+      "chatgptAccount": "ChatGPT アカウント",
+      "chatgptAccountDescription": "Memoh はこの Agent の ChatGPT 認証情報を暗号化して保存し、Runtime でのみ Codex に渡します。",
+      "chatgptAccountConnectedDescription": "この Agent の ChatGPT 認証情報は暗号化して保存されています。",
+      "reconnect": "再接続",
+      "codexDeviceHint": "認証ページを開き、このワンタイムコードを入力してください。表示された OpenAI の認証ページ以外には入力しないでください。Memoh が認証を自動で完了します。",
+      "codexLoginSuccess": "Codex を ChatGPT アカウントに接続しました",
+      "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
+      "modelsLoadFailed": "Agent のモデルを読み込めませんでした。Agent の設定を確認して、もう一度お試しください。",
+      "openSettings": "Agent の設定を開く"
     },
     "folders": {
       "create": "新しいフォルダ",
@@ -2618,43 +2652,8 @@
       "acpArgumentsHelp": "任意です。1 行に 1 つの引数を入力してください。各行は Shell で解析せず、そのまま個別の引数として渡されます。",
       "acpSetupApiKey": "APIキー",
       "acpSetupOAuth": "OAuth",
-      "acpSetupChatGPT": "チャットGPT",
-      "acpSetupClaude": "クロード",
       "acpSetupSelf": "自己管理",
-      "acpAuthType": "認証",
-      "acpAuthApiKey": "APIキー",
-      "acpAuthChatGPT": "ChatGPTアカウント",
-      "acpProvider": "OpenAI コーデックス Provider",
-      "acpProviderPlaceholder": "Providerを選択してください",
-      "acpProviderRequired": "OpenAI Codex Providerを選択して承認します。",
-      "acpCreateAndAuthorize": "作成と承認",
-      "acpOAuthAuthorize": "承認する",
-      "acpOAuthUnavailable": "Codex 認証を現在のWorkspaceに書き込むことができません。",
-      "acpCodexAccount": "ChatGPT アカウント",
-      "acpClaudeAccount": "Claude アカウント",
-      "acpCodexConnectHint": "ChatGPT アカウントでログインすると、この Bot が Codex を使えます。",
-      "acpClaudeConnectHint": "Claude アカウントでログインすると、この Bot が Claude Code を使えます。",
-      "acpOAuthReconnect": "再接続",
-      "acpCodexDeviceHint": "検証ページを開き、このワンタイムコードを入力してください。このコードは表示された OpenAI の検証URLにのみ入力してください。デバイスコードはフィッシングに悪用される可能性があります。Memoh が自動的に認証を完了します。",
-      "acpCodexDeviceExpired": "デバイスコードの有効期限が切れました。もう一度開始してください。",
-      "acpCodexDeviceFailed": "デバイス認証に失敗しました。もう一度お試しください。",
-      "acpClaudeOAuthUnavailable": "クロード コード認証を現在のWorkspaceに保存できません。",
-      "acpClaudeOAuthCodeHint": "サインイン後にクロードが表示する認証コードを貼り付けます。",
-      "acpClaudeOAuthCodePlaceholder": "認証コード",
-      "acpClaudeOAuthCodeRequired": "クロード認証コードを貼り付けます。",
-      "acpClaudeOAuthExchange": "Tokenの保存",
-      "acpClaudeOAuthExchangeFailed": "クロードTokenの保存に失敗しました",
       "acpSelfModeHint": "Workspace ランタイム内ですでに設定されている Agent（既存のログインなど）を使用します。",
-      "acpHermesSelfModeHint": "この Workspace で構成済みの Hermes Profile を使用します。Memoh で Bot の認証情報を管理する場合は API Key 設定を使用してください。",
-      "acpHermesSelfModeConfirm": "自己管理の Hermes を使用",
-      "acpHermesProviderPlaceholder": "Providerを選択",
-      "acpHermesProviderGemini": "Gemini（Google AI Studio）",
-      "acpHermesProviderOpenRouter": "OpenRouter",
-      "acpHermesProviderOpenAI": "OpenAI API",
-      "acpHermesProviderCustom": "カスタムエンドポイント",
-      "acpHermesModelPlaceholder": "Modelを選択",
-      "acpHermesCustomModel": "カスタムModel ID",
-      "acpHermesCustomModelPlaceholder": "Model IDを入力",
       "acpRequiredField": "{agent} には {field} が必要です。",
       "toolApprovalBypass": "バイパス",
       "toolApprovalMustReview": "要検討",
@@ -2731,7 +2730,8 @@
       "agentCredentialSaved": "API キーを保存しました",
       "agentCredentialConnected": "API キー接続済み",
       "agentCredentialConnectedHint": "この Agent は専用のキーを使用します。新しいキーを保存すると置き換えられます。",
-      "agentCredentialDisconnect": "切断"
+      "agentCredentialDisconnect": "切断",
+      "agentCredentialDisconnectConfirm": "この Agent の認証情報を切断しますか?"
     },
     "access": {
       "title": "アクセス制御",
@@ -3161,14 +3161,14 @@
         "session": "セッション",
         "sessionPlaceholder": "セッションを選択",
         "sessionRuntimeNative": "このセッションは内蔵モデルランタイムを使用し、フォルダを引き継ぎます。",
-        "sessionRuntimeAcp": "このセッションは {agent} で実行され、フォルダを引き継ぎます。",
+        "sessionRuntimeAgent": "このセッションは {agent} で実行され、フォルダを引き継ぎます。",
         "model": "モデル",
         "botDefault": "Bot デフォルト",
         "pickModel": "モデルを選択",
         "noBotDefaultModel": "この Bot にはデフォルトモデルがないため、ここで選んだモデルでタスクを実行します。",
         "noModelAvailable": "この Bot にはデフォルトモデルがなく、選択できるチャットモデルもありません。先に追加してください。",
         "sessionDefault": "セッションのデフォルト",
-        "acpAgents": "コーディング Agent",
+        "externalAgents": "External Agent",
         "agentDefaultModel": "Agent デフォルト",
         "loadingAgentModels": "Agent を起動してモデルを取得中…",
         "agentModelsFailed": "Agent のモデルを取得できませんでした",
@@ -3488,22 +3488,7 @@
         "retry": "再試行"
       },
       "acp": {
-        "deferredHint": "認可は、Bot とワークスペースの準備ができた後の次のステップで行われます。",
-        "oauthTitle": "{agent}を承認する",
-        "oauthAuthorized": "認可された",
-        "oauthNotAuthorized": "まだ認可されていません",
-        "oauthDescription": "認可されると、{agent} はこの Bot のワークスペース内で実行できるようになります。後で Bot 設定で認証をスキップまたは終了することもできます。",
-        "oauthAuthorizeChatGPT": "ChatGPT でサインインする",
-        "oauthAuthorizeClaude": "クロードでサインイン",
-        "oauthDeviceHint": "検証ページを開き、このワンタイムコードを入力してください。このコードは表示された OpenAI の検証URLにのみ入力してください。デバイスコードはフィッシングに悪用される可能性があります。Memoh が自動的に認証を完了します。",
-        "oauthDeviceExpired": "デバイスコードの有効期限が切れました。もう一度開始してください。",
-        "oauthDeviceFailed": "デバイス認証に失敗しました。もう一度お試しください。",
-        "oauthCodeHint": "ポップアップでサインインした後、認証コードをコピーして下に貼り付けます。",
-        "oauthCodePlaceholder": "認証コードを貼り付けます",
-        "oauthExchange": "提出する",
-        "oauthSkip": "今のところスキップしてください",
-        "oauthSuccess": "認可成功",
-        "oauthExchangeFailed": "認証に失敗しました。もう一度お試しください。"
+        "deferredHint": "認可は、Bot とワークスペースの準備ができた後の次のステップで行われます。"
       }
     },
     "im": {

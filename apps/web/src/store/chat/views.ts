@@ -38,8 +38,8 @@ export function createChatViews(deps: ChatViewsDeps) {
   let startSessionRuntime: (botId: string, sessionId: string) => void = () => {}
   let discardDraft: (view: ChatViewEntry) => void = () => {}
   let invalidateDraftCommand: (target: ChatViewTarget) => void = () => {}
-  let saveDraftACP: () => void = () => {}
-  let activateDraftACP: (target: ChatViewTarget) => void = () => {}
+  let saveDraftExternalAgent: () => void = () => {}
+  let activateDraftExternalAgent: (target: ChatViewTarget) => void = () => {}
   let ensureVisibleSummary: (botId: string, sessionId: string) => void = () => {}
   const projectionVersion = ref(0)
 
@@ -307,7 +307,7 @@ export function createChatViews(deps: ChatViewsDeps) {
       ensureVisibleSummary(change.view.botId, change.view.sessionId)
     }
     if (change.view.kind === 'draft' && focusedViewId.value === change.view.viewId) {
-      activateDraftACP({
+      activateDraftExternalAgent({
         botId: change.view.botId,
         sessionId: null,
         viewId: change.view.viewId,
@@ -331,11 +331,11 @@ export function createChatViews(deps: ChatViewsDeps) {
   function focusChatView(viewId: string) {
     const id = viewId.trim()
     if (!id || id === focusedViewId.value) return
-    saveDraftACP()
+    saveDraftExternalAgent()
     focusedViewId.value = id
     const view = chatViews.getPanel(id)
     if (view?.kind === 'draft') {
-      activateDraftACP({ botId: view.botId, sessionId: null, viewId: view.viewId })
+      activateDraftExternalAgent({ botId: view.botId, sessionId: null, viewId: view.viewId })
     }
   }
 
@@ -354,8 +354,8 @@ export function createChatViews(deps: ChatViewsDeps) {
     stopSessionRuntime: (botId: string, sessionId: string) => void
     discardDraft: (view: ChatViewEntry) => void
     invalidateDraftCommand: (target: ChatViewTarget) => void
-    saveDraftACP: () => void
-    activateDraftACP: (target: ChatViewTarget) => void
+    saveDraftExternalAgent: () => void
+    activateDraftExternalAgent: (target: ChatViewTarget) => void
     refreshAppliedHook: typeof refreshAppliedHook
     ensureVisibleSummary: (botId: string, sessionId: string) => void
   }) {
@@ -364,8 +364,8 @@ export function createChatViews(deps: ChatViewsDeps) {
     stopSessionRuntime = options.stopSessionRuntime
     discardDraft = options.discardDraft
     invalidateDraftCommand = options.invalidateDraftCommand
-    saveDraftACP = options.saveDraftACP
-    activateDraftACP = options.activateDraftACP
+    saveDraftExternalAgent = options.saveDraftExternalAgent
+    activateDraftExternalAgent = options.activateDraftExternalAgent
     refreshAppliedHook = options.refreshAppliedHook
     ensureVisibleSummary = options.ensureVisibleSummary
   }

@@ -13,7 +13,6 @@ import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/s
 import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
 import {
   defaultSetupMode,
-  ensureHermesManagedDefaults,
   findMissingRequiredManagedField,
   normalizeACPAgentID,
 } from '@/utils/acp'
@@ -42,15 +41,11 @@ const { setupModeItems, setupModes } = useAcpSetupModeItems(() => props.profile)
 const setupMode = ref('api_key')
 const managed = reactive<Record<string, string>>({})
 
-const isHermes = computed(() => normalizeACPAgentID(props.profile.id) === 'hermes')
-
 const visibleManagedFields = computed(() =>
   filterCreateVisibleManagedFields(props.profile, managed, setupMode.value),
 )
 
-const selfModeHint = computed(() => isHermes.value
-  ? t('bots.settings.acpHermesSelfModeHint')
-  : t('bots.settings.acpSelfModeHint'))
+const selfModeHint = computed(() => t('bots.settings.acpSelfModeHint'))
 
 watch(() => props.profile, (profile) => {
   for (const key of Object.keys(managed)) delete managed[key]
@@ -61,17 +56,11 @@ watch(() => props.profile, (profile) => {
   const modes = setupModes()
   const preferred = defaultSetupMode(profile)
   setupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
-  if (isHermes.value && setupMode.value === 'api_key') {
-    ensureHermesManagedDefaults(managed)
-  }
   errorMessage.value = ''
 }, { immediate: true })
 
 function setSetupMode(mode: string) {
   setupMode.value = mode
-  if (isHermes.value && mode === 'api_key') {
-    ensureHermesManagedDefaults(managed)
-  }
   errorMessage.value = ''
 }
 

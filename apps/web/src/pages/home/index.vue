@@ -76,26 +76,27 @@ const isChatRoute = () => CHAT_ROUTE_NAMES.has(route.name as string)
 
 // One-shot guard so concurrent syncStoreFromUrl() calls can't both start a
 // session for the same redirect. Set synchronously before the first await.
-let acpStartConsumed = false
+let agentStartConsumed = false
 
-function stripAcpQuery() {
-  if (route.query.acp === undefined) return
+function stripAgentQuery() {
+  if (route.query.agent === undefined && route.query.acp === undefined) return
   const query = { ...route.query }
+  delete query.agent
   delete query.acp
   void router.replace({ query })
 }
 
-// When onboarding redirects here with ?acp=<agent>, open an ACP session for the
-// freshly configured agent so the user lands inside it. Read the query at call
-// time (not captured at setup) so it works regardless of mount timing.
-async function maybeStartACPSession() {
-  if (acpStartConsumed) return
-  const raw = route.query.acp
+// When onboarding redirects here with ?agent=<id>, open an External Agent
+// session so the user lands inside it. The old ?acp= spelling remains a
+// read-only compatibility alias for links created before this rename.
+async function maybeStartExternalAgentSession() {
+  if (agentStartConsumed) return
+  const raw = route.query.agent ?? route.query.acp
   if (typeof raw !== 'string' || raw === '') {
-    stripAcpQuery()
+    stripAgentQuery()
     return
   }
-  acpStartConsumed = true
+  agentStartConsumed = true
   const agentId = normalizeACPAgentID(raw)
   try {
     const botId = currentBotId.value?.trim() ?? ''
@@ -103,7 +104,7 @@ async function maybeStartACPSession() {
       const { data } = await getBotsByBotIdAgents({ path: { bot_id: botId }, throwOnError: true })
       const botAgent = data.items?.find(agent => agent.enabled !== false && botAgentProvider(agent) === agentId)
       if (!botAgent?.id) return
-      const { session } = await chatStore.createACPSession({
+      const { session } = await chatStore.createExternalAgentSession({
         botAgentId: botAgent.id,
         agentId,
         projectMode: ACP_NO_PROJECT_MODE,
@@ -117,7 +118,7 @@ async function maybeStartACPSession() {
     // Bot may not have the agent enabled; user can still pick it from the composer.
   } finally {
     // Always strip the one-shot query param, even for malformed/empty values.
-    stripAcpQuery()
+    stripAgentQuery()
   }
 }
 
@@ -127,7 +128,7 @@ async function syncStoreFromUrl(rawName: string) {
     if (!currentBotId.value) {
       await chatStore.initializeWithRecovery()
     }
-    await maybeStartACPSession()
+    await maybeStartExternalAgentSession()
     return
   }
   const resolvedId = await resolveBotIdFromName(urlName)
@@ -140,7 +141,7 @@ async function syncStoreFromUrl(rawName: string) {
       suppressUrlSync = false
     }
   }
-  await maybeStartACPSession()
+  await maybeStartExternalAgentSession()
   // Canonicalize the URL to the bot's name slug. This covers entry points that
   // navigate with a UUID (e.g. returning from settings), where currentBotId is
   // unchanged so the watcher below never fires.

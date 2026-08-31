@@ -1,9 +1,9 @@
 import type { Ref } from 'vue'
 import { getBotsByBotIdSettings } from '@memohai/sdk'
 import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
-import type { ACPAgentSessionInput } from './types'
+import type { ExternalAgentSessionInput } from './types'
 
-interface ACPSettings {
+interface ExternalAgentSettings {
   default_bot_agent_id?: string | null
   chat_runtime?: string
   chat_acp_agent_id?: string | null
@@ -11,41 +11,44 @@ interface ACPSettings {
   chat_acp_project_mode?: string | null
 }
 
-async function fetchACPSettings(botId: string): Promise<ACPSettings | undefined> {
+async function fetchExternalAgentSettings(botId: string): Promise<ExternalAgentSettings | undefined> {
   // The generated SDK currently loses this response type at the public export.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (getBotsByBotIdSettings as any)({
     path: { bot_id: botId },
     throwOnError: true,
   })
-  return data as ACPSettings | undefined
+  return data as ExternalAgentSettings | undefined
 }
 
-export function createACPDefaults(deps: {
+export function createExternalAgentDefaults(deps: {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   explicitSessionSelection: Ref<boolean>
   userScopeGeneration: () => number
   currentSelectRequest: () => number
-  rememberDefault: (botId: string, input: ACPAgentSessionInput | null) => void
+  rememberDefault: (botId: string, input: ExternalAgentSessionInput | null) => void
   cachedDefault: (botId: string) => {
     loaded: boolean
-    input: ACPAgentSessionInput | null
+    input: ExternalAgentSessionInput | null
   }
-  pendingMatches: (input: ACPAgentSessionInput) => boolean
-  stageDefault: (input: ACPAgentSessionInput) => void
+  pendingMatches: (input: ExternalAgentSessionInput) => boolean
+  stageDefault: (input: ExternalAgentSessionInput) => void
 }) {
   async function settingsForAgent(
     botId: string,
     agentId: string,
-  ): Promise<Partial<ACPAgentSessionInput>> {
+  ): Promise<Partial<ExternalAgentSessionInput>> {
     try {
-      const settings = await fetchACPSettings(botId)
-      if (
-        settings?.chat_runtime !== 'acp_agent'
-        || (settings.chat_acp_agent_id ?? '').trim() !== agentId
-      ) return {}
+      const settings = await fetchExternalAgentSettings(botId)
+      const runtime = settings?.chat_runtime ?? ''
+      // Direct defaults store the runtime itself in chat_runtime; the
+      // acp_agent shape carries the agent id in chat_acp_agent_id.
+      const matches = runtime === agentId
+        || (runtime === 'acp_agent' && (settings?.chat_acp_agent_id ?? '').trim() === agentId)
+      if (!settings || !matches) return {}
       return {
+        botAgentId: settings.default_bot_agent_id?.trim() || undefined,
         projectPath: settings.chat_acp_project_path?.trim() || undefined,
         projectMode: settings.chat_acp_project_mode?.trim() || undefined,
       }
@@ -54,18 +57,24 @@ export function createACPDefaults(deps: {
     }
   }
 
-  async function inputFromSettings(botId: string): Promise<ACPAgentSessionInput | null> {
+  async function inputFromSettings(botId: string): Promise<ExternalAgentSessionInput | null> {
     const bid = botId.trim()
     if (!bid) return null
     const generation = deps.userScopeGeneration()
     try {
-      const settings = await fetchACPSettings(bid)
+      const settings = await fetchExternalAgentSettings(bid)
       if (generation !== deps.userScopeGeneration()) return null
-      if (settings?.chat_runtime !== 'acp_agent') {
+      if (!settings) {
         deps.rememberDefault(bid, null)
         return null
       }
-      const agentId = settings.chat_acp_agent_id?.trim() ?? ''
+      const runtime = settings?.chat_runtime ?? ''
+      const isDirect = runtime === 'codex' || runtime === 'claude-code'
+      if (runtime !== 'acp_agent' && !isDirect) {
+        deps.rememberDefault(bid, null)
+        return null
+      }
+      const agentId = isDirect ? runtime : (settings?.chat_acp_agent_id?.trim() ?? '')
       if (!agentId) {
         deps.rememberDefault(bid, null)
         return null
@@ -85,7 +94,7 @@ export function createACPDefaults(deps: {
     }
   }
 
-  async function defaultRuntimeIsACP(botId: string) {
+  async function defaultRuntimeIsExternalAgent(botId: string) {
     return await inputFromSettings(botId) !== null
   }
 
@@ -112,7 +121,7 @@ export function createACPDefaults(deps: {
 
   return {
     settingsForAgent,
-    defaultRuntimeIsACP,
+    defaultRuntimeIsExternalAgent,
     stageFromSettings,
   }
 }

@@ -197,7 +197,7 @@ export function createACPRuntimeRegistry(
     return setACPRuntimeReasoningFor(bid, sid, effort)
   }
 
-  function resetACPRuntimeRegistry() {
+  function resetExternalAgentRuntimeRegistry() {
     registryGeneration += 1
     requests.clear()
     statusVersions.clear()
@@ -220,6 +220,6 @@ export function createACPRuntimeRegistry(
     setACPRuntimeModel,
     setACPRuntimeReasoningFor,
     setACPRuntimeReasoning,
-    resetACPRuntimeRegistry,
+    resetExternalAgentRuntimeRegistry,
   }
 }

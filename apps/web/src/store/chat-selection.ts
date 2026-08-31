@@ -11,7 +11,7 @@ export const useChatSelectionStore = defineStore('chat-selection', () => {
   const sessionId = useTabScopedStorage<string | null>('chat-session-id', null)
   // Persist the user's intent separately from the raw session id. `sessionId`
   // can be written by initialize() when it auto-picks the latest conversation;
-  // default ACP startup must be allowed to override that. A manually selected
+  // default External Agent startup must be allowed to override that. A manually selected
   // or newly-created session is different and should survive reloads.
   const explicitSelection = useTabScopedStorage<boolean>('chat-explicit-selection', false)
   // Did the user intentionally sit on the draft "New Session" page (vs. just never

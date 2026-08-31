@@ -35,6 +35,7 @@ import (
 	agentpayload "github.com/felinics/memoh/internal/agent/event/payload"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
 	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -595,8 +596,20 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 	return driver
 }
 
-func provideDirectAgentDrivers(codex *codexruntime.Driver) external.Drivers {
-	return external.Drivers{codex}
+func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore) *claudecoderuntime.Driver {
+	return claudecoderuntime.NewDriver(
+		workspaceManager,
+		botAgents,
+		credentials,
+		toolApproval,
+		agentsessionadapter.NewStateStore(queries),
+		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
+		log,
+	)
+}
+
+func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderuntime.Driver) external.Drivers {
+	return external.Drivers{codex, claude}
 }
 
 func provideExternalAgentCodexHandler(log *slog.Logger, driver *codexruntime.Driver, botAgents *botagents.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ExternalAgentCodexHandler {

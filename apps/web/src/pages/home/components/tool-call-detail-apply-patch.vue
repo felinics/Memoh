@@ -87,7 +87,13 @@ function resultObject(): Record<string, unknown> {
 
 const patchText = computed(() => {
   const input = asObject(props.block.input)
-  return typeof input.patch === 'string' ? input.patch : ''
+  if (typeof input.patch === 'string') return input.patch
+  const changes = Array.isArray(input.changes) ? input.changes : resultObject().changes
+  if (!Array.isArray(changes)) return ''
+  return changes
+    .map(item => asObject(item).diff)
+    .filter((diff): diff is string => typeof diff === 'string' && diff.length > 0)
+    .join('\n')
 })
 
 const summary = computed(() => {
@@ -114,6 +120,10 @@ const files = computed<PatchFile[]>(() => {
 })
 
 function filesFromResult(result: Record<string, unknown>): PatchFile[] {
+  if (Array.isArray(result.changes)) {
+    const changes = filesFromChanges(result.changes)
+    if (changes.length > 0) return changes
+  }
   const rawFiles = result.files
   if (Array.isArray(rawFiles)) {
     return rawFiles
@@ -139,6 +149,18 @@ function filesFromResult(result: Record<string, unknown>): PatchFile[] {
     }
   }
   return out
+}
+
+function filesFromChanges(changes: unknown[]): PatchFile[] {
+  return changes
+    .map((item) => {
+      const obj = asObject(item)
+      const path = typeof obj.path === 'string' ? obj.path : ''
+      const kind = asObject(obj.kind)
+      const operation = normalizeOperation(kind.type ?? obj.kind ?? obj.operation)
+      return path && operation ? { operation, path } : null
+    })
+    .filter((item): item is PatchFile => Boolean(item))
 }
 
 function filesFromPatch(patch: string): PatchFile[] {

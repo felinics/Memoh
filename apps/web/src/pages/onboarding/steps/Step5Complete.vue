@@ -16,7 +16,7 @@ const { complete, completing } = useOnboarding()
 const visible = ref(false)
 const exiting = ref(false)
 const botResult = readOnboardingBotResult()
-const hasConfiguredAI = botResult?.modelConfigured === true || botResult?.acp?.oauthPending === false
+const hasConfiguredAI = botResult?.modelConfigured === true || !!botResult?.agent
 
 const cards = [
   { icon: Plug, titleKey: 'onboarding.complete.cards.im.title', descKey: 'onboarding.complete.cards.im.desc' },

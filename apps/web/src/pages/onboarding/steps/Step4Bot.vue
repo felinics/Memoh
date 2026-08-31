@@ -14,32 +14,29 @@ import {
   TooltipTrigger,
 } from '@felinic/ui'
 import { SquarePen, CircleHelp, Bot } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { DeviceCodePanel, FieldStack, InlineLoadingRow, toast } from '@felinic/ui'
+import { ref, reactive, computed, watch } from 'vue'
+import { FieldStack, InlineLoadingRow, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getModels, getProviders, getProvidersByIdModels, getMemoryProviders, getAcpProfiles, putBotsByBotIdSettings, putModelsById, type AcpprofilePublicProfile } from '@memohai/sdk'
+import { getModels, getProviders, getProvidersByIdModels, getMemoryProviders, getAcpProfiles, putModelsById, type AcpprofilePublicProfile } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
-import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
-import { acpAgentDisplayName, acpAgentIcon, isClaudeCodeAgent, isCodexAgent, normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { acpAgentDisplayName, normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
 import AgentTypePill from '@/pages/bots/components/agent-type-pill.vue'
-import AcpSetupPanel from '@/pages/bots/components/acp-setup-panel.vue'
+import AcpSetupPanel, { type AcpSetupSelection } from '@/pages/bots/components/acp-setup-panel.vue'
 import { MEMOH_AGENT_VALUE } from '@/pages/bots/components/agent-type'
-import { useStepTransition, nextFrame } from '../useStepTransition'
+import { useStepTransition } from '../useStepTransition'
 import {
   clearOnboardingBotResult,
-  markOnboardingOAuthComplete,
-  readOnboardingOAuthResume,
   readOnboardingProviderId,
-  skipOnboardingOAuth,
   writeOnboardingBotResult,
 } from '../session'
 import { mergeOnboardingModels } from './provider-setup'
@@ -58,13 +55,10 @@ const submitting = ref(false)
 const store = useBotCreateProgressStore()
 const { lines: terminalLines, status: createStatus } = storeToRefs(store)
 
-const oauthResume = readOnboardingOAuthResume()
-const agentType = ref(oauthResume?.agentId ?? MEMOH_AGENT_VALUE)
+const agentType = ref(MEMOH_AGENT_VALUE)
 const acpError = ref('')
 const acpSetupPanelRef = ref<InstanceType<typeof AcpSetupPanel> | null>(null)
-const acpSelection = ref(oauthResume
-  ? { agentId: oauthResume.agentId, setupMode: 'oauth', managed: {} }
-  : null)
+const acpSelection = ref<AcpSetupSelection | null>(null)
 
 const { data: acpProfileData } = useQuery({
   key: ['acp-profiles'],
@@ -74,43 +68,17 @@ const { data: acpProfileData } = useQuery({
   },
 })
 const acpProfiles = computed(() => acpProfileData.value?.items ?? [])
+// codex / claude-code are direct runtimes with no ACP profile: no setup
+// fields here, credentials are configured on the Bot's settings page.
+const selectedDirectRuntime = computed(() => {
+  const value = agentType.value
+  return value === BOT_AGENT_RUNTIME_CODEX || value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? value : ''
+})
 const selectedAcpProfile = computed<AcpprofilePublicProfile | null>(() => {
-  if (agentType.value === MEMOH_AGENT_VALUE) return null
+  if (agentType.value === MEMOH_AGENT_VALUE || selectedDirectRuntime.value) return null
   return acpProfiles.value.find(profile => normalizeACPAgentID(profile.id) === agentType.value) ?? null
 })
 const onboardingProviderId = readOnboardingProviderId()
-const acpAgentId = computed(() => acpSelection.value?.agentId ?? '')
-const acpAgentName = computed(() => acpAgentDisplayName(acpAgentId.value))
-
-// OAuth runs only after the bot + workspace exist, so it lives in a post-create
-// phase of this step (bot-scoped endpoints have no user-scoped equivalent).
-const oauthPhase = ref<'idle' | 'pending'>('idle')
-const oauthVisible = ref(false)
-const oauthBotId = ref('')
-const oauthBotAgentId = ref(oauthResume?.botAgentId ?? '')
-const oauthLeaving = ref(false)
-const claudeCode = ref('')
-const {
-  codexStatus,
-  authorizingCodexDevice,
-  codexAuthorizing,
-  codexDeviceSession,
-  codexDevicePending,
-  claudeStatus,
-  authorizingClaude,
-  exchangingClaude,
-  claudeSessionId,
-  loadCodexStatus,
-  loadClaudeStatus,
-  authorizeCodexDevice,
-  cancelCodexDeviceAuthorization,
-  authorizeClaude,
-  exchangeClaude,
-} = useACPOAuth(() => oauthBotId.value, () => oauthBotAgentId.value)
-
-onMounted(() => {
-  if (oauthResume) enterOAuthPhase(oauthResume.botId)
-})
 
 const form = reactive({
   display_name: '',
@@ -181,7 +149,8 @@ const providers = computed(() => providerData.value ?? [])
 
 const canSubmit = computed(() => {
   if (!form.display_name.trim()) return false
-  if (selectedAcpProfile.value || !onboardingProviderId) return true
+  // Agent runtimes resolve their own model; only a Memoh-model bot needs one.
+  if (selectedAcpProfile.value || selectedDirectRuntime.value || !onboardingProviderId) return true
   if (onboardingModelsStatus.value !== 'success') return false
   return !!form.chat_model_id
 })
@@ -195,6 +164,8 @@ const ctaLabel = computed(() => {
 
 function buildMetadata(): Record<string, unknown> | undefined {
   let metadata: Record<string, unknown> = {}
+
+  if (selectedDirectRuntime.value) return undefined
 
   const selection = acpSelection.value
   if (selection) {
@@ -276,13 +247,20 @@ async function handleSubmit() {
       chat_model_id: form.chat_model_id || undefined,
       memory_provider_id: form.memory_provider_id || undefined,
     },
-    ...(selectedAcpProfile.value && {
-      agent: {
-        name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
-        provider: normalizeACPAgentID(selectedAcpProfile.value.id),
-        deferDefault: acpSelection.value?.setupMode === 'oauth',
-      },
-    }),
+    ...(selectedDirectRuntime.value
+      ? {
+          agent: {
+            name: acpAgentDisplayName(selectedDirectRuntime.value, selectedDirectRuntime.value),
+            provider: selectedDirectRuntime.value,
+            metadata: directBotAgentMetadata(selectedDirectRuntime.value),
+          },
+        }
+      : selectedAcpProfile.value && {
+          agent: {
+            name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
+            provider: normalizeACPAgentID(selectedAcpProfile.value.id),
+          },
+        }),
   })
   submitting.value = false
 
@@ -303,14 +281,14 @@ async function handleSubmit() {
     acpSelection.value = null
   }
 
+  const stagedAgentId = selectedDirectRuntime.value || acpSelection.value?.agentId || ''
   writeOnboardingBotResult({
     botId,
     modelConfigured: !!form.chat_model_id && createResult.settingsApplied,
-    ...(acpSelection.value && {
-      acp: {
-        agentId: acpSelection.value.agentId,
-        botAgentId: createResult.agentId!,
-        oauthPending: acpSelection.value.setupMode === 'oauth',
+    ...(stagedAgentId && createResult.agentId && {
+      agent: {
+        agentId: stagedAgentId,
+        botAgentId: createResult.agentId,
       },
     }),
   })
@@ -322,136 +300,10 @@ async function handleSubmit() {
 
   void queryCache.invalidateQueries({ key: getBotsQueryKey() })
 
-  // OAuth runs after the workspace is ready so the managed token can be
-  // written into the bot-scoped configuration.
-  if (acpSelection.value?.setupMode === 'oauth') {
-    store.reset()
-    enterOAuthPhase(botId, createResult.agentId!)
-    return
-  }
-
   leave(nextStep)
   store.reset()
 }
 
-function enterOAuthPhase(botId: string, botAgentId = oauthBotAgentId.value) {
-  oauthBotId.value = botId
-  oauthBotAgentId.value = botAgentId
-  oauthPhase.value = 'pending'
-  claudeCode.value = ''
-  oauthVisible.value = false
-  nextFrame(() => {
-    oauthVisible.value = true
-  })
-  if (isCodexAgent(acpAgentId.value)) void loadCodexStatus()
-  if (isClaudeCodeAgent(acpAgentId.value)) void loadClaudeStatus()
-}
-
-const oauthAuthorized = computed(() => {
-  if (isCodexAgent(acpAgentId.value)) {
-    return !!codexStatus.value?.has_token ||
-      codexDeviceSession.value?.status === 'success' ||
-      !!codexDeviceSession.value?.has_token
-  }
-  if (isClaudeCodeAgent(acpAgentId.value)) return !!claudeStatus.value?.has_token
-  return false
-})
-
-// 码还能用(或刚过期、可就地重取)时才展示面板;error/cancelled 只由状态行和
-// toast 交代 —— 留一张废码在页面上只会误导。
-const codexDevicePanel = computed(() => {
-  const session = codexDeviceSession.value
-  if (!session || session.bot_id !== oauthBotId.value || session.has_token) return null
-  const usable = session.status === 'pending' || session.status === 'writing' || session.status === 'expired'
-  return usable ? session : null
-})
-
-const codexDeviceExpired = computed(() =>
-  !!codexDeviceSession.value &&
-  codexDeviceSession.value.bot_id === oauthBotId.value &&
-  codexDeviceSession.value.status === 'expired',
-)
-
-const oauthStatusText = computed(() => {
-  if (oauthAuthorized.value) return t('onboarding.bot.acp.oauthAuthorized')
-  if (codexDevicePending.value) return t('provider.oauth.status.pendingDevice')
-  if (codexDeviceExpired.value) return t('onboarding.bot.acp.oauthDeviceExpired')
-  return t('onboarding.bot.acp.oauthNotAuthorized')
-})
-
-const oauthStatusTextClass = computed(() =>
-  oauthAuthorized.value || codexDevicePending.value
-    ? 'text-muted-foreground'
-    : 'text-destructive',
-)
-
-async function authorizeCodexDeviceFlow() {
-  const ok = await authorizeCodexDevice()
-  if (!ok) toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
-}
-
-async function cancelCodexDeviceFlow() {
-  await cancelCodexDeviceAuthorization()
-}
-
-watch(() => codexDeviceSession.value?.status, (status, previousStatus) => {
-  if (!status || status === previousStatus) return
-  if (status === 'success') {
-    toast.success(t('onboarding.bot.acp.oauthSuccess'))
-    return
-  }
-  if (status === 'expired') {
-    toast.error(t('onboarding.bot.acp.oauthDeviceExpired'))
-    return
-  }
-  if (status === 'error') {
-    toast.error(codexDeviceSession.value?.error || t('onboarding.bot.acp.oauthDeviceFailed'))
-  }
-})
-
-async function authorizeClaudeFlow() {
-  const ok = await authorizeClaude()
-  if (ok === false) toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
-}
-
-async function exchangeClaudeFlow() {
-  const ok = await exchangeClaude(claudeCode.value)
-  if (ok) {
-    claudeCode.value = ''
-    toast.success(t('onboarding.bot.acp.oauthSuccess'))
-  } else {
-    toast.error(t('onboarding.bot.acp.oauthExchangeFailed'))
-  }
-}
-
-async function continueFromOAuth() {
-  if (!oauthAuthorized.value || oauthLeaving.value) return
-  oauthLeaving.value = true
-  try {
-    await putBotsByBotIdSettings({
-      path: { bot_id: oauthBotId.value },
-      body: { default_bot_agent_id: oauthBotAgentId.value },
-      throwOnError: true,
-    })
-    void queryCache.invalidateQueries({ key: ['bot-settings', oauthBotId.value] })
-    markOnboardingOAuthComplete()
-    leave(nextStep)
-  } catch {
-    oauthLeaving.value = false
-    toast.error(t('common.saveFailed'))
-  }
-}
-
-async function skipOAuth() {
-  if (oauthLeaving.value) return
-  oauthLeaving.value = true
-  // User skipped OAuth — clear ACP selection so the completion step does not
-  // redirect with ?acp=<agent>. Starting an ACP session without a token would
-  // fail on the first prompt; the user can authorize later via bot settings.
-  if (codexDevicePending.value) await cancelCodexDeviceAuthorization()
-  skipOnboardingOAuth()
-  leave(nextStep)
-}
 </script>
 
 <template>
@@ -462,10 +314,7 @@ async function skipOAuth() {
         title-class="mb-8"
         :visible="visible"
       >
-        <div
-          v-show="oauthPhase !== 'pending'"
-          class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
-        >
+        <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
           <form
             @submit.prevent="handleSubmit"
           >
@@ -538,7 +387,13 @@ async function skipOAuth() {
                 :profiles="acpProfiles"
                 class="mb-3"
               />
-              <template v-if="!selectedAcpProfile">
+              <p
+                v-if="selectedDirectRuntime"
+                class="text-sm text-muted-foreground"
+              >
+                {{ $t('bots.agentCreate.directSetupHint') }}
+              </p>
+              <template v-else-if="!selectedAcpProfile">
                 <div class="mb-2 flex items-center gap-2">
                   <Label>{{ $t('bots.settings.chatModel') }}</Label>
                   <Tooltip>
@@ -615,129 +470,7 @@ async function skipOAuth() {
           </form>
         </div>
 
-        <div
-          v-if="oauthPhase === 'pending'"
-          class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1"
-        >
-          <div
-            class="flex items-center gap-3 transition-all duration-[350ms] ease-out"
-            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <component
-              :is="acpAgentIcon(acpAgentId, true)"
-              class="size-7 shrink-0"
-            />
-            <div>
-              <h3 class="text-lg font-semibold">
-                {{ t('onboarding.bot.acp.oauthTitle', { agent: acpAgentName }) }}
-              </h3>
-              <p
-                class="text-xs"
-                :class="oauthStatusTextClass"
-              >
-                {{ oauthStatusText }}
-              </p>
-            </div>
-          </div>
-
-          <p
-            class="mt-4 text-sm text-muted-foreground leading-relaxed transition-all duration-[350ms] ease-out delay-[60ms]"
-            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            {{ t('onboarding.bot.acp.oauthDescription') }}
-          </p>
-
-          <div
-            v-if="isCodexAgent(acpAgentId)"
-            class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
-            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <!-- 签发码之前只有"登录";码在手时这颗按钮的语义变成"放弃这次授权",
-                 所以是替换而不是并排多一颗。 -->
-            <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-              <Button
-                v-if="!codexDevicePending"
-                type="button"
-                variant="outline"
-                :disabled="codexAuthorizing"
-                :loading="authorizingCodexDevice"
-                @click="authorizeCodexDeviceFlow"
-              >
-                {{ t('onboarding.bot.acp.oauthAuthorizeChatGPT') }}
-              </Button>
-              <Button
-                v-else
-                type="button"
-                variant="ghost"
-                @click="cancelCodexDeviceFlow"
-              >
-                {{ t('common.cancel') }}
-              </Button>
-            </div>
-
-            <div
-              v-if="codexDevicePanel"
-              class="rounded-md bg-accent p-4"
-            >
-              <DeviceCodePanel
-                :code="codexDevicePanel.user_code"
-                :verification-uri="codexDevicePanel.verification_url"
-                :expires-at="codexDevicePanel.expires_at ?? ''"
-                :hint="t('onboarding.bot.acp.oauthDeviceHint')"
-                :retry-loading="authorizingCodexDevice"
-                :copy-and-open-label="t('deviceCode.copyAndOpen')"
-                :retry-label="t('deviceCode.retry')"
-                :expired-label="t('deviceCode.codeExpired')"
-                :expires-in-label="(time: string) => t('deviceCode.expiresIn', { time })"
-                :copy-failed-message="t('deviceCode.copyFailed')"
-                @retry="authorizeCodexDeviceFlow"
-              />
-            </div>
-          </div>
-
-          <div
-            v-else-if="isClaudeCodeAgent(acpAgentId)"
-            class="mt-5 space-y-3 transition-all duration-[350ms] ease-out delay-[100ms]"
-            :class="oauthVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
-          >
-            <Button
-              type="button"
-              variant="outline"
-              class="h-10"
-              :loading="authorizingClaude"
-              @click="authorizeClaudeFlow"
-            >
-              {{ t('onboarding.bot.acp.oauthAuthorizeClaude') }}
-            </Button>
-
-            <div
-              v-if="claudeSessionId && !oauthAuthorized"
-              class="space-y-2"
-            >
-              <p class="text-xs text-muted-foreground leading-relaxed">
-                {{ t('onboarding.bot.acp.oauthCodeHint') }}
-              </p>
-              <div class="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  v-model="claudeCode"
-                  :placeholder="t('onboarding.bot.acp.oauthCodePlaceholder')"
-                  class="h-10 min-w-0 flex-1"
-                />
-                <Button
-                  type="button"
-                  class="h-10 shrink-0"
-                  :loading="exchangingClaude"
-                  @click="exchangeClaudeFlow"
-                >
-                  {{ t('onboarding.bot.acp.oauthExchange') }}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <FooterNav
-          v-if="oauthPhase !== 'pending'"
           class="delay-[220ms]"
           :visible="visible"
           :prev-label="t('onboarding.prev')"
@@ -774,17 +507,6 @@ async function skipOAuth() {
             </button>
           </template>
         </FooterNav>
-
-        <FooterNav
-          v-else
-          class="delay-[140ms]"
-          :visible="oauthVisible"
-          :prev-label="t('onboarding.bot.acp.oauthSkip')"
-          :next-label="t('onboarding.next')"
-          :next-disabled="!oauthAuthorized"
-          @prev="skipOAuth"
-          @next="continueFromOAuth"
-        />
 
         <AvatarEditDialog
           v-model:open="avatarDialogOpen"

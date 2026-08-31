@@ -125,7 +125,7 @@ const chatStoreMock = vi.hoisted(() => ({
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>>,
-  pendingACPSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
+  pendingExternalAgentSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
   draftViewRequested: undefined as unknown as ReturnType<typeof ref<{
     botId: string
     viewId: string
@@ -172,7 +172,7 @@ const chatStoreMock = vi.hoisted(() => ({
     chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
   }),
   resetToEmptyComposer: vi.fn((options?: {
-    clearPendingACP?: boolean
+    clearPendingExternalAgent?: boolean
     explicitSelection?: boolean
     draftIntent?: boolean
   }) => {
@@ -207,8 +207,8 @@ vi.mock('@/store/chat-list', () => ({
     get guiToolUseRequested() {
       return chatStoreMock.guiToolUseRequested.value
     },
-    get pendingACPSessionInput() {
-      return chatStoreMock.pendingACPSessionInput.value
+    get pendingExternalAgentSessionInput() {
+      return chatStoreMock.pendingExternalAgentSessionInput.value
     },
     get draftViewRequested() {
       return chatStoreMock.draftViewRequested.value
@@ -658,7 +658,7 @@ describe('workspace layout store', () => {
     chatStoreMock.hasExplicitSessionSelection = false
     chatStoreMock.loadingChats = false
     chatStoreMock.deletedSession = ref(null)
-    chatStoreMock.pendingACPSessionInput = ref(null)
+    chatStoreMock.pendingExternalAgentSessionInput = ref(null)
     chatStoreMock.draftViewRequested = ref(null)
     chatStoreMock.forkedSessionRequested = ref(null)
     chatStoreMock.userSentInSession = ref(null)
@@ -683,7 +683,7 @@ describe('workspace layout store', () => {
       chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
     })
     chatStoreMock.resetToEmptyComposer.mockImplementation((options?: {
-      clearPendingACP?: boolean
+      clearPendingExternalAgent?: boolean
       explicitSelection?: boolean
       draftIntent?: boolean
     }) => {
@@ -981,22 +981,6 @@ describe('workspace layout store', () => {
     expect(store.ephemeralPanels[rightDraft.id]).toBeUndefined()
   })
 
-  it('marks sidebar-created draft chats as non-explicit so default ACP can stage', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openDraftChat({ title: 'New Session', explicitSelection: false })
-
-    const draft = dock.panels.find((p) => p.component === 'chat')
-    expect(draft?.params).toMatchObject({ sessionId: null, explicitSelection: false })
-
-    store.openTerminal()
-    store.openDraftChat({ title: 'New Session', explicitSelection: false })
-
-    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
-  })
-
   it('keeps a non-explicit draft non-explicit after an explicit session was active', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
@@ -1010,29 +994,6 @@ describe('workspace layout store', () => {
     expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: false })
     expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
     expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
-  })
-
-  it('switches the active stale chat tab to draft when default ACP stages later', async () => {
-    const selection = useChatSelectionStore()
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 'native-session', title: 'Native Session' })
-    expect(dock.activePanel?.params.sessionId).toBe('native-session')
-
-    chatStoreMock.sessionId = null
-    chatStoreMock.hasExplicitSessionSelection = false
-    selection.setSession(null, { explicitSelection: false })
-    await nextTick()
-    expect(dock.activePanel?.params.sessionId).toBe('native-session')
-
-    chatStoreMock.pendingACPSessionInput.value = { agentId: 'codex' }
-    await nextTick()
-
-    expect(dock.activePanel?.component).toBe('chat')
-    expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: false })
-    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
   })
 
   it('opens an explicit draft from a stale active chat session', async () => {
@@ -1222,7 +1183,7 @@ describe('workspace layout store', () => {
     expect(dock.panels.map(panel => panel.component).sort()).toEqual(['file', 'preview'])
     expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
     expect(chatStoreMock.resetToEmptyComposer).toHaveBeenCalledWith({
-      clearPendingACP: false,
+      clearPendingExternalAgent: false,
       explicitSelection: false,
       draftIntent: false,
     })

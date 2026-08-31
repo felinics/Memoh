@@ -77,9 +77,9 @@ export function acpSlashCommandComposerText(command: ACPAvailableCommand): strin
 
 export function composerLocalQuickActionID(
   text: string,
-  usesACPComposer: boolean,
+  usesExternalAgentComposer: boolean,
 ): '' | 'compact' | 'model' {
-  if (usesACPComposer) return ''
+  if (usesExternalAgentComposer) return ''
   switch (text.trim().toLowerCase()) {
     case '/compact':
       return 'compact'

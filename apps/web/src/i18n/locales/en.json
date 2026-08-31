@@ -204,7 +204,6 @@
       "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
       "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
       "operation_failed": "The Agent runtime operation failed. Please try again.",
-      "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
       "model_selection_unsupported": "This external agent does not support model selection.",
       "model_id_required": "Choose a model and try again.",
       "model_unavailable": "The selected model is no longer available for this external agent.",
@@ -215,6 +214,9 @@
       "mode_id_required": "Choose a session mode and try again.",
       "mode_unavailable": "The selected session mode is no longer available for this external agent.",
       "config_update_failed": "The external agent could not apply the selected settings. Please retry."
+    },
+    "external_agent": {
+      "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead."
     },
     "agent_credential": {
       "not_found": "This Agent account is no longer available. Choose another account.",
@@ -238,6 +240,10 @@
       "access_denied": "You do not have access to context lifecycle diagnostics.",
       "not_found": "The conversation was not found.",
       "load_failed": "Context lifecycle diagnostics could not be loaded. Please try again."
+    },
+    "external_runtime": {
+      "auth_required": "Codex is not connected yet. Open Agent settings to connect ChatGPT or configure an API key.",
+      "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again."
     }
   },
   "auth": {
@@ -847,8 +853,8 @@
       "list_skills": "List skills",
       "list_models": "List models",
       "list_workdirs": "List workdirs",
-      "list_acp_agents": "List coding agents",
-      "list_acp_agents_one": "Inspect coding agent",
+      "list_acp_agents": "List ACP agents",
+      "list_acp_agents_one": "Inspect ACP agent",
       "browser_action": "Browser {action}",
       "browser_observe": "Observe browser {action}",
       "computer_observe": "Observe desktop {action}",
@@ -1036,13 +1042,13 @@
     "modelOptions": "Options",
     "modelEffort": "Effort",
     "noModels": "No models available",
-    "defaultACPLoading": "Default Agent is still loading. Try again in a moment.",
-    "defaultACPNoWorkspaceExec": "Default Agent is enabled, but you do not have permission to run workspace commands.",
-    "defaultACPAgentMissing": "Default Agent is enabled, but no agent is selected.",
-    "defaultACPAgentUnavailable": "Default Agent is enabled, but the selected agent is unavailable.",
-    "defaultACPAgentDisabled": "Default Agent is enabled, but the selected agent is disabled.",
-    "defaultACPAgentNotConfigured": "Default Agent is enabled, but the selected agent is not configured.",
-    "acp": {
+    "defaultExternalAgentLoading": "Default Agent is still loading. Try again in a moment.",
+    "defaultAgentNoWorkspaceExec": "Default Agent is enabled, but you do not have permission to run workspace commands.",
+    "defaultAgentMissing": "Default Agent is enabled, but no agent is selected.",
+    "defaultAgentUnavailable": "Default Agent is enabled, but the selected agent is unavailable.",
+    "defaultAgentDisabled": "Default Agent is enabled, but the selected agent is disabled.",
+    "defaultAgentNotConfigured": "Default Agent is enabled, but the selected agent is not configured.",
+    "externalAgent": {
       "agentNotConfigured": "External agent setup is incomplete for this bot.",
       "agentCommandStale": "The agent no longer offers this command. Reopen the command picker and try again.",
       "agentNotFound": "The selected external agent is unavailable.",
@@ -1275,7 +1281,8 @@
         "jitter": "Jitter",
         "rtt": "RTT"
       }
-    }
+    },
+    "modelDefaultNamed": "Default ({model})"
   },
   "models": {
     "title": "Models",
@@ -1920,7 +1927,8 @@
     "agentCreate": {
       "typeAriaLabel": "Agent type",
       "oauthSettingsHint": "Authorization happens after creation — finish it anytime in the bot's settings.",
-      "requiredError": "Please fill in \"{field}\""
+      "requiredError": "Please fill in \"{field}\"",
+      "directSetupHint": "Codex and Claude Code need no setup here — finish sign-in or API keys on the Bot's settings page after creation."
     },
     "createBotLocalHint": "Local bots use a folder on this computer and are not sandboxed.",
     "create": {
@@ -2148,7 +2156,7 @@
       "desktop": "Desktop",
       "toolApproval": "Tool Approval",
       "hooks": "Hooks",
-      "acp": "Agents",
+      "agents": "Agents",
       "network": "Network",
       "memory": "Memory",
       "channels": "Platforms",
@@ -2177,14 +2185,40 @@
       "namePlaceholder": "Enter an Agent name",
       "nameRequired": "Enter an Agent name.",
       "emptyTitle": "No Agents yet",
-      "emptyDescription": "Add an Agent to let this Bot use Codex, Claude Code, or Hermes.",
+      "emptyDescription": "Add an Agent to let this Bot use Codex, Claude Code, or a custom ACP Agent.",
       "statusNeedsConfig": "Needs setup",
       "statusOff": "Disabled",
       "deleteTitle": "Delete Agent?",
       "deleteDescription": "Delete \"{name}\"? Existing conversations keep their binding, but this Agent cannot be selected for new conversations.",
       "deleted": "Agent deleted",
       "deleteFailed": "Failed to delete Agent",
-      "nameDescription": "This name identifies the Agent in selectors and conversations."
+      "nameDescription": "This name identifies the Agent in selectors and conversations.",
+      "runtimeSetup": "Runtime setup",
+      "authMode": "Authentication",
+      "authChatGPT": "ChatGPT account",
+      "authWorkspace": "Workspace credentials",
+      "authOAuthToken": "OAuth token",
+      "authChatGPTDescription": "Authorize Codex with a ChatGPT subscription account.",
+      "authWorkspaceDescription": "Use the Claude Code login already stored in this Bot's workspace.",
+      "authOAuthTokenDescription": "Use an OAuth token created with Claude Code setup-token.",
+      "authApiKeyDescription": "Use an API key stored by Memoh and injected into the runtime.",
+      "apiKey": "API Key",
+      "apiKeyDescription": "The API key is encrypted at rest and provided only to this Agent at runtime.",
+      "oauthToken": "OAuth token",
+      "oauthTokenDescription": "Paste the token created by Claude Code setup-token.",
+      "defaultModel": "Default model",
+      "defaultModelDescription": "Optional. Leave blank to use the external Agent's default; conversations can still override it.",
+      "defaultModelPlaceholder": "Use runtime default",
+      "account": "Account",
+      "chatgptAccount": "ChatGPT account",
+      "chatgptAccountDescription": "Memoh encrypts this Agent's ChatGPT credentials and provides them to Codex only at runtime.",
+      "chatgptAccountConnectedDescription": "This Agent's ChatGPT credentials are encrypted at rest.",
+      "reconnect": "Reconnect",
+      "codexDeviceHint": "Open the verification page and enter this one-time code. Only enter it on the OpenAI verification address shown there. Memoh will finish authorization automatically.",
+      "codexLoginSuccess": "Codex is connected to ChatGPT",
+      "codexLoginFailed": "Codex account authorization failed. Try again.",
+      "modelsLoadFailed": "Couldn’t load Agent models. Check the Agent setup and try again.",
+      "openSettings": "Open Agent settings"
     },
     "folders": {
       "create": "New folder",
@@ -2620,43 +2654,8 @@
       "acpArgumentsHelp": "Optional. Enter one argument per line; each line is passed directly without shell parsing.",
       "acpSetupApiKey": "API Key",
       "acpSetupOAuth": "OAuth",
-      "acpSetupChatGPT": "ChatGPT",
-      "acpSetupClaude": "Claude",
       "acpSetupSelf": "Self-managed",
-      "acpAuthType": "Authentication",
-      "acpAuthApiKey": "API Key",
-      "acpAuthChatGPT": "ChatGPT Account",
-      "acpProvider": "OpenAI Codex Provider",
-      "acpProviderPlaceholder": "Select a provider",
-      "acpProviderRequired": "Select and authorize an OpenAI Codex provider.",
-      "acpCreateAndAuthorize": "Create & Authorize",
-      "acpOAuthAuthorize": "Authorize",
-      "acpOAuthUnavailable": "Codex auth cannot be written to the current workspace.",
-      "acpCodexAccount": "ChatGPT account",
-      "acpClaudeAccount": "Claude account",
-      "acpCodexConnectHint": "Sign in with a ChatGPT account to let this bot run Codex.",
-      "acpClaudeConnectHint": "Sign in with a Claude account to let this bot run Claude Code.",
-      "acpOAuthReconnect": "Reconnect",
-      "acpCodexDeviceHint": "Open the verification page and enter this one-time code. Only enter it on the displayed OpenAI verification URL; device codes can be used for phishing. Memoh will finish authorization automatically.",
-      "acpCodexDeviceExpired": "Device code expired. Start again to continue.",
-      "acpCodexDeviceFailed": "Device authorization failed. Try again.",
-      "acpClaudeOAuthUnavailable": "Claude Code auth cannot be saved for the current workspace.",
-      "acpClaudeOAuthCodeHint": "Paste the authorization code Claude shows after sign-in.",
-      "acpClaudeOAuthCodePlaceholder": "Authorization code",
-      "acpClaudeOAuthCodeRequired": "Paste the Claude authorization code.",
-      "acpClaudeOAuthExchange": "Save Token",
-      "acpClaudeOAuthExchangeFailed": "Failed to save Claude token",
       "acpSelfModeHint": "Uses the Agent you've already configured inside the workspace runtime (e.g. an existing login).",
-      "acpHermesSelfModeHint": "Uses the Hermes profile already configured in this workspace. Use API Key setup for Memoh-managed bot credentials.",
-      "acpHermesSelfModeConfirm": "Use self-managed Hermes",
-      "acpHermesProviderPlaceholder": "Select a provider",
-      "acpHermesProviderGemini": "Gemini (Google AI Studio)",
-      "acpHermesProviderOpenRouter": "OpenRouter",
-      "acpHermesProviderOpenAI": "OpenAI API",
-      "acpHermesProviderCustom": "Custom endpoint",
-      "acpHermesModelPlaceholder": "Select a model",
-      "acpHermesCustomModel": "Custom model ID",
-      "acpHermesCustomModelPlaceholder": "Enter model ID",
       "acpStatusNeedsConfig": "Needs setup",
       "acpStatusOff": "Disabled",
       "acpEmptyTitle": "No agents available",
@@ -2734,7 +2733,8 @@
       "agentCredentialSaved": "API key saved",
       "agentCredentialConnected": "API key connected",
       "agentCredentialConnectedHint": "This Agent uses its own stored key. Saving a new key replaces it.",
-      "agentCredentialDisconnect": "Disconnect"
+      "agentCredentialDisconnect": "Disconnect",
+      "agentCredentialDisconnectConfirm": "Disconnect this Agent credential?"
     },
     "access": {
       "title": "Access Control",
@@ -3176,14 +3176,14 @@
         "session": "Session",
         "sessionPlaceholder": "Pick a session",
         "sessionRuntimeNative": "This session uses the built-in model runtime; its workdir is kept.",
-        "sessionRuntimeAcp": "This session runs through {agent}; its workdir is kept.",
+        "sessionRuntimeAgent": "This session runs through {agent}; its workdir is kept.",
         "model": "Model",
         "botDefault": "Bot default",
         "pickModel": "Pick a model",
         "noBotDefaultModel": "This bot has no default model, so the task runs on the one you pick here.",
         "noModelAvailable": "This bot has no default model and there is no chat model to pick. Add one first.",
         "sessionDefault": "Session default",
-        "acpAgents": "Coding agents",
+        "externalAgents": "External agents",
         "agentDefaultModel": "Agent default",
         "loadingAgentModels": "Starting agent to load models…",
         "agentModelsFailed": "Could not load the agent's models",
@@ -3503,22 +3503,7 @@
         "retry": "Retry"
       },
       "acp": {
-        "deferredHint": "Authorization happens in the next step, after the bot and its workspace are ready.",
-        "oauthTitle": "Authorize {agent}",
-        "oauthAuthorized": "Authorized",
-        "oauthNotAuthorized": "Not authorized yet",
-        "oauthDescription": "Once authorized, {agent} can run inside this bot's workspace. You can also skip and finish authorization later in bot settings.",
-        "oauthAuthorizeChatGPT": "Sign in with ChatGPT",
-        "oauthAuthorizeClaude": "Sign in with Claude",
-        "oauthDeviceHint": "Open the verification page and enter this one-time code. Only enter it on the displayed OpenAI verification URL; device codes can be used for phishing. Memoh will finish authorization automatically.",
-        "oauthDeviceExpired": "Device code expired. Start again to continue.",
-        "oauthDeviceFailed": "Device authorization failed. Try again.",
-        "oauthCodeHint": "After signing in on the popup, copy the authorization code and paste it below.",
-        "oauthCodePlaceholder": "Paste authorization code",
-        "oauthExchange": "Submit",
-        "oauthSkip": "Skip for now",
-        "oauthSuccess": "Authorization successful",
-        "oauthExchangeFailed": "Authorization failed, please try again"
+        "deferredHint": "Authorization happens in the next step, after the bot and its workspace are ready."
       }
     },
     "im": {

@@ -267,7 +267,8 @@ function firstLine(s: string, max = 80): string {
 
 function lineCount(s: string): number {
   if (!s) return 0
-  return s.split('\n').length
+  const lines = s.split('\n')
+  return lines.at(-1) === '' ? lines.length - 1 : lines.length
 }
 
 function resultObject(block: ToolCallBlock): Record<string, unknown> {
@@ -296,8 +297,22 @@ function normalizePatchOperation(value: unknown): PatchFileTarget['operation'] |
   return ''
 }
 
+function patchFilesFromChanges(value: unknown): PatchFileTarget[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const obj = asObject(item)
+      const path = pickString(obj, 'path')
+      const operation = normalizePatchOperation(asObject(obj.kind).type ?? obj.kind ?? obj.operation)
+      return path && operation ? { operation, path } : null
+    })
+    .filter((item): item is PatchFileTarget => Boolean(item))
+}
+
 function patchFilesFromResult(block: ToolCallBlock): PatchFileTarget[] {
   const result = resultObject(block)
+  const changes = patchFilesFromChanges(result.changes)
+  if (changes.length > 0) return changes
   const rawFiles = result.files
   if (Array.isArray(rawFiles)) {
     return rawFiles
@@ -352,6 +367,25 @@ function patchLineCounts(patch: string): { add: number; remove: number } {
   for (const line of patch.split('\n')) {
     if (line.startsWith('+')) add++
     else if (line.startsWith('-') && !line.startsWith('***')) remove++
+  }
+  return { add, remove }
+}
+
+function changeLineCounts(value: unknown): { add: number; remove: number } {
+  if (!Array.isArray(value)) return { add: 0, remove: 0 }
+  let add = 0
+  let remove = 0
+  for (const item of value) {
+    const obj = asObject(item)
+    const diff = pickString(obj, 'diff')
+    const operation = normalizePatchOperation(asObject(obj.kind).type ?? obj.kind ?? obj.operation)
+    if (operation === 'add') add += lineCount(diff)
+    else if (operation === 'delete') remove += lineCount(diff)
+    else {
+      const counts = patchLineCounts(diff)
+      add += counts.add
+      remove += counts.remove
+    }
   }
   return { add, remove }
 }
@@ -610,6 +644,24 @@ function resolveToolDisplay(block: ToolCallBlock): ToolDisplay {
       return { ...variant, target: basename(path), fullTarget: path, detail: ToolCallDetailOutput }
     }
     case 'write': {
+      const result = resultObject(block)
+      const changes = patchFilesFromChanges(input.changes)
+      const files = changes.length > 0 ? changes : patchFilesFromResult(block)
+      if (files.length > 0) {
+        const target = files.length === 1 ? basename(files[0]!.path) : `${files.length} files`
+        const fullTarget = files.map(file => `${PATCH_OPERATION_MARK[file.operation]} ${file.path}`).join('\n')
+        const counts = changeLineCounts(Array.isArray(input.changes) ? input.changes : result.changes)
+        return {
+          icon: FilePen,
+          actionKey: 'write',
+          target,
+          fullTarget,
+          detail: ToolCallDetailApplyPatch,
+          defaultOpen: true,
+          diffAdd: counts.add,
+          diffRemove: counts.remove,
+        }
+      }
       const path = pickString(input, 'path')
       const content = pickString(input, 'content')
       const contentLineCount = pickNumber(input, 'content_line_count')

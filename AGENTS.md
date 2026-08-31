@@ -81,9 +81,14 @@ Memoh/
 │   │   ├── decision/           #     User input, tool approval, and stable user-facing feedback
 │   │   ├── event/              #     Agent events and transport payload vocabulary
 │   │   ├── runtime/            #     Runtime implementations
-│   │   │   ├── acp/            #       ACP pool, client process manager, and profiles
+│   │   │   ├── acp/            #       ACP pool, client process manager, and the generic custom-agent profile
+│   │   │   ├── claudecode/     #       Claude Code direct runtime (external.Driver)
+│   │   │   ├── codex/          #       Codex direct runtime (external.Driver)
+│   │   │   ├── external/       #       Neutral Driver port between the application layer and external runtimes
 │   │   │   ├── native/         #       Twilight AI native runtime, prompts, streaming, hooks, and guards
-│   │   │   └── session/        #       Per-thread runtime state and control
+│   │   │   ├── agentstate/     #       External Agent session publication heads and state storage port
+│   │   │   ├── session/        #       Per-thread runtime state and control
+│   │   │   └── toolmount/      #       Memoh tool gateway mounts for direct runtimes
 │   │   ├── sessionmode/        #     Session mode resolution
 │   │   ├── tool/               #     Native tool providers (package name remains tools)
 │   │       ├── message.go      #       Send message tool
@@ -387,7 +392,7 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 
 The codebase has grown beyond the original agent/channel/container core. When working near these areas, read the local `AGENTS.md` and treat the corresponding `internal/` package as the source of truth; do not guess tool or schema details.
 
-- **ACP (`internal/agent/runtime/acp/`)** — runtime pool, client process manager, profiles, and OAuth integration for external ACP agents such as Claude Code and Codex. Stable user-facing ACP errors live in `internal/agent/decision/feedback/`.
+- **External coding-agent runtimes (`internal/agent/runtime/external/`, `codex/`, `claudecode/`)** — the neutral `external.Driver` port plus the direct Codex and Claude Code runtimes (pinned protocol assets, device-code/OAuth login, native thread resume/fork, Memoh tool gateway mounts via `toolmount/`). **ACP (`internal/agent/runtime/acp/`)** is the generic channel for custom user-supplied ACP agents (single generic profile with a managed launch command), folded into the same driver port. Stable user-facing runtime errors live in `internal/agent/decision/feedback/`.
 - **Skill Packages (`internal/skillpackages/`, `internal/supermarket/`)** — Supermarket Package discovery and installation state. Installed Packages expand into immutable Registry Skills in the selected workspace target.
 - **User input / `ask_user` (`internal/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
 - **Bot backup / import / export (`internal/botbackup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.

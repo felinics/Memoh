@@ -397,7 +397,7 @@ interface BotReminder {
 
 const reminders = computed<BotReminder[]>(() => {
   const list: BotReminder[] = []
-  if (settings.value && settings.value.chat_runtime !== 'acp_agent' && !settings.value.chat_model_id) {
+  if (settings.value && (settings.value.chat_runtime ?? 'model') === 'model' && !settings.value.chat_model_id) {
     list.push({
       key: 'model',
       title: t('bots.overview.reminderModelTitle'),

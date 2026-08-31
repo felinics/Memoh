@@ -269,7 +269,16 @@ export interface UIErrorMessage {
   content: string
 }
 
-export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage
+// Runtime degradation notice (tools unavailable, an interaction declined).
+// `name` carries the machine code, `content` the human-readable text.
+export interface UINoticeMessage {
+  id: number
+  type: 'notice'
+  name?: string
+  content: string
+}
+
+export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage | UINoticeMessage
 
 export interface UISkillActivationSkill {
   name: string

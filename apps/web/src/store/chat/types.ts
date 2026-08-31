@@ -7,6 +7,7 @@ import type {
   UIErrorMessage,
   UIForwardRef,
   UIReasoningMessage,
+  UINoticeMessage,
   UIReplyRef,
   UISkillActivation,
   UITextMessage,
@@ -38,6 +39,7 @@ export type ThinkingBlock = UIReasoningMessage
 export type AttachmentItem = UIAttachment
 export type AttachmentBlock = UIAttachmentsMessage
 export type ErrorBlock = UIErrorMessage
+export type NoticeBlock = UINoticeMessage
 
 export interface ToolCallBlock extends UIToolMessage {
   toolCallId: string
@@ -49,7 +51,7 @@ export interface ToolCallBlock extends UIToolMessage {
   backgroundTask?: BackgroundTask
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock
+export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock | NoticeBlock
 
 export interface ChatViewTarget {
   botId: string
@@ -63,18 +65,18 @@ export type ActiveChatTarget =
       sessionId: string
       session: SessionSummary | null
       runtimeType: string
-      isACP: boolean
-      isPendingACP: false
+      isExternalAgent: boolean
+      isPendingExternalAgent: false
       metadata: Record<string, unknown>
       explicitSelection: boolean
     }
   | {
-      kind: 'draft-acp'
+      kind: 'draft-external-agent'
       sessionId: null
       session: null
-      runtimeType: 'acp_agent'
-      isACP: true
-      isPendingACP: true
+      runtimeType: 'acp_agent' | 'codex' | 'claude-code'
+      isExternalAgent: true
+      isPendingExternalAgent: true
       metadata: Record<string, unknown>
       explicitSelection: boolean
     }
@@ -83,8 +85,8 @@ export type ActiveChatTarget =
       sessionId: null
       session: null
       runtimeType: 'model'
-      isACP: false
-      isPendingACP: false
+      isExternalAgent: false
+      isPendingExternalAgent: false
       metadata: Record<string, unknown>
       explicitSelection: boolean
     }
@@ -187,9 +189,11 @@ export interface ChatWorkspaceTargetSnapshot {
 
 export type ChatWorkspaceTargetSelectionSource = 'unset' | 'default' | 'session' | 'user'
 
-export interface ACPAgentSessionInput {
+export interface ExternalAgentSessionInput {
   /** Persisted Agent instance selected for this session. */
   botAgentId?: string
+  /** Runtime owned by the selected Agent. Omitted by legacy ACP callers. */
+  runtime?: 'acp' | 'codex' | 'claude-code'
   /** Temporary ACP provider identity stored in BotAgent metadata. */
   agentId: string
   sessionMode?: 'chat' | 'discuss'

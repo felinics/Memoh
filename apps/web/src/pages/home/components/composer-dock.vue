@@ -19,22 +19,13 @@
         @dismiss-command="emit('dismissCommand')"
       />
     </Transition>
-    <Transition
-      enter-active-class="transition-all duration-150 ease-out"
-      enter-from-class="opacity-0 translate-y-1"
-      enter-to-class="opacity-100 translate-y-0"
-      leave-active-class="transition-all duration-100 ease-in"
-      leave-from-class="opacity-100 translate-y-0"
-      leave-to-class="opacity-0 translate-y-1"
-    >
-      <ChatUserInputForm
-        v-if="pendingUserInput"
-        ref="formEl"
-        :class="composerVisible ? 'mb-2' : ''"
-        :user-input="pendingUserInput"
-        @reveal-composer="handleUserInputReveal"
-      />
-    </Transition>
+    <ChatUserInputForm
+      v-if="pendingUserInput"
+      ref="formEl"
+      :class="composerVisible ? 'mb-2' : ''"
+      :user-input="pendingUserInput"
+      @reveal-composer="handleUserInputReveal"
+    />
     <div
       v-show="composerVisible"
       ref="boxEl"

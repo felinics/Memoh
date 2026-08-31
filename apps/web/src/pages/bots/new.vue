@@ -186,7 +186,13 @@
           :profiles="acpProfiles"
           class="mb-3"
         />
-        <template v-if="!selectedAcpProfile">
+        <p
+          v-if="selectedDirectRuntime"
+          class="text-sm text-muted-foreground"
+        >
+          {{ $t('bots.agentCreate.directSetupHint') }}
+        </p>
+        <template v-else-if="!selectedAcpProfile">
           <Label class="mb-2">{{ $t('bots.settings.chatModel') }}</Label>
           <ModelSelect
             v-model="form.chat_model_id"
@@ -309,7 +315,8 @@ import type { BotsCreateBotRequest, AcpprofilePublicProfile } from '@memohai/sdk
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
-import { normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { acpAgentDisplayName, normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import ModelSelect from './components/model-select.vue'
@@ -462,10 +469,18 @@ const agentType = ref(MEMOH_AGENT_VALUE)
 const acpError = ref('')
 const acpSetupPanelRef = ref<InstanceType<typeof AcpSetupPanel> | null>(null)
 
+// codex / claude-code are direct runtimes with no ACP profile: they need no
+// setup fields at creation (credentials and login are configured on the Bot's
+// settings page afterwards).
+const selectedDirectRuntime = computed(() => {
+  const value = agentType.value
+  return value === BOT_AGENT_RUNTIME_CODEX || value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? value : ''
+})
+
 // Null for the built-in agent; the panel + metadata only exist when a hosted
 // agent is picked.
 const selectedAcpProfile = computed<AcpprofilePublicProfile | null>(() => {
-  if (agentType.value === MEMOH_AGENT_VALUE) return null
+  if (agentType.value === MEMOH_AGENT_VALUE || selectedDirectRuntime.value) return null
   return acpProfiles.value.find(profile => normalizeACPAgentID(profile.id) === agentType.value) ?? null
 })
 
@@ -499,6 +514,7 @@ function handleImported(botId: string) {
 // A hosted agent travels as bot metadata (same shape the onboarding bot step
 // builds); the built-in Memoh agent carries none.
 function buildAcpMetadata(): Record<string, unknown> | undefined {
+  if (selectedDirectRuntime.value) return undefined
   const panel = acpSetupPanelRef.value
   if (!selectedAcpProfile.value || !panel) return undefined
   const selection = panel.selection()
@@ -530,9 +546,6 @@ function buildCreatePayload(): BotsCreateBotRequest {
 }
 
 function createStartOptions() {
-  const setupMode = selectedAcpProfile.value
-    ? acpSetupPanelRef.value?.selection().setupMode
-    : undefined
   return {
     display: {
       display_name: form.display_name.trim(),
@@ -546,13 +559,20 @@ function createStartOptions() {
       // from and the stored value would be a guess.
       reasoning_effort: form.chat_model_id ? form.reasoning_effort || undefined : undefined,
     },
-    ...(selectedAcpProfile.value && {
-      agent: {
-        name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
-        provider: normalizeACPAgentID(selectedAcpProfile.value.id),
-        deferDefault: setupMode === 'oauth',
-      },
-    }),
+    ...(selectedDirectRuntime.value
+      ? {
+          agent: {
+            name: acpAgentDisplayName(selectedDirectRuntime.value, selectedDirectRuntime.value),
+            provider: selectedDirectRuntime.value,
+            metadata: directBotAgentMetadata(selectedDirectRuntime.value),
+          },
+        }
+      : selectedAcpProfile.value && {
+          agent: {
+            name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
+            provider: normalizeACPAgentID(selectedAcpProfile.value.id),
+          },
+        }),
   }
 }
 

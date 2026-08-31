@@ -14,7 +14,6 @@
   "apps/web/src/components/sidebar/panel-schedule.vue": 3,
   "apps/web/src/pages/about/index.vue": 2,
   "apps/web/src/pages/bots/components/backup-section-cards.vue": 6,
-  "apps/web/src/pages/bots/components/bot-acp.vue": 4,
   "apps/web/src/pages/bots/components/bot-card.vue": 1,
   "apps/web/src/pages/bots/components/bot-channels.vue": 2,
   "apps/web/src/pages/bots/components/bot-checks-panel.vue": 3,

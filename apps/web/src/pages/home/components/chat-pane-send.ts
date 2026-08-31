@@ -33,10 +33,10 @@ export function matchesChatPaneSendContext(
 // Only a native composer can be model-less in a way that blocks sending. An ACP
 // agent supplies its own default model, so an empty selection there is normal.
 export function composerHasNoModel(
-  activeUsesACPComposer: boolean,
+  activeUsesExternalAgentComposer: boolean,
   selectedModelId: string,
 ): boolean {
-  return !activeUsesACPComposer && !selectedModelId.trim()
+  return !activeUsesExternalAgentComposer && !selectedModelId.trim()
 }
 
 // pinnedSubagentModelId reads the model a subagent was spawned on off its
@@ -70,10 +70,10 @@ const ACP_STALE_CONFIG_CODES = new Set([
 
 export function shouldRefreshACPComposerConfig(
   result: SendMessageResult,
-  activeUsesACPComposer: boolean,
+  activeUsesExternalAgentComposer: boolean,
 ): boolean {
   return !result.ok
-    && activeUsesACPComposer
+    && activeUsesExternalAgentComposer
     && typeof result.errorCode === 'string'
     && ACP_STALE_CONFIG_CODES.has(result.errorCode)
 }

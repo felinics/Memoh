@@ -25,17 +25,17 @@
         @keydown.enter.prevent="$emit('select', session)"
         @keydown.space.prevent="$emit('select', session)"
       >
-        <!-- Native session rows stay text-only. ACP rows carry the agent icon
+        <!-- Native session rows stay text-only. Agent rows carry the agent icon
              and schedule runs a yellow clock, because the unified Recents list
              mixes model chats, external-agent chats, and schedule runs. -->
         <span
-          v-if="isACPSession"
+          v-if="isAgentSession"
           class="mr-2 flex size-4 shrink-0 items-center justify-center text-muted-foreground"
           role="img"
-          :aria-label="acpAgentLabel"
+          :aria-label="agentLabel"
         >
           <component
-            :is="acpAgentIcon(acpAgentId, true)"
+            :is="acpAgentIcon(agentProvider, true)"
             class="size-4"
             aria-hidden="true"
           />
@@ -184,9 +184,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@felinic/ui'
-import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
+import { acpAgentDisplayName, acpAgentIcon } from '@/utils/acp'
+import { sessionAgentProvider } from '@/utils/bot-agent'
 import { splitScriptRuns } from '@/utils/script-runs'
-import { normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
+import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
 import MarqueeText from './marquee-text.vue'
 
 const props = defineProps<{
@@ -262,19 +263,21 @@ const isIMSession = computed(() => {
   return ct !== '' && !WEB_CHANNELS.has(ct)
 })
 
-const acpAgentId = computed(() => normalizeACPAgentID(
-  props.session.runtime_metadata?.acp_agent_id ?? props.session.metadata?.acp_agent_id,
+const agentProvider = computed(() => sessionAgentProvider(
+  normalizedRuntimeType(props.session),
+  props.session.runtime_metadata,
+  props.session.metadata,
 ))
-const isACPSession = computed(() => normalizedRuntimeType(props.session) === 'acp_agent')
+const isAgentSession = computed(() => isAgentRuntimeType(normalizedRuntimeType(props.session)))
 const isScheduleSession = computed(() => normalizedSessionMode(props.session) === 'schedule')
-const acpAgentLabel = computed(() => acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent')))
+const agentLabel = computed(() => acpAgentDisplayName(agentProvider.value, t('chat.sessionTypeACPAgent')))
 
 // The old two-line subLabel is folded into the native tooltip: channel handle
 // for IM sessions, agent name for ACP sessions.
 const hoverTitle = computed(() => {
   const title = (props.session.title ?? '').trim() || displayLabel.value || t('chat.untitledSession')
-  if (isACPSession.value) {
-    return `${title} — ${acpAgentLabel.value}`
+  if (isAgentSession.value) {
+    return `${title} — ${agentLabel.value}`
   }
   if (!isIMSession.value) return title
   const meta = routeMeta()

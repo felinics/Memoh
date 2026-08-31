@@ -143,10 +143,8 @@ export type AclUpdateRuleRequest = {
 
 export type AcpagentRuntimeStatus = {
     acp_session_id?: string;
-    agent_credential_id?: string;
     agent_id?: string;
     available_commands?: Array<AcpclientAvailableCommandInfo>;
-    bot_agent_id?: string;
     default_model_id?: string;
     models?: AcpclientModelState;
     modes?: AcpclientModeState;
@@ -210,11 +208,6 @@ export type AcpprofileManagedField = {
 };
 
 export type AcpprofileProfilesResponse = {
-    /**
-     * CredentialStoreConfigured reports whether the server can hold encrypted
-     * Agent credentials; the UI falls back to legacy metadata editing when not.
-     */
-    credential_store_configured?: boolean;
     items?: Array<AcpprofilePublicProfile>;
 };
 
@@ -224,7 +217,6 @@ export type AcpprofilePublicProfile = {
     id?: string;
     managed_fields?: Array<AcpprofileManagedField>;
     setup_modes?: Array<string>;
-    supported_auth_kinds?: Array<string>;
     supported_backends?: Array<string>;
 };
 
@@ -591,6 +583,9 @@ export type BotagentsListResponse = {
 
 export type BotagentsUpdateRequest = {
     enabled?: boolean;
+    metadata?: {
+        [key: string]: unknown;
+    };
     name?: string;
 };
 
@@ -1197,7 +1192,7 @@ export type ContextfragContextRef = {
     version?: number;
 };
 
-export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'acp_context' | 'memory_recall' | 'conversation_summary';
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
 
 export type ContextfragKindBreakdown = {
     fragments?: number;
@@ -1242,7 +1237,7 @@ export type ContextfragManifestCounts = {
     token_estimate?: number;
 };
 
-export type ContextfragManifestView = 'run_config_pre_provider' | 'acp_runtime_prompt';
+export type ContextfragManifestView = 'run_config_pre_provider' | 'external_agent_prompt';
 
 export type ContextfragMemoryRecallQueryTrace = {
     recent_messages?: number;
@@ -1411,7 +1406,7 @@ export type ConversationUiMessage = {
     user_input?: ConversationUiUserInput;
 };
 
-export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments' | 'error';
+export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments' | 'error' | 'notice';
 
 export type ConversationUiReasoningTiming = {
     duration_ms?: number;
@@ -1589,6 +1584,41 @@ export type EmailUpdateProviderRequest = {
     provider?: string;
 };
 
+export type ExternalModelCatalog = {
+    configured_model_id?: string;
+    configured_reasoning_effort?: string;
+    models?: Array<ExternalModelOption>;
+};
+
+export type ExternalModelOption = {
+    default?: boolean;
+    default_reasoning_effort?: string;
+    description?: string;
+    id?: string;
+    name?: string;
+    reasoning_efforts?: Array<ExternalReasoningEffortOption>;
+};
+
+export type ExternalReasoningEffortOption = {
+    description?: string;
+    id?: string;
+    name?: string;
+};
+
+export type ExternalagentCodexDeviceLoginAuthorizeResponse = {
+    login_id: string;
+    user_code: string;
+    verification_url: string;
+};
+
+export type ExternalagentCodexDeviceLoginPollRequest = {
+    login_id: string;
+};
+
+export type ExternalagentCodexDeviceLoginPollResponse = {
+    status: 'pending' | 'success' | 'error' | 'unknown';
+};
+
 export type FetchprovidersCreateRequest = {
     config?: {
         [key: string]: unknown;
@@ -1657,54 +1687,6 @@ export type GithubComFelinicsMemohInternalMcpConnection = {
     tools_cache?: Array<McpToolDescriptor>;
     type?: string;
     updated_at?: string;
-};
-
-export type HandlersAcpClaudeCodeOAuthAuthorizeResponse = {
-    auth_url?: string;
-    session_id?: string;
-};
-
-export type HandlersAcpClaudeCodeOAuthExchangeRequest = {
-    code?: string;
-    session_id?: string;
-};
-
-export type HandlersAcpClaudeCodeOAuthStatus = {
-    configured?: boolean;
-    has_token?: boolean;
-};
-
-export type HandlersAcpCodexOAuthAuthorizeResponse = {
-    auth_url?: string;
-};
-
-export type HandlersAcpCodexOAuthDeviceAuthorizeResponse = {
-    expires_at?: string;
-    interval_seconds?: number;
-    session_id?: string;
-    user_code?: string;
-    verification_url?: string;
-};
-
-export type HandlersAcpCodexOAuthDeviceSessionRequest = {
-    session_id: string;
-};
-
-export type HandlersAcpCodexOAuthDeviceStatusResponse = {
-    account_id?: string;
-    error?: string;
-    expires_at?: string;
-    has_token?: boolean;
-    interval_seconds?: number;
-    next_poll_after?: string;
-    status?: string;
-};
-
-export type HandlersAcpCodexOAuthStatus = {
-    account_id?: string;
-    callback_url?: string;
-    configured?: boolean;
-    has_token?: boolean;
 };
 
 export type HandlersBatchDeleteRequest = {
@@ -2505,7 +2487,6 @@ export type HandlersUpdateContainerResourceLimitsRequest = {
 
 export type HandlersAcpRuntimeCreateRequest = {
     acp_agent_id?: string;
-    bot_agent_id?: string;
     project_path?: string;
 };
 
@@ -3170,8 +3151,8 @@ export type ScheduleCreateRequest = {
      */
     acp_agent_id?: string;
     /**
-     * ACPModelID is an agent-reported model identifier override for ACP
-     * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+     * ACPModelID is an agent-reported model identifier override for External
+     * Agent runs. Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
     /**
@@ -3220,8 +3201,8 @@ export type ScheduleExecutionConfig = {
      */
     acp_agent_id?: string;
     /**
-     * ACPModelID is an agent-reported model identifier override for ACP
-     * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+     * ACPModelID is an agent-reported model identifier override for External
+     * Agent runs. Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
     /**
@@ -3291,8 +3272,8 @@ export type ScheduleSchedule = {
      */
     acp_agent_id?: string;
     /**
-     * ACPModelID is an agent-reported model identifier override for ACP
-     * runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+     * ACPModelID is an agent-reported model identifier override for External
+     * Agent runs. Mutually exclusive with ModelID.
      */
     acp_model_id?: string;
     /**
@@ -4761,336 +4742,6 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses = {
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses];
 
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Bot Agent ID (required with the encrypted credential store)
-         */
-        bot_agent_id?: string;
-    };
-    url: '/bots/{bot_id}/acp/claude-code/oauth/authorize';
-};
-
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeError = GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors[keyof GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors];
-
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpClaudeCodeOAuthAuthorizeResponse;
-};
-
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponse = GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses[keyof GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses];
-
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeData = {
-    /**
-     * OAuth exchange request
-     */
-    body: HandlersAcpClaudeCodeOAuthExchangeRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp/claude-code/oauth/exchange';
-};
-
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeError = PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors[keyof PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors];
-
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpClaudeCodeOAuthStatus;
-};
-
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeResponse = PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses[keyof PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses];
-
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Bot Agent ID
-         */
-        bot_agent_id?: string;
-    };
-    url: '/bots/{bot_id}/acp/claude-code/oauth/status';
-};
-
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusError = GetBotsByBotIdAcpClaudeCodeOauthStatusErrors[keyof GetBotsByBotIdAcpClaudeCodeOauthStatusErrors];
-
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpClaudeCodeOAuthStatus;
-};
-
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponse = GetBotsByBotIdAcpClaudeCodeOauthStatusResponses[keyof GetBotsByBotIdAcpClaudeCodeOauthStatusResponses];
-
-export type GetBotsByBotIdAcpCodexOauthAuthorizeData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Bot Agent ID (required with the encrypted credential store)
-         */
-        bot_agent_id?: string;
-    };
-    url: '/bots/{bot_id}/acp/codex/oauth/authorize';
-};
-
-export type GetBotsByBotIdAcpCodexOauthAuthorizeErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdAcpCodexOauthAuthorizeError = GetBotsByBotIdAcpCodexOauthAuthorizeErrors[keyof GetBotsByBotIdAcpCodexOauthAuthorizeErrors];
-
-export type GetBotsByBotIdAcpCodexOauthAuthorizeResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpCodexOAuthAuthorizeResponse;
-};
-
-export type GetBotsByBotIdAcpCodexOauthAuthorizeResponse = GetBotsByBotIdAcpCodexOauthAuthorizeResponses[keyof GetBotsByBotIdAcpCodexOauthAuthorizeResponses];
-
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Bot Agent ID (required with the encrypted credential store)
-         */
-        bot_agent_id?: string;
-    };
-    url: '/bots/{bot_id}/acp/codex/oauth/device/authorize';
-};
-
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeError = PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors[keyof PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors];
-
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpCodexOAuthDeviceAuthorizeResponse;
-};
-
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponse = PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses[keyof PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses];
-
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelData = {
-    /**
-     * Device authorization session
-     */
-    body: HandlersAcpCodexOAuthDeviceSessionRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp/codex/oauth/device/cancel';
-};
-
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelError = PostBotsByBotIdAcpCodexOauthDeviceCancelErrors[keyof PostBotsByBotIdAcpCodexOauthDeviceCancelErrors];
-
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpCodexOAuthDeviceStatusResponse;
-};
-
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelResponse = PostBotsByBotIdAcpCodexOauthDeviceCancelResponses[keyof PostBotsByBotIdAcpCodexOauthDeviceCancelResponses];
-
-export type PostBotsByBotIdAcpCodexOauthDevicePollData = {
-    /**
-     * Device authorization session
-     */
-    body: HandlersAcpCodexOAuthDeviceSessionRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/acp/codex/oauth/device/poll';
-};
-
-export type PostBotsByBotIdAcpCodexOauthDevicePollErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdAcpCodexOauthDevicePollError = PostBotsByBotIdAcpCodexOauthDevicePollErrors[keyof PostBotsByBotIdAcpCodexOauthDevicePollErrors];
-
-export type PostBotsByBotIdAcpCodexOauthDevicePollResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpCodexOAuthDeviceStatusResponse;
-};
-
-export type PostBotsByBotIdAcpCodexOauthDevicePollResponse = PostBotsByBotIdAcpCodexOauthDevicePollResponses[keyof PostBotsByBotIdAcpCodexOauthDevicePollResponses];
-
-export type GetBotsByBotIdAcpCodexOauthStatusData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Bot Agent ID
-         */
-        bot_agent_id?: string;
-    };
-    url: '/bots/{bot_id}/acp/codex/oauth/status';
-};
-
-export type GetBotsByBotIdAcpCodexOauthStatusErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdAcpCodexOauthStatusError = GetBotsByBotIdAcpCodexOauthStatusErrors[keyof GetBotsByBotIdAcpCodexOauthStatusErrors];
-
-export type GetBotsByBotIdAcpCodexOauthStatusResponses = {
-    /**
-     * OK
-     */
-    200: HandlersAcpCodexOAuthStatus;
-};
-
-export type GetBotsByBotIdAcpCodexOauthStatusResponse = GetBotsByBotIdAcpCodexOauthStatusResponses[keyof GetBotsByBotIdAcpCodexOauthStatusResponses];
-
 export type GetBotsByBotIdAgentsData = {
     body?: never;
     path: {
@@ -5289,6 +4940,128 @@ export type PatchBotsByBotIdAgentsByIdResponses = {
 
 export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
 
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/codex/login/device/authorize';
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeError = PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors];
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentCodexDeviceLoginAuthorizeResponse;
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponse = PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponses[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponses];
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelData = {
+    /**
+     * Login reference
+     */
+    body: ExternalagentCodexDeviceLoginPollRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/codex/login/device/cancel';
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelError = PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors];
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollData = {
+    /**
+     * Login reference
+     */
+    body: ExternalagentCodexDeviceLoginPollRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/codex/login/device/poll';
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollError = PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors];
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentCodexDeviceLoginPollResponse;
+};
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponse = PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses];
+
 export type DeleteBotsByBotIdAgentsByIdCredentialData = {
     body?: never;
     path: {
@@ -5403,6 +5176,48 @@ export type PutBotsByBotIdAgentsByIdCredentialResponses = {
 };
 
 export type PutBotsByBotIdAgentsByIdCredentialResponse = PutBotsByBotIdAgentsByIdCredentialResponses[keyof PutBotsByBotIdAgentsByIdCredentialResponses];
+
+export type GetBotsByBotIdAgentsByIdModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/models';
+};
+
+export type GetBotsByBotIdAgentsByIdModelsErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdModelsError = GetBotsByBotIdAgentsByIdModelsErrors[keyof GetBotsByBotIdAgentsByIdModelsErrors];
+
+export type GetBotsByBotIdAgentsByIdModelsResponses = {
+    /**
+     * OK
+     */
+    200: ExternalModelCatalog;
+};
+
+export type GetBotsByBotIdAgentsByIdModelsResponse = GetBotsByBotIdAgentsByIdModelsResponses[keyof GetBotsByBotIdAgentsByIdModelsResponses];
 
 export type PostBotsByBotIdBackupExportData = {
     /**

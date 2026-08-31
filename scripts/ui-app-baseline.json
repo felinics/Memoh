@@ -14,7 +14,6 @@
   "apps/web/src/components/sidebar/session-item.vue": 4,
   "apps/web/src/components/sidebar/session-search-dialog.vue": 1,
   "apps/web/src/pages/bots/components/backup-section-cards.vue": 2,
-  "apps/web/src/pages/bots/components/bot-acp.vue": 2,
   "apps/web/src/pages/bots/components/bot-channels.vue": 3,
   "apps/web/src/pages/bots/components/bot-checks-panel.vue": 3,
   "apps/web/src/pages/bots/components/bot-compaction.vue": 1,

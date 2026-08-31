@@ -27,7 +27,7 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   })
   const pendingState = computed(() => {
     if (!toValue(options.enabled) || !toValue(options.pending)) return null
-    return chatStore.pendingACPStateFor(target.value)
+    return chatStore.pendingExternalAgentStateFor(target.value)
   })
   const agentId = computed(() => toValue(options.agentId).trim())
   const projectPath = computed(() => toValue(options.projectPath).trim())

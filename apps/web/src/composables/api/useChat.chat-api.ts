@@ -39,7 +39,6 @@ export interface CreateSessionOptions {
 
 export interface CreateACPRuntimeOptions {
   agentId: string
-  botAgentId?: string
   projectPath?: string
 }
 
@@ -224,7 +223,6 @@ export async function createACPRuntime(botId: string, options: CreateACPRuntimeO
     path: { bot_id: botId.trim() },
     body: {
       acp_agent_id: options.agentId.trim(),
-      bot_agent_id: options.botAgentId?.trim() || undefined,
       project_path: options.projectPath?.trim(),
     },
     throwOnError: true,

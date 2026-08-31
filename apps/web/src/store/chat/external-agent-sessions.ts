@@ -5,17 +5,18 @@ import {
   updateSessionAgent,
   type SessionSummary,
 } from '@/composables/api/useChat'
+import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentRuntimeForProvider } from '@/utils/bot-agent'
 import { provisionalSessionTitle } from '../chat-list.utils'
-import { acpSessionMetadata } from './acp-staging'
+import { externalAgentDraftMetadata } from './external-agent-staging'
 import { StreamFailureError } from './send'
-import type { ACPAgentSessionInput, ChatViewTarget } from './types'
+import type { ExternalAgentSessionInput, ChatViewTarget } from './types'
 
-interface PendingACPState {
-  input: ACPAgentSessionInput
+interface PendingExternalAgentState {
+  input: ExternalAgentSessionInput
   runtimeId: string
 }
 
-export interface ACPSessionDeps {
+export interface ExternalAgentSessionDeps {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   draftIntent: Ref<boolean>
@@ -23,8 +24,8 @@ export interface ACPSessionDeps {
   focusedViewId: Ref<string>
   userScopeGeneration: () => number
   normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
-  targetDraftForACP: (target?: ChatViewTarget) => ChatViewTarget
-  pendingACPStateFor: (target: ChatViewTarget) => PendingACPState | null
+  targetDraftForExternalAgent: (target?: ChatViewTarget) => ChatViewTarget
+  pendingExternalAgentStateFor: (target: ChatViewTarget) => PendingExternalAgentState | null
   isFocusedTarget: (target: ChatViewTarget) => boolean
   upsertSession: (session: SessionSummary) => void
   rememberSession: (session: SessionSummary) => void
@@ -34,7 +35,7 @@ export interface ACPSessionDeps {
   discardDraftStage: (target: ChatViewTarget) => void
   rememberDraftStage: (
     target: ChatViewTarget,
-    detached: { botId: string; input: ACPAgentSessionInput; runtimeId: string },
+    detached: { botId: string; input: ExternalAgentSessionInput; runtimeId: string },
   ) => void
   activateDraftStage: (target: ChatViewTarget) => void
   markSessionDeleted: (botId: string, sessionId: string) => void
@@ -47,13 +48,13 @@ export interface ACPSessionDeps {
   beginDraftCreation: (target: ChatViewTarget) => void
   endDraftCreation: (target: ChatViewTarget) => void
   // Resolves the bot's working workdir for a new session ('' = no binding).
-  // ACP sessions can only bind native-workspace workdirs, so the resolver is
+  // External Agent sessions can only bind native-workspace workdirs, so the resolver is
   // told which runtime the session will use.
-  draftWorkdirIdFor: (botId: string, opts: { acp: boolean }) => string
+  draftWorkdirIdFor: (botId: string, opts: { externalAgent: boolean }) => string
 }
 
-function normalizedACPInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
-  const metadata = acpSessionMetadata(input)
+function normalizedExternalAgentInput(input: ExternalAgentSessionInput): ExternalAgentSessionInput {
+  const metadata = externalAgentDraftMetadata(input)
   return {
     ...input,
     agentId: String(metadata.acp_agent_id ?? ''),
@@ -62,26 +63,49 @@ function normalizedACPInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
   }
 }
 
-export function createACPSessions(deps: ACPSessionDeps) {
-  async function createACPSessionRecord(
+function agentSessionRuntimeType(input: ExternalAgentSessionInput): string {
+  switch (input.runtime) {
+    case BOT_AGENT_RUNTIME_CODEX:
+    case BOT_AGENT_RUNTIME_CLAUDE_CODE:
+      return input.runtime
+    case BOT_AGENT_RUNTIME_ACP:
+      return 'acp_agent'
+    default:
+      break
+  }
+  // Legacy callers (slash commands, cached defaults) carry only agentId;
+  // direct external agents are addressed by their runtime name, so derive
+  // it here instead of silently creating an acp_agent session the server
+  // will refuse.
+  const derived = botAgentRuntimeForProvider(input.agentId)
+  return derived === BOT_AGENT_RUNTIME_ACP ? 'acp_agent' : derived
+}
+
+function externalAgentSessionMetadata(input: ExternalAgentSessionInput): Record<string, unknown> {
+  return agentSessionRuntimeType(input) === 'acp_agent' ? externalAgentDraftMetadata(input) : {}
+}
+
+export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
+  async function createExternalAgentSessionRecord(
     botId: string,
-    input: ACPAgentSessionInput,
+    input: ExternalAgentSessionInput,
   ): Promise<SessionSummary> {
     const id = botId.trim()
     if (!id) throw new Error('Bot not ready')
-    const metadata = acpSessionMetadata(input)
+    const runtimeType = agentSessionRuntimeType(input)
+    const runtimeMetadata = externalAgentSessionMetadata(input)
     const runtimeId = input.runtimeId?.trim() ?? ''
     const sessionMode = input.sessionMode === 'discuss' ? 'discuss' : 'chat'
-    const workdirId = deps.draftWorkdirIdFor(id, { acp: true })
+    const workdirId = deps.draftWorkdirIdFor(id, { externalAgent: true })
     return createSession(id, {
       botAgentId: input.botAgentId,
       title: input.title ?? '',
       type: sessionMode,
       sessionMode,
-      runtimeType: 'acp_agent',
+      runtimeType,
       metadata: {},
-      runtimeMetadata: metadata,
-      acpRuntimeId: runtimeId || undefined,
+      runtimeMetadata,
+      acpRuntimeId: runtimeType === 'acp_agent' ? runtimeId || undefined : undefined,
       workdirId: workdirId || undefined,
     })
   }
@@ -89,7 +113,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
   async function rollbackFailedCreation(
     created: SessionSummary,
     draft: ChatViewTarget,
-    stagedInput: ACPAgentSessionInput,
+    stagedInput: ExternalAgentSessionInput,
     stagedRuntimeId: string,
     generation: number,
   ) {
@@ -106,7 +130,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
     deps.forgetDraftStage(draft)
     deps.rememberDraftStage(draft, {
       botId: draft.botId,
-      input: normalizedACPInput({ ...stagedInput, runtimeId: undefined }),
+      input: normalizedExternalAgentInput({ ...stagedInput, runtimeId: undefined }),
       runtimeId: '',
     })
     if (deps.isFocusedTarget(draft)) deps.activateDraftStage(draft)
@@ -118,14 +142,14 @@ export function createACPSessions(deps: ACPSessionDeps) {
   }
 
   async function createForTarget(
-    input: ACPAgentSessionInput,
+    input: ExternalAgentSessionInput,
     target: ChatViewTarget,
   ): Promise<{ session: SessionSummary }> {
-    const draft = deps.targetDraftForACP(target)
+    const draft = deps.targetDraftForExternalAgent(target)
     const generation = deps.userScopeGeneration()
-    const stagedBeforeCreate = deps.pendingACPStateFor(draft)
+    const stagedBeforeCreate = deps.pendingExternalAgentStateFor(draft)
     const runtimeId = input.runtimeId?.trim() ?? ''
-    const created = await createACPSessionRecord(draft.botId, input)
+    const created = await createExternalAgentSessionRecord(draft.botId, input)
     if (
       generation !== deps.userScopeGeneration()
       || (deps.currentBotId.value ?? '').trim() !== draft.botId
@@ -161,7 +185,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
     return { session: created }
   }
 
-  async function createACPSession(input: ACPAgentSessionInput) {
+  async function createExternalAgentSession(input: ExternalAgentSessionInput) {
     const botId = deps.currentBotId.value ?? await deps.ensureBot()
     if (!botId) throw new Error('Bot not ready')
     return createForTarget(input, {
@@ -172,7 +196,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
   }
 
   async function updateCurrentSessionAgent(
-    input: ACPAgentSessionInput,
+    input: ExternalAgentSessionInput,
     target?: ChatViewTarget,
   ): Promise<{ session: SessionSummary }> {
     const resolved = deps.normalizeTarget(target)
@@ -180,18 +204,19 @@ export function createACPSessions(deps: ACPSessionDeps) {
     const botId = resolved.botId
     const targetSessionId = resolved.sessionId
     if (!botId) throw new Error('Bot not selected')
-    const metadata = acpSessionMetadata(input)
+    const runtimeType = agentSessionRuntimeType(input)
+    const runtimeMetadata = externalAgentSessionMetadata(input)
     const current = deps.knownSessionSummary(targetSessionId)
     const sessionMode = current?.session_mode
       || (current?.type === 'discuss' ? 'discuss' : 'chat')
     const generation = deps.userScopeGeneration()
     const updated = await updateSessionAgent(botId, targetSessionId, {
       botAgentId: input.botAgentId,
-      type: sessionMode === 'discuss' ? 'discuss' : 'acp_agent',
+      type: sessionMode,
       sessionMode,
-      runtimeType: 'acp_agent',
-      metadata,
-      runtimeMetadata: metadata,
+      runtimeType,
+      metadata: runtimeMetadata,
+      runtimeMetadata,
     })
     if (
       generation !== deps.userScopeGeneration()
@@ -248,11 +273,11 @@ export function createACPSessions(deps: ACPSessionDeps) {
     }
     deps.beginDraftCreation(target)
     try {
-      const pendingACP = deps.pendingACPStateFor(target)
-      if (pendingACP) {
+      const pendingExternalAgent = deps.pendingExternalAgentStateFor(target)
+      if (pendingExternalAgent) {
         const { session: created } = await createForTarget({
-          ...pendingACP.input,
-          runtimeId: pendingACP.runtimeId,
+          ...pendingExternalAgent.input,
+          runtimeId: pendingExternalAgent.runtimeId,
         }, target)
         if (firstPrompt?.trim() && !created.title?.trim()) {
           created.title = provisionalSessionTitle(firstPrompt)
@@ -263,7 +288,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
       }
 
       const generation = deps.userScopeGeneration()
-      const workdirId = deps.draftWorkdirIdFor(target.botId, { acp: false })
+      const workdirId = deps.draftWorkdirIdFor(target.botId, { externalAgent: false })
       const created = await createSession(target.botId, {
         workdirId: workdirId || undefined,
       })
@@ -291,7 +316,7 @@ export function createACPSessions(deps: ACPSessionDeps) {
   }
 
   return {
-    createACPSession,
+    createExternalAgentSession,
     updateCurrentSessionAgent,
     updateCurrentSessionToMemoh,
     ensureChatViewSession,

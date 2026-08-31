@@ -85,13 +85,13 @@ export const useWorkdirsStore = defineStore('workdirs', () => {
   }
 
   // sessionWorkdirIdFor answers "which workdir should this new session bind
-  // to". ACP sessions can only run in native-workspace workdirs (the runtime
+  // to". External Agent sessions can only run in native-workspace workdirs (the runtime
   // cannot reach a remote computer yet), so a remote working workdir is
   // skipped rather than producing a session the backend would reject.
-  function sessionWorkdirIdFor(botId: string | null | undefined, opts: { acp?: boolean } = {}): string {
+  function sessionWorkdirIdFor(botId: string | null | undefined, opts: { externalAgent?: boolean } = {}): string {
     const workdir = workingWorkdirFor(botId)
     if (!workdir?.id) return ''
-    if (opts.acp && workdir.target_kind === 'remote') return ''
+    if (opts.externalAgent && workdir.target_kind === 'remote') return ''
     return workdir.id
   }
 

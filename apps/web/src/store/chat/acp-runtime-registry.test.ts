@@ -93,7 +93,7 @@ describe('ACP runtime registry', () => {
     vi.mocked(transport.ensureACPRuntime).mockReturnValue(request.promise)
 
     const pending = registry.ensureACPRuntime()
-    registry.resetACPRuntimeRegistry()
+    registry.resetExternalAgentRuntimeRegistry()
     request.resolve(runtime('old-user-runtime'))
     await pending
 

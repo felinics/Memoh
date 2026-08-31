@@ -1,18 +1,6 @@
 <!-- eslint-disable vue/no-mutating-props -->
 <template>
   <div class="space-y-8">
-    <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
-      <span class="flex size-9 shrink-0 items-center justify-center">
-        <component
-          :is="acpAgentIcon(profile.id, true)"
-          class="size-5"
-        />
-      </span>
-      <h2 class="truncate text-sm font-semibold">
-        {{ profile.display_name || profile.id }}
-      </h2>
-    </section>
-
     <SettingsSection :title="isGenericACP ? t('bots.settings.acpLaunchSection') : undefined">
       <div class="space-y-5 p-4">
         <SegmentedControl
@@ -24,8 +12,7 @@
           @update:model-value="(mode) => setSetupMode(String(mode))"
         />
 
-        <!-- OAuth 模式下这里可能一个托管字段都不剩(Codex),空的字段栈会白占一格
-             space-y —— 有字段才渲染。 -->
+        <!-- 空的字段栈会白占一格 space-y —— 有字段才渲染。 -->
         <AcpManagedFields
           v-if="agent.setup_mode !== 'self' && visibleManagedFields.length > 0"
           :profile="profile"
@@ -35,563 +22,67 @@
           @field-commit="commitForm"
         />
 
-        <!-- API key 授权：一个实例一份密钥。已连接时显示状态行 + 更换/断开；
-             未连接时只有一个输入框和保存。OAuth 类 profile 的账号区在下方
-             Account section，与 providers 页同形。 -->
-        <FormStack v-if="agent.setup_mode === 'api_key' && credentialUIEnabled">
-          <SettingsRow
-            v-if="attachedCredential"
-            :label="attachedCredential.label || $t('bots.settings.agentCredentialConnected')"
-            :description="$t('bots.settings.agentCredentialConnectedHint')"
-          >
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              :loading="savingCredential"
-              @click="disconnectCredential"
-            >
-              {{ $t('bots.settings.agentCredentialDisconnect') }}
-            </Button>
-          </SettingsRow>
-          <FieldStack :label="$t('bots.settings.agentCredentialSecret')">
-            <Input
-              v-model="credentialSecret"
-              type="password"
-              autocomplete="new-password"
-              :placeholder="$t('bots.settings.agentCredentialSecretPlaceholder')"
-            />
-          </FieldStack>
-          <Button
-            type="button"
-            class="self-start"
-            :loading="savingCredential"
-            :disabled="!credentialSecret.trim()"
-            @click="saveAPIKeyCredential"
-          >
-            {{ attachedCredential ? $t('bots.settings.agentCredentialReplace') : $t('bots.settings.agentCredentialSave') }}
-          </Button>
-        </FormStack>
-
         <p
           v-else-if="agent.setup_mode === 'self'"
           class="break-words text-sm text-muted-foreground"
         >
-          {{ selfModeHint }}
+          {{ t('bots.settings.acpSelfModeHint') }}
         </p>
-        <Button
-          v-if="isHermesSelfConfirmVisible"
-          size="sm"
-          class="mt-3"
-          @click="confirmSelfMode"
-        >
-          {{ $t('bots.settings.acpHermesSelfModeConfirm') }}
-        </Button>
       </div>
-    </SettingsSection>
-
-    <!-- 账号:与 providers 页的 OAuth 卡片同形 —— 一行账号状态 + 行内动作,等待
-         输码时才在卡片内追加居中的验证码块。授权轮询在后台静默完成。 -->
-    <SettingsSection
-      v-if="oauthSectionVisible"
-      :title="$t('provider.oauth.sectionTitle')"
-    >
-      <!-- AutoHeight:验证码块出现/收起时让卡片平滑生长,不硬切。 -->
-      <AutoHeight>
-        <template v-if="isCodex">
-          <!-- 首次加载:借行高稳住卡片,状态到达时不跳动。
-               ui-allow-shape: skeleton borrowing the row height, not a data row. -->
-          <div
-            v-if="codexOAuthStatusLoading && !codexOAuthStatus"
-            class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
-          >
-            <Spinner class="size-5 text-muted-foreground" />
-          </div>
-
-          <!-- 无法把授权写进当前工作区:说明原因,没有可给的动作。 -->
-          <SettingsRow
-            v-else-if="codexOAuthStatus && !codexOAuthStatus.configured"
-            :label="$t('bots.settings.acpCodexAccount')"
-            :description="$t('bots.settings.acpOAuthUnavailable')"
-          />
-
-          <template v-else>
-            <SettingsRow
-              :label="$t('bots.settings.acpCodexAccount')"
-              :description="codexAccountDescription"
-            >
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                class="shrink-0"
-                :disabled="authorizingCodexDevice"
-                :loading="authorizingCodexDevice"
-                loading-mode="manual"
-                @click="codexDevicePending ? handleCancelCodexDeviceAuthorization() : handleAuthorizeDevice()"
-              >
-                <!-- 三态 label:连接 → 连接中…(按下变长,给等待一个视觉挽留点)
-                     → 取消(码到手收短)。已连接时说"重新连接",因为按下会换掉
-                     现有账号,而不是首次接上。 -->
-                <LabelSwap :active="codexButtonState">
-                  <template #connect>
-                    <KeyRound />
-                    {{ $t('provider.oauth.connect') }}
-                  </template>
-                  <template #reconnect>
-                    <KeyRound />
-                    {{ $t('bots.settings.acpOAuthReconnect') }}
-                  </template>
-                  <template #connecting>
-                    <Spinner />
-                    {{ $t('provider.oauth.connecting') }}
-                  </template>
-                  <template #cancel>
-                    {{ $t('common.cancel') }}
-                  </template>
-                </LabelSwap>
-              </Button>
-            </SettingsRow>
-
-            <!-- 输码时刻交给 owner;这层 wrapper 只负责它在卡片里的定位。 -->
-            <div
-              v-if="codexDevicePanelSession"
-              class="mx-4 border-b border-border py-6 last:border-b-0"
-            >
-              <DeviceCodePanel
-                :code="codexDevicePanelSession.user_code"
-                :verification-uri="codexDevicePanelSession.verification_url"
-                :expires-at="codexDevicePanelSession.expires_at ?? ''"
-                :hint="$t('bots.settings.acpCodexDeviceHint')"
-                :retry-loading="authorizingCodexDevice"
-                :copy-and-open-label="$t('deviceCode.copyAndOpen')"
-                :retry-label="$t('deviceCode.retry')"
-                :expired-label="$t('deviceCode.codeExpired')"
-                :expires-in-label="(time: string) => $t('deviceCode.expiresIn', { time })"
-                :copy-failed-message="$t('deviceCode.copyFailed')"
-                @retry="handleAuthorizeDevice"
-              />
-            </div>
-          </template>
-        </template>
-
-        <template v-else-if="isClaude">
-          <!-- ui-allow-shape: skeleton borrowing the row height, not a data row. -->
-          <div
-            v-if="claudeOAuthStatusLoading && !claudeOAuthStatus"
-            class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
-          >
-            <Spinner class="size-5 text-muted-foreground" />
-          </div>
-
-          <SettingsRow
-            v-else-if="claudeOAuthStatus && !claudeOAuthStatus.configured"
-            :label="$t('bots.settings.acpClaudeAccount')"
-            :description="$t('bots.settings.acpClaudeOAuthUnavailable')"
-          />
-
-          <template v-else>
-            <SettingsRow
-              :label="$t('bots.settings.acpClaudeAccount')"
-              :description="claudeAccountDescription"
-            >
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                class="shrink-0"
-                :disabled="authorizingClaudeOAuth"
-                :loading="authorizingClaudeOAuth"
-                loading-mode="manual"
-                @click="handleAuthorizeClaude"
-              >
-                <LabelSwap :active="claudeButtonState">
-                  <template #connect>
-                    <KeyRound />
-                    {{ $t('provider.oauth.connect') }}
-                  </template>
-                  <template #reconnect>
-                    <KeyRound />
-                    {{ $t('bots.settings.acpOAuthReconnect') }}
-                  </template>
-                  <template #connecting>
-                    <Spinner />
-                    {{ $t('provider.oauth.connecting') }}
-                  </template>
-                </LabelSwap>
-              </Button>
-            </SettingsRow>
-
-            <!-- Claude 走的是"授权页给码、回来粘贴"——不是设备码,所以是行内工具块
-                 (说明 + 输入行)的 py-4 档,不是英雄面板的 py-6。 -->
-            <div
-              v-if="claudeExchangeVisible"
-              class="mx-4 space-y-2.5 border-b border-border py-4 last:border-b-0"
-            >
-              <p class="text-body text-muted-foreground">
-                {{ $t('bots.settings.acpClaudeOAuthCodeHint') }}
-              </p>
-              <div class="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  v-model="claudeOAuthCode"
-                  :placeholder="$t('bots.settings.acpClaudeOAuthCodePlaceholder')"
-                  class="min-w-0 flex-1"
-                />
-                <Button
-                  type="button"
-                  class="shrink-0"
-                  :loading="exchangingClaudeOAuth"
-                  @click="handleExchangeClaudeOAuth"
-                >
-                  {{ $t('bots.settings.acpClaudeOAuthExchange') }}
-                </Button>
-              </div>
-            </div>
-          </template>
-        </template>
-      </AutoHeight>
     </SettingsSection>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryCache } from '@pinia/colada'
 import {
-  AutoHeight,
-  Button,
-  DeviceCodePanel,
-  FieldStack,
-  FormStack,
-  Input,
-  LabelSwap,
   SegmentedControl,
-  SettingsRow,
   SettingsSection,
-  Spinner,
-  toast,
 } from '@felinic/ui'
-import { KeyRound } from 'lucide-vue-next'
 import {
   type AcpprofilePublicProfile,
-  deleteBotsByBotIdAgentsByIdCredential,
-  getBotsByBotIdAgentsByIdCredential,
-  putBotsByBotIdAgentsByIdCredential,
-  type BotagentsBotAgent,
 } from '@memohai/sdk'
-import { useACPOAuth } from '@/composables/useACPOAuth'
 import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
-import { getBotsQueryKey } from '@memohai/sdk/colada'
 import {
-  acpAgentIcon,
   ensureACPAgentForm,
-  ensureHermesManagedDefaults,
-  findMissingRequiredManagedFieldWithCredential,
+  findMissingRequiredManagedField,
   isACPAgent,
-  isClaudeCodeAgent,
-  isCodexAgent,
-  normalizeACPAgentID,
   type ACPAgentForm,
   type ACPForm,
 } from '@/utils/acp'
-import { hermesProviderValue } from '@/utils/acp/hermes'
 import { filterSettingsVisibleManagedFields } from '@/utils/acp/setup-fields'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 import AcpManagedFields from './acp-managed-fields.vue'
 
 const props = defineProps<{
   botId: string
   profile: AcpprofilePublicProfile
   form: ACPForm
-  agent?: BotagentsBotAgent
-  credentialStore?: boolean
-  pendingSelfConfirm?: boolean
 }>()
 
-interface ACPDetailCommitOptions {
-  confirmSelf?: boolean
-}
-
 const emit = defineEmits<{
-  commit: [options?: ACPDetailCommitOptions]
+  commit: []
 }>()
 
 const { t } = useI18n()
-const queryCache = useQueryCache()
-const claudeOAuthCode = ref('')
 const { setupModeItems } = useAcpSetupModeItems(() => props.profile)
-const credentialSecret = ref('')
-const savingCredential = ref(false)
-// PUT 刚成功、异步查询还没回填时，commitForm 的守卫需要立刻知道凭据已挂上，
-// 否则 self→api_key 的模式切换永远提交不出去（服务端一直停留在 self）。
-const credentialJustAttached = ref(false)
-const {
-  codexStatus: codexOAuthStatus,
-  codexStatusLoading: codexOAuthStatusLoading,
-  authorizingCodexDevice,
-  codexDeviceSession,
-  codexDevicePending,
-  claudeStatus: claudeOAuthStatus,
-  claudeStatusLoading: claudeOAuthStatusLoading,
-  authorizingClaude: authorizingClaudeOAuth,
-  exchangingClaude: exchangingClaudeOAuth,
-  claudeSessionId: claudeOAuthSessionId,
-  loadCodexStatus: loadOAuthStatus,
-  loadClaudeStatus: loadClaudeOAuthStatus,
-  authorizeCodexDevice,
-  cancelCodexDeviceAuthorization,
-  clearCodexDeviceAuthorization,
-  authorizeClaude,
-  exchangeClaude,
-} = useACPOAuth(() => props.botId, () => botAgentId.value)
 
 const agent = computed<ACPAgentForm>(() => ensureACPAgentForm(props.form, props.profile))
 const isGenericACP = computed(() => isACPAgent(props.profile.id))
-const isCodex = computed(() => isCodexAgent(props.profile.id))
-const isClaude = computed(() => isClaudeCodeAgent(props.profile.id))
-const isHermes = computed(() => normalizeACPAgentID(props.profile.id) === 'hermes')
-const botAgentId = computed(() => props.agent?.id ?? '')
-// 服务端未配置加密 key 时回退 legacy metadata 编辑，凭据 UI 整体隐藏。
-const credentialUIEnabled = computed(() => props.credentialStore === true && !!botAgentId.value)
-const credentialQueryKey = computed(() => ['agent-credential', props.botId, botAgentId.value] as const)
-const { data: attachedCredential } = useQuery({
-  key: () => credentialQueryKey.value,
-  query: async () => {
-    if (!credentialUIEnabled.value) return null
-    const { data, response } = await getBotsByBotIdAgentsByIdCredential({
-      path: { bot_id: props.botId, id: botAgentId.value },
-    })
-    if (response.status === 404) return null
-    return data ?? null
-  },
-})
 
-// 密钥类型由 profile（Hermes 再看 provider 字段）决定，UI 上不需要用户选择。
-function credentialAuthKind(): string {
-  if (isCodex.value) return 'openai_api_key'
-  if (isClaude.value) return 'anthropic_api_key'
-  switch (hermesProviderValue(agent.value.managed.provider)) {
-    case 'gemini': return 'google_api_key'
-    case 'openrouter': return 'openrouter_api_key'
-    default: return 'openai_api_key'
-  }
-}
-
-async function saveAPIKeyCredential() {
-  const apiKey = credentialSecret.value.trim()
-  if (!apiKey || !botAgentId.value) return
-  savingCredential.value = true
-  try {
-    await putBotsByBotIdAgentsByIdCredential({
-      path: { bot_id: props.botId, id: botAgentId.value },
-      body: { auth_kind: credentialAuthKind(), secret: { api_key: apiKey } },
-      throwOnError: true,
-    })
-    credentialSecret.value = ''
-    credentialJustAttached.value = true
-    // 持久化当前的 setup_mode（此前因缺密钥被守卫拦下），并刷新实例状态，
-    // 否则服务端仍是 self，运行时会跳过凭据解析。
-    commitForm()
-    await queryCache.invalidateQueries({ key: credentialQueryKey.value })
-    await queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
-    toast.success(t('bots.settings.agentCredentialSaved'))
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
-  } finally {
-    savingCredential.value = false
-  }
-}
-
-async function disconnectCredential() {
-  if (!botAgentId.value) return
-  savingCredential.value = true
-  credentialJustAttached.value = false
-  try {
-    await deleteBotsByBotIdAgentsByIdCredential({
-      path: { bot_id: props.botId, id: botAgentId.value },
-      throwOnError: true,
-    })
-    await queryCache.invalidateQueries({ key: credentialQueryKey.value })
-    // 实例行上的 agent_credential_id 是各就绪守卫的依据，断开后必须同步刷新，
-    // 否则该 Agent 在列表/选择器里仍显示为已配置。
-    await queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
-  } finally {
-    savingCredential.value = false
-  }
-}
-const isHermesSelfConfirmVisible = computed(() =>
-  isHermes.value && props.pendingSelfConfirm === true && agent.value.enabled && agent.value.setup_mode === 'self',
-)
-const selfModeHint = computed(() => isHermes.value
-  ? t('bots.settings.acpHermesSelfModeHint')
-  : t('bots.settings.acpSelfModeHint'))
-
-// 密钥归实例凭据（下方的 API Key 输入/OAuth Connect）管；metadata 里的同名
-// managed 字段在凭据模式下保存时会被服务端剥掉，展示出来只会造成"两个
-// API Key"的困惑。base_url 等非敏感配置仍走 managed 字段。
-const CREDENTIAL_OWNED_FIELDS = new Set(['api_key', 'oauth_token'])
-const visibleManagedFields = computed(() => {
-  const fields = filterSettingsVisibleManagedFields(props.profile, agent.value.managed, agent.value.setup_mode)
-  if (!credentialUIEnabled.value) return fields
-  return fields.filter(field => !CREDENTIAL_OWNED_FIELDS.has(normalizeACPAgentID(field.id)))
-})
-
-// 只有走托管 OAuth 的两个 agent、且当前就在 OAuth 模式时,账号卡片才有存在意义。
-const oauthSectionVisible = computed(() =>
-  (isCodex.value || isClaude.value) && agent.value.setup_mode === 'oauth',
+const visibleManagedFields = computed(() =>
+  filterSettingsVisibleManagedFields(props.profile, agent.value.managed, agent.value.setup_mode),
 )
 
 function commitForm() {
-  const credentialAttached = props.credentialStore === true && (credentialJustAttached.value || !!(attachedCredential.value || props.agent?.agent_credential_id))
-  if (agent.value.enabled && findMissingRequiredManagedFieldWithCredential(props.profile, agent.value.managed, agent.value.setup_mode, credentialAttached)) {
+  if (agent.value.enabled && findMissingRequiredManagedField(props.profile, agent.value.managed, agent.value.setup_mode)) {
     return
   }
   emit('commit')
 }
 
-function confirmSelfMode() {
-  if (!isHermesSelfConfirmVisible.value) return
-  emit('commit', { confirmSelf: true })
-}
-
 function setSetupMode(mode: string) {
   agent.value.setup_mode = mode
-  if (isHermes.value && mode === 'api_key') ensureHermesManagedDefaults(agent.value.managed)
-  if (isCodex.value && mode === 'oauth') void loadOAuthStatus()
-  if (isCodex.value && mode !== 'oauth') clearCodexDeviceAuthorization()
-  if (isClaude.value && mode === 'oauth') void loadClaudeOAuthStatus()
   commitForm()
-}
-
-const codexOAuthActive = computed(() => isCodex.value && !!agent.value.enabled && agent.value.setup_mode === 'oauth')
-const claudeOAuthActive = computed(() => isClaude.value && !!agent.value.enabled && agent.value.setup_mode === 'oauth')
-const currentCodexDeviceSession = computed(() => {
-  const session = codexDeviceSession.value
-  return session?.bot_id === props.botId ? session : null
-})
-
-// 面板只在码还能用(或刚过期、可就地重取)时露出;error/cancelled 由行内状态和
-// toast 交代,留一张废码在页面上只会误导。
-const codexDevicePanelSession = computed(() => {
-  const session = currentCodexDeviceSession.value
-  if (!session || session.has_token) return null
-  const usable = session.status === 'pending' || session.status === 'writing' || session.status === 'expired'
-  return usable ? session : null
-})
-
-const claudeExchangeVisible = computed(() =>
-  Boolean(claudeOAuthSessionId.value) && !claudeOAuthStatus.value?.has_token,
-)
-
-const codexButtonState = computed(() => {
-  if (authorizingCodexDevice.value) return 'connecting'
-  if (codexDevicePending.value) return 'cancel'
-  return codexOAuthStatus.value?.has_token ? 'reconnect' : 'connect'
-})
-
-const claudeButtonState = computed(() => {
-  if (authorizingClaudeOAuth.value) return 'connecting'
-  return claudeOAuthStatus.value?.has_token ? 'reconnect' : 'connect'
-})
-
-// 行描述就是这张卡片的全部状态出口:失败/过期/等待/已连接/未连接各说一句。
-const codexAccountDescription = computed(() => {
-  const session = currentCodexDeviceSession.value
-  if (session?.status === 'error') return session.error || t('bots.settings.acpCodexDeviceFailed')
-  if (session?.status === 'expired') return t('bots.settings.acpCodexDeviceExpired')
-  if (codexDevicePending.value) return t('provider.oauth.status.pendingDevice')
-  if (codexOAuthStatus.value?.has_token) return t('provider.oauth.status.authorizedCurrent')
-  if (codexOAuthStatusLoading.value) return t('provider.oauth.status.checking')
-  return t('bots.settings.acpCodexConnectHint')
-})
-
-const claudeAccountDescription = computed(() => {
-  if (claudeOAuthStatus.value?.has_token) return t('provider.oauth.status.authorizedCurrent')
-  if (claudeExchangeVisible.value) return t('provider.oauth.status.oauthing')
-  if (claudeOAuthStatusLoading.value) return t('provider.oauth.status.checking')
-  return t('bots.settings.acpClaudeConnectHint')
-})
-
-watch([() => props.botId, () => props.profile.id, () => agent.value.setup_mode], () => {
-  if (isHermes.value && agent.value.setup_mode === 'api_key') ensureHermesManagedDefaults(agent.value.managed)
-  if (codexOAuthActive.value || (isCodex.value && agent.value.setup_mode === 'oauth')) void loadOAuthStatus()
-  if (claudeOAuthActive.value || (isClaude.value && agent.value.setup_mode === 'oauth')) void loadClaudeOAuthStatus()
-}, { immediate: true })
-
-watch(claudeOAuthStatus, (status) => {
-  if (status?.has_token) {
-    agent.value.managed.oauth_token = agent.value.managed.oauth_token || '***'
-  }
-}, { immediate: true })
-
-watch(() => codexDeviceSession.value?.status, (status, previousStatus) => {
-  if (!status || status === previousStatus) return
-  if (status === 'success') {
-    markCodexOAuthAuthorized()
-    toast.success(t('provider.oauth.authorizeSuccess'))
-    return
-  }
-  if (status === 'expired') {
-    toast.error(t('bots.settings.acpCodexDeviceExpired'))
-    return
-  }
-  if (status === 'error') {
-    toast.error(codexDeviceSession.value?.error || t('bots.settings.acpCodexDeviceFailed'))
-  }
-})
-
-function invalidateOAuthQueries() {
-  void queryCache.invalidateQueries({ key: ['bot', props.botId] })
-  void queryCache.invalidateQueries({ key: getBotsQueryKey() })
-}
-
-function markCodexOAuthAuthorized() {
-  agent.value.enabled = true
-  agent.value.setup_mode = 'oauth'
-  commitForm()
-  invalidateOAuthQueries()
-}
-
-async function handleAuthorizeDevice() {
-  if (!props.botId) return
-  agent.value.setup_mode = 'oauth'
-  const ok = await authorizeCodexDevice()
-  if (!ok) {
-    toast.error(t('provider.oauth.authorizeFailed'))
-  }
-}
-
-async function handleCancelCodexDeviceAuthorization() {
-  await cancelCodexDeviceAuthorization()
-}
-
-async function handleAuthorizeClaude() {
-  agent.value.setup_mode = 'oauth'
-  claudeOAuthCode.value = ''
-  const ok = await authorizeClaude()
-  if (!ok) toast.error(t('provider.oauth.authorizeFailed'))
-}
-
-async function handleExchangeClaudeOAuth() {
-  const code = claudeOAuthCode.value.trim()
-  if (!code) {
-    toast.error(t('bots.settings.acpClaudeOAuthCodeRequired'))
-    return
-  }
-  const ok = await exchangeClaude(code)
-  if (ok) {
-    agent.value.enabled = true
-    agent.value.setup_mode = 'oauth'
-    agent.value.managed.oauth_token = '***'
-    claudeOAuthCode.value = ''
-    commitForm()
-    invalidateOAuthQueries()
-    toast.success(t('provider.oauth.authorizeSuccess'))
-  } else {
-    toast.error(t('bots.settings.acpClaudeOAuthExchangeFailed'))
-  }
 }
 </script>

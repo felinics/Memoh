@@ -81,7 +81,7 @@ export interface ChatSendDeps {
   transcriptForTarget: (target?: Partial<ChatViewTarget>) => Transcript
   isWebSlashInput: (text: string) => boolean
   quickActionIDForSlash: (text: string) => string
-  isACPTarget: (target: ChatViewTarget) => boolean
+  isExternalAgentTarget: (target: ChatViewTarget) => boolean
   handleWebNewCommand: (
     text: string,
     attachments: ChatAttachment[] | undefined,
@@ -107,7 +107,7 @@ export interface ChatSendDeps {
   chatReadOnlyFor: (target: ChatViewTarget) => boolean
   isChatViewStreaming: (target: ChatViewTarget, composerScope?: string) => boolean
   isChatViewCreatingSession: (target: ChatViewTarget) => boolean
-  pendingACPStateFor: (target: ChatViewTarget) => unknown
+  pendingExternalAgentStateFor: (target: ChatViewTarget) => unknown
   ensureChatViewSession: (
     target: ChatViewTarget,
     firstPrompt?: string,
@@ -172,7 +172,7 @@ export function createChatSend(deps: ChatSendDeps) {
       sessionId: viewTarget.sessionId ?? undefined,
       composerScope,
     }
-    const isACP = deps.isACPTarget(viewTarget)
+    const isExternalAgent = deps.isExternalAgentTarget(viewTarget)
     if (!trimmed && !attachments?.length && requestedSkills.length === 0) {
       return { ok: false, stage: 'startup' }
     }
@@ -193,7 +193,7 @@ export function createChatSend(deps: ChatSendDeps) {
     if (
       deps.isWebSlashInput(trimmed)
       && attachments?.length
-      && (!isACP || deps.quickActionIDForSlash(trimmed) !== '')
+      && (!isExternalAgent || deps.quickActionIDForSlash(trimmed) !== '')
     ) {
       const message = deps.commandErrorMessage('slash_attachments_unsupported')
       deps.showCommandError('slash_attachments_unsupported', message, commandScope)
@@ -258,9 +258,9 @@ export function createChatSend(deps: ChatSendDeps) {
     const wasDraft = !viewTarget.sessionId
     const serverSlashActivation = deps.isWebSlashInput(trimmed)
       && deps.quickActionIDForSlash(trimmed) === ''
-      && !isACP
+      && !isExternalAgent
     const serverSkillActivation = requestedSkills.length > 0 || serverSlashActivation
-    if (serverSkillActivation && wasDraft && deps.pendingACPStateFor(viewTarget)) {
+    if (serverSkillActivation && wasDraft && deps.pendingExternalAgentStateFor(viewTarget)) {
       const message = deps.commandErrorMessage('unsupported_skill_slash_context')
       deps.showCommandError('unsupported_skill_slash_context', message, commandScope)
       return {

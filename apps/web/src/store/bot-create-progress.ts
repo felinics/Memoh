@@ -15,6 +15,7 @@ import {
   type BotCreateTerminalLine,
 } from '@/composables/api/botCreateTerminal'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
+import { botAgentRuntimeForProvider } from '@/utils/bot-agent'
 
 // status reflects the bot-create lifecycle:
 //   idle     - nothing in flight (also the guard for the progress route)
@@ -38,7 +39,7 @@ export type BotCreateSettings = {
 export type BotCreateAgent = {
   name: string
   provider: string
-  deferDefault?: boolean
+  metadata?: Record<string, unknown>
 }
 
 export type StartBotCreateOptions = {
@@ -162,40 +163,43 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'applying-settings', status: 'running' })
         if (options.agent) {
           try {
+            const provider = options.agent.provider.trim().toLowerCase()
             const { data: createdAgent } = await postBotsByBotIdAgents({
               path: { bot_id: botId },
               body: {
                 name: options.agent.name.trim(),
-                runtime: 'acp',
-                metadata: { provider: options.agent.provider.trim().toLowerCase() },
+                // codex / claude-code are direct runtimes; everything else is
+                // an ACP profile provider.
+                runtime: botAgentRuntimeForProvider(provider),
+                metadata: options.agent.metadata ?? { provider },
               },
               throwOnError: true,
             })
             createdAgentID = createdAgent.id?.trim() ?? ''
             if (!createdAgentID) throw new Error('Created Agent has no ID')
-            if (options.agent.deferDefault) agentApplied = true
           } catch (error) {
             setupError.value = resolveApiErrorMessage(error, toMessage(error))
             lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
           }
         }
         try {
-          if (hasSettings(options.settings) || (createdAgentID && !options.agent?.deferDefault)) {
+          if (hasSettings(options.settings) || createdAgentID) {
             await putBotsByBotIdSettings({
               path: { bot_id: botId },
               body: {
                 ...settingsBody(options.settings ?? {}),
-                ...(createdAgentID && !options.agent?.deferDefault
-                  ? { default_bot_agent_id: createdAgentID }
-                  : {}),
+                ...(createdAgentID ? { default_bot_agent_id: createdAgentID } : {}),
               },
               throwOnError: true,
             })
             if (hasSettings(options.settings)) settingsApplied = true
-            if (createdAgentID && !options.agent?.deferDefault) agentApplied = true
+            if (createdAgentID) agentApplied = true
           }
-        } catch {
-          // Bot created successfully, settings save failed; this is non-fatal.
+        } catch (error) {
+          // The bot exists, but its defaults are wrong — the created Agent is
+          // not the default, or settings were dropped. Surface the failure
+          // instead of showing a clean success over a half-configured bot.
+          setupError.value = resolveApiErrorMessage(error, toMessage(error))
           lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
         }
         if (settingsApplied && agentApplied) {

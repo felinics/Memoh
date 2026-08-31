@@ -21,12 +21,6 @@ export interface ACPAgentConfig {
   managed: Record<string, unknown>
 }
 
-export interface MissingACPRequiredField {
-  profile: AcpprofilePublicProfile
-  field: AcpprofileManagedField
-}
-
-const HERMES_MANAGED_PROVIDERS = ['openrouter', 'openai', 'openai-api', 'gemini', 'google', 'google-gemini', 'google-ai-studio', 'custom']
 
 export function readACPConfig(metadata: Record<string, unknown> | undefined, profiles: AcpprofilePublicProfile[]): ACPForm {
   const out: ACPForm = { agents: {} }
@@ -97,43 +91,6 @@ export function withEnabledACPAgentMetadataIfConfigured(
   return withACPMetadata(metadata, form, [profile])
 }
 
-export function findMissingRequiredACPField(value: ACPForm, profiles: AcpprofilePublicProfile[]): MissingACPRequiredField | null {
-  // Validation is per-agent and skips `self` mode below. Managed api_key and
-  // oauth modes apply the profile's credential requirements consistently.
-  for (const profile of profiles) {
-    const id = normalizeACPAgentID(profile.id)
-    if (!id) continue
-    const agent = value.agents[id]
-    if (!agent?.enabled || normalizeSetupMode(agent.setup_mode, agent.managed) === 'self') continue
-    const field = findMissingRequiredManagedField(profile, agent.managed, agent.setup_mode)
-    if (field) return { profile, field }
-  }
-  return null
-}
-
-const CREDENTIAL_SECRET_FIELD_IDS = ['api_key', 'oauth_token']
-
-/**
- * Managed-field preflight that lets an attached encrypted credential satisfy
- * the secret fields only. The store scrubs api_key/oauth_token out of bot
- * metadata on save, so metadata-only checks would report every connected
- * Agent as unconfigured; non-secret required fields (e.g. the Hermes
- * provider/model) must still come from metadata.
- */
-export function findMissingRequiredManagedFieldWithCredential(
-  profile: AcpprofilePublicProfile | null | undefined,
-  managed: Record<string, unknown>,
-  setupMode: string,
-  credentialAttached: boolean,
-): AcpprofileManagedField | null {
-  if (!credentialAttached) return findMissingRequiredManagedField(profile, managed, setupMode)
-  const stubbed: Record<string, unknown> = { ...managed }
-  for (const id of CREDENTIAL_SECRET_FIELD_IDS) {
-    if (!String(stubbed[id] ?? '').trim()) stubbed[id] = 'credential-store'
-  }
-  return findMissingRequiredManagedField(profile, stubbed, setupMode)
-}
-
 export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile | null | undefined, managed: Record<string, unknown>, setupMode: string): AcpprofileManagedField | null {
   const mode = normalizeSetupMode(setupMode, managed)
   if (!profile) return null
@@ -141,33 +98,6 @@ export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile
     return { id: 'setup_mode', label: 'Setup', type: 'text', required: true }
   }
   if (mode === 'self') return null
-  const agentID = normalizeACPAgentID(profile.id)
-  if (agentID === 'codex') {
-    if (mode === 'oauth') {
-      return null
-    }
-    if (!String(managed.api_key ?? '').trim()) {
-      return profile.managed_fields?.find(field => normalizeACPAgentID(field.id) === 'api_key')
-        ?? { id: 'api_key', label: 'OpenAI API key', type: 'password', required: true, sensitive: true }
-    }
-  }
-  if (agentID === 'claude-code') {
-    const requiredFieldID = mode === 'oauth' ? 'oauth_token' : 'api_key'
-    if (!String(managed[requiredFieldID] ?? '').trim()) {
-      return profile.managed_fields?.find(field => normalizeACPAgentID(field.id) === requiredFieldID)
-        ?? { id: requiredFieldID, label: requiredFieldID, type: 'password', required: true, sensitive: true }
-    }
-    return null
-  }
-  if (agentID === 'hermes') {
-    const provider = normalizeACPAgentID(managed.provider)
-    if (!provider) return managedField(profile, 'provider')
-    if (!HERMES_MANAGED_PROVIDERS.includes(provider)) return managedField(profile, 'provider')
-    if (!String(managed.model ?? '').trim()) return managedField(profile, 'model')
-    if (!String(managed.api_key ?? '').trim()) return managedField(profile, 'api_key')
-    if (provider === 'custom' && !validHTTPURL(managed.base_url)) return managedField(profile, 'base_url')
-    return null
-  }
   for (const field of profile.managed_fields ?? []) {
     const id = normalizeACPAgentID(field.id)
     if (!id || !field.required) continue
@@ -180,22 +110,6 @@ function profileSupportsSetupMode(profile: AcpprofilePublicProfile, mode: string
   const modes = profile.setup_modes?.filter(Boolean)
   if (!modes || modes.length === 0) return true
   return modes.some(supported => normalizeACPAgentID(supported) === mode)
-}
-
-function validHTTPURL(value: unknown): boolean {
-  const raw = typeof value === 'string' ? value.trim() : ''
-  if (!raw) return false
-  try {
-    const url = new URL(raw)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
-  }
-}
-
-function managedField(profile: AcpprofilePublicProfile, fieldID: string): AcpprofileManagedField {
-  return profile.managed_fields?.find(field => normalizeACPAgentID(field.id) === fieldID)
-    ?? { id: fieldID, label: fieldID, type: 'text', required: true }
 }
 
 export function readACPAgentConfig(metadata: Record<string, unknown> | undefined, rawAgentID: string | undefined): ACPAgentConfig {
@@ -221,10 +135,6 @@ export function isACPAgentEnabled(metadata: Record<string, unknown> | undefined,
   if (typeof raw === 'boolean') return raw
   if (isRecord(raw) && typeof raw.enabled === 'boolean') return raw.enabled
   return legacyEnabled(acp, agentID)
-}
-
-export function isACPNoProject(metadata: Record<string, unknown> | undefined): boolean {
-  return metadata?.acp_project_mode === ACP_NO_PROJECT_MODE
 }
 
 export function createACPNoProjectPath(): string {

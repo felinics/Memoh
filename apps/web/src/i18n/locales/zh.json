@@ -204,7 +204,6 @@
       "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
       "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
       "operation_failed": "Agent 运行实例操作失败，请重试。",
-      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。",
       "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
       "model_id_required": "请选择模型后重试。",
       "model_unavailable": "所选模型已不再可用于这个外部 Agent。",
@@ -215,6 +214,9 @@
       "mode_id_required": "请选择会话模式后重试。",
       "mode_unavailable": "所选会话模式已不再可用于这个外部 Agent。",
       "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
+    },
+    "external_agent": {
+      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。"
     },
     "agent_credential": {
       "not_found": "这个 Agent 账号已不可用，请选择其他账号。",
@@ -238,6 +240,10 @@
       "access_denied": "你没有权限查看上下文生命周期诊断信息。",
       "not_found": "未找到该会话。",
       "load_failed": "无法加载上下文生命周期诊断信息，请稍后重试。"
+    },
+    "external_runtime": {
+      "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
+      "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。"
     }
   },
   "auth": {
@@ -847,8 +853,8 @@
       "list_skills": "列出技能",
       "list_models": "列出模型",
       "list_workdirs": "列出工作目录",
-      "list_acp_agents": "列出编程智能体",
-      "list_acp_agents_one": "查看编程智能体",
+      "list_acp_agents": "列出 ACP Agent",
+      "list_acp_agents_one": "查看 ACP Agent",
       "browser_action": "浏览器 {action}",
       "browser_observe": "观察浏览器 {action}",
       "computer_observe": "观察桌面 {action}",
@@ -1036,13 +1042,13 @@
     "modelOptions": "选项",
     "modelEffort": "强度",
     "noModels": "暂无可用模型",
-    "defaultACPLoading": "默认 Agent 仍在加载，请稍后重试。",
-    "defaultACPNoWorkspaceExec": "已启用默认 Agent，但你没有执行工作区命令的权限。",
-    "defaultACPAgentMissing": "已启用默认 Agent，但尚未选择 Agent。",
-    "defaultACPAgentUnavailable": "已启用默认 Agent，但选中的 Agent 不可用。",
-    "defaultACPAgentDisabled": "已启用默认 Agent，但选中的 Agent 已停用。",
-    "defaultACPAgentNotConfigured": "已启用默认 Agent，但选中的 Agent 尚未配置完成。",
-    "acp": {
+    "defaultExternalAgentLoading": "默认 Agent 仍在加载，请稍后重试。",
+    "defaultAgentNoWorkspaceExec": "已启用默认 Agent，但你没有执行工作区命令的权限。",
+    "defaultAgentMissing": "已启用默认 Agent，但尚未选择 Agent。",
+    "defaultAgentUnavailable": "已启用默认 Agent，但选中的 Agent 不可用。",
+    "defaultAgentDisabled": "已启用默认 Agent，但选中的 Agent 已停用。",
+    "defaultAgentNotConfigured": "已启用默认 Agent，但选中的 Agent 尚未配置完成。",
+    "externalAgent": {
       "agentNotConfigured": "该 Bot 的外部 Agent 配置尚未完成。",
       "agentCommandStale": "Agent 已不再提供该命令。请重新打开命令面板后重试。",
       "agentNotFound": "选中的外部 Agent 不可用。",
@@ -1275,7 +1281,8 @@
         "jitter": "抖动",
         "rtt": "RTT"
       }
-    }
+    },
+    "modelDefaultNamed": "默认（{model}）"
   },
   "models": {
     "title": "模型",
@@ -1920,7 +1927,8 @@
     "agentCreate": {
       "typeAriaLabel": "Agent 类型",
       "oauthSettingsHint": "授权在创建后进行，可随时在 Bot 设置中完成。",
-      "requiredError": "请填写「{field}」"
+      "requiredError": "请填写「{field}」",
+      "directSetupHint": "Codex 和 Claude Code 无需在此配置——创建后在 Bot 设置页完成登录或 API Key。"
     },
     "createBotLocalHint": "Local Bot 会使用这台电脑上的文件夹，且不提供沙箱隔离。",
     "create": {
@@ -2148,7 +2156,7 @@
       "desktop": "桌面",
       "toolApproval": "工具审核",
       "hooks": "Hooks",
-      "acp": "Agent",
+      "agents": "Agent",
       "network": "网络",
       "memory": "记忆",
       "channels": "平台",
@@ -2177,14 +2185,40 @@
       "namePlaceholder": "输入 Agent 名称",
       "nameRequired": "请输入 Agent 名称。",
       "emptyTitle": "还没有 Agent",
-      "emptyDescription": "添加 Agent 后，这个 Bot 就可以使用 Codex、Claude Code 或 Hermes。",
+      "emptyDescription": "添加 Agent 后，这个 Bot 就可以使用 Codex、Claude Code 或自定义 ACP Agent。",
       "statusNeedsConfig": "需要配置",
       "statusOff": "已停用",
       "deleteTitle": "删除 Agent？",
       "deleteDescription": "确定删除“{name}”吗？已有对话会保留绑定，但新对话不能再选择它。",
       "deleted": "Agent 已删除",
       "deleteFailed": "删除 Agent 失败",
-      "nameDescription": "这个名称用于在选择器和对话中区分 Agent。"
+      "nameDescription": "这个名称用于在选择器和对话中区分 Agent。",
+      "runtimeSetup": "运行时配置",
+      "authMode": "授权方式",
+      "authChatGPT": "ChatGPT 账号",
+      "authWorkspace": "工作区已有凭据",
+      "authOAuthToken": "OAuth Token",
+      "authChatGPTDescription": "使用 ChatGPT 订阅账号授权 Codex。",
+      "authWorkspaceDescription": "使用这个 Bot 工作区中已经保存的 Claude Code 登录状态。",
+      "authOAuthTokenDescription": "使用 Claude Code setup-token 生成的 OAuth Token。",
+      "authApiKeyDescription": "使用由 Memoh 保存并注入运行时的 API Key。",
+      "apiKey": "API Key",
+      "apiKeyDescription": "API Key 会加密保存，仅在运行时提供给此 Agent。",
+      "oauthToken": "OAuth Token",
+      "oauthTokenDescription": "粘贴 Claude Code setup-token 生成的 Token。",
+      "defaultModel": "默认模型",
+      "defaultModelDescription": "可选。留空时由外部 Agent 选择默认模型；对话中仍可临时切换。",
+      "defaultModelPlaceholder": "使用运行时默认模型",
+      "account": "账号",
+      "chatgptAccount": "ChatGPT 账号",
+      "chatgptAccountDescription": "Memoh 会加密保存此 Agent 的 ChatGPT 凭据，并仅在运行时提供给 Codex。",
+      "chatgptAccountConnectedDescription": "此 Agent 的 ChatGPT 凭据已加密保存。",
+      "reconnect": "重新连接",
+      "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",
+      "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
+      "codexLoginFailed": "Codex 账号授权失败，请重试",
+      "modelsLoadFailed": "无法加载 Agent 模型。请检查 Agent 配置后重试。",
+      "openSettings": "打开 Agent 设置"
     },
     "folders": {
       "create": "新建文件夹",
@@ -2620,43 +2654,8 @@
       "acpArgumentsHelp": "可选，一行填写一个参数；每行会作为单独参数直接传入，不经过 Shell 解析。",
       "acpSetupApiKey": "API Key",
       "acpSetupOAuth": "OAuth",
-      "acpSetupChatGPT": "ChatGPT",
-      "acpSetupClaude": "Claude",
       "acpSetupSelf": "自行配置",
-      "acpAuthType": "授权方式",
-      "acpAuthApiKey": "API Key",
-      "acpAuthChatGPT": "ChatGPT 账号",
-      "acpProvider": "OpenAI Codex 提供商",
-      "acpProviderPlaceholder": "选择提供商",
-      "acpProviderRequired": "请选择并授权一个 OpenAI Codex 提供商。",
-      "acpCreateAndAuthorize": "创建并授权",
-      "acpOAuthAuthorize": "授权",
-      "acpOAuthUnavailable": "当前工作区暂不能写入 Codex 授权。",
-      "acpCodexAccount": "ChatGPT 账号",
-      "acpClaudeAccount": "Claude 账号",
-      "acpCodexConnectHint": "登录 ChatGPT 账号后，这个 Bot 即可使用 Codex。",
-      "acpClaudeConnectHint": "登录 Claude 账号后，这个 Bot 即可使用 Claude Code。",
-      "acpOAuthReconnect": "重新连接",
-      "acpCodexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码；设备代码可能被用于钓鱼。Memoh 会自动完成授权。",
-      "acpCodexDeviceExpired": "设备代码已过期，请重新开始。",
-      "acpCodexDeviceFailed": "设备授权失败，请重试。",
-      "acpClaudeOAuthUnavailable": "当前工作区暂不能保存 Claude Code 授权。",
-      "acpClaudeOAuthCodeHint": "登录后把 Claude 显示的授权码粘贴到这里。",
-      "acpClaudeOAuthCodePlaceholder": "授权码",
-      "acpClaudeOAuthCodeRequired": "请粘贴 Claude 授权码。",
-      "acpClaudeOAuthExchange": "保存 Token",
-      "acpClaudeOAuthExchangeFailed": "保存 Claude Token 失败",
       "acpSelfModeHint": "该模式直接使用工作区运行环境里你已配置好的 Agent（例如已登录的凭据）。",
-      "acpHermesSelfModeHint": "该模式直接使用当前工作区里已配置好的 Hermes Profile。如需由 Memoh 管理 Bot 凭据，请使用 API Key 配置。",
-      "acpHermesSelfModeConfirm": "使用自行配置的 Hermes",
-      "acpHermesProviderPlaceholder": "选择提供商",
-      "acpHermesProviderGemini": "Gemini（Google AI Studio）",
-      "acpHermesProviderOpenRouter": "OpenRouter",
-      "acpHermesProviderOpenAI": "OpenAI API",
-      "acpHermesProviderCustom": "自定义端点",
-      "acpHermesModelPlaceholder": "选择模型",
-      "acpHermesCustomModel": "自定义模型 ID",
-      "acpHermesCustomModelPlaceholder": "输入模型 ID",
       "acpStatusNeedsConfig": "需要配置",
       "acpStatusOff": "已关闭",
       "acpEmptyTitle": "暂无可用 Agent",
@@ -2734,7 +2733,8 @@
       "agentCredentialSaved": "API Key 已保存",
       "agentCredentialConnected": "已连接 API Key",
       "agentCredentialConnectedHint": "此 Agent 使用独立保存的密钥，保存新密钥会替换旧的。",
-      "agentCredentialDisconnect": "断开"
+      "agentCredentialDisconnect": "断开",
+      "agentCredentialDisconnectConfirm": "断开此 Agent 的凭证？"
     },
     "access": {
       "title": "访问控制",
@@ -3176,14 +3176,14 @@
         "session": "会话",
         "sessionPlaceholder": "选择会话",
         "sessionRuntimeNative": "该会话使用内置模型运行时，沿用其文件夹。",
-        "sessionRuntimeAcp": "该会话通过 {agent} 运行，沿用其文件夹。",
+        "sessionRuntimeAgent": "该会话通过 {agent} 运行，沿用其文件夹。",
         "model": "模型",
         "botDefault": "Bot 默认",
         "pickModel": "选择模型",
         "noBotDefaultModel": "该 Bot 没有设置默认模型，任务会使用这里选择的模型运行。",
         "noModelAvailable": "该 Bot 没有默认模型，也没有可选的对话模型，请先添加一个。",
         "sessionDefault": "会话默认",
-        "acpAgents": "编码 Agent",
+        "externalAgents": "外部 Agent",
         "agentDefaultModel": "Agent 默认",
         "loadingAgentModels": "正在启动 Agent 获取模型…",
         "agentModelsFailed": "获取 Agent 模型失败",
@@ -3503,22 +3503,7 @@
         "retry": "重试"
       },
       "acp": {
-        "deferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行。",
-        "oauthTitle": "授权 {agent}",
-        "oauthAuthorized": "已授权",
-        "oauthNotAuthorized": "尚未授权",
-        "oauthDescription": "完成授权后，{agent} 即可在该 Bot 的工作区中运行。你也可以跳过，稍后在 Bot 设置中完成授权。",
-        "oauthAuthorizeChatGPT": "使用 ChatGPT 登录",
-        "oauthAuthorizeClaude": "使用 Claude 登录",
-        "oauthDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码；设备代码可能被用于钓鱼。Memoh 会自动完成授权。",
-        "oauthDeviceExpired": "设备代码已过期，请重新开始。",
-        "oauthDeviceFailed": "设备授权失败，请重试。",
-        "oauthCodeHint": "在弹出的页面完成登录后，复制授权码并粘贴到下方。",
-        "oauthCodePlaceholder": "粘贴授权码",
-        "oauthExchange": "提交",
-        "oauthSkip": "稍后再说",
-        "oauthSuccess": "授权成功",
-        "oauthExchangeFailed": "授权失败，请重试"
+        "deferredHint": "授权将在下一步创建 Bot 并准备好工作区后进行。"
       }
     },
     "im": {

@@ -4,7 +4,7 @@
     :title="t('bots.agent.add')"
     :cancel-text="t('common.cancel')"
     :submit-text="t('bots.agent.add')"
-    :submit-disabled="form.meta.value.valid === false || isLoading || profiles.length === 0"
+    :submit-disabled="form.meta.value.valid === false || isLoading || providerOptions.length === 0"
     :loading="isLoading"
     @submit="createAgent"
   >
@@ -111,7 +111,12 @@ import {
   normalizeACPAgentID,
   withEnabledACPAgentMetadataIfConfigured,
 } from '@/utils/acp'
-import { BOT_AGENT_RUNTIME_ACP, suggestBotAgentName } from '@/utils/bot-agent'
+import {
+  BOT_AGENT_RUNTIME_ACP,
+  botAgentRuntimeOptions,
+  suggestBotAgentName,
+  directBotAgentMetadata,
+} from '@/utils/bot-agent'
 
 const open = defineModel<boolean>('open')
 const props = defineProps<{
@@ -128,16 +133,7 @@ const { t } = useI18n()
 const queryCache = useQueryCache()
 const { run } = useDialogMutation()
 
-const providerOptions = computed(() => props.profiles.flatMap((profile) => {
-  const provider = normalizeACPAgentID(profile.id)
-  if (!provider) return []
-  return [{
-    value: provider,
-    label: profile.display_name?.trim() || provider,
-    description: profile.description?.trim() || undefined,
-    keywords: [provider, profile.display_name ?? '', profile.description ?? ''],
-  }]
-}))
+const providerOptions = computed(() => botAgentRuntimeOptions(props.profiles))
 
 const schema = toTypedSchema(z.object({
   provider: z.string().trim().min(1, t('bots.agent.providerRequired')),
@@ -150,8 +146,8 @@ const form = useForm({
 })
 
 function providerDefaultName(provider: string): string {
-  const profile = props.profiles.find(item => normalizeACPAgentID(item.id) === provider)
-  return suggestBotAgentName(provider, props.agents, profile?.display_name ?? '')
+  const option = providerOptions.value.find(item => item.value === provider)
+  return suggestBotAgentName(provider, props.agents, option?.label ?? '')
 }
 
 function resetForm() {
@@ -173,27 +169,31 @@ function selectProvider(provider: string, handleChange: (value: string) => void)
 const { mutateAsync: createMutation, isLoading } = useMutation({
   mutation: async (value: { provider: string; name: string }) => {
     const provider = normalizeACPAgentID(value.provider)
-    const profile = props.profiles.find(item => normalizeACPAgentID(item.id) === provider)
-    if (!profile) throw new Error(t('bots.agent.providerRequired'))
+    const option = providerOptions.value.find(item => item.value === provider)
+    if (!option) throw new Error(t('bots.agent.providerRequired'))
 
-    // ACP still owns the shared provider credentials. Keep its legacy enabled
-    // bit true once a provider is used so disabling one BotAgent does not stop
-    // existing sessions that share those credentials.
-    const metadata = withEnabledACPAgentMetadataIfConfigured(props.botMetadata, profile)
-    if (metadata) {
-      await putBotsById({
-        path: { id: props.botId },
-        body: { metadata },
-        throwOnError: true,
-      })
+    let agentMetadata: Record<string, unknown> = { provider }
+    if (option.runtime === BOT_AGENT_RUNTIME_ACP) {
+      const profile = props.profiles.find(item => normalizeACPAgentID(item.id) === provider)
+      if (!profile) throw new Error(t('bots.agent.providerRequired'))
+      const metadata = withEnabledACPAgentMetadataIfConfigured(props.botMetadata, profile)
+      if (metadata) {
+        await putBotsById({
+          path: { id: props.botId },
+          body: { metadata },
+          throwOnError: true,
+        })
+      }
+    } else {
+      agentMetadata = directBotAgentMetadata(option.runtime) ?? agentMetadata
     }
 
     const { data } = await postBotsByBotIdAgents({
       path: { bot_id: props.botId },
       body: {
         name: value.name.trim(),
-        runtime: BOT_AGENT_RUNTIME_ACP,
-        metadata: { provider },
+        runtime: option.runtime,
+        metadata: agentMetadata,
       },
       throwOnError: true,
     })

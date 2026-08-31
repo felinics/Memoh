@@ -67,17 +67,15 @@ export function useOnboarding() {
     }
     await minWait
     const result = readOnboardingBotResult()
-    const acpLaunchAgentId = result?.acp && !result.acp.oauthPending
-      ? result.acp.agentId
-      : ''
+    const launchAgentId = result?.agent?.agentId ?? ''
     const forceOnboarding = safeLocalGet(ONBOARDING_KEYS.forceOnboarding)
     safeLocalRemove(ONBOARDING_KEYS.forceOnboarding)
     try {
       // Use the `bot` route directly (not the `/chat/...` redirect, which drops
-      // the query) so the chat page can read `?acp=` on landing.
+      // the query) so the chat page can read `?agent=` on landing.
       const destination = result?.botId
-        ? acpLaunchAgentId
-          ? { name: 'bot', params: { botName: result.botId }, query: { acp: acpLaunchAgentId } }
+        ? launchAgentId
+          ? { name: 'bot', params: { botName: result.botId }, query: { agent: launchAgentId } }
           : { name: 'bot', params: { botName: result.botId } }
         : '/'
       const navigationFailure = await router.replace(destination)

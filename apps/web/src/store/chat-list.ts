@@ -9,7 +9,7 @@ import { createInvocationId } from './chat-list.normalize'
 import { createFsChangeBeacon } from './chat/fs-beacon'
 import { createCommandEventRegistry } from './chat/command-events'
 import { createSessionList } from './chat/session-list'
-import { createACPController } from './chat/acp-controller'
+import { createExternalAgentController } from './chat/external-agent-controller'
 import { createChatRefreshCoordinator } from './chat/refresh-coordinator'
 import { createChatSend } from './chat/send'
 import { createStartupSendFailures } from './chat/send-startup'
@@ -45,7 +45,7 @@ import type {
 } from './chat/types'
 
 export type {
-  ACPAgentSessionInput, ActiveChatTarget, AttachmentBlock, AttachmentItem,
+  ExternalAgentSessionInput, ActiveChatTarget, AttachmentBlock, AttachmentItem,
   BackgroundTask, ChatAssistantTurn, ChatMessage, ChatSystemTurn, ChatUserTurn,
   ChatWorkspaceTargetSnapshot, ContentBlock, ErrorBlock, SendMessageOptions,
   SendMessageResult, SendMessageStage, TextBlock, ThinkingBlock, ToolCallBlock,
@@ -271,7 +271,7 @@ export const useChatStore = defineStore('chat', () => {
   } = runtimeIntegration
 
   const hasExplicitSessionSelection = computed(() => explicitSessionSelection.value)
-  const acp = createACPController({
+  const externalAgents = createExternalAgentController({
     currentBotId,
     sessionId,
     draftIntent,
@@ -304,38 +304,38 @@ export const useChatStore = defineStore('chat', () => {
     acpRuntimeStatuses, acpRuntimePending, acpRuntimeKey, clearACPRuntimeStatus, ensureACPRuntime,
     refreshACPRuntimeFor,
     setACPRuntimeMode, setACPRuntimeModel, setACPRuntimeReasoning,
-  } = acp.runtimeRegistry
-  const { cacheDefaultACPSession, clearPendingACPSession } = acp.staging
+  } = externalAgents.runtimeRegistry
+  const { cacheDefaultExternalAgentSession, clearPendingExternalAgentSession } = externalAgents.staging
   const {
-    pendingACPSessionInput, pendingACPRuntimeId, pendingACPSessionMetadata,
-    pendingACPRuntimeStatus, pendingACPRuntimeEnsuring, pendingACPStateFor,
-    pendingACPMatchesInput,
-    stageACPSession, stageDefaultACPSession, resetToEmptyComposer,
+    pendingExternalAgentSessionInput, pendingACPRuntimeId, pendingExternalAgentSessionMetadata,
+    pendingACPRuntimeStatus, pendingACPRuntimeEnsuring, pendingExternalAgentStateFor,
+    pendingExternalAgentMatchesInput,
+    stageExternalAgentSession, stageDefaultExternalAgentSession, resetToEmptyComposer,
     ensurePendingACPRuntime, setPendingACPModel, setPendingACPMode, setPendingACPReasoning,
-    saveLiveDraftACPStage, activateDraftACPStage, discardEvictedDraft,
-  } = acp.orchestration
+    saveLiveDraftExternalAgentStage, activateDraftExternalAgentStage, discardEvictedDraft,
+  } = externalAgents.orchestration
   const {
-    settingsForAgent: defaultACPSettingsForAgent,
-    defaultRuntimeIsACP,
-    stageFromSettings: stageDefaultACPFromSettings,
-  } = acp.defaults
+    settingsForAgent: defaultExternalAgentSettingsForAgent,
+    defaultRuntimeIsExternalAgent,
+    stageFromSettings: stageDefaultExternalAgentFromSettings,
+  } = externalAgents.defaults
   const {
-    createACPSession, updateCurrentSessionAgent,
+    createExternalAgentSession, updateCurrentSessionAgent,
     updateCurrentSessionToMemoh, ensureChatViewSession,
-  } = acp.sessions
+  } = externalAgents.sessions
   const {
     draftViewRequested, applyDraftViewRequest, requestDraftView,
     invalidateDraftViewCommand, beginDraftViewCommand,
-    reset: resetACP,
-  } = acp
+    reset: resetExternalAgent,
+  } = externalAgents
   configureChatViews({
     runtimeProjection: realtime.runtimeProjection,
     startSessionRuntime,
     stopSessionRuntime,
     discardDraft: discardEvictedDraft,
     invalidateDraftCommand: invalidateDraftViewCommand,
-    saveDraftACP: saveLiveDraftACPStage,
-    activateDraftACP: activateDraftACPStage,
+    saveDraftExternalAgent: saveLiveDraftExternalAgentStage,
+    activateDraftExternalAgent: activateDraftExternalAgentStage,
     refreshAppliedHook: (_view, targetSessionId, latestTimestamp) => {
       touchSessionInList(targetSessionId, latestTimestamp)
     },
@@ -354,7 +354,7 @@ export const useChatStore = defineStore('chat', () => {
     explicitSessionSelection,
     normalizeTarget: normalizedChatViewTarget,
     knownSession: knownSessionSummary,
-    pendingACPState: pendingACPStateFor,
+    pendingExternalAgentState: pendingExternalAgentStateFor,
   })
 
 
@@ -379,7 +379,7 @@ export const useChatStore = defineStore('chat', () => {
       currentBotId.value = null
     }
     resetTranscriptUserScope()
-    resetACP()
+    resetExternalAgent()
     resetBootstrap()
     overrideModelId.value = ''
     overrideReasoningEffort.value = ''
@@ -422,10 +422,10 @@ export const useChatStore = defineStore('chat', () => {
     replaceSessions,
     sessionsCursor,
     hasMoreSessions,
-    defaultRuntimeIsACP,
+    defaultRuntimeIsExternalAgent,
     ensureSessionSummary,
-    pendingACPSessionInput,
-    clearPendingACPSession,
+    pendingExternalAgentSessionInput,
+    clearPendingExternalAgentSession,
     clearHistoryView,
     markHistoryEmpty,
     knownSessionSummary,
@@ -442,7 +442,7 @@ export const useChatStore = defineStore('chat', () => {
     // must drop the folders' paging state too, or a folder reads as empty.
     clearRememberedSessions: () => { clearRememberedSessions(); resetWorkdirSessions() },
     resetToEmptyComposer,
-    stageDefaultACPFromSettings,
+    stageDefaultExternalAgentFromSettings,
   })
   const {
     deletedSession,
@@ -520,7 +520,7 @@ export const useChatStore = defineStore('chat', () => {
     beginDraftCommand: beginDraftViewCommand,
     requestDraftView,
     ensureBot,
-    defaultACPSettingsForAgent,
+    defaultExternalAgentSettingsForAgent,
     normalizeTarget: normalizedChatViewTarget,
     chatTargetFor,
     commandErrorMessage,
@@ -540,7 +540,7 @@ export const useChatStore = defineStore('chat', () => {
     transcriptForTarget,
     isWebSlashInput,
     quickActionIDForSlash,
-    isACPTarget: target => chatTargetFor(normalizedChatViewTarget(target)).isACP,
+    isExternalAgentTarget: target => chatTargetFor(normalizedChatViewTarget(target)).isExternalAgent,
     handleWebNewCommand,
     handleWebSlashCommand,
     commandErrorMessage,
@@ -549,7 +549,7 @@ export const useChatStore = defineStore('chat', () => {
     chatReadOnlyFor,
     isChatViewStreaming,
     isChatViewCreatingSession,
-    pendingACPStateFor,
+    pendingExternalAgentStateFor,
     ensureChatViewSession,
     startSessionRuntime,
     recordUserSent: (target, targetSessionId, wasDraft) => {
@@ -590,10 +590,10 @@ export const useChatStore = defineStore('chat', () => {
     workdirSessionsFor, workdirSessionsState,
     ensureWorkdirSessions, loadMoreWorkdirSessions,
     activeChatReadOnly, activeChatCanFork,
-    acpRuntimeStatuses, acpRuntimePending, pendingACPSessionInput,
-    pendingACPSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,
-    pendingACPRuntimeEnsuring, pendingACPStateFor,
-    pendingACPMatchesInput,
+    acpRuntimeStatuses, acpRuntimePending, pendingExternalAgentSessionInput,
+    pendingExternalAgentSessionMetadata, pendingACPRuntimeId, pendingACPRuntimeStatus,
+    pendingACPRuntimeEnsuring, pendingExternalAgentStateFor,
+    pendingExternalAgentMatchesInput,
     sessionId, hasExplicitSessionSelection, currentBotId, bots,
     activeChatTarget, isSessionStreaming,
     loadingChats, loadingMessages, loadingOlder, hasMoreOlder,
@@ -607,10 +607,10 @@ export const useChatStore = defineStore('chat', () => {
     initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,
     selectDraft, userSentInSession, draftViewRequested, applyDraftViewRequest,
     forkedSessionRequested, guiToolUseRequested, deletedSession,
-    stageACPSession, stageDefaultACPSession, cacheDefaultACPSession,
+    stageExternalAgentSession, stageDefaultExternalAgentSession, cacheDefaultExternalAgentSession,
     resetToEmptyComposer, ensurePendingACPRuntime,
-    setPendingACPModel, setPendingACPMode, setPendingACPReasoning, clearPendingACPSession,
-    createACPSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
+    setPendingACPModel, setPendingACPMode, setPendingACPReasoning, clearPendingExternalAgentSession,
+    createExternalAgentSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
     acpRuntimeKey, ensureACPRuntime, setACPRuntimeMode, setACPRuntimeModel, setACPRuntimeReasoning,
     removeSession, renameSession, forkTurn,
     sendMessage, retryLatestAssistant, editLatestUser,

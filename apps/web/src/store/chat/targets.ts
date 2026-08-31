@@ -1,6 +1,6 @@
 import { computed, type Ref } from 'vue'
 import type { SessionSummary } from '@/composables/api/useChat'
-import { normalizedRuntimeType } from '../chat-list.utils'
+import { isAgentRuntimeType, normalizedRuntimeType } from '../chat-list.utils'
 import type {
   ActiveChatTarget,
   ChatViewTarget,
@@ -12,7 +12,10 @@ export function createChatTargets(deps: {
   explicitSessionSelection: Ref<boolean>
   normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
   knownSession: (sessionId: string) => SessionSummary | null | undefined
-  pendingACPState: (target: ChatViewTarget) => {
+  pendingExternalAgentState: (target: ChatViewTarget) => {
+    input: {
+      runtime?: 'acp' | 'codex' | 'claude-code'
+    }
     metadata: Record<string, unknown>
   } | null | undefined
 }) {
@@ -44,22 +47,26 @@ export function createChatTargets(deps: {
         sessionId,
         session,
         runtimeType,
-        isACP: runtimeType === 'acp_agent',
-        isPendingACP: false,
+        isExternalAgent: isAgentRuntimeType(runtimeType),
+        isPendingExternalAgent: false,
         metadata: sessionMetadata(session),
         explicitSelection,
       }
     }
 
-    const pendingState = deps.pendingACPState(resolved)
+    const pendingState = deps.pendingExternalAgentState(resolved)
     if (pendingState) {
+      const runtimeType = pendingState.input.runtime === 'codex'
+        || pendingState.input.runtime === 'claude-code'
+        ? pendingState.input.runtime
+        : 'acp_agent'
       return {
-        kind: 'draft-acp',
+        kind: 'draft-external-agent',
         sessionId: null,
         session: null,
-        runtimeType: 'acp_agent',
-        isACP: true,
-        isPendingACP: true,
+        runtimeType,
+        isExternalAgent: true,
+        isPendingExternalAgent: true,
         metadata: pendingState.metadata,
         explicitSelection,
       }
@@ -70,8 +77,8 @@ export function createChatTargets(deps: {
       sessionId: null,
       session: null,
       runtimeType: 'model',
-      isACP: false,
-      isPendingACP: false,
+      isExternalAgent: false,
+      isPendingExternalAgent: false,
       metadata: {},
       explicitSelection,
     }

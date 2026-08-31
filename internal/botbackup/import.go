@@ -485,7 +485,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	if err != nil {
 		return ImportResult{}, err
 	}
-	profile = scrubImportedProfileACPSecrets(profile, state)
+	profile = scrubImportedProfileAgentSecrets(profile, state)
 	settingsRaw, err := readRawEntry(state, "bot/settings.json")
 	if err != nil {
 		return ImportResult{}, err
@@ -576,14 +576,14 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	return ImportResult{BotID: targetBotID, Created: created, Warnings: state.warnings, Imported: state.counts}, nil
 }
 
-func scrubImportedProfileACPSecrets(profile bots.Bot, state *importState) bots.Bot {
+func scrubImportedProfileAgentSecrets(profile bots.Bot, state *importState) bots.Bot {
 	scrubbed, changed := acpprofile.ScrubMetadataForExport(profile.Metadata)
 	if !changed {
 		return profile
 	}
 	profile.Metadata = scrubbed
 	if state != nil {
-		state.warnings = appendWarningOnce(state.warnings, acpManagedSecretsWarning)
+		state.warnings = appendWarningOnce(state.warnings, agentCredentialsWarning)
 	}
 	return profile
 }

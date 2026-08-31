@@ -243,6 +243,19 @@ func TestAgentRuntimeDoesNotDependOnChat(t *testing.T) {
 	}
 }
 
+func TestDirectExternalRuntimesDoNotDependOnACP(t *testing.T) {
+	root := repoRoot(t)
+	for _, dir := range []string{"internal/agent/runtime/codex", "internal/agent/runtime/claudecode"} {
+		for _, file := range goFiles(t, root, dir) {
+			for _, imp := range imports(t, root, file) {
+				if isPackageOrChild(imp, modulePrefix+"internal/agent/runtime/acp") {
+					t.Errorf("%s imports %s: direct External Agent runtimes must not depend on ACP", file, imp)
+				}
+			}
+		}
+	}
+}
+
 // TestThreadStorageDoesNotReachRouteDB pins the ownership split: Thread may
 // carry an opaque route_id, while Channel owns active-thread selection and
 // route metadata projection.
@@ -362,6 +375,7 @@ func TestRetiredDomainPackagesStayRemoved(t *testing.T) {
 		"internal/acpagent",
 		"internal/acpclient",
 		"internal/acpfeedback",
+		"internal/agentfeedback",
 		"internal/acpprofile",
 		"internal/agentpayload",
 		"internal/conversation",

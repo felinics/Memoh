@@ -1251,7 +1251,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   ) {
     // Dockview emits active-panel changes while fromJSON restores the saved layout.
     // That is not a user click, and must not promote a stale restored chat tab into
-    // an explicit chat-selection entry before chat initialization/default ACP wins.
+    // an explicit chat-selection entry before chat initialization/default External Agent wins.
     if (suppressPersist) return
     // Switch the panel-scoped chat state before the global selection changes. ACP
     // draft staging uses this transition to persist the old view before loading
@@ -1295,7 +1295,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const groupId = activeIsChat ? active.group.id : undefined
     if (sid) {
       // A non-explicit stored session may be the last auto-picked history item.
-      // While chat initialization is still deciding whether default ACP should win,
+      // While chat initialization is still deciding whether default External Agent should win,
       // do not let the restored layout promote that stale id into an explicit user
       // selection. Once loading settles, the loading watcher calls this again.
       if (!explicitSelection && chatStore.loadingChats) return
@@ -1350,7 +1350,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!sessionId || isDeletedSessionForCurrentBot(sessionId)) {
       if (!chatStore.hasExplicitSessionSelection && (chatStore.sessionId ?? '').trim()) {
         chatStore.resetToEmptyComposer({
-          clearPendingACP: false,
+          clearPendingExternalAgent: false,
           explicitSelection: false,
           draftIntent: false,
         })
@@ -1368,8 +1368,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const dock = api.value
     if (!dock || suppressPersist) return
     if ((selection.sessionId ?? '').trim()) return
-    if (chatStore.hasExplicitSessionSelection !== true && !chatStore.pendingACPSessionInput) return
-    // Explicit empty-composer / ACP draft staging is a real request to show a
+    if (chatStore.hasExplicitSessionSelection !== true && !chatStore.pendingExternalAgentSessionInput) return
+    // Explicit empty-composer / External Agent draft staging is a real request to show a
     // draft, even after a non-empty restore — clear the cold-start guard so
     // syncRestoredChatSelection can open one.
     if (suppressSelectionDockMutations) suppressSelectionDockMutations = false
@@ -2455,7 +2455,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }, { flush: 'sync' })
 
   // Keep the active chat tab in step with the global session when it is set from
-  // OUTSIDE a tab activation (initialize picking a session, an ACP session being
+  // OUTSIDE a tab activation (initialize picking a session, an External Agent session being
   // created, a session deleted). Declared AFTER the userSentInSession watch so a
   // send-promotion has already repointed the draft tab by the time this runs —
   // chatPanelForSession then finds it and this just focuses (no duplicate tab).
@@ -2488,7 +2488,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   })
 
   watch(
-    () => chatStore.pendingACPSessionInput,
+    () => chatStore.pendingExternalAgentSessionInput,
     (pending) => {
       if (!pending) return
       syncDraftTargetFromState()

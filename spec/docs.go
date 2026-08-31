@@ -1257,395 +1257,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/acp/claude-code/oauth/authorize": {
-            "get": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Start Claude Code ACP OAuth authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID (required with the encrypted credential store)",
-                        "name": "bot_agent_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthAuthorizeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/claude-code/oauth/exchange": {
-            "post": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Exchange Claude Code OAuth code for an ACP token",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "OAuth exchange request",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthExchangeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/claude-code/oauth/status": {
-            "get": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Get Claude Code ACP OAuth status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID",
-                        "name": "bot_agent_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/authorize": {
-            "get": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Start Codex ACP OAuth authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID (required with the encrypted credential store)",
-                        "name": "bot_agent_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthAuthorizeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/device/authorize": {
-            "post": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Start Codex ACP device code authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID (required with the encrypted credential store)",
-                        "name": "bot_agent_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceAuthorizeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/device/cancel": {
-            "post": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Cancel Codex ACP device code authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Device authorization session",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/device/poll": {
-            "post": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Poll Codex ACP device code authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Device authorization session",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/status": {
-            "get": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Get Codex ACP OAuth status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Bot Agent ID",
-                        "name": "bot_agent_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/agents": {
             "get": {
                 "description": "List active and disabled non-deleted Agents attached to a bot",
@@ -1832,7 +1443,7 @@ const docTemplate = `{
                 }
             },
             "patch": {
-                "description": "Rename, enable, or disable an Agent; runtime metadata is immutable",
+                "description": "Update an Agent's name, availability, or runtime configuration",
                 "consumes": [
                     "application/json"
                 ],
@@ -1897,6 +1508,159 @@ const docTemplate = `{
                         "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/codex/login/device/authorize": {
+            "post": {
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Start a ChatGPT device-code login for the direct codex runtime",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginAuthorizeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/codex/login/device/cancel": {
+            "post": {
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Cancel a pending codex device-code login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Login reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/codex/login/device/poll": {
+            "post": {
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Poll a pending codex device-code login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Login reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -2030,6 +1794,56 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/models": {
+            "get": {
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "List models available to a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/external.ModelCatalog"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -15625,9 +15439,6 @@ const docTemplate = `{
                 "acp_session_id": {
                     "type": "string"
                 },
-                "agent_credential_id": {
-                    "type": "string"
-                },
                 "agent_id": {
                     "type": "string"
                 },
@@ -15636,9 +15447,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/acpclient.AvailableCommandInfo"
                     }
-                },
-                "bot_agent_id": {
-                    "type": "string"
                 },
                 "default_model_id": {
                     "type": "string"
@@ -15802,10 +15610,6 @@ const docTemplate = `{
         "acpprofile.ProfilesResponse": {
             "type": "object",
             "properties": {
-                "credential_store_configured": {
-                    "description": "CredentialStoreConfigured reports whether the server can hold encrypted\nAgent credentials; the UI falls back to legacy metadata editing when not.",
-                    "type": "boolean"
-                },
                 "items": {
                     "type": "array",
                     "items": {
@@ -15833,12 +15637,6 @@ const docTemplate = `{
                     }
                 },
                 "setup_modes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "supported_auth_kinds": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -16719,6 +16517,10 @@ const docTemplate = `{
             "properties": {
                 "enabled": {
                     "type": "boolean"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
@@ -18304,7 +18106,7 @@ const docTemplate = `{
                 "hook_context",
                 "injected_message",
                 "background_summary",
-                "acp_context",
+                "runtime_context",
                 "memory_recall",
                 "conversation_summary"
             ],
@@ -18323,7 +18125,7 @@ const docTemplate = `{
                 "KindHookContext",
                 "KindInjectedMessage",
                 "KindBackgroundSummary",
-                "KindACPContext",
+                "KindRuntimeContext",
                 "KindMemoryRecall",
                 "KindConversationSummary"
             ]
@@ -18470,11 +18272,11 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "run_config_pre_provider",
-                "acp_runtime_prompt"
+                "external_agent_prompt"
             ],
             "x-enum-varnames": [
                 "ViewRunConfigPreProvider",
-                "ViewACPRuntimePrompt"
+                "ViewExternalAgentPrompt"
             ]
         },
         "contextfrag.MemoryRecallQueryTrace": {
@@ -18988,14 +18790,16 @@ const docTemplate = `{
                 "reasoning",
                 "tool",
                 "attachments",
-                "error"
+                "error",
+                "notice"
             ],
             "x-enum-varnames": [
                 "UIMessageText",
                 "UIMessageReasoning",
                 "UIMessageTool",
                 "UIMessageAttachments",
-                "UIMessageError"
+                "UIMessageError",
+                "UIMessageNotice"
             ]
         },
         "conversation.UIReasoningTiming": {
@@ -19441,6 +19245,110 @@ const docTemplate = `{
                 }
             }
         },
+        "external.ModelCatalog": {
+            "type": "object",
+            "properties": {
+                "configured_model_id": {
+                    "type": "string"
+                },
+                "configured_reasoning_effort": {
+                    "type": "string"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/external.ModelOption"
+                    }
+                }
+            }
+        },
+        "external.ModelOption": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "boolean"
+                },
+                "default_reasoning_effort": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reasoning_efforts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/external.ReasoningEffortOption"
+                    }
+                }
+            }
+        },
+        "external.ReasoningEffortOption": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.CodexDeviceLoginAuthorizeResponse": {
+            "type": "object",
+            "required": [
+                "login_id",
+                "user_code",
+                "verification_url"
+            ],
+            "properties": {
+                "login_id": {
+                    "type": "string"
+                },
+                "user_code": {
+                    "type": "string"
+                },
+                "verification_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.CodexDeviceLoginPollRequest": {
+            "type": "object",
+            "required": [
+                "login_id"
+            ],
+            "properties": {
+                "login_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.CodexDeviceLoginPollResponse": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "pending",
+                        "success",
+                        "error",
+                        "unknown"
+                    ]
+                }
+            }
+        },
         "fetchproviders.CreateRequest": {
             "type": "object",
             "properties": {
@@ -19608,121 +19516,6 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
-                }
-            }
-        },
-        "handlers.ACPClaudeCodeOAuthAuthorizeResponse": {
-            "type": "object",
-            "properties": {
-                "auth_url": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPClaudeCodeOAuthExchangeRequest": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPClaudeCodeOAuthStatus": {
-            "type": "object",
-            "properties": {
-                "configured": {
-                    "type": "boolean"
-                },
-                "has_token": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthAuthorizeResponse": {
-            "type": "object",
-            "properties": {
-                "auth_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthDeviceAuthorizeResponse": {
-            "type": "object",
-            "properties": {
-                "expires_at": {
-                    "type": "string"
-                },
-                "interval_seconds": {
-                    "type": "integer"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "user_code": {
-                    "type": "string"
-                },
-                "verification_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthDeviceSessionRequest": {
-            "type": "object",
-            "required": [
-                "session_id"
-            ],
-            "properties": {
-                "session_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthDeviceStatusResponse": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "has_token": {
-                    "type": "boolean"
-                },
-                "interval_seconds": {
-                    "type": "integer"
-                },
-                "next_poll_after": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthStatus": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "callback_url": {
-                    "type": "string"
-                },
-                "configured": {
-                    "type": "boolean"
-                },
-                "has_token": {
-                    "type": "boolean"
                 }
             }
         },
@@ -21837,9 +21630,6 @@ const docTemplate = `{
                 "acp_agent_id": {
                     "type": "string"
                 },
-                "bot_agent_id": {
-                    "type": "string"
-                },
                 "project_path": {
                     "type": "string"
                 }
@@ -23338,7 +23128,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "acp_model_id": {
-                    "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "description": "ACPModelID is an agent-reported model identifier override for External\nAgent runs. Mutually exclusive with ModelID.",
                     "type": "string"
                 },
                 "bot_agent_id": {
@@ -23397,7 +23187,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "acp_model_id": {
-                    "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "description": "ACPModelID is an agent-reported model identifier override for External\nAgent runs. Mutually exclusive with ModelID.",
                     "type": "string"
                 },
                 "bot_agent_id": {
@@ -23507,7 +23297,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "acp_model_id": {
-                    "description": "ACPModelID is an agent-reported model identifier override for ACP\nruns (e.g. a Codex model id). Mutually exclusive with ModelID.",
+                    "description": "ACPModelID is an agent-reported model identifier override for External\nAgent runs. Mutually exclusive with ModelID.",
                     "type": "string"
                 },
                 "bot_agent_id": {

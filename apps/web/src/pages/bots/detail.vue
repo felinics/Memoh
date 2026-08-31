@@ -303,7 +303,7 @@ import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
 import BotRemoteRuntime from './components/bot-remote-runtime.vue'
 import BotAccess from './components/bot-access.vue'
-import BotAcp from './components/bot-acp.vue'
+import BotAgents from './components/bot-agents.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -406,7 +406,7 @@ const tabList = computed(() => {
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'tool-approval', label: 'bots.tabs.toolApproval', icon: Zap, component: BotToolApproval, params: { 'bot-id': bot_id } },
     { value: 'hooks', label: 'bots.tabs.hooks', icon: Workflow, component: BotHooks, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
-    { value: 'acp', label: 'bots.tabs.acp', icon: BotIcon, component: BotAcp, params: { 'bot-id': bot_id } },
+    { value: 'agents', label: 'bots.tabs.agents', icon: BotIcon, component: BotAgents, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
     ...(capabilitiesStore.loaded && capabilitiesStore.connectors
       ? [{ value: 'connectors', label: 'bots.tabs.connectors', icon: Plug, component: BotConnectors, params: { 'bot-id': bot_id } }]
@@ -444,7 +444,7 @@ const searchIndex = computed(() => {
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
     { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
     { tab: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
-    { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'claude code', 'coding agent', 'acp'] },
+    { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'external agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     ...(capabilitiesStore.loaded && capabilitiesStore.connectors
       ? [{ tab: 'connectors', key: 'bots.tabs.connectors', keywords: ['providers', 'apps', 'oauth', 'api', '连接器', 'コネクター'] }]
@@ -522,7 +522,7 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'acp', 'connectors', 'mcp', 'memory']
+  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'memory']
   const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
   const securityKeys = ['access', 'email']
 
@@ -587,6 +587,10 @@ watch(bot, (val) => {
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
 watch([tabList, activeTab], ([tabs, tab]) => {
+  if (tab === 'acp') {
+    activeTab.value = 'agents'
+    return
+  }
   if (tabs.some(item => item.value === tab)) return
   // 'connectors' only joins the list once the capability ping lands; don't
   // bounce a deep link / refresh to overview while that's still in flight.

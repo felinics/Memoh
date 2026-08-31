@@ -9,16 +9,15 @@ const LEGACY_SESSION_KEYS = [
   'memoh:onboarding:provider-added-count',
 ] as const
 
-export interface OnboardingACPResult {
+export interface OnboardingAgentResult {
   agentId: string
   botAgentId: string
-  oauthPending: boolean
 }
 
 export interface OnboardingBotResult {
   botId: string
   modelConfigured: boolean
-  acp?: OnboardingACPResult
+  agent?: OnboardingAgentResult
 }
 
 let providerIdMemory: string | undefined
@@ -34,17 +33,18 @@ function normalizeBotResult(value: unknown): OnboardingBotResult | null {
   const botId = normalizeProviderId(candidate.botId)
   if (!botId) return null
 
-  const acpAgentId = normalizeACPAgentID(candidate.acp?.agentId)
-  const botAgentId = normalizeProviderId(candidate.acp?.botAgentId)
+  const legacy = candidate as Partial<OnboardingBotResult> & { acp?: OnboardingAgentResult }
+  const selectedAgent = candidate.agent ?? legacy.acp
+  const agentId = normalizeACPAgentID(selectedAgent?.agentId)
+  const botAgentId = normalizeProviderId(selectedAgent?.botAgentId)
 
   return {
     botId,
     modelConfigured: candidate.modelConfigured === true,
-    ...(acpAgentId && botAgentId && {
-      acp: {
-        agentId: acpAgentId,
+    ...(agentId && botAgentId && {
+      agent: {
+        agentId,
         botAgentId,
-        oauthPending: candidate.acp?.oauthPending === true,
       },
     }),
   }
@@ -92,35 +92,6 @@ export function writeOnboardingBotResult(result: OnboardingBotResult): void {
 export function clearOnboardingBotResult(): void {
   botResultMemory = null
   safeSessionRemove(ONBOARDING_KEYS.botResult)
-}
-
-export function readOnboardingOAuthResume(): { botId: string, agentId: string, botAgentId: string } | null {
-  const result = readOnboardingBotResult()
-  if (!result?.acp?.oauthPending) return null
-  return { botId: result.botId, agentId: result.acp.agentId, botAgentId: result.acp.botAgentId }
-}
-
-export function markOnboardingOAuthComplete(): void {
-  const result = readOnboardingBotResult()
-  if (!result?.acp?.oauthPending) return
-  writeOnboardingBotResult({
-    botId: result.botId,
-    modelConfigured: result.modelConfigured,
-    acp: {
-      agentId: result.acp.agentId,
-      botAgentId: result.acp.botAgentId,
-      oauthPending: false,
-    },
-  })
-}
-
-export function skipOnboardingOAuth(): void {
-  const result = readOnboardingBotResult()
-  if (!result) return
-  writeOnboardingBotResult({
-    botId: result.botId,
-    modelConfigured: result.modelConfigured,
-  })
 }
 
 export function resetOnboardingSession(): void {

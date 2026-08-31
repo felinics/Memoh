@@ -63,7 +63,7 @@ describe('useOnboarding completion', () => {
     writeOnboardingBotResult({
       botId: 'bot-id',
       modelConfigured: false,
-      acp: { agentId: 'codex', botAgentId: 'agent-id', oauthPending: false },
+      agent: { agentId: 'codex', botAgentId: 'agent-id' },
     })
     localStorage.setItem(ONBOARDING_KEYS.forceOnboarding, '1')
 
@@ -82,24 +82,10 @@ describe('useOnboarding completion', () => {
     expect(mocks.replace).toHaveBeenLastCalledWith({
       name: 'bot',
       params: { botName: 'bot-id' },
-      query: { acp: 'codex' },
+      query: { agent: 'codex' },
     })
     expect(readOnboardingBotResult()).toBeNull()
     expect(localStorage.getItem(ONBOARDING_KEYS.forceOnboarding)).toBeNull()
-  })
-
-  it('does not launch an ACP agent while OAuth is still pending', async () => {
-    writeOnboardingBotResult({
-      botId: 'bot-id',
-      modelConfigured: false,
-      acp: { agentId: 'claude-code', botAgentId: 'agent-id', oauthPending: true },
-    })
-
-    expect(await useOnboarding().complete()).toBe(true)
-    expect(mocks.replace).toHaveBeenCalledWith({
-      name: 'bot',
-      params: { botName: 'bot-id' },
-    })
   })
 
   it('treats a resolved router failure as a failed completion', async () => {

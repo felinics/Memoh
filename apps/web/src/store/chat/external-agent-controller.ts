@@ -1,17 +1,17 @@
 import { ref, type Ref } from 'vue'
-import { acpSessionMetadata, createACPStaging } from './acp-staging'
-import { createACPOrchestration } from './acp-orchestration'
+import { externalAgentDraftMetadata, createExternalAgentStaging } from './external-agent-staging'
+import { createExternalAgentOrchestration } from './external-agent-orchestration'
 import { createACPRuntimeRegistry } from './acp-runtime-registry'
-import { createACPSessions } from './acp-sessions'
-import { createACPDefaults } from './acp-defaults'
+import { createExternalAgentSessions } from './external-agent-sessions'
+import { createExternalAgentDefaults } from './external-agent-defaults'
 import type { ChatViewEntry } from './view-registry'
 import type {
-  ACPAgentSessionInput,
+  ExternalAgentSessionInput,
   ChatViewTarget,
 } from './types'
 import type { SessionSummary } from '@/composables/api/useChat'
 
-export function createACPController(deps: {
+export function createExternalAgentController(deps: {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   draftIntent: Ref<boolean>
@@ -36,13 +36,13 @@ export function createACPController(deps: {
   removeSessionFromList: (sessionId: string) => void
   ensureBot: () => Promise<string | null>
   knownSession: (sessionId: string) => SessionSummary | null | undefined
-  draftWorkdirIdFor: (botId: string, opts: { acp: boolean }) => string
+  draftWorkdirIdFor: (botId: string, opts: { externalAgent: boolean }) => string
 }) {
   const runtimeRegistry = createACPRuntimeRegistry({
     currentBotId: deps.currentBotId,
     sessionId: deps.sessionId,
   })
-  const staging = createACPStaging({
+  const staging = createExternalAgentStaging({
     currentBotId: deps.currentBotId,
     sessionId: deps.sessionId,
     draftIntent: deps.draftIntent,
@@ -76,7 +76,7 @@ export function createACPController(deps: {
     }
   }
 
-  const orchestration = createACPOrchestration({
+  const orchestration = createExternalAgentOrchestration({
     staging,
     runtimeRegistry,
     normalizeTarget: deps.normalizeTarget,
@@ -86,18 +86,18 @@ export function createACPController(deps: {
     },
     resetWorkspaceTargetSelection: deps.resetWorkspaceTargetSelection,
   })
-  const defaults = createACPDefaults({
+  const defaults = createExternalAgentDefaults({
     currentBotId: deps.currentBotId,
     sessionId: deps.sessionId,
     explicitSessionSelection: deps.explicitSessionSelection,
     userScopeGeneration: deps.userScopeGeneration,
     currentSelectRequest: deps.currentSelectSessionRequest,
-    rememberDefault: staging.rememberDefaultACPInput,
-    cachedDefault: staging.cachedDefaultACPInput,
-    pendingMatches: orchestration.pendingACPMatchesInput,
-    stageDefault: orchestration.stageDefaultACPSession,
+    rememberDefault: staging.rememberDefaultExternalAgentInput,
+    cachedDefault: staging.cachedDefaultExternalAgentInput,
+    pendingMatches: orchestration.pendingExternalAgentMatchesInput,
+    stageDefault: orchestration.stageDefaultExternalAgentSession,
   })
-  const sessions = createACPSessions({
+  const sessions = createExternalAgentSessions({
     currentBotId: deps.currentBotId,
     sessionId: deps.sessionId,
     draftIntent: deps.draftIntent,
@@ -105,17 +105,17 @@ export function createACPController(deps: {
     focusedViewId: deps.focusedViewId,
     userScopeGeneration: deps.userScopeGeneration,
     normalizeTarget: deps.normalizeTarget,
-    targetDraftForACP: orchestration.targetDraftForACP,
-    pendingACPStateFor: orchestration.pendingACPStateFor,
+    targetDraftForExternalAgent: orchestration.targetDraftForExternalAgent,
+    pendingExternalAgentStateFor: orchestration.pendingExternalAgentStateFor,
     isFocusedTarget: deps.isFocusedTarget,
     upsertSession: deps.upsertSession,
     rememberSession: deps.rememberSession,
     promoteDraftView: deps.promoteDraftView,
     clearRuntimeStatus: runtimeRegistry.clearACPRuntimeStatus,
-    forgetDraftStage: orchestration.forgetDraftACPStage,
-    discardDraftStage: orchestration.discardDraftACPStage,
-    rememberDraftStage: orchestration.rememberDraftACPStage,
-    activateDraftStage: orchestration.activateDraftACPStage,
+    forgetDraftStage: orchestration.forgetDraftExternalAgentStage,
+    discardDraftStage: orchestration.discardDraftExternalAgentStage,
+    rememberDraftStage: orchestration.rememberDraftExternalAgentStage,
+    activateDraftStage: orchestration.activateDraftExternalAgentStage,
     markSessionDeleted: deps.markSessionDeleted,
     stopSessionRuntime: deps.stopSessionRuntime,
     removeSessionView: deps.removeSessionView,
@@ -138,14 +138,14 @@ export function createACPController(deps: {
     viewId: string
     expectedSessionId: string | null
     explicitSelection: boolean
-    input: ACPAgentSessionInput | null
+    input: ExternalAgentSessionInput | null
     activate: boolean
     seq: number
   } | null>(null)
   let draftViewRequestSeq = 0
 
-  function normalizedInput(input: ACPAgentSessionInput): ACPAgentSessionInput {
-    const metadata = acpSessionMetadata(input)
+  function normalizedInput(input: ExternalAgentSessionInput): ExternalAgentSessionInput {
+    const metadata = externalAgentDraftMetadata(input)
     return {
       ...input,
       agentId: String(metadata.acp_agent_id ?? ''),
@@ -164,7 +164,7 @@ export function createACPController(deps: {
       viewId: request.viewId,
     }
     if (mirrorGlobalSelection) {
-      if (request.input) orchestration.stageNewACPSession(request.input, target)
+      if (request.input) orchestration.stageNewExternalAgentSession(request.input, target)
       else {
         orchestration.resetToEmptyComposer({
           explicitSelection: request.explicitSelection,
@@ -174,9 +174,9 @@ export function createACPController(deps: {
       return
     }
     deps.chatView(target).transcript.clearHistoryView()
-    orchestration.discardDraftACPStage(target)
+    orchestration.discardDraftExternalAgentStage(target)
     if (request.input) {
-      orchestration.rememberDraftACPStage(target, {
+      orchestration.rememberDraftExternalAgentStage(target, {
         botId: request.botId,
         input: normalizedInput(request.input),
         runtimeId: '',
@@ -186,7 +186,7 @@ export function createACPController(deps: {
 
   function requestDraftView(
     target: ChatViewTarget,
-    input: ACPAgentSessionInput | null,
+    input: ExternalAgentSessionInput | null,
     activate = deps.isFocusedTarget(target),
   ) {
     const resolved = deps.normalizeTarget(target)
@@ -202,10 +202,10 @@ export function createACPController(deps: {
   }
 
   function reset() {
-    staging.clearPendingACPSession()
-    staging.clearDefaultACPInputs()
+    staging.clearPendingExternalAgentSession()
+    staging.clearDefaultExternalAgentInputs()
     orchestration.reset()
-    runtimeRegistry.resetACPRuntimeRegistry()
+    runtimeRegistry.resetExternalAgentRuntimeRegistry()
     draftViewRequested.value = null
     draftViewCommandVersions.clear()
   }

@@ -50,7 +50,7 @@ function makeStore(initial?: AcpagentRuntimeStatus) {
   const setACPRuntimeMode = vi.fn<(modeId: string) => Promise<AcpagentRuntimeStatus | undefined>>()
   const setACPRuntimeModel = vi.fn<(modelId: string) => Promise<AcpagentRuntimeStatus | undefined>>()
   const setACPRuntimeReasoning = vi.fn<(effort: string) => Promise<AcpagentRuntimeStatus | undefined>>()
-  const pendingACPStateFor = vi.fn(() => null as unknown)
+  const pendingExternalAgentStateFor = vi.fn(() => null as unknown)
   const useStore = defineStore(`acp-runtime-test-${Math.random()}`, () => {
     const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({
       ...(initial ? { 'bot-1:session-1': initial } : {}),
@@ -60,7 +60,7 @@ function makeStore(initial?: AcpagentRuntimeStatus) {
       acpRuntimeStatuses,
       acpRuntimePending,
       acpRuntimeKey: (botId: string, sessionId: string) => `${botId.trim()}:${sessionId.trim()}`,
-      pendingACPStateFor,
+      pendingExternalAgentStateFor,
       ensurePendingACPRuntime: vi.fn(),
       setPendingACPModel: vi.fn(),
       setPendingACPReasoning: vi.fn(),
@@ -72,7 +72,7 @@ function makeStore(initial?: AcpagentRuntimeStatus) {
   })
   const store = useStore()
   chatStoreMock.use.mockReturnValue(store)
-  return { store, ensureACPRuntime, setACPRuntimeModel, setACPRuntimeReasoning, pendingACPStateFor }
+  return { store, ensureACPRuntime, setACPRuntimeModel, setACPRuntimeReasoning, pendingExternalAgentStateFor }
 }
 
 function useSessionRuntime() {
@@ -142,10 +142,10 @@ describe('useACPRuntime', () => {
   })
 
   it('rebinds draft capability to the target Session on promotion or navigation', async () => {
-    const { store, pendingACPStateFor } = makeStore()
+    const { store, pendingExternalAgentStateFor } = makeStore()
     const pending = ref(true)
     const sessionId = ref<string | null>(null)
-    pendingACPStateFor.mockReturnValue({
+    pendingExternalAgentStateFor.mockReturnValue({
       runtimeStatus: runtime('model-b', 'low'),
       ensuring: false,
     })

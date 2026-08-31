@@ -262,6 +262,17 @@
                 <span class="min-w-0 whitespace-pre-wrap break-words">{{ errorBlockContent(node.block) }}</span>
               </div>
 
+              <!-- Runtime notice block: a degradation the runtime wants the
+                   user to see (tools unavailable, an interaction declined).
+                   Warning-toned, quieter than an error — the turn continues. -->
+              <div
+                v-else-if="node.block.type === 'notice' && node.block.content"
+                class="flex items-start gap-2 rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
+              >
+                <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
+                <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
+              </div>
+
               <!-- Attachment block. An assistant turn posts images as reply
                    content, so they render inline at natural aspect ratio rather
                    than as square upload chips. -->
@@ -361,7 +372,7 @@ if (typeof document !== 'undefined') {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
-import { CircleAlert, Sparkles } from 'lucide-vue-next'
+import { CircleAlert, Sparkles, TriangleAlert } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
@@ -778,6 +789,7 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
   if (block.type === 'tool') return true
   if (block.type === 'text') return Boolean(block.content)
   if (block.type === 'error') return Boolean(block.code || block.content)
+  if (block.type === 'notice') return Boolean(block.content)
   if (block.type === 'attachments') return block.attachments.length > 0
   return true
 }

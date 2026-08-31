@@ -25,7 +25,7 @@ describe('resolveApiErrorMessage', () => {
     const message = resolveApiErrorMessage({
       body: {
         code: 'no_workspace_exec',
-        i18n_key: 'chat.acp.noWorkspaceExec',
+        i18n_key: 'chat.externalAgent.noWorkspaceExec',
         args: {},
         message: 'raw backend message',
       },
@@ -38,7 +38,7 @@ describe('resolveApiErrorMessage', () => {
     const message = resolveApiErrorMessage({
       message: {
         code: 'no_workspace_exec',
-        i18n_key: 'chat.acp.noWorkspaceExec',
+        i18n_key: 'chat.externalAgent.noWorkspaceExec',
         args: {},
         message: 'raw backend message',
       },
@@ -55,7 +55,7 @@ describe('resolveApiErrorMessage', () => {
       message: 'raw backend message',
       feedback: {
         code: 'no_workspace_exec',
-        i18n_key: 'chat.acp.noWorkspaceExec',
+        i18n_key: 'chat.externalAgent.noWorkspaceExec',
         args: {},
         message: 'raw backend message',
       },

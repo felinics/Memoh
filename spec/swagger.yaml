@@ -231,16 +231,12 @@ definitions:
     properties:
       acp_session_id:
         type: string
-      agent_credential_id:
-        type: string
       agent_id:
         type: string
       available_commands:
         items:
           $ref: '#/definitions/acpclient.AvailableCommandInfo'
         type: array
-      bot_agent_id:
-        type: string
       default_model_id:
         type: string
       models:
@@ -346,11 +342,6 @@ definitions:
     type: object
   acpprofile.ProfilesResponse:
     properties:
-      credential_store_configured:
-        description: |-
-          CredentialStoreConfigured reports whether the server can hold encrypted
-          Agent credentials; the UI falls back to legacy metadata editing when not.
-        type: boolean
       items:
         items:
           $ref: '#/definitions/acpprofile.PublicProfile'
@@ -369,10 +360,6 @@ definitions:
           $ref: '#/definitions/acpprofile.ManagedField'
         type: array
       setup_modes:
-        items:
-          type: string
-        type: array
-      supported_auth_kinds:
         items:
           type: string
         type: array
@@ -964,6 +951,9 @@ definitions:
     properties:
       enabled:
         type: boolean
+      metadata:
+        additionalProperties: {}
+        type: object
       name:
         type: string
     type: object
@@ -2065,7 +2055,7 @@ definitions:
     - hook_context
     - injected_message
     - background_summary
-    - acp_context
+    - runtime_context
     - memory_recall
     - conversation_summary
     type: string
@@ -2084,7 +2074,7 @@ definitions:
     - KindHookContext
     - KindInjectedMessage
     - KindBackgroundSummary
-    - KindACPContext
+    - KindRuntimeContext
     - KindMemoryRecall
     - KindConversationSummary
   contextfrag.KindBreakdown:
@@ -2181,11 +2171,11 @@ definitions:
   contextfrag.ManifestView:
     enum:
     - run_config_pre_provider
-    - acp_runtime_prompt
+    - external_agent_prompt
     type: string
     x-enum-varnames:
     - ViewRunConfigPreProvider
-    - ViewACPRuntimePrompt
+    - ViewExternalAgentPrompt
   contextfrag.MemoryRecallQueryTrace:
     properties:
       recent_messages:
@@ -2543,6 +2533,7 @@ definitions:
     - tool
     - attachments
     - error
+    - notice
     type: string
     x-enum-varnames:
     - UIMessageText
@@ -2550,6 +2541,7 @@ definitions:
     - UIMessageTool
     - UIMessageAttachments
     - UIMessageError
+    - UIMessageNotice
   conversation.UIReasoningTiming:
     properties:
       duration_ms:
@@ -2850,6 +2842,75 @@ definitions:
       provider:
         type: string
     type: object
+  external.ModelCatalog:
+    properties:
+      configured_model_id:
+        type: string
+      configured_reasoning_effort:
+        type: string
+      models:
+        items:
+          $ref: '#/definitions/external.ModelOption'
+        type: array
+    type: object
+  external.ModelOption:
+    properties:
+      default:
+        type: boolean
+      default_reasoning_effort:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      reasoning_efforts:
+        items:
+          $ref: '#/definitions/external.ReasoningEffortOption'
+        type: array
+    type: object
+  external.ReasoningEffortOption:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  externalagent.CodexDeviceLoginAuthorizeResponse:
+    properties:
+      login_id:
+        type: string
+      user_code:
+        type: string
+      verification_url:
+        type: string
+    required:
+    - login_id
+    - user_code
+    - verification_url
+    type: object
+  externalagent.CodexDeviceLoginPollRequest:
+    properties:
+      login_id:
+        type: string
+    required:
+    - login_id
+    type: object
+  externalagent.CodexDeviceLoginPollResponse:
+    properties:
+      status:
+        enum:
+        - pending
+        - success
+        - error
+        - unknown
+        type: string
+    required:
+    - status
+    type: object
   fetchproviders.CreateRequest:
     properties:
       config:
@@ -2963,80 +3024,6 @@ definitions:
         type: string
       updated_at:
         type: string
-    type: object
-  handlers.ACPClaudeCodeOAuthAuthorizeResponse:
-    properties:
-      auth_url:
-        type: string
-      session_id:
-        type: string
-    type: object
-  handlers.ACPClaudeCodeOAuthExchangeRequest:
-    properties:
-      code:
-        type: string
-      session_id:
-        type: string
-    type: object
-  handlers.ACPClaudeCodeOAuthStatus:
-    properties:
-      configured:
-        type: boolean
-      has_token:
-        type: boolean
-    type: object
-  handlers.ACPCodexOAuthAuthorizeResponse:
-    properties:
-      auth_url:
-        type: string
-    type: object
-  handlers.ACPCodexOAuthDeviceAuthorizeResponse:
-    properties:
-      expires_at:
-        type: string
-      interval_seconds:
-        type: integer
-      session_id:
-        type: string
-      user_code:
-        type: string
-      verification_url:
-        type: string
-    type: object
-  handlers.ACPCodexOAuthDeviceSessionRequest:
-    properties:
-      session_id:
-        type: string
-    required:
-    - session_id
-    type: object
-  handlers.ACPCodexOAuthDeviceStatusResponse:
-    properties:
-      account_id:
-        type: string
-      error:
-        type: string
-      expires_at:
-        type: string
-      has_token:
-        type: boolean
-      interval_seconds:
-        type: integer
-      next_poll_after:
-        type: string
-      status:
-        type: string
-    type: object
-  handlers.ACPCodexOAuthStatus:
-    properties:
-      account_id:
-        type: string
-      callback_url:
-        type: string
-      configured:
-        type: boolean
-      has_token:
-        type: boolean
     type: object
   handlers.BatchDeleteRequest:
     properties:
@@ -4464,8 +4451,6 @@ definitions:
     properties:
       acp_agent_id:
         type: string
-      bot_agent_id:
-        type: string
       project_path:
         type: string
     type: object
@@ -5506,8 +5491,8 @@ definitions:
         type: string
       acp_model_id:
         description: |-
-          ACPModelID is an agent-reported model identifier override for ACP
-          runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+          ACPModelID is an agent-reported model identifier override for External
+          Agent runs. Mutually exclusive with ModelID.
         type: string
       bot_agent_id:
         description: |-
@@ -5558,8 +5543,8 @@ definitions:
         type: string
       acp_model_id:
         description: |-
-          ACPModelID is an agent-reported model identifier override for ACP
-          runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+          ACPModelID is an agent-reported model identifier override for External
+          Agent runs. Mutually exclusive with ModelID.
         type: string
       bot_agent_id:
         description: |-
@@ -5643,8 +5628,8 @@ definitions:
         type: string
       acp_model_id:
         description: |-
-          ACPModelID is an agent-reported model identifier override for ACP
-          runs (e.g. a Codex model id). Mutually exclusive with ModelID.
+          ACPModelID is an agent-reported model identifier override for External
+          Agent runs. Mutually exclusive with ModelID.
         type: string
       bot_agent_id:
         description: |-
@@ -7157,260 +7142,6 @@ paths:
       summary: Set an ACP runtime's reasoning effort
       tags:
       - acp
-  /bots/{bot_id}/acp/claude-code/oauth/authorize:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Bot Agent ID (required with the encrypted credential store)
-        in: query
-        name: bot_agent_id
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthAuthorizeResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Start Claude Code ACP OAuth authorization
-      tags:
-      - acp
-  /bots/{bot_id}/acp/claude-code/oauth/exchange:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: OAuth exchange request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ACPClaudeCodeOAuthExchangeRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Exchange Claude Code OAuth code for an ACP token
-      tags:
-      - acp
-  /bots/{bot_id}/acp/claude-code/oauth/status:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Bot Agent ID
-        in: query
-        name: bot_agent_id
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPClaudeCodeOAuthStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get Claude Code ACP OAuth status
-      tags:
-      - acp
-  /bots/{bot_id}/acp/codex/oauth/authorize:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Bot Agent ID (required with the encrypted credential store)
-        in: query
-        name: bot_agent_id
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPCodexOAuthAuthorizeResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Start Codex ACP OAuth authorization
-      tags:
-      - acp
-  /bots/{bot_id}/acp/codex/oauth/device/authorize:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Bot Agent ID (required with the encrypted credential store)
-        in: query
-        name: bot_agent_id
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceAuthorizeResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Start Codex ACP device code authorization
-      tags:
-      - acp
-  /bots/{bot_id}/acp/codex/oauth/device/cancel:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Device authorization session
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Cancel Codex ACP device code authorization
-      tags:
-      - acp
-  /bots/{bot_id}/acp/codex/oauth/device/poll:
-    post:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Device authorization session
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Poll Codex ACP device code authorization
-      tags:
-      - acp
-  /bots/{bot_id}/acp/codex/oauth/status:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Bot Agent ID
-        in: query
-        name: bot_agent_id
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ACPCodexOAuthStatus'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get Codex ACP OAuth status
-      tags:
-      - acp
   /bots/{bot_id}/agents:
     get:
       description: List active and disabled non-deleted Agents attached to a bot
@@ -7538,7 +7269,7 @@ paths:
     patch:
       consumes:
       - application/json
-      description: Rename, enable, or disable an Agent; runtime metadata is immutable
+      description: Update an Agent's name, availability, or runtime configuration
       parameters:
       - description: Bot ID
         in: path
@@ -7582,6 +7313,107 @@ paths:
       summary: Update a bot Agent
       tags:
       - bot-agents
+  /bots/{bot_id}/agents/{id}/codex/login/device/authorize:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.CodexDeviceLoginAuthorizeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Start a ChatGPT device-code login for the direct codex runtime
+      tags:
+      - external-agents
+  /bots/{bot_id}/agents/{id}/codex/login/device/cancel:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Login reference
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/externalagent.CodexDeviceLoginPollRequest'
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Cancel a pending codex device-code login
+      tags:
+      - external-agents
+  /bots/{bot_id}/agents/{id}/codex/login/device/poll:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Login reference
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/externalagent.CodexDeviceLoginPollRequest'
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.CodexDeviceLoginPollResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Poll a pending codex device-code login
+      tags:
+      - external-agents
   /bots/{bot_id}/agents/{id}/credential:
     delete:
       parameters:
@@ -7672,6 +7504,39 @@ paths:
       summary: Attach a credential to a Bot Agent, replacing any previous one
       tags:
       - agent-credentials
+  /bots/{bot_id}/agents/{id}/models:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/external.ModelCatalog'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List models available to a bot Agent
+      tags:
+      - bot-agents
   /bots/{bot_id}/backup/export:
     post:
       consumes:
