@@ -80,12 +80,14 @@ RUN set -eux; \
 COPY --from=toolkit-builder /opt/memoh/toolkit /opt/memoh/toolkit
 COPY scripts/desktop-style.sh scripts/display-apply-style.sh scripts/display-prepare.sh /opt/memoh/scripts/
 COPY docker/workspace-contract.json /opt/memoh/workspace-contract.json
-RUN chmod 0755 /opt/memoh/scripts/*.sh \
+RUN printf '%s\n' 'export PATH="/opt/memoh/toolkit/bin:$PATH"' > /etc/profile.d/memoh-toolkit.sh \
+  && chmod 0755 /opt/memoh/scripts/*.sh \
   && test -x /usr/bin/tini \
   && test -x /opt/memoh/toolkit/bin/node \
   && test -x /opt/memoh/toolkit/bin/python3 \
   && test -x /opt/memoh/toolkit/bin/uv \
   && test -x /opt/memoh/toolkit/display/bin/a11y-cli \
+  && /bin/bash -lc 'node --version >/dev/null && npm --version >/dev/null' \
   && /opt/memoh/toolkit/bin/codex --version >/dev/null \
   && /opt/memoh/toolkit/bin/claude --version >/dev/null
 
