@@ -178,6 +178,21 @@ func TestNewServiceRejectsDefaultDockerNetwork(t *testing.T) {
 	}
 }
 
+func TestNewServiceRejectsWorkspaceNetworkForHostServer(t *testing.T) {
+	if runningInContainer() {
+		t.Skip("test requires a host process")
+	}
+	_, err := NewService(slog.New(slog.DiscardHandler), config.Config{
+		Docker: config.DockerConfig{Network: "memoh-workspace"},
+	})
+	if err == nil {
+		t.Fatal("NewService() accepted Docker workspace networking from a host process")
+	}
+	if !strings.Contains(err.Error(), "host deployments use the loopback workspace bridge") {
+		t.Fatalf("NewService() error = %q, want host loopback guidance", err)
+	}
+}
+
 func TestCreateContainerUsesWorkspaceNetworkWithoutPublishingBridge(t *testing.T) {
 	var createRequest dockercontainer.CreateRequest
 	svc := newTestService(t, "memoh-workspace", func(w http.ResponseWriter, r *http.Request) {

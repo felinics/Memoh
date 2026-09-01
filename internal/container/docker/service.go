@@ -47,6 +47,13 @@ func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
 	}
+	workspaceNetwork := strings.TrimSpace(cfg.Docker.Network)
+	if isDefaultDockerNetwork(workspaceNetwork) {
+		return nil, fmt.Errorf("docker network %q does not provide container-name DNS; configure a user-defined network", workspaceNetwork)
+	}
+	if workspaceNetwork != "" && !runningInContainer() {
+		return nil, fmt.Errorf("docker network %q requires the Memoh server to run in a container; host deployments use the loopback workspace bridge", workspaceNetwork)
+	}
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 	if host := strings.TrimSpace(cfg.Docker.Host); host != "" {
 		opts = append(opts, client.WithHost(host))
@@ -54,11 +61,6 @@ func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
 	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
-	}
-	workspaceNetwork := strings.TrimSpace(cfg.Docker.Network)
-	if isDefaultDockerNetwork(workspaceNetwork) {
-		_ = cli.Close()
-		return nil, fmt.Errorf("docker network %q does not provide container-name DNS; configure a user-defined network", workspaceNetwork)
 	}
 	return &Service{
 		client:           cli,
