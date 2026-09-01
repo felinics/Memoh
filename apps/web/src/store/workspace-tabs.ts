@@ -1398,8 +1398,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       const sid = panelSessionId(panel)
       if (!sid) continue
       const session = chatStore.knownSessionSummary(sid)
-      const title = (session?.title ?? '').trim()
-      if (title && panel.api.title !== title) panel.api.setTitle(title)
+      // Unknown session (not yet in the loaded list): leave the tab alone —
+      // deriving from nothing would overwrite a correct title with a fallback.
+      if (!session) continue
+      // Untitled sessions (channel/discuss ones) derive their tab title from the
+      // fallback chain (conversation name → untitled): this refreshes a persisted
+      // "Untitled Session" placeholder after upgrade and follows a group rename —
+      // repairEmptyPanelTitles skips non-empty titles, so without this both stay stale.
+      const next = (session.title ?? '').trim() || chatTitleFallbackFor(sid)
+      if (panel.api.title !== next) panel.api.setTitle(next)
     }
   }
 
@@ -2494,9 +2501,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   )
 
   // Server renames flow into each open chat tab's title. Keyed by a sorted
-  // id:title digest so it fires on title changes, not on every sidebar reorder.
+  // id:title:conversation-name digest so it fires on title changes AND on
+  // channel route (group/peer name) changes, not on every sidebar reorder.
   watch(
-    () => chatStore.knownSessions.map(s => `${s.id}:${s.title ?? ''}`).sort().join('|'),
+    () => chatStore.knownSessions.map(s => `${s.id}:${s.title ?? ''}:${(s.route_metadata?.conversation_name as string) ?? ''}`).sort().join('|'),
     () => syncChatTitles(),
   )
 
