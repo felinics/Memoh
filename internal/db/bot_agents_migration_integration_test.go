@@ -367,7 +367,9 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		}
 
 		stepDown(t, dsn, 1)
-		assertScheduleACPFieldsValidated(t, ctx, pool, false)
+		// The retirement deleted the only historical invalid row, so the down
+		// migration can validate the restored ACP execution-shape constraint.
+		assertScheduleACPFieldsValidated(t, ctx, pool, true)
 		var directBotReset bool
 		var directAgentRows, directSessionRows, directScheduleRows, directMessageRows int
 		if err := pool.QueryRow(ctx, `
