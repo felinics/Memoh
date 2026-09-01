@@ -162,8 +162,8 @@ func TestBridgeTargetPrefersPublishedHostPort(t *testing.T) {
 	}
 }
 
-func TestNewServiceRejectsDefaultDockerNetwork(t *testing.T) {
-	for _, networkName := range []string{"bridge", "default", "host", "none"} {
+func TestNewServiceRejectsNonUserDefinedDockerNetwork(t *testing.T) {
+	for _, networkName := range []string{"bridge", "default", "host", "nat", "none", "container:server"} {
 		t.Run(networkName, func(t *testing.T) {
 			_, err := NewService(slog.New(slog.DiscardHandler), config.Config{
 				Docker: config.DockerConfig{Network: networkName},
@@ -190,6 +190,16 @@ func TestNewServiceRejectsWorkspaceNetworkForHostServer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "host deployments use the loopback workspace bridge") {
 		t.Fatalf("NewService() error = %q, want host loopback guidance", err)
+	}
+}
+
+func TestValidateWorkspaceNetworkRequiresStrictBridgeTLS(t *testing.T) {
+	const networkName = "memoh-workspace"
+	if err := validateWorkspaceNetwork(networkName, true, false); err == nil || !strings.Contains(err.Error(), `[bridge_tls].mode = "strict"`) {
+		t.Fatalf("validateWorkspaceNetwork() error = %v, want strict bridge TLS guidance", err)
+	}
+	if err := validateWorkspaceNetwork(networkName, true, true); err != nil {
+		t.Fatalf("validateWorkspaceNetwork() with strict bridge TLS error = %v", err)
 	}
 }
 
@@ -293,6 +303,54 @@ func TestSetupNetworkAttachesExistingWorkspace(t *testing.T) {
 	}
 	if result.IP != "172.20.0.4" {
 		t.Fatalf("SetupNetwork() IP = %q, want 172.20.0.4", result.IP)
+	}
+}
+
+func TestRemoveNetworkDetachesWorkspaceIdempotently(t *testing.T) {
+	connected := true
+	disconnects := 0
+	svc := newTestService(t, "memoh-workspace", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/workspace-bot-1/json"):
+			networks := map[string]*dockernetwork.EndpointSettings{}
+			if connected {
+				networks["memoh-workspace"] = &dockernetwork.EndpointSettings{}
+			}
+			writeDockerJSON(t, w, dockercontainer.InspectResponse{
+				NetworkSettings: &dockercontainer.NetworkSettings{Networks: networks},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/networks/memoh-workspace/disconnect"):
+			var request struct {
+				Container string `json:"Container"`
+				Force     bool   `json:"Force"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode network disconnect request: %v", err)
+			}
+			if request.Container != "workspace-bot-1" {
+				t.Errorf("network disconnect container = %q, want workspace-bot-1", request.Container)
+			}
+			if request.Force {
+				t.Error("network disconnect unexpectedly forced detachment")
+			}
+			disconnects++
+			connected = false
+			writeDockerJSON(t, w, struct{}{})
+		default:
+			t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+
+	request := containerapi.NetworkRequest{ContainerID: "workspace-bot-1"}
+	if err := svc.RemoveNetwork(context.Background(), request); err != nil {
+		t.Fatalf("RemoveNetwork() error = %v", err)
+	}
+	if err := svc.RemoveNetwork(context.Background(), request); err != nil {
+		t.Fatalf("second RemoveNetwork() error = %v", err)
+	}
+	if disconnects != 1 {
+		t.Fatalf("network disconnect calls = %d, want 1", disconnects)
 	}
 }
 
