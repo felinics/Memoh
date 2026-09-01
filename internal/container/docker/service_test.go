@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimage "github.com/docker/docker/api/types/image"
+	dockernetwork "github.com/docker/docker/api/types/network"
+	dockerclient "github.com/docker/docker/client"
 
+	"github.com/felinics/memoh/internal/config"
 	containerapi "github.com/felinics/memoh/internal/container"
 )
 
@@ -154,5 +159,151 @@ func TestBridgeTargetPrefersPublishedHostPort(t *testing.T) {
 	}
 	if got, want := firstHostPort(info, bridgeTCPPort), "127.0.0.1:49153"; got != want {
 		t.Fatalf("firstHostPort = %q, want %q", got, want)
+	}
+}
+
+func TestNewServiceRejectsDefaultDockerNetwork(t *testing.T) {
+	for _, networkName := range []string{"bridge", "default", "host", "none"} {
+		t.Run(networkName, func(t *testing.T) {
+			_, err := NewService(slog.New(slog.DiscardHandler), config.Config{
+				Docker: config.DockerConfig{Network: networkName},
+			})
+			if err == nil {
+				t.Fatalf("NewService() accepted Docker network %q", networkName)
+			}
+			if !strings.Contains(err.Error(), "user-defined network") {
+				t.Fatalf("NewService() error = %q, want user-defined network guidance", err)
+			}
+		})
+	}
+}
+
+func TestCreateContainerUsesWorkspaceNetworkWithoutPublishingBridge(t *testing.T) {
+	var createRequest dockercontainer.CreateRequest
+	svc := newTestService(t, "memoh-workspace", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/containers/create"):
+			if err := json.NewDecoder(r.Body).Decode(&createRequest); err != nil {
+				t.Errorf("decode create request: %v", err)
+			}
+			writeDockerJSON(t, w, dockercontainer.CreateResponse{ID: "container-id"})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/container-id/json"):
+			writeDockerJSON(t, w, dockercontainer.InspectResponse{
+				ContainerJSONBase: &dockercontainer.ContainerJSONBase{ID: "container-id", Name: "/workspace-bot-1"},
+				Config:            &dockercontainer.Config{Image: "debian:bookworm-slim"},
+			})
+		default:
+			t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := svc.CreateContainer(context.Background(), containerapi.CreateContainerRequest{
+		ID:       "workspace-bot-1",
+		ImageRef: "debian:bookworm-slim",
+	})
+	if err != nil {
+		t.Fatalf("CreateContainer() error = %v", err)
+	}
+	if got := string(createRequest.HostConfig.NetworkMode); got != "memoh-workspace" {
+		t.Fatalf("NetworkMode = %q, want memoh-workspace", got)
+	}
+	if len(createRequest.HostConfig.PortBindings) != 0 {
+		t.Fatalf("PortBindings = %#v, want no host bridge publication", createRequest.HostConfig.PortBindings)
+	}
+	if createRequest.NetworkingConfig == nil || createRequest.NetworkingConfig.EndpointsConfig["memoh-workspace"] == nil {
+		t.Fatalf("NetworkingConfig = %#v, want memoh-workspace endpoint", createRequest.NetworkingConfig)
+	}
+}
+
+func TestBridgeTargetUsesWorkspaceContainerDNS(t *testing.T) {
+	svc := newTestService(t, "memoh-workspace", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/containers/workspace-bot-1/json") {
+			t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		writeDockerJSON(t, w, dockercontainer.InspectResponse{
+			NetworkSettings: &dockercontainer.NetworkSettings{
+				Networks: map[string]*dockernetwork.EndpointSettings{
+					"memoh-workspace": {IPAddress: "172.20.0.3"},
+				},
+			},
+		})
+	})
+
+	if got, want := svc.BridgeTarget("bot-1"), "workspace-bot-1:9090"; got != want {
+		t.Fatalf("BridgeTarget() = %q, want %q", got, want)
+	}
+}
+
+func TestSetupNetworkAttachesExistingWorkspace(t *testing.T) {
+	connected := false
+	svc := newTestService(t, "memoh-workspace", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/workspace-bot-1/json"):
+			networks := map[string]*dockernetwork.EndpointSettings{
+				"bridge": {IPAddress: "172.17.0.2"},
+			}
+			if connected {
+				networks["memoh-workspace"] = &dockernetwork.EndpointSettings{IPAddress: "172.20.0.4"}
+			}
+			writeDockerJSON(t, w, dockercontainer.InspectResponse{
+				NetworkSettings: &dockercontainer.NetworkSettings{Networks: networks},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/networks/memoh-workspace/connect"):
+			var request struct {
+				Container string `json:"Container"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode network connect request: %v", err)
+			}
+			if request.Container != "workspace-bot-1" {
+				t.Errorf("network connect container = %q, want workspace-bot-1", request.Container)
+			}
+			connected = true
+			writeDockerJSON(t, w, struct{}{})
+		default:
+			t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := svc.SetupNetwork(context.Background(), containerapi.NetworkRequest{ContainerID: "workspace-bot-1"})
+	if err != nil {
+		t.Fatalf("SetupNetwork() error = %v", err)
+	}
+	if !connected {
+		t.Fatal("SetupNetwork() did not connect the existing workspace")
+	}
+	if result.IP != "172.20.0.4" {
+		t.Fatalf("SetupNetwork() IP = %q, want 172.20.0.4", result.IP)
+	}
+}
+
+func newTestService(t *testing.T, workspaceNetwork string, handler http.HandlerFunc) *Service {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	cli, err := dockerclient.NewClientWithOpts(
+		dockerclient.WithHost(server.URL),
+		dockerclient.WithVersion("1.49"),
+	)
+	if err != nil {
+		t.Fatalf("create Docker test client: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	return &Service{
+		client:           cli,
+		logger:           slog.New(slog.DiscardHandler),
+		workspaceNetwork: workspaceNetwork,
+	}
+}
+
+func writeDockerJSON(t *testing.T, w http.ResponseWriter, value any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Errorf("encode Docker API response: %v", err)
 	}
 }

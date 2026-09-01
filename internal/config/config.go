@@ -444,7 +444,8 @@ type ContainerdConfig struct {
 }
 
 type DockerConfig struct {
-	Host string `toml:"host"`
+	Host    string `toml:"host"`
+	Network string `toml:"network"`
 }
 
 type AppleConfig struct {

@@ -56,6 +56,9 @@ namespace = "default"
 [docker]
 # Used only when [container].backend = "docker"; the dev Compose stack uses containerd.
 host = ""
+# Dedicated user-defined network shared by a custom containerized
+# Docker-backend server and its workspace containers.
+network = ""
 
 [postgres]
 host = "postgres"

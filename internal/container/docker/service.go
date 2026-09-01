@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"syscall"
@@ -19,6 +20,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	dockermount "github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
@@ -36,8 +38,9 @@ const (
 var invalidSnapshotTagChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 
 type Service struct {
-	client *client.Client
-	logger *slog.Logger
+	client           *client.Client
+	logger           *slog.Logger
+	workspaceNetwork string
 }
 
 func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
@@ -52,9 +55,15 @@ func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
+	workspaceNetwork := strings.TrimSpace(cfg.Docker.Network)
+	if isDefaultDockerNetwork(workspaceNetwork) {
+		_ = cli.Close()
+		return nil, fmt.Errorf("docker network %q does not provide container-name DNS; configure a user-defined network", workspaceNetwork)
+	}
 	return &Service{
-		client: cli,
-		logger: log.With(slog.String("service", "docker")),
+		client:           cli,
+		logger:           log.With(slog.String("service", "docker")),
+		workspaceNetwork: workspaceNetwork,
 	}, nil
 }
 
@@ -132,6 +141,10 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 	if req.StorageRef.Key != "" {
 		labels[containerapi.StorageKeyLabel] = req.StorageRef.Key
 	}
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		return containerapi.ContainerInfo{}, err
+	}
 	hostCfg := &container.HostConfig{
 		Mounts: toDockerMounts(req.Spec.Mounts),
 		DNS:    req.Spec.DNS,
@@ -139,6 +152,7 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 			nat.Port(bridgeTCPPort + "/tcp"): []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: ""}},
 		},
 	}
+	var networkingCfg *network.NetworkingConfig
 	if req.ResourceLimits.MemoryBytes > 0 {
 		hostCfg.Memory = req.ResourceLimits.MemoryBytes
 	}
@@ -147,6 +161,14 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 	}
 	if req.Spec.NetworkJoinTarget.Value != "" {
 		hostCfg.NetworkMode = container.NetworkMode("none")
+	} else if workspaceNetwork != "" {
+		hostCfg.NetworkMode = container.NetworkMode(workspaceNetwork)
+		hostCfg.PortBindings = nil
+		networkingCfg = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				workspaceNetwork: {},
+			},
+		}
 	}
 	cfg := &container.Config{
 		Image:      req.ImageRef,
@@ -160,7 +182,7 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 			nat.Port(bridgeTCPPort + "/tcp"): struct{}{},
 		},
 	}
-	resp, err := s.client.ContainerCreate(ctx, cfg, hostCfg, nil, nil, req.ID)
+	resp, err := s.client.ContainerCreate(ctx, cfg, hostCfg, networkingCfg, nil, req.ID)
 	if err != nil {
 		return containerapi.ContainerInfo{}, mapDockerErr(err)
 	}
@@ -173,9 +195,20 @@ func (s *Service) BridgeTarget(botID string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		s.logger.Warn("resolve Docker workspace network", slog.Any("error", err))
+		return ""
+	}
 	info, err := s.client.ContainerInspect(ctx, workspaceContainerPref+strings.TrimSpace(botID))
 	if err != nil {
 		return ""
+	}
+	if workspaceNetwork != "" {
+		if containerNetworkIP(info, workspaceNetwork) == "" {
+			return ""
+		}
+		return net.JoinHostPort(workspaceContainerPref+strings.TrimSpace(botID), bridgeTCPPort)
 	}
 	if host := firstHostPort(info, bridgeTCPPort); host != "" {
 		return host
@@ -203,6 +236,59 @@ func firstHostPort(info container.InspectResponse, port string) string {
 		return net.JoinHostPort(hostIP, hostPort)
 	}
 	return ""
+}
+
+func (s *Service) resolveWorkspaceNetwork(ctx context.Context) (string, error) {
+	if s.workspaceNetwork != "" {
+		return s.workspaceNetwork, nil
+	}
+	if !runningInContainer() {
+		return "", nil
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("%w: read server container hostname: %w", containerapi.ErrInvalidArgument, err)
+	}
+	info, err := s.client.ContainerInspect(ctx, hostname)
+	if err != nil {
+		return "", fmt.Errorf("%w: inspect server container %q: %w; set [docker].network explicitly", containerapi.ErrInvalidArgument, hostname, err)
+	}
+	if info.HostConfig != nil && info.HostConfig.NetworkMode.IsHost() {
+		return "", nil
+	}
+	return "", fmt.Errorf("%w: Docker backend inside a container requires [docker].network to name a dedicated user-defined network shared with workspace containers", containerapi.ErrInvalidArgument)
+}
+
+func runningInContainer() bool {
+	for _, marker := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := os.Stat(marker); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func isDefaultDockerNetwork(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "bridge", "default", "host", "none":
+		return true
+	default:
+		return false
+	}
+}
+
+func containerNetworkIP(info container.InspectResponse, networkName string) string {
+	if info.NetworkSettings == nil {
+		return ""
+	}
+	endpoint := info.NetworkSettings.Networks[strings.TrimSpace(networkName)]
+	if endpoint == nil {
+		return ""
+	}
+	if ip := strings.TrimSpace(endpoint.IPAddress); ip != "" {
+		return ip
+	}
+	return strings.TrimSpace(endpoint.GlobalIPv6Address)
 }
 
 func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.ContainerInfo, error) {
@@ -349,9 +435,29 @@ func (s *Service) ListTasks(ctx context.Context, _ *containerapi.ListTasksOption
 }
 
 func (s *Service) SetupNetwork(ctx context.Context, req containerapi.NetworkRequest) (containerapi.NetworkResult, error) {
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		return containerapi.NetworkResult{}, err
+	}
 	info, err := s.client.ContainerInspect(ctx, req.ContainerID)
 	if err != nil {
 		return containerapi.NetworkResult{}, mapDockerErr(err)
+	}
+	if workspaceNetwork != "" {
+		if containerNetworkIP(info, workspaceNetwork) == "" {
+			connectErr := s.client.NetworkConnect(ctx, workspaceNetwork, req.ContainerID, nil)
+			info, err = s.client.ContainerInspect(ctx, req.ContainerID)
+			if err != nil {
+				return containerapi.NetworkResult{}, mapDockerErr(err)
+			}
+			if containerNetworkIP(info, workspaceNetwork) == "" {
+				if connectErr != nil {
+					return containerapi.NetworkResult{}, fmt.Errorf("connect container %q to Docker network %q: %w", req.ContainerID, workspaceNetwork, mapDockerErr(connectErr))
+				}
+				return containerapi.NetworkResult{}, errors.Join(containerapi.ErrRuntime, fmt.Errorf("container %q joined Docker network %q without an IP address", req.ContainerID, workspaceNetwork))
+			}
+		}
+		return containerapi.NetworkResult{IP: containerNetworkIP(info, workspaceNetwork)}, nil
 	}
 	return containerapi.NetworkResult{IP: firstContainerIP(info)}, nil
 }
@@ -361,8 +467,18 @@ func (*Service) RemoveNetwork(context.Context, containerapi.NetworkRequest) erro
 }
 
 func (s *Service) CheckNetwork(ctx context.Context, req containerapi.NetworkRequest) error {
-	_, err := s.client.ContainerInspect(ctx, req.ContainerID)
-	return mapDockerErr(err)
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		return err
+	}
+	info, err := s.client.ContainerInspect(ctx, req.ContainerID)
+	if err != nil {
+		return mapDockerErr(err)
+	}
+	if workspaceNetwork != "" && containerNetworkIP(info, workspaceNetwork) == "" {
+		return errors.Join(containerapi.ErrRuntime, fmt.Errorf("container %q is detached from Docker network %q", req.ContainerID, workspaceNetwork))
+	}
+	return nil
 }
 
 func (s *Service) CommitSnapshot(ctx context.Context, req containerapi.CommitSnapshotRequest) error {

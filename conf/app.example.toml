@@ -142,6 +142,9 @@ namespace = "default"
 # Leave empty to use Docker's standard environment discovery (DOCKER_HOST,
 # DOCKER_TLS_VERIFY, DOCKER_CERT_PATH, or the platform default socket).
 host = ""
+# Dedicated user-defined network shared by a containerized server and its
+# workspace containers. Host deployments keep this empty.
+network = ""
 
 [bridge_tls]
 # disabled: default for local/open-source deployments.

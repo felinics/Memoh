@@ -133,6 +133,7 @@ namespace = "memoh-test"
 
 [docker]
 host = "unix:///var/run/docker.sock"
+network = "memoh-workspace"
 
 [apple]
 socket_path = "/tmp/socktainer.sock"
@@ -154,6 +155,9 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	}
 	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
 		t.Fatalf("docker host = %q", cfg.Docker.Host)
+	}
+	if cfg.Docker.Network != "memoh-workspace" {
+		t.Fatalf("docker network = %q", cfg.Docker.Network)
 	}
 	if cfg.Apple.SocketPath != "/tmp/socktainer.sock" {
 		t.Fatalf("apple socket path = %q", cfg.Apple.SocketPath)
