@@ -437,6 +437,9 @@ func (s *Service) ListTasks(ctx context.Context, _ *containerapi.ListTasksOption
 }
 
 func (s *Service) SetupNetwork(ctx context.Context, req containerapi.NetworkRequest) (containerapi.NetworkResult, error) {
+	if strings.TrimSpace(req.ContainerID) == "" {
+		return containerapi.NetworkResult{}, containerapi.ErrInvalidArgument
+	}
 	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
 	if err != nil {
 		return containerapi.NetworkResult{}, err
@@ -464,11 +467,17 @@ func (s *Service) SetupNetwork(ctx context.Context, req containerapi.NetworkRequ
 	return containerapi.NetworkResult{IP: firstContainerIP(info)}, nil
 }
 
-func (*Service) RemoveNetwork(context.Context, containerapi.NetworkRequest) error {
+func (*Service) RemoveNetwork(_ context.Context, req containerapi.NetworkRequest) error {
+	if strings.TrimSpace(req.ContainerID) == "" {
+		return containerapi.ErrInvalidArgument
+	}
 	return nil
 }
 
 func (s *Service) CheckNetwork(ctx context.Context, req containerapi.NetworkRequest) error {
+	if strings.TrimSpace(req.ContainerID) == "" {
+		return containerapi.ErrInvalidArgument
+	}
 	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
 	if err != nil {
 		return err

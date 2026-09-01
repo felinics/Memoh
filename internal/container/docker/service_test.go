@@ -296,6 +296,29 @@ func TestSetupNetworkAttachesExistingWorkspace(t *testing.T) {
 	}
 }
 
+func TestDockerNetworkOperationsRejectEmptyContainerID(t *testing.T) {
+	svc := &Service{}
+	tests := map[string]func() error{
+		"setup": func() error {
+			_, err := svc.SetupNetwork(context.Background(), containerapi.NetworkRequest{})
+			return err
+		},
+		"remove": func() error {
+			return svc.RemoveNetwork(context.Background(), containerapi.NetworkRequest{})
+		},
+		"check": func() error {
+			return svc.CheckNetwork(context.Background(), containerapi.NetworkRequest{})
+		},
+	}
+	for name, operation := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := operation(); !errors.Is(err, containerapi.ErrInvalidArgument) {
+				t.Fatalf("network operation error = %v, want ErrInvalidArgument", err)
+			}
+		})
+	}
+}
+
 func newTestService(t *testing.T, workspaceNetwork string, handler http.HandlerFunc) *Service {
 	t.Helper()
 	server := httptest.NewServer(handler)
