@@ -286,7 +286,7 @@ func TestValidateServerNetworkMembership(t *testing.T) {
 }
 
 func TestValidateServerNetworkMembershipPreservesCancellation(t *testing.T) {
-	svc := newTestService(t, "memoh-workspace", func(w http.ResponseWriter, r *http.Request) {
+	svc := newTestService(t, "memoh-workspace", func(_ http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected Docker API request after cancellation: %s %s", r.Method, r.URL.Path)
 	})
 	ctx, cancel := context.WithCancel(context.Background())

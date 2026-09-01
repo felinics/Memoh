@@ -313,7 +313,7 @@ func validateServerNetworkMembership(ctx context.Context, cli *client.Client, se
 		mappedErr := mapDockerErr(err)
 		if containerapi.IsNotFound(mappedErr) {
 			return fmt.Errorf(
-				"%w: Memoh server container %q does not exist on Docker daemon %q: %v",
+				"%w: Memoh server container %q does not exist on Docker daemon %q: %w",
 				containerapi.ErrInvalidArgument,
 				serverContainer,
 				cli.DaemonHost(),
