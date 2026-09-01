@@ -26,7 +26,7 @@ func ProvideService(ctx context.Context, log *slog.Logger, cfg config.Config, ba
 		cleanup := func() { _ = svc.Close() }
 		return svc, cleanup, nil
 	case containerapi.BackendDocker:
-		svc, err := dockeradapter.NewService(log, cfg)
+		svc, err := dockeradapter.NewService(ctx, log, cfg)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -104,7 +104,9 @@ func provideLogger(cfg config.Config) *slog.Logger {
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
-	svc, cleanup, err := containerprovider.ProvideService(context.Background(), log, cfg, rc.ContainerBackend)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	svc, cleanup, err := containerprovider.ProvideService(ctx, log, cfg, rc.ContainerBackend)
 	if err != nil {
 		return nil, err
 	}

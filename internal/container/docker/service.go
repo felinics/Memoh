@@ -43,12 +43,13 @@ type Service struct {
 	workspaceNetwork string
 }
 
-func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
+func NewService(ctx context.Context, log *slog.Logger, cfg config.Config) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
 	}
 	workspaceNetwork := strings.TrimSpace(cfg.Docker.Network)
-	if err := validateWorkspaceNetwork(workspaceNetwork, runningInContainer(), cfg.BridgeTLS.Strict()); err != nil {
+	serverContainer := strings.TrimSpace(cfg.Docker.ServerContainer)
+	if err := validateWorkspaceNetwork(workspaceNetwork, serverContainer, runningInContainer(), cfg.BridgeTLS.Strict()); err != nil {
 		return nil, err
 	}
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
@@ -58,6 +59,13 @@ func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
 	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
+	}
+	if workspaceNetwork != "" {
+		err = validateServerNetworkMembership(ctx, cli, serverContainer, workspaceNetwork)
+		if err != nil {
+			_ = cli.Close()
+			return nil, err
+		}
 	}
 	return &Service{
 		client:           cli,
@@ -280,7 +288,7 @@ func isUserDefinedDockerNetwork(name string) bool {
 	}
 }
 
-func validateWorkspaceNetwork(name string, serverInContainer, bridgeTLSStrict bool) error {
+func validateWorkspaceNetwork(name, serverContainer string, serverInContainer, bridgeTLSStrict bool) error {
 	if name == "" {
 		return nil
 	}
@@ -293,7 +301,37 @@ func validateWorkspaceNetwork(name string, serverInContainer, bridgeTLSStrict bo
 	if !bridgeTLSStrict {
 		return fmt.Errorf("docker network %q requires [bridge_tls].mode = %q to isolate workspace bridge access", name, config.BridgeTLSModeStrict)
 	}
+	if strings.TrimSpace(serverContainer) == "" {
+		return fmt.Errorf("docker network %q requires [docker].server_container to identify this Memoh server on the configured Docker daemon", name)
+	}
 	return nil
+}
+
+func validateServerNetworkMembership(ctx context.Context, cli *client.Client, serverContainer, networkName string) error {
+	info, err := cli.ContainerInspect(ctx, serverContainer)
+	if err != nil {
+		mappedErr := mapDockerErr(err)
+		if containerapi.IsNotFound(mappedErr) {
+			return fmt.Errorf(
+				"%w: Memoh server container %q does not exist on Docker daemon %q: %v",
+				containerapi.ErrInvalidArgument,
+				serverContainer,
+				cli.DaemonHost(),
+				err,
+			)
+		}
+		return fmt.Errorf("inspect Memoh server container %q on Docker daemon %q: %w", serverContainer, cli.DaemonHost(), mappedErr)
+	}
+	if containerNetworkEndpoint(info, networkName) != nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: Memoh server container %q is not attached to Docker network %q on Docker daemon %q",
+		containerapi.ErrInvalidArgument,
+		serverContainer,
+		networkName,
+		cli.DaemonHost(),
+	)
 }
 
 func containerNetworkIP(info container.InspectResponse, networkName string) string {

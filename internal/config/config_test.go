@@ -134,6 +134,7 @@ namespace = "memoh-test"
 [docker]
 host = "unix:///var/run/docker.sock"
 network = "memoh-workspace"
+server_container = "memoh-server"
 
 [apple]
 socket_path = "/tmp/socktainer.sock"
@@ -152,6 +153,9 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	}
 	if cfg.Containerd.Namespace != "memoh-test" {
 		t.Fatalf("containerd namespace = %q", cfg.Containerd.Namespace)
+	}
+	if cfg.Docker.ServerContainer != "memoh-server" {
+		t.Fatalf("docker server container = %q", cfg.Docker.ServerContainer)
 	}
 	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
 		t.Fatalf("docker host = %q", cfg.Docker.Host)

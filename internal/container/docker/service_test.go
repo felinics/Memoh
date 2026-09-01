@@ -165,7 +165,7 @@ func TestBridgeTargetPrefersPublishedHostPort(t *testing.T) {
 func TestNewServiceRejectsNonUserDefinedDockerNetwork(t *testing.T) {
 	for _, networkName := range []string{"bridge", "default", "host", "nat", "none", "container:server"} {
 		t.Run(networkName, func(t *testing.T) {
-			_, err := NewService(slog.New(slog.DiscardHandler), config.Config{
+			_, err := NewService(context.Background(), slog.New(slog.DiscardHandler), config.Config{
 				Docker: config.DockerConfig{Network: networkName},
 			})
 			if err == nil {
@@ -182,7 +182,7 @@ func TestNewServiceRejectsWorkspaceNetworkForHostServer(t *testing.T) {
 	if runningInContainer() {
 		t.Skip("test requires a host process")
 	}
-	_, err := NewService(slog.New(slog.DiscardHandler), config.Config{
+	_, err := NewService(context.Background(), slog.New(slog.DiscardHandler), config.Config{
 		Docker: config.DockerConfig{Network: "memoh-workspace"},
 	})
 	if err == nil {
@@ -195,11 +195,105 @@ func TestNewServiceRejectsWorkspaceNetworkForHostServer(t *testing.T) {
 
 func TestValidateWorkspaceNetworkRequiresStrictBridgeTLS(t *testing.T) {
 	const networkName = "memoh-workspace"
-	if err := validateWorkspaceNetwork(networkName, true, false); err == nil || !strings.Contains(err.Error(), `[bridge_tls].mode = "strict"`) {
+	if err := validateWorkspaceNetwork(networkName, "server-id", true, false); err == nil || !strings.Contains(err.Error(), `[bridge_tls].mode = "strict"`) {
 		t.Fatalf("validateWorkspaceNetwork() error = %v, want strict bridge TLS guidance", err)
 	}
-	if err := validateWorkspaceNetwork(networkName, true, true); err != nil {
+	if err := validateWorkspaceNetwork(networkName, "server-id", true, true); err != nil {
 		t.Fatalf("validateWorkspaceNetwork() with strict bridge TLS error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceNetworkRequiresServerContainer(t *testing.T) {
+	err := validateWorkspaceNetwork("memoh-workspace", "", true, true)
+	if err == nil || !strings.Contains(err.Error(), "[docker].server_container") {
+		t.Fatalf("validateWorkspaceNetwork() error = %v, want server container guidance", err)
+	}
+}
+
+func TestValidateServerNetworkMembership(t *testing.T) {
+	const networkName = "memoh-workspace"
+	tests := []struct {
+		name        string
+		containerID string
+		networks    map[string]*dockernetwork.EndpointSettings
+		status      int
+		wantError   string
+		wantRuntime bool
+	}{
+		{
+			name:        "attached with explicit identity",
+			containerID: "server-id",
+			networks:    map[string]*dockernetwork.EndpointSettings{networkName: {}},
+			status:      http.StatusOK,
+		},
+		{
+			name:        "configured container is detached",
+			containerID: "server-id",
+			networks:    map[string]*dockernetwork.EndpointSettings{"bridge": {}},
+			status:      http.StatusOK,
+			wantError:   `server container "server-id" is not attached to Docker network "memoh-workspace"`,
+		},
+		{
+			name:        "configured container does not exist",
+			containerID: "missing-server-id",
+			status:      http.StatusNotFound,
+			wantError:   `server container "missing-server-id" does not exist on Docker daemon`,
+		},
+		{
+			name:        "daemon error",
+			containerID: "server-id",
+			status:      http.StatusInternalServerError,
+			wantError:   `inspect Memoh server container "server-id" on Docker daemon`,
+			wantRuntime: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc := newTestService(t, networkName, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/containers/"+test.containerID+"/json") {
+					t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				if test.status != http.StatusOK {
+					http.Error(w, http.StatusText(test.status), test.status)
+					return
+				}
+				writeDockerJSON(t, w, dockercontainer.InspectResponse{
+					NetworkSettings: &dockercontainer.NetworkSettings{Networks: test.networks},
+				})
+			})
+
+			err := validateServerNetworkMembership(context.Background(), svc.client, test.containerID, networkName)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validateServerNetworkMembership() error = %v", err)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validateServerNetworkMembership() error = %v, want error containing %q", err, test.wantError)
+			}
+			if test.wantRuntime {
+				if !errors.Is(err, containerapi.ErrRuntime) {
+					t.Fatalf("validateServerNetworkMembership() error = %v, want ErrRuntime", err)
+				}
+			} else if !errors.Is(err, containerapi.ErrInvalidArgument) {
+				t.Fatalf("validateServerNetworkMembership() error = %v, want ErrInvalidArgument", err)
+			}
+		})
+	}
+}
+
+func TestValidateServerNetworkMembershipPreservesCancellation(t *testing.T) {
+	svc := newTestService(t, "memoh-workspace", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected Docker API request after cancellation: %s %s", r.Method, r.URL.Path)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := validateServerNetworkMembership(ctx, svc.client, "server-id", "memoh-workspace")
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, containerapi.ErrRuntime) {
+		t.Fatalf("validateServerNetworkMembership() error = %v, want context.Canceled and ErrRuntime", err)
 	}
 }
 

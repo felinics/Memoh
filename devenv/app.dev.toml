@@ -60,6 +60,9 @@ host = ""
 # Docker-backend server and its workspace containers. Requires
 # [bridge_tls].mode = "strict".
 network = ""
+# Container ID or unique name of this Memoh server on the configured Docker
+# daemon. Required together with network.
+server_container = ""
 
 [postgres]
 host = "postgres"
