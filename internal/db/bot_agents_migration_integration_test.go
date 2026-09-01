@@ -120,7 +120,7 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		migrateUpAll(t, dsn)
 	})
 
-	t.Run("moves built-in ACP agents to direct runtimes without copying credentials", func(t *testing.T) {
+	t.Run("retires removed built-in ACP agents without materializing direct agents", func(t *testing.T) {
 		ctx := context.Background()
 		dsn := teamMigrationDSN(t)
 		pool := freshMigratedDB(t)
@@ -133,22 +133,25 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		}
 
 		const (
-			userID        = "10000000-0000-4000-8000-000000000143"
-			botID         = "20000000-0000-4000-8000-000000000143"
-			agentID       = "30000000-0000-4000-8000-000000000143"
-			credentialID  = "40000000-0000-4000-8000-000000000143"
-			sessionID     = "50000000-0000-4000-8000-000000000143"
-			scheduleID    = "60000000-0000-4000-8000-000000000143"
-			sessionBotID  = "70000000-0000-4000-8000-000000000143"
-			orphanSession = "80000000-0000-4000-8000-000000000143"
-			disabledBotID = "90000000-0000-4000-8000-000000000143"
-			disabledAgent = "a0000000-0000-4000-8000-000000000143"
-			disabledSched = "b0000000-0000-4000-8000-000000000143"
-			collisionBot  = "c0000000-0000-4000-8000-000000000143"
-			legacySched   = "d0000000-0000-4000-8000-000000000143"
-			disabledSess  = "e0000000-0000-4000-8000-000000000143"
-			providerID    = "f0000000-0000-4000-8000-000000000143"
-			modelID       = "f1000000-0000-4000-8000-000000000143"
+			userID         = "10000000-0000-4000-8000-000000000143"
+			botID          = "20000000-0000-4000-8000-000000000143"
+			agentID        = "30000000-0000-4000-8000-000000000143"
+			credentialID   = "40000000-0000-4000-8000-000000000143"
+			sessionID      = "50000000-0000-4000-8000-000000000143"
+			scheduleID     = "60000000-0000-4000-8000-000000000143"
+			sessionBotID   = "70000000-0000-4000-8000-000000000143"
+			orphanSession  = "80000000-0000-4000-8000-000000000143"
+			disabledBotID  = "90000000-0000-4000-8000-000000000143"
+			disabledAgent  = "a0000000-0000-4000-8000-000000000143"
+			disabledSched  = "b0000000-0000-4000-8000-000000000143"
+			collisionBot   = "c0000000-0000-4000-8000-000000000143"
+			legacySched    = "d0000000-0000-4000-8000-000000000143"
+			disabledSess   = "e0000000-0000-4000-8000-000000000143"
+			providerID     = "f0000000-0000-4000-8000-000000000143"
+			modelID        = "f1000000-0000-4000-8000-000000000143"
+			customAgent    = "f7000000-0000-4000-8000-000000000143"
+			customSession  = "f8000000-0000-4000-8000-000000000143"
+			customSchedule = "f9000000-0000-4000-8000-000000000143"
 		)
 
 		seed := []struct {
@@ -202,6 +205,8 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 			  VALUES
 			    ($1, $2, 'Codex', 'acp', true, '{"provider":"acp"}'::jsonb),
 			    ($1, $2, 'Codex (migrated)', 'acp', true, '{"provider":"acp"}'::jsonb)`, []any{team.DefaultTeamID, collisionBot}},
+			{`INSERT INTO bot_agents (id, team_id, bot_id, name, runtime, enabled, metadata)
+			  VALUES ($1, $2, $3, 'Custom ACP', 'acp', true, '{"provider":"acp"}'::jsonb)`, []any{customAgent, team.DefaultTeamID, collisionBot}},
 			{`UPDATE bots SET default_bot_agent_id = $1 WHERE id = $2`, []any{agentID, botID}},
 			{`INSERT INTO bot_sessions (
 				id, team_id, bot_id, bot_agent_id, type, session_mode, runtime_type, runtime_metadata, metadata
@@ -224,6 +229,13 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 				'{"acp_agent_id":"codex","project_path":"/data"}'::jsonb,
 				'{"acp_agent_id":"codex","project_path":"/data"}'::jsonb
 			)`, []any{disabledSess, team.DefaultTeamID, disabledBotID}},
+			{`INSERT INTO bot_sessions (
+				id, team_id, bot_id, bot_agent_id, type, session_mode, runtime_type, runtime_metadata, metadata
+			) VALUES (
+				$1, $2, $3, $4, 'acp_agent', 'chat', 'acp_agent',
+				'{"acp_agent_id":"acp","project_path":"/data"}'::jsonb,
+				'{"acp_agent_id":"acp","project_path":"/data"}'::jsonb
+			)`, []any{customSession, team.DefaultTeamID, collisionBot, customAgent}},
 			{`INSERT INTO schedule (
 				id, team_id, bot_id, bot_agent_id, name, description, pattern, command,
 				run_target, runtime_type, acp_agent_id
@@ -238,9 +250,16 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 				$1, $2, $3, 'disabled-only migration schedule', '', '0 0 * * *', 'run',
 				'new_session', 'acp_agent', 'codex'
 			)`, []any{disabledSched, team.DefaultTeamID, disabledBotID}},
+			{`INSERT INTO schedule (
+				id, team_id, bot_id, bot_agent_id, name, description, pattern, command,
+				run_target, runtime_type, acp_agent_id
+			) VALUES (
+				$1, $2, $3, $4, 'custom ACP schedule', '', '0 0 * * *', 'run',
+				'new_session', 'acp_agent', 'acp'
+			)`, []any{customSchedule, team.DefaultTeamID, collisionBot, customAgent}},
 			// A row that predates 0141's execution-shape CHECK is legal while the
-			// constraint is NOT VALID. 0144 must leave it untouched rather than
-			// re-checking the row and aborting the whole upgrade.
+			// constraint is NOT VALID. The retirement cleanup deletes it without
+			// re-checking the invalid legacy shape or aborting the whole upgrade.
 			{`INSERT INTO schedule (
 				id, team_id, bot_id, name, description, pattern, command,
 				run_target, runtime_type, acp_agent_id, model_id
@@ -267,98 +286,103 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		stepUp(t, dsn, 1)
 		assertDirectScheduleRequiresBotAgent(t, ctx, pool, false)
 
-		var runtime, auth, baseURL, copiedSecret, storedCredential string
+		var runtime, auth, baseURL, storedCredential string
+		var enabled, deleted bool
 		if err := pool.QueryRow(ctx, `
 			SELECT runtime,
 			       COALESCE(metadata->>'auth', ''),
 			       COALESCE(metadata->>'base_url', ''),
-			       COALESCE(metadata->>'api_key', ''),
-			       agent_credential_id::text
+			       agent_credential_id::text,
+			       enabled,
+			       deleted_at IS NOT NULL
 			FROM bot_agents WHERE id = $1`, agentID,
-		).Scan(&runtime, &auth, &baseURL, &copiedSecret, &storedCredential); err != nil {
-			t.Fatalf("read migrated Agent: %v", err)
+		).Scan(&runtime, &auth, &baseURL, &storedCredential, &enabled, &deleted); err != nil {
+			t.Fatalf("read retired Agent: %v", err)
 		}
-		if runtime != "codex" || auth != "api_key" || baseURL != "https://gateway.example/v1" || copiedSecret != "" || storedCredential != credentialID {
-			t.Fatalf("migrated Agent = runtime=%q auth=%q base_url=%q secret=%q credential=%q", runtime, auth, baseURL, copiedSecret, storedCredential)
+		if runtime != "acp" || auth != "" || baseURL != "" || storedCredential != credentialID || enabled || !deleted {
+			t.Fatalf("retired Agent = runtime=%q auth=%q base_url=%q credential=%q enabled=%t deleted=%t", runtime, auth, baseURL, storedCredential, enabled, deleted)
 		}
 
-		var botRuntime, sessionRuntime, scheduleRuntime string
-		var hasExternalAgents bool
+		var botRuntime string
+		var defaultCleared, legacyDefaultCleared bool
 		if err := pool.QueryRow(ctx, `
 			SELECT
 				(SELECT chat_runtime FROM bots WHERE id = $1),
-				(SELECT metadata ? 'external_agents' FROM bots WHERE id = $1),
-				(SELECT runtime_type FROM bot_sessions WHERE id = $2),
-				(SELECT runtime_type FROM schedule WHERE id = $3)`,
-			botID, sessionID, scheduleID,
-		).Scan(&botRuntime, &hasExternalAgents, &sessionRuntime, &scheduleRuntime); err != nil {
-			t.Fatalf("read migrated runtime bindings: %v", err)
+				(SELECT default_bot_agent_id IS NULL AND chat_acp_agent_id IS NULL FROM bots WHERE id = $1),
+				(SELECT default_bot_agent_id IS NULL AND chat_runtime = 'model' AND chat_acp_agent_id IS NULL FROM bots WHERE id = $2)`,
+			botID, disabledBotID,
+		).Scan(&botRuntime, &defaultCleared, &legacyDefaultCleared); err != nil {
+			t.Fatalf("read retired runtime bindings: %v", err)
 		}
-		if botRuntime != "codex" || hasExternalAgents || sessionRuntime != "codex" || scheduleRuntime != "codex" {
-			t.Fatalf("migrated bindings = bot=%q external_agents=%t session=%q schedule=%q", botRuntime, hasExternalAgents, sessionRuntime, scheduleRuntime)
-		}
-
-		var sessionOnlyRuntime, sessionOnlyAgentRuntime, sessionOnlyAgentID string
-		if err := pool.QueryRow(ctx, `
-			SELECT session.runtime_type, session.bot_agent_id::text, agent.runtime
-			FROM bot_sessions session
-			JOIN bot_agents agent ON agent.id = session.bot_agent_id
-			WHERE session.id = $1 AND session.bot_id = $2`,
-			orphanSession, sessionBotID,
-		).Scan(&sessionOnlyRuntime, &sessionOnlyAgentID, &sessionOnlyAgentRuntime); err != nil {
-			t.Fatalf("read session-only migrated Agent binding: %v", err)
-		}
-		if sessionOnlyRuntime != "claude-code" || sessionOnlyAgentRuntime != "claude-code" || sessionOnlyAgentID == "" {
-			t.Fatalf("session-only binding = runtime=%q agent=%q agent_runtime=%q", sessionOnlyRuntime, sessionOnlyAgentID, sessionOnlyAgentRuntime)
+		if botRuntime != "model" || !defaultCleared || !legacyDefaultCleared {
+			t.Fatalf("retired defaults = bot_runtime=%q default_cleared=%t legacy_default_cleared=%t", botRuntime, defaultCleared, legacyDefaultCleared)
 		}
 
-		var disabledDefaultAgent, disabledSessionAgent, disabledScheduleAgent, disabledScheduleRuntime string
-		var enabledDirectAgents int
+		var archivedSessions, remainingSchedules, directAgents, activeCustomAgents, customSessions, customSchedules int
 		if err := pool.QueryRow(ctx, `
 			SELECT
-				(SELECT default_bot_agent_id::text FROM bots WHERE id = $1),
-				(SELECT bot_agent_id::text FROM bot_sessions WHERE id = $3),
-				(SELECT bot_agent_id::text FROM schedule WHERE id = $2),
-				(SELECT runtime_type FROM schedule WHERE id = $2),
-				(SELECT count(*) FROM bot_agents WHERE bot_id = $1 AND runtime = 'codex' AND enabled AND deleted_at IS NULL)`,
-			disabledBotID, disabledSched, disabledSess,
-		).Scan(&disabledDefaultAgent, &disabledSessionAgent, &disabledScheduleAgent, &disabledScheduleRuntime, &enabledDirectAgents); err != nil {
-			t.Fatalf("read disabled-only migrated bindings: %v", err)
+				(SELECT count(*) FROM bot_sessions WHERE id IN ($1, $2, $3) AND runtime_type = 'acp_agent' AND deleted_at IS NOT NULL),
+				(SELECT count(*) FROM schedule WHERE id IN ($4, $5, $6)),
+				(SELECT count(*) FROM bot_agents WHERE runtime IN ('codex', 'claude-code')),
+				(SELECT count(*) FROM bot_agents WHERE id = $7 AND runtime = 'acp' AND metadata->>'provider' = 'acp' AND enabled AND deleted_at IS NULL),
+				(SELECT count(*) FROM bot_sessions WHERE id = $8 AND runtime_type = 'acp_agent' AND deleted_at IS NULL),
+				(SELECT count(*) FROM schedule WHERE id = $9 AND runtime_type = 'acp_agent' AND acp_agent_id = 'acp')`,
+			sessionID, orphanSession, disabledSess,
+			scheduleID, disabledSched, legacySched,
+			customAgent, customSession, customSchedule,
+		).Scan(&archivedSessions, &remainingSchedules, &directAgents, &activeCustomAgents, &customSessions, &customSchedules); err != nil {
+			t.Fatalf("inspect retired ACP data: %v", err)
 		}
-		if enabledDirectAgents != 1 || disabledDefaultAgent == "" || disabledSessionAgent != disabledDefaultAgent || disabledScheduleAgent != disabledDefaultAgent || disabledScheduleRuntime != "codex" {
-			t.Fatalf("disabled-only migration = enabled_agents=%d default=%q session_agent=%q schedule_agent=%q schedule_runtime=%q", enabledDirectAgents, disabledDefaultAgent, disabledSessionAgent, disabledScheduleAgent, disabledScheduleRuntime)
-		}
-
-		var collisionName string
-		if err := pool.QueryRow(ctx, `
-			SELECT name FROM bot_agents
-			WHERE bot_id = $1 AND runtime = 'codex' AND enabled AND deleted_at IS NULL`,
-			collisionBot,
-		).Scan(&collisionName); err != nil {
-			t.Fatalf("read collision-safe migrated Agent: %v", err)
-		}
-		if collisionName != "Codex (migrated 2)" {
-			t.Fatalf("collision-safe migrated Agent name = %q, want %q", collisionName, "Codex (migrated 2)")
+		if archivedSessions != 3 || remainingSchedules != 0 || directAgents != 0 || activeCustomAgents != 1 || customSessions != 1 || customSchedules != 1 {
+			t.Fatalf("retirement = archived_sessions=%d remaining_schedules=%d direct_agents=%d active_custom_agents=%d custom_sessions=%d custom_schedules=%d", archivedSessions, remainingSchedules, directAgents, activeCustomAgents, customSessions, customSchedules)
 		}
 
-		var legacyRuntime, legacyAgentID, legacyModelID string
-		if err := pool.QueryRow(ctx, `
-			SELECT runtime_type, acp_agent_id, model_id::text
-			FROM schedule WHERE id = $1`, legacySched,
-		).Scan(&legacyRuntime, &legacyAgentID, &legacyModelID); err != nil {
-			t.Fatalf("read skipped legacy schedule: %v", err)
+		const (
+			directBotID      = "f2000000-0000-4000-8000-000000000143"
+			directAgentID    = "f3000000-0000-4000-8000-000000000143"
+			directSessionID  = "f4000000-0000-4000-8000-000000000143"
+			directScheduleID = "f5000000-0000-4000-8000-000000000143"
+			directMessageID  = "f6000000-0000-4000-8000-000000000143"
+		)
+		directSeed := []struct {
+			query string
+			args  []any
+		}{
+			{`INSERT INTO bots (id, team_id, owner_user_id, name, chat_runtime, metadata)
+			  VALUES ($1, $2, $3, 'direct-runtime-rollback-bot', 'model', '{}'::jsonb)`, []any{directBotID, team.DefaultTeamID, userID}},
+			{`INSERT INTO bot_agents (id, team_id, bot_id, name, runtime, enabled, metadata)
+			  VALUES ($1, $2, $3, 'Direct Codex', 'codex', true, '{"provider":"codex"}'::jsonb)`, []any{directAgentID, team.DefaultTeamID, directBotID}},
+			{`UPDATE bots SET chat_runtime = 'codex', default_bot_agent_id = $1 WHERE id = $2`, []any{directAgentID, directBotID}},
+			{`INSERT INTO bot_sessions (id, team_id, bot_id, bot_agent_id, type, session_mode, runtime_type)
+			  VALUES ($1, $2, $3, $4, 'chat', 'chat', 'codex')`, []any{directSessionID, team.DefaultTeamID, directBotID, directAgentID}},
+			{`INSERT INTO bot_history_messages (id, team_id, bot_id, session_id, role, content, runtime_type)
+			  VALUES ($1, $2, $3, $4, 'assistant', '[]'::jsonb, 'codex')`, []any{directMessageID, team.DefaultTeamID, directBotID, directSessionID}},
+			{`INSERT INTO schedule (id, team_id, bot_id, bot_agent_id, name, description, pattern, command, run_target, runtime_type)
+			  VALUES ($1, $2, $3, $4, 'direct schedule', '', '0 0 * * *', 'run', 'new_session', 'codex')`, []any{directScheduleID, team.DefaultTeamID, directBotID, directAgentID}},
 		}
-		if legacyRuntime != "acp_agent" || legacyAgentID != "codex" || legacyModelID != modelID {
-			t.Fatalf("skipped legacy schedule = runtime=%q agent=%q model=%q", legacyRuntime, legacyAgentID, legacyModelID)
+		for _, statement := range directSeed {
+			if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+				t.Fatalf("seed direct rollback data: %v", err)
+			}
 		}
 
 		stepDown(t, dsn, 1)
 		assertScheduleACPFieldsValidated(t, ctx, pool, false)
-		if err := pool.QueryRow(ctx, `SELECT runtime FROM bot_agents WHERE id = $1`, agentID).Scan(&runtime); err != nil {
-			t.Fatalf("read rolled-back Agent: %v", err)
+		var directBotReset bool
+		var directAgentRows, directSessionRows, directScheduleRows, directMessageRows int
+		if err := pool.QueryRow(ctx, `
+			SELECT
+				(SELECT chat_runtime = 'model' AND default_bot_agent_id IS NULL FROM bots WHERE id = $1),
+				(SELECT count(*) FROM bot_agents WHERE id = $2),
+				(SELECT count(*) FROM bot_sessions WHERE id = $3),
+				(SELECT count(*) FROM schedule WHERE id = $4),
+				(SELECT count(*) FROM bot_history_messages WHERE id = $5)`,
+			directBotID, directAgentID, directSessionID, directScheduleID, directMessageID,
+		).Scan(&directBotReset, &directAgentRows, &directSessionRows, &directScheduleRows, &directMessageRows); err != nil {
+			t.Fatalf("inspect destructive direct rollback: %v", err)
 		}
-		if runtime != "acp" {
-			t.Fatalf("rolled-back Agent runtime = %q, want acp", runtime)
+		if !directBotReset || directAgentRows != 0 || directSessionRows != 0 || directScheduleRows != 0 || directMessageRows != 0 {
+			t.Fatalf("direct rollback = bot_reset=%t agents=%d sessions=%d schedules=%d messages=%d", directBotReset, directAgentRows, directSessionRows, directScheduleRows, directMessageRows)
 		}
 		migrateUpAll(t, dsn)
 	})

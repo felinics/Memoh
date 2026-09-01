@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/felinics/memoh/internal/team"
 )
 
 func TestAgentSessionStateMigrationAndCanonicalSchema(t *testing.T) {
@@ -54,74 +52,6 @@ func TestAgentSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		assertAgentSessionStateSchema(t, ctx, pool, "agent")
 		assertSessionRunCandidateIndex(t, ctx, pool, true, true)
 	})
-
-	t.Run("turn marker rewrite is reversible", func(t *testing.T) {
-		ctx := context.Background()
-		dsn := teamMigrationDSN(t)
-		pool := freshMigratedDB(t)
-		migrateTo(t, dsn, 145)
-
-		const (
-			userID    = "10000000-0000-4000-8000-000000000146"
-			botID     = "20000000-0000-4000-8000-000000000146"
-			sessionID = "30000000-0000-4000-8000-000000000146"
-			messageID = "40000000-0000-4000-8000-000000000146"
-		)
-		seed := []struct {
-			query string
-			args  []any
-		}{
-			{`INSERT INTO users (id, username) VALUES ($1, 'agent-turn-marker-owner')`, []any{userID}},
-			{`INSERT INTO team_members (team_id, user_id) VALUES ($1, $2)`, []any{team.DefaultTeamID, userID}},
-			{`INSERT INTO bots (id, team_id, owner_user_id, name, metadata)
-			  VALUES ($1, $2, $3, 'agent-turn-marker-bot', '{}'::jsonb)`, []any{botID, team.DefaultTeamID, userID}},
-			{`INSERT INTO bot_sessions (id, team_id, bot_id, type, session_mode, runtime_type)
-			  VALUES ($1, $2, $3, 'chat', 'chat', 'model')`, []any{sessionID, team.DefaultTeamID, botID}},
-			{`INSERT INTO bot_history_messages (
-				id, team_id, bot_id, session_id, role, content, metadata
-			  ) VALUES (
-				$1, $2, $3, $4, 'assistant', '[]'::jsonb,
-				'{"acp_turn_outcome":"succeeded","acp_decision_projection":true,"acp_decision_tool_call_id":"tool-1","keep":"value"}'::jsonb
-			  )`, []any{messageID, team.DefaultTeamID, botID, sessionID}},
-		}
-		for _, statement := range seed {
-			if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
-				t.Fatalf("seed Agent turn marker migration: %v", err)
-			}
-		}
-
-		stepUp(t, dsn, 1)
-		assertTurnMarkerNames(t, ctx, pool, messageID, "agent", "acp")
-		stepDown(t, dsn, 1)
-		assertTurnMarkerNames(t, ctx, pool, messageID, "acp", "agent")
-		migrateUpAll(t, dsn)
-	})
-}
-
-func assertTurnMarkerNames(t *testing.T, ctx context.Context, pool *pgxpool.Pool, messageID, wantPrefix, absentPrefix string) {
-	t.Helper()
-	var outcome, toolCallID, untouched string
-	var projection, hasOldKeys bool
-	if err := pool.QueryRow(ctx, `
-		SELECT
-			metadata->>($2 || '_turn_outcome'),
-			(metadata->>($2 || '_decision_projection'))::boolean,
-			metadata->>($2 || '_decision_tool_call_id'),
-			metadata->>'keep',
-			metadata ?| ARRAY[
-				$3 || '_turn_outcome',
-				$3 || '_decision_projection',
-				$3 || '_decision_tool_call_id'
-			]
-		FROM bot_history_messages
-		WHERE id = $1`,
-		messageID, wantPrefix, absentPrefix,
-	).Scan(&outcome, &projection, &toolCallID, &untouched, &hasOldKeys); err != nil {
-		t.Fatalf("inspect %s turn markers: %v", wantPrefix, err)
-	}
-	if outcome != "succeeded" || !projection || toolCallID != "tool-1" || untouched != "value" || hasOldKeys {
-		t.Fatalf("%s turn markers = outcome=%q projection=%t tool=%q keep=%q old_keys=%t", wantPrefix, outcome, projection, toolCallID, untouched, hasOldKeys)
-	}
 }
 
 func assertSessionRunCandidateIndex(

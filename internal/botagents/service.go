@@ -30,7 +30,7 @@ var (
 	ErrDefaultInUse    = errors.New("default bot agent cannot be disabled or deleted")
 	ErrUnavailable     = errors.New("bot agent is unavailable")
 	// ErrProviderDirectRuntime rejects new ACP agents for providers that now
-	// run as direct runtimes (migration 0144 converted the existing rows).
+	// run as direct runtimes (migration 0144 retired the old built-in rows).
 	ErrProviderDirectRuntime = errors.New("this provider runs as a direct runtime; create the agent with runtime codex or claude-code")
 )
 

@@ -1,7 +1,7 @@
 -- 0144_external_agent_runtimes (down)
--- Restore Codex and Claude Code Bot Agents and sessions to the ACP runtime.
--- Bindings and runtime metadata created after the cutover are intentionally
--- preserved; reused Agent names may require manual reconciliation on rollback.
+-- Remove direct-runtime data before restoring the pre-direct schema. The old
+-- built-in ACP Codex, Claude Code, and Hermes profiles are not recreated: this
+-- rollback is intentionally destructive for Direct Agents and their sessions.
 
 ALTER TABLE bot_agents NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE bot_agents DISABLE ROW LEVEL SECURITY;
@@ -14,53 +14,51 @@ ALTER TABLE schedule DISABLE ROW LEVEL SECURITY;
 ALTER TABLE bot_history_messages NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE bot_history_messages DISABLE ROW LEVEL SECURITY;
 
-UPDATE bots
-SET chat_acp_agent_id = chat_runtime,
-    chat_runtime = 'acp_agent',
+UPDATE bots bot
+SET default_bot_agent_id = NULL,
+    chat_runtime = 'model',
+    chat_acp_agent_id = NULL,
     updated_at = now()
-WHERE chat_runtime IN ('codex', 'claude-code');
+WHERE bot.chat_runtime IN ('codex', 'claude-code')
+   OR EXISTS (
+     SELECT 1
+     FROM bot_agents agent
+     WHERE agent.team_id = bot.team_id
+       AND agent.bot_id = bot.id
+       AND agent.id = bot.default_bot_agent_id
+       AND agent.runtime IN ('codex', 'claude-code')
+   );
 
-ALTER TABLE bots
-  DROP CONSTRAINT IF EXISTS bots_chat_runtime_check;
-ALTER TABLE bots
-  ADD CONSTRAINT bots_chat_runtime_check
-  CHECK (chat_runtime IN ('model', 'acp_agent'));
+DELETE FROM schedule sched
+WHERE sched.runtime_type IN ('codex', 'claude-code')
+   OR EXISTS (
+     SELECT 1
+     FROM bot_agents agent
+     WHERE agent.team_id = sched.team_id
+       AND agent.bot_id = sched.bot_id
+       AND agent.id = sched.bot_agent_id
+       AND agent.runtime IN ('codex', 'claude-code')
+   );
 
-UPDATE bot_agents
-SET runtime = 'acp', updated_at = now()
+DELETE FROM bot_sessions session
+WHERE session.runtime_type IN ('codex', 'claude-code')
+   OR EXISTS (
+     SELECT 1
+     FROM bot_agents agent
+     WHERE agent.team_id = session.team_id
+       AND agent.bot_id = session.bot_id
+       AND agent.id = session.bot_agent_id
+       AND agent.runtime IN ('codex', 'claude-code')
+   );
+
+-- Normally the session delete cascades every direct-runtime history row. The
+-- explicit sweep also handles historical or manually repaired rows whose
+-- runtime marker no longer matches their parent session.
+DELETE FROM bot_history_messages
+WHERE runtime_type IN ('codex', 'claude-code');
+
+DELETE FROM bot_agents
 WHERE runtime IN ('codex', 'claude-code');
-
-UPDATE bot_agents
-SET enabled = COALESCE((metadata->>'_migration_0144_removed_profile_enabled')::boolean, FALSE),
-    deleted_at = NULL,
-    metadata = metadata - '_migration_0144_removed_profile_enabled',
-    updated_at = now()
-WHERE runtime = 'acp'
-  AND lower(btrim(COALESCE(metadata->>'provider', ''))) = 'hermes'
-  AND metadata ? '_migration_0144_removed_profile_enabled';
-
-UPDATE bot_sessions
-SET metadata = jsonb_set(metadata, '{acp_agent_id}', to_jsonb(runtime_type), true),
-    runtime_metadata = jsonb_set(runtime_metadata, '{acp_agent_id}', to_jsonb(runtime_type), true),
-    updated_at = now()
-WHERE runtime_type IN ('codex', 'claude-code')
-  AND COALESCE(runtime_metadata->>'acp_agent_id', metadata->>'acp_agent_id', '') = '';
-
-UPDATE bot_sessions
-SET runtime_type = 'acp_agent',
-    type = CASE WHEN session_mode = 'chat' THEN 'acp_agent' ELSE type END,
-    updated_at = now()
-WHERE runtime_type IN ('codex', 'claude-code');
-
-UPDATE schedule
-SET acp_agent_id = runtime_type,
-    runtime_type = 'acp_agent',
-    updated_at = now()
-WHERE runtime_type IN ('codex', 'claude-code');
-
-UPDATE bot_history_messages
-SET runtime_type = 'acp_agent'
-WHERE runtime_type IN ('codex', 'claude-code');
 
 ALTER TABLE bot_history_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bot_history_messages FORCE ROW LEVEL SECURITY;
@@ -72,6 +70,12 @@ ALTER TABLE bot_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bot_sessions FORCE ROW LEVEL SECURITY;
 ALTER TABLE bot_agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bot_agents FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE bots
+  DROP CONSTRAINT IF EXISTS bots_chat_runtime_check;
+ALTER TABLE bots
+  ADD CONSTRAINT bots_chat_runtime_check
+  CHECK (chat_runtime IN ('model', 'acp_agent'));
 
 ALTER TABLE bot_sessions
   DROP CONSTRAINT IF EXISTS bot_sessions_runtime_type_check;
