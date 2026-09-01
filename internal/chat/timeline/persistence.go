@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -18,8 +19,20 @@ import (
 
 // EventStore persists and loads CanonicalEvents from the database.
 type EventStore struct {
-	queries dbstore.Queries
-	logger  *slog.Logger
+	queries         dbstore.Queries
+	logger          *slog.Logger
+	replayArtifacts ReplayArtifactProvider
+}
+
+const (
+	defaultReplayMaxBytes = 64 << 20
+	defaultReplayPageSize = 256
+)
+
+// ReplayArtifactProvider supplies the durable compaction frontier before a
+// replay query loads event payloads.
+type ReplayArtifactProvider interface {
+	ActiveCompactionArtifacts(ctx context.Context, botID, sessionID string) ([]CompactionArtifact, error)
 }
 
 // NewEventStore creates an EventStore.
@@ -31,6 +44,12 @@ func NewEventStore(log *slog.Logger, queries dbstore.Queries) *EventStore {
 		queries: queries,
 		logger:  log.With(slog.String("service", "chat/timeline_event_store")),
 	}
+}
+
+// SetReplayArtifactProvider enables frontier-aware replay. It is setter-
+// injected because the concrete provider belongs to agent compaction.
+func (s *EventStore) SetReplayArtifactProvider(provider ReplayArtifactProvider) {
+	s.replayArtifacts = provider
 }
 
 // PersistEvent writes a CanonicalEvent to the bot_session_events table with a
@@ -98,18 +117,72 @@ func (s *EventStore) PersistEvent(ctx context.Context, botID, sessionID string, 
 	return "", original, nil
 }
 
-// LoadEvents loads all events for a session, ordered by received_at_ms.
+// LoadEvents is the compatibility surface for callers without a bot identity.
+// It is still keyset/byte bounded, but cannot apply a compaction frontier.
 func (s *EventStore) LoadEvents(ctx context.Context, sessionID string) ([]CanonicalEvent, error) {
+	return s.loadEvents(ctx, "", sessionID, nil)
+}
+
+// LoadEventsForReplay applies the active compaction frontier in SQL and loads
+// the newest event tail within a hard byte budget.
+func (s *EventStore) LoadEventsForReplay(ctx context.Context, botID, sessionID string) ([]CanonicalEvent, error) {
+	var artifacts []CompactionArtifact
+	if s.replayArtifacts != nil {
+		var err error
+		artifacts, err = s.replayArtifacts.ActiveCompactionArtifacts(ctx, botID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("load replay compaction frontier: %w", err)
+		}
+	}
+	return s.loadEvents(ctx, botID, sessionID, artifacts)
+}
+
+func (s *EventStore) loadEvents(ctx context.Context, botID, sessionID string, artifacts []CompactionArtifact) ([]CanonicalEvent, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid session id: %w", err)
 	}
 
-	rows, err := s.queries.ListSessionEventsBySession(ctx, pgSessionID)
+	coverage := coveredExternalMessages(artifacts)
+	coverageJSON := make(map[string]int64, len(coverage))
+	for messageID, covered := range coverage {
+		coverageJSON[messageID] = covered.coverageAsOfMs
+	}
+	encodedCoverage, err := json.Marshal(coverageJSON)
 	if err != nil {
-		return nil, fmt.Errorf("list session events: %w", err)
+		return nil, fmt.Errorf("encode replay compaction frontier: %w", err)
 	}
 
+	remaining := int64(defaultReplayMaxBytes)
+	rows := make([]sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow, 0, defaultReplayPageSize)
+	params := sqlc.ListSessionEventsBySessionPageBeforeWithinBytesParams{
+		SessionID:               pgSessionID,
+		CoveredExternalMessages: encodedCoverage,
+		MaxBytes:                remaining,
+		PageSize:                defaultReplayPageSize,
+	}
+	for remaining > 0 {
+		page, queryErr := s.queries.ListSessionEventsBySessionPageBeforeWithinBytes(ctx, params)
+		if queryErr != nil {
+			return nil, fmt.Errorf("list bounded session events: %w", queryErr)
+		}
+		if len(page) == 0 {
+			break
+		}
+		rows = append(rows, page...)
+		loaded := page[len(page)-1].CumulativeBytes
+		remaining -= loaded
+		last := page[len(page)-1]
+		params.HasCursor = true
+		params.BeforeReceivedAtMs = last.ReceivedAtMs
+		params.BeforeCreatedAt = last.CreatedAt
+		params.BeforeID = last.ID
+		params.MaxBytes = remaining
+		if len(page) < int(defaultReplayPageSize) {
+			break
+		}
+	}
+	slices.Reverse(rows)
 	events := make([]CanonicalEvent, 0, len(rows))
 	for _, row := range rows {
 		event, parseErr := parseEventData(row.EventKind, row.EventData)
@@ -122,6 +195,19 @@ func (s *EventStore) LoadEvents(ctx context.Context, sessionID string) ([]Canoni
 		}
 		events = append(events, event)
 	}
+	loadedBytes := int64(defaultReplayMaxBytes) - remaining
+	totalEvents, countErr := s.queries.CountSessionEvents(ctx, pgSessionID)
+	if countErr != nil {
+		s.logger.Warn("measure replay event count failed", slog.String("session_id", sessionID), slog.Any("error", countErr))
+	}
+	s.logger.Info("timeline replay payload admitted",
+		slog.String("bot_id", botID),
+		slog.String("session_id", sessionID),
+		slog.Int("event_count", len(events)),
+		slog.Int64("event_bytes", loadedBytes),
+		slog.Int64("persisted_event_count", totalEvents),
+		slog.Int("covered_external_messages", len(coverageJSON)),
+		slog.Int64("replay_max_bytes", defaultReplayMaxBytes))
 
 	return events, nil
 }

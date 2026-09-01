@@ -58,6 +58,7 @@ ALTER TABLE bot_channel_routes ADD COLUMN team_id UUID NOT NULL DEFAULT public.m
 ALTER TABLE channel_identities ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
 ALTER TABLE bot_history_message_compacts ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
 ALTER TABLE bot_history_messages ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
+ALTER TABLE bot_session_events ADD COLUMN team_id UUID NOT NULL DEFAULT public.memoh_current_team_id();
 
 DROP VIEW bot_visible_history_messages;
 CREATE VIEW bot_visible_history_messages AS
@@ -170,7 +171,8 @@ VALUES
 	if err := sessionUUID.Scan(sessionID); err != nil {
 		t.Fatalf("scan session uuid: %v", err)
 	}
-	rows, err := sqlc.New(tx).ListUncompactedMessagesBySession(ctx, sessionUUID)
+	queries := sqlc.New(tx)
+	rows, err := queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		t.Fatalf("ListUncompactedMessagesBySession: %v", err)
 	}
@@ -190,5 +192,63 @@ VALUES
 	}
 	if len(got) != len(wantEligible) {
 		t.Errorf("candidate set size = %d, want %d (an excluded row leaked in)", len(got), len(wantEligible))
+	}
+
+	measure, err := queries.MeasureUncompactedMessagesBySession(ctx, sessionUUID)
+	if err != nil {
+		t.Fatalf("MeasureUncompactedMessagesBySession: %v", err)
+	}
+	if measure.CandidateCount != int64(len(wantEligible)) || measure.CandidateBytes <= 0 {
+		t.Fatalf("unexpected measure: %+v", measure)
+	}
+	bounded, err := queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
+		SessionID: sessionUUID,
+		MaxBytes:  measure.CandidateBytes,
+	})
+	if err != nil {
+		t.Fatalf("ListUncompactedMessagesBySessionWithinBytes: %v", err)
+	}
+	if len(bounded) != len(wantEligible) || bounded[len(bounded)-1].CumulativeBytes > measure.CandidateBytes {
+		t.Fatalf("bounded candidate set = %d rows, last=%+v, measure=%+v", len(bounded), bounded[len(bounded)-1], measure)
+	}
+	oversized, err := queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
+		SessionID: sessionUUID,
+		MaxBytes:  1,
+	})
+	if err != nil {
+		t.Fatalf("ListUncompactedMessagesBySessionWithinBytes tiny budget: %v", err)
+	}
+	if len(oversized) != 0 {
+		t.Fatalf("tiny byte budget admitted %d payload rows", len(oversized))
+	}
+
+	if _, err := tx.Exec(ctx, `
+INSERT INTO bot_session_events (id, bot_id, session_id, event_kind, event_data, external_message_id, received_at_ms) VALUES
+  ($1, $5, $6, 'message', '{"message_id":"covered","received_at_ms":10}', 'covered', 10),
+  ($2, $5, $6, 'message', '{"message_id":"uncovered","received_at_ms":15}', 'uncovered', 15),
+  ($3, $5, $6, 'edit',    '{"message_id":"covered","received_at_ms":30}', 'covered', 30),
+  ($4, $5, $6, 'message', '{"message_id":"covered-stable","received_at_ms":5}', 'covered-stable', 5)
+`, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), botID, sessionID); err != nil {
+		t.Fatalf("insert replay events: %v", err)
+	}
+	replayRows, err := queries.ListSessionEventsBySessionPageBeforeWithinBytes(ctx, sqlc.ListSessionEventsBySessionPageBeforeWithinBytesParams{
+		SessionID:               sessionUUID,
+		CoveredExternalMessages: []byte(`{"covered":20,"covered-stable":20}`),
+		MaxBytes:                1 << 20,
+		PageSize:                10,
+	})
+	if err != nil {
+		t.Fatalf("ListSessionEventsBySessionPageBeforeWithinBytes: %v", err)
+	}
+	if len(replayRows) != 3 {
+		t.Fatalf("frontier-aware replay returned %d rows, want 3", len(replayRows))
+	}
+	if replayRows[0].ReceivedAtMs != 30 || replayRows[1].ReceivedAtMs != 15 || replayRows[2].ReceivedAtMs != 10 {
+		t.Fatalf("unexpected replay order/coverage: %#v", replayRows)
+	}
+	for i, row := range replayRows {
+		if row.CumulativeBytes > 1<<20 || (i > 0 && row.CumulativeBytes < replayRows[i-1].CumulativeBytes) {
+			t.Fatalf("invalid replay byte accounting: %#v", replayRows)
+		}
 	}
 }

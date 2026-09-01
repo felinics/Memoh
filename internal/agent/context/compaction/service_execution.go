@@ -16,13 +16,46 @@ import (
 )
 
 func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {
-	rows, err := s.queries.ListUncompactedMessagesBySession(ctx, sessionUUID)
+	measure, err := s.queries.MeasureUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return Result{}, err
 	}
-	if len(rows) == 0 {
+	if measure.CandidateCount == 0 {
 		return Result{Status: StatusNoop}, nil
 	}
+	readMaxBytes := compactionReadMaxBytes(cfg)
+	boundedRows, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
+		SessionID: sessionUUID,
+		MaxBytes:  readMaxBytes,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	rows := uncompactedRowsFromBounded(boundedRows)
+	if len(rows) == 0 {
+		s.logger.Warn("compaction: no candidate fits the database read budget",
+			slog.String("session_id", cfg.SessionID),
+			slog.Int64("candidate_count", measure.CandidateCount),
+			slog.Int64("candidate_bytes", measure.CandidateBytes),
+			slog.Int64("largest_candidate_bytes", measure.LargestCandidateBytes),
+			slog.Int64("read_max_bytes", readMaxBytes))
+		return Result{Status: StatusNoop}, nil
+	}
+	// Use the count captured by the same SQL statement as the payload rows for
+	// the selection decision. The metadata-only measure above is observability
+	// and oversized-head handling; concurrent claims may legitimately change
+	// eligibility between the two statements.
+	candidateCount := boundedRows[0].CandidateCount
+	candidateBytes := boundedRows[0].CandidateBytes
+	truncatedRead := candidateCount > int64(len(rows))
+	s.logger.Info("compaction: bounded candidate read",
+		slog.String("session_id", cfg.SessionID),
+		slog.Int("loaded_messages", len(rows)),
+		slog.Int64("candidate_count", candidateCount),
+		slog.Int64("candidate_bytes", candidateBytes),
+		slog.Int64("loaded_bytes", boundedRows[len(boundedRows)-1].CumulativeBytes),
+		slog.Int64("read_max_bytes", readMaxBytes),
+		slog.Bool("truncated", truncatedRead))
 
 	messages, barrierCount := itemsFromRows(rows)
 	if barrierCount > 0 {
@@ -36,12 +69,20 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 
 	var toCompact []CompactionCandidate
-	if cfg.TargetTokens > 0 {
+	switch {
+	case truncatedRead:
+		// Rows are an oldest-first prefix. When more history exists outside the
+		// database admission boundary, compact the admitted prefix and let the
+		// existing prompt trim/closure rules choose the largest safe claim. Using
+		// splitByTarget here could noop forever because the unseen newest tail is
+		// precisely what should be kept.
+		toCompact = messages
+	case cfg.TargetTokens > 0:
 		// Sync compaction: compress enough messages to bring context
 		// down to TargetTokens. Calculate how many tokens to keep
 		// (newest messages) and compact everything older.
 		toCompact = splitByTarget(messages, cfg.TargetTokens)
-	} else {
+	default:
 		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
 	}
 	if len(toCompact) == 0 {
@@ -287,6 +328,43 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 	return Result{Status: StatusOK, Summary: summary, MessageCount: len(compactedMessageIDs)}, nil
+}
+
+const (
+	minCompactionReadBytes = 512 << 10
+	maxCompactionReadBytes = 8 << 20
+)
+
+func compactionReadMaxBytes(cfg TriggerConfig) int64 {
+	tokens := cfg.MaxCompactTokens
+	if tokens <= 0 {
+		tokens = 30000
+	}
+	bytes := int64(tokens) * 8
+	if bytes < minCompactionReadBytes {
+		return minCompactionReadBytes
+	}
+	if bytes > maxCompactionReadBytes {
+		return maxCompactionReadBytes
+	}
+	return bytes
+}
+
+func uncompactedRowsFromBounded(rows []sqlc.ListUncompactedMessagesBySessionWithinBytesRow) []sqlc.ListUncompactedMessagesBySessionRow {
+	converted := make([]sqlc.ListUncompactedMessagesBySessionRow, len(rows))
+	for i, row := range rows {
+		converted[i] = sqlc.ListUncompactedMessagesBySessionRow{
+			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
+			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
+			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
+			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
+			EventID: row.EventID, DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
+			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl,
+			Platform: row.Platform, CompactionEpoch: row.CompactionEpoch,
+			ConversationType: row.ConversationType, ConversationName: row.ConversationName, ReplyTarget: row.ReplyTarget,
+		}
+	}
+	return converted
 }
 
 func boundedCompactionInputTokens(cfg TriggerConfig, maxCompactTokens, maxOutputTokens int, prompt string) (int, error) {

@@ -506,7 +506,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "" &&
 		len(req.RequestedSkills) == 0
 	if usePipeline {
-		if _, loaded := s.pipeline.GetIC(strings.TrimSpace(req.ThreadID)); !loaded {
+		if !s.pipeline.HasSession(strings.TrimSpace(req.ThreadID)) {
 			usePipeline = false
 		}
 	}

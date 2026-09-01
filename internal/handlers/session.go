@@ -27,16 +27,21 @@ import (
 
 // SessionHandler handles bot session CRUD endpoints.
 type SessionHandler struct {
-	sessionService *session.Service
-	threadEnricher threadEnricher
-	acpRuntimes    acpSessionRuntimeService
-	runtimeResets  sessionResetService
-	workdirs       sessionWorkdirService
-	agentRuntimes  sessionAgentRuntimeService
-	botAgents      *botagents.Service
-	botService     *bots.Service
-	accountService *accounts.Service
-	logger         *slog.Logger
+	sessionService  *session.Service
+	threadEnricher  threadEnricher
+	acpRuntimes     acpSessionRuntimeService
+	runtimeResets   sessionResetService
+	workdirs        sessionWorkdirService
+	agentRuntimes   sessionAgentRuntimeService
+	botAgents       *botagents.Service
+	botService      *bots.Service
+	accountService  *accounts.Service
+	projectionCache sessionProjectionCache
+	logger          *slog.Logger
+}
+
+type sessionProjectionCache interface {
+	DropSession(sessionID string)
 }
 
 // sessionAgentRuntimeService owns external-runtime fork preparation and active
@@ -110,6 +115,10 @@ func (h *SessionHandler) SetBotAgents(service *botagents.Service) {
 // external-runtime fork preparation and active-run shutdown.
 func (h *SessionHandler) SetAgentRuntimeService(service sessionAgentRuntimeService) {
 	h.agentRuntimes = service
+}
+
+func (h *SessionHandler) SetProjectionCache(cache sessionProjectionCache) {
+	h.projectionCache = cache
 }
 
 // Register registers session routes.
@@ -999,6 +1008,9 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 		if err := h.agentRuntimes.AbortSessionRuns(c.Request().Context(), botID, sessionID); err != nil {
 			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
 		}
+	}
+	if h.projectionCache != nil {
+		h.projectionCache.DropSession(sessionID)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

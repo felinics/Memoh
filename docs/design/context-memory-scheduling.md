@@ -114,26 +114,19 @@ Representations materialized per Discuss turn, in order:
 The genuinely payload-doubling steps are the three JSON round-trips (#3, #4, #7); the
 frag clones (#5, #6) are allocation churn but share payload bytes.
 
-### 3.3 No process-level memory scheduling
+### 3.3 Process-level memory scheduling baseline (resolved by PR 3)
 
-- **Process-lifetime timeline cache with no eviction.** `Pipeline.sessions` and
-  `Pipeline.rendered` (`internal/chat/timeline/pipeline.go`) only ever insert or
-  overwrite. `DropSession` exists with **zero callers repo-wide**. Every warmed
-  session's full intermediate context (all nodes) and rendered context stay resident
-  for the process lifetime, growing without bound in session count. This is the
-  largest standing leak.
-- **O(N²) replay.** `ReplaySession` folds `Reduce` over all events; `Reduce` starts
-  with `cloneIC`, which reallocates the node slice per event (sizes 1..N → O(N²)
-  allocated bytes). On the live path, `PushEvent` additionally re-runs `Render` over
-  every node on every event — O(N²) over a session's life.
-- **Unbounded DB loads.** `ListSessionEventsBySession`
-  (`db/postgres/queries/session_events.sql`) has no LIMIT; `LoadEvents`
-  (`timeline/persistence.go`) materializes every row, and `replayPipelineSession`
-  feeds them all into the O(N²) replay. `ListUncompactedMessagesBySession`
-  (`messages.sql`) has no LIMIT — compaction's token cap is applied in Go *after* the
-  full load. `ListHistoryTurnsByBot` aggregates a bot's entire history with no LIMIT.
-  (A bounding precedent already exists: `ListMessagesBySession` ends with
-  `LIMIT 10000`.)
+- **Timeline cache is bounded.** `Pipeline` now applies LRU, TTL, session-count,
+  and approximate resident-byte limits. Session delete/history reset explicitly
+  invalidate entries; bot-wide reset conservatively clears the cache.
+- **Projection and replay are incremental.** Live events mutate the owned IC and
+  re-render only dirty/new nodes, while cold replay reduces in place and renders
+  once. The public pure `Reduce` + full `Render` path remains the equivalence
+  oracle.
+- **Runtime DB loads are bounded.** Timeline replay uses a newest-first keyset and
+  byte budget, applying active compaction coverage in SQL before covered payloads
+  cross the process boundary. Compaction uses an oldest-prefix byte admission
+  query before selection; the legacy bot turn aggregate has a defensive LIMIT.
 - **Per-token-delta snapshot cloning.** The session runtime memory backend clones the
   full message set **twice per accepted stream event** — including every non-empty
   text/reasoning delta — via per-message JSON round-trips
@@ -478,20 +471,20 @@ Landing order inside this PR is a hard constraint: paginated, frontier-first rep
 ships before — or atomically with — cache eviction, never eviction first
 (CM-CCH-001).
 
-- [ ] `Pipeline.sessions`/`rendered`: LRU + TTL + resident-bytes bound; wire
+- [x] `Pipeline.sessions`/`rendered`: LRU + TTL + resident-bytes bound; wire
       `DropSession` — CM-CCH-001
-- [ ] Remove per-event `cloneIC` full copy (incremental IC or append-only nodes);
+- [x] Remove per-event `cloneIC` full copy (incremental IC or append-only nodes);
       remove per-event full `Render` with per-node dirty marking (edits/deletes
       invalidate affected nodes and coalesced neighbors, not a global tail) —
       CM-RPL-002
-- [ ] Incremental-render equivalence oracle: property/fuzz test asserting
+- [x] Incremental-render equivalence oracle: property/fuzz test asserting
       byte-equality with full re-render over event sequences including edits and
       deletes — CM-RPL-002
-- [ ] `ListSessionEventsBySession` pagination/keyset; replay applies the compaction
+- [x] `ListSessionEventsBySession` pagination/keyset; replay applies the compaction
       frontier before loading covered payloads — CM-RPL-001
-- [ ] `ListUncompactedMessagesBySession` / `ListHistoryTurnsByBot`: LIMIT or
+- [x] `ListUncompactedMessagesBySession` / `ListHistoryTurnsByBot`: LIMIT or
       token-budgeted incremental loading — CM-RPL-001
-- [ ] Metrics: replay event count/bytes, cache eviction counters — CM-OBS-001
+- [x] Metrics: replay event count/bytes, cache eviction counters — CM-OBS-001
 
 ### PR 4 (P1) — Representation convergence & zero-copy
 
