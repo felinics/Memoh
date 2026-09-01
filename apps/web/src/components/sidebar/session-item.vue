@@ -159,7 +159,7 @@ import {
 } from '@felinic/ui'
 import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
 import { splitScriptRuns } from '@/utils/script-runs'
-import { normalizedRuntimeType, normalizedSessionMode } from '@/store/chat-list.utils'
+import { normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
 
 const props = defineProps<{
   session: SessionSummary
@@ -184,8 +184,18 @@ const menuOpen = ref(false)
 // pattern follows nav-button.vue (component-owned chrome, no global token).
 const rowInteractionClass = 'hover:bg-[color:var(--sidebar-hover)] active:bg-[color:var(--sidebar-hover)]' /* ui-allow-style */
 
+function routeMeta(): Record<string, unknown> {
+  return props.session.route_metadata ?? {}
+}
+
+// Group title for group sessions, peer name for DMs — the default visible
+// label for untitled channel sessions, and the IM handle for the hover
+// tooltip. Empty title is expected: only the chat turn path generates titles
+// server-side; discuss (group) sessions never get one (issue #1043).
+const displayLabel = computed(() => routeConversationLabel(props.session))
+
 const titleRuns = computed(() =>
-  splitScriptRuns((props.session.title ?? '').trim() || t('chat.untitledSession')),
+  splitScriptRuns((props.session.title ?? '').trim() || displayLabel.value || t('chat.untitledSession')),
 )
 
 const WEB_CHANNELS = new Set(['local', ''])
@@ -202,22 +212,10 @@ const isACPSession = computed(() => normalizedRuntimeType(props.session) === 'ac
 const isScheduleSession = computed(() => normalizedSessionMode(props.session) === 'schedule')
 const acpAgentLabel = computed(() => acpAgentDisplayName(acpAgentId.value, t('chat.sessionTypeACPAgent')))
 
-function routeMeta(): Record<string, unknown> {
-  return props.session.route_metadata ?? {}
-}
-
-const displayLabel = computed(() => {
-  const meta = routeMeta()
-  return (meta.conversation_name as string ?? '').trim()
-    || (meta.sender_display_name as string ?? '').trim()
-    || (meta.sender_username as string ?? '').trim()
-    || ''
-})
-
 // The old two-line subLabel is folded into the native tooltip: channel handle
 // for IM sessions, agent name for ACP sessions.
 const hoverTitle = computed(() => {
-  const title = props.session.title || t('chat.untitledSession')
+  const title = (props.session.title ?? '').trim() || displayLabel.value || t('chat.untitledSession')
   if (isACPSession.value) {
     return `${title} — ${acpAgentLabel.value}`
   }

@@ -5,6 +5,7 @@ import { useTabScopedStorage } from '@/utils/tab-scoped-storage'
 import { useIsMobile } from '@/composables/useIsMobile'
 import type { DockviewApi, DockviewGroupPanel, SerializedDockview } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
+import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { hasBotPermission, type BotPermission } from '@/utils/bot-permissions'
@@ -351,7 +352,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function chatTitleFallbackFor(sid: string | null): string {
     if (!sid) return DEFAULT_CHAT_TITLE
     const session = chatStore.knownSessionSummary(sid)
-    return (session?.title ?? '').trim() || i18n.global.t('chat.untitledSession')
+    return (session?.title ?? '').trim() || routeConversationLabel(session) || i18n.global.t('chat.untitledSession')
   }
 
   function panelTitleFallback(panel: { id: string, params?: Record<string, unknown> }): string {

@@ -3,7 +3,7 @@ import type { SearchableSelectOption } from '@/components/searchable-select-popo
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import type { SessionKind } from './session-kind-icon.vue'
 import { acpAgentDisplayName, normalizeACPAgentID } from '@/utils/acp'
-import { normalizedRuntimeType, normalizedSessionMode } from '@/store/chat-list.utils'
+import { normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
 
 // The per-row mark the picker paints beside a session title.
 export interface SessionMark {
@@ -25,7 +25,7 @@ export interface SessionSelectLabels {
 export const NO_MARK: SessionMark = { kind: 'chat', agentId: '', label: '' }
 
 export function sessionTitle(session: SessionSession, labels: SessionSelectLabels): string {
-  return (session.title ?? '').trim() || labels.untitled
+  return (session.title ?? '').trim() || routeConversationLabel(session) || labels.untitled
 }
 
 export function sessionMark(session: SessionSession, labels: SessionSelectLabels): SessionMark {
