@@ -56,7 +56,13 @@ chmod +x "$FAKEBIN/id" "$FAKEBIN/docker" "$FAKEBIN/git" "$FAKEBIN/curl"
 read_workspace_image() {
   section=$2
   awk -v target_section="[$section]" '
-    /^\[[^]]+\]$/ { in_section = ($0 == target_section); next }
+    /^[[:space:]]*\[[^]]+\]/ {
+      section_header = $0
+      sub(/^[[:space:]]*/, "", section_header)
+      sub(/[[:space:]]*$/, "", section_header)
+      in_section = (section_header == target_section)
+      next
+    }
     in_section && /^[[:space:]]*default_image[[:space:]]*=/ {
       value = substr($0, index($0, "=") + 1)
       gsub(/^[[:space:]\"]+|[[:space:]\"]+$/, "", value)
@@ -124,6 +130,8 @@ password = "memoh123"
 [pgvector]
 password = "memoh123"
 EOF
+  sed -i.bak 's/^\[workspace\]$/[workspace]  /' "$home/memoh/config.toml"
+  rm -f "$home/memoh/config.toml.bak"
 }
 
 FRESH_HOME="$TMPDIR/fresh"

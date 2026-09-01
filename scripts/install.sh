@@ -165,8 +165,11 @@ read_toml_value() {
     return 1
   fi
   value=$(awk -v target_section="[$section]" -v target_key="$key" '
-    /^\[[^]]+\]/ {
-      in_section = ($0 == target_section)
+    /^[[:space:]]*\[[^]]+\]/ {
+      section_header = $0
+      sub(/^[[:space:]]*/, "", section_header)
+      sub(/[[:space:]]*$/, "", section_header)
+      in_section = (section_header == target_section)
       next
     }
     in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
@@ -257,12 +260,15 @@ set_toml_string_value() {
     BEGIN {
       target_value = ENVIRON["TOML_VALUE"]
     }
-    /^\[[^]]+\]/ {
+    /^[[:space:]]*\[[^]]+\]/ {
       if (in_section && !value_written) {
         print target_key " = \"" target_value "\""
         value_written = 1
       }
-      in_section = ($0 == target_section)
+      section_header = $0
+      sub(/^[[:space:]]*/, "", section_header)
+      sub(/[[:space:]]*$/, "", section_header)
+      in_section = (section_header == target_section)
       if (in_section) {
         section_found = 1
       }
@@ -301,8 +307,11 @@ set_toml_bool_value() {
     BEGIN {
       target_value = ENVIRON["TOML_VALUE"]
     }
-    /^\[[^]]+\]/ {
-      in_section = ($0 == target_section)
+    /^[[:space:]]*\[[^]]+\]/ {
+      section_header = $0
+      sub(/^[[:space:]]*/, "", section_header)
+      sub(/[[:space:]]*$/, "", section_header)
+      in_section = (section_header == target_section)
     }
     in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
       indent = $0
