@@ -60,6 +60,7 @@
     "type": "类型",
     "typePlaceholder": "选择类型",
     "refresh": "刷新",
+    "retry": "重试",
     "status": "状态",
     "active": "启用",
     "inactive": "未启用",

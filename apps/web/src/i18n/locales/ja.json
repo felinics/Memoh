@@ -54,6 +54,7 @@
     "type": "タイプ",
     "typePlaceholder": "タイプを選択してください",
     "refresh": "更新",
+    "retry": "再試行",
     "status": "ステータス",
     "active": "アクティブ",
     "inactive": "非アクティブ",

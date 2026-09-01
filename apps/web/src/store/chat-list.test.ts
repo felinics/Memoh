@@ -821,6 +821,27 @@ describe('chat-list store', () => {
       })).toBe(false)
     })
 
+  it('treats a discuss draft as a different pending agent than the staged chat draft', async () => {
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const target = { botId: 'bot-1', sessionId: null, viewId: 'draft-a' }
+      const input = {
+        botAgentId: 'agent-1',
+        agentId: 'codex',
+        projectPath: '/data',
+        projectMode: 'project',
+      }
+      store.stageDefaultExternalAgentSession(input, target)
+
+      expect(store.pendingExternalAgentMatchesInput(input, target)).toBe(true)
+      expect(store.pendingExternalAgentMatchesInput({ ...input, sessionMode: 'chat' }, target)).toBe(true)
+      // The pane-targeted and focused matchers must agree on sessionMode;
+      // they used to diverge, so the same draft could be judged both ways.
+      expect(store.pendingExternalAgentMatchesInput({ ...input, sessionMode: 'discuss' }, target)).toBe(false)
+      expect(store.pendingExternalAgentMatchesInput({ ...input, sessionMode: 'discuss' })).toBe(false)
+    })
+
   it('keeps an explicit draft as Memoh even when the bot default runtime is ACP', async () => {
       sdk.getBotsByBotIdSettings.mockResolvedValue({
         data: {

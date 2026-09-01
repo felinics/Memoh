@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { externalAgentDraftMetadata, type DetachedExternalAgentSession, type createExternalAgentStaging } from './external-agent-staging'
+import { externalAgentDraftMetadata, sameExternalAgentSessionInput, type DetachedExternalAgentSession, type createExternalAgentStaging } from './external-agent-staging'
 import type { createACPRuntimeRegistry } from './acp-runtime-registry'
 import type { ExternalAgentSessionInput, ChatViewTarget } from './types'
 import type { ChatViewEntry } from './view-registry'
@@ -259,12 +259,7 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
     if (!target) return focusedPendingExternalAgentMatchesInput(input)
     const state = pendingExternalAgentStateFor(target)
     if (!state) return false
-    const metadata = externalAgentDraftMetadata(input)
-    return state.metadata.acp_agent_id === metadata.acp_agent_id
-      && (state.input.botAgentId ?? '') === (input.botAgentId?.trim() ?? '')
-      && (state.input.runtime || 'acp') === (input.runtime || 'acp')
-      && state.metadata.project_path === metadata.project_path
-      && state.metadata.acp_project_mode === metadata.acp_project_mode
+    return sameExternalAgentSessionInput(state.input, input)
   }
 
   function reset() {

@@ -60,6 +60,7 @@
     "type": "Type",
     "typePlaceholder": "Select type",
     "refresh": "Refresh",
+    "retry": "Retry",
     "status": "Status",
     "active": "Active",
     "inactive": "Inactive",

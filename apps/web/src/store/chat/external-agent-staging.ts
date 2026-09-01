@@ -48,6 +48,22 @@ export function externalAgentDraftMetadata(input: ExternalAgentSessionInput): Re
   }
 }
 
+// Identity of a pending External Agent draft. Every "is this the same staged
+// draft?" decision — keep-or-replace the warm runtime, skip re-staging the
+// bot default, pane-level matching — must agree on the field set, so they all
+// route through here. sessionMode is part of the identity: a chat draft and a
+// discuss draft for the same agent are different sessions.
+export function sameExternalAgentSessionInput(a: ExternalAgentSessionInput, b: ExternalAgentSessionInput): boolean {
+  const left = externalAgentDraftMetadata(a)
+  const right = externalAgentDraftMetadata(b)
+  return left.acp_agent_id === right.acp_agent_id
+    && (a.botAgentId?.trim() ?? '') === (b.botAgentId?.trim() ?? '')
+    && (a.runtime || 'acp') === (b.runtime || 'acp')
+    && (a.sessionMode || 'chat') === (b.sessionMode || 'chat')
+    && left.project_path === right.project_path
+    && left.acp_project_mode === right.acp_project_mode
+}
+
 export interface ExternalAgentStagingDeps {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
@@ -181,12 +197,7 @@ export function createExternalAgentStaging(deps: ExternalAgentStagingDeps) {
     const existing = pendingExternalAgentSessionInput.value
     const samePendingAgent = Boolean(existing
       && pendingExternalAgentBotId.value === ownerBotId
-      && (existing.botAgentId ?? '') === (input.botAgentId?.trim() ?? '')
-      && (existing.runtime || 'acp') === (input.runtime || 'acp')
-      && existing.agentId === metadata.acp_agent_id
-      && (existing.sessionMode || 'chat') === (input.sessionMode || 'chat')
-      && (existing.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
-      && (existing.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode)
+      && sameExternalAgentSessionInput(existing, input))
     if (!samePendingAgent) {
       nextPendingExternalAgentGeneration()
       pendingACPConfigRequestVersion += 1
@@ -426,13 +437,7 @@ export function createExternalAgentStaging(deps: ExternalAgentStagingDeps) {
   function pendingExternalAgentMatchesInput(input: ExternalAgentSessionInput): boolean {
     const pending = pendingExternalAgentSessionInput.value
     if (!pending || sessionId.value) return false
-    const metadata = externalAgentDraftMetadata(input)
-    return pending.agentId === metadata.acp_agent_id
-      && (pending.botAgentId ?? '') === (input.botAgentId?.trim() ?? '')
-      && (pending.runtime || 'acp') === (input.runtime || 'acp')
-      && (pending.sessionMode || 'chat') === (input.sessionMode || 'chat')
-      && (pending.projectPath || ACP_DEFAULT_PROJECT_PATH) === metadata.project_path
-      && (pending.projectMode || ACP_DEFAULT_PROJECT_MODE) === metadata.acp_project_mode
+    return sameExternalAgentSessionInput(pending, input)
   }
 
   return {
