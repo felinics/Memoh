@@ -46,7 +46,7 @@
               class="size-3.5 shrink-0 text-muted-foreground"
             />
             <span class="min-w-0 flex-1 truncate text-xs text-foreground">
-              {{ session.title || t('chat.untitledSession') }}
+              {{ displayTitle(session) }}
             </span>
           </button>
 
@@ -79,7 +79,7 @@ import {
 } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { sortByRecency } from '@/store/chat-list.utils'
+import { sortByRecency, routeConversationLabel } from '@/store/chat-list.utils'
 import type { SessionSummary } from '@/composables/api/useChat'
 
 const props = defineProps<{
@@ -103,11 +103,18 @@ const results = computed<SessionSummary[]>(() => {
   const list = q
     ? sessions.value.filter(session =>
       (session.title ?? '').toLowerCase().includes(q)
-      || (session.id ?? '').toLowerCase().includes(q),
+      || (session.id ?? '').toLowerCase().includes(q)
+      // Untitled channel sessions show as their conversation name — make that
+      // the searchable form of their identity too.
+      || routeConversationLabel(session).toLowerCase().includes(q),
     )
     : sessions.value
   return sortByRecency(list).slice(0, 50)
 })
+
+function displayTitle(session: SessionSummary): string {
+  return (session.title ?? '').trim() || routeConversationLabel(session) || t('chat.untitledSession')
+}
 
 function iconOf(session: SessionSummary): Component {
   switch (session.type) {
@@ -119,7 +126,9 @@ function iconOf(session: SessionSummary): Component {
 }
 
 function handleSelect(session: SessionSummary) {
-  const title = (session.title ?? '').trim() || t('chat.untitledSession')
+  // Raw title only — the tab store derives its own fallback (channel
+  // conversation name) from the session summary.
+  const title = (session.title ?? '').trim()
   // Subagent sessions live in the region right of the conversation (the same
   // split the live Desktop uses); everything else opens as a regular chat tab.
   if (session.type === 'subagent') {

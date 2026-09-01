@@ -277,16 +277,18 @@ watch(
 )
 
 function handleSelect(session: SessionSummary) {
+  // Same contract as recents.vue: pass the raw title, let the tab store
+  // derive the fallback (incl. channel conversation name).
   workspaceTabs.openSessionChat({
     sessionId: session.id,
-    title: (session.title ?? '').trim() || t('chat.untitledSession'),
+    title: (session.title ?? '').trim(),
   })
 }
 
 function handleOpenNewTab(session: SessionSummary) {
   workspaceTabs.openSessionChatPinned({
     sessionId: session.id,
-    title: (session.title ?? '').trim() || t('chat.untitledSession'),
+    title: (session.title ?? '').trim(),
   })
 }
 

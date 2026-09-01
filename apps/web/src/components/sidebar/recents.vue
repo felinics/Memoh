@@ -197,9 +197,12 @@ watch(currentBotId, () => {
 })
 
 function handleSelect(session: SessionSummary) {
+  // Pass the raw title (possibly empty): openSessionChat's fallback derives
+  // the tab title, including the channel conversation name for untitled
+  // channel sessions — never bake the literal "Untitled" text in here.
   workspaceTabs.openSessionChat({
     sessionId: session.id,
-    title: (session.title ?? '').trim() || t('chat.untitledSession'),
+    title: (session.title ?? '').trim(),
   })
   workspaceTabs.closeMobileNav()
 }
@@ -207,7 +210,7 @@ function handleSelect(session: SessionSummary) {
 function handleOpenNewTab(session: SessionSummary) {
   workspaceTabs.openSessionChatPinned({
     sessionId: session.id,
-    title: (session.title ?? '').trim() || t('chat.untitledSession'),
+    title: (session.title ?? '').trim(),
   })
   workspaceTabs.closeMobileNav()
 }
