@@ -3139,8 +3139,6 @@ definitions:
         type: integer
       enabled:
         type: boolean
-      hard_tokens:
-        type: integer
     type: object
   handlers.ConnectorCredentialRequest:
     properties:

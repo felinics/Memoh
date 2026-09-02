@@ -70,7 +70,8 @@ SELECT
   metadata,
   created_at
 FROM bot_history_messages
-WHERE session_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = $1
   AND run_id = $2
   AND role = 'assistant'
   AND metadata ? 'context_lifecycle'

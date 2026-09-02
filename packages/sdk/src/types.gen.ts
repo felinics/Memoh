@@ -1757,7 +1757,6 @@ export type HandlersCommandEventResponse = {
 export type HandlersCompactionInfo = {
     auto_tokens?: number;
     enabled?: boolean;
-    hard_tokens?: number;
 };
 
 export type HandlersConnectorCredentialRequest = {

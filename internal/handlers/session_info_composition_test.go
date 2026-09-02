@@ -99,29 +99,29 @@ func TestContextCompactionInfoDerivation(t *testing.T) {
 			name:    "marks derive from the persisted plan window",
 			enabled: true,
 			plan:    &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:    CompactionInfo{Enabled: true, AutoTokens: 100000, HardTokens: 150000},
+			want:    CompactionInfo{Enabled: true, AutoTokens: 100000},
 		},
 		{
 			name:      "configured threshold moves only the auto mark",
 			enabled:   true,
 			threshold: 90000,
 			plan:      &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:      CompactionInfo{Enabled: true, AutoTokens: 90000, HardTokens: 150000},
+			want:      CompactionInfo{Enabled: true, AutoTokens: 90000},
 		},
 		{
-			name:      "disabled compaction still reports marks",
+			name:      "disabled compaction still reports the mark",
 			threshold: 90000,
 			plan:      &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:      CompactionInfo{AutoTokens: 90000, HardTokens: 150000},
+			want:      CompactionInfo{AutoTokens: 90000},
 		},
 		{
-			name:    "plan without a window leaves the marks unset",
+			name:    "plan without a window leaves the mark unset",
 			enabled: true,
 			plan:    &contextfrag.ContextBudgetPlan{},
 			want:    CompactionInfo{Enabled: true},
 		},
 		{
-			name:    "no plan leaves the marks unset instead of guessing from the model window",
+			name:    "no plan leaves the mark unset instead of guessing from the model window",
 			enabled: true,
 			want:    CompactionInfo{Enabled: true},
 		},
@@ -316,8 +316,8 @@ func TestGetSessionInfoReportsBudgetPlanAndCompactionMarks(t *testing.T) {
 		t.Fatalf("budget plan = %+v, want the persisted plan", plan)
 	}
 	compaction := response.ContextUsage.Compaction
-	if compaction == nil || !compaction.Enabled || compaction.AutoTokens != 90000 || compaction.HardTokens != 150000 {
-		t.Fatalf("compaction = %+v, want enabled marks at 90000/150000", compaction)
+	if compaction == nil || !compaction.Enabled || compaction.AutoTokens != 90000 {
+		t.Fatalf("compaction = %+v, want the enabled mark at 90000", compaction)
 	}
 	if queries.settingsCalls != 1 {
 		t.Fatalf("settings loads = %d, want exactly one per request", queries.settingsCalls)

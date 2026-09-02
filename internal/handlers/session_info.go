@@ -63,13 +63,12 @@ type ContextUsage struct {
 	Compaction    *CompactionInfo                `json:"compaction,omitempty"`
 }
 
-// CompactionInfo reports where compaction fires for this session. It is
-// omitted for runtimes Memoh never compacts, and its marks are omitted until a
-// turn has persisted a budget plan, so the UI never draws a guessed level.
+// CompactionInfo reports where automatic compaction fires for this session.
+// It is omitted for runtimes Memoh never compacts, and the mark is omitted
+// until a turn has persisted a budget plan, so the UI never draws a guess.
 type CompactionInfo struct {
 	Enabled    bool  `json:"enabled"`
 	AutoTokens int64 `json:"auto_tokens,omitempty"`
-	HardTokens int64 `json:"hard_tokens,omitempty"`
 }
 
 type ToolDefBucket struct {
@@ -261,9 +260,7 @@ func contextCompactionInfo(enabled bool, threshold int, plan *contextfrag.Contex
 	if plan == nil || plan.Window <= 0 {
 		return info
 	}
-	autoTokens, hardTokens := application.CompactionMarks(threshold, plan.Window)
-	info.AutoTokens = int64(autoTokens)
-	info.HardTokens = int64(hardTokens)
+	info.AutoTokens = int64(application.AutoCompactionMark(threshold, plan.Window))
 	return info
 }
 

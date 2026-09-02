@@ -161,7 +161,8 @@ SELECT
   metadata,
   created_at
 FROM bot_history_messages
-WHERE session_id = sqlc.arg(session_id)
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = sqlc.arg(session_id)
   AND run_id = sqlc.arg(run_id)
   AND role = 'assistant'
   AND metadata ? 'context_lifecycle'
