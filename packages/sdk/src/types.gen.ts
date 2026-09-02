@@ -4052,6 +4052,44 @@ export type GetBotsNameAvailabilityResponses = {
 
 export type GetBotsNameAvailabilityResponse = GetBotsNameAvailabilityResponses[keyof GetBotsNameAvailabilityResponses];
 
+export type GetBotsUserAccessCandidatesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Max results
+         */
+        limit?: number;
+    };
+    url: '/bots/user-access/candidates';
+};
+
+export type GetBotsUserAccessCandidatesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsUserAccessCandidatesError = GetBotsUserAccessCandidatesErrors[keyof GetBotsUserAccessCandidatesErrors];
+
+export type GetBotsUserAccessCandidatesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersBotUserCandidateListResponse;
+};
+
+export type GetBotsUserAccessCandidatesResponse = GetBotsUserAccessCandidatesResponses[keyof GetBotsUserAccessCandidatesResponses];
+
 export type GetBotsByBotIdAclChannelIdentitiesData = {
     body?: never;
     path: {

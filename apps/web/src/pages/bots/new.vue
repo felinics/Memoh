@@ -131,64 +131,6 @@
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection :title="$t('bots.steps.security')">
-        <SettingsRow stack="sm">
-          <template #content>
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <label
-                  :for="ACL_PRESET_ID"
-                  class="flex items-center gap-1.5 text-control font-medium text-foreground"
-                >
-                  {{ $t('bots.aclPreset') }}
-                  <span class="text-destructive">*</span>
-                </label>
-                <Tooltip>
-                  <TooltipTrigger as-child>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      class="size-5 text-muted-foreground hover:text-foreground"
-                    >
-                      <CircleHelp class="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent class="max-w-80 text-left leading-relaxed">
-                    {{ $t('bots.aclPresetHelp') }}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <p
-                v-if="aclDescription"
-                class="mt-0.5 text-body text-muted-foreground"
-              >
-                {{ aclDescription }}
-              </p>
-            </div>
-          </template>
-          <div class="w-full sm:w-56">
-            <Select v-model="form.acl_preset">
-              <SelectTrigger
-                :id="ACL_PRESET_ID"
-                class="w-full"
-              >
-                <SelectValue :placeholder="$t('bots.aclPreset')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="preset in aclPresetOptions"
-                  :key="preset.value"
-                  :value="preset.value"
-                >
-                  {{ $t(preset.titleKey) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </SettingsRow>
-      </SettingsSection>
-
       <!-- One card for what the bot runs on: the agent kind and its model, the
            memory backend, and the clock it schedules against. Three cards for
            three single-row concerns was three titles saying less than the rows
@@ -284,6 +226,73 @@
         </SettingsRow>
       </SettingsSection>
 
+      <SettingsSection :title="$t('bots.access.title')">
+        <SettingsRow stack="sm">
+          <template #content>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <label
+                  :for="ACL_PRESET_ID"
+                  class="flex items-center gap-1.5 text-control font-medium text-foreground"
+                >
+                  {{ $t('bots.aclPreset') }}
+                  <span class="text-destructive">*</span>
+                </label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      class="size-5 text-muted-foreground hover:text-foreground"
+                    >
+                      <CircleHelp class="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-80 text-left leading-relaxed">
+                    {{ $t('bots.aclPresetHelp') }}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <p
+                v-if="aclDescription"
+                class="mt-0.5 text-body text-muted-foreground"
+              >
+                {{ aclDescription }}
+              </p>
+            </div>
+          </template>
+          <div class="w-full sm:w-56">
+            <Select v-model="form.acl_preset">
+              <SelectTrigger
+                :id="ACL_PRESET_ID"
+                class="w-full"
+              >
+                <SelectValue :placeholder="$t('bots.aclPreset')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="preset in aclPresetOptions"
+                  :key="preset.value"
+                  :value="preset.value"
+                >
+                  {{ $t(preset.titleKey) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </SettingsRow>
+
+        <!-- The same Workspace Members list the Access Control tab shows, in
+             draft mode: with no bot to write to yet it edits a local list that
+             starts as you alone, and the create flow grants the rest once the
+             bot exists. -->
+        <BotUserAccess
+          v-model:draft-grants="memberGrants"
+          embedded
+        />
+      </SettingsSection>
+
       <!-- Hint -->
       <div class="rounded-md border bg-muted-soft px-3 py-2 text-xs text-muted-foreground">
         {{ $t('bots.createBotWaitHint') }}
@@ -353,11 +362,15 @@ import { acpAgentDisplayName, normalizeACPAgentID, withACPMetadata, type ACPForm
 import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
+import { useUserStore } from '@/store/user'
+import { BOT_PERMISSION_ORDER } from '@/utils/bot-permissions'
+import type { BotsUserGrant } from '@memohai/sdk'
 import ModelSelect from './components/model-select.vue'
 import AgentTypePill from './components/agent-type-pill.vue'
 import AcpSetupPanel from './components/acp-setup-panel.vue'
 import { MEMOH_AGENT_VALUE } from './components/agent-type'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
+import BotUserAccess from './components/bot-user-access.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import BotImportPanel from './components/bot-import-panel.vue'
 
@@ -456,6 +469,21 @@ const nameStatusMessage = computed(() => {
 
 const avatarDialogOpen = ref(false)
 const avatarFallback = useAvatarInitials(() => form.display_name || '')
+
+// Workspace members, drafted here and granted after the bot exists. The creator
+// seeds the list as its owner — the server makes that grant itself, so the row
+// is shown, not sent; only what the user adds below it is.
+const userStore = useUserStore()
+const memberGrants = ref<BotsUserGrant[]>([{
+  id: 'draft-owner',
+  subject_type: 'user',
+  user_id: userStore.userInfo.id,
+  user_username: userStore.userInfo.username,
+  user_display_name: userStore.userInfo.displayName || userStore.userInfo.username,
+  user_avatar_url: userStore.userInfo.avatarUrl,
+  permissions: [...BOT_PERMISSION_ORDER],
+  is_owner: true,
+}])
 
 // Data queries
 const { data: modelData } = useQuery({
@@ -591,6 +619,13 @@ function createStartOptions() {
       name: form.name.trim(),
       avatar_url: form.avatar_url.trim() || undefined,
     },
+    grants: memberGrants.value
+      .filter(grant => !grant.is_owner)
+      .map(grant => ({
+        subject_type: grant.subject_type === 'everyone' ? 'everyone' as const : 'user' as const,
+        user_id: grant.subject_type === 'everyone' ? undefined : grant.user_id,
+        permissions: grant.permissions ?? [],
+      })),
     settings: {
       chat_model_id: form.chat_model_id || undefined,
       memory_provider_id: form.memory_provider_id || undefined,

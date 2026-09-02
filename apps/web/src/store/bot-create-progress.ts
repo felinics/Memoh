@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { postBotsByBotIdAgents, putBotsByBotIdSettings } from '@memohai/sdk'
+import { postBotsByBotIdAgents, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
 import type { BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
 import {
   botCreateProgressPercent,
@@ -42,10 +42,20 @@ export type BotCreateAgent = {
   metadata?: Record<string, unknown>
 }
 
+// Workspace access drafted on the create form. The creator's own grant is not
+// here — the server writes that itself when the bot is created — so this only
+// ever carries the members added alongside them.
+export type BotCreateGrant = {
+  subject_type: 'user' | 'everyone'
+  user_id?: string
+  permissions: string[]
+}
+
 export type StartBotCreateOptions = {
   display?: BotCreateDisplay
   settings?: BotCreateSettings
   agent?: BotCreateAgent
+  grants?: BotCreateGrant[]
 }
 
 export type BotCreateStartResult = {
@@ -63,6 +73,34 @@ function settingsBody(settings: BotCreateSettings) {
     ...(settings.chat_model_id ? { chat_model_id: settings.chat_model_id } : {}),
     ...(settings.memory_provider_id ? { memory_provider_id: settings.memory_provider_id } : {}),
     ...(settings.reasoning_effort ? { reasoning_effort: settings.reasoning_effort } : {}),
+  }
+}
+
+// Grants are applied one at a time and never fail the creation: the bot and its
+// owner already exist, so a rejected member is a partial share to fix on the
+// Access Control tab, not a reason to present the whole create as broken. Each
+// failure still surfaces as the setup error the progress view reads.
+async function applyGrants(
+  botId: string,
+  grants: BotCreateGrant[] | undefined,
+  onError?: (message: string) => void,
+): Promise<void> {
+  for (const grant of grants ?? []) {
+    if (grant.subject_type === 'user' && !grant.user_id) continue
+    if (grant.permissions.length === 0) continue
+    try {
+      await postBotsByBotIdUserAccess({
+        path: { bot_id: botId },
+        body: {
+          subject_type: grant.subject_type,
+          user_id: grant.subject_type === 'user' ? grant.user_id : undefined,
+          permissions: grant.permissions,
+        },
+        throwOnError: true,
+      })
+    } catch (error) {
+      onError?.(resolveApiErrorMessage(error, toMessage(error)))
+    }
   }
 }
 
@@ -159,6 +197,9 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       }
 
       const botId = createdBot.id
+      if (botId) {
+        await applyGrants(botId, options.grants, (message) => { setupError.value = message })
+      }
       if (botId && (hasSettings(options.settings) || options.agent)) {
         lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'applying-settings', status: 'running' })
         if (options.agent) {

@@ -1,5 +1,10 @@
 <template>
-  <SettingsSection>
+  <!-- `embedded` hands the card to the caller: the bot-creation form folds this
+       list into its own Access Control section, so a SettingsSection here would
+       draw a second card inside the first. A plain <div> keeps the rows'
+       mx-4/py-3/border-b rhythm intact, and their last:border-b-0 still lands
+       because the members list is the last block in that card. -->
+  <component :is="embedded ? 'div' : SettingsSection">
     <SettingsRow
       :label="$t('bots.access.userAccess.title')"
       :description="$t('bots.access.userAccess.subtitle')"
@@ -100,7 +105,7 @@
     </div>
 
     <InlineLoadingRow
-      v-if="isLoading"
+      v-if="!isDraft && isLoading"
       size="md"
       surface="card-row"
     >
@@ -198,7 +203,7 @@
         </div>
       </SettingsRow>
     </template>
-  </SettingsSection>
+  </component>
 </template>
 
 <script setup lang="ts">
@@ -229,6 +234,7 @@ import { BOT_PERMISSION_ORDER, expandBotPermissions, type BotPermission } from '
 import {
   getBotsByBotIdUserAccess,
   getBotsByBotIdUserAccessCandidates,
+  getBotsUserAccessCandidates,
   postBotsByBotIdUserAccess,
   putBotsByBotIdUserAccessByGrantId,
   deleteBotsByBotIdUserAccessByGrantId,
@@ -237,9 +243,24 @@ import type { BotsUserGrant, HandlersBotUserCandidate } from '@memohai/sdk'
 
 type Permission = BotPermission
 
-const props = defineProps<{
-  botId: string
-}>()
+const props = withDefaults(defineProps<{
+  /**
+   * Empty while the bot is still being created. With no bot to read or write,
+   * the list becomes a draft the caller owns and submits after creation.
+   */
+  botId?: string
+  /** Render bare, for a caller whose own SettingsSection provides the card. */
+  embedded?: boolean
+}>(), {
+  botId: '',
+  embedded: false,
+})
+
+// The draft list, used only when botId is empty. The caller seeds it with the
+// owner row and reads it back to create the grants once the bot exists.
+const draftGrants = defineModel<BotsUserGrant[]>('draftGrants', { default: () => [] })
+
+const isDraft = computed(() => !props.botId)
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
@@ -256,7 +277,9 @@ const { data: grantsData, isLoading } = useQuery({
   enabled: () => !!props.botId,
 })
 
-const grants = computed<BotsUserGrant[]>(() => grantsData.value?.items ?? [])
+const grants = computed<BotsUserGrant[]>(() =>
+  isDraft.value ? draftGrants.value : (grantsData.value?.items ?? []),
+)
 
 const formVisible = ref(false)
 const formSubjectType = ref<'user' | 'everyone'>('user')
@@ -275,6 +298,15 @@ const permissionOptions = BOT_PERMISSION_ORDER
 const { data: candidatesData } = useQuery({
   key: () => ['bot-user-access-candidates', props.botId],
   query: async () => {
+    // A bot that does not exist yet has no manage check to pass, so the create
+    // form reads the bot-less candidate route instead.
+    if (isDraft.value) {
+      const { data } = await getBotsUserAccessCandidates({
+        query: { limit: 200 },
+        throwOnError: true,
+      })
+      return data
+    }
     const { data } = await getBotsByBotIdUserAccessCandidates({
       path: { bot_id: props.botId },
       query: { limit: 200 },
@@ -282,7 +314,7 @@ const { data: candidatesData } = useQuery({
     })
     return data
   },
-  enabled: () => !!props.botId && formVisible.value,
+  enabled: () => formVisible.value,
 })
 
 const candidateOptions = computed<SearchableSelectOption[]>(() => {
@@ -406,8 +438,35 @@ function invalidate() {
   ])
 }
 
+function draftCandidate(userId: string): SearchableSelectOption | undefined {
+  return candidateOptions.value.find(option => option.value === userId)
+}
+
+// Draft grants carry the same shape the API returns, so every row, badge and
+// checkbox above renders one without knowing which mode it is in.
+function buildDraftGrant(): BotsUserGrant {
+  const permissions = buildPermissions()
+  if (formSubjectType.value === 'everyone') {
+    return { id: 'draft-everyone', subject_type: 'everyone', permissions }
+  }
+  const candidate = draftCandidate(formUserId.value)
+  return {
+    id: `draft-${formUserId.value}`,
+    subject_type: 'user',
+    user_id: formUserId.value,
+    user_display_name: candidate?.label,
+    user_username: candidate?.description?.replace(/^@/, ''),
+    permissions,
+  }
+}
+
 async function handleCreate() {
   if (!canSubmit.value || isSaving.value) return
+  if (isDraft.value) {
+    draftGrants.value = [...draftGrants.value, buildDraftGrant()]
+    closeForm()
+    return
+  }
   isSaving.value = true
   try {
     await postBotsByBotIdUserAccess({
@@ -445,6 +504,12 @@ async function togglePerm(grant: BotsUserGrant, perm: Permission) {
     toast.error(t('bots.access.userAccess.atLeastOnePermission'))
     return
   }
+  if (isDraft.value) {
+    draftGrants.value = draftGrants.value.map(item =>
+      item.id === grant.id ? { ...item, permissions: next } : item,
+    )
+    return
+  }
   busyGrantIds.value.add(grant.id)
   try {
     await putBotsByBotIdUserAccessByGrantId({
@@ -464,6 +529,10 @@ async function togglePerm(grant: BotsUserGrant, perm: Permission) {
 
 async function handleDelete(grant: BotsUserGrant) {
   if (grant.is_owner || !grant.id) return
+  if (isDraft.value) {
+    draftGrants.value = draftGrants.value.filter(item => item.id !== grant.id)
+    return
+  }
   busyGrantIds.value.add(grant.id)
   try {
     await deleteBotsByBotIdUserAccessByGrantId({

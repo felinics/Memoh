@@ -13285,6 +13285,35 @@ paths:
       summary: Check bot name availability
       tags:
       - bots
+  /bots/user-access/candidates:
+    get:
+      description: List grantable workspace members before the bot exists, for the
+        create form
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Max results
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.BotUserCandidateListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Search workspace member candidates for a bot being created
+      tags:
+      - bots
   /channels:
     get:
       description: List channel meta information including capabilities and schemas

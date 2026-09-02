@@ -50,6 +50,13 @@ func (h *BotUserAccessHandler) Register(e *echo.Echo) {
 	group.PUT("/:grant_id", h.UpdateGrant)
 	group.DELETE("/:grant_id", h.DeleteGrant)
 	group.GET("/candidates", h.ListCandidates)
+
+	// Creation flow: the bot does not exist yet, so there is nothing to
+	// authorize a manage check against — any signed-in user may look up the
+	// members they want to grant access to on a bot they are about to create.
+	// Registered as a static path, which Echo prefers over the :bot_id route
+	// above, and the grants themselves are still created per-bot afterwards.
+	e.GET("/bots/user-access/candidates", h.ListNewBotCandidates)
 }
 
 // ListGrants godoc
@@ -178,6 +185,29 @@ func (h *BotUserAccessHandler) ListCandidates(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
 	}
+	return h.respondCandidates(c)
+}
+
+// ListNewBotCandidates godoc
+// @Summary Search workspace member candidates for a bot being created
+// @Description List grantable workspace members before the bot exists, for the create form
+// @Tags bots
+// @Param q query string false "Search query"
+// @Param limit query int false "Max results"
+// @Success 200 {object} BotUserCandidateListResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/user-access/candidates [get].
+func (h *BotUserAccessHandler) ListNewBotCandidates(c echo.Context) error {
+	if _, err := RequireChannelIdentityID(c); err != nil {
+		return err
+	}
+	return h.respondCandidates(c)
+}
+
+// respondCandidates is the shared body of both candidate lookups: the same
+// active-account search, differing only in what the caller had to prove first.
+func (h *BotUserAccessHandler) respondCandidates(c echo.Context) error {
 	accountsList, err := h.accountService.SearchAccounts(c.Request().Context(), strings.TrimSpace(c.QueryParam("q")), parseLimit(c.QueryParam("limit")))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

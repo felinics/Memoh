@@ -389,6 +389,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/user-access/candidates": {
+            "get": {
+                "description": "List grantable workspace members before the bot exists, for the create form",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Search workspace member candidates for a bot being created",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BotUserCandidateListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/acl/channel-identities": {
             "get": {
                 "description": "Search locally observed channel identities for building ACL rules",
