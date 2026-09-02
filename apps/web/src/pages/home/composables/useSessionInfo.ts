@@ -40,7 +40,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
       sessionId.value ?? '',
       options.overrideModelId?.value ?? '',
     ],
-    query: async () => {
+    query: async ({ signal }) => {
       const { data } = await getBotsByBotIdSessionsBySessionIdStatus({
         path: {
           bot_id: currentBotId.value!,
@@ -49,6 +49,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
         query: {
           model_id: options.overrideModelId?.value || undefined,
         },
+        signal,
         throwOnError: true,
       })
       return data as HandlersSessionInfoResponse

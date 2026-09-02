@@ -89,13 +89,6 @@
             </div>
           </div>
 
-          <p
-            v-if="row.detailPending"
-            class="text-caption text-muted-foreground"
-          >
-            {{ $t('chat.lifecycle.loadingDetail') }}
-          </p>
-
           <div
             v-for="section in row.sections"
             :key="section.key"
@@ -127,42 +120,33 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, shallowRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Empty, EmptyDescription } from '@felinic/ui'
 import { ChevronRight } from 'lucide-vue-next'
-import type { ContextfragLifecycleSnapshot, HandlersContextLifecycleTurn } from '@memohai/sdk'
+import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
 import { formatCalendarTime } from '@/utils/date-time'
 import { buildTurnRow, type TurnRow } from '../composables/context-lifecycle-view'
 import ContextUsageBreakdown from './context-usage-breakdown.vue'
 
 const props = withDefaults(defineProps<{
   turns: HandlersContextLifecycleTurn[]
-  details?: Record<string, ContextfragLifecycleSnapshot>
-  loadingRunId?: string | null
   hasOlder?: boolean
 }>(), {
-  details: () => ({}),
-  loadingRunId: null,
   hasOlder: false,
 })
-
-const emit = defineEmits<{ expand: [runId: string] }>()
 
 const { t, locale } = useI18n()
 
 const sectionLabelClass = 'text-caption font-medium uppercase tracking-wider text-muted-foreground'
 
 const rows = computed<TurnRow[]>(() => props.turns.map((turn, index) => {
-  const runId = turn.run_id ?? ''
   const older = props.turns[index + 1]?.snapshot
   return buildTurnRow(turn, {
     index,
     t,
     formatTime: iso => formatCalendarTime(iso, { locale: locale.value }),
-    detail: runId ? props.details[runId] : undefined,
     previous: older ?? (props.hasOlder ? undefined : null),
-    detailPending: runId !== '' && props.loadingRunId === runId && !props.details[runId],
   })
 }))
 
@@ -170,16 +154,11 @@ const openKeys = shallowRef<Set<string>>(new Set())
 
 watch(() => rows.value[0]?.key, (key) => {
   openKeys.value = key ? new Set([key]) : new Set()
-  const runId = rows.value[0]?.runId
-  if (runId) void nextTick(() => emit('expand', runId))
 }, { immediate: true })
 
 function toggle(row: TurnRow) {
   const next = new Set(openKeys.value)
-  if (!next.delete(row.key)) {
-    next.add(row.key)
-    if (row.runId) emit('expand', row.runId)
-  }
+  if (!next.delete(row.key)) next.add(row.key)
   openKeys.value = next
 }
 </script>

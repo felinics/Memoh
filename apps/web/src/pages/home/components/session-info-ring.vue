@@ -70,15 +70,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Popover, PopoverContent, PopoverTrigger } from '@felinic/ui'
 import SessionInfoPanel from './session-info-panel.vue'
-import ContextLifecycleDialog from './context-lifecycle-dialog.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass } from '../composables/context-categories'
 
 defineOptions({ inheritAttrs: false })
+
+const ContextLifecycleDialog = defineAsyncComponent(() => import('./context-lifecycle-dialog.vue'))
 
 const props = defineProps<{
   visible?: boolean

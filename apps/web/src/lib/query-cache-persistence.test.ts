@@ -181,7 +181,7 @@ describe('cancelPendingQueryCacheSave', () => {
 
 describe('context lifecycle queries stay off disk', () => {
   it('excludes the per-turn audit payloads, which grow with conversation length', () => {
-    for (const key of [['context-lifecycle', 'b', 's'], ['context-lifecycle-turn', 'b', 's', 'r']]) {
+    for (const key of [['context-lifecycle', 'b', 's', 50]]) {
       expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
     }
   })
@@ -193,17 +193,8 @@ describe('createQueryCachePersistencePlugin', () => {
     vi.useRealTimers()
   })
 
-  it('keeps saving after a storage write throws, so a quota error cannot wedge the debounce', async () => {
-    vi.useFakeTimers()
+  function pluginHarness(setItem: (key: string, value: string) => void) {
     const storage = memoryStorage()
-    let failNext = true
-    const setItem = vi.fn((key: string, value: string) => {
-      if (failNext) {
-        failNext = false
-        throw new DOMException('quota', 'QuotaExceededError')
-      }
-      ;(storage as unknown as { data: Map<string, string> }).data.set(key, value)
-    })
     ;(storage as unknown as { setItem: typeof setItem }).setItem = setItem
     let onAction: ((ctx: { name: string, after: (cb: () => void) => void }) => void) | undefined
     const queryCache = {
@@ -211,16 +202,44 @@ describe('createQueryCachePersistencePlugin', () => {
       $onAction: vi.fn((cb: typeof onAction) => { onAction = cb }),
     } as unknown as QueryCache
     createQueryCachePersistencePlugin({ storage })({ queryCache } as never)
-    await Promise.resolve()
-    const fire = () => onAction?.({ name: 'setEntryState', after: cb => cb() })
+    return { storage, fire: () => onAction?.({ name: 'setEntryState', after: cb => cb() }) }
+  }
 
-    fire()
+  it('recovers the debounce after a transient storage error', async () => {
+    vi.useFakeTimers()
+    let failNext = true
+    const setItem = vi.fn((key: string, value: string) => {
+      if (failNext) {
+        failNext = false
+        throw new DOMException('blocked', 'SecurityError')
+      }
+      ;(harness.storage as unknown as { data: Map<string, string> }).data.set(key, value)
+    })
+    const harness = pluginHarness(setItem)
+    await Promise.resolve()
+
+    harness.fire()
     vi.advanceTimersByTime(1000)
     expect(setItem).toHaveBeenCalledTimes(1)
 
-    fire()
+    harness.fire()
     vi.advanceTimersByTime(1000)
     expect(setItem).toHaveBeenCalledTimes(2)
-    expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toContain('models')
+    expect(harness.storage.getItem(QUERY_CACHE_STORAGE_KEY)).toContain('models')
+  })
+
+  it('stops writing for the rest of the page session once the quota is exceeded', async () => {
+    vi.useFakeTimers()
+    const setItem = vi.fn(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+    const harness = pluginHarness(setItem)
+    await Promise.resolve()
+
+    harness.fire()
+    vi.advanceTimersByTime(1000)
+    harness.fire()
+    vi.advanceTimersByTime(1000)
+    expect(setItem).toHaveBeenCalledTimes(1)
   })
 })

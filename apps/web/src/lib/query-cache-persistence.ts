@@ -44,10 +44,8 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   // Raw workspace file text (hooks.json env map may contain API keys); deepStripSecrets
   // only walks objects/arrays and cannot redact secrets inside an opaque string.
   'bot-hooks-config',
-  // Per-turn context audit: volatile, and the per-turn selection decisions grow
-  // with conversation length, so a long session alone can exceed the quota.
+  // Per-turn context audit: a debug surface with no reload value.
   'context-lifecycle',
-  'context-lifecycle-turn',
 ])
 
 /**
@@ -141,11 +139,18 @@ export function resetQueryCacheRestoreForTests() {
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let saveAgainAfterCurrent = false
+// A full origin will not drain within the page session, so one quota failure
+// stops the whole-cache serialization instead of retrying it every second.
+let quotaExceeded = false
+
+function isQuotaExceeded(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22)
+}
 let activeStorage: Storage | undefined
 let activeQueryCache: QueryCache | undefined
 
 function scheduleDebouncedSaveToDisk() {
-  if (!activeStorage || !activeQueryCache) return
+  if (!activeStorage || !activeQueryCache || quotaExceeded) return
   if (saveTimer) {
     saveAgainAfterCurrent = true
     return
@@ -154,7 +159,12 @@ function scheduleDebouncedSaveToDisk() {
     try {
       saveQueryCacheToDiskNow(activeQueryCache!, activeStorage)
     } catch (error) {
-      console.warn('[query-cache] save to disk failed', error)
+      if (isQuotaExceeded(error)) {
+        quotaExceeded = true
+        console.warn('[query-cache] storage quota exceeded; persistence paused for this page session')
+      } else {
+        console.warn('[query-cache] save to disk failed', error)
+      }
     } finally {
       saveTimer = undefined
     }
@@ -172,6 +182,7 @@ export function cancelPendingQueryCacheSave() {
     saveTimer = undefined
   }
   saveAgainAfterCurrent = false
+  quotaExceeded = false
 }
 
 /**

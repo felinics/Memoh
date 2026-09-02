@@ -1148,7 +1148,6 @@
       "empty": "本会话暂无生命周期数据",
       "loadFailed": "生命周期数据加载失败",
       "trimmedCount": "裁剪 {n}",
-      "loadingDetail": "正在加载选择明细…",
       "diffInitial": "首轮",
       "diffTools": "工具变化",
       "diffSystem": "系统提示变化",

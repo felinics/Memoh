@@ -1,6 +1,6 @@
 import type {
   ContextfragLifecycleSnapshot,
-  ContextfragSelectionDecision,
+  ContextfragSelectionTrace,
   ContextfragToolDefAccounting,
   HandlersContextLifecycleTurn,
 } from '@memohai/sdk'
@@ -10,27 +10,20 @@ export function compositionFromSnapshot(snapshot: ContextfragLifecycleSnapshot |
   return computeContextComposition({ breakdown: snapshot?.breakdown, tool_defs: snapshot?.tool_defs })
 }
 
-export interface DropReasonGroup {
+export interface DropReasonRow {
   reason: string
   count: number
-  tokens: number
+  tokens: number | null
 }
 
-export function groupDroppedDecisions(decisions: ContextfragSelectionDecision[] | null | undefined): DropReasonGroup[] {
-  const groups = new Map<string, DropReasonGroup>()
-  for (const entry of decisions ?? []) {
-    if (entry.decision !== 'dropped') continue
-    const reason = entry.reason?.trim() || 'unknown'
-    const group = groups.get(reason) ?? { reason, count: 0, tokens: 0 }
-    group.count += 1
-    group.tokens += entry.token_estimate ?? 0
-    groups.set(reason, group)
-  }
-  return [...groups.values()].sort((a, b) => b.tokens - a.tokens || b.count - a.count || a.reason.localeCompare(b.reason))
-}
-
-export function countTrimmed(decisions: ContextfragSelectionDecision[] | null | undefined): number {
-  return (decisions ?? []).filter(entry => entry.decision === 'trimmed').length
+// Drop reasons come from the bounded trace rolled up when the turn was
+// persisted; the per-fragment audit is never read here. Snapshots older than
+// the token rollup only carry counts.
+export function dropReasonRows(selection: ContextfragSelectionTrace | null | undefined): DropReasonRow[] {
+  const tokens = selection?.drop_reason_tokens
+  return Object.entries(selection?.drop_reasons ?? {})
+    .map(([reason, count]) => ({ reason, count, tokens: tokens?.[reason] ?? null }))
+    .sort((a, b) => (b.tokens ?? 0) - (a.tokens ?? 0) || b.count - a.count || a.reason.localeCompare(b.reason))
 }
 
 // Every class is a literal so the Tailwind scanner can see it.
@@ -112,7 +105,6 @@ export interface TurnRow {
   selection: string
   metrics: LabeledValue[]
   sections: TurnSection[]
-  detailPending: boolean
 }
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
@@ -121,9 +113,7 @@ export interface BuildTurnRowOptions {
   t: Translate
   formatTime: (iso: string | undefined) => string
   index?: number
-  detail?: ContextfragLifecycleSnapshot
   previous?: ContextfragLifecycleSnapshot | null
-  detailPending?: boolean
 }
 
 function positive(value: number | undefined): number | null {
@@ -154,9 +144,8 @@ function stepRows(snapshot: ContextfragLifecycleSnapshot, t: Translate): Labeled
 }
 
 export function buildTurnRow(turn: HandlersContextLifecycleTurn, options: BuildTurnRowOptions): TurnRow {
-  const { t, detail, index = 0 } = options
+  const { t, index = 0 } = options
   const snapshot = turn.snapshot ?? {}
-  const decisions = detail?.selection_decisions
   const composition = compositionFromSnapshot(snapshot)
   const statusKey = lifecycleStatusLabelKey(turn.status)
   const diff = classifyPromptDiff(snapshot, options.previous)
@@ -165,7 +154,7 @@ export function buildTurnRow(turn: HandlersContextLifecycleTurn, options: BuildT
     ? [
         t('chat.lifecycle.selectedCount', { n: snapshot.selection.selected ?? 0 }),
         t('chat.lifecycle.droppedCount', { n: snapshot.selection.dropped ?? 0 }),
-        ...(countTrimmed(decisions) > 0 ? [t('chat.lifecycle.trimmedCount', { n: countTrimmed(decisions) })] : []),
+        ...((snapshot.selection.trimmed ?? 0) > 0 ? [t('chat.lifecycle.trimmedCount', { n: snapshot.selection.trimmed })] : []),
       ].join(' · ')
     : ''
 
@@ -194,10 +183,10 @@ export function buildTurnRow(turn: HandlersContextLifecycleTurn, options: BuildT
       return tokens == null ? [] : [{ key, label: t(labelKey), value: formatTokenCount(tokens) }]
     }),
     sections: [
-      ...section('dropReasons', 'drop-reason', 'chat.lifecycle.dropReasons', groupDroppedDecisions(decisions).map(group => ({
-        key: group.reason,
-        label: group.reason === 'unknown' ? t('chat.lifecycle.unknown') : group.reason,
-        value: `${group.count} · ${formatTokenCount(group.tokens)}`,
+      ...section('dropReasons', 'drop-reason', 'chat.lifecycle.dropReasons', dropReasonRows(snapshot.selection).map(row => ({
+        key: row.reason,
+        label: row.reason === 'unknown' ? t('chat.lifecycle.unknown') : row.reason,
+        value: row.tokens == null ? String(row.count) : `${row.count} · ${formatTokenCount(row.tokens)}`,
       }))),
       ...section('trust', 'trust', 'chat.lifecycle.trust', (snapshot.trust_breakdown ?? []).map((entry, i) => {
         const trust = entry.trust ?? ''
@@ -214,6 +203,5 @@ export function buildTurnRow(turn: HandlersContextLifecycleTurn, options: BuildT
       })),
       ...section('steps', 'step', 'chat.lifecycle.steps', stepRows(snapshot, t)),
     ],
-    detailPending: options.detailPending === true,
   }
 }

@@ -5,7 +5,7 @@ import { computed, createApp, defineComponent, h, inject, nextTick, provide } fr
 import type { ComputedRef } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ContextfragLifecycleSnapshot, HandlersContextLifecycleTurn } from '@memohai/sdk'
+import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
 import ContextLifecycleTurns from './context-lifecycle-turns.vue'
 
 // reka-ui resolves its own Vue copy under vitest, so its primitives cannot be
@@ -56,18 +56,13 @@ afterEach(() => {
 })
 
 interface MountOptions {
-  details?: Record<string, ContextfragLifecycleSnapshot>
-  loadingRunId?: string | null
   hasOlder?: boolean
 }
-
-const expanded: string[] = []
 
 async function mountTurns(turns: HandlersContextLifecycleTurn[], options: MountOptions = {}): Promise<HTMLDivElement> {
   const root = document.createElement('div')
   document.body.append(root)
-  expanded.splice(0)
-  const app = createApp(ContextLifecycleTurns, { turns, ...options, onExpand: (runId: string) => expanded.push(runId) })
+  const app = createApp(ContextLifecycleTurns, { turns, ...options })
   app.use(createI18n({
     legacy: false,
     locale: 'en',
@@ -98,7 +93,6 @@ async function mountTurns(turns: HandlersContextLifecycleTurn[], options: MountO
             droppedCount: '{n} dropped',
             trimmedCount: '{n} trimmed',
             truncatedCount: '{n} truncated',
-            loadingDetail: 'Loading selection details…',
             diffInitial: 'First turn',
             diffTools: 'Tools changed',
             diffSystem: 'System changed',
@@ -144,7 +138,7 @@ const richTurn: HandlersContextLifecycleTurn = {
     ],
     budget_plan: { window: 10_000, output_reserve: 2000 },
     counts: { token_estimate: 4200 },
-    selection: { selected: 12, dropped: 3 },
+    selection: { selected: 12, dropped: 3, trimmed: 1, drop_reasons: { budget: 2, stale: 1 }, drop_reason_tokens: { budget: 2000, stale: 100 } },
     stable_prefix_hash: 'prefix-b',
     tool_defs: [{ provider: 'native', name: 'read', bytes: 900 }],
     trust_breakdown: [
@@ -160,15 +154,6 @@ const richTurn: HandlersContextLifecycleTurn = {
     cache_read_tokens: 800,
     cache_write_tokens: 0,
   },
-}
-
-const richDetail: ContextfragLifecycleSnapshot = {
-  selection_decisions: [
-    { decision: 'dropped', reason: 'budget', token_estimate: 1500 },
-    { decision: 'dropped', reason: 'budget', token_estimate: 500 },
-    { decision: 'trimmed', reason: 'stale', token_estimate: 100 },
-    { decision: 'selected', reason: 'kept', token_estimate: 900 },
-  ],
 }
 
 const bareTurn: HandlersContextLifecycleTurn = {
@@ -232,37 +217,23 @@ describe('context-lifecycle-turns', () => {
     expect(root.textContent).not.toContain('Composition')
   })
 
-  it('summarises selection counts from the list row before any detail arrives', async () => {
+  it('summarises selection counts and lists drop reasons straight from the bounded trace', async () => {
     const root = await mountTurns([richTurn])
 
     expect(root.textContent).toContain('12 selected')
     expect(root.textContent).toContain('3 dropped')
-    expect(root.textContent).not.toContain('trimmed')
-    expect(root.querySelectorAll('[data-testid="drop-reason-label"]')).toHaveLength(0)
-  })
-
-  it('groups dropped decisions by reason from the lazily loaded detail and counts trimmed separately', async () => {
-    const root = await mountTurns([richTurn], { details: { 'run-a': richDetail } })
-
     expect(root.textContent).toContain('1 trimmed')
-    expect(texts(root, '[data-testid="drop-reason-label"]')).toEqual(['budget'])
-    expect(texts(root, '[data-testid="drop-reason-value"]')).toEqual(['2 · 2.0K'])
+    expect(texts(root, '[data-testid="drop-reason-label"]')).toEqual(['budget', 'stale'])
+    expect(texts(root, '[data-testid="drop-reason-value"]')).toEqual(['2 · 2.0K', '1 · 100'])
   })
 
-  it('shows a loading hint for the drop reasons while the expanded detail is pending', async () => {
-    const root = await mountTurns([richTurn], { loadingRunId: 'run-a' })
+  it('never reads per-fragment decisions even when a snapshot still carries them', async () => {
+    const root = await mountTurns([{
+      ...richTurn,
+      snapshot: { ...richTurn.snapshot, selection_decisions: [{ decision: 'dropped', reason: 'from-decisions', token_estimate: 1 }] },
+    }])
 
-    expect(root.textContent).toContain('Loading selection details…')
-  })
-
-  it('emits expand for the auto-expanded first turn and again for a user toggle', async () => {
-    const root = await mountTurns([richTurn, bareTurn])
-    await nextTick()
-
-    expect(expanded).toEqual(['run-a'])
-    root.querySelectorAll<HTMLButtonElement>('[data-testid="turn-row"]')[1]?.click()
-    await nextTick()
-    expect(expanded).toEqual(['run-a', 'run-b'])
+    expect(texts(root, '[data-testid="drop-reason-label"]')).toEqual(['budget', 'stale'])
   })
 
   it('tags each turn with its prompt diff against the older turn on the page', async () => {

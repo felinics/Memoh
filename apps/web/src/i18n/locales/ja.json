@@ -1126,7 +1126,6 @@
       "empty": "このセッションのライフサイクルデータはまだありません",
       "loadFailed": "ライフサイクルデータの読み込みに失敗しました",
       "trimmedCount": "トリム {n}",
-      "loadingDetail": "選択の詳細を読み込み中…",
       "diffInitial": "最初のターン",
       "diffTools": "ツール変更",
       "diffSystem": "システム変更",

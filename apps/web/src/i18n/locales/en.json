@@ -1148,7 +1148,6 @@
       "empty": "No lifecycle data for this session yet",
       "loadFailed": "Failed to load lifecycle data",
       "trimmedCount": "{n} trimmed",
-      "loadingDetail": "Loading selection details…",
       "diffInitial": "First turn",
       "diffTools": "Tools changed",
       "diffSystem": "System changed",

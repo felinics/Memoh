@@ -35,7 +35,9 @@ describe('installTurnEndInvalidation', () => {
     expect(predicate(entry(['session-status', 'b', 's1', '']))).toBe(true)
     expect(predicate(entry(['session-status', 'b', 's1', 'model-x']))).toBe(true)
     expect(predicate(entry(['session-status', 'b', 's2', '']))).toBe(false)
-    expect(predicate(entry(['context-lifecycle', 'b', 's1']))).toBe(false)
+    expect(predicate(entry(['context-lifecycle', 'b', 's1', 50]))).toBe(true)
+    expect(predicate(entry(['context-lifecycle', 'b', 's2', 50]))).toBe(false)
+    expect(predicate(entry(['bot', 's1']))).toBe(false)
   })
 
   it('treats a switch straight to another streaming session as the first one finishing', async () => {
