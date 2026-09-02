@@ -215,6 +215,23 @@ type BotChannelRoute struct {
 	TeamID                 pgtype.UUID        `json:"team_id"`
 }
 
+type BotDependencyInstallation struct {
+	ID                pgtype.UUID        `json:"id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID string             `json:"workspace_target_id"`
+	DependencyID      string             `json:"dependency_id"`
+	Source            string             `json:"source"`
+	Status            string             `json:"status"`
+	InstalledVersion  string             `json:"installed_version"`
+	LatestVersion     string             `json:"latest_version"`
+	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
+	LastError         string             `json:"last_error"`
+	ManifestDigest    string             `json:"manifest_digest"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotEmailBinding struct {
 	ID              pgtype.UUID        `json:"id"`
 	BotID           pgtype.UUID        `json:"bot_id"`
