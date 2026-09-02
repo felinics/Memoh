@@ -81,12 +81,12 @@ func TestResolveReasoningConfigSessionLevel(t *testing.T) {
 	const clientType = "openai-completions"
 
 	tests := []struct {
-		name      string
-		model     models.GetResponse
-		stored    string
-		session   string
-		requested string
-		wantEffort string
+		name         string
+		model        models.GetResponse
+		stored       string
+		session      string
+		requested    string
+		wantEffort   string
 		wantDisabled bool
 	}{
 		{name: "session beats stored", model: toggleModel, stored: "low", session: "high", requested: "", wantEffort: "high"},

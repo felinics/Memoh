@@ -58,9 +58,9 @@ type ChatRequest struct {
 	SessionType               string                `json:"-"`
 	RuntimeType               string                `json:"-"`
 	SkipMemoryExtraction      bool                  `json:"-"`
-	SkipHistoryTurn        bool `json:"-"`
-	SkipTitleGeneration    bool `json:"-"`
-	ForceFreshRuntime      bool `json:"-"`
+	SkipHistoryTurn           bool                  `json:"-"`
+	SkipTitleGeneration       bool                  `json:"-"`
+	ForceFreshRuntime         bool                  `json:"-"`
 	// AgentCommand is the exact agent-command selector the Web admission layer
 	// matched against a live ACP runtime. The session pool re-validates it
 	// against the final session at prompt time; it never crosses the turn

@@ -402,7 +402,7 @@ type modelSelectionFakeQueries struct {
 // the "no memory" default every derived fake wants (issue #879). Kept out of
 // the embedded store so a preference read can never panic on the nil
 // interface.
-func (f *modelSelectionFakeQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+func (*modelSelectionFakeQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
 	return sqlc.BotSession{ID: id}, nil
 }
 
