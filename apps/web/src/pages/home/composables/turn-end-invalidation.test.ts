@@ -1,5 +1,5 @@
 import { nextTick, ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { QueryCache } from '@pinia/colada'
 import { installTurnEndInvalidation } from './turn-end-invalidation'
 
@@ -17,48 +17,71 @@ function predicateOf(cache: FakeCache, call = 0): (entry: { key: unknown[] }) =>
 
 const entry = (key: unknown[]) => ({ key })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('installTurnEndInvalidation', () => {
-  it('invalidates the finished session status once per turn end, however many callers installed it', async () => {
-    const streaming = ref<string | null>(null)
+  it('invalidates the finished session once per turn end, however many callers installed it', async () => {
+    vi.useFakeTimers()
+    const streaming = ref<string[]>([])
     const cache = fakeCache()
     installTurnEndInvalidation(streaming, cache)
     installTurnEndInvalidation(streaming, cache)
 
-    streaming.value = 's1'
+    streaming.value = ['s1']
     await nextTick()
     expect(cache.invalidateQueries).not.toHaveBeenCalled()
 
-    streaming.value = null
+    streaming.value = []
     await nextTick()
     expect(cache.invalidateQueries).toHaveBeenCalledTimes(1)
     const predicate = predicateOf(cache)
     expect(predicate(entry(['session-status', 'b', 's1', '']))).toBe(true)
     expect(predicate(entry(['session-status', 'b', 's1', 'model-x']))).toBe(true)
-    expect(predicate(entry(['session-status', 'b', 's2', '']))).toBe(false)
     expect(predicate(entry(['context-lifecycle', 'b', 's1', 50]))).toBe(true)
+    expect(predicate(entry(['session-status', 'b', 's2', '']))).toBe(false)
     expect(predicate(entry(['context-lifecycle', 'b', 's2', 50]))).toBe(false)
     expect(predicate(entry(['bot', 's1']))).toBe(false)
   })
 
-  it('treats a switch straight to another streaming session as the first one finishing', async () => {
-    const streaming = ref<string | null>('s1')
+  it('refetches once more shortly after, when the lifecycle row has had time to land', async () => {
+    vi.useFakeTimers()
+    const streaming = ref<string[]>(['s1'])
     const cache = fakeCache()
     installTurnEndInvalidation(streaming, cache)
 
-    streaming.value = 's2'
+    streaming.value = []
     await nextTick()
     expect(cache.invalidateQueries).toHaveBeenCalledTimes(1)
-    expect(predicateOf(cache)(entry(['session-status', 'b', 's1', '']))).toBe(true)
+    vi.advanceTimersByTime(1500)
+    expect(cache.invalidateQueries).toHaveBeenCalledTimes(2)
+    expect(predicateOf(cache, 1)(entry(['session-status', 'b', 's1', '']))).toBe(true)
+  })
+
+  it('only invalidates the session that finished when another pane keeps streaming', async () => {
+    vi.useFakeTimers()
+    const streaming = ref<string[]>(['s1', 's2'])
+    const cache = fakeCache()
+    installTurnEndInvalidation(streaming, cache)
+
+    streaming.value = ['s2']
+    await nextTick()
+    expect(cache.invalidateQueries).toHaveBeenCalledTimes(1)
+    const predicate = predicateOf(cache)
+    expect(predicate(entry(['session-status', 'b', 's1', '']))).toBe(true)
+    expect(predicate(entry(['session-status', 'b', 's2', '']))).toBe(false)
   })
 
   it('installs independently per query cache', async () => {
-    const streaming = ref<string | null>('s1')
+    vi.useFakeTimers()
+    const streaming = ref<string[]>(['s1'])
     const a = fakeCache()
     const b = fakeCache()
     installTurnEndInvalidation(streaming, a)
     installTurnEndInvalidation(streaming, b)
 
-    streaming.value = null
+    streaming.value = []
     await nextTick()
     expect(a.invalidateQueries).toHaveBeenCalledTimes(1)
     expect(b.invalidateQueries).toHaveBeenCalledTimes(1)

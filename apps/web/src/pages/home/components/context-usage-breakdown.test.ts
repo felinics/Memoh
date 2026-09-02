@@ -192,10 +192,10 @@ describe('context-usage-breakdown', () => {
     expect(root.lastElementChild?.textContent?.trim()).toBe('Auto-compact threshold ~8.0K')
   })
 
-  it('clamps the auto-compact mark to the end of the track', () => {
+  it('clamps the auto-compact mark to the last visible pixel of the track', () => {
     const root = mountBreakdown({ composition, contextWindow: 10_000, autoCompactTokens: 20_000 })
 
-    expect(root.querySelector<HTMLElement>('.w-px')?.style.left).toBe('100%')
+    expect(root.querySelector<HTMLElement>('.w-px')?.style.left).toBe('calc(100% - 1px)')
   })
 
   it('drops the reserve band, reserve row and auto-compact mark when no context window is known', () => {

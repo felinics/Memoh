@@ -31,7 +31,7 @@
       </div>
       <Empty
         v-else-if="isError"
-        class="min-h-40 border-0 p-6"
+        class="min-h-40"
       >
         <EmptyDescription>{{ $t('chat.lifecycle.loadFailed') }}</EmptyDescription>
       </Empty>
@@ -47,7 +47,7 @@
           :has-older="data?.has_more === true || data?.legacy_history_may_exist === true"
         />
         <div
-          v-if="data?.has_more"
+          v-if="data?.has_more || data?.legacy_history_may_exist"
           class="flex items-center justify-between gap-2 text-caption text-muted-foreground"
         >
           <span>{{ $t('chat.lifecycle.moreTurns') }}</span>
@@ -57,7 +57,7 @@
             size="sm"
             @click="loadOlder"
           >
-            {{ $t('chat.lifecycle.loadOlder') }}
+            {{ $t('chat.lifecycle.loadOlder', { n: maxLimit }) }}
           </Button>
         </div>
       </template>
@@ -74,9 +74,11 @@ import { formatTokenCount } from '../composables/context-categories'
 import ContextLifecycleTurns from './context-lifecycle-turns.vue'
 
 const { t } = useI18n()
-const { data, status, canLoadOlder, loadOlder } = useContextLifecycle()
+const { data, status, hasTarget, canLoadOlder, loadOlder, maxLimit } = useContextLifecycle()
 
-const isLoading = computed(() => status.value === 'pending')
+// A pane without a session never fetches; showing its empty state beats a
+// skeleton that would spin forever.
+const isLoading = computed(() => hasTarget.value && status.value === 'pending')
 const isError = computed(() => status.value === 'error')
 const turns = computed(() => data.value?.turns ?? [])
 

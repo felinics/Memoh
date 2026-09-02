@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* eslint-disable vue/one-component-per-file */
 
-import { computed, createApp, defineComponent, h, inject, nextTick, provide } from 'vue'
+import { computed, createApp, defineComponent, h, inject, nextTick, provide, ref } from 'vue'
 import type { ComputedRef } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -234,6 +234,26 @@ describe('context-lifecycle-turns', () => {
     }])
 
     expect(texts(root, '[data-testid="drop-reason-label"]')).toEqual(['budget', 'stale'])
+  })
+
+  it('keeps rows the reader expanded when a finished turn prepends a newer row', async () => {
+    const turns = ref<HandlersContextLifecycleTurn[]>([richTurn, bareTurn])
+    const root = document.createElement('div')
+    document.body.append(root)
+    const app = createApp(defineComponent({
+      setup: () => () => h(ContextLifecycleTurns, { turns: turns.value }),
+    }))
+    app.use(createI18n({ legacy: false, locale: 'en', messages: { en: { chat: { contextBreakdown: {}, lifecycle: { statusCompleted: 'Completed', selectedCount: '{n} selected', droppedCount: '{n} dropped' } } } } }))
+    app.mount(root)
+    mounted.push({ app, root })
+    await nextTick()
+    root.querySelectorAll<HTMLButtonElement>('[data-testid="turn-row"]')[1]?.click()
+    await nextTick()
+    expect(root.querySelectorAll('[data-testid="turn-detail"]')).toHaveLength(2)
+
+    turns.value = [{ ...bareTurn, run_id: 'run-c', created_at: '2026-09-01T10:00:00.000Z', status: 'completed' }, richTurn, bareTurn]
+    await nextTick()
+    expect(root.querySelectorAll('[data-testid="turn-detail"]')).toHaveLength(3)
   })
 
   it('tags each turn with its prompt diff against the older turn on the page', async () => {

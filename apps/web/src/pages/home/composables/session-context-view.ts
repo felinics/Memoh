@@ -1,5 +1,5 @@
 import type { HandlersContextUsage } from '@memohai/sdk'
-import { computeContextComposition, type ContextComposition } from './context-categories'
+import { computeContextComposition, positive, type ContextComposition } from './context-categories'
 
 export interface SessionContextView {
   composition: ContextComposition | null
@@ -12,10 +12,6 @@ export interface SessionContextView {
 
 export interface SessionContextViewOptions {
   fallbackWindow: number | null | undefined
-}
-
-function positive(value: number | null | undefined): number | null {
-  return value != null && value > 0 ? value : null
 }
 
 // The fragment estimate is the basis the backend budgets and compacts on, and

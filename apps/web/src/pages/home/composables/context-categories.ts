@@ -94,3 +94,7 @@ export function formatTokenCount(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
 }
+
+export function positive(value: number | null | undefined): number | null {
+  return value != null && value > 0 ? value : null
+}

@@ -4,7 +4,7 @@ import type {
   ContextfragToolDefAccounting,
   HandlersContextLifecycleTurn,
 } from '@memohai/sdk'
-import { computeContextComposition, formatTokenCount, type ContextComposition } from './context-categories'
+import { computeContextComposition, formatTokenCount, positive, type ContextComposition } from './context-categories'
 
 export function compositionFromSnapshot(snapshot: ContextfragLifecycleSnapshot | null | undefined): ContextComposition | null {
   return computeContextComposition({ breakdown: snapshot?.breakdown, tool_defs: snapshot?.tool_defs })
@@ -43,7 +43,7 @@ export function lifecycleStatusLabelKey(status: string | null | undefined): stri
   return STATUS_VIEW[status ?? '']?.labelKey ?? null
 }
 
-export type PromptDiff = 'initial' | 'tools' | 'system' | 'history'
+export type PromptDiff = 'initial' | 'tools' | 'system' | 'system_tools' | 'history'
 
 function toolRoster(defs: ContextfragToolDefAccounting[] | undefined): string {
   return (defs ?? []).map(def => `${def.provider ?? ''}/${def.name ?? ''}:${def.bytes ?? 0}`).sort().join('|')
@@ -57,15 +57,18 @@ export function classifyPromptDiff(
 ): PromptDiff | null {
   if (previous === null) return 'initial'
   if (previous === undefined) return null
-  if (toolRoster(current.tool_defs) !== toolRoster(previous.tool_defs)) return 'tools'
-  if (!current.stable_prefix_hash || !previous.stable_prefix_hash) return null
-  return current.stable_prefix_hash === previous.stable_prefix_hash ? 'history' : 'system'
+  const toolsChanged = toolRoster(current.tool_defs) !== toolRoster(previous.tool_defs)
+  if (!current.stable_prefix_hash || !previous.stable_prefix_hash) return toolsChanged ? 'tools' : null
+  const systemChanged = current.stable_prefix_hash !== previous.stable_prefix_hash
+  if (toolsChanged) return systemChanged ? 'system_tools' : 'tools'
+  return systemChanged ? 'system' : 'history'
 }
 
 const DIFF_LABEL_KEY: Record<PromptDiff, string> = {
   initial: 'chat.lifecycle.diffInitial',
   tools: 'chat.lifecycle.diffTools',
   system: 'chat.lifecycle.diffSystem',
+  system_tools: 'chat.lifecycle.diffSystemTools',
   history: 'chat.lifecycle.diffHistory',
 }
 
@@ -114,10 +117,6 @@ export interface BuildTurnRowOptions {
   formatTime: (iso: string | undefined) => string
   index?: number
   previous?: ContextfragLifecycleSnapshot | null
-}
-
-function positive(value: number | undefined): number | null {
-  return value != null && value > 0 ? value : null
 }
 
 function section(key: string, testId: string, titleKey: string, rows: LabeledValue[]): TurnSection[] {

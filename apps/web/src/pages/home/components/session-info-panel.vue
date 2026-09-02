@@ -94,7 +94,7 @@
           variant="secondary"
           size="sm"
           class="mt-3 w-full"
-          :disabled="!sessionId || usedTokens <= 0"
+          :disabled="!sessionId || contextTokens <= 0"
           :loading="isCompacting"
           loading-mode="icon"
           @click="triggerCompact"
@@ -171,7 +171,7 @@ const visibleRef = toRef(props, 'visible')
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 
-const { info, usedTokens, composition, contextWindow, outputReserve, autoCompactTokens, compactionAvailable, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
+const { info, usedTokens, composition, contextWindow, outputReserve, autoCompactTokens, compactionAvailable, contextTokens, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
   visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,

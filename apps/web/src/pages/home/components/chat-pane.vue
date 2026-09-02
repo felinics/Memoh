@@ -1709,7 +1709,7 @@ const slashPanelHasResults = computed(() =>
 // this adds no extra fetch.
 const sessionFallbackContextWindow = computed(() => activeModel.value?.config?.context_window ?? null)
 const {
-  usedTokens: sessionUsedTokens,
+  contextTokens: sessionContextTokens,
   compactionAvailable: sessionCompactionAvailable,
   contextWindow: sessionContextWindow,
   contextPercent: sessionContextPercent,
@@ -1724,7 +1724,7 @@ const {
 })
 const sessionContextPercentKnown = computed(() => sessionContextWindow.value != null && sessionContextWindow.value > 0)
 const canCompactViaSlash = computed(() =>
-  !!activeSessionId.value && sessionCompactionAvailable.value && sessionUsedTokens.value > 0 && !isCompactingSession.value,
+  !!activeSessionId.value && sessionCompactionAvailable.value && sessionContextTokens.value > 0 && !isCompactingSession.value,
 )
 
 // Client-side quick actions run an existing UI affordance directly instead of

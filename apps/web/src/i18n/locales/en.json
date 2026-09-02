@@ -1151,10 +1151,11 @@
       "diffInitial": "First turn",
       "diffTools": "Tools changed",
       "diffSystem": "System changed",
+      "diffSystemTools": "System and tools changed",
       "diffHistory": "History only",
-      "aggScope": "this page",
+      "aggScope": "on this page",
       "moreTurns": "Older turns exist beyond this page",
-      "loadOlder": "Load up to 200 turns",
+      "loadOlder": "Load up to {n} turns",
       "legacySource": "Recovered from legacy message metadata"
     },
     "infoCacheHitRate": "Cache Hit Rate",
@@ -1259,6 +1260,7 @@
     "openPreviewToSide": "Open preview to the side",
     "previewTab": "Preview: {name}",
     "sessionInfoRingAria": "Session info",
+    "sessionInfoRingAriaUsage": "Session info, context {percent}% used",
     "sessionInfoTooltipHint": "Hover to see session info",
     "sessionActions": "Session actions",
     "bottomPanel": {

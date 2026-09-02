@@ -158,6 +158,19 @@ describe('saveQueryCacheToDiskNow', () => {
     expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toBeNull()
   })
 
+  it('swallows a failing write and pauses after the quota is exceeded', () => {
+    const storage = memoryStorage()
+    const setItem = vi.fn(() => {
+      throw new DOMException('quota', 'QuotaExceededError')
+    })
+    ;(storage as unknown as { setItem: typeof setItem }).setItem = setItem
+
+    expect(() => saveQueryCacheToDiskNow(cacheWith([entryWith(['models'])]), storage)).not.toThrow()
+    saveQueryCacheToDiskNow(cacheWith([entryWith(['models'])]), storage)
+    expect(setItem).toHaveBeenCalledTimes(1)
+    cancelPendingQueryCacheSave()
+  })
+
   it('removes the storage key when nothing qualifies', () => {
     const storage = memoryStorage({ [QUERY_CACHE_STORAGE_KEY]: '{}' })
     saveQueryCacheToDiskNow(cacheWith([entryWith(['remote-runtimes'])]), storage)

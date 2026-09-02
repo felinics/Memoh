@@ -1,7 +1,7 @@
 <template>
   <Empty
     v-if="rows.length === 0"
-    class="min-h-40 border-0 p-6"
+    class="min-h-40"
   >
     <EmptyDescription>{{ $t('chat.lifecycle.empty') }}</EmptyDescription>
   </Empty>
@@ -152,8 +152,12 @@ const rows = computed<TurnRow[]>(() => props.turns.map((turn, index) => {
 
 const openKeys = shallowRef<Set<string>>(new Set())
 
-watch(() => rows.value[0]?.key, (key) => {
-  openKeys.value = key ? new Set([key]) : new Set()
+// The newest turn opens by default; rows the reader expanded stay open when a
+// finished turn prepends a new row or older turns append.
+watch(() => rows.value.map(row => row.key), (keys, previous) => {
+  const next = new Set([...openKeys.value].filter(key => keys.includes(key)))
+  if (keys[0] && keys[0] !== previous?.[0]) next.add(keys[0])
+  openKeys.value = next
 }, { immediate: true })
 
 function toggle(row: TurnRow) {

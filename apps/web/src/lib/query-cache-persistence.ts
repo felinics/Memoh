@@ -29,6 +29,15 @@ export const QUERY_CACHE_STORAGE_KEY = 'memoh:query-cache'
 
 const SAVE_TO_DISK_DEBOUNCE_MS = 1000
 
+// A full origin will not drain within the page session, so one quota failure
+// stops the whole-cache serialization instead of retrying it on every change.
+let quotaExceeded = false
+
+function isQuotaExceeded(error: unknown): boolean {
+  return error instanceof DOMException
+    && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED' || error.code === 22 || error.code === 1014)
+}
+
 /**
  * Keys that never touch disk: either the whole payload is a credential
  * (remote-runtimes) or the data is volatile session state, not display data.
@@ -99,18 +108,32 @@ function serializePersistableEntries(queryCache: QueryCache): Record<string, unk
   )
 }
 
-/** Write the in-memory cache (secrets stripped) to localStorage immediately, skipping debounce. */
+/**
+ * Write the in-memory cache (secrets stripped) to localStorage immediately,
+ * skipping debounce. Persistence is best effort: a failed write keeps the old
+ * on-disk copy, and a full origin pauses writing for the rest of the page
+ * session instead of retrying on every change.
+ */
 export function saveQueryCacheToDiskNow(
   queryCache: QueryCache,
   storage: Storage | undefined = typeof localStorage !== 'undefined' ? localStorage : undefined,
 ) {
-  if (!storage) return
-  const serialized = serializePersistableEntries(queryCache)
-  if (Object.keys(serialized).length === 0) {
-    storage.removeItem(QUERY_CACHE_STORAGE_KEY)
-    return
+  if (!storage || quotaExceeded) return
+  try {
+    const serialized = serializePersistableEntries(queryCache)
+    if (Object.keys(serialized).length === 0) {
+      storage.removeItem(QUERY_CACHE_STORAGE_KEY)
+      return
+    }
+    storage.setItem(QUERY_CACHE_STORAGE_KEY, JSON.stringify(serialized))
+  } catch (error) {
+    if (isQuotaExceeded(error)) {
+      quotaExceeded = true
+      console.warn('[query-cache] storage quota exceeded; persistence paused for this page session')
+    } else {
+      console.warn('[query-cache] save to disk failed', error)
+    }
   }
-  storage.setItem(QUERY_CACHE_STORAGE_KEY, JSON.stringify(serialized))
 }
 
 /** Remove the on-disk copy; in-memory query cache is untouched. */
@@ -139,14 +162,6 @@ export function resetQueryCacheRestoreForTests() {
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let saveAgainAfterCurrent = false
-// A full origin will not drain within the page session, so one quota failure
-// stops the whole-cache serialization instead of retrying it every second.
-let quotaExceeded = false
-
-function isQuotaExceeded(error: unknown): boolean {
-  return error instanceof DOMException
-    && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED' || error.code === 22 || error.code === 1014)
-}
 let activeStorage: Storage | undefined
 let activeQueryCache: QueryCache | undefined
 
@@ -159,13 +174,6 @@ function scheduleDebouncedSaveToDisk() {
   saveTimer = setTimeout(() => {
     try {
       saveQueryCacheToDiskNow(activeQueryCache!, activeStorage)
-    } catch (error) {
-      if (isQuotaExceeded(error)) {
-        quotaExceeded = true
-        console.warn('[query-cache] storage quota exceeded; persistence paused for this page session')
-      } else {
-        console.warn('[query-cache] save to disk failed', error)
-      }
     } finally {
       saveTimer = undefined
     }

@@ -37,10 +37,11 @@ export function useContextLifecycle() {
     refetchOnWindowFocus: false,
   })
 
+  const hasTarget = computed(() => !!botId.value && !!sessionId.value)
   const canLoadOlder = computed(() => data.value?.has_more === true && limit.value < MAX_LIMIT)
   function loadOlder() {
     limit.value = MAX_LIMIT
   }
 
-  return { data, status, canLoadOlder, loadOlder }
+  return { data, status, hasTarget, canLoadOlder, loadOlder, maxLimit: MAX_LIMIT }
 }

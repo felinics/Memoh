@@ -118,9 +118,14 @@ describe('classifyPromptDiff', () => {
     expect(classifyPromptDiff(base, undefined)).toBeNull()
   })
 
-  it('reports a tool roster change ahead of the prefix change it implies', () => {
-    const next = { ...base, stable_prefix_hash: 'h2', tool_defs: [...tools, { provider: 'mcp', name: 'jira', bytes: 300 }] }
+  it('reports a tool roster change alone when the stable prefix held', () => {
+    const next = { ...base, tool_defs: [...tools, { provider: 'mcp', name: 'jira', bytes: 300 }] }
     expect(classifyPromptDiff(next, base)).toBe('tools')
+  })
+
+  it('reports system and tools together when both moved', () => {
+    const next = { ...base, stable_prefix_hash: 'h2', tool_defs: [...tools, { provider: 'mcp', name: 'jira', bytes: 300 }] }
+    expect(classifyPromptDiff(next, base)).toBe('system_tools')
   })
 
   it('reports a system change when only the stable prefix hash moved', () => {

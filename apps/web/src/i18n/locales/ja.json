@@ -1129,10 +1129,11 @@
       "diffInitial": "最初のターン",
       "diffTools": "ツール変更",
       "diffSystem": "システム変更",
+      "diffSystemTools": "システムとツール変更",
       "diffHistory": "履歴のみ",
-      "aggScope": "このページ",
+      "aggScope": "このページ内",
       "moreTurns": "このページより古いターンがあります",
-      "loadOlder": "最大 200 ターンを読み込む",
+      "loadOlder": "最大 {n} ターンを読み込む",
       "legacySource": "旧メッセージメタデータから復元"
     },
     "infoCacheHitRate": "キャッシュヒット率",
@@ -1237,6 +1238,7 @@
     "openPreviewToSide": "プレビューを横に開く",
     "previewTab": "プレビュー: {name}",
     "sessionInfoRingAria": "セッション情報",
+    "sessionInfoRingAriaUsage": "セッション情報、コンテキスト使用率 {percent}%",
     "sessionInfoTooltipHint": "カーソルを合わせるとセッション情報が表示されます",
     "sessionActions": "セッションアクション",
     "tabBarToolkit": {

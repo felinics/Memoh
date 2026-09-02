@@ -82,7 +82,8 @@ function segmentWidth(tokens: number): string {
 // against the window and makes no claim about which segment reaches it.
 const autoMarkLeft = computed(() => {
   if (props.contextWindow == null || props.autoCompactTokens == null || denominator.value <= 0) return null
-  return `${Math.min(props.autoCompactTokens / denominator.value, 1) * 100}%`
+  const ratio = props.autoCompactTokens / denominator.value
+  return ratio >= 1 ? 'calc(100% - 1px)' : `${ratio * 100}%`
 })
 
 const legendRows = computed<LegendRow[]>(() => {
