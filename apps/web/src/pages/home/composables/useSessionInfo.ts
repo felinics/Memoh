@@ -1,4 +1,4 @@
-import { computed, ref, watch, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -9,6 +9,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
 import { useChatViewTarget } from './useChatViewContext'
 import { computeContextComposition } from './context-categories'
+import { installTurnEndInvalidation } from './turn-end-invalidation'
 
 interface UseSessionInfoOptions {
   botId?: Ref<string | null | undefined>
@@ -123,17 +124,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     }
   }
 
-  // A finished turn rewrites the context but nothing else refetches the
-  // status, so the ring would keep showing the pre-turn percentage. The key is
-  // the 3-element prefix (no `exact`), which matches every overrideModelId
-  // variant of the finished Session — same reach as triggerCompact's.
-  // Scoped to this instance's Session because invalidation is not deduped:
-  // every instance that fires issues its own request for the same entry.
-  watch(storeRefs.streamingSessionId, (now, prev) => {
-    if (prev && prev !== now && prev === sessionId.value) {
-      queryCache.invalidateQueries({ key: ['session-status', currentBotId.value ?? '', prev] })
-    }
-  })
+  installTurnEndInvalidation(storeRefs.streamingSessionId, queryCache)
 
   return {
     info,
