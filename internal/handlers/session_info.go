@@ -44,7 +44,6 @@ func NewSessionInfoHandler(log *slog.Logger, queries dbstore.Queries, botService
 func (h *SessionInfoHandler) Register(e *echo.Echo) {
 	e.GET("/bots/:bot_id/sessions/:session_id/status", h.GetSessionInfo)
 	e.GET("/bots/:bot_id/sessions/:session_id/context-lifecycle", h.GetSessionContextLifecycle)
-	e.GET("/bots/:bot_id/sessions/:session_id/context-lifecycle/:run_id", h.GetSessionContextLifecycleTurn)
 }
 
 type SessionInfoResponse struct {
@@ -191,11 +190,12 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	var breakdown []contextfrag.KindBreakdown
 	var toolDefs []ToolDefBucket
 	var budgetPlan *contextfrag.ContextBudgetPlan
-	if load, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, 1); err != nil {
+	if snapshot, ok, err := latestContextLifecycleSnapshot(ctx, h.queries, pgSessionID); err != nil {
 		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
-	} else {
-		breakdown, toolDefs, budgetPlan = latestContextComposition(load.Turns)
-		if !budgetPlanApplies(load.Turns, resolvedModel) {
+	} else if ok {
+		turns := []ContextLifecycleTurn{{Snapshot: snapshot}}
+		breakdown, toolDefs, budgetPlan = latestContextComposition(turns)
+		if !budgetPlanApplies(turns, resolvedModel) {
 			budgetPlan = nil
 		}
 	}

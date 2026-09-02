@@ -53,17 +53,20 @@ type recordingContextLifecycleStore struct {
 func (s *recordingContextLifecycleStore) CreateContextLifecycle(
 	_ context.Context,
 	arg sqlc.CreateContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.CreateContextLifecycleRow, error) {
 	s.creates = append(s.creates, arg)
 	if s.createErr != nil {
-		return sqlc.ContextLifecycle{}, s.createErr
+		return sqlc.CreateContextLifecycleRow{}, s.createErr
 	}
 	created := sqlc.ContextLifecycle{
 		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
 		Status: arg.Status, ErrorCode: arg.ErrorCode, Snapshot: arg.Snapshot,
 	}
 	s.existing = &created
-	return created, nil
+	return sqlc.CreateContextLifecycleRow{
+		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
+		Status: arg.Status, ErrorCode: arg.ErrorCode,
+	}, nil
 }
 
 type lifecycleTurnAdmitter struct {
@@ -139,34 +142,37 @@ func (s *recordingContextLifecycleStore) GetLatestAssistantContextLifecycleByRun
 func (s *recordingContextLifecycleStore) UpdateAbortedContextLifecycleSnapshot(
 	_ context.Context,
 	arg sqlc.UpdateAbortedContextLifecycleSnapshotParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpdateAbortedContextLifecycleSnapshotRow, error) {
 	s.updates = append(s.updates, arg)
-	return sqlc.ContextLifecycle{}, s.updateErr
+	return sqlc.UpdateAbortedContextLifecycleSnapshotRow{}, s.updateErr
 }
 
 func (s *recordingContextLifecycleStore) UpsertAbortedContextLifecycle(
 	_ context.Context,
 	arg sqlc.UpsertAbortedContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertAbortedContextLifecycleRow, error) {
 	s.upserts = append(s.upserts, arg)
-	return sqlc.ContextLifecycle{}, s.upsertErr
+	return sqlc.UpsertAbortedContextLifecycleRow{}, s.upsertErr
 }
 
 func (s *recordingContextLifecycleStore) UpsertTerminalContextLifecycle(
 	ctx context.Context,
 	arg sqlc.UpsertTerminalContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertTerminalContextLifecycleRow, error) {
 	_, s.terminalUpsertBound = ctx.Deadline()
 	s.terminalUpserts = append(s.terminalUpserts, arg)
 	if s.terminalUpsertErr != nil {
-		return sqlc.ContextLifecycle{}, s.terminalUpsertErr
+		return sqlc.UpsertTerminalContextLifecycleRow{}, s.terminalUpsertErr
 	}
 	upserted := sqlc.ContextLifecycle{
 		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
 		Status: arg.Status, ErrorCode: arg.ErrorCode, Snapshot: arg.Snapshot,
 	}
 	s.existing = &upserted
-	return upserted, nil
+	return sqlc.UpsertTerminalContextLifecycleRow{
+		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
+		Status: arg.Status, ErrorCode: arg.ErrorCode,
+	}, nil
 }
 
 func (s *recordingContextLifecycleStore) ListTerminalSessionRunsNeedingContextLifecycle(

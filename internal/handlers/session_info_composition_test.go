@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
@@ -268,6 +269,13 @@ func (q *sessionInfoQueryStub) ListRecentContextLifecyclesBySession(
 	_ sqlc.ListRecentContextLifecyclesBySessionParams,
 ) ([]sqlc.ListRecentContextLifecyclesBySessionRow, error) {
 	return q.lifecycleRows, nil
+}
+
+func (q *sessionInfoQueryStub) GetLatestContextLifecycleBySession(_ context.Context, _ pgtype.UUID) ([]byte, error) {
+	if len(q.lifecycleRows) == 0 {
+		return nil, pgx.ErrNoRows
+	}
+	return q.lifecycleRows[0].Snapshot, nil
 }
 
 func (*sessionInfoQueryStub) HasUnmaterializedContextLifecycleMetadataBySession(

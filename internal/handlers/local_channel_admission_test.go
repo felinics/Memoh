@@ -57,15 +57,14 @@ type wsLifecycleQueries struct {
 func (q *wsLifecycleQueries) CreateContextLifecycle(
 	_ context.Context,
 	arg sqlc.CreateContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.CreateContextLifecycleRow, error) {
 	q.params = append(q.params, arg)
-	return sqlc.ContextLifecycle{
+	return sqlc.CreateContextLifecycleRow{
 		RunID:     arg.RunID,
 		BotID:     arg.BotID,
 		SessionID: arg.SessionID,
 		Status:    arg.Status,
 		ErrorCode: arg.ErrorCode,
-		Snapshot:  arg.Snapshot,
 	}, nil
 }
 

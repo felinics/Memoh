@@ -41,8 +41,8 @@ type abortLifecycleQueries struct {
 func (*abortLifecycleQueries) CreateContextLifecycle(
 	context.Context,
 	sqlc.CreateContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
-	return sqlc.ContextLifecycle{}, errors.New("unexpected lifecycle create")
+) (sqlc.CreateContextLifecycleRow, error) {
+	return sqlc.CreateContextLifecycleRow{}, errors.New("unexpected lifecycle create")
 }
 
 func (q *abortLifecycleQueries) GetContextLifecycleByRunID(
@@ -94,14 +94,14 @@ func (q *abortLifecycleQueries) GetLatestAssistantContextLifecycleByRunID(
 func (*abortLifecycleQueries) UpdateAbortedContextLifecycleSnapshot(
 	context.Context,
 	sqlc.UpdateAbortedContextLifecycleSnapshotParams,
-) (sqlc.ContextLifecycle, error) {
-	return sqlc.ContextLifecycle{}, errors.New("unexpected lifecycle update")
+) (sqlc.UpdateAbortedContextLifecycleSnapshotRow, error) {
+	return sqlc.UpdateAbortedContextLifecycleSnapshotRow{}, errors.New("unexpected lifecycle update")
 }
 
 func (q *abortLifecycleQueries) UpsertAbortedContextLifecycle(
 	_ context.Context,
 	arg sqlc.UpsertAbortedContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertAbortedContextLifecycleRow, error) {
 	q.mu.Lock()
 	q.upserts = append(q.upserts, arg)
 	q.mu.Unlock()
@@ -111,7 +111,7 @@ func (q *abortLifecycleQueries) UpsertAbortedContextLifecycle(
 		default:
 		}
 	}
-	return sqlc.ContextLifecycle{}, q.upsertErr
+	return sqlc.UpsertAbortedContextLifecycleRow{}, q.upsertErr
 }
 
 func (q *abortLifecycleQueries) GetSessionRun(context.Context, pgtype.UUID) (sqlc.SessionRun, error) {

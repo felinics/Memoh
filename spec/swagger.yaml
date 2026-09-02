@@ -2311,6 +2311,13 @@ definitions:
     - DecisionDropped
   contextfrag.SelectionTrace:
     properties:
+      drop_reason_tokens:
+        additionalProperties:
+          type: integer
+        description: |-
+          DropReasonTokens is the token estimate lost per drop reason, rolled up
+          when the snapshot is built so readers never need the per-fragment audit.
+        type: object
       drop_reasons:
         additionalProperties:
           type: integer
@@ -2318,6 +2325,8 @@ definitions:
       dropped:
         type: integer
       selected:
+        type: integer
+      trimmed:
         type: integer
     type: object
   contextfrag.Slot:
@@ -11473,55 +11482,6 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Get session context lifecycle
-      tags:
-      - sessions
-  /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}:
-    get:
-      description: Return the full persisted lifecycle snapshot of one run, including
-        the per-fragment selection_decisions the list endpoint omits. Sessions predating
-        run lifecycle persistence fall back to legacy assistant metadata
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Session ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: Run ID
-        in: path
-        name: run_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ContextLifecycleTurn'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Get one session context lifecycle turn
       tags:
       - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:

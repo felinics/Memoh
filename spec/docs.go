@@ -7786,76 +7786,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}": {
-            "get": {
-                "description": "Return the full persisted lifecycle snapshot of one run, including the per-fragment selection_decisions the list endpoint omits. Sessions predating run lifecycle persistence fall back to legacy assistant metadata",
-                "tags": [
-                    "sessions"
-                ],
-                "summary": "Get one session context lifecycle turn",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Session ID",
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Run ID",
-                        "name": "run_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ContextLifecycleTurn"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/sessions/{session_id}/fork": {
             "post": {
                 "tags": [
@@ -18621,6 +18551,13 @@ const docTemplate = `{
         "contextfrag.SelectionTrace": {
             "type": "object",
             "properties": {
+                "drop_reason_tokens": {
+                    "description": "DropReasonTokens is the token estimate lost per drop reason, rolled up\nwhen the snapshot is built so readers never need the per-fragment audit.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
                 "drop_reasons": {
                     "type": "object",
                     "additionalProperties": {
@@ -18631,6 +18568,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "selected": {
+                    "type": "integer"
+                },
+                "trimmed": {
                     "type": "integer"
                 }
             }

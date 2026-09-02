@@ -1290,11 +1290,19 @@ export type ContextfragSelectionDecision = {
 export type ContextfragSelectionDecisionKind = 'selected' | 'trimmed' | 'dropped';
 
 export type ContextfragSelectionTrace = {
+    /**
+     * DropReasonTokens is the token estimate lost per drop reason, rolled up
+     * when the snapshot is built so readers never need the per-fragment audit.
+     */
+    drop_reason_tokens?: {
+        [key: string]: number;
+    };
     drop_reasons?: {
         [key: string]: number;
     };
     dropped?: number;
     selected?: number;
+    trimmed?: number;
 };
 
 export type ContextfragSlot = 'system' | 'before_history' | 'history' | 'after_history_before_current' | 'current_user' | 'after_current';
@@ -10024,60 +10032,6 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses = {
 };
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses];
-
-export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Session ID
-         */
-        session_id: string;
-        /**
-         * Run ID
-         */
-        run_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}';
-};
-
-export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Unauthorized
-     */
-    401: ApperrorProblem;
-    /**
-     * Forbidden
-     */
-    403: ApperrorProblem;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-};
-
-export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdError = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdErrors];
-
-export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdResponses = {
-    /**
-     * OK
-     */
-    200: HandlersContextLifecycleTurn;
-};
-
-export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdResponses];
 
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**

@@ -105,39 +105,6 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	})
 }
 
-// GetSessionContextLifecycleTurn godoc
-// @Summary Get one session context lifecycle turn
-// @Description Return the full persisted lifecycle snapshot of one run, including the per-fragment selection_decisions the list endpoint omits. Sessions predating run lifecycle persistence fall back to legacy assistant metadata
-// @Tags sessions
-// @Param bot_id path string true "Bot ID"
-// @Param session_id path string true "Session ID"
-// @Param run_id path string true "Run ID"
-// @Success 200 {object} ContextLifecycleTurn
-// @Failure 400 {object} apperror.Problem
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id} [get].
-func (h *SessionInfoHandler) GetSessionContextLifecycleTurn(c echo.Context) error {
-	pgSessionID, err := h.authorizeContextLifecycleSession(c)
-	if err != nil {
-		return err
-	}
-	pgRunID, err := db.ParseUUID(strings.TrimSpace(c.Param("run_id")))
-	if err != nil {
-		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
-	}
-	turn, err := loadContextLifecycleTurn(c.Request().Context(), h.queries, pgSessionID, pgRunID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
-		}
-		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
-	}
-	return c.JSON(http.StatusOK, turn)
-}
-
 // authorizeContextLifecycleSession resolves the session behind a lifecycle
 // request and applies the same access checks as the session status endpoint.
 func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (pgtype.UUID, error) {
@@ -250,14 +217,7 @@ type contextLifecycleQueries interface {
 		sqlc.ListRecentAssistantMessagesBySessionParams,
 	) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error)
 	HasUnmaterializedContextLifecycleMetadataBySession(ctx context.Context, sessionID pgtype.UUID) (bool, error)
-	GetContextLifecycleBySessionAndRunID(
-		context.Context,
-		sqlc.GetContextLifecycleBySessionAndRunIDParams,
-	) (sqlc.GetContextLifecycleBySessionAndRunIDRow, error)
-	GetAssistantContextLifecycleBySessionAndRunID(
-		context.Context,
-		sqlc.GetAssistantContextLifecycleBySessionAndRunIDParams,
-	) (sqlc.GetAssistantContextLifecycleBySessionAndRunIDRow, error)
+	GetLatestContextLifecycleBySession(ctx context.Context, sessionID pgtype.UUID) ([]byte, error)
 }
 
 type contextLifecycleLoad struct {
@@ -347,56 +307,36 @@ func lifecycleTurnsFromRunRows(
 	return turns, nil
 }
 
-func loadContextLifecycleTurn(
+// latestContextLifecycleSnapshot reads the newest bounded summary only: one
+// row, no page probe, and never the per-fragment audit.
+func latestContextLifecycleSnapshot(
 	ctx context.Context,
 	queries contextLifecycleQueries,
 	sessionID pgtype.UUID,
-	runID pgtype.UUID,
-) (ContextLifecycleTurn, error) {
-	row, err := queries.GetContextLifecycleBySessionAndRunID(ctx, sqlc.GetContextLifecycleBySessionAndRunIDParams{
-		SessionID: sessionID,
-		RunID:     runID,
-	})
+) (contextfrag.LifecycleSnapshot, bool, error) {
+	raw, err := queries.GetLatestContextLifecycleBySession(ctx, sessionID)
 	if err == nil {
-		snapshot, err := contextfrag.DecodeLifecycleSnapshot(row.Snapshot)
+		snapshot, err := contextfrag.DecodeLifecycleSnapshot(raw)
 		if err != nil {
-			return ContextLifecycleTurn{}, fmt.Errorf("decode lifecycle snapshot for run %s: %w", row.RunID.String(), err)
+			return contextfrag.LifecycleSnapshot{}, false, fmt.Errorf("decode latest lifecycle snapshot: %w", err)
 		}
-		turn := ContextLifecycleTurn{
-			RunID:              row.RunID.String(),
-			Status:             row.Status,
-			AssistantMessageID: snapshot.AssistantMessageID,
-			CreatedAt:          row.CreatedAt.Time,
-			Snapshot:           snapshot,
-		}
-		if row.ErrorCode.Valid {
-			turn.ErrorCode = row.ErrorCode.String
-		}
-		return turn, nil
+		return snapshot, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return ContextLifecycleTurn{}, fmt.Errorf("get run lifecycle: %w", err)
+		return contextfrag.LifecycleSnapshot{}, false, fmt.Errorf("get latest run lifecycle: %w", err)
 	}
-	legacy, err := queries.GetAssistantContextLifecycleBySessionAndRunID(ctx, sqlc.GetAssistantContextLifecycleBySessionAndRunIDParams{
+	legacyRows, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
 		SessionID: sessionID,
-		RunID:     runID,
+		MaxCount:  1,
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ContextLifecycleTurn{}, err
-		}
-		return ContextLifecycleTurn{}, fmt.Errorf("get legacy assistant lifecycle: %w", err)
+		return contextfrag.LifecycleSnapshot{}, false, fmt.Errorf("list legacy assistant lifecycles: %w", err)
 	}
-	snapshot, ok := contextfrag.LifecycleSnapshotFromMetadata(legacy.Metadata)
-	if !ok {
-		return ContextLifecycleTurn{}, pgx.ErrNoRows
+	turns := legacyLifecycleTurnsFromRows(legacyRows, 1)
+	if len(turns) == 0 {
+		return contextfrag.LifecycleSnapshot{}, false, nil
 	}
-	return ContextLifecycleTurn{
-		RunID:              legacy.RunID.String(),
-		AssistantMessageID: legacy.ID.String(),
-		CreatedAt:          legacy.CreatedAt.Time,
-		Snapshot:           snapshot,
-	}, nil
+	return turns[0].Snapshot, true, nil
 }
 
 // legacyLifecycleTurnsFromRows extracts pre-run-table lifecycle snapshots from
