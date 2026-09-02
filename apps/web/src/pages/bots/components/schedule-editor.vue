@@ -51,15 +51,16 @@
       </SettingsRow>
 
       <!-- The picker is a cluster — a mode select, its operands, a weekday
-           grid — so its control column is wider than the sm:w-56 the plain
-           fields use: sm:w-72 is the width the seven weekday buttons need.
-           -->
+           grid — and each mode is a different width. A fixed control column
+           either wraps the wide modes or leaves the narrow ones short of the
+           right edge every other row lines up on, so this one sizes to its
+           content and hugs that edge instead. -->
       <SettingsRow
         :label="t('bots.schedule.form.pattern')"
         stack="sm"
       >
-        <div class="w-full space-y-3 sm:w-72">
-          <div class="flex items-center gap-2 flex-wrap">
+        <div class="w-full space-y-3 sm:w-auto">
+          <div class="flex flex-wrap items-center gap-2 sm:justify-end">
             <Select v-model="schedModeModel">
               <SelectTrigger class="w-36 shrink-0">
                 <SelectValue />
@@ -136,7 +137,7 @@
 
           <div
             v-if="patternState.mode === 'weekly'"
-            class="grid grid-cols-7 gap-1"
+            class="grid grid-cols-7 gap-1 sm:w-72"
           >
             <button
               v-for="(key, idx) in WEEKDAY_KEYS"
@@ -154,7 +155,7 @@
 
           <div
             v-if="patternState.mode === 'advanced'"
-            class="space-y-1.5"
+            class="space-y-1.5 sm:w-72"
           >
             <Input
               :model-value="patternState.advancedPattern"
@@ -172,7 +173,7 @@
 
           <p
             v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
-            class="text-caption text-muted-foreground"
+            class="text-caption text-muted-foreground sm:text-right"
           >
             {{ schedulePreviewText }}
           </p>
