@@ -137,6 +137,35 @@ func TestContextCompactionInfoDerivation(t *testing.T) {
 	}
 }
 
+func TestBudgetPlanApplies(t *testing.T) {
+	t.Parallel()
+
+	turnFor := func(model string) []ContextLifecycleTurn {
+		return []ContextLifecycleTurn{{Snapshot: contextfrag.LifecycleSnapshot{Model: model}}}
+	}
+	cases := []struct {
+		name          string
+		turns         []ContextLifecycleTurn
+		resolvedModel string
+		want          bool
+	}{
+		{name: "no turns keeps nothing to reject", resolvedModel: "gpt-5", want: true},
+		{name: "unknown resolved model keeps the plan", turns: turnFor("gpt-5"), want: true},
+		{name: "legacy snapshot without a model keeps the plan", turns: turnFor(""), resolvedModel: "gpt-5", want: true},
+		{name: "same model, any case, applies", turns: turnFor("GPT-5"), resolvedModel: "gpt-5", want: true},
+		{name: "a pane override to another model drops the plan", turns: turnFor("gpt-5"), resolvedModel: "claude-opus-4", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := budgetPlanApplies(tc.turns, tc.resolvedModel); got != tc.want {
+				t.Fatalf("budgetPlanApplies() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetSessionInfoOmitsCompactionForACPRuntime(t *testing.T) {
 	t.Parallel()
 

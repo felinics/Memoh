@@ -166,7 +166,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	}
 
 	botSettings, hasSettings := h.loadBotSettings(ctx, bot.ID)
-	contextWindow := h.resolveContextWindow(c, botSettings)
+	contextWindow, resolvedModel := h.resolveContextWindow(c, botSettings)
 
 	cacheRow, err := h.queries.GetSessionCacheStats(ctx, pgSessionID)
 	if err != nil {
@@ -195,6 +195,9 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
 	} else {
 		breakdown, toolDefs, budgetPlan = latestContextComposition(load.Turns)
+		if !budgetPlanApplies(load.Turns, resolvedModel) {
+			budgetPlan = nil
+		}
 	}
 
 	var compactionInfo *CompactionInfo
@@ -264,7 +267,20 @@ func contextCompactionInfo(enabled bool, threshold int, plan *contextfrag.Contex
 	return info
 }
 
-func (h *SessionInfoHandler) resolveContextWindow(c echo.Context, botSettings settings.Settings) *int64 {
+// budgetPlanApplies reports whether the newest persisted plan was made for the
+// model the next turn will use; a pane override budgets against another model,
+// so its window, reserve, and marks would describe a turn that will not run.
+func budgetPlanApplies(turns []ContextLifecycleTurn, resolvedModel string) bool {
+	if len(turns) == 0 || resolvedModel == "" || turns[0].Snapshot.Model == "" {
+		return true
+	}
+	return strings.EqualFold(turns[0].Snapshot.Model, resolvedModel)
+}
+
+// resolveContextWindow returns the context window and provider model name of
+// the model the next turn will use: the pane override when given, else the
+// bot's chat model.
+func (h *SessionInfoHandler) resolveContextWindow(c echo.Context, botSettings settings.Settings) (*int64, string) {
 	modelIDStr := strings.TrimSpace(c.QueryParam("model_id"))
 
 	if modelIDStr == "" {
@@ -272,16 +288,16 @@ func (h *SessionInfoHandler) resolveContextWindow(c echo.Context, botSettings se
 	}
 
 	if modelIDStr == "" || h.modelsService == nil {
-		return nil
+		return nil, ""
 	}
 
 	m, err := h.modelsService.GetByID(c.Request().Context(), modelIDStr)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	if m.Config.ContextWindow == nil {
-		return nil
+		return nil, m.ModelID
 	}
 	cw := int64(*m.Config.ContextWindow)
-	return &cw
+	return &cw, m.ModelID
 }
