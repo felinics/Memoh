@@ -3,7 +3,10 @@
 -- their own column. The snapshot becomes a bounded summary, so list and status
 -- readers never detoast the one part that grows with conversation length.
 -- Existing rows are split in place, per team, because the table forces row
--- level security.
+-- level security. Opening the teams policy takes an exclusive lock on
+-- public.teams for the whole migration transaction while every lifecycle row is
+-- rewritten twice, so run this with the server stopped, as the compose stack
+-- does; on large tables expect it to take minutes.
 
 ALTER TABLE public.context_lifecycles
     ADD COLUMN IF NOT EXISTS selection_decisions JSONB;
@@ -57,6 +60,7 @@ BEGIN
         WHERE team_id = migration_team_id
           AND jsonb_typeof(selection_decisions) = 'array'
           AND NOT (COALESCE(snapshot -> 'selection', '{}'::jsonb) ? 'drop_reason_tokens')
+          AND NOT (COALESCE(snapshot -> 'selection', '{}'::jsonb) ? 'trimmed')
         GROUP BY run_id, 3
       ) AS per_reason
       GROUP BY run_id

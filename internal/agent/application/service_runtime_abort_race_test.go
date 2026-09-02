@@ -23,7 +23,7 @@ func TestAbortReconciliationPrefersResumedRunSnapshotOverPausedMetadata(t *testi
 		t.Fatal(err)
 	}
 	queries := newAbortedLifecycleQueries(t)
-	queries.existing = &sqlc.ContextLifecycle{Snapshot: finalSnapshot}
+	queries.existing = &sqlc.GetContextLifecycleByRunIDRow{Snapshot: finalSnapshot}
 	queries.existingAfter = 2
 	queries.metadata = staleMetadata
 	service := &Service{queries: queries, contextLifecycles: queries}
@@ -58,7 +58,7 @@ func TestAbortReconciliationRechecksPendingDecisionBeforeMetadataFallback(t *tes
 		t.Fatal(err)
 	}
 	queries := newAbortedLifecycleQueries(t)
-	queries.existing = &sqlc.ContextLifecycle{Snapshot: finalSnapshot}
+	queries.existing = &sqlc.GetContextLifecycleByRunIDRow{Snapshot: finalSnapshot}
 	queries.existingAfter = 4
 	queries.metadata = staleMetadata
 	queries.pending = true

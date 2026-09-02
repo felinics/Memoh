@@ -34,7 +34,13 @@ VALUES (
 RETURNING run_id, bot_id, session_id, status, error_code, created_at;
 
 -- name: GetContextLifecycleByRunID :one
-SELECT *
+SELECT run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = sqlc.arg(run_id);
+
+-- name: GetContextLifecycleSelectionDecisionsByRunID :one
+SELECT selection_decisions
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id);

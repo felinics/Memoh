@@ -20,10 +20,10 @@ import (
 	"github.com/felinics/memoh/internal/settings"
 )
 
-func TestLatestContextCompositionUsesNewestTurn(t *testing.T) {
+func TestContextCompositionBucketsToolDefsByProvider(t *testing.T) {
 	t.Parallel()
 
-	latest := ContextLifecycleTurn{RunID: "r2", Snapshot: contextfrag.LifecycleSnapshot{
+	latest := contextfrag.LifecycleSnapshot{
 		Breakdown: []contextfrag.KindBreakdown{
 			{Kind: contextfrag.KindConversationEvent, Fragments: 4, TokenEstimate: 900},
 			{Kind: contextfrag.KindSystemPrompt, Fragments: 2, TokenEstimate: 300},
@@ -33,14 +33,11 @@ func TestLatestContextCompositionUsesNewestTurn(t *testing.T) {
 			{Provider: "mcp", Name: "jira_search", Bytes: 1600, TokenEstimate: 400},
 			{Provider: "native", Name: "exec", Bytes: 800, TokenEstimate: 200},
 		},
-	}}
-	older := ContextLifecycleTurn{RunID: "r1", Snapshot: contextfrag.LifecycleSnapshot{
-		Breakdown: []contextfrag.KindBreakdown{{Kind: contextfrag.KindSystemPrompt, Fragments: 1, TokenEstimate: 1}},
-	}}
+	}
 
-	breakdown, buckets, _ := latestContextComposition([]ContextLifecycleTurn{latest, older})
+	breakdown, buckets, _ := contextComposition(latest)
 	if len(breakdown) != 2 || breakdown[0].Kind != contextfrag.KindConversationEvent {
-		t.Fatalf("breakdown = %+v, want latest turn's rows", breakdown)
+		t.Fatalf("breakdown = %+v, want the snapshot's rows", breakdown)
 	}
 	want := []ToolDefBucket{
 		{Provider: "mcp", Tools: 1, TokenEstimate: 400},
@@ -56,33 +53,12 @@ func TestLatestContextCompositionUsesNewestTurn(t *testing.T) {
 	}
 }
 
-func TestLatestContextCompositionEmpty(t *testing.T) {
+func TestContextCompositionEmpty(t *testing.T) {
 	t.Parallel()
 
-	breakdown, buckets, plan := latestContextComposition(nil)
+	breakdown, buckets, plan := contextComposition(contextfrag.LifecycleSnapshot{})
 	if breakdown != nil || buckets != nil || plan != nil {
-		t.Fatalf("empty turns must produce nil composition, got %+v %+v %+v", breakdown, buckets, plan)
-	}
-}
-
-func TestLatestContextCompositionTakesBudgetPlanFromNewestTurn(t *testing.T) {
-	t.Parallel()
-
-	newest := &contextfrag.ContextBudgetPlan{Window: 200000, OutputReserve: 8000, ToolDefsCost: 1200}
-	turns := []ContextLifecycleTurn{
-		{RunID: "r2", Snapshot: contextfrag.LifecycleSnapshot{BudgetPlan: newest}},
-		{RunID: "r1", Snapshot: contextfrag.LifecycleSnapshot{
-			Breakdown:  []contextfrag.KindBreakdown{{Kind: contextfrag.KindSystemPrompt, Fragments: 1, TokenEstimate: 1}},
-			BudgetPlan: &contextfrag.ContextBudgetPlan{Window: 8000},
-		}},
-	}
-
-	breakdown, buckets, plan := latestContextComposition(turns)
-	if breakdown != nil || buckets != nil {
-		t.Fatalf("composition = %+v %+v, want the newest turn's empty composition", breakdown, buckets)
-	}
-	if plan != newest {
-		t.Fatalf("budget plan = %+v, want the newest turn's plan %+v", plan, newest)
+		t.Fatalf("empty snapshot must produce nil composition, got %+v %+v %+v", breakdown, buckets, plan)
 	}
 }
 
@@ -141,26 +117,22 @@ func TestContextCompactionInfoDerivation(t *testing.T) {
 func TestBudgetPlanApplies(t *testing.T) {
 	t.Parallel()
 
-	turnFor := func(model string) []ContextLifecycleTurn {
-		return []ContextLifecycleTurn{{Snapshot: contextfrag.LifecycleSnapshot{Model: model}}}
-	}
 	cases := []struct {
 		name          string
-		turns         []ContextLifecycleTurn
+		model         string
 		resolvedModel string
 		want          bool
 	}{
-		{name: "no turns keeps nothing to reject", resolvedModel: "gpt-5", want: true},
-		{name: "unknown resolved model keeps the plan", turns: turnFor("gpt-5"), want: true},
-		{name: "legacy snapshot without a model keeps the plan", turns: turnFor(""), resolvedModel: "gpt-5", want: true},
-		{name: "same model, any case, applies", turns: turnFor("GPT-5"), resolvedModel: "gpt-5", want: true},
-		{name: "a pane override to another model drops the plan", turns: turnFor("gpt-5"), resolvedModel: "claude-opus-4", want: false},
+		{name: "unknown resolved model keeps the plan", model: "gpt-5", want: true},
+		{name: "legacy snapshot without a model keeps the plan", resolvedModel: "gpt-5", want: true},
+		{name: "same model, any case, applies", model: "GPT-5", resolvedModel: "gpt-5", want: true},
+		{name: "a pane override to another model drops the plan", model: "gpt-5", resolvedModel: "claude-opus-4", want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := budgetPlanApplies(tc.turns, tc.resolvedModel); got != tc.want {
+			if got := budgetPlanApplies(contextfrag.LifecycleSnapshot{Model: tc.model}, tc.resolvedModel); got != tc.want {
 				t.Fatalf("budgetPlanApplies() = %v, want %v", got, tc.want)
 			}
 		})
@@ -265,13 +237,6 @@ func (*sessionInfoQueryStub) GetSessionUsedSkills(_ context.Context, _ pgtype.UU
 	return nil, nil
 }
 
-func (q *sessionInfoQueryStub) ListRecentContextLifecyclesBySession(
-	_ context.Context,
-	_ sqlc.ListRecentContextLifecyclesBySessionParams,
-) ([]sqlc.ListRecentContextLifecyclesBySessionRow, error) {
-	return q.lifecycleRows, nil
-}
-
 func (q *sessionInfoQueryStub) GetLatestContextLifecycleBySession(_ context.Context, _ pgtype.UUID) ([]byte, error) {
 	if len(q.lifecycleRows) == 0 {
 		return nil, pgx.ErrNoRows
@@ -284,13 +249,6 @@ func (q *sessionInfoQueryStub) ListRecentAssistantMessagesBySession(
 	_ sqlc.ListRecentAssistantMessagesBySessionParams,
 ) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error) {
 	return q.legacyRows, nil
-}
-
-func (*sessionInfoQueryStub) HasUnmaterializedContextLifecycleMetadataBySession(
-	context.Context,
-	pgtype.UUID,
-) (bool, error) {
-	return false, nil
 }
 
 func (q *sessionInfoQueryStub) GetSettingsByBotID(_ context.Context, _ pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {

@@ -193,16 +193,15 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	if snapshot, ok, err := latestContextLifecycleSnapshot(ctx, h.queries, pgSessionID); err != nil {
 		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
 	} else if ok {
-		turns := []ContextLifecycleTurn{{Snapshot: snapshot}}
-		breakdown, toolDefs, budgetPlan = latestContextComposition(turns)
-		if !budgetPlanApplies(turns, resolvedModel) {
+		breakdown, toolDefs, budgetPlan = contextComposition(snapshot)
+		if !budgetPlanApplies(snapshot, resolvedModel) {
 			budgetPlan = nil
 		}
 	}
 
 	var compactionInfo *CompactionInfo
 	if hasSettings && runtimeType == session.RuntimeModel {
-		info := contextCompactionInfo(botSettings.CompactionEnabled, botSettings.CompactionThreshold, budgetPlan)
+		info := contextCompactionInfo(h.autoCompactionArmed(ctx, botSettings, sessionID), botSettings.CompactionThreshold, budgetPlan)
 		compactionInfo = &info
 	}
 
@@ -263,18 +262,36 @@ func contextCompactionInfo(enabled bool, threshold int, plan *contextfrag.Contex
 	if plan == nil || plan.Window <= 0 {
 		return info
 	}
-	info.AutoTokens = int64(application.AutoCompactionMark(threshold, plan.Window))
+	info.AutoTokens = int64(application.AutoCompactionThreshold(threshold, plan.Window))
 	return info
 }
 
 // budgetPlanApplies reports whether the newest persisted plan was made for the
 // model the next turn will use; a pane override budgets against another model,
 // so its window, reserve, and marks would describe a turn that will not run.
-func budgetPlanApplies(turns []ContextLifecycleTurn, resolvedModel string) bool {
-	if len(turns) == 0 || resolvedModel == "" || turns[0].Snapshot.Model == "" {
+func budgetPlanApplies(snapshot contextfrag.LifecycleSnapshot, resolvedModel string) bool {
+	if resolvedModel == "" || snapshot.Model == "" {
 		return true
 	}
-	return strings.EqualFold(turns[0].Snapshot.Model, resolvedModel)
+	return strings.EqualFold(snapshot.Model, resolvedModel)
+}
+
+// autoCompactionArmed mirrors the trigger's preconditions: the setting is on
+// and a summarizer resolves through the same candidate chain the manual
+// trigger uses, otherwise the mark would label a level that never fires.
+func (h *SessionInfoHandler) autoCompactionArmed(ctx context.Context, botSettings settings.Settings, sessionID string) bool {
+	if !botSettings.CompactionEnabled {
+		return false
+	}
+	if h.modelsService == nil {
+		return true
+	}
+	sessionModelID := ""
+	if strings.TrimSpace(botSettings.CompactionModelID) == "" {
+		sessionModelID = models.LatestSessionModelID(ctx, h.queries, sessionID)
+	}
+	_, err := models.ResolveCompactionModel(ctx, h.modelsService, h.queries, botSettings.CompactionModelID, sessionModelID, botSettings.ChatModelID)
+	return !models.IsCompactionModelUnavailable(err)
 }
 
 // resolveContextWindow returns the context window and provider model name of

@@ -7719,7 +7719,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
             "get": {
-                "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are omitted from every turn because they grow with conversation length; fetch a single turn to inspect them",
+                "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs",
                 "tags": [
                     "sessions"
                 ],

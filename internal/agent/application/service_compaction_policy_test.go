@@ -89,8 +89,8 @@ func TestUnifiedCompactionController(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := autoCompactionThreshold(tc.threshold, tc.budget); got != tc.wantTrigger {
-				t.Fatalf("autoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.wantTrigger)
+			if got := AutoCompactionThreshold(tc.threshold, tc.budget); got != tc.wantTrigger {
+				t.Fatalf("AutoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.wantTrigger)
 			}
 			if got := compactionTargetTokens(tc.targetPercent, tc.budget); got != tc.wantTarget {
 				t.Fatalf("compactionTargetTokens(%v, %d) = %d, want %d", tc.targetPercent, tc.budget, got, tc.wantTarget)
@@ -102,7 +102,7 @@ func TestUnifiedCompactionController(t *testing.T) {
 	}
 }
 
-func TestAutoCompactionMark(t *testing.T) {
+func TestAutoCompactionThreshold(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -121,8 +121,8 @@ func TestAutoCompactionMark(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := AutoCompactionMark(tc.threshold, tc.budget); got != tc.want {
-				t.Fatalf("AutoCompactionMark(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.want)
+			if got := AutoCompactionThreshold(tc.threshold, tc.budget); got != tc.want {
+				t.Fatalf("AutoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.want)
 			}
 		})
 	}

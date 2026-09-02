@@ -94,7 +94,7 @@ func (s *synchronizedLifecycleStore) CreateContextLifecycle(
 func (s *synchronizedLifecycleStore) GetContextLifecycleByRunID(
 	ctx context.Context,
 	runID pgtype.UUID,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.GetContextLifecycleByRunIDRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.store.GetContextLifecycleByRunID(ctx, runID)

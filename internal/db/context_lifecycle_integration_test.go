@@ -160,8 +160,12 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 	if !reflect.DeepEqual(roundTripped, snapshot.Summary()) {
 		t.Fatalf("round-tripped lifecycle summary = %#v, want %#v", roundTripped, snapshot.Summary())
 	}
+	audit, err := queries.GetContextLifecycleSelectionDecisionsByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("get selection decisions: %v", err)
+	}
 	var decisions []contextfrag.SelectionDecision
-	if err := json.Unmarshal(got.SelectionDecisions, &decisions); err != nil {
+	if err := json.Unmarshal(audit, &decisions); err != nil {
 		t.Fatalf("unmarshal selection decisions: %v", err)
 	}
 	if !reflect.DeepEqual(decisions, snapshot.SelectionDecisions) {
@@ -172,7 +176,7 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 		t.Fatalf("get latest context lifecycle summary: %v", err)
 	}
 	assertJSONSemanticallyEqual(t, latest, got.Snapshot)
-	if strings.Contains(string(got.Snapshot), secret) || strings.Contains(string(got.SelectionDecisions), secret) {
+	if strings.Contains(string(got.Snapshot), secret) || strings.Contains(string(audit), secret) {
 		t.Fatal("persisted lifecycle snapshot contains raw prompt text")
 	}
 
@@ -264,7 +268,7 @@ VALUES ($1, $2, 'assistant', '{}'::jsonb, '{"other":"metadata"}'::jsonb,
 		t.Fatalf("aborted lifecycle terminal = (%q, %#v), want aborted with no error code", aborted.Status, aborted.ErrorCode)
 	}
 	assertJSONSemanticallyEqual(t, aborted.Snapshot, got.Snapshot)
-	assertJSONSemanticallyEqual(t, aborted.SelectionDecisions, got.SelectionDecisions)
+	assertJSONSemanticallyEqual(t, mustSelectionDecisions(t, ctx, queries, parsedRunID), audit)
 	if aborted.CreatedAt != got.CreatedAt {
 		t.Fatalf("aborted lifecycle changed created_at = %#v, want %#v", aborted.CreatedAt, got.CreatedAt)
 	}
@@ -394,7 +398,8 @@ VALUES ($1, gen_random_uuid(), $2, $3, 'completed', '{}'::jsonb)
 	if err != nil {
 		t.Fatalf("read rewritten aborted lifecycle: %v", err)
 	}
-	assertJSONSemanticallyEqual(t, rewritten.SelectionDecisions, got.SelectionDecisions)
+	assertJSONSemanticallyEqual(t, rewritten.Snapshot, []byte(`{"version":2,"source":"summary-only"}`))
+	assertJSONSemanticallyEqual(t, mustSelectionDecisions(t, ctx, queries, parsedRunID), audit)
 	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:           parsedRunID,
 		BotID:           parsedBotID,
@@ -409,7 +414,7 @@ VALUES ($1, gen_random_uuid(), $2, $3, 'completed', '{}'::jsonb)
 	if err != nil {
 		t.Fatalf("read replaced terminal lifecycle: %v", err)
 	}
-	assertJSONSemanticallyEqual(t, replaced.SelectionDecisions, got.SelectionDecisions)
+	assertJSONSemanticallyEqual(t, mustSelectionDecisions(t, ctx, queries, parsedRunID), audit)
 	if strings.Contains(string(replaced.Snapshot), "selection_decisions") || !strings.Contains(string(replaced.Snapshot), "terminal-summary-only") {
 		t.Fatalf("replaced summary = %s, want the new summary without the audit", replaced.Snapshot)
 	}
@@ -834,4 +839,13 @@ FROM context_lifecycles WHERE run_id = $1
 	}
 	assertJSONSemanticallyEqual(t, folded, []byte(legacySnapshot))
 	stepUp(t, dsn, 1)
+}
+
+func mustSelectionDecisions(t *testing.T, ctx context.Context, queries *sqlc.Queries, runID pgtype.UUID) []byte {
+	t.Helper()
+	audit, err := queries.GetContextLifecycleSelectionDecisionsByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("get selection decisions for %v: %v", runID, err)
+	}
+	return audit
 }

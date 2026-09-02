@@ -72,7 +72,7 @@ type ContextLifecycleAggregates struct {
 
 // GetSessionContextLifecycle godoc
 // @Summary Get session context lifecycle
-// @Description List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are omitted from every turn because they grow with conversation length; fetch a single turn to inspect them
+// @Description List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
@@ -85,53 +85,30 @@ type ContextLifecycleAggregates struct {
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle [get].
 func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
-	pgSessionID, err := h.authorizeContextLifecycleSession(c)
-	if err != nil {
-		return err
-	}
-	limit := contextLifecycleLimit(c)
-	load, err := loadContextLifecycleTurns(c.Request().Context(), h.queries, pgSessionID, limit)
-	if err != nil {
-		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
-	}
-	return c.JSON(http.StatusOK, ContextLifecycleResponse{
-		Turns:                 load.Turns,
-		Aggregates:            aggregateContextLifecycle(load.Turns),
-		Limit:                 limit,
-		HasMore:               load.HasMore,
-		LegacySource:          load.LegacySource,
-		LegacyHistoryMayExist: load.LegacyHistoryMayExist,
-		AggregateScope:        contextLifecycleAggregateScope,
-	})
-}
-
-// authorizeContextLifecycleSession resolves the session behind a lifecycle
-// request and applies the same access checks as the session status endpoint.
-func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (pgtype.UUID, error) {
 	userID, err := RequireChannelIdentityID(c)
 	if err != nil {
-		return pgtype.UUID{}, mapContextLifecycleError(err)
+		return mapContextLifecycleError(err)
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 	pgSessionID, err := db.ParseUUID(sessionID)
 	if err != nil {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 
 	ctx := c.Request().Context()
 	sessionRow, err := h.queries.GetSessionByID(ctx, pgSessionID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+			return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 		}
-		return pgtype.UUID{}, apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
 	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
 		Type:        sessionRow.Type,
@@ -147,14 +124,14 @@ func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (p
 		requiredReadPermissionForSessionRuntime(sessionMode, runtimeType),
 	)
 	if err != nil {
-		return pgtype.UUID{}, mapContextLifecycleError(err)
+		return mapContextLifecycleError(err)
 	}
 	if sessionRow.BotID.String() != bot.ID {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
 	if err != nil {
-		return pgtype.UUID{}, mapContextLifecycleError(err)
+		return mapContextLifecycleError(err)
 	}
 	sess := session.Thread{
 		ID:          sessionRow.ID.String(),
@@ -167,9 +144,23 @@ func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (p
 		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()
 	}
 	if !canAccessSession(sess, userID, perms) {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 	}
-	return pgSessionID, nil
+
+	limit := contextLifecycleLimit(c)
+	load, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, limit)
+	if err != nil {
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, ContextLifecycleResponse{
+		Turns:                 load.Turns,
+		Aggregates:            aggregateContextLifecycle(load.Turns),
+		Limit:                 limit,
+		HasMore:               load.HasMore,
+		LegacySource:          load.LegacySource,
+		LegacyHistoryMayExist: load.LegacyHistoryMayExist,
+		AggregateScope:        contextLifecycleAggregateScope,
+	})
 }
 
 func mapContextLifecycleError(err error) error {
@@ -361,17 +352,13 @@ func legacyLifecycleTurnsFromRows(rows []sqlc.ListRecentAssistantMessagesBySessi
 	return turns
 }
 
-func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindBreakdown, []ToolDefBucket, *contextfrag.ContextBudgetPlan) {
-	if len(turns) == 0 {
-		return nil, nil, nil
-	}
-	snapshot := turns[0].Snapshot
+func contextComposition(snapshot contextfrag.LifecycleSnapshot) ([]contextfrag.KindBreakdown, []ToolDefBucket, *contextfrag.ContextBudgetPlan) {
 	var buckets []ToolDefBucket
 	if len(snapshot.ToolDefs) > 0 {
-		byProvider := make(map[string]*ToolDefBucket, 2)
+		byProvider := make(map[string]*ToolDefBucket, 4)
 		for _, def := range snapshot.ToolDefs {
-			bucket, ok := byProvider[def.Provider]
-			if !ok {
+			bucket := byProvider[def.Provider]
+			if bucket == nil {
 				bucket = &ToolDefBucket{Provider: def.Provider}
 				byProvider[def.Provider] = bucket
 			}
@@ -383,9 +370,6 @@ func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindB
 			buckets = append(buckets, *bucket)
 		}
 		sort.Slice(buckets, func(i, j int) bool {
-			if buckets[i].TokenEstimate != buckets[j].TokenEstimate {
-				return buckets[i].TokenEstimate > buckets[j].TokenEstimate
-			}
 			return buckets[i].Provider < buckets[j].Provider
 		})
 	}

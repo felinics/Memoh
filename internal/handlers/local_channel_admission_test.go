@@ -71,8 +71,8 @@ func (q *wsLifecycleQueries) CreateContextLifecycle(
 func (*wsLifecycleQueries) GetContextLifecycleByRunID(
 	context.Context,
 	pgtype.UUID,
-) (sqlc.ContextLifecycle, error) {
-	return sqlc.ContextLifecycle{}, pgx.ErrNoRows
+) (sqlc.GetContextLifecycleByRunIDRow, error) {
+	return sqlc.GetContextLifecycleByRunIDRow{}, pgx.ErrNoRows
 }
 
 func newStubWSTurnAdmitter() *stubWSTurnAdmitter {

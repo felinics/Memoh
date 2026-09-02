@@ -24,9 +24,12 @@ const (
 	maxAsyncCompactionPasses = 3
 )
 
-// autoCompactionThreshold is the async trigger level. A zero return leaves
-// automatic compaction off when no usable model window is available.
-func autoCompactionThreshold(userThreshold, contextTokenBudget int) int {
+// AutoCompactionThreshold is the async trigger level, exported so read-side
+// surfaces label the same level the turn path acts on. A zero return leaves
+// automatic compaction off when no usable model window is available. The
+// synchronous backstop is deliberately not exposed: it only runs on the history
+// path, which a reader cannot observe.
+func AutoCompactionThreshold(userThreshold, contextTokenBudget int) int {
 	if contextTokenBudget <= 0 {
 		return 0
 	}
@@ -41,14 +44,6 @@ func hardCompactionThreshold(contextTokenBudget int) int {
 		return 0
 	}
 	return max(1, contextTokenBudget*compactionHardThresholdPercent/100)
-}
-
-// AutoCompactionMark is the read-side mirror of the async trigger derivation
-// above, so UI surfaces label the level the turn path acts on. It is zero when
-// no usable budget is known. The synchronous backstop is deliberately not
-// exposed: it only runs on the history path, which a reader cannot observe.
-func AutoCompactionMark(userThreshold, contextTokenBudget int) int {
-	return autoCompactionThreshold(userThreshold, contextTokenBudget)
 }
 
 func compactionTargetTokens(targetPercent *int, contextTokenBudget int) int {
@@ -96,7 +91,7 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		s.logger.Info("compaction: skipped, disabled")
 		return
 	}
-	threshold := autoCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	threshold := AutoCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
 	if threshold <= 0 {
 		s.logger.Info("compaction: skipped, no usable threshold",
 			slog.Int("configured_threshold", botSettings.CompactionThreshold),

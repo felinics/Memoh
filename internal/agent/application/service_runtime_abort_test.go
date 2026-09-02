@@ -22,7 +22,7 @@ import (
 type abortLifecycleQueries struct {
 	dbstore.Queries
 	mu            sync.Mutex
-	existing      *sqlc.ContextLifecycle
+	existing      *sqlc.GetContextLifecycleByRunIDRow
 	existingAfter int
 	getCalls      int
 	assistantID   pgtype.UUID
@@ -48,12 +48,12 @@ func (*abortLifecycleQueries) CreateContextLifecycle(
 func (q *abortLifecycleQueries) GetContextLifecycleByRunID(
 	context.Context,
 	pgtype.UUID,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.GetContextLifecycleByRunIDRow, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.getCalls++
 	if q.existing == nil || q.existingAfter > 0 && q.getCalls < q.existingAfter {
-		return sqlc.ContextLifecycle{}, pgx.ErrNoRows
+		return sqlc.GetContextLifecycleByRunIDRow{}, pgx.ErrNoRows
 	}
 	return *q.existing, nil
 }
@@ -315,7 +315,7 @@ func TestAbortRuntimeRunFallsBackToMinimalAfterPendingDecisionGrace(t *testing.T
 
 func TestAbortRuntimeRunPrefersExistingAuthoritativeSnapshot(t *testing.T) {
 	queries := newAbortedLifecycleQueries(t)
-	queries.existing = &sqlc.ContextLifecycle{Snapshot: []byte(`{"version":7}`)}
+	queries.existing = &sqlc.GetContextLifecycleByRunIDRow{Snapshot: []byte(`{"version":7}`)}
 	service := &Service{
 		queries:           queries,
 		contextLifecycles: queries,

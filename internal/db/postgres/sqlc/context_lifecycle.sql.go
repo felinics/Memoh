@@ -73,15 +73,26 @@ func (q *Queries) CreateContextLifecycle(ctx context.Context, arg CreateContextL
 }
 
 const getContextLifecycleByRunID = `-- name: GetContextLifecycleByRunID :one
-SELECT run_id, team_id, bot_id, session_id, status, error_code, snapshot, selection_decisions, created_at
+SELECT run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $1
 `
 
-func (q *Queries) GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (ContextLifecycle, error) {
+type GetContextLifecycleByRunIDRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	Snapshot  []byte             `json:"snapshot"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (GetContextLifecycleByRunIDRow, error) {
 	row := q.db.QueryRow(ctx, getContextLifecycleByRunID, runID)
-	var i ContextLifecycle
+	var i GetContextLifecycleByRunIDRow
 	err := row.Scan(
 		&i.RunID,
 		&i.TeamID,
@@ -90,10 +101,23 @@ func (q *Queries) GetContextLifecycleByRunID(ctx context.Context, runID pgtype.U
 		&i.Status,
 		&i.ErrorCode,
 		&i.Snapshot,
-		&i.SelectionDecisions,
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getContextLifecycleSelectionDecisionsByRunID = `-- name: GetContextLifecycleSelectionDecisionsByRunID :one
+SELECT selection_decisions
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+`
+
+func (q *Queries) GetContextLifecycleSelectionDecisionsByRunID(ctx context.Context, runID pgtype.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getContextLifecycleSelectionDecisionsByRunID, runID)
+	var selection_decisions []byte
+	err := row.Scan(&selection_decisions)
+	return selection_decisions, err
 }
 
 const getLatestAssistantContextLifecycleByRunID = `-- name: GetLatestAssistantContextLifecycleByRunID :one
