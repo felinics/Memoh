@@ -29,14 +29,29 @@ type BotAgent struct {
 	// empty means not connected (legacy metadata path).
 	AgentCredentialID string         `json:"agent_credential_id,omitempty"`
 	Metadata          map[string]any `json:"metadata"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
-	DeletedAt         *time.Time     `json:"deleted_at,omitempty"`
+	// Dependency is the workspace dependency the agent's runtime declares
+	// (design §9.3). It is derived from the driver at read time, never
+	// persisted, and omitted for runtimes without a declaration (ACP).
+	Dependency *DependencyRequirement `json:"dependency,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
+	UpdatedAt  time.Time              `json:"updated_at"`
+	DeletedAt  *time.Time             `json:"deleted_at,omitempty"`
+}
+
+// DependencyRequirement names the managed workspace dependency a direct
+// runtime needs and the version this server build is pinned to. The web
+// preflight (POST /bots/{bot_id}/dependencies/preflight) keys on both.
+type DependencyRequirement struct {
+	DependencyID    string `json:"dependency_id"`
+	RequiredVersion string `json:"required_version"`
 }
 
 type CreateRequest struct {
-	Name     string         `json:"name"`
-	Runtime  string         `json:"runtime"`
+	Name    string `json:"name"`
+	Runtime string `json:"runtime"`
+	// Enabled defaults to true when omitted. The web passes false for direct
+	// runtimes so the dependency preflight runs before the agent goes live.
+	Enabled  *bool          `json:"enabled,omitempty"`
 	Metadata map[string]any `json:"metadata"`
 }
 

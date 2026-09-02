@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/background"
 	"github.com/felinics/memoh/internal/textutil"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
@@ -73,6 +74,10 @@ type Options struct {
 	// ScriptEnv returns extra environment entries for every script run, such
 	// as NPM_MIRROR (design §5.4). It may be nil.
 	ScriptEnv func(ctx context.Context) []string
+	// Background receives the installs the launcher resolver starts for a
+	// missing dependency (design §9.4). When nil the resolver reports the
+	// dependency missing without starting anything and TaskID stays empty.
+	Background *background.Manager
 }
 
 // Service reconciles the catalog, the installation records, and the
@@ -92,6 +97,18 @@ type Service struct {
 	run      func(ctx context.Context, client *bridge.Client, spec RunSpec, sink LogSink) (Result, error)
 
 	locks operationLocks
+
+	// background and the maps below belong to the launcher resolver
+	// (resolver.go); resolverMu guards both maps.
+	background *background.Manager
+	resolverMu sync.Mutex
+	// installs maps a (bot, target, dependency) to the background install the
+	// resolver started for it, until that task finishes.
+	installs map[InstallationKey]string
+	// launched remembers the path ResolveLauncher last handed out per key so
+	// a handshake-reported version is written to that copy, not the default
+	// winner.
+	launched map[InstallationKey]string
 }
 
 // NewService wires a Service and subscribes the cache to bridge resets so a
@@ -118,6 +135,10 @@ func NewService(opts Options) *Service {
 		discover:  Discover,
 		run:       Run,
 		locks:     operationLocks{held: make(map[InstallationKey]struct{})},
+
+		background: opts.Background,
+		installs:   make(map[InstallationKey]string),
+		launched:   make(map[InstallationKey]string),
 	}
 	if s.cache == nil {
 		s.cache = NewCache(defaultCacheTTL)

@@ -299,6 +299,9 @@ type fakeWorkspace struct {
 	ensureErr   error
 	ensureCalls []string
 	resetFns    []func(string)
+	// currentTarget is what CurrentTargetID reports; empty means native.
+	currentTarget    string
+	currentTargetErr error
 }
 
 func newFakeWorkspace(client *bridge.Client, dataRoot string) *fakeWorkspace {
@@ -343,6 +346,22 @@ func (f *fakeWorkspace) OnBridgeReset(fn func(botID string)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resetFns = append(f.resetFns, fn)
+}
+
+func (f *fakeWorkspace) CurrentTargetID(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.currentTargetErr != nil {
+		return "", f.currentTargetErr
+	}
+	return normalizeTargetID(f.currentTarget), nil
+}
+
+func (f *fakeWorkspace) setCurrentTarget(targetID string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.currentTarget = targetID
+	f.currentTargetErr = err
 }
 
 func (f *fakeWorkspace) reset(botID string) {

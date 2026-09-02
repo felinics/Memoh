@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
@@ -56,6 +57,16 @@ type Driver struct {
 	stateStore  agentstate.SessionStateStore
 	toolGateway toolmount.Gateway
 	logger      *slog.Logger
+
+	// launchers picks the CLI copy each turn executes (design §9.2). Nil
+	// means the toolkit launcher, unconditionally.
+	launchers external.LauncherResolver
+
+	// mismatchNoticed records, per thread, the (required, installed) version
+	// pair the thread was already told about, so the version-mismatch notice
+	// fires once per thread (design §9.4).
+	mismatchMu      sync.Mutex
+	mismatchNoticed map[string]string
 }
 
 // NewDriver constructs the Claude Code runtime driver.
@@ -124,7 +135,13 @@ func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (ex
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	proc, err := startCLI(ctx, client, defaultProjectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg))
+	// A missing dependency returns as agent_dependency_missing feedback; it
+	// must not be re-wrapped into a generic runtime error.
+	launcher, err := d.resolveLauncher(ctx, botID)
+	if err != nil {
+		return external.ModelCatalog{}, err
+	}
+	proc, err := startCLI(ctx, client, defaultProjectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg), launcher.Path)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
@@ -136,6 +153,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (ex
 		Sink:       external.EventSinkFunc(func(event.StreamEvent) {}),
 	}
 	turn := newTurnRunner(ctx, input, proc, d.approval, d.approval.RegisterWaiter, d.logger)
+	turn.onCLIVersion = d.versionObserver(botID)
 	defer turn.close()
 	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
 	responseCh, _, err := turn.sendControl("initialize", nil)
@@ -222,6 +240,15 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err != nil {
 		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
+	// Resolve the CLI copy before any session or tool work: a missing
+	// dependency ends the turn here with agent_dependency_missing feedback,
+	// already in its final user-facing shape (design §9.4). A version mismatch
+	// still launches and is announced once per thread (WD-EXT-001).
+	launcher, err := d.resolveLauncher(ctx, input.BotID)
+	if err != nil {
+		return external.PromptResult{}, err
+	}
+	d.noticeVersionMismatch(input, launcher)
 
 	storedSessionID := strings.TrimSpace(metadataString(input.RuntimeMetadata, metadataSessionIDKey))
 	if input.ForceFreshRuntime {
@@ -249,13 +276,14 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	// The process must survive a caller disconnect long enough for the
 	// interrupt handshake below.
-	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, env)
+	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, env, launcher.Path)
 	if err != nil {
 		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
 	defer func() { _ = proc.Close() }()
 
 	turn := newTurnRunner(ctx, input, proc, d.approval, d.approval.RegisterWaiter, d.logger)
+	turn.onCLIVersion = d.versionObserver(input.BotID)
 	defer turn.close()
 	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, turn.emit)

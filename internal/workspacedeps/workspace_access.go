@@ -53,6 +53,11 @@ type WorkspaceAccess interface {
 	// OnBridgeReset registers a callback that runs whenever the bot's bridge
 	// connection is evicted, i.e. after a container restart or rebuild.
 	OnBridgeReset(fn func(botID string))
+	// CurrentTargetID returns the workspace target a runtime launched for the
+	// bot right now would use: the request-scoped override when the context
+	// carries one, otherwise the bot's primary target. It never connects to a
+	// runtime.
+	CurrentTargetID(ctx context.Context, botID string) (string, error)
 }
 
 // normalizeTargetID maps the empty target to the native workspace.
@@ -154,6 +159,14 @@ func (a *managerWorkspaceAccess) EnsureRunning(ctx context.Context, botID, targe
 
 func (a *managerWorkspaceAccess) OnBridgeReset(fn func(botID string)) {
 	a.manager.OnBridgeReset(fn)
+}
+
+func (a *managerWorkspaceAccess) CurrentTargetID(ctx context.Context, botID string) (string, error) {
+	targetID, err := a.manager.CurrentWorkspaceTargetID(ctx, botID)
+	if err != nil {
+		return "", fmt.Errorf("workspacedeps: current workspace target: %w", mapRemoteError(err))
+	}
+	return normalizeTargetID(targetID), nil
 }
 
 // isRemoteUnavailable groups every manager error that means "the remote

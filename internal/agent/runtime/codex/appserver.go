@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/version"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -32,6 +33,10 @@ type appServer struct {
 	mountCtx    context.Context
 	mountCancel context.CancelFunc
 
+	// launcher is the CLI copy this process runs. When the resolver flagged
+	// a version mismatch the server still runs (design WD-EXT-001) and each
+	// thread is told once; mismatchNoticed records which threads were told.
+	launcher     external.Launcher
 	codexVersion string
 
 	mu    sync.Mutex
@@ -51,7 +56,8 @@ type appServer struct {
 	toolMounts map[string]*toolmount.Mount
 	// logins tracks in-flight device-code logins by login id; outcomes arrive
 	// via the account/login/completed notification.
-	logins map[string]*loginOutcome
+	logins          map[string]*loginOutcome
+	mismatchNoticed map[string]bool
 }
 
 // loginOutcome is the terminal state of one device-code login.
@@ -68,8 +74,8 @@ var ErrAuthRequired = errors.New("codex runtime authentication is required")
 // handshakeTimeout bounds initialize plus auth setup on a fresh process.
 const handshakeTimeout = 60 * time.Second
 
-func startAppServerSession(ctx context.Context, botID, botAgentID string, client *bridge.Client, cfg Config, logger *slog.Logger) (*appServer, error) {
-	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg)
+func startAppServerSession(ctx context.Context, botID, botAgentID string, client *bridge.Client, cfg Config, launcher external.Launcher, logger *slog.Logger) (*appServer, error) {
+	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg, launcher.Path)
 	if err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
@@ -80,6 +86,7 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		proc:            proc,
 		logger:          logger,
 		client:          client,
+		launcher:        launcher,
 		mountCtx:        mountCtx,
 		mountCancel:     mountCancel,
 		turns:           map[string]*turnState{},
@@ -87,6 +94,7 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		toollessThreads: map[string]bool{},
 		logins:          map[string]*loginOutcome{},
 		toolMounts:      map[string]*toolmount.Mount{},
+		mismatchNoticed: map[string]bool{},
 	}
 	srv.conn = newConn(proc, srv, logger)
 
@@ -117,6 +125,8 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 			slog.String("bot_id", botID),
 			slog.String("cli_version", srv.codexVersion),
 			slog.String("pinned", protocol.PinnedCodexVersion),
+			slog.String("launcher", launcher.Path),
+			slog.String("launcher_source", string(launcher.Source)),
 		)
 	}
 	return srv, nil
@@ -244,6 +254,35 @@ func (s *appServer) threadToolless(threadID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.toollessThreads[threadID]
+}
+
+// claimLauncherMismatchNotice reports whether threadID must still be told
+// that this server runs a CLI at a version other than the pinned one, and
+// marks it told. It is false when the launcher matches or the thread has
+// already been told: the notice is once per thread per app-server.
+func (s *appServer) claimLauncherMismatchNotice(threadID string) bool {
+	if !s.launcher.Mismatch {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mismatchNoticed[threadID] {
+		return false
+	}
+	if s.mismatchNoticed == nil {
+		s.mismatchNoticed = map[string]bool{}
+	}
+	s.mismatchNoticed[threadID] = true
+	return true
+}
+
+// installedLauncherVersion is the version to show in a mismatch notice: the
+// resolver's observation, or the handshake's when discovery had none.
+func (s *appServer) installedLauncherVersion() string {
+	if v := strings.TrimSpace(s.launcher.Version); v != "" {
+		return v
+	}
+	return strings.TrimSpace(s.codexVersion)
 }
 
 // HandleServerRequest routes app-server → Memoh requests to the owning turn.
