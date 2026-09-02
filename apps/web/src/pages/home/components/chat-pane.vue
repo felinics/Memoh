@@ -656,7 +656,7 @@
                              same contract as composer-continue-on's pill. -->
                         <span class="composer-pill-content inline-flex min-w-0 items-center gap-2">
                           <Spinner
-                            v-if="composerConfigPending || composerModelsLoading"
+                            v-if="composerSpinnerVisible"
                             class="size-3.5 shrink-0"
                           />
                           <span class="min-w-0 truncate text-label text-composer-control-label">{{ modelTriggerLabel }}</span>
@@ -1099,6 +1099,25 @@ const pairCarried = computed(() => {
 // welcome composer (per bot, cleared on first send). Both paths are silent on
 // failure — the next sent message writes the resolved pair back server-side,
 // so a dropped write only loses the pick-until-send window.
+// Show the composer loading spinner only when the load outlasts a fast
+// round-trip: sub-3s catalog loads must not flash a spinner on every pane
+// switch (user feedback, 2026-09-02). The popover's own loading row stays
+// immediate — there the user is actively waiting on an open menu.
+function useDelayedTrue(source: Ref<boolean>, delayMs: number): Ref<boolean> {
+  const visible = ref(false)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  watch(source, (value) => {
+    if (value) {
+      timer ??= setTimeout(() => { visible.value = true }, delayMs)
+      return
+    }
+    if (timer) { clearTimeout(timer); timer = undefined }
+    visible.value = false
+  }, { immediate: true })
+  onUnmounted(() => { if (timer) clearTimeout(timer) })
+  return visible
+}
+
 const pairDraftKey = computed(() => `memoh:composer-pair:${currentBotId.value}`)
 const pendingPairPatchSession = ref('')
 
@@ -2046,6 +2065,10 @@ const directModelCatalogError = computed(() => {
 const composerConfigPending = computed(() => activeUsesExternalAgentComposer.value && (
   agentChanging.value || (activeUsesACPRuntime.value && (acpConfigChanging.value || acpConfigPreparing.value))
 ))
+const composerSpinnerVisible = useDelayedTrue(
+  computed(() => composerConfigPending.value || composerModelsLoading.value),
+  3000,
+)
 const canChangeAgent = computed(() => !streaming.value
   && !creatingSession.value
   && !composerConfigPending.value
