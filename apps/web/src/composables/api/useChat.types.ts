@@ -21,6 +21,9 @@ export interface SessionSummary {
   updated_at?: string
   route_metadata?: Record<string, unknown>
   route_conversation_type?: string
+  /** Session's persisted (model, effort) pair (issue #879); empty = no memory. */
+  preferred_chat_model_id?: string
+  preferred_reasoning_effort?: string
 }
 
 // Bot-wide activity SSE: `/bots/{bot_id}/sessions/events`. Carries identifier

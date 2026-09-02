@@ -74,8 +74,6 @@ export interface ChatSendDeps {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   focusedChatViewId: Ref<string>
-  overrideModelId: Ref<string>
-  overrideReasoningEffort: Ref<string>
   normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
   chatView: (target?: Partial<ChatViewTarget>) => ChatViewEntry
   transcriptForTarget: (target?: Partial<ChatViewTarget>) => Transcript
@@ -111,6 +109,7 @@ export interface ChatSendDeps {
   ensureChatViewSession: (
     target: ChatViewTarget,
     firstPrompt?: string,
+    pair?: { modelId?: string, reasoningEffort?: string },
   ) => Promise<ChatViewTarget>
   startSessionRuntime: (botId: string, sessionId: string) => void
   recordUserSent: (target: ChatViewTarget, sessionId: string, wasDraft: boolean) => void
@@ -276,12 +275,18 @@ export function createChatSend(deps: ChatSendDeps) {
 
     const deferSessionCreation = serverSkillActivation && wasDraft
     try {
-      const modelId = options.modelId?.trim() || deps.overrideModelId.value || undefined
+      // The pair comes from options only (spec v2 §3.4): the composer passes
+      // it when the pair has an explicit source (user/session) and omits it
+      // for default-sourced pairs, which is how the server tells "never
+      // picked" apart from "picked the default".
+      const modelId = options.modelId?.trim() || undefined
       const reasoningEffort = options.reasoningEffort?.trim()
-        || deps.overrideReasoningEffort.value
         || undefined
       if (!deferSessionCreation) {
-        viewTarget = await deps.ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined)
+        viewTarget = await deps.ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined, {
+          modelId,
+          reasoningEffort,
+        })
       }
 
       const botId = viewTarget.botId
@@ -484,9 +489,8 @@ export function createChatSend(deps: ChatSendDeps) {
         invocation_id: invocationId,
         session_id: targetSessionId,
         turn_id: targetTurnId,
-        model_id: options.modelId?.trim() || deps.overrideModelId.value || undefined,
+        model_id: options.modelId?.trim() || undefined,
         reasoning_effort: options.reasoningEffort?.trim()
-          || deps.overrideReasoningEffort.value
           || undefined,
         workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
@@ -572,9 +576,8 @@ export function createChatSend(deps: ChatSendDeps) {
         session_id: targetSessionId,
         turn_id: targetTurnId,
         text: trimmed,
-        model_id: options.modelId?.trim() || deps.overrideModelId.value || undefined,
+        model_id: options.modelId?.trim() || undefined,
         reasoning_effort: options.reasoningEffort?.trim()
-          || deps.overrideReasoningEffort.value
           || undefined,
         workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')

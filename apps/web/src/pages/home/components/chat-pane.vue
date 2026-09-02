@@ -970,7 +970,7 @@ import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { provideConnectorLogos } from '../composables/useConnectorLogos'
-import { fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
+import { fetchSafeSkillCatalog, fetchSession, fetchModelPreferenceSeed, updateSessionModelPreference, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
 import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -1066,11 +1066,103 @@ const activeChatTarget = computed(() => chatStore.chatTargetFor(paneTarget.value
 const activeSession = computed(() => activeChatTarget.value.session)
 const activeChatReadOnly = computed(() => chatStore.chatReadOnlyFor(paneTarget.value))
 const activeChatCanFork = computed(() => chatStore.chatCanForkFor(paneTarget.value))
-const overrideModelId = ref('')
-const overrideReasoningEffort = ref('')
-// Set once the user picks a model in this pane, so late-arriving defaults
-// (a subagent's pinned model, bot settings) never overwrite their choice.
-const userPickedModel = ref(false)
+// The composer pair lives on the shared ChatViewEntry (issue #879, spec v2
+// §3.4), bridged here as computed accessors: same-session tabs share one
+// pair, and repointing this pane swaps in the target view's own pair instead
+// of carrying a stale selection across sessions.
+const overrideModelId = computed({
+  get: () => paneView.value.pairModelId.value,
+  set: (value: string) => { paneView.value.pairModelId.value = value },
+})
+const overrideReasoningEffort = computed({
+  get: () => paneView.value.pairEffort.value,
+  set: (value: string) => { paneView.value.pairEffort.value = value },
+})
+const pairSource = computed(() => paneView.value.pairSource.value)
+
+// The wire pair (spec v2 §3.4): only explicit sources (user pick, remembered
+// session) are carried on send/retry/edit/createSession. Default-sourced and
+// unset pairs are omitted so the session keeps following the bot default live
+// (P10′) and the server never freezes an unpicked default into the session.
+const pairCarried = computed(() => {
+  const source = pairSource.value
+  if (source !== 'user' && source !== 'session') return { modelId: '', reasoningEffort: '' }
+  return {
+    modelId: overrideModelId.value.trim(),
+    reasoningEffort: overrideReasoningEffort.value.trim(),
+  }
+})
+
+// ── Session model preference (issue #879) ────────────────────────────────
+// The composer pair (model, effort) is a session attribute: PATCH it
+// best-effort when a session is open, keep a localStorage draft on the
+// welcome composer (per bot, cleared on first send). Both paths are silent on
+// failure — the next sent message writes the resolved pair back server-side,
+// so a dropped write only loses the pick-until-send window.
+const pairDraftKey = computed(() => `memoh:composer-pair:${currentBotId.value}`)
+const pendingPairPatchSession = ref('')
+
+function persistComposerPair() {
+  if (activeUsesExternalAgentComposer.value) return // ACP double-write is its own path
+  const sessionId = paneTarget.value.sessionId
+  const modelId = overrideModelId.value.trim()
+  if (!modelId) return
+  const effort = overrideReasoningEffort.value.trim()
+  if (!sessionId) {
+    try {
+      localStorage.setItem(pairDraftKey.value, JSON.stringify({ model_id: modelId, reasoning_effort: effort }))
+    } catch { /* private mode / quota: the draft simply doesn't persist */ }
+    return
+  }
+  pendingPairPatchSession.value = sessionId
+  updateSessionModelPreference(currentBotId.value, sessionId, modelId, effort)
+    .catch(() => { /* best-effort; next send is the retry */ })
+    .finally(() => {
+      if (pendingPairPatchSession.value === sessionId) pendingPairPatchSession.value = ''
+    })
+}
+
+function readPairDraft(): { model_id: string, reasoning_effort: string } | null {
+  try {
+    const raw = localStorage.getItem(pairDraftKey.value)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { model_id?: string, reasoning_effort?: string }
+    return parsed.model_id ? { model_id: parsed.model_id, reasoning_effort: parsed.reasoning_effort ?? '' } : null
+  } catch {
+    return null
+  }
+}
+
+function clearPairDraft() {
+  try {
+    localStorage.removeItem(pairDraftKey.value)
+  } catch { /* ignore */ }
+}
+
+// Welcome seed chain (spec §3.4): draft (this device, source user) > latest
+// native session pair (server, source session — carried on first send) > bot
+// default (source default, initFromBotSettings owns that level).
+async function seedWelcomePair() {
+  if (activeUsesExternalAgentComposer.value || paneTarget.value.sessionId) return
+  if (pairSource.value === 'user') return // this device already picked
+  const draft = readPairDraft()
+  if (draft) {
+    overrideModelId.value = draft.model_id
+    overrideReasoningEffort.value = draft.reasoning_effort || botSettings.value?.reasoning_effort || 'medium'
+    paneView.value.pairSource.value = 'user'
+    return
+  }
+  try {
+    const seed = await fetchModelPreferenceSeed(currentBotId.value)
+    // The user may have picked something or opened a session while the seed
+    // was in flight; only apply to a still-welcome, still-unpicked composer.
+    if (!seed.model_id || paneTarget.value.sessionId || pairSource.value === 'user') return
+    overrideModelId.value = seed.model_id
+    overrideReasoningEffort.value = seed.reasoning_effort || botSettings.value?.reasoning_effort || 'medium'
+    paneView.value.pairSource.value = 'session'
+  } catch { /* seed is best-effort; the bot default remains */ }
+}
+
 // Session creation briefly changes several pieces of the direct-runtime
 // identity. That is one draft being promoted, not a switch to another chat.
 let directDraftPromotionPending = false
@@ -2235,26 +2327,34 @@ const pinnedSubagentModelId = computed(() => resolvePinnedSubagentModelId(
 
 function initFromBotSettings() {
   if (activeUsesExternalAgentComposer.value || !botSettings.value) return
-  if (!overrideModelId.value) {
-    overrideModelId.value = pinnedSubagentModelId.value || botSettings.value.chat_model_id || ''
+  // The bot default is the lowest seed level (spec §3.4): it only feeds views
+  // with no explicit pair, marks them default-sourced so sends omit the pair,
+  // and follows admin changes to the default live (P10′).
+  if (pairSource.value !== 'unset' && pairSource.value !== 'default') return
+  const modelId = pinnedSubagentModelId.value || botSettings.value.chat_model_id || ''
+  const effort = botSettings.value.reasoning_effort || 'medium'
+  if (pairSource.value === 'default') {
+    overrideModelId.value = modelId
+    overrideReasoningEffort.value = effort
+    return
   }
-  if (!overrideReasoningEffort.value) {
-    // reasoning_effort is the bot's whole reasoning decision now, including
-    // "disable"; an empty value only means settings have not loaded a tier yet,
-    // which resolves to medium the same way the backend does.
-    overrideReasoningEffort.value = botSettings.value.reasoning_effort || 'medium'
-  }
+  if (!overrideModelId.value) overrideModelId.value = modelId
+  if (!overrideReasoningEffort.value) overrideReasoningEffort.value = effort
+  if (overrideModelId.value) paneView.value.pairSource.value = 'default'
 }
 
 watch([botSettings, activeUsesExternalAgentComposer], () => initFromBotSettings(), { immediate: true })
 
 // The session summary and the model list are both fetched, so the pinned model
 // routinely lands after bot settings already seeded the default. Adopt it then
-// too — but never over a model the user picked themselves.
+// too — but never over a remembered pair (memory outranks the pin server-side)
+// or a model the user picked themselves.
 watch(pinnedSubagentModelId, (pinned, previous) => {
-  if (userPickedModel.value || activeUsesExternalAgentComposer.value) return
+  if (activeUsesExternalAgentComposer.value) return
+  if (pairSource.value !== 'unset' && pairSource.value !== 'default') return
   if (pinned) {
     overrideModelId.value = pinned
+    paneView.value.pairSource.value = 'default'
     return
   }
   // Repointed off a subagent: hand the composer back to the bot's own default
@@ -2274,25 +2374,45 @@ watch(activeModelReasoning, (options) => {
 }, { immediate: true })
 
 watch(currentBotId, () => {
-  overrideModelId.value = ''
-  overrideReasoningEffort.value = ''
-  userPickedModel.value = false
+  if (!paneTarget.value.sessionId) void seedWelcomePair()
 })
 
-// A pane can be repointed at another session without remounting, and the model
-// a user picked belongs to the session they picked it in — clear the flag so the
-// next session's pinned model can still seed the composer.
-watch(() => paneTarget.value.sessionId, () => {
+// A pane can be repointed at another session without remounting, and the pair
+// belongs to the session it was picked in (#879): reseed the VIEW from the
+// target session's persisted pair. Reseeding only overwrites unset/default
+// sources — a user pick (or a draft pair promoted into the session view)
+// survives the session row landing late, which is also what keeps the first
+// send from flashing back to the bot default (P9′).
+watch(() => [paneTarget.value.sessionId, activeSession.value?.id], ([sessionId], previous) => {
   if (directDraftPromotionPending) return
-  userPickedModel.value = false
-})
+  if (activeUsesExternalAgentComposer.value) return
+  if (!sessionId) {
+    void seedWelcomePair()
+    return
+  }
+  if (previous && !previous[0] && sessionId) clearPairDraft() // welcome → session: draft consumed
+  if (pendingPairPatchSession.value === sessionId) return // our PATCH is in flight; stay optimistic
+  if (pairSource.value !== 'unset' && pairSource.value !== 'default') return
+  const sess = activeSession.value
+  if (!sess || sess.id !== sessionId) return // row not loaded yet: the view keeps its pair
+  if (sess.preferred_chat_model_id) {
+    overrideModelId.value = sess.preferred_chat_model_id
+    overrideReasoningEffort.value = sess.preferred_reasoning_effort || botSettings.value?.reasoning_effort || 'medium'
+    paneView.value.pairSource.value = 'session'
+    return
+  }
+  // No memory: the session follows the bot default chain live (P10′).
+  overrideModelId.value = pinnedSubagentModelId.value || botSettings.value?.chat_model_id || ''
+  overrideReasoningEffort.value = botSettings.value?.reasoning_effort || 'medium'
+  paneView.value.pairSource.value = 'default'
+}, { immediate: true })
 
 watch(activeUsesExternalAgentComposer, (usesExternalAgent, previouslyUsedExternalAgent) => {
   if (usesExternalAgent === previouslyUsedExternalAgent) return
   if (directDraftPromotionPending) return
   overrideModelId.value = ''
   overrideReasoningEffort.value = ''
-  userPickedModel.value = false
+  paneView.value.pairSource.value = 'unset'
   if (!usesExternalAgent) initFromBotSettings()
 })
 
@@ -2300,6 +2420,7 @@ watch(activeACPAgentId, (agentID, previousAgentID) => {
   if (!activeUsesExternalAgentComposer.value || !previousAgentID || agentID === previousAgentID) return
   overrideModelId.value = ''
   overrideReasoningEffort.value = ''
+  paneView.value.pairSource.value = 'unset'
 })
 
 const directSessionIdentity = computed(() => JSON.stringify([
@@ -2312,7 +2433,7 @@ watch(directSessionIdentity, (identity, previousIdentity) => {
   if (!activeUsesDirectRuntime.value || identity === previousIdentity || directDraftPromotionPending) return
   overrideModelId.value = ''
   overrideReasoningEffort.value = ''
-  userPickedModel.value = false
+  paneView.value.pairSource.value = 'unset'
 })
 
 // ACP overrides describe one runtime. An ephemeral pane is repointed to a
@@ -2332,6 +2453,7 @@ watch(acpSessionIdentity, (identity, previousIdentity) => {
   if (!activeUsesACPRuntime.value || identity === previousIdentity) return
   overrideModelId.value = ''
   overrideReasoningEffort.value = ''
+  paneView.value.pairSource.value = 'unset'
 })
 
 function reconcileACPComposerConfig() {
@@ -2346,6 +2468,7 @@ function reconcileACPComposerConfig() {
     if (!selectedModel || !availableModels.has(selectedModel)) {
       const currentModel = currentACPModelId.value.trim()
       overrideModelId.value = availableModels.has(currentModel) ? currentModel : ''
+      paneView.value.pairSource.value = 'session'
     }
   }
 
@@ -2357,6 +2480,7 @@ function reconcileACPComposerConfig() {
     if (!selectedEffort || !availableEfforts.has(selectedEffort)) {
       const currentEffort = currentACPReasoningEffort.value.trim()
       overrideReasoningEffort.value = availableEfforts.has(currentEffort) ? currentEffort : ''
+      paneView.value.pairSource.value = 'session'
     }
   } else {
     overrideReasoningEffort.value = ''
@@ -2534,11 +2658,13 @@ async function selectMemohAgent() {
 }
 
 function onModelSelected() {
-  // The popover stays open on selection (#899) — dismissal is outside click /
-  // Esc. Here we only sanitise the effort when the new model can't reason.
+  // Switching models replaces the WHOLE pair (spec v2 P6′): the effort lands
+  // on the new model's default tier and is never carried across models.
   if (!activeModelSupportsReasoning.value) {
     overrideReasoningEffort.value = REASONING_EFFORT_DISABLE
+    return
   }
+  overrideReasoningEffort.value = activeModelReasoning.value?.default_effort?.trim() ?? ''
 }
 
 function reconcileDirectReasoningEffort() {
@@ -2550,18 +2676,24 @@ function reconcileDirectReasoningEffort() {
   overrideReasoningEffort.value = available.has(configured)
     ? configured
     : available.has(fallback) ? fallback : ''
+  // The value now comes from the runtime's own state: it is the session's
+  // pair, carried on sends like any remembered pair.
+  paneView.value.pairSource.value = 'session'
 }
 
 async function onComposerModelValueSelected(value: string) {
   if (activeUsesACPRuntime.value && acpConfigChanging.value) return
   const previousModel = overrideModelId.value
   const previousReasoningEffort = overrideReasoningEffort.value
-  userPickedModel.value = true
+  const previousSource = pairSource.value
   overrideModelId.value = value
   if (!activeUsesExternalAgentComposer.value) {
+    paneView.value.pairSource.value = 'user'
     onModelSelected()
+    persistComposerPair() // pair semantics (spec §1.0): effort follows onModelSelected
     return
   }
+  paneView.value.pairSource.value = 'user'
   if (activeUsesDirectRuntime.value) {
     reconcileDirectReasoningEffort()
     return
@@ -2570,6 +2702,7 @@ async function onComposerModelValueSelected(value: string) {
   const modelId = value.trim()
   if (!modelId) {
     overrideModelId.value = previousModel
+    paneView.value.pairSource.value = previousSource
     return
   }
   const operationScope = acpOperationScope.value
@@ -2586,6 +2719,7 @@ async function onComposerModelValueSelected(value: string) {
     ) {
       overrideModelId.value = previousModel
       overrideReasoningEffort.value = previousReasoningEffort
+      paneView.value.pairSource.value = previousSource
       composerError.value = resolveApiErrorMessage(error, t('chat.modelSwitchFailed'))
     }
   } finally {
@@ -2622,13 +2756,21 @@ async function onACPModeSelected(value: unknown) {
 async function onComposerReasoningEffortSelected(value: string) {
   if (activeUsesACPRuntime.value && acpConfigChanging.value) return
   const previousEffort = overrideReasoningEffort.value
+  const previousSource = pairSource.value
   overrideReasoningEffort.value = value
-  if (!activeUsesExternalAgentComposer.value) return
+  if (!activeUsesExternalAgentComposer.value) {
+    // Changing only the effort swaps the pair's effort component (spec §1.0).
+    paneView.value.pairSource.value = 'user'
+    persistComposerPair()
+    return
+  }
+  paneView.value.pairSource.value = 'user'
   if (activeUsesDirectRuntime.value) return
 
   const effort = value.trim()
   if (!effort) {
     overrideReasoningEffort.value = previousEffort
+    paneView.value.pairSource.value = previousSource
     return
   }
   const operationScope = acpOperationScope.value
@@ -2644,6 +2786,7 @@ async function onComposerReasoningEffortSelected(value: string) {
       && overrideReasoningEffort.value === value
     ) {
       overrideReasoningEffort.value = previousEffort
+      paneView.value.pairSource.value = previousSource
       composerError.value = resolveApiErrorMessage(error, t('chat.reasoningSwitchFailed'))
     }
   } finally {
@@ -3211,8 +3354,8 @@ async function handleRetryMessage(turnId: string) {
   composerError.value = ''
   const result = await chatStore.retryLatestAssistant(turnId, {
     target: paneTarget.value,
-    modelId: overrideModelId.value,
-    reasoningEffort: overrideReasoningEffort.value,
+    modelId: pairCarried.value.modelId,
+    reasoningEffort: pairCarried.value.reasoningEffort,
     workspaceTargetId: sendWorkspaceTargetId.value,
   })
   await refreshACPComposerConfigAfterSelectionError(result)
@@ -3230,8 +3373,8 @@ async function handleEditMessage(turnId: string, text: string, done?: (started: 
   try {
     const result = await chatStore.editLatestUser(turnId, text, {
       target: paneTarget.value,
-      modelId: overrideModelId.value,
-      reasoningEffort: overrideReasoningEffort.value,
+      modelId: pairCarried.value.modelId,
+      reasoningEffort: pairCarried.value.reasoningEffort,
       workspaceTargetId: sendWorkspaceTargetId.value,
     })
     await refreshACPComposerConfigAfterSelectionError(result)
@@ -3279,8 +3422,8 @@ async function handleSend() {
     paneTarget.value,
     inputDraftKey.value || 'chat',
   )
-  const sentModelId = overrideModelId.value
-  const sentReasoningEffort = overrideReasoningEffort.value
+  const sentModelId = pairCarried.value.modelId
+  const sentReasoningEffort = pairCarried.value.reasoningEffort
   const sentWorkspaceTargetId = sendWorkspaceTargetId.value
   const preserveDirectDraftSelection = activeUsesDirectRuntime.value && !sentContext.target.sessionId
   composerError.value = ''

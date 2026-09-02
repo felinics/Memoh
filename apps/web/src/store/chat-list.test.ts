@@ -2983,8 +2983,9 @@ describe('chat-list store', () => {
       const store = useChatStore()
 
       await store.selectBot('bot-1')
-      store.overrideReasoningEffort = REASONING_EFFORT_DISABLE
-      const result = await store.sendMessage('hello')
+      // The pair travels via send options (spec v2 §3.4): the composer passes
+      // it when it has an explicit source; the store has no pair of its own.
+      const result = await store.sendMessage('hello', undefined, { reasoningEffort: REASONING_EFFORT_DISABLE })
 
       expect(result).toMatchObject({ ok: true })
       expect(h.sentWSMessages).toHaveLength(1)

@@ -266,6 +266,11 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
   async function ensureChatViewSession(
     target: ChatViewTarget,
     firstPrompt?: string,
+    // First-send picker pair (issue #879): forwarded into the createSession
+    // body so the row is born with it (P9′). Callers pass it only when the
+    // pair has an explicit source; external-agent sessions never receive it
+    // (their pair lives in runtime_metadata instead).
+    pair?: { modelId?: string, reasoningEffort?: string },
   ): Promise<ChatViewTarget> {
     if (target.sessionId) return target
     if (deps.isDraftCreationActive(target)) {
@@ -291,6 +296,8 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
       const workdirId = deps.draftWorkdirIdFor(target.botId, { externalAgent: false })
       const created = await createSession(target.botId, {
         workdirId: workdirId || undefined,
+        preferredChatModelId: pair?.modelId,
+        preferredReasoningEffort: pair?.reasoningEffort,
       })
       if (
         generation !== deps.userScopeGeneration()
