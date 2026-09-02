@@ -409,6 +409,14 @@ func (s *ExecStream) Close() error {
 	return s.stream.CloseSend()
 }
 
+// CloseSend half-closes the send side so the process sees stdin EOF while
+// its output keeps streaming. Close() cancels the stream; this does not.
+func (s *ExecStream) CloseSend() error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.stream.CloseSend()
+}
+
 // ExecStreamPTY opens a bidirectional PTY exec stream.
 // The command runs inside a pseudo-terminal with the given initial size.
 func (c *Client) ExecStreamPTY(ctx context.Context, command, workDir string, cols, rows uint32) (*ExecStream, error) {

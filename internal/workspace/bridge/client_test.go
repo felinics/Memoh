@@ -647,3 +647,136 @@ func TestClientExecReturnsResultWhenServerClosesBeforeStdinLands(t *testing.T) {
 		t.Fatalf("exec result = %q/%d, want %q/0", result.Stdout, result.ExitCode, "done")
 	}
 }
+
+// newExecTestClient wires the client to a real bridgesvc server in-process, so
+// Exec runs actual /bin/sh processes with the production stdin/stdout plumbing
+// (bridgesvc.Server.execPipe) instead of a scripted fake.
+func newExecTestClient(t *testing.T) *Client {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("bridgesvc exec runs commands via /bin/sh")
+	}
+	return newTestClient(t, bridgesvc.New(bridgesvc.Options{
+		DefaultWorkDir:    t.TempDir(),
+		AllowHostAbsolute: true,
+	}))
+}
+
+// drainExecStream receives until EXIT, returning the concatenated stdout and
+// the exit code. It fails the test if the stream ends without EXIT.
+func drainExecStream(t *testing.T, stream *ExecStream) (string, int32) {
+	t.Helper()
+	var stdout bytes.Buffer
+	for {
+		out, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("Recv returned error before EXIT: %v (stdout so far %q)", err, stdout.String())
+		}
+		switch out.GetStream() {
+		case pb.ExecOutput_STDOUT:
+			stdout.Write(out.GetData())
+		case pb.ExecOutput_EXIT:
+			return stdout.String(), out.GetExitCode()
+		}
+	}
+}
+
+// TestExecStreamCloseSendDeliversStdinEOF proves the half-close contract end
+// to end against the real bridge server: `sh -s` reads its script from stdin,
+// `cat` then blocks on the same stdin, and only the client's CloseSend can
+// unblock it. Seeing `done` and EXIT 0 means bridgesvc closed stdinPipe when
+// its Recv loop hit EOF while the output side kept streaming.
+func TestExecStreamCloseSendDeliversStdinEOF(t *testing.T) {
+	client := newExecTestClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	stream, err := client.ExecStream(ctx, "exec sh -s", "", 20)
+	if err != nil {
+		t.Fatalf("ExecStream returned error: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	if err := stream.SendStdin([]byte("cat; echo done\n")); err != nil {
+		t.Fatalf("SendStdin returned error: %v", err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CloseSend returned error: %v", err)
+	}
+
+	stdout, exitCode := drainExecStream(t, stream)
+	if !strings.Contains(stdout, "done") {
+		t.Fatalf("stdout = %q, want it to contain %q", stdout, "done")
+	}
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+}
+
+// TestExecStreamCloseAfterCloseSendIsSafe pins the documented call order
+// `defer stream.Close()` → SendStdin → CloseSend: the deferred Close must not
+// panic or surface an error because gRPC's CloseSend is idempotent.
+func TestExecStreamCloseAfterCloseSendIsSafe(t *testing.T) {
+	client := newExecTestClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	stream, err := client.ExecStream(ctx, "exec sh -s", "", 20)
+	if err != nil {
+		t.Fatalf("ExecStream returned error: %v", err)
+	}
+	if err := stream.SendStdin([]byte("echo ok\n")); err != nil {
+		t.Fatalf("SendStdin returned error: %v", err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("CloseSend returned error: %v", err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		t.Fatalf("second CloseSend returned error: %v", err)
+	}
+	if _, exitCode := drainExecStream(t, stream); exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close after CloseSend returned error: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("second Close returned error: %v", err)
+	}
+}
+
+// TestExecStreamCloseWithoutCloseSendCancelsProcess fixes the semantic gap
+// between the two methods: Close cancels the whole stream, so the shell that
+// is still blocked on stdin never gets to run `echo done` for us and Recv
+// reports cancellation instead of output + EXIT. Compare with
+// TestExecStreamCloseSendDeliversStdinEOF, which sends the same script.
+func TestExecStreamCloseWithoutCloseSendCancelsProcess(t *testing.T) {
+	client := newExecTestClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	stream, err := client.ExecStream(ctx, "exec sh -s", "", 20)
+	if err != nil {
+		t.Fatalf("ExecStream returned error: %v", err)
+	}
+	if err := stream.SendStdin([]byte("cat; echo done\n")); err != nil {
+		t.Fatalf("SendStdin returned error: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	for {
+		out, err := stream.Recv()
+		if err == nil {
+			if out.GetStream() == pb.ExecOutput_EXIT || strings.Contains(string(out.GetData()), "done") {
+				t.Fatalf("Close() let the process finish normally: %v", out)
+			}
+			continue
+		}
+		if status.Code(err) != codes.Canceled && !errors.Is(err, context.Canceled) {
+			t.Fatalf("Recv error = %v, want cancellation", err)
+		}
+		return
+	}
+}
