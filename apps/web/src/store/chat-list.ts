@@ -71,6 +71,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
+    backgroundTaskFor,
   } = backgroundTasks
   const views = createChatViews({
     currentBotId,
@@ -604,6 +605,7 @@ export const useChatStore = defineStore('chat', () => {
     startupSendFailure, startupSendFailureFor,
     commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
+    backgroundTaskFor,
     initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,
     selectDraft, userSentInSession, draftViewRequested, applyDraftViewRequest,
     forkedSessionRequested, guiToolUseRequested, deletedSession,

@@ -15,6 +15,7 @@ import {
   pickString,
   skillActivationTextFromRaw,
   sortChatMessages,
+  stringRecord,
   structuredToolResult,
 } from './chat-list.normalize'
 import type { ChatMessage, ChatUserTurn } from './chat-list'
@@ -71,6 +72,13 @@ describe('record pickers', () => {
   it('pickString trims and skips blank values; pickRawString keeps raw', () => {
     expect(pickString({ a: '  ', b: ' x ' }, 'a', 'b')).toBe('x')
     expect(pickRawString({ a: '  ', b: 'x' }, 'a', 'b')).toBe('  ')
+  })
+
+  it('stringRecord keeps only string entries and collapses to undefined', () => {
+    expect(stringRecord({ dep_id: 'codex', install_task_id: '', count: 2, nested: { a: 1 } }))
+      .toEqual({ dep_id: 'codex', install_task_id: '' })
+    expect(stringRecord({ count: 2 })).toBeUndefined()
+    expect(stringRecord(undefined)).toBeUndefined()
   })
 
   it('structuredToolResult prefers structuredContent when non-empty', () => {

@@ -2240,7 +2240,8 @@
       "openSettings": "打开 Agent 设置",
       "dependencyRequired": "需要在工作区中安装 {name} {version}",
       "dependencyChecking": "正在检查依赖…",
-      "dependencySatisfied": "已安装 {name} {version}"
+      "dependencySatisfied": "已安装 {name} {version}",
+      "dependencyRemoteOffline": "该 Bot 连接的电脑已离线，上线后才能检查依赖。"
     },
     "dependencies": {
       "title": "工作区依赖",
@@ -2365,7 +2366,11 @@
         "title": "依赖有更新",
         "description": "不会自动更新。请在列表中逐项确认。",
         "gotIt": "知道了"
-      }
+      },
+      "done": "完成",
+      "errorDetails": "错误详情",
+      "checkUpdatesFailed": "检查更新失败",
+      "backgroundDone": "{name} 已完成"
     },
     "folders": {
       "create": "新建文件夹",

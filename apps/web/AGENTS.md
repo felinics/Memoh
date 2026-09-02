@@ -164,6 +164,8 @@ src/
 │   │   ├── index.vue          #     Bot grid
 │   │   ├── new.vue            #     Create bot flow
 │   │   ├── detail.vue         #     Bot detail with tabbed interface
+│   │   ├── composables/       #     Page-specific composables
+│   │   │   └── useDependencyOperation.ts  # One streamed dependency operation: log, outcome, progress dialog state
 │   │   └── components/        #     Bot sub-components
 │   │       ├── bot-overview.vue       # Bot overview tab
 │   │       ├── bot-settings.vue       # Bot settings tab
@@ -189,6 +191,8 @@ src/
 │   │       ├── tts-model-select.vue         # TTS model selector
 │   │       ├── channel-settings-panel.vue   # Channel settings panel
 │   │       ├── container-create-progress.vue # Container creation progress
+│   │       ├── bot-dependencies.vue         # Workspace dependencies tab (target select, check updates, grouped rows, dialogs)
+│   │       ├── dependency-row.vue           # One dependency row: icon, version/status badges, primary action + menu
 │   │       ├── dependency-kv-list.vue       # Read-only key/value block shared by the dependency dialogs
 │   │       ├── dependency-confirm-dialog.vue # Confirm install / update / align / reinstall of a workspace dependency
 │   │       ├── dependency-progress-dialog.vue # Live SSE log of a dependency operation (copy log, retry, no auto-close)
