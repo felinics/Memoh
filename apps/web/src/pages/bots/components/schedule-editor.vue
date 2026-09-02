@@ -50,154 +50,151 @@
         </div>
       </SettingsRow>
 
-      <!-- A three-row textarea has no business in the control column: the
-           command is the longest thing on this form, so it takes the row. -->
-      <SettingsRow stack="always">
-        <template #content>
-          <FieldStack
-            :label="t('bots.schedule.form.command')"
-            for="sched-command"
-          >
-            <Textarea
-              id="sched-command"
-              v-model="form.command"
-              class="min-h-[4.5rem] resize-none font-mono"
-              :placeholder="t('bots.schedule.form.commandPlaceholder')"
-              rows="3"
-            />
-          </FieldStack>
-        </template>
-      </SettingsRow>
-
       <!-- The picker is a cluster — a mode select, its operands, a weekday
-           grid — not one control, so it takes the row rather than the
-           control column, the same way the command above it does. -->
-      <SettingsRow stack="always">
-        <template #content>
-          <FieldStack :label="t('bots.schedule.form.pattern')">
-            <div class="space-y-3">
-              <div class="flex items-center gap-2 flex-wrap">
-                <Select v-model="schedModeModel">
-                  <SelectTrigger class="w-36 shrink-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="scheduleMode in SCHEDULE_MODES"
-                      :key="scheduleMode.value"
-                      :value="scheduleMode.value"
-                    >
-                      {{ t(scheduleMode.labelKey) }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <template v-if="patternState.mode === 'minutes'">
-                  <Input
-                    type="number"
-                    :min="1"
-                    :max="59"
-                    :model-value="patternState.intervalMinutes"
-                    class="w-20 text-center"
-                    @update:model-value="v => patchState({ intervalMinutes: clampInt(v, 1, 59, 1) })"
-                  />
-                  <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.minutes') }}</span>
-                </template>
-
-                <template v-else-if="patternState.mode === 'hourly'">
-                  <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.atMinute') }}</span>
-                  <Input
-                    type="number"
-                    :min="0"
-                    :max="59"
-                    :model-value="patternState.minute"
-                    class="w-20 text-center"
-                    @update:model-value="v => patchState({ minute: clampInt(v, 0, 59, 0) })"
-                  />
-                </template>
-
-                <TimeInput
-                  v-else-if="patternState.mode === 'daily'"
-                  :hour="patternState.hours[0] ?? 9"
-                  :minute="patternState.minute"
-                  @update:hour="v => patchState({ hours: [v] })"
-                  @update:minute="v => patchState({ minute: v })"
-                />
-
-                <TimeInput
-                  v-else-if="patternState.mode === 'weekly'"
-                  :hour="patternState.hours[0] ?? 9"
-                  :minute="patternState.minute"
-                  @update:hour="v => patchState({ hours: [v] })"
-                  @update:minute="v => patchState({ minute: v })"
-                />
-
-                <template v-else-if="patternState.mode === 'monthly'">
-                  <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.day') }}</span>
-                  <Input
-                    type="number"
-                    :min="1"
-                    :max="31"
-                    :model-value="patternState.monthDays[0] ?? 1"
-                    class="w-16 text-center"
-                    @update:model-value="v => patchState({ monthDays: [clampInt(v, 1, 31, 1)] })"
-                  />
-                  <TimeInput
-                    :hour="patternState.hours[0] ?? 9"
-                    :minute="patternState.minute"
-                    @update:hour="v => patchState({ hours: [v] })"
-                    @update:minute="v => patchState({ minute: v })"
-                  />
-                </template>
-              </div>
-
-              <div
-                v-if="patternState.mode === 'weekly'"
-                class="grid grid-cols-7 gap-1"
-              >
-                <button
-                  v-for="(key, idx) in WEEKDAY_KEYS"
-                  :key="key"
-                  type="button"
-                  class="h-9 rounded-md border text-sm transition-colors"
-                  :class="patternState.weekdays.includes(idx)
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'bg-background hover:bg-accent'"
-                  @click="toggleWeekday(idx)"
+           grid — so its control column is wider than the sm:w-56 the plain
+           fields use: sm:w-72 is the width the seven weekday buttons need.
+           -->
+      <SettingsRow
+        :label="t('bots.schedule.form.pattern')"
+        stack="sm"
+      >
+        <div class="w-full space-y-3 sm:w-72">
+          <div class="flex items-center gap-2 flex-wrap">
+            <Select v-model="schedModeModel">
+              <SelectTrigger class="w-36 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="scheduleMode in SCHEDULE_MODES"
+                  :key="scheduleMode.value"
+                  :value="scheduleMode.value"
                 >
-                  {{ t(`bots.schedule.weekday.${key}`) }}
-                </button>
-              </div>
+                  {{ t(scheduleMode.labelKey) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
 
-              <div
-                v-if="patternState.mode === 'advanced'"
-                class="space-y-1.5"
-              >
-                <Input
-                  :model-value="patternState.advancedPattern"
-                  class="font-mono"
-                  placeholder="0 9 * * *"
-                  @update:model-value="v => patchState({ advancedPattern: String(v) })"
-                />
-                <p
-                  v-if="patternState.advancedPattern && !isValidCron(patternState.advancedPattern)"
-                  class="text-caption text-destructive"
-                >
-                  {{ t('bots.schedule.form.invalidPattern') }}
-                </p>
-              </div>
+            <template v-if="patternState.mode === 'minutes'">
+              <Input
+                type="number"
+                :min="1"
+                :max="59"
+                :model-value="patternState.intervalMinutes"
+                class="w-20 text-center"
+                @update:model-value="v => patchState({ intervalMinutes: clampInt(v, 1, 59, 1) })"
+              />
+              <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.minutes') }}</span>
+            </template>
 
-              <p
-                v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
-                class="text-caption text-muted-foreground"
-              >
-                {{ schedulePreviewText }}
-              </p>
-            </div>
-          </FieldStack>
-        </template>
+            <template v-else-if="patternState.mode === 'hourly'">
+              <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.atMinute') }}</span>
+              <Input
+                type="number"
+                :min="0"
+                :max="59"
+                :model-value="patternState.minute"
+                class="w-20 text-center"
+                @update:model-value="v => patchState({ minute: clampInt(v, 0, 59, 0) })"
+              />
+            </template>
+
+            <TimeInput
+              v-else-if="patternState.mode === 'daily'"
+              :hour="patternState.hours[0] ?? 9"
+              :minute="patternState.minute"
+              @update:hour="v => patchState({ hours: [v] })"
+              @update:minute="v => patchState({ minute: v })"
+            />
+
+            <TimeInput
+              v-else-if="patternState.mode === 'weekly'"
+              :hour="patternState.hours[0] ?? 9"
+              :minute="patternState.minute"
+              @update:hour="v => patchState({ hours: [v] })"
+              @update:minute="v => patchState({ minute: v })"
+            />
+
+            <template v-else-if="patternState.mode === 'monthly'">
+              <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.day') }}</span>
+              <Input
+                type="number"
+                :min="1"
+                :max="31"
+                :model-value="patternState.monthDays[0] ?? 1"
+                class="w-16 text-center"
+                @update:model-value="v => patchState({ monthDays: [clampInt(v, 1, 31, 1)] })"
+              />
+              <TimeInput
+                :hour="patternState.hours[0] ?? 9"
+                :minute="patternState.minute"
+                @update:hour="v => patchState({ hours: [v] })"
+                @update:minute="v => patchState({ minute: v })"
+              />
+            </template>
+          </div>
+
+          <div
+            v-if="patternState.mode === 'weekly'"
+            class="grid grid-cols-7 gap-1"
+          >
+            <button
+              v-for="(key, idx) in WEEKDAY_KEYS"
+              :key="key"
+              type="button"
+              class="h-9 rounded-md border text-sm transition-colors"
+              :class="patternState.weekdays.includes(idx)
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-background hover:bg-accent'"
+              @click="toggleWeekday(idx)"
+            >
+              {{ t(`bots.schedule.weekday.${key}`) }}
+            </button>
+          </div>
+
+          <div
+            v-if="patternState.mode === 'advanced'"
+            class="space-y-1.5"
+          >
+            <Input
+              :model-value="patternState.advancedPattern"
+              class="font-mono"
+              placeholder="0 9 * * *"
+              @update:model-value="v => patchState({ advancedPattern: String(v) })"
+            />
+            <p
+              v-if="patternState.advancedPattern && !isValidCron(patternState.advancedPattern)"
+              class="text-caption text-destructive"
+            >
+              {{ t('bots.schedule.form.invalidPattern') }}
+            </p>
+          </div>
+
+          <p
+            v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
+            class="text-caption text-muted-foreground"
+          >
+            {{ schedulePreviewText }}
+          </p>
+        </div>
       </SettingsRow>
     </SettingsSection>
+
+    <!-- The command is the task. It gets its own titled section and no card:
+         the textarea is already a bordered surface, and a card around it
+         would draw a second edge around one field. -->
+    <SectionGroup
+      tone="muted"
+      :title="t('bots.schedule.form.command')"
+    >
+      <Textarea
+        id="sched-command"
+        v-model="form.command"
+        class="min-h-[9rem] resize-none font-mono"
+        :placeholder="t('bots.schedule.form.commandPlaceholder')"
+        rows="6"
+      />
+    </SectionGroup>
 
     <!-- Execution parameters used to hide behind a "More options" disclosure.
          A card that collapses to an empty bordered strip reads as broken, and
@@ -281,8 +278,8 @@ import { Trash2 } from 'lucide-vue-next'
 import {
   Button,
   DialogFooter,
-  FieldStack,
   Input,
+  SectionGroup,
   Select,
   SelectContent,
   SelectItem,
