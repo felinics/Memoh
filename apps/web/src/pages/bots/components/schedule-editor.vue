@@ -187,10 +187,15 @@
       tone="muted"
       :title="t('bots.schedule.form.command')"
     >
+      <!-- size="lg" puts the command on text-control, the same 14px the row
+           labels beside it use — it is the field people read, not a footnote.
+           bg-card fills it to the surface it sits on: fields are transparent by
+           default, which only matched the dialog by accident. -->
       <Textarea
         id="sched-command"
         v-model="form.command"
-        class="min-h-[9rem] resize-none font-mono"
+        size="lg"
+        class="min-h-[9rem] resize-none bg-card font-mono"
         :placeholder="t('bots.schedule.form.commandPlaceholder')"
         rows="6"
       />
