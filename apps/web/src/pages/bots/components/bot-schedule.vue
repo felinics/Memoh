@@ -104,7 +104,10 @@
 
     <!-- Create / Edit Dialog -->
     <Dialog v-model:open="formVisible">
-      <DialogScrollContent class="sm:max-w-lg">
+      <!-- max-w-2xl matches the create-bot form: the editor is settings cards of
+           label-left / control-right rows now, and lg left the labels crowding
+           their controls. -->
+      <DialogScrollContent class="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
             {{ formMode === 'create' ? $t('bots.schedule.create') : $t('bots.schedule.edit') }}

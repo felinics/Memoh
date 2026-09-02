@@ -1,6 +1,12 @@
 <template>
-  <FormStack>
-    <FieldStack :label="t('bots.schedule.execution.runsIn')">
+  <!-- Rows, not a form column: these render inside the schedule editor's
+       Settings card, next to Run Limit. Each control column is sm:w-56 so the
+       four selects line up with the rows above and below them. -->
+  <SettingsRow
+    :label="t('bots.schedule.execution.runsIn')"
+    stack="sm"
+  >
+    <div class="w-full sm:w-56">
       <Select v-model="runTargetModel">
         <SelectTrigger class="w-full">
           <SelectValue />
@@ -14,12 +20,15 @@
           </SelectItem>
         </SelectContent>
       </Select>
-    </FieldStack>
+    </div>
+  </SettingsRow>
 
-    <FieldStack
-      v-if="form.runTarget === 'existing_session'"
-      :label="t('bots.schedule.execution.session')"
-    >
+  <SettingsRow
+    v-if="form.runTarget === 'existing_session'"
+    :label="t('bots.schedule.execution.session')"
+    stack="sm"
+  >
+    <div class="w-full sm:w-56">
       <!-- Only chat and schedule sessions can host a scheduled run; discuss
            and subagent threads back their own loops. -->
       <SessionSelect
@@ -31,16 +40,19 @@
       />
       <p
         v-if="selectedSession"
-        class="text-caption text-muted-foreground"
+        class="mt-1.5 text-caption text-muted-foreground"
       >
         {{ selectedSessionSummary }}
       </p>
-    </FieldStack>
+    </div>
+  </SettingsRow>
 
-    <FieldStack
-      :label="t('bots.schedule.execution.model')"
-      :help="modelHelp"
-    >
+  <SettingsRow
+    :label="t('bots.schedule.execution.model')"
+    :description="modelHelp"
+    stack="sm"
+  >
+    <div class="w-full sm:w-56">
       <!-- Existing-session mode inherits the runtime; only the matching model
            column is offered. New-session mode picks the runtime here. Reasoning
            rides inside the picker that owns the model, the same way the chat
@@ -79,7 +91,7 @@
         </InlineLoadingRow>
         <p
           v-else-if="acpCatalogError"
-          class="text-caption text-destructive"
+          class="mt-1.5 text-caption text-destructive"
         >
           {{ acpCatalogError }}
         </p>
@@ -95,12 +107,15 @@
           :reasoning-options="acpReasoningOptions"
         />
       </template>
-    </FieldStack>
+    </div>
+  </SettingsRow>
 
-    <FieldStack
-      v-if="form.runTarget === 'new_session' && selectableWorkdirs.length > 0"
-      :label="t('bots.schedule.execution.workdir')"
-    >
+  <SettingsRow
+    v-if="form.runTarget === 'new_session' && selectableWorkdirs.length > 0"
+    :label="t('bots.schedule.execution.workdir')"
+    stack="sm"
+  >
+    <div class="w-full sm:w-56">
       <Select v-model="workdirModel">
         <SelectTrigger class="w-full">
           <SelectValue :placeholder="t('bots.schedule.execution.noWorkdir')" />
@@ -118,8 +133,8 @@
           </SelectItem>
         </SelectContent>
       </Select>
-    </FieldStack>
-  </FormStack>
+    </div>
+  </SettingsRow>
 </template>
 
 <script setup lang="ts">
@@ -128,14 +143,13 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  FieldStack,
-  FormStack,
   InlineLoadingRow,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SettingsRow,
 } from '@felinic/ui'
 import {
   deleteBotsByBotIdAcpRuntimesByRuntimeId,
