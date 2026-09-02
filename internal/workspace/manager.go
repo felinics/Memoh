@@ -104,6 +104,8 @@ type Manager struct {
 	setupDiagnostics  WorkspaceSetupDiagnostics
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
+	bridgeResetMu     sync.Mutex
+	bridgeResetFns    []func(botID string) // see OnBridgeReset
 }
 
 func NewManager(log *slog.Logger, service runtimeService, networkController netctl.Controller, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
@@ -242,7 +244,7 @@ func (m *Manager) ClearLegacyIP(botID string) {
 // gRPC dials use the bridge container's Unix socket.
 func (m *Manager) clearLegacyRoute(botID string) {
 	m.ClearLegacyIP(botID)
-	m.grpcPool.Remove(botID)
+	m.resetBridge(botID)
 }
 
 func (m *Manager) nativeMCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
@@ -362,7 +364,7 @@ func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error
 			return nil
 		}
 		lastErr = err
-		m.grpcPool.Remove(botID)
+		m.resetBridge(botID)
 		if time.Now().After(deadline) {
 			return fmt.Errorf("workspace bridge not ready for bot %s after %s: %w", botID, bridgeReadyTimeout, lastErr)
 		}
