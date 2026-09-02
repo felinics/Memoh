@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildTurnRow,
+  classifyPromptDiff,
   compositionFromSnapshot,
+  countTrimmed,
   groupDroppedDecisions,
   lifecycleStatusLabelKey,
   lifecycleStatusToneClass,
 } from './context-lifecycle-view'
-import type { ContextfragLifecycleSnapshot, ContextfragSelectionDecision } from '@memohai/sdk'
+import type { ContextfragLifecycleSnapshot, ContextfragSelectionDecision, HandlersContextLifecycleTurn } from '@memohai/sdk'
 
 describe('compositionFromSnapshot', () => {
   it('computes a composition from a snapshot breakdown and tool_defs', () => {
@@ -59,7 +62,7 @@ describe('groupDroppedDecisions', () => {
     expect(groupDroppedDecisions([])).toEqual([])
   })
 
-  it('excludes selected decisions and keeps trimmed and dropped grouped together', () => {
+  it('groups only dropped decisions; trimmed fragments are still in context', () => {
     const decisions: ContextfragSelectionDecision[] = [
       { decision: 'selected', reason: 'kept', token_estimate: 10 },
       { decision: 'trimmed', reason: 'budget', token_estimate: 20 },
@@ -67,8 +70,10 @@ describe('groupDroppedDecisions', () => {
     ]
 
     expect(groupDroppedDecisions(decisions)).toEqual([
-      { reason: 'budget', count: 2, tokens: 50 },
+      { reason: 'budget', count: 1, tokens: 30 },
     ])
+    expect(countTrimmed(decisions)).toBe(1)
+    expect(countTrimmed(undefined)).toBe(0)
   })
 
   it('groups by reason trimmed of surrounding whitespace', () => {
@@ -82,23 +87,19 @@ describe('groupDroppedDecisions', () => {
     ])
   })
 
-  it('falls back to decision.decision when reason is missing or blank', () => {
+  it('falls back to unknown when the reason is missing or blank', () => {
     const decisions: ContextfragSelectionDecision[] = [
       { decision: 'dropped', token_estimate: 10 },
       { decision: 'dropped', reason: '   ', token_estimate: 5 },
     ]
 
     expect(groupDroppedDecisions(decisions)).toEqual([
-      { reason: 'dropped', count: 2, tokens: 15 },
+      { reason: 'unknown', count: 2, tokens: 15 },
     ])
   })
 
-  it('falls back to unknown when neither reason nor decision is present', () => {
-    const decisions: ContextfragSelectionDecision[] = [{ token_estimate: 5 }]
-
-    expect(groupDroppedDecisions(decisions)).toEqual([
-      { reason: 'unknown', count: 1, tokens: 5 },
-    ])
+  it('ignores decisions without a decision kind', () => {
+    expect(groupDroppedDecisions([{ token_estimate: 5 }])).toEqual([])
   })
 
   it('treats a missing token_estimate as zero', () => {
@@ -169,5 +170,77 @@ describe('lifecycleStatusLabelKey', () => {
     [undefined, null],
   ])('maps %s to %s', (status, expected) => {
     expect(lifecycleStatusLabelKey(status)).toBe(expected)
+  })
+})
+
+describe('classifyPromptDiff', () => {
+  const tools = [{ provider: 'native', name: 'read', bytes: 900 }]
+  const base: ContextfragLifecycleSnapshot = { stable_prefix_hash: 'h1', tool_defs: tools }
+
+  it('labels the first turn of a session', () => {
+    expect(classifyPromptDiff(base, null)).toBe('initial')
+  })
+
+  it('stays silent when the older turn is unknown (page boundary)', () => {
+    expect(classifyPromptDiff(base, undefined)).toBeNull()
+  })
+
+  it('reports a tool roster change ahead of the prefix change it implies', () => {
+    const next = { ...base, stable_prefix_hash: 'h2', tool_defs: [...tools, { provider: 'mcp', name: 'jira', bytes: 300 }] }
+    expect(classifyPromptDiff(next, base)).toBe('tools')
+  })
+
+  it('reports a system change when only the stable prefix hash moved', () => {
+    expect(classifyPromptDiff({ ...base, stable_prefix_hash: 'h2' }, base)).toBe('system')
+  })
+
+  it('reports history-only when prefix and tools are unchanged', () => {
+    expect(classifyPromptDiff({ ...base }, base)).toBe('history')
+  })
+
+  it('stays silent without prefix hashes unless the tools changed', () => {
+    expect(classifyPromptDiff({ tool_defs: tools }, { tool_defs: tools })).toBeNull()
+    expect(classifyPromptDiff({ tool_defs: [] }, { tool_defs: tools })).toBe('tools')
+  })
+})
+
+describe('buildTurnRow', () => {
+  const t = (key: string, params?: Record<string, unknown>) => (params ? `${key}:${Object.values(params).join(',')}` : key)
+  const turn: HandlersContextLifecycleTurn = {
+    run_id: 'run-a',
+    created_at: '2026-08-31T10:00:00.000Z',
+    status: 'completed',
+    snapshot: {
+      model: 'm',
+      breakdown: [{ kind: 'system_prompt', token_estimate: 1000 }],
+      selection: { selected: 12, dropped: 3 },
+      trust_breakdown: [{ trust: 'system', token_estimate: 1000 }],
+    },
+  }
+  const detail: ContextfragLifecycleSnapshot = {
+    selection_decisions: [
+      { decision: 'dropped', reason: 'budget', token_estimate: 1500 },
+      { decision: 'trimmed', reason: 'stale', token_estimate: 100 },
+    ],
+  }
+
+  it('summarises selection from the list row and adds trimmed once the detail is known', () => {
+    expect(buildTurnRow(turn, { t, formatTime: () => '10:00' }).selection).toBe('chat.lifecycle.selectedCount:12 · chat.lifecycle.droppedCount:3')
+    expect(buildTurnRow(turn, { detail, t, formatTime: () => '10:00' }).selection)
+      .toBe('chat.lifecycle.selectedCount:12 · chat.lifecycle.droppedCount:3 · chat.lifecycle.trimmedCount:1')
+  })
+
+  it('builds the drop-reason section only from the detail decisions', () => {
+    const without = buildTurnRow(turn, { t, formatTime: () => '' })
+    const withDetail = buildTurnRow(turn, { detail, t, formatTime: () => '' })
+
+    expect(without.sections.map(section => section.key)).toEqual(['trust'])
+    expect(withDetail.sections.map(section => section.key)).toEqual(['dropReasons', 'trust'])
+    expect(withDetail.sections[0]?.rows).toEqual([{ key: 'budget', label: 'budget', value: '1 · 1.5K' }])
+  })
+
+  it('carries the prompt-diff label key, or none at an unknown boundary', () => {
+    expect(buildTurnRow(turn, { previous: null, t, formatTime: () => '' }).diffKey).toBe('chat.lifecycle.diffInitial')
+    expect(buildTurnRow(turn, { t, formatTime: () => '' }).diffKey).toBeNull()
   })
 })

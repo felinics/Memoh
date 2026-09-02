@@ -5,14 +5,22 @@ import { computed, createApp, defineComponent, h, inject, nextTick, provide } fr
 import type { ComputedRef } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
+import type { ContextfragLifecycleSnapshot, HandlersContextLifecycleTurn } from '@memohai/sdk'
 import ContextLifecycleTurns from './context-lifecycle-turns.vue'
 
 // reka-ui resolves its own Vue copy under vitest, so its primitives cannot be
 // mounted here; the collapsible is stubbed down to its open/closed contract.
 vi.mock('@felinic/ui', () => {
   const openKey = Symbol('collapsible-open')
+  const passthrough = (tag: string) => defineComponent({
+    inheritAttrs: false,
+    setup(_, { attrs, slots }) {
+      return () => h(tag, attrs, slots.default?.())
+    },
+  })
   return {
+    Empty: passthrough('div'),
+    EmptyDescription: passthrough('p'),
     Collapsible: defineComponent({
       name: 'CollapsibleStub',
       props: { open: { type: Boolean, default: false } },
@@ -47,10 +55,19 @@ afterEach(() => {
   }
 })
 
-async function mountTurns(turns: HandlersContextLifecycleTurn[]): Promise<HTMLDivElement> {
+interface MountOptions {
+  details?: Record<string, ContextfragLifecycleSnapshot>
+  loadingRunId?: string | null
+  hasMore?: boolean
+}
+
+const expanded: string[] = []
+
+async function mountTurns(turns: HandlersContextLifecycleTurn[], options: MountOptions = {}): Promise<HTMLDivElement> {
   const root = document.createElement('div')
   document.body.append(root)
-  const app = createApp(ContextLifecycleTurns, { turns })
+  expanded.splice(0)
+  const app = createApp(ContextLifecycleTurns, { turns, ...options, onExpand: (runId: string) => expanded.push(runId) })
   app.use(createI18n({
     legacy: false,
     locale: 'en',
@@ -79,7 +96,13 @@ async function mountTurns(turns: HandlersContextLifecycleTurn[]): Promise<HTMLDi
             selection: 'Selection',
             selectedCount: '{n} selected',
             droppedCount: '{n} dropped',
+            trimmedCount: '{n} trimmed',
             truncatedCount: '{n} truncated',
+            loadingDetail: 'Loading selection details…',
+            diffInitial: 'First turn',
+            diffTools: 'Tools changed',
+            diffSystem: 'System changed',
+            diffHistory: 'History only',
             dropReasons: 'Drop reasons',
             trust: 'Trust',
             trustSystem: 'System',
@@ -122,12 +145,8 @@ const richTurn: HandlersContextLifecycleTurn = {
     budget_plan: { window: 10_000, output_reserve: 2000 },
     counts: { token_estimate: 4200 },
     selection: { selected: 12, dropped: 3 },
-    selection_decisions: [
-      { decision: 'dropped', reason: 'budget', token_estimate: 1500 },
-      { decision: 'dropped', reason: 'budget', token_estimate: 500 },
-      { decision: 'trimmed', reason: 'stale', token_estimate: 100 },
-      { decision: 'selected', reason: 'kept', token_estimate: 900 },
-    ],
+    stable_prefix_hash: 'prefix-b',
+    tool_defs: [{ provider: 'native', name: 'read', bytes: 900 }],
     trust_breakdown: [
       { trust: 'system', token_estimate: 1000 },
       { trust: 'external', token_estimate: 250 },
@@ -143,11 +162,20 @@ const richTurn: HandlersContextLifecycleTurn = {
   },
 }
 
+const richDetail: ContextfragLifecycleSnapshot = {
+  selection_decisions: [
+    { decision: 'dropped', reason: 'budget', token_estimate: 1500 },
+    { decision: 'dropped', reason: 'budget', token_estimate: 500 },
+    { decision: 'trimmed', reason: 'stale', token_estimate: 100 },
+    { decision: 'selected', reason: 'kept', token_estimate: 900 },
+  ],
+}
+
 const bareTurn: HandlersContextLifecycleTurn = {
   run_id: 'run-b',
   created_at: '2026-08-30T09:00:00.000Z',
   status: 'weird_status',
-  snapshot: { model: 'gpt-5', counts: { token_estimate: 900 } },
+  snapshot: { model: 'gpt-5', counts: { token_estimate: 900 }, stable_prefix_hash: 'prefix-a', tool_defs: [{ provider: 'native', name: 'read', bytes: 900 }] },
 }
 
 describe('context-lifecycle-turns', () => {
@@ -204,13 +232,49 @@ describe('context-lifecycle-turns', () => {
     expect(root.textContent).not.toContain('Composition')
   })
 
-  it('summarises selection counts and groups dropped decisions by reason', async () => {
+  it('summarises selection counts from the list row before any detail arrives', async () => {
     const root = await mountTurns([richTurn])
 
     expect(root.textContent).toContain('12 selected')
     expect(root.textContent).toContain('3 dropped')
-    expect(texts(root, '[data-testid="drop-reason"]')).toEqual(['budget', 'stale'])
-    expect(texts(root, '[data-testid="drop-reason-value"]')).toEqual(['2 · 2.0K', '1 · 100'])
+    expect(root.textContent).not.toContain('trimmed')
+    expect(root.querySelectorAll('[data-testid="drop-reason-label"]')).toHaveLength(0)
+  })
+
+  it('groups dropped decisions by reason from the lazily loaded detail and counts trimmed separately', async () => {
+    const root = await mountTurns([richTurn], { details: { 'run-a': richDetail } })
+
+    expect(root.textContent).toContain('1 trimmed')
+    expect(texts(root, '[data-testid="drop-reason-label"]')).toEqual(['budget'])
+    expect(texts(root, '[data-testid="drop-reason-value"]')).toEqual(['2 · 2.0K'])
+  })
+
+  it('shows a loading hint for the drop reasons while the expanded detail is pending', async () => {
+    const root = await mountTurns([richTurn], { loadingRunId: 'run-a' })
+
+    expect(root.textContent).toContain('Loading selection details…')
+  })
+
+  it('emits expand for the auto-expanded first turn and again for a user toggle', async () => {
+    const root = await mountTurns([richTurn, bareTurn])
+    await nextTick()
+
+    expect(expanded).toEqual(['run-a'])
+    root.querySelectorAll<HTMLButtonElement>('[data-testid="turn-row"]')[1]?.click()
+    await nextTick()
+    expect(expanded).toEqual(['run-a', 'run-b'])
+  })
+
+  it('tags each turn with its prompt diff against the older turn on the page', async () => {
+    const root = await mountTurns([richTurn, bareTurn])
+
+    expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['System changed', 'First turn'])
+  })
+
+  it('leaves the oldest row untagged when older turns exist beyond the page', async () => {
+    const root = await mountTurns([richTurn, bareTurn], { hasMore: true })
+
+    expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['System changed'])
   })
 
   it('labels trust levels and leaves an unknown level raw', async () => {
@@ -232,8 +296,8 @@ describe('context-lifecycle-turns', () => {
   it('lists mutations by kind with their detail', async () => {
     const root = await mountTurns([richTurn])
 
-    expect(texts(root, '[data-testid="mutation-kind"]')).toEqual(['mid_task_prune'])
-    expect(texts(root, '[data-testid="mutation-detail"]')).toEqual(['pruned 2 tool outputs'])
+    expect(texts(root, '[data-testid="mutation-label"]')).toEqual(['mid_task_prune'])
+    expect(texts(root, '[data-testid="mutation-value"]')).toEqual(['pruned 2 tool outputs'])
   })
 
   it('lists steps when more than one ran, with drop counts and the reselection outcome', async () => {
