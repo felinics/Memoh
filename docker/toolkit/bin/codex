@@ -7,28 +7,11 @@ if [ -z "${SSL_CERT_FILE:-}" ] && [ -f "$TOOLKIT_CA_BUNDLE" ]; then
   export SSL_CERT_FILE="$TOOLKIT_CA_BUNDLE"
 fi
 
-fallback_codex() {
-  old_ifs="$IFS"
-  IFS=:
-  for dir in $PATH; do
-    IFS="$old_ifs"
-    [ -n "$dir" ] || dir=.
-    case "$dir" in
-      "$TOOLKIT/bin") ;;
-      *)
-        if [ -x "$dir/codex" ]; then
-          exec "$dir/codex" "$@"
-        fi
-        ;;
-    esac
-    IFS=:
-  done
-  IFS="$old_ifs"
-}
-
+# No PATH fallback: the direct runtime resolves its launcher with a version
+# gate (managed dependency first, then this toolkit copy). Running whatever
+# codex happens to be on PATH would bypass that gate.
 if [ ! -f "$CODEX" ]; then
-  fallback_codex "$@"
-  echo "codex is not installed in the Memoh workspace toolkit and no fallback codex command was found: $CODEX" >&2
+  echo "codex is not installed in the Memoh workspace toolkit: $CODEX" >&2
   exit 127
 fi
 exec "$TOOLKIT/bin/node" "$CODEX" "$@"

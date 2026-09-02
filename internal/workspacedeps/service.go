@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/background"
 	"github.com/felinics/memoh/internal/textutil"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
@@ -75,6 +76,10 @@ type Options struct {
 	// ScriptEnv returns extra environment entries for every script run, such
 	// as NPM_MIRROR. It may be nil.
 	ScriptEnv func(ctx context.Context) []string
+	// Background tracks explicitly authorized dependency operations and their
+	// source-session notifications. Launcher discovery never starts an install.
+	Background                *background.Manager
+	OperationSessionValidator func(context.Context, string, string) error
 }
 
 // Service reconciles the catalog, the installation records, and the
@@ -100,6 +105,19 @@ type Service struct {
 	active         sync.WaitGroup
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
+
+	// background and the maps below belong to the launcher resolver
+	// (resolver.go); resolverMu guards both maps.
+	background                *background.Manager
+	operationSessionValidator func(context.Context, string, string) error
+	resolverMu                sync.Mutex
+	// installs maps a (bot, target, dependency) to the background install the
+	// resolver started for it, until that task finishes.
+	installs map[InstallationKey]string
+	// launched remembers the path ResolveLauncher last handed out per key so
+	// a handshake-reported version is written to that copy, not the default
+	// winner.
+	launched map[InstallationKey]string
 }
 
 // NewService wires a Service and subscribes the cache to bridge resets so a
@@ -132,6 +150,11 @@ func NewService(opts Options) *Service {
 		discover:  Discover,
 		run:       Run,
 		locks:     operationLocks{held: make(map[InstallationKey]struct{})},
+
+		background:                opts.Background,
+		operationSessionValidator: opts.OperationSessionValidator,
+		installs:                  make(map[InstallationKey]string),
+		launched:                  make(map[InstallationKey]string),
 	}
 	if s.cache == nil {
 		s.cache = NewCache(defaultCacheTTL)
@@ -580,22 +603,6 @@ func effectiveCandidate(obs Observed) Candidate {
 		return candidate
 	}
 	return Candidate{Source: obs.Source, Path: obs.Command, Version: obs.Version}
-}
-
-// selectLauncherCandidate applies the launcher preference order to discovered copies:
-// the managed copy, then the toolkit copy, then a PATH copy. Within a source
-// the discovery order is kept. This is the same precedence the shim
-// directory gives the managed copy on PATH, so the launcher and a terminal
-// agree on which copy runs.
-func selectLauncherCandidate(candidates []Candidate) (Candidate, bool) {
-	for _, source := range []Source{SourceManaged, SourceToolkit, SourcePath} {
-		for _, candidate := range candidates {
-			if candidate.Source == source && candidate.Path != "" {
-				return candidate, true
-			}
-		}
-	}
-	return Candidate{}, false
 }
 
 // imageCandidate is the toolkit copy discovery found, i.e. what the

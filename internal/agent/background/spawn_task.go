@@ -19,6 +19,9 @@ const (
 	KindAgent TaskKind = "agent"
 	// KindVideo is an asynchronous video generation task.
 	KindVideo TaskKind = "video"
+	// KindDependency is an in-process workspace dependency install or update
+	// started by SpawnManaged.
+	KindDependency TaskKind = "dependency"
 )
 
 // SpawnTaskTimeout is the safety ceiling for a background spawn task,

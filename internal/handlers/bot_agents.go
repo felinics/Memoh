@@ -64,6 +64,12 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 	}
 	catalog, err := h.runtimes.ModelCatalog(c.Request().Context(), agent.Runtime, botID, agent.ID)
 	if err != nil {
+		// Stable runtime feedback (agent_dependency_missing and friends) keeps
+		// its own status and args; wrapping it as runtime-unavailable would
+		// lose both and hide the install task from the web.
+		if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
+			return feedbackErr
+		}
 		if apperror.CodeOf(err) != "" {
 			return err
 		}
@@ -75,7 +81,7 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 
 // Create godoc
 // @Summary Add an Agent to a bot
-// @Description Add a named Agent backed by a runtime descriptor
+// @Description Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.
 // @Tags bot-agents
 // @Accept json
 // @Produce json
@@ -99,12 +105,12 @@ func (h *BotAgentsHandler) Create(c echo.Context) error {
 	if err != nil {
 		return h.publicError("create", err)
 	}
-	return c.JSON(http.StatusCreated, agent)
+	return c.JSON(http.StatusCreated, h.withDependency(agent))
 }
 
 // List godoc
 // @Summary List a bot's Agents
-// @Description List active and disabled non-deleted Agents attached to a bot
+// @Description List active and disabled non-deleted Agents attached to a bot. Direct-runtime Agents carry the workspace dependency their runtime declares.
 // @Tags bot-agents
 // @Produce json
 // @Param bot_id path string true "Bot ID"
@@ -120,12 +126,12 @@ func (h *BotAgentsHandler) List(c echo.Context) error {
 	if err != nil {
 		return h.publicError("list", err)
 	}
-	return c.JSON(http.StatusOK, botagents.ListResponse{Items: items})
+	return c.JSON(http.StatusOK, botagents.ListResponse{Items: h.withDependencies(items)})
 }
 
 // Get godoc
 // @Summary Get a bot Agent
-// @Description Get one Agent attached to a bot
+// @Description Get one Agent attached to a bot, including the workspace dependency its runtime declares (omitted for runtimes without one).
 // @Tags bot-agents
 // @Produce json
 // @Param bot_id path string true "Bot ID"
@@ -143,7 +149,7 @@ func (h *BotAgentsHandler) Get(c echo.Context) error {
 	if err != nil {
 		return h.publicError("get", err)
 	}
-	return c.JSON(http.StatusOK, agent)
+	return c.JSON(http.StatusOK, h.withDependency(agent))
 }
 
 // Update godoc
@@ -177,7 +183,7 @@ func (h *BotAgentsHandler) Update(c echo.Context) error {
 	if req.Metadata != nil {
 		h.runtimes.ResetBotAgent(agent.Runtime, botID, agent.ID)
 	}
-	return c.JSON(http.StatusOK, agent)
+	return c.JSON(http.StatusOK, h.withDependency(agent))
 }
 
 // Delete godoc
@@ -256,4 +262,33 @@ func botAgentHTTPError(err error) error {
 		return apperror.New(apperror.CodeBotAgentUnavailable, map[string]string{"field": configErr.Field})
 	}
 	return nil
+}
+
+// withDependency projects the driver-declared workspace dependency onto the
+// agent (design §9.3) so the web can run the install preflight before
+// enabling it. Direct agents share the runtimekind vocabulary with their
+// driver (botagents.RuntimeCodex == codex.RuntimeType), so the agent's
+// runtime is the lookup key; runtimes without a declaration leave it nil.
+func (h *BotAgentsHandler) withDependency(agent botagents.BotAgent) botagents.BotAgent {
+	agent.Dependency = dependencyFor(h.runtimes.RequiredDependencies(), agent.Runtime)
+	return agent
+}
+
+func (h *BotAgentsHandler) withDependencies(agents []botagents.BotAgent) []botagents.BotAgent {
+	requirements := h.runtimes.RequiredDependencies()
+	for i := range agents {
+		agents[i].Dependency = dependencyFor(requirements, agents[i].Runtime)
+	}
+	return agents
+}
+
+func dependencyFor(requirements map[string]external.DependencyRequirement, runtime string) *botagents.DependencyRequirement {
+	requirement, ok := requirements[strings.TrimSpace(runtime)]
+	if !ok {
+		return nil
+	}
+	return &botagents.DependencyRequirement{
+		DependencyID:    requirement.DependencyID,
+		RequiredVersion: requirement.Version,
+	}
 }

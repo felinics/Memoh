@@ -559,6 +559,12 @@ export type BotagentsBotAgent = {
     bot_id?: string;
     created_at?: string;
     deleted_at?: string;
+    /**
+     * Dependency is the workspace dependency the agent's runtime declares
+     * (design §9.3). It is derived from the driver at read time, never
+     * persisted, and omitted for runtimes without a declaration (ACP).
+     */
+    dependency?: BotagentsDependencyRequirement;
     enabled?: boolean;
     id?: string;
     metadata?: {
@@ -570,11 +576,21 @@ export type BotagentsBotAgent = {
 };
 
 export type BotagentsCreateRequest = {
+    /**
+     * Enabled defaults to true when omitted. The web passes false for direct
+     * runtimes so the dependency preflight runs before the agent goes live.
+     */
+    enabled?: boolean;
     metadata?: {
         [key: string]: unknown;
     };
     name?: string;
     runtime?: string;
+};
+
+export type BotagentsDependencyRequirement = {
+    dependency_id?: string;
+    required_version?: string;
 };
 
 export type BotagentsListResponse = {

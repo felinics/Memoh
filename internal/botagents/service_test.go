@@ -248,3 +248,40 @@ func testRow(enabled bool) sqlc.BotAgent {
 func testUUID(value string) pgtype.UUID {
 	return pgtype.UUID{Bytes: uuid.MustParse(value), Valid: true}
 }
+
+func TestCreateHonorsEnabledFlag(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+	tests := []struct {
+		name    string
+		enabled *bool
+		want    bool
+	}{
+		{name: "omitted defaults to enabled", enabled: nil, want: true},
+		{name: "explicit false creates disabled", enabled: boolPtr(false), want: false},
+		{name: "explicit true creates enabled", enabled: boolPtr(true), want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			row := testRow(tc.want)
+			row.Runtime = RuntimeCodex
+			row.Metadata = []byte(`{"provider":"codex"}`)
+			fake := &fakeQueries{createRow: row}
+			service := NewService(slog.Default(), fake)
+
+			created, err := service.Create(context.Background(), testBotID, CreateRequest{
+				Name:    "Codex",
+				Runtime: RuntimeCodex,
+				Enabled: tc.enabled,
+			})
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			if fake.createParams.Enabled != tc.want {
+				t.Fatalf("Create() persisted enabled = %v, want %v", fake.createParams.Enabled, tc.want)
+			}
+			if created.Enabled != tc.want {
+				t.Fatalf("Create() returned enabled = %v, want %v", created.Enabled, tc.want)
+			}
+		})
+	}
+}
