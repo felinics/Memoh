@@ -88,54 +88,116 @@ func TestLatestContextCompositionTakesBudgetPlanFromNewestTurn(t *testing.T) {
 func TestContextCompactionInfoDerivation(t *testing.T) {
 	t.Parallel()
 
-	window := int64(80000)
 	cases := []struct {
-		name          string
-		settings      settings.Settings
-		plan          *contextfrag.ContextBudgetPlan
-		contextWindow *int64
-		want          CompactionInfo
+		name      string
+		enabled   bool
+		threshold int
+		plan      *contextfrag.ContextBudgetPlan
+		want      CompactionInfo
 	}{
 		{
-			name:          "budget plan window wins over the resolved model window",
-			settings:      settings.Settings{CompactionEnabled: true},
-			plan:          &contextfrag.ContextBudgetPlan{Window: 200000},
-			contextWindow: &window,
-			want:          CompactionInfo{Enabled: true, AutoTokens: 100000, HardTokens: 150000},
+			name:    "marks derive from the persisted plan window",
+			enabled: true,
+			plan:    &contextfrag.ContextBudgetPlan{Window: 200000},
+			want:    CompactionInfo{Enabled: true, AutoTokens: 100000, HardTokens: 150000},
 		},
 		{
-			name:          "resolved model window is the fallback denominator",
-			settings:      settings.Settings{CompactionEnabled: true},
-			plan:          &contextfrag.ContextBudgetPlan{},
-			contextWindow: &window,
-			want:          CompactionInfo{Enabled: true, AutoTokens: 40000, HardTokens: 60000},
+			name:      "configured threshold moves only the auto mark",
+			enabled:   true,
+			threshold: 90000,
+			plan:      &contextfrag.ContextBudgetPlan{Window: 200000},
+			want:      CompactionInfo{Enabled: true, AutoTokens: 90000, HardTokens: 150000},
 		},
 		{
-			name:     "configured threshold moves only the auto mark",
-			settings: settings.Settings{CompactionEnabled: true, CompactionThreshold: 90000},
-			plan:     &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:     CompactionInfo{Enabled: true, AutoTokens: 90000, HardTokens: 150000},
+			name:      "disabled compaction still reports marks",
+			threshold: 90000,
+			plan:      &contextfrag.ContextBudgetPlan{Window: 200000},
+			want:      CompactionInfo{AutoTokens: 90000, HardTokens: 150000},
 		},
 		{
-			name:     "disabled compaction still reports marks",
-			settings: settings.Settings{CompactionThreshold: 90000},
-			plan:     &contextfrag.ContextBudgetPlan{Window: 200000},
-			want:     CompactionInfo{AutoTokens: 90000, HardTokens: 150000},
+			name:    "plan without a window leaves the marks unset",
+			enabled: true,
+			plan:    &contextfrag.ContextBudgetPlan{},
+			want:    CompactionInfo{Enabled: true},
 		},
 		{
-			name:     "no budget leaves the marks unset",
-			settings: settings.Settings{CompactionEnabled: true},
-			want:     CompactionInfo{Enabled: true},
+			name:    "no plan leaves the marks unset instead of guessing from the model window",
+			enabled: true,
+			want:    CompactionInfo{Enabled: true},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := contextCompactionInfo(tc.settings, tc.plan, tc.contextWindow); got != tc.want {
+			if got := contextCompactionInfo(tc.enabled, tc.threshold, tc.plan); got != tc.want {
 				t.Fatalf("contextCompactionInfo() = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGetSessionInfoOmitsCompactionForACPRuntime(t *testing.T) {
+	t.Parallel()
+
+	queries := &sessionInfoQueryStub{
+		bot: testBotRow(lifecycleTestBotID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:          testUUID(lifecycleTestSessionID),
+			BotID:       testUUID(lifecycleTestBotID),
+			Type:        session.TypeACPAgent,
+			SessionMode: session.TypeChat,
+			RuntimeType: session.RuntimeACPAgent,
+		},
+		lifecycleRows: []sqlc.ListRecentContextLifecyclesBySessionRow{{
+			RunID:     testUUID("44444444-4444-4444-4444-444444444444"),
+			Status:    "completed",
+			CreatedAt: pgtype.Timestamptz{Valid: true},
+			Snapshot: lifecycleSnapshotJSON(t, contextfrag.LifecycleSnapshot{
+				Version:   1,
+				Breakdown: []contextfrag.KindBreakdown{{Kind: contextfrag.KindRuntimeContext, Fragments: 3, TokenEstimate: 900}},
+			}),
+		}},
+		settingsRow: sqlc.GetSettingsByBotIDRow{
+			BotID:             testUUID(lifecycleTestBotID),
+			Language:          "auto",
+			ReasoningEffort:   "medium",
+			CompactionEnabled: true,
+		},
+	}
+	logger := slog.New(slog.DiscardHandler)
+	handler := NewSessionInfoHandler(
+		logger,
+		queries,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+		nil,
+		settings.NewService(logger, queries, nil, nil),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/sessions/:session_id/status")
+	ctx.SetParamNames("bot_id", "session_id")
+	ctx.SetParamValues(lifecycleTestBotID, lifecycleTestSessionID)
+
+	if err := handler.GetSessionInfo(ctx); err != nil {
+		t.Fatalf("GetSessionInfo() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var response SessionInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.ContextUsage.Breakdown) != 1 {
+		t.Fatalf("breakdown = %+v, want the ACP composition", response.ContextUsage.Breakdown)
+	}
+	if response.ContextUsage.Compaction != nil {
+		t.Fatalf("compaction = %+v, want none: Memoh never compacts ACP sessions", response.ContextUsage.Compaction)
 	}
 }
 

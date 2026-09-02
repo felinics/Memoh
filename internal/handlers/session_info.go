@@ -44,6 +44,7 @@ func NewSessionInfoHandler(log *slog.Logger, queries dbstore.Queries, botService
 func (h *SessionInfoHandler) Register(e *echo.Echo) {
 	e.GET("/bots/:bot_id/sessions/:session_id/status", h.GetSessionInfo)
 	e.GET("/bots/:bot_id/sessions/:session_id/context-lifecycle", h.GetSessionContextLifecycle)
+	e.GET("/bots/:bot_id/sessions/:session_id/context-lifecycle/:run_id", h.GetSessionContextLifecycleTurn)
 }
 
 type SessionInfoResponse struct {
@@ -62,8 +63,9 @@ type ContextUsage struct {
 	Compaction    *CompactionInfo                `json:"compaction,omitempty"`
 }
 
-// CompactionInfo reports where compaction fires for this session. Marks are
-// omitted when no token budget is known, so the UI never draws a guessed level.
+// CompactionInfo reports where compaction fires for this session. It is
+// omitted for runtimes Memoh never compacts, and its marks are omitted until a
+// turn has persisted a budget plan, so the UI never draws a guessed level.
 type CompactionInfo struct {
 	Enabled    bool  `json:"enabled"`
 	AutoTokens int64 `json:"auto_tokens,omitempty"`
@@ -197,8 +199,8 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	}
 
 	var compactionInfo *CompactionInfo
-	if hasSettings {
-		info := contextCompactionInfo(botSettings, budgetPlan, contextWindow)
+	if hasSettings && runtimeType == session.RuntimeModel {
+		info := contextCompactionInfo(botSettings.CompactionEnabled, botSettings.CompactionThreshold, budgetPlan)
 		compactionInfo = &info
 	}
 
@@ -245,27 +247,21 @@ func (h *SessionInfoHandler) loadBotSettings(ctx context.Context, botID string) 
 	}
 	botSettings, err := h.settingsService.GetBot(ctx, botID)
 	if err != nil {
+		h.logger.Warn("load bot settings failed", slog.Any("error", err))
 		return settings.Settings{}, false
 	}
 	return botSettings, true
 }
 
 // contextCompactionInfo mirrors the turn-time compaction levels for display.
-// The persisted plan window is the budget the turn actually ran against; the
-// resolved model window only stands in before any turn recorded a plan.
-func contextCompactionInfo(botSettings settings.Settings, plan *contextfrag.ContextBudgetPlan, contextWindow *int64) CompactionInfo {
-	info := CompactionInfo{Enabled: botSettings.CompactionEnabled}
-	tokenBudget := 0
-	switch {
-	case plan != nil && plan.Window > 0:
-		tokenBudget = plan.Window
-	case contextWindow != nil && *contextWindow > 0:
-		tokenBudget = int(*contextWindow)
-	}
-	if tokenBudget <= 0 {
+// Only the persisted plan window is the budget the turn actually ran against;
+// the turn path caps the raw model window, so guessing from it would diverge.
+func contextCompactionInfo(enabled bool, threshold int, plan *contextfrag.ContextBudgetPlan) CompactionInfo {
+	info := CompactionInfo{Enabled: enabled}
+	if plan == nil || plan.Window <= 0 {
 		return info
 	}
-	autoTokens, hardTokens := application.CompactionMarks(botSettings.CompactionThreshold, tokenBudget)
+	autoTokens, hardTokens := application.CompactionMarks(threshold, plan.Window)
 	info.AutoTokens = int64(autoTokens)
 	info.HardTokens = int64(hardTokens)
 	return info
