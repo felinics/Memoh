@@ -77,6 +77,7 @@ export function computeContextComposition(usage: ContextCompositionSource | null
     categories.push({ id, tokens, colorClass: CATEGORY_COLOR_CLASS[id] })
     totalTokens += tokens
   }
+  if (categories.length === 0) return null
 
   return { categories, totalTokens }
 }

@@ -53,6 +53,7 @@
               :context-window="contextWindow"
               :output-reserve="outputReserve"
               :auto-compact-tokens="autoCompactTokens"
+              :hard-compact-tokens="hardCompactTokens"
             />
             <div
               v-else-if="contextWindow != null && contextWindow > 0"
@@ -64,6 +65,15 @@
                 :style="{ width: `${Math.min(contextPercent, 100)}%` }"
               />
             </div>
+          </div>
+
+          <!-- Provider-reported input of the latest turn: the only actual↔estimate bridge -->
+          <div
+            v-if="composition && usedTokens > 0"
+            class="flex items-center justify-between py-2"
+          >
+            <span class="text-muted-foreground">{{ $t('chat.infoProviderInput') }}</span>
+            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(usedTokens) }}</span>
           </div>
 
           <!-- Cache Hit Rate -->
@@ -79,8 +89,9 @@
           </div>
         </div>
 
-        <!-- Compact Now -->
+        <!-- Compact Now: only where Memoh owns compaction (native runtime) -->
         <Button
+          v-if="compactionAvailable"
           variant="secondary"
           size="sm"
           class="mt-3 w-full"
@@ -149,6 +160,8 @@ import { contextPressureToneClass, formatTokenCount } from '../composables/conte
 import SubagentList from './subagent-list.vue'
 import ContextUsageBreakdown from './context-usage-breakdown.vue'
 
+const emit = defineEmits<{ openLifecycle: [] }>()
+
 const props = defineProps<{
   visible: boolean
   overrideModelId?: string
@@ -159,7 +172,7 @@ const visibleRef = toRef(props, 'visible')
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
 
-const { info, usedTokens, composition, contextWindow, outputReserve, autoCompactTokens, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
+const { info, usedTokens, composition, contextWindow, outputReserve, autoCompactTokens, hardCompactTokens, compactionAvailable, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
   visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,
@@ -177,6 +190,4 @@ const cacheHitRate = computed(() => {
 })
 
 const skills = computed(() => info.value?.skills ?? [])
-
-const emit = defineEmits<{ openLifecycle: [] }>()
 </script>

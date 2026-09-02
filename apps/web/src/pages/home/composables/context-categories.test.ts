@@ -127,10 +127,10 @@ describe('computeContextComposition', () => {
     ])
   })
 
-  it('returns an empty composition rather than null when entries exist but total zero', () => {
+  it('returns null when entries exist but carry zero tokens, so callers never render an empty bar', () => {
     const input = usage({ breakdown: [frag('system_prompt', 0)], tool_defs: [toolDef('anthropic', 0)] })
 
-    expect(computeContextComposition(input)).toEqual({ categories: [], totalTokens: 0 })
+    expect(computeContextComposition(input)).toBeNull()
   })
 
   it('returns null when breakdown and tool_defs are both empty', () => {

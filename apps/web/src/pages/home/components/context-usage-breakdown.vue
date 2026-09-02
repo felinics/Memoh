@@ -16,9 +16,14 @@
         />
       </template>
       <div
-        v-if="autoCompactMark"
+        v-if="autoMarkLeft"
         class="absolute inset-y-0 w-px bg-muted-foreground"
-        :style="{ left: autoCompactMark.left }"
+        :style="{ left: autoMarkLeft }"
+      />
+      <div
+        v-if="hardMarkLeft"
+        class="absolute inset-y-0 w-px bg-destructive"
+        :style="{ left: hardMarkLeft }"
       />
     </div>
     <div>
@@ -39,17 +44,23 @@
       </div>
     </div>
     <p
-      v-if="autoCompactMark"
+      v-if="hardMarkLeft && hardCompactTokens != null"
       class="text-caption text-muted-foreground"
     >
-      {{ $t('chat.infoAutoCompactAt', { tokens: autoCompactMark.tokens }) }}
+      {{ $t('chat.infoHardCompactAt', { tokens: formatTokenCount(hardCompactTokens) }) }}
+    </p>
+    <p
+      v-if="autoMarkLeft && autoCompactTokens != null"
+      class="text-caption text-muted-foreground"
+    >
+      {{ $t('chat.infoAutoCompactAt', { tokens: formatTokenCount(autoCompactTokens) }) }}
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { formatTokenCount } from '../composables/context-categories'
+import { CONTEXT_CATEGORY_IDS, formatTokenCount } from '../composables/context-categories'
 import type { ContextCategoryId, ContextComposition } from '../composables/context-categories'
 
 const props = withDefaults(defineProps<{
@@ -57,9 +68,11 @@ const props = withDefaults(defineProps<{
   contextWindow: number | null
   outputReserve?: number | null
   autoCompactTokens?: number | null
+  hardCompactTokens?: number | null
 }>(), {
   outputReserve: null,
   autoCompactTokens: null,
+  hardCompactTokens: null,
 })
 
 interface LegendRow {
@@ -77,11 +90,20 @@ function segmentWidth(tokens: number): string {
   return denominator.value > 0 ? `${(tokens / denominator.value) * 100}%` : '0%'
 }
 
-const autoCompactMark = computed(() => {
-  if (props.contextWindow == null || props.autoCompactTokens == null) return null
-  const ratio = denominator.value > 0 ? Math.min(props.autoCompactTokens / denominator.value, 1) : 0
-  return { left: `${ratio * 100}%`, tokens: formatTokenCount(props.autoCompactTokens) }
-})
+// The compaction trigger measures the conversation alone, so both marks are
+// anchored where the conversation segment starts, not at the track origin.
+const BEFORE_CONVERSATION = new Set<ContextCategoryId>(CONTEXT_CATEGORY_IDS.slice(0, CONTEXT_CATEGORY_IDS.indexOf('conversation')))
+const conversationStart = computed(() => props.composition.categories
+  .filter(category => BEFORE_CONVERSATION.has(category.id))
+  .reduce((sum, category) => sum + category.tokens, 0))
+
+function markLeft(tokens: number | null): string | null {
+  if (props.contextWindow == null || tokens == null || denominator.value <= 0) return null
+  return `${Math.min((conversationStart.value + tokens) / denominator.value, 1) * 100}%`
+}
+
+const autoMarkLeft = computed(() => markLeft(props.autoCompactTokens))
+const hardMarkLeft = computed(() => markLeft(props.hardCompactTokens))
 
 const legendRows = computed<LegendRow[]>(() => {
   const rows: LegendRow[] = props.composition.categories.map(category => ({
