@@ -102,6 +102,11 @@ export interface ToolDisplay {
   actionKey: string
   actionParams?: Record<string, unknown>
   target: string
+  // Native `title` tooltip completing a truncated `target` — only for short,
+  // single-line values (full path, URL, query). Never a long or multi-line blob
+  // (a whole exec command, a message body): a native tooltip can't scroll or be
+  // copied, so such content renders as an unreadable wall; the expandable detail
+  // is the channel for full content. Consumers bind `title` only when this is set.
   fullTarget?: string
   detail?: Component
   isError?: boolean
@@ -726,8 +731,8 @@ function resolveToolDisplay(block: ToolCallBlock): ToolDisplay {
       return {
         icon: SquareTerminal,
         actionKey: background ? 'exec_background' : 'exec',
+        // No fullTarget: the full command lives in the exec detail, not a tooltip.
         target: firstLine(cmd, 80),
-        fullTarget: cmd,
         detail: ToolCallDetailExec,
       }
     }

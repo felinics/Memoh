@@ -9,7 +9,7 @@
         <span
           v-if="displayTarget"
           class="min-w-0 truncate font-normal"
-          :title="display.fullTarget || display.target"
+          :title="display.fullTarget || undefined"
         >{{ displayTarget }}</span>
       </p>
 

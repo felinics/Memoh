@@ -23,7 +23,7 @@
         v-if="display.target && canOpenInFiles"
         class="truncate min-w-0 hover:underline cursor-pointer"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
         @click.stop="handleOpenInFiles"
       >
         {{ display.target }}
@@ -32,7 +32,7 @@
         v-else-if="display.target"
         class="truncate min-w-0"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
       >{{ display.target }}</span>
       <span
         v-if="executionLocationLabel"
@@ -83,7 +83,7 @@
         v-if="display.target && canOpenInFiles"
         class="truncate min-w-0 hover:underline cursor-pointer"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
         @click="handleOpenInFiles"
       >
         {{ display.target }}
@@ -92,7 +92,7 @@
         v-else-if="display.target"
         class="truncate min-w-0"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
       >{{ display.target }}</span>
       <span
         v-if="executionLocationLabel"
