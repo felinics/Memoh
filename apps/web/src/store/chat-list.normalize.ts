@@ -72,6 +72,15 @@ export function normalizeForwardRef(forward?: UIForwardRef): UIForwardRef | unde
     : undefined
 }
 
+/** The string-valued entries of an open record; undefined when there are none. */
+export function stringRecord(record?: Record<string, unknown>): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(record ?? {})) {
+    if (typeof value === 'string') out[key] = value
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 export function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
