@@ -120,13 +120,16 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 	return cfg, credential, nil
 }
 
-// ModelCatalog returns the live model vocabulary advertised by the bot's
-// pinned codex app-server. Authentication is checked first because ChatGPT
-// plans and API-key accounts may expose different catalogs.
+// ModelCatalog returns the models available to this Agent. API-key Agents with
+// an explicit Base URL use that provider's OpenAI-compatible /models endpoint;
+// ChatGPT and default-OpenAI Agents retain Codex's richer native catalog.
 func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (external.ModelCatalog, error) {
 	cfg, _, err := d.resolveAgentConfig(ctx, botID, botAgentID, true)
 	if err != nil {
 		return external.ModelCatalog{}, err
+	}
+	if cfg.Auth == AuthAPIKey && strings.TrimSpace(cfg.BaseURL) != "" {
+		return customBaseURLModelCatalog(ctx, cfg, nil)
 	}
 	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
 	if err != nil {
