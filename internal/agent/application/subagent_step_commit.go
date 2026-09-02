@@ -160,7 +160,7 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 			if inputs[i].Metadata == nil {
 				inputs[i].Metadata = make(map[string]any, 1)
 			}
-			inputs[i].Metadata[contextfrag.MetadataContextLifecycleKey] = snapshot
+			inputs[i].Metadata[contextfrag.MetadataContextLifecycleKey] = snapshot.Summary()
 			break
 		}
 	}

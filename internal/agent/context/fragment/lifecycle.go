@@ -213,6 +213,7 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 	if manifest.Selection != nil {
 		snapshot.Selection = cloneSelectionTrace(*manifest.Selection)
 	}
+	snapshot.Selection.Trimmed, snapshot.Selection.DropReasonTokens = rollUpSelectionDecisions(manifest.SelectionDecisions)
 	if manifest.BudgetPlan != nil {
 		plan := *manifest.BudgetPlan
 		snapshot.BudgetPlan = &plan
@@ -232,6 +233,36 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 		snapshot.Steps = manifest.Mutations.StepSnapshots()
 	}
 	return snapshot
+}
+
+// rollUpSelectionDecisions reduces the per-fragment audit to the bounded
+// facts the UI shows: how many fragments were trimmed, and how many tokens each
+// drop reason cost. Blank reasons share the selector's "unknown" bucket.
+func rollUpSelectionDecisions(decisions []SelectionDecision) (trimmed int, dropReasonTokens map[string]int) {
+	for _, decision := range decisions {
+		switch decision.Decision {
+		case DecisionTrimmed:
+			trimmed++
+		case DecisionDropped:
+			reason := strings.TrimSpace(decision.Reason)
+			if reason == "" {
+				reason = "unknown"
+			}
+			if dropReasonTokens == nil {
+				dropReasonTokens = make(map[string]int, 4)
+			}
+			dropReasonTokens[reason] += decision.TokenEstimate
+		}
+	}
+	return trimmed, dropReasonTokens
+}
+
+// Summary returns the snapshot without its per-fragment selection decisions,
+// the only part whose size grows with the conversation. Everything a list or
+// status reader needs is already rolled up on the remaining fields.
+func (s LifecycleSnapshot) Summary() LifecycleSnapshot {
+	s.SelectionDecisions = nil
+	return s
 }
 
 // DecodeLifecycleSnapshot parses a durable snapshot of any persisted version.
@@ -342,12 +373,18 @@ func cloneStepSnapshots(steps []StepSnapshot) []StepSnapshot {
 }
 
 func cloneSelectionTrace(selection SelectionTrace) SelectionTrace {
-	if selection.DropReasons != nil {
-		reasons := make(map[string]int, len(selection.DropReasons))
-		for reason, count := range selection.DropReasons {
-			reasons[reason] = count
-		}
-		selection.DropReasons = reasons
-	}
+	selection.DropReasons = cloneCounts(selection.DropReasons)
+	selection.DropReasonTokens = cloneCounts(selection.DropReasonTokens)
 	return selection
+}
+
+func cloneCounts(counts map[string]int) map[string]int {
+	if counts == nil {
+		return nil
+	}
+	out := make(map[string]int, len(counts))
+	for key, value := range counts {
+		out[key] = value
+	}
+	return out
 }

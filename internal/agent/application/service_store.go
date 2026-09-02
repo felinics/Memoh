@@ -122,7 +122,7 @@ func (opts storeRoundOptions) withContextLifecycleMetadata(logger *slog.Logger, 
 	if existing == nil {
 		existing = map[string]any{}
 	}
-	existing[contextfrag.MetadataContextLifecycleKey] = snapshot
+	existing[contextfrag.MetadataContextLifecycleKey] = snapshot.Summary()
 	opts.MessageMetadataByIndex[idx] = existing
 	return opts
 }
