@@ -1,0 +1,13 @@
+id: python
+name: Python
+category: runtime
+icon: python
+description: Python 3 interpreter shipped with the workspace image, including pip.
+
+source: image
+provides:
+  - python3
+  - pip3
+
+platforms:
+  - { os: linux, arch: [amd64, arm64], libc: glibc }

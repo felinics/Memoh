@@ -1,0 +1,29 @@
+id: claude-code
+name: Claude Code
+category: agent
+icon: anthropic
+description: Anthropic Claude Code CLI used by the direct Claude Code runtime.
+
+source: managed
+requires: [node]
+provides:
+  - claude
+
+platforms:
+  - { os: linux, arch: [amd64, arm64], libc: glibc }
+  - { os: darwin, arch: [arm64] }
+
+version:
+  # Must equal claudecode.PinnedCLIVersion; enforced by
+  # TestWorkspaceDependencyCatalogPinsMatchProtocolSnapshots (WD-CAT-004).
+  pin: "2.1.250"
+
+timeouts:
+  install: 1200
+  remove: 300
+  version: 30
+
+scripts:
+  install: install.sh
+  update: update.sh
+  remove: remove.sh

@@ -1,0 +1,13 @@
+id: uv
+name: uv
+category: runtime
+icon: uv
+description: uv Python package and project manager shipped with the workspace image, including uvx.
+
+source: image
+provides:
+  - uv
+  - uvx
+
+platforms:
+  - { os: linux, arch: [amd64, arm64], libc: glibc }

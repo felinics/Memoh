@@ -1,0 +1,14 @@
+id: node
+name: Node.js
+category: runtime
+icon: nodejs
+description: Node.js runtime shipped with the workspace image, including npm and npx.
+
+source: image
+provides:
+  - node
+  - npm
+  - npx
+
+platforms:
+  - { os: linux, arch: [amd64, arm64], libc: glibc }
