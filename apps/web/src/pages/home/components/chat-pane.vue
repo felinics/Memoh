@@ -783,92 +783,114 @@
                          The context-pressure ring itself is only shelved for
                          now, not deleted — its useSessionInfo data source
                          stays wired below (untouched) because the /compact
-                         quick action's live percentage still reads off it. -->
-                    <Button
-                      type="button"
-                      variant="primary"
-                      shape="circle"
-                      :disabled="voiceInputDisabled"
-                      :title="voiceInputLabel"
-                      :aria-label="voiceInputLabel"
-                      class="absolute inset-0 size-8 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                         quick action's live percentage still reads off it.
+
+                         Visibility (opacity / scale / pointer-events) lives on
+                         WRAPPER divs around each Button, never on the Button
+                         itself: the design system's disabled dimming is
+                         element-level opacity-40 (packages/ui AGENTS.md
+                         § Disabled), which outranks opacity-0/100 state classes
+                         in the cascade — so a disabled "hidden" button still
+                         painted at 0.4 and bled through its sibling (the mic
+                         ghost showed under the semi-transparent send while
+                         loadingMessages). Split onto two elements, the two
+                         opacity systems compound instead of fight: hidden
+                         stays hidden, while a VISIBLE disabled button still
+                         dims as designed. -->
+                    <div
+                      class="absolute inset-0 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
                       :class="micVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
-                      @click="handleVoiceInput"
                     >
-                      <Spinner
-                        v-if="voiceInputState === 'transcribing'"
-                        class="size-4 max-md:size-5"
-                      />
-                      <svg
-                        v-else
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        stroke-linecap="round"
-                        class="size-4.5 max-md:size-5"
-                        :class="voiceInputState === 'recording' ? 'motion-safe:animate-pulse' : undefined"
-                        aria-hidden="true"
+                      <Button
+                        type="button"
+                        variant="primary"
+                        shape="circle"
+                        :disabled="voiceInputDisabled"
+                        :title="voiceInputLabel"
+                        :aria-label="voiceInputLabel"
+                        class="size-full"
+                        @click="handleVoiceInput"
                       >
-                        <!-- Relaxed envelope: the center bar spans only 14 of
-                             the 24 viewBox units — the full-18 spike made the
-                             glyph read tense. Ends are vertical ovals
-                             (2.5 × 3.5 — a hair taller than pure circles), mids
-                             hold half the max (7). The 4.5-unit gaps are
-                             untouched: denser spacing smudges at this size. -->
-                        <path d="M3 11.5v1" />
-                        <path d="M7.5 8.5v7" />
-                        <path d="M12 5v14" />
-                        <path d="M16.5 8.5v7" />
-                        <path d="M21 11.5v1" />
-                      </svg>
-                    </Button>
+                        <Spinner
+                          v-if="voiceInputState === 'transcribing'"
+                          class="size-4 max-md:size-5"
+                        />
+                        <svg
+                          v-else
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          class="size-4.5 max-md:size-5"
+                          :class="voiceInputState === 'recording' ? 'motion-safe:animate-pulse' : undefined"
+                          aria-hidden="true"
+                        >
+                          <!-- Relaxed envelope: the center bar spans only 14 of
+                               the 24 viewBox units — the full-18 spike made the
+                               glyph read tense. Ends are vertical ovals
+                               (2.5 × 3.5 — a hair taller than pure circles), mids
+                               hold half the max (7). The 4.5-unit gaps are
+                               untouched: denser spacing smudges at this size. -->
+                          <path d="M3 11.5v1" />
+                          <path d="M7.5 8.5v7" />
+                          <path d="M12 5v14" />
+                          <path d="M16.5 8.5v7" />
+                          <path d="M21 11.5v1" />
+                        </svg>
+                      </Button>
+                    </div>
                     <!-- Send and stop are one brand circle: the surface never
                          changes between the two states, only the glyph cross-fades
                          (arrow ⇄ stop square), so the button can't blink color or
                          shape mid-turn. While streaming it stays clickable to abort. -->
-                    <Button
-                      type="button"
-                      variant="brand"
-                      :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel)"
-                      :aria-label="streaming ? 'Stop generating response' : 'Send message'"
-                      class="absolute inset-0 size-8 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                    <div
+                      class="absolute inset-0 transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="sendButtonVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
-                      @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                     >
-                      <span
-                        class="grid size-[18px] max-md:size-5 shrink-0 place-items-center"
-                        aria-hidden="true"
+                      <Button
+                        type="button"
+                        variant="brand"
+                        shape="circle"
+                        :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel)"
+                        :aria-label="streaming ? 'Stop generating response' : 'Send message'"
+                        class="size-full"
+                        @click="streaming ? chatStore.abort(paneTarget) : handleSend()"
                       >
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.75"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                          :class="streaming ? 'opacity-0' : 'opacity-100'"
+                        <span
+                          class="grid size-[18px] max-md:size-5 shrink-0 place-items-center"
+                          aria-hidden="true"
                         >
-                          <path d="M12 19.5 V5" />
-                          <path d="M6 10.5 L12 4.5 L18 10.5" />
-                        </svg>
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                          :class="streaming ? 'opacity-100' : 'opacity-0'"
-                        >
-                          <rect
-                            x="4"
-                            y="4"
-                            width="16"
-                            height="16"
-                            rx="3"
-                          />
-                        </svg>
-                      </span>
-                    </Button>
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.75"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                            :class="streaming ? 'opacity-0' : 'opacity-100'"
+                          >
+                            <path d="M12 19.5 V5" />
+                            <path d="M6 10.5 L12 4.5 L18 10.5" />
+                          </svg>
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
+                            :class="streaming ? 'opacity-100' : 'opacity-0'"
+                          >
+                            <rect
+                              x="4"
+                              y="4"
+                              width="16"
+                              height="16"
+                              rx="3"
+                            />
+                          </svg>
+                        </span>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
