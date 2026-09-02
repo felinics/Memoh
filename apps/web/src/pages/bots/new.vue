@@ -26,12 +26,10 @@
       />
     </div>
 
-    <!-- Each step is a settings card, the same shape the Billing page and the
-         bot's own settings pages use: a muted section title over a bordered
-         card whose rows carry the padding and the hairlines. The form's fields
-         are full-width, so every row is a stack="always" row holding a
-         FieldStack — label over control over help — instead of the
-         label-beside-control rhythm a read-only settings row uses. -->
+    <!-- Settings cards, the shape every other surface in the app uses: a muted
+         section label over a card whose rows are label-left / control-right,
+         divided by the row hairline. Full-width controls are the exception here
+         (the avatar pairing, the ACP panel), and each says so where it sits. -->
     <form
       v-else
       class="space-y-8"
@@ -40,9 +38,12 @@
       @submit.prevent="handleSubmit"
     >
       <SettingsSection :title="$t('bots.steps.basicInfo')">
+        <!-- Identity row: no label. The avatar and a placeholder reading "Give
+             your bot a name" already say what the field is, and a "Name" label
+             over them would only restate the card's own title. -->
         <SettingsRow stack="always">
           <template #content>
-            <div class="flex items-start gap-4">
+            <div class="flex items-center gap-4">
               <div class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden cursor-pointer">
                 <Avatar class="size-16 rounded-full">
                   <AvatarImage
@@ -64,69 +65,32 @@
                   <SquarePen class="size-6 text-white" />
                 </button>
               </div>
-              <FieldStack
+              <Input
+                v-model="form.display_name"
+                type="text"
                 class="min-w-0 flex-1"
-                :for="DISPLAY_NAME_ID"
-              >
-                <!-- Own label slot: the required marker rides with the copy,
-                     which the bound `label` prop cannot express. -->
-                <template #label>
-                  <Label :for="DISPLAY_NAME_ID">
-                    {{ $t('bots.displayName') }}
-                    <span class="text-destructive">*</span>
-                  </Label>
-                </template>
-                <Input
-                  :id="DISPLAY_NAME_ID"
-                  v-model="form.display_name"
-                  type="text"
-                  :placeholder="$t('bots.displayNamePlaceholder')"
-                />
-              </FieldStack>
+                :aria-label="$t('bots.displayName')"
+                :placeholder="$t('bots.displayNamePlaceholder')"
+              />
             </div>
           </template>
         </SettingsRow>
 
-        <SettingsRow stack="always">
+        <SettingsRow stack="sm">
+          <!-- Own body: the required marker rides with the label copy, and the
+               hint under it swaps to a success or error tone as availability
+               resolves — neither fits the bound label/description pair. -->
           <template #content>
-            <FieldStack :for="BOT_NAME_ID">
-              <template #label>
-                <Label :for="BOT_NAME_ID">
-                  {{ $t('bots.name') }}
-                  <span class="text-destructive">*</span>
-                </Label>
-              </template>
-              <div class="relative">
-                <Input
-                  :id="BOT_NAME_ID"
-                  v-model="form.name"
-                  type="text"
-                  autocapitalize="off"
-                  autocomplete="off"
-                  spellcheck="false"
-                  class="pr-9"
-                  :placeholder="$t('bots.namePlaceholder')"
-                  @input="handleNameInput"
-                />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2">
-                  <LoaderCircle
-                    v-if="nameStatus === 'checking'"
-                    class="size-4 animate-spin text-muted-foreground"
-                  />
-                  <Check
-                    v-else-if="nameStatus === 'available'"
-                    class="size-4 text-success-foreground"
-                  />
-                  <X
-                    v-else-if="nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved'"
-                    class="size-4 text-destructive"
-                  />
-                </span>
-              </div>
-              <!-- Not FieldStack's `help`: this line swaps to a success or
-                   error tone as availability resolves, and help is always muted. -->
+            <div class="min-w-0">
+              <label
+                :for="BOT_NAME_ID"
+                class="flex items-center gap-1.5 text-control font-medium text-foreground"
+              >
+                {{ $t('bots.name') }}
+                <span class="text-destructive">*</span>
+              </label>
               <p
-                class="text-body"
+                class="mt-0.5 text-body"
                 :class="nameStatus === 'available'
                   ? 'text-success-foreground'
                   : (nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved')
@@ -135,97 +99,136 @@
               >
                 {{ nameStatusMessage || $t('bots.nameHint') }}
               </p>
-            </FieldStack>
+            </div>
           </template>
+          <div class="relative w-full sm:w-56">
+            <Input
+              :id="BOT_NAME_ID"
+              v-model="form.name"
+              type="text"
+              autocapitalize="off"
+              autocomplete="off"
+              spellcheck="false"
+              class="pr-9"
+              :placeholder="$t('bots.namePlaceholder')"
+              @input="handleNameInput"
+            />
+            <span class="absolute right-3 top-1/2 -translate-y-1/2">
+              <LoaderCircle
+                v-if="nameStatus === 'checking'"
+                class="size-4 animate-spin text-muted-foreground"
+              />
+              <Check
+                v-else-if="nameStatus === 'available'"
+                class="size-4 text-success-foreground"
+              />
+              <X
+                v-else-if="nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved'"
+                class="size-4 text-destructive"
+              />
+            </span>
+          </div>
         </SettingsRow>
       </SettingsSection>
 
       <SettingsSection :title="$t('bots.steps.security')">
-        <SettingsRow stack="always">
+        <SettingsRow stack="sm">
           <template #content>
-            <FieldStack :help="aclDescription">
-              <template #label>
-                <div class="flex items-center gap-2">
-                  <Label :for="ACL_PRESET_ID">
-                    {{ $t('bots.aclPreset') }}
-                    <span class="text-destructive">*</span>
-                  </Label>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        class="size-5 text-muted-foreground hover:text-foreground"
-                      >
-                        <CircleHelp class="size-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent class="max-w-80 text-left leading-relaxed">
-                      {{ $t('bots.aclPresetHelp') }}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </template>
-              <Select v-model="form.acl_preset">
-                <SelectTrigger
-                  :id="ACL_PRESET_ID"
-                  class="w-full"
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <label
+                  :for="ACL_PRESET_ID"
+                  class="flex items-center gap-1.5 text-control font-medium text-foreground"
                 >
-                  <SelectValue :placeholder="$t('bots.aclPreset')" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem
-                    v-for="preset in aclPresetOptions"
-                    :key="preset.value"
-                    :value="preset.value"
-                  >
-                    {{ $t(preset.titleKey) }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </FieldStack>
+                  {{ $t('bots.aclPreset') }}
+                  <span class="text-destructive">*</span>
+                </label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      class="size-5 text-muted-foreground hover:text-foreground"
+                    >
+                      <CircleHelp class="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-80 text-left leading-relaxed">
+                    {{ $t('bots.aclPresetHelp') }}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <p
+                v-if="aclDescription"
+                class="mt-0.5 text-body text-muted-foreground"
+              >
+                {{ aclDescription }}
+              </p>
+            </div>
           </template>
+          <div class="w-full sm:w-56">
+            <Select v-model="form.acl_preset">
+              <SelectTrigger
+                :id="ACL_PRESET_ID"
+                class="w-full"
+              >
+                <SelectValue :placeholder="$t('bots.aclPreset')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="preset in aclPresetOptions"
+                  :key="preset.value"
+                  :value="preset.value"
+                >
+                  {{ $t(preset.titleKey) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection :title="selectedAcpProfile ? $t('bots.steps.agent') : $t('bots.steps.model')">
-        <!-- Chooser and the setup it governs share one row: picking the agent
-             kind and configuring it is one decision, and the chooser hides
-             itself when the server publishes no hosted agents — a row of its
-             own would collapse to bare help text on those servers. -->
-        <SettingsRow stack="always">
+      <!-- One card for what the bot runs on: the agent kind and its model, the
+           memory backend, and the clock it schedules against. Three cards for
+           three single-row concerns was three titles saying less than the rows
+           under them. -->
+      <SettingsSection :title="$t('bots.steps.settings')">
+        <SettingsRow
+          :label="$t('bots.steps.agent')"
+          stack="sm"
+        >
+          <AgentTypePill
+            v-model="agentType"
+            :profiles="acpProfiles"
+          />
+        </SettingsRow>
+
+        <!-- Direct runtimes need no setup fields at creation, so the row is the
+             sentence explaining where the credentials go instead. -->
+        <SettingsRow
+          v-if="selectedDirectRuntime"
+          stack="always"
+        >
+          <template #content>
+            <p class="text-body text-muted-foreground">
+              {{ $t('bots.agentCreate.directSetupHint') }}
+            </p>
+          </template>
+        </SettingsRow>
+
+        <!-- The ACP panel is a form of its own (setup mode, credentials), so it
+             takes the full row rather than the control column. -->
+        <SettingsRow
+          v-else-if="selectedAcpProfile"
+          stack="always"
+        >
           <template #content>
             <div class="space-y-3">
               <p class="text-body text-muted-foreground">
-                {{ selectedAcpProfile ? $t('bots.steps.agentDesc') : $t('bots.steps.modelDesc') }}
+                {{ $t('bots.steps.agentDesc') }}
               </p>
-              <AgentTypePill
-                v-model="agentType"
-                :profiles="acpProfiles"
-              />
-              <p
-                v-if="selectedDirectRuntime"
-                class="text-body text-muted-foreground"
-              >
-                {{ $t('bots.agentCreate.directSetupHint') }}
-              </p>
-              <FieldStack
-                v-else-if="!selectedAcpProfile"
-                :label="$t('bots.settings.chatModel')"
-              >
-                <ModelSelect
-                  v-model="form.chat_model_id"
-                  v-model:reasoning-effort="form.reasoning_effort"
-                  :models="models"
-                  :providers="providers"
-                  model-type="chat"
-                  :placeholder="$t('common.none')"
-                  show-reasoning
-                />
-              </FieldStack>
               <AcpSetupPanel
-                v-else
                 ref="acpSetupPanelRef"
                 v-model:error-message="acpError"
                 :profile="selectedAcpProfile"
@@ -234,43 +237,55 @@
             </div>
           </template>
         </SettingsRow>
-      </SettingsSection>
 
-      <SettingsSection :title="$t('bots.steps.memory')">
-        <SettingsRow stack="always">
-          <template #content>
-            <FieldStack
-              :label="$t('bots.settings.memoryProvider')"
-              :help="$t('bots.steps.memoryDesc')"
-            >
-              <MemoryProviderSelect
-                v-model="form.memory_provider_id"
-                :providers="memoryProviders"
-                :placeholder="$t('common.none')"
-              />
-            </FieldStack>
-          </template>
+        <SettingsRow
+          v-else
+          :label="$t('bots.settings.chatModel')"
+          :description="$t('bots.steps.modelDesc')"
+          stack="sm"
+        >
+          <div class="w-full sm:w-56">
+            <ModelSelect
+              v-model="form.chat_model_id"
+              v-model:reasoning-effort="form.reasoning_effort"
+              :models="models"
+              :providers="providers"
+              model-type="chat"
+              :placeholder="$t('common.none')"
+              show-reasoning
+            />
+          </div>
         </SettingsRow>
-      </SettingsSection>
 
-      <SettingsSection :title="$t('bots.steps.settings')">
-        <SettingsRow stack="always">
+        <SettingsRow
+          :label="$t('bots.settings.memoryProvider')"
+          :description="$t('bots.steps.memoryDesc')"
+          stack="sm"
+        >
+          <div class="w-full sm:w-56">
+            <MemoryProviderSelect
+              v-model="form.memory_provider_id"
+              :providers="memoryProviders"
+              :placeholder="$t('common.none')"
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow stack="sm">
           <template #content>
-            <FieldStack>
-              <template #label>
-                <Label>
-                  {{ $t('bots.timezone') }}
-                  <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
-                </Label>
-              </template>
-              <TimezoneSelect
-                v-model="form.timezone"
-                :placeholder="$t('bots.timezonePlaceholder')"
-                allow-empty
-                :empty-label="$t('bots.timezoneInherited')"
-              />
-            </FieldStack>
+            <div class="truncate text-control font-medium text-foreground">
+              {{ $t('bots.timezone') }}
+              <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+            </div>
           </template>
+          <div class="w-full sm:w-56">
+            <TimezoneSelect
+              v-model="form.timezone"
+              :placeholder="$t('bots.timezonePlaceholder')"
+              allow-empty
+              :empty-label="$t('bots.timezoneInherited')"
+            />
+          </div>
         </SettingsRow>
       </SettingsSection>
 
@@ -313,9 +328,7 @@ import {
   AvatarImage,
   AvatarFallback,
   Button,
-  FieldStack,
   Input,
-  Label,
   Select,
   SelectContent,
   SelectItem,
@@ -359,9 +372,8 @@ const { t } = useI18n()
 
 const mode = ref<'create' | 'import'>(route.query.mode === 'import' ? 'import' : 'create')
 
-// Control ids, so each FieldStack's label focuses the field it names. Static
-// rather than useId(): this page is a route, never mounted twice at once.
-const DISPLAY_NAME_ID = 'bot-create-display-name'
+// Control ids, so a row's label focuses the field it names. Static rather than
+// useId(): this page is a route, never mounted twice at once.
 const BOT_NAME_ID = 'bot-create-name'
 const ACL_PRESET_ID = 'bot-create-acl-preset'
 

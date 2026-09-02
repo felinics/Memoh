@@ -84,12 +84,10 @@ vi.mock('@/composables/useAvatarInitials', () => ({
 vi.mock('@felinic/ui', async () => {
   const { h } = await import('vue')
   const Passthrough = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.())
-  // The settings-card primitives render named slots the page relies on: a row's
-  // body arrives in #content, and a FieldStack's label in #label.
+  // A settings row puts its body in the #content slot, so a default-slot-only
+  // stub would drop every field on the page.
   const SlottedRow = (_props: Record<string, unknown>, { slots }: { slots: Slots }) =>
     h('div', [slots.content?.(), slots.default?.()])
-  const SlottedField = (_props: Record<string, unknown>, { slots }: { slots: Slots }) =>
-    h('div', [slots.label?.(), slots.default?.()])
   const Button = (props: Record<string, unknown>, { attrs, slots }: { attrs: Record<string, unknown>, slots: Slots }) =>
     h('button', { ...attrs, disabled: props.disabled, type: props.type ?? 'button' }, slots.default?.())
   const Input = Object.assign((
@@ -108,7 +106,6 @@ vi.mock('@felinic/ui', async () => {
     AvatarFallback: Passthrough,
     AvatarImage: Passthrough,
     Button,
-    FieldStack: SlottedField,
     Input,
     Label: Passthrough,
     Select: Passthrough,
