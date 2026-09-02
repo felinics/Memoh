@@ -916,6 +916,13 @@ definitions:
         type: string
       deleted_at:
         type: string
+      dependency:
+        allOf:
+        - $ref: '#/definitions/botagents.DependencyRequirement'
+        description: |-
+          Dependency is the workspace dependency the agent's runtime declares
+          (design §9.3). It is derived from the driver at read time, never
+          persisted, and omitted for runtimes without a declaration (ACP).
       enabled:
         type: boolean
       id:
@@ -932,12 +939,24 @@ definitions:
     type: object
   botagents.CreateRequest:
     properties:
+      enabled:
+        description: |-
+          Enabled defaults to true when omitted. The web passes false for direct
+          runtimes so the dependency preflight runs before the agent goes live.
+        type: boolean
       metadata:
         additionalProperties: {}
         type: object
       name:
         type: string
       runtime:
+        type: string
+    type: object
+  botagents.DependencyRequirement:
+    properties:
+      dependency_id:
+        type: string
+      required_version:
         type: string
     type: object
   botagents.ListResponse:
@@ -7395,7 +7414,8 @@ paths:
       - acp
   /bots/{bot_id}/agents:
     get:
-      description: List active and disabled non-deleted Agents attached to a bot
+      description: List active and disabled non-deleted Agents attached to a bot.
+        Direct-runtime Agents carry the workspace dependency their runtime declares.
       parameters:
       - description: Bot ID
         in: path
@@ -7419,7 +7439,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: Add a named Agent backed by a runtime descriptor
+      description: Add a named Agent backed by a runtime descriptor. Omit enabled
+        to create it enabled; pass enabled=false to hold a direct-runtime Agent back
+        until its workspace dependency preflight passes. The response reports that
+        dependency (dependency_id, required_version) when the runtime declares one.
       parameters:
       - description: Bot ID
         in: path
@@ -7487,7 +7510,8 @@ paths:
       tags:
       - bot-agents
     get:
-      description: Get one Agent attached to a bot
+      description: Get one Agent attached to a bot, including the workspace dependency
+        its runtime declares (omitted for runtimes without one).
       parameters:
       - description: Bot ID
         in: path

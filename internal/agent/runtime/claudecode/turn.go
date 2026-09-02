@@ -40,6 +40,11 @@ type turnRunner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// onCLIVersion, when set, receives the version the CLI reports in its
+	// system/init handshake so the launcher resolver can correct its cache.
+	// It runs on the read loop and must return quickly.
+	onCLIVersion func(ctx context.Context, version string)
+
 	writeMu sync.Mutex
 	nextID  atomic.Uint64
 
@@ -160,6 +165,9 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			if msg.ClaudeCodeVersion != "" && msg.ClaudeCodeVersion != PinnedCLIVersion {
 				t.logger.Warn("claude CLI version differs from the pinned wire contract",
 					slog.String("cli_version", msg.ClaudeCodeVersion), slog.String("pinned", PinnedCLIVersion))
+			}
+			if msg.ClaudeCodeVersion != "" && t.onCLIVersion != nil {
+				t.onCLIVersion(t.ctx, msg.ClaudeCodeVersion)
 			}
 		}
 	case messageTypeAssistant:

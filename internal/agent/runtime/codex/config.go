@@ -23,8 +23,13 @@ const (
 	metadataThreadIDKey = "codex_thread_id"
 
 	codexHomeRoot = "/data/.codex/agents"
-	// launcherPath is the pinned toolkit launcher for the codex CLI.
-	launcherPath = "/opt/memoh/toolkit/bin/codex"
+	// dependencyID names the managed workspace dependency that provides the
+	// codex CLI (design §9.1); the catalog entry must use the same id.
+	dependencyID = "codex"
+	// defaultLauncherPath is the toolkit copy of the codex CLI, used only when
+	// no LauncherResolver is installed. With a resolver the copy to run is
+	// chosen per bot (design §9.2).
+	defaultLauncherPath = "/opt/memoh/toolkit/bin/codex"
 	// defaultProjectPath matches the workspace data volume root.
 	defaultProjectPath = "/data"
 )

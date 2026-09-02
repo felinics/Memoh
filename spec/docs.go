@@ -1302,7 +1302,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents": {
             "get": {
-                "description": "List active and disabled non-deleted Agents attached to a bot",
+                "description": "List active and disabled non-deleted Agents attached to a bot. Direct-runtime Agents carry the workspace dependency their runtime declares.",
                 "produces": [
                     "application/json"
                 ],
@@ -1335,7 +1335,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Add a named Agent backed by a runtime descriptor",
+                "description": "Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1394,7 +1394,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/agents/{id}": {
             "get": {
-                "description": "Get one Agent attached to a bot",
+                "description": "Get one Agent attached to a bot, including the workspace dependency its runtime declares (omitted for runtimes without one).",
                 "produces": [
                     "application/json"
                 ],
@@ -17173,6 +17173,14 @@ const docTemplate = `{
                 "deleted_at": {
                     "type": "string"
                 },
+                "dependency": {
+                    "description": "Dependency is the workspace dependency the agent's runtime declares\n(design §9.3). It is derived from the driver at read time, never\npersisted, and omitted for runtimes without a declaration (ACP).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/botagents.DependencyRequirement"
+                        }
+                    ]
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -17197,6 +17205,10 @@ const docTemplate = `{
         "botagents.CreateRequest": {
             "type": "object",
             "properties": {
+                "enabled": {
+                    "description": "Enabled defaults to true when omitted. The web passes false for direct\nruntimes so the dependency preflight runs before the agent goes live.",
+                    "type": "boolean"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -17205,6 +17217,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "runtime": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.DependencyRequirement": {
+            "type": "object",
+            "properties": {
+                "dependency_id": {
+                    "type": "string"
+                },
+                "required_version": {
                     "type": "string"
                 }
             }

@@ -259,14 +259,14 @@ export const patchBotsByBotIdAcpRuntimesByRuntimeIdReasoning = <ThrowOnError ext
 /**
  * List a bot's Agents
  *
- * List active and disabled non-deleted Agents attached to a bot
+ * List active and disabled non-deleted Agents attached to a bot. Direct-runtime Agents carry the workspace dependency their runtime declares.
  */
 export const getBotsByBotIdAgents = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdAgentsData, ThrowOnError>): RequestResult<GetBotsByBotIdAgentsResponses, GetBotsByBotIdAgentsErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdAgentsResponses, GetBotsByBotIdAgentsErrors, ThrowOnError>({ url: '/bots/{bot_id}/agents', ...options });
 
 /**
  * Add an Agent to a bot
  *
- * Add a named Agent backed by a runtime descriptor
+ * Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.
  */
 export const postBotsByBotIdAgents = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdAgentsData, ThrowOnError>): RequestResult<PostBotsByBotIdAgentsResponses, PostBotsByBotIdAgentsErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdAgentsResponses, PostBotsByBotIdAgentsErrors, ThrowOnError>({
     url: '/bots/{bot_id}/agents',
@@ -287,7 +287,7 @@ export const deleteBotsByBotIdAgentsById = <ThrowOnError extends boolean = false
 /**
  * Get a bot Agent
  *
- * Get one Agent attached to a bot
+ * Get one Agent attached to a bot, including the workspace dependency its runtime declares (omitted for runtimes without one).
  */
 export const getBotsByBotIdAgentsById = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdAgentsByIdData, ThrowOnError>): RequestResult<GetBotsByBotIdAgentsByIdResponses, GetBotsByBotIdAgentsByIdErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdAgentsByIdResponses, GetBotsByBotIdAgentsByIdErrors, ThrowOnError>({ url: '/bots/{bot_id}/agents/{id}', ...options });
 
