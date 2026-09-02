@@ -67,7 +67,6 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   const contextWindow = computed(() => contextView.value.contextWindow)
   const outputReserve = computed(() => contextView.value.outputReserve)
   const autoCompactTokens = computed(() => contextView.value.autoCompactTokens)
-  const hardCompactTokens = computed(() => contextView.value.hardCompactTokens)
   const compactionAvailable = computed(() => contextView.value.compactionAvailable)
   const contextPercent = computed(() => {
     if (contextWindow.value == null || contextWindow.value <= 0) return 0
@@ -116,7 +115,6 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     contextWindow,
     outputReserve,
     autoCompactTokens,
-    hardCompactTokens,
     compactionAvailable,
     contextPercent,
     currentBotId,

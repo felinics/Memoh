@@ -20,11 +20,6 @@
         class="absolute inset-y-0 w-px bg-muted-foreground"
         :style="{ left: autoMarkLeft }"
       />
-      <div
-        v-if="hardMarkLeft"
-        class="absolute inset-y-0 w-px bg-destructive"
-        :style="{ left: hardMarkLeft }"
-      />
     </div>
     <div>
       <div
@@ -44,12 +39,6 @@
       </div>
     </div>
     <p
-      v-if="hardMarkLeft && hardCompactTokens != null"
-      class="text-caption text-muted-foreground"
-    >
-      {{ $t('chat.infoHardCompactAt', { tokens: formatTokenCount(hardCompactTokens) }) }}
-    </p>
-    <p
       v-if="autoMarkLeft && autoCompactTokens != null"
       class="text-caption text-muted-foreground"
     >
@@ -60,7 +49,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CONTEXT_CATEGORY_IDS, formatTokenCount } from '../composables/context-categories'
+import { formatTokenCount } from '../composables/context-categories'
 import type { ContextCategoryId, ContextComposition } from '../composables/context-categories'
 
 const props = withDefaults(defineProps<{
@@ -68,11 +57,9 @@ const props = withDefaults(defineProps<{
   contextWindow: number | null
   outputReserve?: number | null
   autoCompactTokens?: number | null
-  hardCompactTokens?: number | null
 }>(), {
   outputReserve: null,
   autoCompactTokens: null,
-  hardCompactTokens: null,
 })
 
 interface LegendRow {
@@ -90,20 +77,13 @@ function segmentWidth(tokens: number): string {
   return denominator.value > 0 ? `${(tokens / denominator.value) * 100}%` : '0%'
 }
 
-// The compaction trigger measures the conversation alone, so both marks are
-// anchored where the conversation segment starts, not at the track origin.
-const BEFORE_CONVERSATION = new Set<ContextCategoryId>(CONTEXT_CATEGORY_IDS.slice(0, CONTEXT_CATEGORY_IDS.indexOf('conversation')))
-const conversationStart = computed(() => props.composition.categories
-  .filter(category => BEFORE_CONVERSATION.has(category.id))
-  .reduce((sum, category) => sum + category.tokens, 0))
-
-function markLeft(tokens: number | null): string | null {
-  if (props.contextWindow == null || tokens == null || denominator.value <= 0) return null
-  return `${Math.min((conversationStart.value + tokens) / denominator.value, 1) * 100}%`
-}
-
-const autoMarkLeft = computed(() => markLeft(props.autoCompactTokens))
-const hardMarkLeft = computed(() => markLeft(props.hardCompactTokens))
+// The trigger's measured quantity differs by turn path (provider input on the
+// pipeline path, history estimate otherwise), so the mark states the threshold
+// against the window and makes no claim about which segment reaches it.
+const autoMarkLeft = computed(() => {
+  if (props.contextWindow == null || props.autoCompactTokens == null || denominator.value <= 0) return null
+  return `${Math.min(props.autoCompactTokens / denominator.value, 1) * 100}%`
+})
 
 const legendRows = computed<LegendRow[]>(() => {
   const rows: LegendRow[] = props.composition.categories.map(category => ({

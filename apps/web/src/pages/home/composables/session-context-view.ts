@@ -7,7 +7,6 @@ export interface SessionContextView {
   contextWindow: number | null
   outputReserve: number | null
   autoCompactTokens: number | null
-  hardCompactTokens: number | null
   compactionAvailable: boolean
 }
 
@@ -32,14 +31,13 @@ export function resolveSessionContextView(
   const composition = computeContextComposition(usage)
   const plan = options.overrideActive ? undefined : usage?.budget_plan
   const compaction = usage?.compaction
-  const marksApply = plan != null && compaction?.enabled === true
+  const markApplies = plan != null && compaction?.enabled === true
   return {
     composition,
     estimatedTokens: composition?.totalTokens ?? null,
     contextWindow: positive(plan?.window) ?? positive(usage?.context_window) ?? positive(options.fallbackWindow),
     outputReserve: positive(plan?.output_reserve),
-    autoCompactTokens: marksApply ? positive(compaction.auto_tokens) : null,
-    hardCompactTokens: marksApply ? positive(compaction.hard_tokens) : null,
+    autoCompactTokens: markApplies ? positive(compaction.auto_tokens) : null,
     compactionAvailable: compaction != null,
   }
 }

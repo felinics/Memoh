@@ -1104,8 +1104,7 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
-    "infoAutoCompactAt": "Auto-compact once the conversation reaches ~{tokens}",
-    "infoHardCompactAt": "Blocking compaction at ~{tokens}",
+    "infoAutoCompactAt": "Auto-compact threshold ~{tokens}",
     "contextBreakdown": {
       "system": "System prompt",
       "rules": "Workspace rules",

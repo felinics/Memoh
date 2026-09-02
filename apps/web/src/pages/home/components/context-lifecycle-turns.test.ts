@@ -58,7 +58,7 @@ afterEach(() => {
 interface MountOptions {
   details?: Record<string, ContextfragLifecycleSnapshot>
   loadingRunId?: string | null
-  hasMore?: boolean
+  hasOlder?: boolean
 }
 
 const expanded: string[] = []
@@ -272,7 +272,7 @@ describe('context-lifecycle-turns', () => {
   })
 
   it('leaves the oldest row untagged when older turns exist beyond the page', async () => {
-    const root = await mountTurns([richTurn, bareTurn], { hasMore: true })
+    const root = await mountTurns([richTurn, bareTurn], { hasOlder: true })
 
     expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['System changed'])
   })

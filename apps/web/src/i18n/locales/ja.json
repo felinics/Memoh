@@ -1082,8 +1082,7 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
-    "infoAutoCompactAt": "会話が ~{tokens} に達すると自動圧縮",
-    "infoHardCompactAt": "~{tokens} でブロッキング圧縮",
+    "infoAutoCompactAt": "自動圧縮しきい値 ~{tokens}",
     "contextBreakdown": {
       "system": "システムプロンプト",
       "rules": "ワークスペースルール",

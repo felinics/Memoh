@@ -20,7 +20,6 @@ function mountBreakdown(props: {
   contextWindow: number | null
   outputReserve?: number | null
   autoCompactTokens?: number | null
-  hardCompactTokens?: number | null
 }): HTMLDivElement {
   const root = document.createElement('div')
   document.body.append(root)
@@ -43,8 +42,7 @@ function mountBreakdown(props: {
             reserve: 'Output reserve',
             free: 'Free space',
           },
-          infoAutoCompactAt: 'Auto-compact once the conversation reaches ~{tokens}',
-          infoHardCompactAt: 'Blocking compaction at ~{tokens}',
+          infoAutoCompactAt: 'Auto-compact threshold ~{tokens}',
         },
       },
     },
@@ -184,39 +182,24 @@ describe('context-usage-breakdown', () => {
     expect(root.textContent).not.toContain('Output reserve')
   })
 
-  const withConversation: ContextComposition = {
-    categories: [...categories, { id: 'conversation', tokens: 2000, colorClass: 'bg-accent-orange' }],
-    totalTokens: 6000,
-  }
-
-  it('anchors the auto-compact mark to the conversation segment, where the trigger measures, and captions it', () => {
-    const root = mountBreakdown({ composition: withConversation, contextWindow: 10_000, autoCompactTokens: 5000 })
+  it('marks the auto-compact threshold against the window and captions it as a threshold', () => {
+    const root = mountBreakdown({ composition, contextWindow: 10_000, autoCompactTokens: 8000 })
     const tick = root.querySelector<HTMLElement>('.w-px')
 
     expect(tick?.classList.contains('bg-muted-foreground')).toBe(true)
-    expect(tick?.style.left).toBe('90%')
+    expect(tick?.style.left).toBe('80%')
     expect(root.lastElementChild?.classList.contains('text-caption')).toBe(true)
-    expect(root.lastElementChild?.textContent?.trim()).toBe('Auto-compact once the conversation reaches ~5.0K')
+    expect(root.lastElementChild?.textContent?.trim()).toBe('Auto-compact threshold ~8.0K')
   })
 
-  it('marks the blocking threshold in destructive tone with its own caption line', () => {
-    const root = mountBreakdown({ composition: withConversation, contextWindow: 10_000, autoCompactTokens: 5000, hardCompactTokens: 5500 })
-    const ticks = [...root.querySelectorAll<HTMLElement>('.w-px')]
+  it('clamps the auto-compact mark to the end of the track', () => {
+    const root = mountBreakdown({ composition, contextWindow: 10_000, autoCompactTokens: 20_000 })
 
-    expect(ticks).toHaveLength(2)
-    expect(ticks[1]?.classList.contains('bg-destructive')).toBe(true)
-    expect(ticks[1]?.style.left).toBe('95%')
-    expect(root.textContent).toContain('Blocking compaction at ~5.5K')
+    expect(root.querySelector<HTMLElement>('.w-px')?.style.left).toBe('100%')
   })
 
-  it('clamps the marks to the end of the track', () => {
-    const root = mountBreakdown({ composition: withConversation, contextWindow: 10_000, autoCompactTokens: 20_000, hardCompactTokens: 30_000 })
-
-    expect([...root.querySelectorAll<HTMLElement>('.w-px')].map(tick => tick.style.left)).toEqual(['100%', '100%'])
-  })
-
-  it('drops the reserve band, reserve row and compaction marks when no context window is known', () => {
-    const root = mountBreakdown({ composition, contextWindow: null, outputReserve: 2000, autoCompactTokens: 8000, hardCompactTokens: 9000 })
+  it('drops the reserve band, reserve row and auto-compact mark when no context window is known', () => {
+    const root = mountBreakdown({ composition, contextWindow: null, outputReserve: 2000, autoCompactTokens: 8000 })
 
     expect(segments(root)).toHaveLength(2)
     expect(nth(segments(root), 0).style.width).toBe('25%')
@@ -224,6 +207,5 @@ describe('context-usage-breakdown', () => {
     expect(root.querySelector('.w-px')).toBeNull()
     expect(root.textContent).not.toContain('Output reserve')
     expect(root.textContent).not.toContain('Auto-compact')
-    expect(root.textContent).not.toContain('Blocking compaction')
   })
 })

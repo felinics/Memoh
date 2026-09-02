@@ -36,6 +36,7 @@ export function useContextLifecycle(open: Ref<boolean>) {
       return data as HandlersContextLifecycleResponse
     },
     enabled: () => open.value && !!botId.value && !!sessionId.value,
+    placeholderData: (previous: HandlersContextLifecycleResponse | undefined) => previous,
     refetchOnWindowFocus: false,
   })
 
@@ -49,7 +50,7 @@ export function useContextLifecycle(open: Ref<boolean>) {
 
 // A persisted run's snapshot never changes, so a fetched turn stays fresh for
 // the whole dialog session instead of re-downloading on every re-expand.
-export function useContextLifecycleTurn(runId: Ref<string | null>) {
+export function useContextLifecycleTurn(open: Ref<boolean>, runId: Ref<string | null>) {
   const { botId, sessionId } = useLifecycleTarget()
 
   const { data, status } = useQuery({
@@ -61,7 +62,7 @@ export function useContextLifecycleTurn(runId: Ref<string | null>) {
       })
       return data as HandlersContextLifecycleTurn
     },
-    enabled: () => !!runId.value && !!botId.value && !!sessionId.value,
+    enabled: () => open.value && !!runId.value && !!botId.value && !!sessionId.value,
     staleTime: 10 * 60_000,
     refetchOnWindowFocus: false,
   })

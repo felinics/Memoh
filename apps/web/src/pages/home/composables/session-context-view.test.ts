@@ -11,7 +11,7 @@ const usage: HandlersContextUsage = {
   ],
   tool_defs: [{ provider: 'native', tools: 39, token_estimate: 8409 }],
   budget_plan: { window: 200000, output_reserve: 32000 },
-  compaction: { enabled: true, auto_tokens: 100000, hard_tokens: 150000 },
+  compaction: { enabled: true, auto_tokens: 100000 },
 }
 
 describe('resolveSessionContextView', () => {
@@ -22,7 +22,6 @@ describe('resolveSessionContextView', () => {
     expect(view.contextWindow).toBe(200000)
     expect(view.outputReserve).toBe(32000)
     expect(view.autoCompactTokens).toBe(100000)
-    expect(view.hardCompactTokens).toBe(150000)
     expect(view.compactionAvailable).toBe(true)
   })
 
@@ -32,14 +31,12 @@ describe('resolveSessionContextView', () => {
     expect(view.contextWindow).toBe(258000)
     expect(view.outputReserve).toBeNull()
     expect(view.autoCompactTokens).toBeNull()
-    expect(view.hardCompactTokens).toBeNull()
   })
 
-  it('hides marks when auto-compaction is disabled but keeps manual compaction available', () => {
-    const view = resolveSessionContextView({ ...usage, compaction: { enabled: false, auto_tokens: 100000, hard_tokens: 150000 } }, { overrideActive: false, fallbackWindow: null })
+  it('hides the mark when auto-compaction is disabled but keeps manual compaction available', () => {
+    const view = resolveSessionContextView({ ...usage, compaction: { enabled: false, auto_tokens: 100000 } }, { overrideActive: false, fallbackWindow: null })
 
     expect(view.autoCompactTokens).toBeNull()
-    expect(view.hardCompactTokens).toBeNull()
     expect(view.compactionAvailable).toBe(true)
   })
 

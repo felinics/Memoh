@@ -1104,8 +1104,7 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
-    "infoAutoCompactAt": "会话内容达到 ~{tokens} 时自动压缩",
-    "infoHardCompactAt": "达到 ~{tokens} 时阻塞压缩",
+    "infoAutoCompactAt": "自动压缩阈值 ~{tokens}",
     "contextBreakdown": {
       "system": "系统提示词",
       "rules": "工作区规则",

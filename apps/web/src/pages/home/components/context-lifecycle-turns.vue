@@ -140,11 +140,11 @@ const props = withDefaults(defineProps<{
   turns: HandlersContextLifecycleTurn[]
   details?: Record<string, ContextfragLifecycleSnapshot>
   loadingRunId?: string | null
-  hasMore?: boolean
+  hasOlder?: boolean
 }>(), {
   details: () => ({}),
   loadingRunId: null,
-  hasMore: false,
+  hasOlder: false,
 })
 
 const emit = defineEmits<{ expand: [runId: string] }>()
@@ -161,7 +161,7 @@ const rows = computed<TurnRow[]>(() => props.turns.map((turn, index) => {
     t,
     formatTime: iso => formatCalendarTime(iso, { locale: locale.value }),
     detail: runId ? props.details[runId] : undefined,
-    previous: older ?? (props.hasMore ? undefined : null),
+    previous: older ?? (props.hasOlder ? undefined : null),
     detailPending: runId !== '' && props.loadingRunId === runId && !props.details[runId],
   })
 }))

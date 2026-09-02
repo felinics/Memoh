@@ -48,9 +48,15 @@
               :turns="turns"
               :details="details"
               :loading-run-id="loadingRunId"
-              :has-more="data?.has_more === true"
+              :has-older="data?.has_more === true || data?.legacy_history_may_exist === true"
               @expand="onExpand"
             />
+            <p
+              v-if="detailStatus === 'error'"
+              class="text-caption text-destructive"
+            >
+              {{ $t('chat.lifecycle.loadFailed') }}
+            </p>
             <div
               v-if="data?.has_more"
               class="flex items-center justify-between gap-2 text-caption text-muted-foreground"
@@ -87,10 +93,15 @@ const { t } = useI18n()
 const { data, status, canLoadOlder, loadOlder } = useContextLifecycle(open)
 
 const activeRunId = ref<string | null>(null)
-const { data: turnDetail, status: detailStatus } = useContextLifecycleTurn(activeRunId)
+const { data: turnDetail, status: detailStatus } = useContextLifecycleTurn(open, activeRunId)
 const details = shallowRef<Record<string, ContextfragLifecycleSnapshot>>({})
 watch(turnDetail, (turn) => {
   if (turn?.run_id && turn.snapshot) details.value = { ...details.value, [turn.run_id]: turn.snapshot }
+})
+watch(open, (isOpen) => {
+  if (isOpen) return
+  activeRunId.value = null
+  details.value = {}
 })
 const loadingRunId = computed(() => (detailStatus.value === 'pending' ? activeRunId.value : null))
 
