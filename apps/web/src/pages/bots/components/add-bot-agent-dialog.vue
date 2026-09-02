@@ -188,12 +188,17 @@ const { mutateAsync: createMutation, isLoading } = useMutation({
       agentMetadata = directBotAgentMetadata(option.runtime) ?? agentMetadata
     }
 
+    // Direct runtimes declare a workspace dependency; the row stays disabled
+    // until bot-agents.vue has run the preflight on the created agent
+    // (design §9.3). ACP agents keep the Server default.
+    const direct = option.runtime !== BOT_AGENT_RUNTIME_ACP
     const { data } = await postBotsByBotIdAgents({
       path: { bot_id: props.botId },
       body: {
         name: value.name.trim(),
         runtime: option.runtime,
         metadata: agentMetadata,
+        ...(direct ? { enabled: false } : {}),
       },
       throwOnError: true,
     })

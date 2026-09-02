@@ -212,7 +212,7 @@ function finish() {
             v-else-if="status === 'done'"
             @click="finish"
           >
-            {{ t('common.done') }}
+            {{ t('bots.dependencies.done') }}
           </Button>
           <template v-else>
             <Button

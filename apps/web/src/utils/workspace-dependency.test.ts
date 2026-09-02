@@ -45,22 +45,7 @@ describe('dependencyStatusBadge', () => {
     expect(dependencyStatusBadge(item({ status: 'missing' }))).toMatchObject({ variant: 'warning', key: 'bots.dependencies.status.missing' })
   })
 
-  it('asks an installed agent to align with the Server pin', () => {
-    const badge = dependencyStatusBadge(item({
-      status: 'installed',
-      installed_version: '0.147.0',
-      required_version: 'v0.151.0',
-      needs_alignment: true,
-    }))
-    expect(badge).toEqual({
-      variant: 'info',
-      key: 'bots.dependencies.status.needsAlignment',
-      args: { version: '0.151.0' },
-      spinner: false,
-    })
-  })
-
-  it('offers a tool update only from installed_version to a different latest_version', () => {
+  it('offers an update from installed_version to a different latest_version, whatever the category', () => {
     const tool = item({ id: 'uv', category: 'tool', status: 'installed', installed_version: '0.5.0' })
     expect(dependencyStatusBadge({ ...tool, latest_version: '0.6.0' })).toMatchObject({
       variant: 'info',
@@ -69,13 +54,19 @@ describe('dependencyStatusBadge', () => {
     })
     expect(dependencyStatusBadge({ ...tool, latest_version: '0.5.0' })).toMatchObject({ variant: 'success' })
     expect(dependencyStatusBadge({ ...tool, update_available: true })).toMatchObject({ key: 'bots.dependencies.status.updateAvailable' })
+    expect(dependencyStatusBadge(item({ status: 'installed', installed_version: '0.150.0', latest_version: 'v0.151.0' })))
+      .toMatchObject({ key: 'bots.dependencies.status.updateAvailable', args: { version: '0.151.0' } })
   })
 
-  it('ignores needs_alignment on a non-agent row and latest_version on an agent row', () => {
+  it('never reads the retired Server pin (required_version / needs_alignment)', () => {
+    expect(dependencyStatusBadge(item({
+      status: 'installed',
+      installed_version: '0.147.0',
+      required_version: 'v0.151.0',
+      needs_alignment: true,
+    }))).toEqual({ variant: 'success', key: 'bots.dependencies.status.installed', spinner: false })
     expect(dependencyStatusBadge(item({ id: 'node', category: 'runtime', status: 'installed', needs_alignment: true })))
       .toMatchObject({ variant: 'success' })
-    expect(dependencyStatusBadge(item({ status: 'installed', installed_version: '1', latest_version: '2' })))
-      .toMatchObject({ variant: 'success', key: 'bots.dependencies.status.installed' })
   })
 
   it('falls back to not-installed when the catalog has no record', () => {
@@ -117,24 +108,38 @@ describe('dependencyPrimaryAction', () => {
     expect(dependencyRetryOperation(item({ status: 'failed', actions: ['update', 'reinstall', 'remove'] }))).toBe('reinstall')
     expect(dependencyRetryOperation(item({
       status: 'failed',
-      needs_alignment: true,
+      update_available: true,
       actions: ['update', 'reinstall', 'remove'],
     }))).toBe('update')
+    expect(dependencyPrimaryAction(item({ status: 'failed', actions: [] }), running)).toBeNull()
   })
 
-  it('aligns an agent and updates a tool through the update operation', () => {
-    expect(dependencyPrimaryAction(item({ status: 'installed', needs_alignment: true, actions: ['update'] }), running)).toMatchObject({
-      kind: 'align',
-      labelKey: 'bots.dependencies.action.align',
-      operation: 'update',
-    })
-    expect(dependencyPrimaryAction(item({
-      id: 'uv',
-      category: 'tool',
+  it('updates any installed row with a newer version through the update operation', () => {
+    const updatable: Partial<DependencyItem> = {
       status: 'installed',
       installed_version: '1',
       latest_version: '2',
-    }), running)).toMatchObject({ kind: 'update', labelKey: 'bots.dependencies.action.update', operation: 'update' })
+      actions: ['update', 'reinstall', 'remove'],
+    }
+    expect(dependencyPrimaryAction(item(updatable), running)).toMatchObject({
+      kind: 'update',
+      labelKey: 'bots.dependencies.action.update',
+      operation: 'update',
+    })
+    expect(dependencyPrimaryAction(item({ ...updatable, id: 'uv', category: 'tool' }), running)).toMatchObject({ kind: 'update' })
+    // The retired pin never drives a button.
+    expect(dependencyPrimaryAction(item({ status: 'installed', needs_alignment: true, required_version: '9', actions: ['update'] }), running)).toBeNull()
+  })
+
+  it('follows the Server action list, not the source', () => {
+    // No install listed → no button, even for a managed row without a record.
+    expect(dependencyPrimaryAction(item({ actions: [] }), running)).toBeNull()
+    expect(dependencyPrimaryAction(item({ status: 'missing', actions: ['remove'] }), running)).toBeNull()
+    // An image-provided row grows an install the day the Server lists one.
+    expect(dependencyPrimaryAction(item({ id: 'node', category: 'runtime', source: 'image', actions: ['install'] }), running))
+      .toMatchObject({ kind: 'install' })
+    expect(dependencyPrimaryAction(item({ status: 'installed', installed_version: '1', latest_version: '2', actions: ['reinstall'] }), running))
+      .toBeNull()
   })
 
   it('shows progress only to the client that holds the stream', () => {
@@ -149,19 +154,23 @@ describe('dependencyPrimaryAction', () => {
   })
 
   it('has no primary button for up-to-date, image-provided, or unsupported rows', () => {
-    expect(dependencyPrimaryAction(item({ status: 'installed' }), running)).toBeNull()
-    expect(dependencyPrimaryAction(item({ id: 'node', category: 'runtime', source: 'image' }), running)).toBeNull()
-    expect(dependencyPrimaryAction(item({ platform_supported: false }), running)).toBeNull()
+    expect(dependencyPrimaryAction(item({ status: 'installed', actions: ['update', 'reinstall', 'remove'] }), running)).toBeNull()
+    expect(dependencyPrimaryAction(item({ id: 'node', category: 'runtime', source: 'image', status: 'installed' }), running)).toBeNull()
+    expect(dependencyPrimaryAction(item({ platform_supported: false, actions: ['install'] }), running)).toBeNull()
   })
 
   it.each(['not_running', 'missing', 'remote_offline', undefined] as const)('disables the button while the workspace is %s', (state) => {
-    expect(dependencyPrimaryAction(item(), state)).toMatchObject({ kind: 'install', disabled: true })
+    expect(dependencyPrimaryAction(item({ actions: ['install'] }), state)).toMatchObject({ kind: 'install', disabled: true })
   })
 })
 
 describe('dependencyMenuActions', () => {
   it('lists reinstall, rollback, script, and remove for an installed managed row', () => {
-    const actions = dependencyMenuActions(item({ status: 'installed', previous_version: 'v0.147.0' }), 'running')
+    const actions = dependencyMenuActions(item({
+      status: 'installed',
+      previous_version: 'v0.147.0',
+      actions: ['update', 'reinstall', 'remove', 'rollback'],
+    }), 'running')
     expect(actions.map(action => action.kind)).toEqual(['reinstall', 'rollback', 'viewScript', 'remove'])
     expect(actions[1]).toMatchObject({ args: { version: '0.147.0' }, disabled: false })
     expect(actions[2]).toMatchObject({ separatorBefore: true, disabled: false })
@@ -169,33 +178,49 @@ describe('dependencyMenuActions', () => {
   })
 
   it('keeps only the script preview clickable while the workspace is read-only', () => {
-    const actions = dependencyMenuActions(item({ status: 'installed', previous_version: '0.1.0' }), 'not_running')
+    const actions = dependencyMenuActions(item({
+      status: 'installed',
+      previous_version: '0.1.0',
+      actions: ['update', 'reinstall', 'remove', 'rollback'],
+    }), 'not_running')
     expect(actions.filter(action => !action.disabled).map(action => action.kind)).toEqual(['viewScript'])
   })
 
   it('offers script and remove for a missing row, script only for an uninstalled one', () => {
-    expect(dependencyMenuActions(item({ status: 'missing' }), 'running').map(action => action.kind)).toEqual(['viewScript', 'remove'])
-    expect(dependencyMenuActions(item(), 'running').map(action => action.kind)).toEqual(['viewScript'])
+    expect(dependencyMenuActions(item({ status: 'missing', actions: ['install', 'remove'] }), 'running').map(action => action.kind))
+      .toEqual(['viewScript', 'remove'])
+    expect(dependencyMenuActions(item({ actions: ['install'] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
   })
 
-  it('renders remove as a disabled item for image-provided rows', () => {
-    expect(dependencyMenuActions(item({ id: 'node', category: 'runtime', source: 'image', status: 'installed' }), 'running')).toEqual([
-      expect.objectContaining({ kind: 'remove', destructive: true, disabled: true }),
-    ])
+  it('keeps the script preview while an operation empties the action list', () => {
+    expect(dependencyMenuActions(item({ status: 'installing', actions: [] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+  })
+
+  it('hides rollback until the Server lists it, even with a previous version recorded', () => {
+    const kinds = dependencyMenuActions(item({ status: 'installed', previous_version: '0.1.0', actions: ['update', 'reinstall', 'remove'] }), 'running')
+      .map(action => action.kind)
+    expect(kinds).toEqual(['reinstall', 'viewScript', 'remove'])
+  })
+
+  it('gives image-provided rows no menu until the Server lists a scripted action', () => {
+    expect(dependencyMenuActions(item({ id: 'node', category: 'runtime', source: 'image', status: 'installed' }), 'running')).toEqual([])
+    expect(dependencyMenuActions(item({ id: 'node', category: 'runtime', source: 'image', status: 'installed', actions: ['install'] }), 'running')
+      .map(action => action.kind)).toEqual(['viewScript'])
   })
 
   it('leaves only the script preview on an unsupported platform', () => {
-    expect(dependencyMenuActions(item({ platform_supported: false, status: 'installed' }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+    expect(dependencyMenuActions(item({ platform_supported: false, status: 'installed', actions: ['update'] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
     expect(dependencyMenuActions(item({ platform_supported: false, source: 'image' }), 'running')).toEqual([])
   })
 })
 
 describe('dependencyNeedsAttention', () => {
-  it('counts missing, failed, misaligned, and updatable rows', () => {
+  it('counts missing, failed, and updatable rows — never the retired pin', () => {
     expect(dependencyNeedsAttention(item({ status: 'missing' }))).toBe(true)
     expect(dependencyNeedsAttention(item({ status: 'failed' }))).toBe(true)
-    expect(dependencyNeedsAttention(item({ status: 'installed', needs_alignment: true }))).toBe(true)
+    expect(dependencyNeedsAttention(item({ status: 'installed', update_available: true }))).toBe(true)
     expect(dependencyNeedsAttention(item({ id: 'uv', category: 'tool', status: 'installed', update_available: true }))).toBe(true)
+    expect(dependencyNeedsAttention(item({ status: 'installed', needs_alignment: true, required_version: '9' }))).toBe(false)
     expect(dependencyNeedsAttention(item({ status: 'installed' }))).toBe(false)
     expect(dependencyNeedsAttention(item())).toBe(false)
   })

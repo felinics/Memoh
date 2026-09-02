@@ -67,6 +67,23 @@
           </template>
 
           <div class="flex items-center gap-2">
+            <span
+              v-if="checkingAgentID === agent.id && enableFlow?.checking"
+              class="flex items-center gap-1.5 text-caption text-muted-foreground"
+            >
+              <Spinner class="size-3" />
+              {{ t('bots.agent.dependencyChecking') }}
+            </span>
+
+            <Badge
+              v-if="agentDependency(agent)"
+              variant="outline"
+              size="sm"
+              font="mono"
+            >
+              {{ agentDependency(agent)?.dependencyId }}
+            </Badge>
+
             <Badge
               v-if="agent.enabled !== false && agentNeedsConfig(agent)"
               variant="warning"
@@ -121,7 +138,12 @@
         :profiles="profiles"
         :agents="agents"
         :bot-metadata="botMetadata"
-        @created="openAgent"
+        @created="onAgentCreated"
+      />
+
+      <DependencyEnableFlow
+        ref="enableFlow"
+        :bot-id="botId"
       />
 
       <ConfirmDeleteDialog
@@ -183,7 +205,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -201,6 +223,7 @@ import {
   SettingsSection,
   SettingsShell,
   Skeleton,
+  Spinner,
   SwapTransition,
   Switch,
   toast,
@@ -222,6 +245,8 @@ import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
 import SettingsDirectAgentDetail from './settings-direct-agent-detail.vue'
 import AddBotAgentDialog from './add-bot-agent-dialog.vue'
+import DependencyEnableFlow from './dependency-enable-flow.vue'
+import { agentDependencyRequirement } from './dependency-enable-flow'
 import { externalAgentModelsQueryKey } from '@/composables/useAgentModelCatalog'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -259,6 +284,8 @@ const lastPersistedSnapshot = ref('')
 const persistRunning = ref(false)
 const persistQueued = ref(false)
 const busyAgentIDs = reactive(new Set<string>())
+const enableFlow = useTemplateRef<InstanceType<typeof DependencyEnableFlow>>('enableFlow')
+const checkingAgentID = ref('')
 const addOpen = ref(false)
 const deleteTarget = ref<BotagentsBotAgent | null>(null)
 const deleting = ref(false)
@@ -396,11 +423,31 @@ function openAgent(agent: BotagentsBotAgent) {
   openDetail()
 }
 
+const agentDependency = agentDependencyRequirement
+
+// Blocking preflight before an agent goes live (design §9.3). Resolves true
+// when the agent declares no dependency or the flow ended with it satisfied;
+// the Switch stays bound to the server value, so nothing lights up until
+// `enabled: true` is actually written.
+async function ensureAgentDependency(agent: BotagentsBotAgent): Promise<boolean> {
+  if (!agentDependency(agent)) return true
+  const flow = enableFlow.value
+  if (!flow) return false
+  checkingAgentID.value = agent.id ?? ''
+  try {
+    return await flow.run(agent)
+  } finally {
+    checkingAgentID.value = ''
+  }
+}
+
 async function setAgentEnabled(agent: BotagentsBotAgent, enabled: boolean) {
   const id = agent.id ?? ''
   if (!id || busyAgentIDs.has(id)) return
   busyAgentIDs.add(id)
   try {
+    // WD-EXT-002: a cancelled or failed preflight writes nothing.
+    if (enabled && !(await ensureAgentDependency(agent))) return
     await updateAgent({ agent, body: { enabled } })
     if (enabled && agentNeedsConfig(agent)) openAgent(agent)
   } catch (error) {
@@ -408,6 +455,23 @@ async function setAgentEnabled(agent: BotagentsBotAgent, enabled: boolean) {
   } finally {
     busyAgentIDs.delete(id)
   }
+}
+
+// A direct agent is created disabled; it is enabled here once its dependency
+// checks out, and the detail opens either way so credentials can be set up.
+async function onAgentCreated(agent: BotagentsBotAgent) {
+  const id = agent.id ?? ''
+  if (id && agent.enabled === false && agentDependency(agent) && !busyAgentIDs.has(id)) {
+    busyAgentIDs.add(id)
+    try {
+      if (await ensureAgentDependency(agent)) await updateAgent({ agent, body: { enabled: true } })
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+    } finally {
+      busyAgentIDs.delete(id)
+    }
+  }
+  openAgent(agent)
 }
 
 async function saveSelectedName() {

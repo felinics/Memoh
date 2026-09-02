@@ -2229,7 +2229,8 @@
       "openSettings": "Agent の設定を開く",
       "dependencyRequired": "Workspace に {name} {version} が必要です",
       "dependencyChecking": "依存関係を確認中…",
-      "dependencySatisfied": "{name} {version} はインストール済みです"
+      "dependencySatisfied": "{name} {version} はインストール済みです",
+      "dependencyRemoteOffline": "この Bot が接続しているコンピューターはオフラインです。オンラインになると依存関係を確認できます。"
     },
     "dependencies": {
       "title": "Workspace の依存関係",
@@ -2354,7 +2355,11 @@
         "title": "依存関係の更新があります",
         "description": "自動では更新されません。一覧から個別に確認してください。",
         "gotIt": "OK"
-      }
+      },
+      "done": "完了",
+      "errorDetails": "エラーの詳細",
+      "checkUpdatesFailed": "更新を確認できませんでした",
+      "backgroundDone": "{name} が完了しました"
     },
     "folders": {
       "create": "新しいフォルダ",

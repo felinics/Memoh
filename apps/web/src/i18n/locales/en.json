@@ -2240,7 +2240,8 @@
       "openSettings": "Open Agent settings",
       "dependencyRequired": "Requires {name} {version} in the workspace",
       "dependencyChecking": "Checking dependency…",
-      "dependencySatisfied": "{name} {version} is installed"
+      "dependencySatisfied": "{name} {version} is installed",
+      "dependencyRemoteOffline": "The bot's connected computer is offline. Dependencies can be checked once it is back online."
     },
     "dependencies": {
       "title": "Workspace dependencies",
@@ -2365,7 +2366,11 @@
         "title": "Dependency updates available",
         "description": "Nothing updates automatically; confirm each one from the list.",
         "gotIt": "Got it"
-      }
+      },
+      "done": "Done",
+      "errorDetails": "Error details",
+      "checkUpdatesFailed": "Couldn't check for updates",
+      "backgroundDone": "{name} finished"
     },
     "folders": {
       "create": "New folder",

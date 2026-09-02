@@ -2,6 +2,7 @@ import type { Component } from 'vue'
 import { Bot, Layers, Package } from 'lucide-vue-next'
 import { Anthropic, ClaudeCodeColor, CodexColor, Openai } from '@memohai/icon'
 import type {
+  DependencyAvailableAction,
   DependencyItem,
   DependencyOperationAction,
   DependencyWorkspaceState,
@@ -25,7 +26,7 @@ export interface DependencyStatusBadge {
   tooltipKey?: string
 }
 
-export type DependencyPrimaryActionKind = 'install' | 'reinstall' | 'retry' | 'align' | 'update' | 'viewProgress'
+export type DependencyPrimaryActionKind = 'install' | 'reinstall' | 'retry' | 'update' | 'viewProgress'
 
 export interface DependencyPrimaryAction {
   kind: DependencyPrimaryActionKind
@@ -84,26 +85,35 @@ export function dependencyPlatformUnsupported(item: Pick<DependencyItem, 'platfo
   return item.platform_supported === false
 }
 
-/** Installed agent whose version differs from the Server pin (design §10.1). */
-export function dependencyNeedsAlignment(item: Pick<DependencyItem, 'category' | 'status' | 'needs_alignment'>): boolean {
-  return item.category === 'agent' && item.status === 'installed' && item.needs_alignment === true
-}
-
-/** Installed tool whose last upstream check reported a newer version (design §10.2). */
+/**
+ * Installed row whose last upstream check reported a newer version. No
+ * dependency is pinned by the Server any more — agents and tools alike install
+ * the latest and can be updated or rolled back — so the rule is the same for
+ * every category and never reads `required_version` / `needs_alignment`.
+ */
 export function dependencyUpdateAvailable(
-  item: Pick<DependencyItem, 'category' | 'status' | 'update_available' | 'latest_version' | 'installed_version'>,
+  item: Pick<DependencyItem, 'status' | 'update_available' | 'latest_version' | 'installed_version'>,
 ): boolean {
-  if (item.category !== 'tool' || item.status !== 'installed') return false
+  if (item.status !== 'installed') return false
   if (item.update_available === true) return true
   const latest = formatDependencyVersion(item.latest_version)
   return !!latest && latest !== formatDependencyVersion(item.installed_version)
+}
+
+/**
+ * Whether the Server lets this action be requested right now (`actions`).
+ * Buttons key off this list, never off `source`: an image-provided row gets
+ * no buttons today only because the Server lists nothing for it, and will
+ * grow an install the day the Server does.
+ */
+export function dependencyAllows(item: Pick<DependencyItem, 'actions'>, action: DependencyAvailableAction): boolean {
+  return (item.actions ?? []).includes(action)
 }
 
 /** Drives the tab count badge: rows the user should act on. */
 export function dependencyNeedsAttention(item: DependencyItem): boolean {
   return item.status === 'missing'
     || item.status === 'failed'
-    || dependencyNeedsAlignment(item)
     || dependencyUpdateAvailable(item)
 }
 
@@ -124,14 +134,6 @@ export function dependencyStatusBadge(item: DependencyItem): DependencyStatusBad
   }
   if (item.status === 'missing') {
     return { variant: 'warning', key: `${STATUS_KEY}.missing`, spinner: false }
-  }
-  if (dependencyNeedsAlignment(item)) {
-    return {
-      variant: 'info',
-      key: `${STATUS_KEY}.needsAlignment`,
-      args: { version: formatDependencyVersion(item.required_version) },
-      spinner: false,
-    }
   }
   if (dependencyUpdateAvailable(item)) {
     return {
@@ -154,10 +156,8 @@ export function dependencyStatusBadge(item: DependencyItem): DependencyStatusBad
  * absent copy retries the install.
  */
 export function dependencyRetryOperation(item: DependencyItem): DependencyOperationAction {
-  const actions = item.actions ?? []
-  if (actions.includes('reinstall') || actions.includes('update')) {
-    if ((dependencyNeedsAlignment({ ...item, status: 'installed' })
-      || dependencyUpdateAvailable({ ...item, status: 'installed' })) && actions.includes('update')) {
+  if (dependencyAllows(item, 'reinstall') || dependencyAllows(item, 'update')) {
+    if (dependencyUpdateAvailable({ ...item, status: 'installed' }) && dependencyAllows(item, 'update')) {
       return 'update'
     }
     return 'reinstall'
@@ -170,7 +170,7 @@ export function dependencyPrimaryAction(
   workspaceState: DependencyWorkspaceState | undefined,
   options: { ownsStream?: boolean } = {},
 ): DependencyPrimaryAction | null {
-  if (dependencyPlatformUnsupported(item) || item.source === 'image') return null
+  if (dependencyPlatformUnsupported(item)) return null
   const disabled = workspaceState !== 'running'
 
   if (dependencyInProgress(item)) {
@@ -180,6 +180,7 @@ export function dependencyPrimaryAction(
     return { kind: 'viewProgress', labelKey: `${ACTION_KEY}.viewProgress`, variant: 'outline', disabled: false }
   }
   if (item.status === 'failed') {
+    if (!item.actions?.length) return null
     return {
       kind: 'retry',
       labelKey: 'common.retry',
@@ -191,25 +192,29 @@ export function dependencyPrimaryAction(
   if (item.status === 'missing') {
     // Reads "reinstall" (the record remembers it was installed) but runs the
     // install script: nothing is left in the workspace to remove first.
+    if (!dependencyAllows(item, 'install')) return null
     return { kind: 'reinstall', labelKey: `${ACTION_KEY}.reinstall`, operation: 'install', variant: 'default', disabled }
   }
   if (!item.status) {
+    if (!dependencyAllows(item, 'install')) return null
     return { kind: 'install', labelKey: `${ACTION_KEY}.install`, operation: 'install', variant: 'default', disabled }
   }
-  if (dependencyNeedsAlignment(item)) {
-    return { kind: 'align', labelKey: `${ACTION_KEY}.align`, operation: 'update', variant: 'default', disabled }
-  }
-  if (dependencyUpdateAvailable(item)) {
+  if (dependencyUpdateAvailable(item) && dependencyAllows(item, 'update')) {
     return { kind: 'update', labelKey: `${ACTION_KEY}.update`, operation: 'update', variant: 'default', disabled }
   }
   return null
 }
 
+const SCRIPTED_ACTIONS: DependencyAvailableAction[] = ['install', 'update', 'reinstall', 'remove']
+
 export function dependencyMenuActions(
   item: DependencyItem,
   workspaceState: DependencyWorkspaceState | undefined,
 ): DependencyMenuAction[] {
-  const managed = item.source !== 'image'
+  // A row backed by catalog scripts can always show them — including while an
+  // operation runs and `actions` is empty. Image-provided rows have no scripts
+  // until the Server lists a scripted action for them.
+  const scripted = item.source !== 'image' || SCRIPTED_ACTIONS.some(action => dependencyAllows(item, action))
   // Script preview is rendered by the Server from the catalog; it needs no
   // workspace, so it stays clickable while everything else is read-only.
   const viewScript: DependencyMenuAction = {
@@ -220,25 +225,12 @@ export function dependencyMenuActions(
     separatorBefore: false,
   }
   if (dependencyPlatformUnsupported(item)) {
-    return managed ? [viewScript] : []
+    return scripted ? [viewScript] : []
   }
 
   const readonly = workspaceState !== 'running' || dependencyInProgress(item)
   const items: DependencyMenuAction[] = []
-  if (!managed) {
-    // Visible but inert: the row description explains that the image provides
-    // it, and a hidden item would leave the user hunting for "remove".
-    items.push({
-      kind: 'remove',
-      labelKey: `${ACTION_KEY}.remove`,
-      destructive: true,
-      disabled: true,
-      separatorBefore: false,
-    })
-    return items
-  }
-
-  if (item.status === 'installed' || item.status === 'failed') {
+  if (dependencyAllows(item, 'reinstall')) {
     items.push({
       kind: 'reinstall',
       labelKey: `${ACTION_KEY}.reinstall`,
@@ -248,7 +240,7 @@ export function dependencyMenuActions(
     })
   }
   const previous = formatDependencyVersion(item.previous_version)
-  if (previous) {
+  if (previous && dependencyAllows(item, 'rollback')) {
     items.push({
       kind: 'rollback',
       labelKey: `${ACTION_KEY}.rollback`,
@@ -258,8 +250,8 @@ export function dependencyMenuActions(
       separatorBefore: false,
     })
   }
-  items.push({ ...viewScript, separatorBefore: items.length > 0 })
-  if (item.status === 'installed' || item.status === 'missing' || item.status === 'failed') {
+  if (scripted) items.push({ ...viewScript, separatorBefore: items.length > 0 })
+  if (dependencyAllows(item, 'remove')) {
     items.push({
       kind: 'remove',
       labelKey: `${ACTION_KEY}.remove`,
