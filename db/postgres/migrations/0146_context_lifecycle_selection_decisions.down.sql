@@ -1,6 +1,10 @@
 -- 0146_context_lifecycle_selection_decisions
 -- Fold the selection decisions back into the snapshot and drop the column.
 
+-- The per-team loop reads public.teams, whose forced policy needs a bound
+-- team; open it for the duration of this migration as 0120 does.
+ALTER POLICY teams_self_select ON public.teams USING (true);
+
 DO $$
 DECLARE
   previous_team_id text;
@@ -33,6 +37,9 @@ BEGIN
 
   PERFORM set_config('memoh.team_id', COALESCE(previous_team_id, ''), true);
 END $$;
+
+ALTER POLICY teams_self_select ON public.teams
+  USING (id = public.memoh_current_team_id());
 
 ALTER TABLE public.context_lifecycles
     DROP COLUMN IF EXISTS selection_decisions;

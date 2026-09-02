@@ -379,6 +379,40 @@ VALUES ($1, gen_random_uuid(), $2, $3, 'completed', '{}'::jsonb)
 	if unmaterialized {
 		t.Fatal("probe = true, want false once every metadata run has a lifecycle row")
 	}
+
+	// Summary-only rewrites, which is what every read-back-and-write path now
+	// produces, must never erase the audit column.
+	if _, err := queries.UpdateAbortedContextLifecycleSnapshot(ctx, sqlc.UpdateAbortedContextLifecycleSnapshotParams{
+		Snapshot:  []byte(`{"version":2,"source":"summary-only"}`),
+		RunID:     parsedRunID,
+		BotID:     parsedBotID,
+		SessionID: parsedSessionID,
+	}); err != nil {
+		t.Fatalf("rewrite aborted summary: %v", err)
+	}
+	rewritten, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read rewritten aborted lifecycle: %v", err)
+	}
+	assertJSONSemanticallyEqual(t, rewritten.SelectionDecisions, got.SelectionDecisions)
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedSessionID,
+		Status:          "completed",
+		Snapshot:        []byte(`{"version":2,"source":"terminal-summary-only"}`),
+		ReplaceSnapshot: true,
+	}); err != nil {
+		t.Fatalf("replace terminal summary: %v", err)
+	}
+	replaced, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read replaced terminal lifecycle: %v", err)
+	}
+	assertJSONSemanticallyEqual(t, replaced.SelectionDecisions, got.SelectionDecisions)
+	if strings.Contains(string(replaced.Snapshot), "selection_decisions") || !strings.Contains(string(replaced.Snapshot), "terminal-summary-only") {
+		t.Fatalf("replaced summary = %s, want the new summary without the audit", replaced.Snapshot)
+	}
 }
 
 func TestUpsertTerminalContextLifecycleConvergesByRunIdentity(t *testing.T) {

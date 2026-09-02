@@ -144,7 +144,8 @@ let saveAgainAfterCurrent = false
 let quotaExceeded = false
 
 function isQuotaExceeded(error: unknown): boolean {
-  return error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22)
+  return error instanceof DOMException
+    && (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED' || error.code === 22 || error.code === 1014)
 }
 let activeStorage: Storage | undefined
 let activeQueryCache: QueryCache | undefined

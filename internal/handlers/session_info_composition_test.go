@@ -236,6 +236,7 @@ type sessionInfoQueryStub struct {
 	bot           sqlc.GetBotByIDRow
 	session       sqlc.BotSession
 	lifecycleRows []sqlc.ListRecentContextLifecyclesBySessionRow
+	legacyRows    []sqlc.ListRecentAssistantMessagesBySessionRow
 	settingsRow   sqlc.GetSettingsByBotIDRow
 	settingsCalls int
 }
@@ -276,6 +277,13 @@ func (q *sessionInfoQueryStub) GetLatestContextLifecycleBySession(_ context.Cont
 		return nil, pgx.ErrNoRows
 	}
 	return q.lifecycleRows[0].Snapshot, nil
+}
+
+func (q *sessionInfoQueryStub) ListRecentAssistantMessagesBySession(
+	_ context.Context,
+	_ sqlc.ListRecentAssistantMessagesBySessionParams,
+) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error) {
+	return q.legacyRows, nil
 }
 
 func (*sessionInfoQueryStub) HasUnmaterializedContextLifecycleMetadataBySession(
@@ -358,5 +366,74 @@ func TestGetSessionInfoReportsBudgetPlanAndCompactionMarks(t *testing.T) {
 	}
 	if queries.settingsCalls != 1 {
 		t.Fatalf("settings loads = %d, want exactly one per request", queries.settingsCalls)
+	}
+}
+
+func TestGetSessionInfoFallsBackToLegacyLifecycleMetadata(t *testing.T) {
+	t.Parallel()
+
+	metadata, err := json.Marshal(map[string]json.RawMessage{
+		contextfrag.MetadataContextLifecycleKey: lifecycleSnapshotJSON(t, contextfrag.LifecycleSnapshot{
+			Version:    2,
+			Breakdown:  []contextfrag.KindBreakdown{{Kind: contextfrag.KindSystemPrompt, Fragments: 1, TokenEstimate: 300}},
+			BudgetPlan: &contextfrag.ContextBudgetPlan{Window: 100000, OutputReserve: 4000},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy metadata: %v", err)
+	}
+	queries := &sessionInfoQueryStub{
+		bot: testBotRow(lifecycleTestBotID, map[string]any{}),
+		session: sqlc.BotSession{
+			ID:          testUUID(lifecycleTestSessionID),
+			BotID:       testUUID(lifecycleTestBotID),
+			Type:        session.TypeChat,
+			SessionMode: session.TypeChat,
+			RuntimeType: session.RuntimeModel,
+		},
+		legacyRows: []sqlc.ListRecentAssistantMessagesBySessionRow{{
+			ID:        testUUID("77777777-7777-7777-7777-777777777777"),
+			RunID:     testUUID("88888888-8888-8888-8888-888888888888"),
+			Role:      "assistant",
+			Metadata:  metadata,
+			CreatedAt: pgtype.Timestamptz{Valid: true},
+		}},
+		settingsRow: sqlc.GetSettingsByBotIDRow{
+			BotID:             testUUID(lifecycleTestBotID),
+			Language:          "auto",
+			ReasoningEffort:   "medium",
+			CompactionEnabled: true,
+		},
+	}
+	logger := slog.New(slog.DiscardHandler)
+	handler := NewSessionInfoHandler(
+		logger,
+		queries,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+		nil,
+		settings.NewService(logger, queries, nil, nil),
+	)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+lifecycleTestBotID+"/sessions/"+lifecycleTestSessionID+"/status", nil)
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(e, req, rec, "user-1")
+	ctx.SetPath("/bots/:bot_id/sessions/:session_id/status")
+	ctx.SetParamNames("bot_id", "session_id")
+	ctx.SetParamValues(lifecycleTestBotID, lifecycleTestSessionID)
+
+	if err := handler.GetSessionInfo(ctx); err != nil {
+		t.Fatalf("GetSessionInfo() error = %v", err)
+	}
+	var response SessionInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.ContextUsage.Breakdown) != 1 || response.ContextUsage.BudgetPlan == nil || response.ContextUsage.BudgetPlan.Window != 100000 {
+		t.Fatalf("context usage = %+v, want the legacy metadata snapshot", response.ContextUsage)
+	}
+	if response.ContextUsage.Compaction == nil || response.ContextUsage.Compaction.AutoTokens != 50000 {
+		t.Fatalf("compaction = %+v, want the mark derived from the legacy plan", response.ContextUsage.Compaction)
 	}
 }
