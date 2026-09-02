@@ -29,6 +29,11 @@ const (
 	CodeAgentCommandStale     = "acp_agent_command_stale"
 	CodeImageInputUnsupported = "acp_image_input_unsupported"
 	CodeInvalidChatRuntime    = "invalid_chat_runtime"
+	// Workspace dependency feedback (design §9.4): missing blocks the turn and
+	// carries dep_id / required_version / install_task_id; version_mismatch is a
+	// one-time notice and never blocks.
+	CodeAgentDependencyMissing         = "agent_dependency_missing"
+	CodeAgentDependencyVersionMismatch = "agent_dependency_version_mismatch"
 )
 
 type Error struct {
