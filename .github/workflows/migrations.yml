@@ -16,6 +16,7 @@ on:
       - "internal/db/team_*_integration_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/chat/message/*postgres_integration_test.go"
+      - "internal/workspacedeps/*integration_test.go"
   pull_request:
     branches: [main]
     paths:
@@ -31,6 +32,7 @@ on:
       - "internal/db/team_*_integration_test.go"
       - "internal/db/*postgres_integration_test.go"
       - "internal/chat/message/*postgres_integration_test.go"
+      - "internal/workspacedeps/*integration_test.go"
 
 concurrency:
   group: migrations-${{ github.ref }}
@@ -104,4 +106,4 @@ jobs:
         # internal/chat/thread owns the fork query, whose CTEs cut history by
         # turn position. Nothing else executes it: `go test ./...` runs without
         # a DSN and skips, and the fencing job filters by test name.
-        run: go test -tags=integration -count=1 ./internal/db ./internal/chat/message ./internal/chat/thread
+        run: go test -tags=integration -count=1 ./internal/db ./internal/chat/message ./internal/chat/thread ./internal/workspacedeps
