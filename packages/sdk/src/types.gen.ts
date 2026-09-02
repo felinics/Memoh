@@ -1405,6 +1405,15 @@ export type ConversationUiForwardRef = {
 
 export type ConversationUiMessage = {
     approval?: ConversationUiToolApproval;
+    /**
+     * Args are the machine-readable parameters of a notice block: the string
+     * values of the runtime_notice event metadata (dep_id, required_version,
+     * installed_version for agent_dependency_version_mismatch). The client
+     * renders actions from them instead of parsing Content.
+     */
+    args?: {
+        [key: string]: string;
+    };
     attachments?: Array<ConversationUiAttachment>;
     background_task?: ConversationUiBackgroundTask;
     code?: string;

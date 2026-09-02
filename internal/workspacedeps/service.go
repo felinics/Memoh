@@ -395,18 +395,40 @@ func buildEntry(entry Entry, dep catalog.Dependency, rec *Installation, obs Obse
 		entry.InstalledVersion = rec.InstalledVersion
 		entry.LatestVersion = rec.LatestVersion
 	}
-	if obs.Present && obs.Version != "" {
-		entry.InstalledVersion = obs.Version
-	}
 	if dep.IsAgent() {
 		entry.RequiredVersion = dep.Version.Pin
 		entry.LatestVersion = dep.Version.Pin
+	}
+	// The version shown is that of the copy the launcher resolver would run,
+	// not necessarily the discovery winner: a managed 0.147.0 next to a
+	// toolkit copy at the pin runs the toolkit copy, and the panel must not
+	// ask for an alignment the runtime does not need (nor the other way
+	// round). The record keeps the discovery winner's version, which is what
+	// the Server installed.
+	if obs.Present {
+		if version := launcherVersion(obs, entry.RequiredVersion); version != "" {
+			entry.InstalledVersion = version
+		}
+	}
+	if dep.IsAgent() {
 		entry.NeedsAlignment = obs.Present && entry.InstalledVersion != dep.Version.Pin
 	} else if obs.Present && entry.LatestVersion != "" {
 		entry.UpdateAvailable = entry.LatestVersion != entry.InstalledVersion
 	}
 	entry.Actions = availableActions(dep, rec, obs)
 	return entry
+}
+
+// launcherVersion is the version of the copy the launcher resolver would
+// execute for the dependency (selectLauncherCandidate, design §9.2), falling
+// back to the discovery winner when no candidate qualifies. The panel
+// (buildEntry) and Preflight both go through it so neither can disagree with
+// the runtime about whether a version mismatch exists.
+func launcherVersion(obs Observed, requiredVersion string) string {
+	if candidate, ok := selectLauncherCandidate(obs.Candidates, requiredVersion); ok {
+		return candidate.Version
+	}
+	return obs.Version
 }
 
 // offlineEntry builds an Entry from the record alone, for a workspace that
@@ -492,13 +514,10 @@ func preflightItem(cat *catalog.Catalog, snap Snapshot, depID string) PreflightI
 	if dep.IsAgent() {
 		item.RequiredVersion = dep.Version.Pin
 	}
-	// The verdict follows the copy the launcher resolver would run
-	// (selectLauncherCandidate), so the UI never reports a mismatch the
-	// runtime would not see, or the other way round.
-	version := obs.Version
-	if candidate, ok := selectLauncherCandidate(obs.Candidates, item.RequiredVersion); ok {
-		version = candidate.Version
-	}
+	// The verdict follows the copy the launcher resolver would run, the same
+	// way the panel's entry does (launcherVersion), so the UI never reports a
+	// mismatch the runtime would not see, or the other way round.
+	version := launcherVersion(obs, item.RequiredVersion)
 	switch {
 	case !obs.Present && !dep.SupportsPlatform(snap.Platform.OS, snap.Platform.Arch, snap.Platform.Libc):
 		item.Reason = PreflightReasonPlatformUnsupported

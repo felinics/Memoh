@@ -90,8 +90,8 @@ func (*Driver) RequiredDependency() (string, string) {
 }
 
 // SetLauncherResolver installs the workspace dependency resolver. Setter
-// injection: the resolver depends on workspace services that in turn depend
-// on the driver table.
+// injection keeps the driver constructible without one (tests, the toolkit
+// fallback); assembly wires it right after NewDriver.
 func (d *Driver) SetLauncherResolver(r external.LauncherResolver) {
 	d.launchers = r
 }

@@ -1465,3 +1465,51 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 		t.Errorf("runner left files behind: %v", leftovers)
 	}
 }
+
+// TestListAlignmentFollowsLauncherCandidate pins the panel to the copy the
+// launcher resolver runs (design §9.2): a managed copy behind the pin next to a
+// toolkit copy at the pin needs no alignment, because the runtime executes the
+// toolkit copy. Preflight must agree with the panel in both directions.
+func TestListAlignmentFollowsLauncherCandidate(t *testing.T) {
+	f := newServiceFixture(t)
+	f.seed("agent-x", StatusInstalled, "1.9.0")
+	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("2.0.0"))
+
+	result, err := f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	agent := f.entry(t, result, "agent-x")
+	if agent.NeedsAlignment || agent.InstalledVersion != "2.0.0" || agent.RequiredVersion != "2.0.0" || agent.Status != StatusInstalled {
+		t.Errorf("agent-x entry = %+v", agent)
+	}
+	// The record still describes what the Server installed.
+	if rec, ok := f.store.get(f.key("agent-x")); !ok || rec.InstalledVersion != "1.9.0" || rec.Source != InstallationSourceManaged {
+		t.Errorf("agent-x record = %+v", rec)
+	}
+	pre, err := f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
+	if err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+	if item := pre.Items[0]; !item.Satisfied || item.InstalledVersion != "2.0.0" {
+		t.Errorf("preflight item = %+v", item)
+	}
+
+	// Without a copy at the pin the managed one runs, and the panel asks for
+	// alignment with that version.
+	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("1.8.0"))
+	result, err = f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if agent := f.entry(t, result, "agent-x"); !agent.NeedsAlignment || agent.InstalledVersion != "1.9.0" {
+		t.Errorf("agent-x entry = %+v", agent)
+	}
+	pre, err = f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
+	if err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+	if item := pre.Items[0]; item.Satisfied || item.Reason != PreflightReasonVersionMismatch || item.InstalledVersion != "1.9.0" {
+		t.Errorf("preflight item = %+v", item)
+	}
+}
