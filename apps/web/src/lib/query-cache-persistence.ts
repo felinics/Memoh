@@ -44,6 +44,10 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   // Raw workspace file text (hooks.json env map may contain API keys); deepStripSecrets
   // only walks objects/arrays and cannot redact secrets inside an opaque string.
   'bot-hooks-config',
+  // Per-turn context audit: volatile, and the per-turn selection decisions grow
+  // with conversation length, so a long session alone can exceed the quota.
+  'context-lifecycle',
+  'context-lifecycle-turn',
 ])
 
 /**
@@ -147,8 +151,13 @@ function scheduleDebouncedSaveToDisk() {
     return
   }
   saveTimer = setTimeout(() => {
-    saveQueryCacheToDiskNow(activeQueryCache!, activeStorage)
-    saveTimer = undefined
+    try {
+      saveQueryCacheToDiskNow(activeQueryCache!, activeStorage)
+    } catch (error) {
+      console.warn('[query-cache] save to disk failed', error)
+    } finally {
+      saveTimer = undefined
+    }
     if (saveAgainAfterCurrent) {
       saveAgainAfterCurrent = false
       scheduleDebouncedSaveToDisk()

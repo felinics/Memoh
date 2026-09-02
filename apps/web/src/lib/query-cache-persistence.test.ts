@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { QueryCache, UseQueryEntry } from '@pinia/colada'
 import {
   QUERY_CACHE_STORAGE_KEY,
   cancelPendingQueryCacheSave,
+  createQueryCachePersistencePlugin,
   persistableQueryFilter,
   removeQueryCacheFromDisk,
   saveQueryCacheToDiskNow,
@@ -175,5 +176,51 @@ describe('removeQueryCacheFromDisk', () => {
 describe('cancelPendingQueryCacheSave', () => {
   it('is callable without throwing', () => {
     expect(() => cancelPendingQueryCacheSave()).not.toThrow()
+  })
+})
+
+describe('context lifecycle queries stay off disk', () => {
+  it('excludes the per-turn audit payloads, which grow with conversation length', () => {
+    for (const key of [['context-lifecycle', 'b', 's'], ['context-lifecycle-turn', 'b', 's', 'r']]) {
+      expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
+    }
+  })
+})
+
+describe('createQueryCachePersistencePlugin', () => {
+  afterEach(() => {
+    cancelPendingQueryCacheSave()
+    vi.useRealTimers()
+  })
+
+  it('keeps saving after a storage write throws, so a quota error cannot wedge the debounce', async () => {
+    vi.useFakeTimers()
+    const storage = memoryStorage()
+    let failNext = true
+    const setItem = vi.fn((key: string, value: string) => {
+      if (failNext) {
+        failNext = false
+        throw new DOMException('quota', 'QuotaExceededError')
+      }
+      ;(storage as unknown as { data: Map<string, string> }).data.set(key, value)
+    })
+    ;(storage as unknown as { setItem: typeof setItem }).setItem = setItem
+    let onAction: ((ctx: { name: string, after: (cb: () => void) => void }) => void) | undefined
+    const queryCache = {
+      getEntries: vi.fn(() => [entryWith(['models'])]),
+      $onAction: vi.fn((cb: typeof onAction) => { onAction = cb }),
+    } as unknown as QueryCache
+    createQueryCachePersistencePlugin({ storage })({ queryCache } as never)
+    await Promise.resolve()
+    const fire = () => onAction?.({ name: 'setEntryState', after: cb => cb() })
+
+    fire()
+    vi.advanceTimersByTime(1000)
+    expect(setItem).toHaveBeenCalledTimes(1)
+
+    fire()
+    vi.advanceTimersByTime(1000)
+    expect(setItem).toHaveBeenCalledTimes(2)
+    expect(storage.getItem(QUERY_CACHE_STORAGE_KEY)).toContain('models')
   })
 })
