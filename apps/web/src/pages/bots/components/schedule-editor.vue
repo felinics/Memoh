@@ -1,203 +1,228 @@
 <template>
   <form
-    class="space-y-4"
+    class="space-y-6"
     @submit.prevent="handleSubmit"
   >
-    <!-- Name + enable toggle share one aligned row: the toggle rides beside the
-         input (items-end), not the label, so it stays a sibling of the field
-         rather than living in the FieldStack label slot. -->
-    <div class="flex items-end gap-3">
-      <FieldStack
-        class="min-w-0 flex-1"
-        :label="t('bots.schedule.form.name')"
-        for="sched-name"
-      >
-        <Input
-          id="sched-name"
-          v-model="form.name"
-          :placeholder="t('bots.schedule.form.namePlaceholder')"
-        />
-      </FieldStack>
-      <div class="flex h-9 shrink-0 items-center gap-2">
-        <Label
-          class="cursor-pointer text-muted-foreground"
-          @click="form.enabled = !form.enabled"
-        >
-          {{ t('bots.schedule.form.enabled') }}
-        </Label>
-        <Switch
-          :model-value="form.enabled"
-          @update:model-value="(v: boolean) => form.enabled = !!v"
-        />
-      </div>
-    </div>
-
-    <FieldStack>
-      <!-- Label carries an (optional) suffix, so it rides the #label slot to keep
-           its exact markup rather than the plain-text default label. -->
-      <template #label>
-        <Label for="sched-desc">
-          {{ t('bots.schedule.form.description') }}
-          <span class="ml-1 text-caption text-muted-foreground font-normal">({{ t('common.optional') }})</span>
-        </Label>
-      </template>
-      <Input
-        id="sched-desc"
-        v-model="form.description"
-        :placeholder="t('bots.schedule.form.descriptionPlaceholder')"
-      />
-    </FieldStack>
-
-    <FieldStack
-      :label="t('bots.schedule.form.command')"
-      for="sched-command"
+    <!-- The dialog states its steps the way the settings surfaces do: a
+         muted section label over a bare form column. SectionGroup, not
+         SettingsSection — a bordered card inside a bordered dialog would
+         draw two edges around the same fields. -->
+    <SectionGroup
+      bare
+      tone="muted"
+      :title="t('bots.steps.basicInfo')"
     >
-      <Textarea
-        id="sched-command"
-        v-model="form.command"
-        class="min-h-[4.5rem] resize-none font-mono"
-        :placeholder="t('bots.schedule.form.commandPlaceholder')"
-        rows="3"
-      />
-    </FieldStack>
-
-    <div class="space-y-3">
-      <Label>
-        {{ t('bots.schedule.form.pattern') }}
-      </Label>
-
-      <div class="flex items-center gap-2 flex-wrap">
-        <Select v-model="schedModeModel">
-          <SelectTrigger class="w-36 shrink-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="scheduleMode in SCHEDULE_MODES"
-              :key="scheduleMode.value"
-              :value="scheduleMode.value"
+      <FormStack>
+        <!-- Name + enable toggle share one aligned row: the toggle rides beside the
+             input (items-end), not the label, so it stays a sibling of the field
+             rather than living in the FieldStack label slot. -->
+        <div class="flex items-end gap-3">
+          <FieldStack
+            class="min-w-0 flex-1"
+            :label="t('bots.schedule.form.name')"
+            for="sched-name"
+          >
+            <Input
+              id="sched-name"
+              v-model="form.name"
+              :placeholder="t('bots.schedule.form.namePlaceholder')"
+            />
+          </FieldStack>
+          <div class="flex h-9 shrink-0 items-center gap-2">
+            <Label
+              class="cursor-pointer text-muted-foreground"
+              @click="form.enabled = !form.enabled"
             >
-              {{ t(scheduleMode.labelKey) }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
+              {{ t('bots.schedule.form.enabled') }}
+            </Label>
+            <Switch
+              :model-value="form.enabled"
+              @update:model-value="(v: boolean) => form.enabled = !!v"
+            />
+          </div>
+        </div>
 
-        <template v-if="patternState.mode === 'minutes'">
+        <FieldStack>
+          <!-- Label carries an (optional) suffix, so it rides the #label slot to keep
+               its exact markup rather than the plain-text default label. -->
+          <template #label>
+            <Label for="sched-desc">
+              {{ t('bots.schedule.form.description') }}
+              <span class="ml-1 text-caption text-muted-foreground font-normal">({{ t('common.optional') }})</span>
+            </Label>
+          </template>
           <Input
-            type="number"
-            :min="1"
-            :max="59"
-            :model-value="patternState.intervalMinutes"
-            class="w-20 text-center"
-            @update:model-value="v => patchState({ intervalMinutes: clampInt(v, 1, 59, 1) })"
+            id="sched-desc"
+            v-model="form.description"
+            :placeholder="t('bots.schedule.form.descriptionPlaceholder')"
           />
-          <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.minutes') }}</span>
-        </template>
+        </FieldStack>
 
-        <template v-else-if="patternState.mode === 'hourly'">
-          <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.atMinute') }}</span>
-          <Input
-            type="number"
-            :min="0"
-            :max="59"
-            :model-value="patternState.minute"
-            class="w-20 text-center"
-            @update:model-value="v => patchState({ minute: clampInt(v, 0, 59, 0) })"
+        <FieldStack
+          :label="t('bots.schedule.form.command')"
+          for="sched-command"
+        >
+          <Textarea
+            id="sched-command"
+            v-model="form.command"
+            class="min-h-[4.5rem] resize-none font-mono"
+            :placeholder="t('bots.schedule.form.commandPlaceholder')"
+            rows="3"
           />
-        </template>
+        </FieldStack>
+      </FormStack>
+    </SectionGroup>
 
-        <TimeInput
-          v-else-if="patternState.mode === 'daily'"
-          :hour="patternState.hours[0] ?? 9"
-          :minute="patternState.minute"
-          @update:hour="v => patchState({ hours: [v] })"
-          @update:minute="v => patchState({ minute: v })"
-        />
+    <SectionGroup
+      bare
+      tone="muted"
+      :title="t('bots.schedule.form.pattern')"
+    >
+      <div class="space-y-3">
+        <div class="flex items-center gap-2 flex-wrap">
+          <Select v-model="schedModeModel">
+            <SelectTrigger class="w-36 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="scheduleMode in SCHEDULE_MODES"
+                :key="scheduleMode.value"
+                :value="scheduleMode.value"
+              >
+                {{ t(scheduleMode.labelKey) }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
 
-        <TimeInput
-          v-else-if="patternState.mode === 'weekly'"
-          :hour="patternState.hours[0] ?? 9"
-          :minute="patternState.minute"
-          @update:hour="v => patchState({ hours: [v] })"
-          @update:minute="v => patchState({ minute: v })"
-        />
+          <template v-if="patternState.mode === 'minutes'">
+            <Input
+              type="number"
+              :min="1"
+              :max="59"
+              :model-value="patternState.intervalMinutes"
+              class="w-20 text-center"
+              @update:model-value="v => patchState({ intervalMinutes: clampInt(v, 1, 59, 1) })"
+            />
+            <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.minutes') }}</span>
+          </template>
 
-        <template v-else-if="patternState.mode === 'monthly'">
-          <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.day') }}</span>
-          <Input
-            type="number"
-            :min="1"
-            :max="31"
-            :model-value="patternState.monthDays[0] ?? 1"
-            class="w-16 text-center"
-            @update:model-value="v => patchState({ monthDays: [clampInt(v, 1, 31, 1)] })"
-          />
+          <template v-else-if="patternState.mode === 'hourly'">
+            <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.atMinute') }}</span>
+            <Input
+              type="number"
+              :min="0"
+              :max="59"
+              :model-value="patternState.minute"
+              class="w-20 text-center"
+              @update:model-value="v => patchState({ minute: clampInt(v, 0, 59, 0) })"
+            />
+          </template>
+
           <TimeInput
+            v-else-if="patternState.mode === 'daily'"
             :hour="patternState.hours[0] ?? 9"
             :minute="patternState.minute"
             @update:hour="v => patchState({ hours: [v] })"
             @update:minute="v => patchState({ minute: v })"
           />
-        </template>
-      </div>
 
-      <div
-        v-if="patternState.mode === 'weekly'"
-        class="grid grid-cols-7 gap-1"
-      >
-        <button
-          v-for="(key, idx) in WEEKDAY_KEYS"
-          :key="key"
-          type="button"
-          class="h-9 rounded-md border text-sm transition-colors"
-          :class="patternState.weekdays.includes(idx)
-            ? 'bg-primary text-primary-foreground border-primary'
-            : 'bg-background hover:bg-accent'"
-          @click="toggleWeekday(idx)"
+          <TimeInput
+            v-else-if="patternState.mode === 'weekly'"
+            :hour="patternState.hours[0] ?? 9"
+            :minute="patternState.minute"
+            @update:hour="v => patchState({ hours: [v] })"
+            @update:minute="v => patchState({ minute: v })"
+          />
+
+          <template v-else-if="patternState.mode === 'monthly'">
+            <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.day') }}</span>
+            <Input
+              type="number"
+              :min="1"
+              :max="31"
+              :model-value="patternState.monthDays[0] ?? 1"
+              class="w-16 text-center"
+              @update:model-value="v => patchState({ monthDays: [clampInt(v, 1, 31, 1)] })"
+            />
+            <TimeInput
+              :hour="patternState.hours[0] ?? 9"
+              :minute="patternState.minute"
+              @update:hour="v => patchState({ hours: [v] })"
+              @update:minute="v => patchState({ minute: v })"
+            />
+          </template>
+        </div>
+
+        <div
+          v-if="patternState.mode === 'weekly'"
+          class="grid grid-cols-7 gap-1"
         >
-          {{ t(`bots.schedule.weekday.${key}`) }}
-        </button>
-      </div>
+          <button
+            v-for="(key, idx) in WEEKDAY_KEYS"
+            :key="key"
+            type="button"
+            class="h-9 rounded-md border text-sm transition-colors"
+            :class="patternState.weekdays.includes(idx)
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-background hover:bg-accent'"
+            @click="toggleWeekday(idx)"
+          >
+            {{ t(`bots.schedule.weekday.${key}`) }}
+          </button>
+        </div>
 
-      <div
-        v-if="patternState.mode === 'advanced'"
-        class="space-y-1.5"
-      >
-        <Input
-          :model-value="patternState.advancedPattern"
-          class="font-mono"
-          placeholder="0 9 * * *"
-          @update:model-value="v => patchState({ advancedPattern: String(v) })"
-        />
+        <div
+          v-if="patternState.mode === 'advanced'"
+          class="space-y-1.5"
+        >
+          <Input
+            :model-value="patternState.advancedPattern"
+            class="font-mono"
+            placeholder="0 9 * * *"
+            @update:model-value="v => patchState({ advancedPattern: String(v) })"
+          />
+          <p
+            v-if="patternState.advancedPattern && !isValidCron(patternState.advancedPattern)"
+            class="text-caption text-destructive"
+          >
+            {{ t('bots.schedule.form.invalidPattern') }}
+          </p>
+        </div>
+
         <p
-          v-if="patternState.advancedPattern && !isValidCron(patternState.advancedPattern)"
-          class="text-caption text-destructive"
+          v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
+          class="text-caption text-muted-foreground"
         >
-          {{ t('bots.schedule.form.invalidPattern') }}
+          {{ schedulePreviewText }}
         </p>
       </div>
+    </SectionGroup>
 
-      <p
-        v-if="schedulePreviewText && ['weekly', 'monthly', 'advanced'].includes(patternState.mode)"
-        class="text-caption text-muted-foreground"
-      >
-        {{ schedulePreviewText }}
-      </p>
-    </div>
-
-    <div>
-      <button
-        type="button"
-        class="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        @click="showMore = !showMore"
-      >
-        <ChevronRight
-          class="size-3.5"
-          :class="showMore ? 'rotate-90' : ''"
-        />
-        {{ t('bots.schedule.moreOptions') }}
-      </button>
-
+    <!-- Advanced execution parameters stay folded away: the common schedule
+         is a command and a time, and these four fields would bury it. The
+         disclosure moved from a text button under the form to the section's
+         own header, so the group reads like the two above it. -->
+    <SectionGroup
+      bare
+      tone="muted"
+      :title="t('bots.schedule.moreOptions')"
+    >
+      <template #actions>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          :aria-expanded="showMore"
+          :aria-label="t('bots.schedule.moreOptions')"
+          @click="showMore = !showMore"
+        >
+          <ChevronRight
+            class="size-4 transition-transform"
+            :class="showMore ? 'rotate-90' : ''"
+          />
+        </Button>
+      </template>
       <div
         class="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out"
         :class="showMore ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
@@ -206,7 +231,7 @@
           <!-- The disclosed zone is one continuous form column with the fields
                above it, so it keeps the same label-over-control rhythm rather
                than switching to side-by-side rows halfway down the dialog. -->
-          <FormStack class="mt-3">
+          <FormStack>
             <ScheduleExecutionFields
               ref="executionFields"
               :bot-id="botId"
@@ -229,7 +254,7 @@
           </FormStack>
         </div>
       </div>
-    </div>
+    </SectionGroup>
 
     <p
       v-if="submitError"
@@ -287,6 +312,7 @@ import {
   DialogFooter,
   FieldStack,
   FormStack,
+  SectionGroup,
   Input,
   Label,
   Select,
