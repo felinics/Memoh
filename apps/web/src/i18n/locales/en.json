@@ -198,6 +198,18 @@
       "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
       "display_prepare_failed": "Display preparation failed."
     },
+    "workspace_dependency": {
+      "not_found": "This dependency doesn't exist.",
+      "request_invalid": "The dependency request is invalid. Check it and try again.",
+      "action_unsupported": "This action isn't available for the dependency.",
+      "platform_unsupported": "Not available on this workspace platform.",
+      "busy": "Another operation on this dependency is in progress.",
+      "workspace_not_running": "The workspace isn't running. Start it first.",
+      "workspace_missing": "The workspace hasn't been created yet.",
+      "remote_offline": "That computer is offline.",
+      "rollback_unavailable": "No previous version to roll back to.",
+      "operation_failed": "The dependency operation failed. Check the log and try again."
+    },
     "acp": {
       "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
       "access_forbidden": "You do not have permission to control this Agent runtime.",

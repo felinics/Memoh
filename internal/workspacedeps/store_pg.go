@@ -20,8 +20,8 @@ import (
 // public.memoh_current_team_id(), which reads the memoh.team_id GUC. Memoh
 // binds that GUC per connection, not per request: db.OpenPostgres (and
 // db.OpenPostgresDSN for tests) installs db.SetDefaultTeamOnConnect as the
-// pgxpool AfterConnect hook, so every pooled connection carries
-// team.DefaultTeamID at the session level. Nothing is read from the Go
+// pgxpool AfterConnect hook, so every pooled connection carries the
+// singleton team id at the session level. Nothing is read from the Go
 // context.Context, and no HTTP middleware switches teams per request.
 //
 // A background worker (stale reaper, update checker) therefore needs no

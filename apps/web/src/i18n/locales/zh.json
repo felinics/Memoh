@@ -198,6 +198,18 @@
       "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
       "display_prepare_failed": "显示环境准备失败，请稍后重试。"
     },
+    "workspace_dependency": {
+      "not_found": "该依赖不存在。",
+      "request_invalid": "依赖请求无效，请检查后重试。",
+      "action_unsupported": "该依赖不支持此操作。",
+      "platform_unsupported": "当前工作区平台不支持该依赖。",
+      "busy": "该依赖正在进行其他操作，请稍后再试。",
+      "workspace_not_running": "工作区未运行，请先启动。",
+      "workspace_missing": "尚未创建工作区，请先创建。",
+      "remote_offline": "该电脑离线。",
+      "rollback_unavailable": "没有可回滚的旧版本。",
+      "operation_failed": "依赖操作失败，请查看日志后重试。"
+    },
     "acp": {
       "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
       "access_forbidden": "你没有权限控制这个 Agent 运行实例。",

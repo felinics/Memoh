@@ -155,13 +155,19 @@ type ListResult struct {
 	// Workspace is the target's state; Entries carry no discovery data
 	// unless it is WorkspaceRunning.
 	Workspace WorkspaceState
-	Entries   []Entry
+	// DataRoot is the workspace data root every managed dependency lives
+	// below (design §6). It is empty when the target cannot be resolved,
+	// which only happens for offline remote targets.
+	DataRoot string
+	Entries  []Entry
 }
 
 // PreflightItem is the verdict for one required dependency (design §9.3).
 type PreflightItem struct {
 	DependencyID string
-	Satisfied    bool
+	// Name is the catalog display name, empty for an unknown dependency.
+	Name      string
+	Satisfied bool
 	// Reason is empty when Satisfied, otherwise one of the PreflightReason
 	// constants.
 	Reason           string
@@ -211,6 +217,11 @@ func (s *Service) list(ctx context.Context, botID, targetID string, force bool) 
 	}
 	byDep := indexRecords(records)
 	result := ListResult{Workspace: state}
+	// The data root is a constant for native targets and a resolved mount for
+	// remote ones; an offline remote target simply has none to report.
+	if dataRoot, err := s.workspace.DataRoot(ctx, botID, targetID); err == nil {
+		result.DataRoot = dataRoot
+	}
 	deps := s.catalog.List()
 
 	if state != WorkspaceRunning {
@@ -455,6 +466,7 @@ func preflightItem(cat *catalog.Catalog, snap Snapshot, depID string) PreflightI
 		item.Reason = PreflightReasonUnknownDependency
 		return item
 	}
+	item.Name = dep.Name
 	obs := snap.Observed[depID]
 	if dep.IsAgent() {
 		item.RequiredVersion = dep.Version.Pin
@@ -1124,6 +1136,12 @@ func (s *Service) recordCheck(ctx context.Context, key InstallationKey, check up
 		return fmt.Errorf("workspacedeps: record update check for %s: %w", key.DependencyID, err)
 	}
 	return nil
+}
+
+// Dependency returns the catalog entry with the given id. Handlers use it to
+// validate a request and read the pinned version before an operation starts.
+func (s *Service) Dependency(depID string) (catalog.Dependency, bool) {
+	return s.catalog.Get(strings.TrimSpace(depID))
 }
 
 func (s *Service) dependency(depID string) (catalog.Dependency, error) {
