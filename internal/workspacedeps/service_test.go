@@ -743,9 +743,9 @@ func TestPreflight(t *testing.T) {
 		t.Fatalf("Preflight = %+v", result)
 	}
 	want := map[string]PreflightItem{
-		"agent-x":  {DependencyID: "agent-x", Satisfied: true, InstalledVersion: "2.0.0", RequiredVersion: "2.0.0"},
-		"tool-y":   {DependencyID: "tool-y", Reason: PreflightReasonMissing},
-		"mac-only": {DependencyID: "mac-only", Reason: PreflightReasonPlatformUnsupported},
+		"agent-x":  {DependencyID: "agent-x", Name: "Agent X", Satisfied: true, InstalledVersion: "2.0.0", RequiredVersion: "2.0.0"},
+		"tool-y":   {DependencyID: "tool-y", Name: "Tool Y", Reason: PreflightReasonMissing},
+		"mac-only": {DependencyID: "mac-only", Name: "Mac Only", Reason: PreflightReasonPlatformUnsupported},
 		"nope":     {DependencyID: "nope", Reason: PreflightReasonUnknownDependency},
 	}
 	for _, item := range result.Items {

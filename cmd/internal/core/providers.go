@@ -100,6 +100,8 @@ import (
 	"github.com/felinics/memoh/internal/workdir"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspacedeps"
+	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -694,10 +696,58 @@ func provideDisplayService(lc fx.Lifecycle, log *slog.Logger, manager *workspace
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, workspaceDeps *workspacedeps.Service) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, displayService, botService, accountService, policyService)
+	h.SetWorkspaceDependencyService(workspaceDeps)
 	return h
+}
+
+// provideWorkspaceDependencyCatalog loads the dependency catalog embedded in
+// the binary. A manifest that fails validation stops the Server from
+// starting rather than surfacing as a broken install later.
+func provideWorkspaceDependencyCatalog() (*depcatalog.Catalog, error) {
+	cat, err := depcatalog.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load workspace dependency catalog: %w", err)
+	}
+	return cat, nil
+}
+
+func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, cat *depcatalog.Catalog) *workspacedeps.Service {
+	return workspacedeps.NewService(workspacedeps.Options{
+		Workspace: workspacedeps.NewManagerWorkspaceAccess(manager),
+		Store:     workspacedeps.NewPostgresStore(queries),
+		Catalog:   cat,
+		Logger:    log,
+	})
+}
+
+func provideWorkspaceDependencyUpdateWorker(log *slog.Logger, service *workspacedeps.Service) *workspacedeps.UpdateWorker {
+	return workspacedeps.NewUpdateWorker(service, workspacedeps.DefaultUpdateCheckInterval, log)
+}
+
+// startWorkspaceDependencyMaintenance runs the two background duties of the
+// dependency service: the stale reaper that turns interrupted operations into
+// failed records (WD-STATE-002) and the daily upstream update check for tool
+// dependencies (WD-UPD-001). Both detach from the start context and stop
+// with the app.
+func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, service *workspacedeps.Service, worker *workspacedeps.UpdateWorker) {
+	var stopReaper func()
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			stopReaper = workspacedeps.StartReaper(context.WithoutCancel(ctx), service, workspacedeps.DefaultReapInterval, log)
+			worker.Start(ctx)
+			return nil
+		},
+		OnStop: func(context.Context) error {
+			if stopReaper != nil {
+				stopReaper()
+			}
+			worker.Stop()
+			return nil
+		},
+	})
 }
 
 func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
@@ -965,13 +1015,47 @@ func injectScheduleBotAgents(scheduleService *schedule.Service, botAgentsService
 	scheduleService.SetBotAgents(botAgentsService)
 }
 
-func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
+func startContainerReconciliation(lc fx.Lifecycle, log *slog.Logger, manager *workspace.Manager, workspaceDeps *workspacedeps.Service, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			go manager.ReconcileContainers(ctx)
+			go func() {
+				manager.ReconcileContainers(ctx)
+				// The alignment scan runs once the containers are back so a
+				// Server upgrade that moved an agent pin shows up in the
+				// dependency panel right away (WD-UPD-A01). It outlives the
+				// start context: reconciliation alone can take longer than
+				// the start timeout.
+				scanWorkspaceDependencyAlignment(context.WithoutCancel(ctx), log, manager, workspaceDeps)
+			}()
 			return nil
 		},
 	})
+}
+
+func scanWorkspaceDependencyAlignment(ctx context.Context, log *slog.Logger, manager *workspace.Manager, workspaceDeps *workspacedeps.Service) {
+	bots, err := manager.RunningNativeBotIDs(ctx)
+	if err != nil {
+		log.Warn("dependency alignment scan skipped: list running workspaces failed", slog.Any("error", err))
+		return
+	}
+	if len(bots) == 0 {
+		return
+	}
+	pending, err := workspaceDeps.AlignmentScan(ctx, bots)
+	if err != nil {
+		log.Warn("dependency alignment scan finished with errors",
+			slog.Int("bots", len(bots)),
+			slog.Int("pending", pending),
+			slog.Any("error", err),
+		)
+		return
+	}
+	if pending > 0 {
+		log.Info("agent dependencies need alignment with the Server pins",
+			slog.Int("bots", len(bots)),
+			slog.Int("pending", pending),
+		)
+	}
 }
 
 // EnsureAdminUser bootstraps the admin account on first start. Exported
