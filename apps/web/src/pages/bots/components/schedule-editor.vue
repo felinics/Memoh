@@ -59,10 +59,17 @@
         :label="t('bots.schedule.form.pattern')"
         stack="sm"
       >
-        <div class="w-full space-y-3 sm:w-auto">
+        <!-- A column, not a stack of blocks: sm:items-end right-aligns every
+             part of the picker — the mode row, the weekday grid, the cron
+             field, the preview line — against the same edge the inputs above
+             end on, whatever width each one happens to be. -->
+        <div class="flex w-full flex-col gap-3 sm:w-auto sm:items-end">
           <div class="flex flex-wrap items-center gap-2 sm:justify-end">
             <Select v-model="schedModeModel">
-              <SelectTrigger class="w-36 shrink-0">
+              <!-- w-44, not w-36: "Every N minutes" and "Advanced (cron)" are
+                   both 15 characters and clipped inside 144px. Fixed rather
+                   than auto so the row does not resize as the mode changes. -->
+              <SelectTrigger class="w-44 shrink-0">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
