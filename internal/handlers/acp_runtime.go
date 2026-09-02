@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -408,6 +409,7 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	if err != nil {
 		return runtimePoolError(err)
 	}
+	h.persistACPPair(c, sessionID, sess, status)
 	return c.JSON(http.StatusOK, status)
 }
 
@@ -457,7 +459,40 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	if err != nil {
 		return runtimePoolError(err)
 	}
+	h.persistACPPair(c, sessionID, sess, status)
 	return c.JSON(http.StatusOK, status)
+}
+
+// persistACPPair records the agent-reported (model, effort) pair into the
+// session's runtime_metadata (issue #879, spec v2 §3.6). ACP model ids are
+// agent-namespaced strings, not models-table UUIDs, so the pair cannot live
+// in the preferred_* FK columns; runtime_metadata is where ACP session config
+// already lives, and the spawn path replays these two keys over the profile
+// defaults. The written value is the agent's own report (the status the pool
+// just returned), not the requested string. Best-effort: the live process
+// already switched, so a lost write only means the next cold start replays
+// the previous value — logged, never fails the request.
+func (h *ACPRuntimeHandler) persistACPPair(c echo.Context, sessionID string, sess session.Thread, status acpagent.RuntimeStatus) {
+	delta := map[string]any{}
+	if status.Models != nil {
+		if v := strings.TrimSpace(status.Models.CurrentModelID); v != "" {
+			delta["acp_model_id"] = v
+		}
+	}
+	if status.Reasoning != nil {
+		if v := strings.TrimSpace(status.Reasoning.CurrentEffort); v != "" {
+			delta["acp_reasoning_effort"] = v
+		}
+	}
+	if len(delta) == 0 {
+		return
+	}
+	if _, err := h.sessionService.MergeRuntimeMetadata(c.Request().Context(), sessionID, sess.RuntimeType, delta); err != nil {
+		slog.Default().Warn("persist ACP model preference",
+			slog.String("session_id", sessionID),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // SetMode godoc

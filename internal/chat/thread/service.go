@@ -39,25 +39,29 @@ const (
 
 // Thread represents a chat thread within a bot.
 type Thread struct {
-	ID                    string         `json:"id"`
-	BotID                 string         `json:"bot_id"`
-	BotAgentID            string         `json:"bot_agent_id,omitempty"`
-	RouteID               string         `json:"route_id,omitempty"`
-	ChannelType           string         `json:"channel_type,omitempty"`
-	Type                  string         `json:"type"`
-	SessionMode           string         `json:"session_mode"`
-	RuntimeType           string         `json:"runtime_type"`
-	RuntimeMetadata       map[string]any `json:"runtime_metadata,omitempty"`
-	Title                 string         `json:"title"`
-	Metadata              map[string]any `json:"metadata,omitempty"`
-	ParentThreadID        string         `json:"parent_session_id,omitempty"`
-	CreatedByUserID       string         `json:"created_by_user_id,omitempty"`
-	WorkdirID             string         `json:"workdir_id,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
-	RouteMetadata         map[string]any `json:"route_metadata,omitempty"`
-	RouteConversationType string         `json:"route_conversation_type,omitempty"`
-	Visibility            Visibility     `json:"-"`
+	ID              string         `json:"id"`
+	BotID           string         `json:"bot_id"`
+	BotAgentID      string         `json:"bot_agent_id,omitempty"`
+	RouteID         string         `json:"route_id,omitempty"`
+	ChannelType     string         `json:"channel_type,omitempty"`
+	Type            string         `json:"type"`
+	SessionMode     string         `json:"session_mode"`
+	RuntimeType     string         `json:"runtime_type"`
+	RuntimeMetadata map[string]any `json:"runtime_metadata,omitempty"`
+	Title           string         `json:"title"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	ParentThreadID  string         `json:"parent_session_id,omitempty"`
+	CreatedByUserID string         `json:"created_by_user_id,omitempty"`
+	WorkdirID       string         `json:"workdir_id,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	// Preferred* is the session's persisted (model, effort) pair (issue #879).
+	// Empty means "no memory"; the composer reseeds from it on open/repoint.
+	PreferredChatModelID     string         `json:"preferred_chat_model_id,omitempty"`
+	PreferredReasoningEffort string         `json:"preferred_reasoning_effort,omitempty"`
+	RouteMetadata            map[string]any `json:"route_metadata,omitempty"`
+	RouteConversationType    string         `json:"route_conversation_type,omitempty"`
+	Visibility               Visibility     `json:"-"`
 } // @name session.Session
 
 // The runtime vocabulary is owned by runtimekind (a leaf package shared with
@@ -202,6 +206,13 @@ type CreateInput struct {
 	// project_path so the runtime works in that directory; it also
 	// leaves a creation-time path snapshot in the metadata for history.
 	WorkdirPath string
+	// PreferredChatModelID / PreferredReasoningEffort are the first-message
+	// pair written at INSERT time (issue #879, spec §3.3-D) so the
+	// session_created broadcast never precedes the value. Empty = NULL.
+	// Non-UUID model references degrade to NULL; the steady-state
+	// write-back completes the pair on the same turn.
+	PreferredChatModelID     string
+	PreferredReasoningEffort string
 	// Visibility overrides the default visibility derived from the session
 	// mode. Schedule-created sessions use this to surface in user-facing
 	// session lists while keeping session_mode='schedule' for prompt and
@@ -268,6 +279,7 @@ type Queries interface {
 	GetVisibleHistoryTurnByMessage(context.Context, sqlc.GetVisibleHistoryTurnByMessageParams) (dbstore.HistoryTurn, error)
 	GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error)
 	GetSessionByID(context.Context, pgtype.UUID) (sqlc.BotSession, error)
+	GetLatestSessionModelPreference(context.Context, sqlc.GetLatestSessionModelPreferenceParams) (sqlc.GetLatestSessionModelPreferenceRow, error)
 	GetSubagentConfig(context.Context, pgtype.UUID) (sqlc.SubagentConfig, error)
 	ListSessionsByBot(context.Context, pgtype.UUID) ([]sqlc.ListSessionsByBotRow, error)
 	ListSessionsByBotAndCreatedByUser(context.Context, sqlc.ListSessionsByBotAndCreatedByUserParams) ([]sqlc.ListSessionsByBotAndCreatedByUserRow, error)
@@ -490,6 +502,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		ParentSessionID: pgParentSessionID,
 		CreatedByUserID: pgCreatedByUserID,
 		WorkdirID:       pgWorkdirID,
+		// First-message pair (issue #879): degrade silently to NULL rather
+		// than fail creation on a slug reference or empty value.
+		PreferredChatModelID:     dbpkg.ParseUUIDOrEmpty(input.PreferredChatModelID),
+		PreferredReasoningEffort: pgtype.Text{String: strings.TrimSpace(input.PreferredReasoningEffort), Valid: strings.TrimSpace(input.PreferredReasoningEffort) != ""},
 	})
 	if err != nil {
 		return Thread{}, err
@@ -1042,6 +1058,33 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 }
 
 // Get returns a session by ID.
+// LatestModelPreferenceSeed is the welcome composer seed (issue #879, spec
+// §3.4): the bot's most recent native user-facing session with a persisted
+// pair, scoped to the calling user. Empty pair + nil error = no seed;
+// welcome falls back to the bot default.
+func (s *Service) LatestModelPreferenceSeed(ctx context.Context, botID, userID string) (string, string, error) {
+	id, err := dbpkg.ParseUUID(botID)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid bot id: %w", err)
+	}
+	uid, err := dbpkg.ParseUUID(userID)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid user id: %w", err)
+	}
+	row, err := s.queries.GetLatestSessionModelPreference(ctx, sqlc.GetLatestSessionModelPreferenceParams{BotID: id, CreatedByUserID: uid})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	modelID := ""
+	if row.PreferredChatModelID.Valid {
+		modelID = row.PreferredChatModelID.String()
+	}
+	return modelID, dbpkg.TextToString(row.PreferredReasoningEffort), nil
+}
+
 func (s *Service) Get(ctx context.Context, sessionID string) (Thread, error) {
 	pgID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -1537,6 +1580,7 @@ func toThread(row sqlc.BotSession) Thread {
 	if row.ParentSessionID.Valid {
 		parentID = row.ParentSessionID.String()
 	}
+	prefModelID, prefEffort := preferredPairOf(row)
 	createdByUserID := ""
 	if row.CreatedByUserID.Valid {
 		createdByUserID = row.CreatedByUserID.String()
@@ -1547,24 +1591,36 @@ func toThread(row sqlc.BotSession) Thread {
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
-		ID:              row.ID.String(),
-		BotID:           row.BotID.String(),
-		BotAgentID:      row.BotAgentID.String(),
-		RouteID:         row.RouteID.String(),
-		ChannelType:     dbpkg.TextToString(row.ChannelType),
-		Type:            row.Type,
-		SessionMode:     sessionMode,
-		RuntimeType:     normalizeRuntimeType(row.RuntimeType, row.Type),
-		RuntimeMetadata: parseJSONMap(row.RuntimeMetadata),
-		Title:           row.Title,
-		Metadata:        parseJSONMap(row.Metadata),
-		ParentThreadID:  parentID,
-		CreatedByUserID: createdByUserID,
-		WorkdirID:       workdirID,
-		CreatedAt:       row.CreatedAt.Time,
-		UpdatedAt:       row.UpdatedAt.Time,
-		Visibility:      storedVisibility(row.Visibility, sessionMode),
+		ID:                       row.ID.String(),
+		BotID:                    row.BotID.String(),
+		BotAgentID:               row.BotAgentID.String(),
+		RouteID:                  row.RouteID.String(),
+		ChannelType:              dbpkg.TextToString(row.ChannelType),
+		Type:                     row.Type,
+		SessionMode:              sessionMode,
+		RuntimeType:              normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata:          parseJSONMap(row.RuntimeMetadata),
+		Title:                    row.Title,
+		Metadata:                 parseJSONMap(row.Metadata),
+		ParentThreadID:           parentID,
+		CreatedByUserID:          createdByUserID,
+		WorkdirID:                workdirID,
+		CreatedAt:                row.CreatedAt.Time,
+		UpdatedAt:                row.UpdatedAt.Time,
+		Visibility:               storedVisibility(row.Visibility, sessionMode),
+		PreferredChatModelID:     prefModelID,
+		PreferredReasoningEffort: prefEffort,
 	}
+}
+
+// preferredPairOf reads the persisted (model, effort) pair off a session row
+// (issue #879); both components are empty when the session has no memory.
+func preferredPairOf(row sqlc.BotSession) (string, string) {
+	modelID := ""
+	if row.PreferredChatModelID.Valid {
+		modelID = row.PreferredChatModelID.String()
+	}
+	return modelID, dbpkg.TextToString(row.PreferredReasoningEffort)
 }
 
 func toSubagentConfig(row sqlc.SubagentConfig) SubagentConfig {
@@ -1900,23 +1956,25 @@ func toThreadFromListRow(row sqlc.ListSessionsByBotRow) Thread {
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
-		ID:              row.ID.String(),
-		BotID:           row.BotID.String(),
-		BotAgentID:      row.BotAgentID.String(),
-		RouteID:         row.RouteID.String(),
-		ChannelType:     dbpkg.TextToString(row.ChannelType),
-		Type:            row.Type,
-		SessionMode:     sessionMode,
-		RuntimeType:     normalizeRuntimeType(row.RuntimeType, row.Type),
-		RuntimeMetadata: parseJSONMap(row.RuntimeMetadata),
-		Title:           row.Title,
-		Metadata:        parseJSONMap(row.Metadata),
-		ParentThreadID:  parentID,
-		CreatedByUserID: createdByUserID,
-		WorkdirID:       workdirID,
-		CreatedAt:       row.CreatedAt.Time,
-		UpdatedAt:       row.UpdatedAt.Time,
-		Visibility:      storedVisibility(row.Visibility, sessionMode),
+		ID:                       row.ID.String(),
+		BotID:                    row.BotID.String(),
+		BotAgentID:               row.BotAgentID.String(),
+		RouteID:                  row.RouteID.String(),
+		ChannelType:              dbpkg.TextToString(row.ChannelType),
+		Type:                     row.Type,
+		SessionMode:              sessionMode,
+		RuntimeType:              normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata:          parseJSONMap(row.RuntimeMetadata),
+		Title:                    row.Title,
+		Metadata:                 parseJSONMap(row.Metadata),
+		ParentThreadID:           parentID,
+		CreatedByUserID:          createdByUserID,
+		WorkdirID:                workdirID,
+		CreatedAt:                row.CreatedAt.Time,
+		UpdatedAt:                row.UpdatedAt.Time,
+		Visibility:               storedVisibility(row.Visibility, sessionMode),
+		PreferredChatModelID:     uuidText(row.PreferredChatModelID),
+		PreferredReasoningEffort: dbpkg.TextToString(row.PreferredReasoningEffort),
 	}
 }
 
@@ -1935,23 +1993,25 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 	}
 	sessionMode := normalizeSessionMode(row.SessionMode, row.Type)
 	return Thread{
-		ID:              row.ID.String(),
-		BotID:           row.BotID.String(),
-		BotAgentID:      row.BotAgentID.String(),
-		RouteID:         row.RouteID.String(),
-		ChannelType:     dbpkg.TextToString(row.ChannelType),
-		Type:            row.Type,
-		SessionMode:     sessionMode,
-		RuntimeType:     normalizeRuntimeType(row.RuntimeType, row.Type),
-		RuntimeMetadata: parseJSONMap(row.RuntimeMetadata),
-		Title:           row.Title,
-		Metadata:        parseJSONMap(row.Metadata),
-		ParentThreadID:  parentID,
-		CreatedByUserID: createdByUserID,
-		WorkdirID:       workdirID,
-		CreatedAt:       row.CreatedAt.Time,
-		UpdatedAt:       row.UpdatedAt.Time,
-		Visibility:      storedVisibility(row.Visibility, sessionMode),
+		ID:                       row.ID.String(),
+		BotID:                    row.BotID.String(),
+		BotAgentID:               row.BotAgentID.String(),
+		RouteID:                  row.RouteID.String(),
+		ChannelType:              dbpkg.TextToString(row.ChannelType),
+		Type:                     row.Type,
+		SessionMode:              sessionMode,
+		RuntimeType:              normalizeRuntimeType(row.RuntimeType, row.Type),
+		RuntimeMetadata:          parseJSONMap(row.RuntimeMetadata),
+		Title:                    row.Title,
+		Metadata:                 parseJSONMap(row.Metadata),
+		ParentThreadID:           parentID,
+		CreatedByUserID:          createdByUserID,
+		WorkdirID:                workdirID,
+		CreatedAt:                row.CreatedAt.Time,
+		UpdatedAt:                row.UpdatedAt.Time,
+		Visibility:               storedVisibility(row.Visibility, sessionMode),
+		PreferredChatModelID:     uuidText(row.PreferredChatModelID),
+		PreferredReasoningEffort: dbpkg.TextToString(row.PreferredReasoningEffort),
 	}
 }
 
@@ -1962,6 +2022,7 @@ func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		PreferredChatModelID: row.PreferredChatModelID, PreferredReasoningEffort: row.PreferredReasoningEffort,
 	})
 }
 
@@ -1972,6 +2033,7 @@ func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow
 		Title: row.Title, Metadata: row.Metadata,
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		PreferredChatModelID: row.PreferredChatModelID, PreferredReasoningEffort: row.PreferredReasoningEffort,
 	})
 }
 
@@ -1997,6 +2059,9 @@ type pagedColumns struct {
 	WorkdirID       pgtype.UUID
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+	// Preferred* columns: the session's persisted pair (issue #879).
+	PreferredChatModelID     pgtype.UUID
+	PreferredReasoningEffort pgtype.Text
 }
 
 func threadFromPagedColumns(c pagedColumns) Thread {
@@ -2014,22 +2079,32 @@ func threadFromPagedColumns(c pagedColumns) Thread {
 	}
 	sessionMode := normalizeSessionMode(c.SessionMode, c.Type)
 	return Thread{
-		ID:              c.ID.String(),
-		BotID:           c.BotID.String(),
-		BotAgentID:      c.BotAgentID.String(),
-		RouteID:         c.RouteID.String(),
-		ChannelType:     dbpkg.TextToString(c.ChannelType),
-		Type:            c.Type,
-		SessionMode:     sessionMode,
-		RuntimeType:     normalizeRuntimeType(c.RuntimeType, c.Type),
-		RuntimeMetadata: parseJSONMap(c.RuntimeMetadata),
-		Title:           c.Title,
-		Metadata:        parseJSONMap(c.Metadata),
-		ParentThreadID:  parentID,
-		CreatedByUserID: createdByUserID,
-		WorkdirID:       workdirID,
-		CreatedAt:       c.CreatedAt.Time,
-		UpdatedAt:       c.UpdatedAt.Time,
-		Visibility:      storedVisibility(c.Visibility, sessionMode),
+		ID:                       c.ID.String(),
+		BotID:                    c.BotID.String(),
+		BotAgentID:               c.BotAgentID.String(),
+		RouteID:                  c.RouteID.String(),
+		ChannelType:              dbpkg.TextToString(c.ChannelType),
+		Type:                     c.Type,
+		SessionMode:              sessionMode,
+		RuntimeType:              normalizeRuntimeType(c.RuntimeType, c.Type),
+		RuntimeMetadata:          parseJSONMap(c.RuntimeMetadata),
+		Title:                    c.Title,
+		Metadata:                 parseJSONMap(c.Metadata),
+		ParentThreadID:           parentID,
+		CreatedByUserID:          createdByUserID,
+		WorkdirID:                workdirID,
+		CreatedAt:                c.CreatedAt.Time,
+		UpdatedAt:                c.UpdatedAt.Time,
+		Visibility:               storedVisibility(c.Visibility, sessionMode),
+		PreferredChatModelID:     uuidText(c.PreferredChatModelID),
+		PreferredReasoningEffort: dbpkg.TextToString(c.PreferredReasoningEffort),
 	}
+}
+
+// uuidText renders a nullable UUID as a string, "" when invalid.
+func uuidText(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return id.String()
 }

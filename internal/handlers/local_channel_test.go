@@ -446,7 +446,7 @@ func TestLocalChannelCreateWSChatSessionDoesNotBindRoute(t *testing.T) {
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 	}
 
-	sess, err := handler.createWSChatSession(context.Background(), botID, userID)
+	sess, err := handler.createWSChatSession(context.Background(), botID, userID, "", "")
 	if err != nil {
 		t.Fatalf("createWSChatSession: %v", err)
 	}

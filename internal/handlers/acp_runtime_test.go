@@ -139,6 +139,13 @@ func (q acpRuntimeQueries) GetSessionByID(_ context.Context, _ pgtype.UUID) (sql
 	return q.session, nil
 }
 
+// The #879 pair double-write merges through the thread service; keep the
+// merged metadata observable instead of falling into the nil embedded store.
+func (q acpRuntimeQueries) UpdateSessionRuntimeMetadata(_ context.Context, arg sqlc.UpdateSessionRuntimeMetadataParams) (sqlc.BotSession, error) {
+	q.session.RuntimeMetadata = arg.RuntimeMetadata
+	return q.session, nil
+}
+
 func (q acpRuntimeQueries) ListBotUserGrantsForUser(_ context.Context, _ sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
 	permissions := q.permissions
 	if permissions == nil {

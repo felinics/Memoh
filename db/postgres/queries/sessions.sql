@@ -1,6 +1,6 @@
 -- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, bot_agent_id, route_id, channel_type, type, session_mode, runtime_type, visibility, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id
+  bot_id, bot_agent_id, route_id, channel_type, type, session_mode, runtime_type, visibility, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id, preferred_chat_model_id, preferred_reasoning_effort
 )
 VALUES (
   sqlc.arg(bot_id),
@@ -16,7 +16,9 @@ VALUES (
   sqlc.arg(metadata),
   sqlc.narg(parent_session_id)::uuid,
   sqlc.narg(created_by_user_id)::uuid,
-  sqlc.narg(workdir_id)::uuid
+  sqlc.narg(workdir_id)::uuid,
+  sqlc.narg(preferred_chat_model_id)::uuid,
+  sqlc.narg(preferred_reasoning_effort)::text
 )
 RETURNING *;
 
@@ -123,7 +125,9 @@ created_session AS (
     metadata,
     next_turn_position,
     created_by_user_id,
-    workdir_id
+    workdir_id,
+    preferred_chat_model_id,
+    preferred_reasoning_effort
   )
   SELECT
     fp.bot_id,
@@ -152,7 +156,12 @@ created_session AS (
     sqlc.narg(created_by_user_id)::uuid,
     -- A fork continues the source conversation, so it stays in the same
     -- workdir (and therefore the same working directory).
-    fp.workdir_id
+    fp.workdir_id,
+    -- The fork inherits the source's model preference pair (issue #879): it
+    -- continues the same conversation, so it should look and resolve the
+    -- same way on open.
+    fp.preferred_chat_model_id,
+    fp.preferred_reasoning_effort
   FROM fork_plan fp
   CROSS JOIN prepared_metadata pm
   RETURNING *
@@ -302,7 +311,7 @@ FOR UPDATE;
 -- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -312,7 +321,7 @@ ORDER BY s.updated_at DESC;
 -- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -328,7 +337,7 @@ ORDER BY s.updated_at DESC;
 -- (workdir_unassigned) for the sidebar's ungrouped bucket.
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -359,7 +368,7 @@ LIMIT sqlc.arg(limit_count)::int;
 -- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -606,3 +615,31 @@ WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
   AND (SELECT count(*) FROM deleted_acp_states) >= 0
   AND (SELECT count(*) FROM deleted_acp_lines) >= 0;
+
+-- name: UpdateSessionModelPreference :exec
+-- Preference write-back (issue #879). Deliberately does NOT touch
+-- updated_at: sidebar recency must not move on picker changes or
+-- per-turn write-backs.
+UPDATE bot_sessions
+SET preferred_chat_model_id = $2,
+    preferred_reasoning_effort = $3
+WHERE id = $1;
+
+-- name: GetLatestSessionModelPreference :one
+-- Welcome composer seed: the bot's most recent native user-facing session
+-- that has a persisted pair, created by the CURRENT user (multi-member bots
+-- must not seed one member's welcome from another member's pick). Native =
+-- model runtime, chat/discuss mode, user visibility; subagent/schedule/ACP
+-- sessions never seed.
+SELECT preferred_chat_model_id, preferred_reasoning_effort
+FROM bot_sessions
+WHERE bot_id = $1
+  AND created_by_user_id = $2
+  AND runtime_type = 'model'
+  AND session_mode IN ('chat', 'discuss')
+  AND type = 'chat'
+  AND visibility = 'user'
+  AND deleted_at IS NULL
+  AND preferred_chat_model_id IS NOT NULL
+ORDER BY updated_at DESC, id DESC
+LIMIT 1;

@@ -537,6 +537,12 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   session_mode TEXT NOT NULL DEFAULT 'chat' CHECK (session_mode IN ('chat', 'discuss', 'schedule', 'subagent')),
   runtime_type TEXT NOT NULL DEFAULT 'model' CHECK (runtime_type IN ('model', 'acp_agent', 'codex', 'claude-code')),
   runtime_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- Per-session persisted (chat model, reasoning effort) pair (issue #879);
+  -- logically one value, written/read as a unit. NULL = no memory yet.
+  -- See migration 0146 for semantics; preference writes never bump
+  -- updated_at (sidebar recency must not move on picker changes).
+  preferred_chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  preferred_reasoning_effort TEXT,
   -- visibility says whether the session belongs in user-facing session
   -- lists. Distinct from session_mode on purpose: schedule-created sessions
   -- keep session_mode='schedule' for prompt/tool gating but can be 'user'

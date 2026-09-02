@@ -36,6 +36,7 @@ type SessionHandler struct {
 	botAgents      *botagents.Service
 	botService     *bots.Service
 	accountService *accounts.Service
+	modelPrefs     modelPreferenceService
 	logger         *slog.Logger
 }
 
@@ -44,6 +45,18 @@ type SessionHandler struct {
 type sessionAgentRuntimeService interface {
 	PrepareExternalFork(ctx context.Context, botID, sessionID, turnID string) (map[string]any, error)
 	AbortSessionRuns(ctx context.Context, botID, sessionID string) error
+}
+
+// modelPreferenceService is the picker-pair write path (issue #879),
+// satisfied by the agent application service.
+type modelPreferenceService interface {
+	PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort *string) error
+	ReconcileSessionModelPreference(ctx context.Context, botID, modelRef, effort string) (string, string, error)
+}
+
+// SetModelPreferenceService installs the agent-side preference write path.
+func (h *SessionHandler) SetModelPreferenceService(svc modelPreferenceService) {
+	h.modelPrefs = svc
 }
 
 // sessionWorkdirService validates a workdir binding at session creation.
@@ -117,6 +130,7 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g := e.Group("/bots/:bot_id/sessions")
 	g.POST("", h.CreateSession)
 	g.GET("", h.ListSessions)
+	g.GET("/model-preference-seed", h.ModelPreferenceSeed)
 	g.GET("/:session_id", h.GetSession)
 	g.POST("/:session_id/fork", h.ForkSession)
 	g.PATCH("/:session_id", h.UpdateSession)
@@ -140,6 +154,12 @@ type createSessionRequest struct {
 	// workdir decides the session's workspace target and working directory
 	// for its whole life; there is no way to change or clear it later.
 	WorkdirID string `json:"workdir_id,omitempty"`
+	// PreferredChatModelID / PreferredReasoningEffort carry the first-send
+	// picker pair (issue #879 spec v2). The composer sends them only when the
+	// pair has an explicit source (user pick or remembered session); omitted
+	// fields leave the columns NULL so the session follows the bot default.
+	PreferredChatModelID     *string `json:"preferred_chat_model_id,omitempty"`
+	PreferredReasoningEffort *string `json:"preferred_reasoning_effort,omitempty"`
 }
 
 type updateSessionRequest struct {
@@ -150,6 +170,11 @@ type updateSessionRequest struct {
 	RuntimeType     *string        `json:"runtime_type,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 	RuntimeMetadata map[string]any `json:"runtime_metadata,omitempty"`
+	// PreferredChatModelID / PreferredReasoningEffort are the picker pair
+	// (issue #879). The composer always patches the pair together; either one
+	// alone is reconciled against the model the session would actually use.
+	PreferredChatModelID     *string `json:"preferred_chat_model_id,omitempty"`
+	PreferredReasoningEffort *string `json:"preferred_reasoning_effort,omitempty"`
 }
 
 type forkSessionRequest struct {
@@ -281,6 +306,29 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if boundWorkdir != nil {
 		createInput.WorkdirID = boundWorkdir.ID
 		createInput.WorkdirPath = boundWorkdir.Path
+	}
+	// First-send pair (issue #879, P9′): reconcile BEFORE the INSERT so the
+	// row is born with a legal pair and the session_created broadcast already
+	// carries it. Native-only: ACP/external-runtime sessions keep the columns
+	// NULL (their model concept lives in runtime_metadata). An unresolvable
+	// model is a 400; an illegal effort silently lands on the model default.
+	if (req.PreferredChatModelID != nil || req.PreferredReasoningEffort != nil) && targetRuntimeType == session.RuntimeModel {
+		if h.modelPrefs == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "model preference service unavailable")
+		}
+		modelRef, effortRef := "", ""
+		if req.PreferredChatModelID != nil {
+			modelRef = *req.PreferredChatModelID
+		}
+		if req.PreferredReasoningEffort != nil {
+			effortRef = *req.PreferredReasoningEffort
+		}
+		prefModelID, prefEffort, prefErr := h.modelPrefs.ReconcileSessionModelPreference(c.Request().Context(), bot.ID, modelRef, effortRef)
+		if prefErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, prefErr.Error())
+		}
+		createInput.PreferredChatModelID = prefModelID
+		createInput.PreferredReasoningEffort = prefEffort
 	}
 	sess, err := h.sessionService.Create(c.Request().Context(), createInput)
 	if err != nil {
@@ -419,6 +467,40 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		return sessionForkError(err)
 	}
 	return c.JSON(http.StatusCreated, forked)
+}
+
+// modelPreferenceSeedResponse is the welcome composer seed (issue #879):
+// the pair of the bot's most recent native session, empty when none exists.
+type modelPreferenceSeedResponse struct {
+	ModelID         string `json:"model_id"`
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
+// ModelPreferenceSeed godoc
+// @Summary Welcome composer model seed
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Success 200 {object} modelPreferenceSeedResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Router /bots/{bot_id}/sessions/model-preference-seed [get].
+func (h *SessionHandler) ModelPreferenceSeed(c echo.Context) error {
+	channelIdentityID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	}
+	if _, _, err := h.authorizeBotSessionAccess(c, channelIdentityID, botID); err != nil {
+		return err
+	}
+	modelID, effort, err := h.sessionService.LatestModelPreferenceSeed(c.Request().Context(), botID, channelIdentityID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, modelPreferenceSeedResponse{ModelID: modelID, ReasoningEffort: effort})
 }
 
 // ListSessions godoc
@@ -914,6 +996,16 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			}
 		}
 	}
+	// Picker pair (issue #879): reconcile and persist. The agent service owns
+	// model resolution and effort legality; the handler only routes.
+	if req.PreferredChatModelID != nil || req.PreferredReasoningEffort != nil {
+		if h.modelPrefs == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "model preference service not configured")
+		}
+		if prefErr := h.modelPrefs.PatchSessionModelPreference(c.Request().Context(), botID, sessionID, req.PreferredChatModelID, req.PreferredReasoningEffort); prefErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, prefErr.Error())
+		}
+	}
 	if req.Title != nil {
 		resultMode, resultRuntime := normalizedSessionDescriptor(result)
 		if !bots.HasPermission(perms, requiredPermissionForSessionRuntime(resultMode, resultRuntime)) {
@@ -927,7 +1019,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 	}
-	if req.Title == nil && req.BotAgentID == nil && req.Metadata == nil && req.Type == nil && req.SessionMode == nil && req.RuntimeType == nil && req.RuntimeMetadata == nil {
+	if req.Title == nil && req.BotAgentID == nil && req.Metadata == nil && req.Type == nil && req.SessionMode == nil && req.RuntimeType == nil && req.RuntimeMetadata == nil && req.PreferredChatModelID == nil && req.PreferredReasoningEffort == nil {
 		result = existing
 	}
 	return c.JSON(http.StatusOK, result)

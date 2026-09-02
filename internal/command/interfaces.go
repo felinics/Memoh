@@ -52,6 +52,10 @@ type CommandQueries interface {
 	GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUID) ([]string, error)
 	GetTokenUsageByDayAndType(ctx context.Context, arg dbsqlc.GetTokenUsageByDayAndTypeParams) ([]dbsqlc.GetTokenUsageByDayAndTypeRow, error)
 	GetTokenUsageByModel(ctx context.Context, arg dbsqlc.GetTokenUsageByModelParams) ([]dbsqlc.GetTokenUsageByModelRow, error)
+	// UpdateSessionModelPreference is the /model and /reasoning clear path
+	// (issue #879, spec P11′): called with NULL fields to drop a web-pinned
+	// pair so the session returns to the bot-default chain.
+	UpdateSessionModelPreference(ctx context.Context, arg dbsqlc.UpdateSessionModelPreferenceParams) error
 }
 
 // AccessEvaluator checks whether the current channel context may trigger chat.

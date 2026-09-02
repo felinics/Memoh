@@ -455,6 +455,8 @@ type Queries interface {
 	UpdateSessionMetadata(ctx context.Context, arg dbsqlc.UpdateSessionMetadataParams) (dbsqlc.BotSession, error)
 	UpdateSessionRuntimeMetadata(ctx context.Context, arg dbsqlc.UpdateSessionRuntimeMetadataParams) (dbsqlc.BotSession, error)
 	UpdateSessionTitle(ctx context.Context, arg dbsqlc.UpdateSessionTitleParams) (dbsqlc.BotSession, error)
+	UpdateSessionModelPreference(ctx context.Context, arg dbsqlc.UpdateSessionModelPreferenceParams) error
+	GetLatestSessionModelPreference(ctx context.Context, arg dbsqlc.GetLatestSessionModelPreferenceParams) (dbsqlc.GetLatestSessionModelPreferenceRow, error)
 	UpdateSessionTypeAndMetadata(ctx context.Context, arg dbsqlc.UpdateSessionTypeAndMetadataParams) (dbsqlc.BotSession, error)
 	UpdateAbortedContextLifecycleSnapshot(ctx context.Context, arg dbsqlc.UpdateAbortedContextLifecycleSnapshotParams) (dbsqlc.ContextLifecycle, error)
 	UpdateToolApprovalPromptMessage(ctx context.Context, arg dbsqlc.UpdateToolApprovalPromptMessageParams) (dbsqlc.ToolApprovalRequest, error)

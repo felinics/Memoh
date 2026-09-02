@@ -4518,6 +4518,15 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      preferred_chat_model_id:
+        description: |-
+          PreferredChatModelID / PreferredReasoningEffort carry the first-send
+          picker pair (issue #879 spec v2). The composer sends them only when the
+          pair has an explicit source (user pick or remembered session); omitted
+          fields leave the columns NULL so the session follows the bot default.
+        type: string
+      preferred_reasoning_effort:
+        type: string
       runtime_metadata:
         additionalProperties: {}
         type: object
@@ -4753,6 +4762,13 @@ definitions:
       memory:
         type: string
     type: object
+  handlers.modelPreferenceSeedResponse:
+    properties:
+      model_id:
+        type: string
+      reasoning_effort:
+        type: string
+    type: object
   handlers.oauthAuthorizeRequest:
     properties:
       callback_url:
@@ -4807,6 +4823,14 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      preferred_chat_model_id:
+        description: |-
+          PreferredChatModelID / PreferredReasoningEffort are the picker pair
+          (issue #879). The composer always patches the pair together; either one
+          alone is reconciled against the model the session would actually use.
+        type: string
+      preferred_reasoning_effort:
+        type: string
       runtime_metadata:
         additionalProperties: {}
         type: object
@@ -5825,6 +5849,13 @@ definitions:
         additionalProperties: {}
         type: object
       parent_session_id:
+        type: string
+      preferred_chat_model_id:
+        description: |-
+          Preferred* is the session's persisted (model, effort) pair (issue #879).
+          Empty means "no memory"; the composer reseeds from it on open/repoint.
+        type: string
+      preferred_reasoning_effort:
         type: string
       route_conversation_type:
         type: string
@@ -11538,6 +11569,30 @@ paths:
       summary: Stream bot-wide sessions activity
       tags:
       - messages
+  /bots/{bot_id}/sessions/model-preference-seed:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.modelPreferenceSeedResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Welcome composer model seed
+      tags:
+      - sessions
   /bots/{bot_id}/settings:
     delete:
       description: Remove agent settings for current user

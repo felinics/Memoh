@@ -123,6 +123,9 @@ func (h *Handler) buildReasoningGroup() *CommandGroup {
 			if _, err := h.settingsService.UpsertBot(cc.Ctx, cc.BotID, req); err != nil {
 				return nil, err
 			}
+			// Same contract as /model: drop any web-pinned session pair so the
+			// session follows the bot default the user just set.
+			h.clearSessionModelPreference(cc)
 			s, err := h.getBotSettings(cc)
 			if err != nil {
 				return nil, err

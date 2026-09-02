@@ -2176,7 +2176,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					releaseActiveWSTurnNow()
 					continue
 				}
-				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID)
+				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID, msg.ModelID, msg.ReasoningEffort)
 				if createErr != nil {
 					sendWSError(writer, ref, createErr.Error())
 					releaseActiveWSTurnNow()
@@ -2520,15 +2520,23 @@ func userInputResponseAppError(err error) error {
 	}
 }
 
-func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, channelIdentityID string) (sessionpkg.Thread, error) {
+// createWSChatSession creates the web session for a first message. The
+// request's (model, effort) pair is written into the INSERT (issue #879,
+// spec §3.3-D) so the session is born with the pair: the session_created
+// broadcast that follows can never be observed with empty preference.
+// Channel-side creation (inbound) calls thread.Create without these fields,
+// so channel sessions are born with NULL preference.
+func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, channelIdentityID, modelID, reasoningEffort string) (sessionpkg.Thread, error) {
 	if h == nil || h.sessionService == nil {
 		return sessionpkg.Thread{}, errors.New("session service not configured")
 	}
 	return h.sessionService.Create(ctx, sessionpkg.CreateInput{
-		BotID:           strings.TrimSpace(botID),
-		ChannelType:     h.channelType.String(),
-		Type:            sessionpkg.TypeChat,
-		CreatedByUserID: strings.TrimSpace(channelIdentityID),
+		BotID:                    strings.TrimSpace(botID),
+		ChannelType:              h.channelType.String(),
+		Type:                     sessionpkg.TypeChat,
+		CreatedByUserID:          strings.TrimSpace(channelIdentityID),
+		PreferredChatModelID:     strings.TrimSpace(modelID),
+		PreferredReasoningEffort: strings.TrimSpace(reasoningEffort),
 	})
 }
 

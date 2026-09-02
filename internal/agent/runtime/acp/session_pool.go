@@ -1081,6 +1081,34 @@ func publicationHeadsEqual(a agentstate.SessionPublicationHead, aFound bool, b a
 	return aErr == nil && bErr == nil && aRunID == bRunID && a.Kind == b.Kind
 }
 
+// rememberedACPPair reads the session's persisted ACP (model, effort) pair
+// from runtime_metadata (issue #879, spec v2 §3.6 — written by the PATCH
+// double-write in handlers). Missing/unreadable metadata is an empty pair,
+// never an error: a cold start must fall back to the profile defaults rather
+// than fail.
+func (p *SessionPool) rememberedACPPair(ctx context.Context, sessionID string) (string, string) {
+	if p == nil || p.store == nil || sessionID == "" {
+		return "", ""
+	}
+	desc, err := p.store.Get(ctx, sessionID)
+	if err != nil {
+		p.logger.Warn("load ACP remembered pair failed; using profile defaults",
+			slog.String("session_id", sessionID),
+			slog.Any("error", err))
+		return "", ""
+	}
+	readKey := func(key string) string {
+		if desc.RuntimeMetadata == nil {
+			return ""
+		}
+		if v, ok := desc.RuntimeMetadata[key].(string); ok {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	return readKey("acp_model_id"), readKey("acp_reasoning_effort")
+}
+
 // applyPromptConfig applies the per-turn composer selection while the caller
 // holds the runtime operation lock. Model must be applied first because the
 // authoritative response can replace the available reasoning options.
@@ -1486,6 +1514,33 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 			epoch,
 			finalEpoch,
 		))
+	}
+
+	// Replay the session's remembered (model, effort) pair over the profile
+	// defaults Start just applied (issue #879, spec v2 §3.6 — without this,
+	// every cold start silently reverts the picker choice to the profile
+	// default). Model first: its authoritative response can replace the
+	// available reasoning options. A refused value keeps the agent's current
+	// state — while the agent is live, the agent is the truth.
+	if rememberedModel, rememberedEffort := p.rememberedACPPair(startCtx, boundSession); rememberedModel != "" || rememberedEffort != "" {
+		if rememberedModel != "" && strings.TrimSpace(sess.ModelState().CurrentModelID) != rememberedModel {
+			if _, err := sess.SetModel(startCtx, rememberedModel); err != nil {
+				p.logger.Warn("ACP remembered model rejected; keeping agent state",
+					slog.String("runtime_id", h.id),
+					slog.String("session_id", boundSession),
+					slog.String("model_id", rememberedModel),
+					slog.Any("error", err))
+			}
+		}
+		if rememberedEffort != "" && strings.TrimSpace(sess.ReasoningState().CurrentEffort) != rememberedEffort {
+			if _, err := sess.SetReasoningEffort(startCtx, rememberedEffort); err != nil {
+				p.logger.Warn("ACP remembered reasoning effort rejected; keeping agent state",
+					slog.String("runtime_id", h.id),
+					slog.String("session_id", boundSession),
+					slog.String("reasoning_effort", rememberedEffort),
+					slog.Any("error", err))
+			}
+		}
 	}
 
 	h.state.Lock()

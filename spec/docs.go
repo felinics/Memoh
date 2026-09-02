@@ -7123,6 +7123,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/model-preference-seed": {
+            "get": {
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Welcome composer model seed",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.modelPreferenceSeedResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}": {
             "get": {
                 "tags": [
@@ -21772,6 +21809,13 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "preferred_chat_model_id": {
+                    "description": "PreferredChatModelID / PreferredReasoningEffort carry the first-send\npicker pair (issue #879 spec v2). The composer sends them only when the\npair has an explicit source (user pick or remembered session); omitted\nfields leave the columns NULL so the session follows the bot default.",
+                    "type": "string"
+                },
+                "preferred_reasoning_effort": {
+                    "type": "string"
+                },
                 "runtime_metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -22118,6 +22162,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.modelPreferenceSeedResponse": {
+            "type": "object",
+            "properties": {
+                "model_id": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.oauthAuthorizeRequest": {
             "type": "object",
             "properties": {
@@ -22201,6 +22256,13 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "preferred_chat_model_id": {
+                    "description": "PreferredChatModelID / PreferredReasoningEffort are the picker pair\n(issue #879). The composer always patches the pair together; either one\nalone is reconciled against the model the session would actually use.",
+                    "type": "string"
+                },
+                "preferred_reasoning_effort": {
+                    "type": "string"
                 },
                 "runtime_metadata": {
                     "type": "object",
@@ -23603,6 +23665,13 @@ const docTemplate = `{
                     "additionalProperties": {}
                 },
                 "parent_session_id": {
+                    "type": "string"
+                },
+                "preferred_chat_model_id": {
+                    "description": "Preferred* is the session's persisted (model, effort) pair (issue #879).\nEmpty means \"no memory\"; the composer reseeds from it on open/repoint.",
+                    "type": "string"
+                },
+                "preferred_reasoning_effort": {
                     "type": "string"
                 },
                 "route_conversation_type": {
