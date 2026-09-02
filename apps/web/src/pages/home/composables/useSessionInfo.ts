@@ -59,7 +59,6 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
 
   const usedTokens = computed(() => info.value?.context_usage?.used_tokens ?? 0)
   const contextView = computed(() => resolveSessionContextView(info.value?.context_usage, {
-    overrideActive: !!options.overrideModelId?.value,
     fallbackWindow: options.fallbackContextWindow?.value,
   }))
   const composition = computed(() => contextView.value.composition)

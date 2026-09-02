@@ -11,9 +11,6 @@ export interface SessionContextView {
 }
 
 export interface SessionContextViewOptions {
-  // A pane-level model override budgets the next turn against another model,
-  // so the last turn's plan (window, reserve, marks) no longer applies.
-  overrideActive: boolean
   fallbackWindow: number | null | undefined
 }
 
@@ -23,13 +20,14 @@ function positive(value: number | null | undefined): number | null {
 
 // The fragment estimate is the basis the backend budgets and compacts on, and
 // the only one ACP sessions report; the plan window is the denominator the turn
-// actually ran against, so it wins over the resolved model window.
+// actually ran against, so it wins over the resolved model window. The status
+// already omits the plan when the next turn targets another model.
 export function resolveSessionContextView(
   usage: HandlersContextUsage | null | undefined,
   options: SessionContextViewOptions,
 ): SessionContextView {
   const composition = computeContextComposition(usage)
-  const plan = options.overrideActive ? undefined : usage?.budget_plan
+  const plan = usage?.budget_plan
   const compaction = usage?.compaction
   const markApplies = plan != null && compaction?.enabled === true
   return {

@@ -15,8 +15,8 @@ const usage: HandlersContextUsage = {
 }
 
 describe('resolveSessionContextView', () => {
-  it('budgets against the persisted plan when the pane uses the bot default model', () => {
-    const view = resolveSessionContextView(usage, { overrideActive: false, fallbackWindow: null })
+  it('budgets against the persisted plan when the status carries one', () => {
+    const view = resolveSessionContextView(usage, { fallbackWindow: null })
 
     expect(view.estimatedTokens).toBe(9675)
     expect(view.contextWindow).toBe(200000)
@@ -25,8 +25,9 @@ describe('resolveSessionContextView', () => {
     expect(view.compactionAvailable).toBe(true)
   })
 
-  it('switches to the override model window and drops plan-derived bands when a pane override is active', () => {
-    const view = resolveSessionContextView(usage, { overrideActive: true, fallbackWindow: null })
+  it('drops plan-derived bands when the status omits the plan (next turn targets another model)', () => {
+    const { budget_plan: _omitted, ...withoutPlan } = usage
+    const view = resolveSessionContextView(withoutPlan, { fallbackWindow: null })
 
     expect(view.contextWindow).toBe(258000)
     expect(view.outputReserve).toBeNull()
@@ -34,7 +35,7 @@ describe('resolveSessionContextView', () => {
   })
 
   it('hides the mark when auto-compaction is disabled but keeps manual compaction available', () => {
-    const view = resolveSessionContextView({ ...usage, compaction: { enabled: false, auto_tokens: 100000 } }, { overrideActive: false, fallbackWindow: null })
+    const view = resolveSessionContextView({ ...usage, compaction: { enabled: false, auto_tokens: 100000 } }, { fallbackWindow: null })
 
     expect(view.autoCompactTokens).toBeNull()
     expect(view.compactionAvailable).toBe(true)
@@ -42,17 +43,17 @@ describe('resolveSessionContextView', () => {
 
   it('reports compaction as unavailable when the status carries none (ACP and direct runtimes)', () => {
     const { compaction: _omitted, ...withoutCompaction } = usage
-    const view = resolveSessionContextView(withoutCompaction, { overrideActive: false, fallbackWindow: null })
+    const view = resolveSessionContextView(withoutCompaction, { fallbackWindow: null })
 
     expect(view.compactionAvailable).toBe(false)
     expect(view.autoCompactTokens).toBeNull()
   })
 
   it('falls back to the status window, then the selected model window, and has no estimate without a breakdown', () => {
-    expect(resolveSessionContextView({ used_tokens: 5, context_window: 8000 }, { overrideActive: false, fallbackWindow: 4000 }).contextWindow).toBe(8000)
-    const view = resolveSessionContextView({ used_tokens: 5 }, { overrideActive: false, fallbackWindow: 4000 })
+    expect(resolveSessionContextView({ used_tokens: 5, context_window: 8000 }, { fallbackWindow: 4000 }).contextWindow).toBe(8000)
+    const view = resolveSessionContextView({ used_tokens: 5 }, { fallbackWindow: 4000 })
     expect(view.contextWindow).toBe(4000)
     expect(view.estimatedTokens).toBeNull()
-    expect(resolveSessionContextView(undefined, { overrideActive: false, fallbackWindow: null }).contextWindow).toBeNull()
+    expect(resolveSessionContextView(undefined, { fallbackWindow: null }).contextWindow).toBeNull()
   })
 })

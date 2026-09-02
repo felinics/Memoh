@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useQuery } from '@pinia/colada'
 import {
@@ -24,6 +24,9 @@ function useLifecycleTarget() {
 export function useContextLifecycle(open: Ref<boolean>) {
   const { botId, sessionId } = useLifecycleTarget()
   const limit = ref(PAGE_LIMIT)
+  watch(sessionId, () => {
+    limit.value = PAGE_LIMIT
+  }, { flush: 'sync' })
 
   const { data, status } = useQuery({
     key: () => ['context-lifecycle', botId.value ?? '', sessionId.value ?? '', limit.value],
@@ -36,7 +39,6 @@ export function useContextLifecycle(open: Ref<boolean>) {
       return data as HandlersContextLifecycleResponse
     },
     enabled: () => open.value && !!botId.value && !!sessionId.value,
-    placeholderData: (previous: HandlersContextLifecycleResponse | undefined) => previous,
     refetchOnWindowFocus: false,
   })
 
