@@ -3,7 +3,7 @@ SELECT
   id,
   run_id,
   role,
-  metadata,
+  (metadata #- '{context_lifecycle,selection_decisions}'::text[])::jsonb AS metadata,
   created_at
 FROM bot_history_messages
 WHERE session_id = sqlc.arg(session_id)
@@ -135,12 +135,38 @@ SELECT
   status,
   error_code,
   created_at,
-  snapshot
+  (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
 ORDER BY created_at DESC, run_id DESC
 LIMIT sqlc.arg(max_count);
+
+-- name: GetContextLifecycleBySessionAndRunID :one
+SELECT
+  run_id,
+  status,
+  error_code,
+  created_at,
+  snapshot
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id);
+
+-- name: GetAssistantContextLifecycleBySessionAndRunID :one
+SELECT
+  id,
+  run_id,
+  metadata,
+  created_at
+FROM bot_history_messages
+WHERE session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id)
+  AND role = 'assistant'
+  AND metadata ? 'context_lifecycle'
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
 
 -- name: ListTerminalSessionRunsNeedingContextLifecycle :many
 SELECT

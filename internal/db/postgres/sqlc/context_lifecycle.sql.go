@@ -63,6 +63,45 @@ func (q *Queries) CreateContextLifecycle(ctx context.Context, arg CreateContextL
 	return i, err
 }
 
+const getAssistantContextLifecycleBySessionAndRunID = `-- name: GetAssistantContextLifecycleBySessionAndRunID :one
+SELECT
+  id,
+  run_id,
+  metadata,
+  created_at
+FROM bot_history_messages
+WHERE session_id = $1
+  AND run_id = $2
+  AND role = 'assistant'
+  AND metadata ? 'context_lifecycle'
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetAssistantContextLifecycleBySessionAndRunIDParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	RunID     pgtype.UUID `json:"run_id"`
+}
+
+type GetAssistantContextLifecycleBySessionAndRunIDRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	RunID     pgtype.UUID        `json:"run_id"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetAssistantContextLifecycleBySessionAndRunID(ctx context.Context, arg GetAssistantContextLifecycleBySessionAndRunIDParams) (GetAssistantContextLifecycleBySessionAndRunIDRow, error) {
+	row := q.db.QueryRow(ctx, getAssistantContextLifecycleBySessionAndRunID, arg.SessionID, arg.RunID)
+	var i GetAssistantContextLifecycleBySessionAndRunIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.Metadata,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getContextLifecycleByRunID = `-- name: GetContextLifecycleByRunID :one
 SELECT run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
 FROM context_lifecycles
@@ -82,6 +121,45 @@ func (q *Queries) GetContextLifecycleByRunID(ctx context.Context, runID pgtype.U
 		&i.ErrorCode,
 		&i.Snapshot,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getContextLifecycleBySessionAndRunID = `-- name: GetContextLifecycleBySessionAndRunID :one
+SELECT
+  run_id,
+  status,
+  error_code,
+  created_at,
+  snapshot
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = $1
+  AND run_id = $2
+`
+
+type GetContextLifecycleBySessionAndRunIDParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	RunID     pgtype.UUID `json:"run_id"`
+}
+
+type GetContextLifecycleBySessionAndRunIDRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Snapshot  []byte             `json:"snapshot"`
+}
+
+func (q *Queries) GetContextLifecycleBySessionAndRunID(ctx context.Context, arg GetContextLifecycleBySessionAndRunIDParams) (GetContextLifecycleBySessionAndRunIDRow, error) {
+	row := q.db.QueryRow(ctx, getContextLifecycleBySessionAndRunID, arg.SessionID, arg.RunID)
+	var i GetContextLifecycleBySessionAndRunIDRow
+	err := row.Scan(
+		&i.RunID,
+		&i.Status,
+		&i.ErrorCode,
+		&i.CreatedAt,
+		&i.Snapshot,
 	)
 	return i, err
 }
@@ -155,7 +233,7 @@ SELECT
   id,
   run_id,
   role,
-  metadata,
+  (metadata #- '{context_lifecycle,selection_decisions}'::text[])::jsonb AS metadata,
   created_at
 FROM bot_history_messages
 WHERE session_id = $1
@@ -210,7 +288,7 @@ SELECT
   status,
   error_code,
   created_at,
-  snapshot
+  (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND session_id = $1
