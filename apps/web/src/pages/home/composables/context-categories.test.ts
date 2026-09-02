@@ -28,7 +28,7 @@ describe('computeContextComposition', () => {
         frag('current_user_message', 80),
         frag('attachment_ref', 90),
         frag('native_image', 100),
-        frag('acp_context', 150),
+        frag('runtime_context', 150),
         frag('skills_catalog', 110),
         frag('memory_recall', 160),
         frag('conversation_summary', 170),

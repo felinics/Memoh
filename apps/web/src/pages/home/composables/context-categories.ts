@@ -39,7 +39,7 @@ const KIND_CATEGORY: Record<ContextfragKind, ContextCategoryId> = {
   current_user_message: 'conversation',
   attachment_ref: 'conversation',
   native_image: 'conversation',
-  acp_context: 'conversation',
+  runtime_context: 'conversation',
   hook_context: 'other',
   injected_message: 'other',
   background_summary: 'other',
