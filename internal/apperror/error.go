@@ -28,6 +28,16 @@ const (
 	CodeWorkspaceImageIncompatible              Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed        Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayPrepareFailed           Code = "workspace.display_prepare_failed"
+	CodeWorkspaceDependencyNotFound             Code = "workspace_dependency.not_found"
+	CodeWorkspaceDependencyRequestInvalid       Code = "workspace_dependency.request_invalid"
+	CodeWorkspaceDependencyActionUnsupported    Code = "workspace_dependency.action_unsupported"
+	CodeWorkspaceDependencyPlatformUnsupported  Code = "workspace_dependency.platform_unsupported"
+	CodeWorkspaceDependencyBusy                 Code = "workspace_dependency.busy"
+	CodeWorkspaceDependencyWorkspaceNotRunning  Code = "workspace_dependency.workspace_not_running"
+	CodeWorkspaceDependencyWorkspaceMissing     Code = "workspace_dependency.workspace_missing"
+	CodeWorkspaceDependencyRemoteOffline        Code = "workspace_dependency.remote_offline"
+	CodeWorkspaceDependencyRollbackUnavailable  Code = "workspace_dependency.rollback_unavailable"
+	CodeWorkspaceDependencyOperationFailed      Code = "workspace_dependency.operation_failed"
 	CodeProviderTemplateNotFound                Code = "provider_template.not_found"
 	CodeProviderTemplateDomainInvalid           Code = "provider_template.domain_invalid"
 	CodeProviderTemplateDomainMismatch          Code = "provider_template.domain_mismatch"
@@ -223,6 +233,50 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceDisplayPrepareFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "Display preparation failed.",
+	},
+	// Workspace dependencies (design docs/design/workspace-dependencies.md
+	// §11). The 409 family tells the UI what to offer instead: start or
+	// create the workspace, wait for the other operation, bring the remote
+	// computer online.
+	CodeWorkspaceDependencyNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "This dependency does not exist.",
+	},
+	CodeWorkspaceDependencyRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The dependency request is invalid.",
+	},
+	CodeWorkspaceDependencyActionUnsupported: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "This action is not available for the dependency.",
+	},
+	CodeWorkspaceDependencyPlatformUnsupported: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "This dependency is not available on the workspace platform.",
+	},
+	CodeWorkspaceDependencyBusy: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Another operation on this dependency is in progress.",
+	},
+	CodeWorkspaceDependencyWorkspaceNotRunning: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The workspace is not running. Start it first.",
+	},
+	CodeWorkspaceDependencyWorkspaceMissing: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The workspace has not been created yet.",
+	},
+	CodeWorkspaceDependencyRemoteOffline: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "That computer is offline.",
+	},
+	CodeWorkspaceDependencyRollbackUnavailable: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "No previous version to roll back to.",
+	},
+	CodeWorkspaceDependencyOperationFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The dependency operation failed.",
 	},
 	CodeProviderTemplateNotFound: {
 		HTTPStatus: http.StatusNotFound,
