@@ -1049,7 +1049,14 @@
       "attachmentInvalid": "添付ファイルは無効です。もう一度添付してください。",
       "attachmentUnavailable": "外部Agentが添付ファイルにアクセスできません。もう一度添付してください。",
       "imageInputUnsupported": "この外部Agentは添付画像を読み取れません。",
-      "invalidChatRuntime": "選択されたチャットruntimeが無効です。"
+      "invalidChatRuntime": "選択されたチャットruntimeが無効です。",
+      "dependencyMissing": "{dep_id} はこの Workspace にインストールされていません。{required_version} をバックグラウンドでインストール中です。完了後にメッセージを再送してください。",
+      "dependencyVersionMismatch": "{dep_id} は {installed_version} ですが、Server は {required_version} を必要とします。今回はインストール済みのバージョンで続行します。",
+      "dependencyMissingProgress": "バックグラウンドでインストール中…",
+      "dependencyMissingDone": "インストール完了。再送できます。",
+      "dependencyMissingFailed": "バックグラウンドのインストールに失敗しました。Bot 設定の「依存関係」から再試行してください。",
+      "dependencyOpen": "依存関係を開く",
+      "dependencyAlign": "バージョンを合わせる"
     },
     "sessionFilterAll": "全て",
     "searchSessionPlaceholder": "検索",
@@ -2162,6 +2169,7 @@
       "channels": "プラットフォーム",
       "remoteRuntime": "コンピューター",
       "container": "Workspace",
+      "dependencies": "依存関係",
       "mcp": "MCP",
       "compaction": "圧縮",
       "schedule": "スケジュール",
@@ -2218,7 +2226,135 @@
       "codexLoginSuccess": "Codex を ChatGPT アカウントに接続しました",
       "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
       "modelsLoadFailed": "Agent のモデルを読み込めませんでした。Agent の設定を確認して、もう一度お試しください。",
-      "openSettings": "Agent の設定を開く"
+      "openSettings": "Agent の設定を開く",
+      "dependencyRequired": "Workspace に {name} {version} が必要です",
+      "dependencyChecking": "依存関係を確認中…",
+      "dependencySatisfied": "{name} {version} はインストール済みです"
+    },
+    "dependencies": {
+      "title": "Workspace の依存関係",
+      "intro": "この Bot の Workspace にある Agent CLI・ランタイム・ツールを管理します。",
+      "group": {
+        "agent": "Agent CLI",
+        "runtime": "ランタイム",
+        "tool": "ツール"
+      },
+      "checkUpdates": "更新を確認",
+      "checkUpdatesDone": "更新の確認が完了しました",
+      "lastChecked": "最終確認：{time}",
+      "imageProvidedDescription": "Workspace イメージが提供します。削除できません。",
+      "emptyTitle": "管理できる依存関係がありません",
+      "loadFailed": "依存関係を読み込めませんでした",
+      "close": "閉じる",
+      "status": {
+        "installed": "インストール済み",
+        "notInstalled": "未インストール",
+        "missing": "再インストールが必要",
+        "failed": "失敗",
+        "installing": "インストール中",
+        "updating": "更新中",
+        "removing": "削除中",
+        "needsAlignment": "{version} への更新が必要",
+        "updateAvailable": "{version} が利用可能",
+        "unsupported": "非対応",
+        "unsupportedTooltip": "この Workspace のプラットフォームでは利用できません。"
+      },
+      "source": {
+        "image": "イメージ付属",
+        "managed": "管理対象"
+      },
+      "action": {
+        "install": "インストール",
+        "reinstall": "再インストール",
+        "update": "更新",
+        "align": "バージョンを合わせる",
+        "rollback": "{version} にロールバック",
+        "rollbackPlain": "ロールバック",
+        "remove": "削除",
+        "viewScript": "スクリプトを表示",
+        "viewProgress": "進行状況を表示"
+      },
+      "workspace": {
+        "notRunningTitle": "Workspace が起動していません",
+        "notRunningDescription": "インストール・更新・状態の検出には Workspace の起動が必要です。表示は最後に記録された状態です。",
+        "start": "Workspace を起動",
+        "missingTitle": "Workspace がまだありません",
+        "goToContainer": "Workspace タブを開く",
+        "remoteOfflineTitle": "「{name}」はオフラインです",
+        "remoteOfflineDescription": "オンラインになると依存関係を管理できます。"
+      },
+      "confirm": {
+        "installTitle": "{name} をインストール",
+        "reinstallTitle": "{name} を再インストール",
+        "updateTitle": "{name} を更新",
+        "alignTitle": "{name} を Server が要求するバージョンに更新",
+        "alignDescription": "この Server は {name} {version} を必要とします。",
+        "updateDescription": "{from} から {to} に更新します。新しいバージョンは別ディレクトリにインストールされ、成功時のみ切り替わります。後からロールバックできます。",
+        "installDescription": "Workspace に {name} {version} をダウンロードしてインストールします。",
+        "installLatestDescription": "Workspace に最新の {name} をダウンロードしてインストールします。",
+        "reinstallDescription": "現在の {name} を削除して再インストールします。完了するまで、これに依存する Agent は起動できません。",
+        "dependency": "依存関係",
+        "targetVersion": "対象バージョン",
+        "installPath": "インストール先",
+        "downloadSize": "ダウンロード量",
+        "remoteWarningTitle": "お使いのコンピューター「{name}」で実行されます",
+        "remoteWarningDescription": "スクリプトはそのコンピューター上でファイルをダウンロードして書き込みます。",
+        "installConfirm": "インストール",
+        "updateConfirm": "更新",
+        "alignConfirm": "{version} に更新",
+        "installAndEnable": "インストールして有効化",
+        "alignAndEnable": "更新して有効化"
+      },
+      "progress": {
+        "installing": "{name} をインストール中",
+        "updating": "{name} を更新中",
+        "reinstalling": "{name} を再インストール中",
+        "removing": "{name} を削除中",
+        "preparing": "準備中…",
+        "doneTitle": "完了",
+        "failedTitle": "操作に失敗しました",
+        "failedHint": "失敗として記録されました。依存関係の一覧から再試行できます。ログはコピーできます。",
+        "runInBackground": "バックグラウンドで実行",
+        "version": "バージョン",
+        "entrypoint": "エントリーポイント",
+        "logHint": "ログは Workspace 内スクリプトの出力です"
+      },
+      "script": {
+        "title": "Workspace で実行されるスクリプト",
+        "description": "{name} · {action} · 実際に実行される内容と同一",
+        "digest": "ダイジェスト",
+        "exec": "実行方法",
+        "timeout": "タイムアウト",
+        "timeoutValue": "{seconds} 秒",
+        "env": "環境変数（{count}）"
+      },
+      "remove": {
+        "title": "{name} を削除しますか？",
+        "description": "{path} 以下のすべてのバージョンを削除します。これに依存する Agent は再インストールまで起動できません。"
+      },
+      "rollback": {
+        "title": "{name} をロールバック",
+        "description": "{from} から {to} に戻します。ローカルに保持されたバージョンへ切り替えるだけで、ダウンロードは行いません。",
+        "current": "現在",
+        "target": "戻す先",
+        "confirm": "{to} にロールバック",
+        "success": "{to} にロールバックしました",
+        "failed": "ロールバックに失敗しました"
+      },
+      "preflight": {
+        "failed": "依存関係を確認できませんでした",
+        "workspaceNotRunningTitle": "まず Workspace を起動してください",
+        "workspaceNotRunningDescription": "{name} を有効にするには、起動中の Workspace に依存関係をインストールする必要があります。",
+        "workspaceMissingTitle": "まず Workspace を作成してください",
+        "startAndContinue": "起動して続行",
+        "platformUnsupported": "この Workspace のプラットフォームでは {name} を利用できません",
+        "enabled": "{name} をインストールして有効化しました"
+      },
+      "notice": {
+        "title": "依存関係の更新があります",
+        "description": "自動では更新されません。一覧から個別に確認してください。",
+        "gotIt": "OK"
+      }
     },
     "folders": {
       "create": "新しいフォルダ",
