@@ -94,7 +94,12 @@ defineExpose({ selection, missingRequiredField })
 
 <template>
   <FormStack>
+    <!-- A picker with one segment is not a choice. The only profile shipped
+         today publishes api_key alone — an internal managed-mode marker, not
+         something a user picks — so the row disappears; a profile that really
+         publishes two modes still gets its chooser. -->
     <FieldStack
+      v-if="setupModeItems.length > 1"
       :label="t('bots.settings.acpSetupMode')"
       :gap="fieldGap"
     >

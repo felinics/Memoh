@@ -42,12 +42,13 @@ export function acpManagedFieldLabel(
 export function acpManagedFieldHelp(
   profile: AcpprofilePublicProfile,
   field: AcpprofileManagedField,
-  t: AcpSetupModeLabelTranslate,
 ): string {
+  // Command and Arguments say it themselves: the label names the field and the
+  // placeholder (`my-agent-acp`, `--stdio`) shows the shape. A sentence under
+  // each only restated that, on both the create panel and the settings page.
   if (isACPAgent(profile.id)) {
     const id = normalizeACPAgentID(field.id)
-    if (id === 'command') return t('bots.settings.acpCommandHelp')
-    if (id === 'arguments') return t('bots.settings.acpArgumentsHelp')
+    if (id === 'command' || id === 'arguments') return ''
   }
   return field.help || ''
 }

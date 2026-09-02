@@ -40,11 +40,22 @@ describe('generic ACP managed fields', () => {
     ],
   })
 
-  it('uses localized labels and help text', () => {
+  it('uses localized labels', () => {
     const command = generic.managed_fields?.[0] ?? {}
-    const argumentsField = generic.managed_fields?.[1] ?? {}
     expect(acpManagedFieldLabel(generic, command, t)).toBe('bots.settings.acpCommand')
-    expect(acpManagedFieldHelp(generic, argumentsField, t)).toBe('bots.settings.acpArgumentsHelp')
+  })
+
+  it('leaves command and arguments unexplained', () => {
+    // The label plus the placeholder already carry it; help under these two was
+    // a sentence restating the field name.
+    const command = { ...(generic.managed_fields?.[0] ?? {}), help: 'from the profile' }
+    const argumentsField = { ...(generic.managed_fields?.[1] ?? {}), help: 'from the profile' }
+    expect(acpManagedFieldHelp(generic, command)).toBe('')
+    expect(acpManagedFieldHelp(generic, argumentsField)).toBe('')
+  })
+
+  it('keeps profile-authored help on every other field', () => {
+    expect(acpManagedFieldHelp(generic, { id: 'api_key', help: 'Paste your key' })).toBe('Paste your key')
   })
 })
 

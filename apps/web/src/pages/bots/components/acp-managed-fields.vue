@@ -61,7 +61,7 @@ function handleFieldCommit() {
       v-for="field in fields"
       :key="field.id"
       :label="acpManagedFieldLabel(profile, field, t)"
-      :help="acpManagedFieldHelp(profile, field, t)"
+      :help="acpManagedFieldHelp(profile, field)"
       :gap="fieldGap"
     >
       <Textarea

@@ -224,17 +224,12 @@
           stack="always"
         >
           <template #content>
-            <div class="space-y-3">
-              <p class="text-body text-muted-foreground">
-                {{ $t('bots.steps.agentDesc') }}
-              </p>
-              <AcpSetupPanel
-                ref="acpSetupPanelRef"
-                v-model:error-message="acpError"
-                :profile="selectedAcpProfile"
-                :oauth-hint="$t('bots.agentCreate.oauthSettingsHint')"
-              />
-            </div>
+            <AcpSetupPanel
+              ref="acpSetupPanelRef"
+              v-model:error-message="acpError"
+              :profile="selectedAcpProfile"
+              :oauth-hint="$t('bots.agentCreate.oauthSettingsHint')"
+            />
           </template>
         </SettingsRow>
 
