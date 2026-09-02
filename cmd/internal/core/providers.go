@@ -102,6 +102,7 @@ import (
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps"
+	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -581,7 +582,7 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore) *codexruntime.Driver {
+func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
 	driver := codexruntime.NewDriver(
 		workspaceManager,
 		botAgents,
@@ -591,6 +592,11 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
 		log,
 	)
+	// The dependency service sits upstream of the drivers in the FX graph
+	// (workspace manager, store, catalog, background manager), so it can be
+	// handed over here; the setter only keeps the driver constructible
+	// without a resolver (tests, toolkit fallback).
+	driver.SetLauncherResolver(workspaceDeps)
 	lc.Append(fx.Hook{
 		OnStop: func(context.Context) error {
 			driver.CloseAll()
@@ -600,8 +606,8 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 	return driver
 }
 
-func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore) *claudecoderuntime.Driver {
-	return claudecoderuntime.NewDriver(
+func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *claudecoderuntime.Driver {
+	driver := claudecoderuntime.NewDriver(
 		workspaceManager,
 		botAgents,
 		credentials,
@@ -610,10 +616,72 @@ func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manag
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
 		log,
 	)
+	driver.SetLauncherResolver(workspaceDeps)
+	return driver
 }
 
-func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderuntime.Driver) external.Drivers {
-	return external.Drivers{codex, claude}
+// directRuntimeLaunchers names the CLI command each direct runtime executes,
+// keyed by runtime type. validateDriverDependencies requires it to be the
+// primary command (provides[0]) of the dependency the driver declares: the
+// launcher resolver hands drivers the path of provides[0], so any other
+// arrangement would launch the wrong binary. A new direct runtime that
+// declares a dependency must be added here, or the Server refuses to start.
+var directRuntimeLaunchers = map[string]string{
+	codexruntime.RuntimeType:      "codex",
+	claudecoderuntime.RuntimeType: "claude",
+}
+
+// Built-in runtimes bind official dependency IDs to their launcher command.
+// The recipe itself is downloaded and validated by RemoteCatalog.
+var directRuntimeDependencies = workspacedeps.BuiltinLauncherCommands()
+
+func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderuntime.Driver) (external.Drivers, error) {
+	drivers := external.Drivers{codex, claude}
+	discovery, err := depcatalog.Discovery(directRuntimeDependencies)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateDriverDependencies(drivers, discovery); err != nil {
+		return nil, err
+	}
+	return drivers, nil
+}
+
+// validateDriverDependencies checks every driver that declares a workspace
+// dependency (external.DependencyRequirer): the dependency is in the catalog
+// and its primary command is the runtime's launcher. All violations are
+// reported together.
+func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalog) error {
+	if cat == nil {
+		return errors.New("validate direct agent dependencies: catalog is nil")
+	}
+	requirements := drivers.RequiredDependencies()
+	runtimes := make([]string, 0, len(requirements))
+	for runtimeType := range requirements {
+		runtimes = append(runtimes, runtimeType)
+	}
+	sort.Strings(runtimes)
+
+	var errs []error
+	for _, runtimeType := range runtimes {
+		req := requirements[runtimeType]
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("direct runtime %q requires workspace dependency %q: %s", runtimeType, req.DependencyID, fmt.Sprintf(format, args...)))
+		}
+		dep, ok := cat.Get(req.DependencyID)
+		if !ok {
+			fail("not in the catalog")
+			continue
+		}
+		command, known := directRuntimeLaunchers[runtimeType]
+		switch {
+		case !known:
+			fail("no launcher command registered in directRuntimeLaunchers")
+		case len(dep.Provides) == 0 || dep.Provides[0] != command:
+			fail("primary command %v (provides[0]) is not the runtime launcher %q", dep.Provides, command)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func provideExternalAgentCodexHandler(log *slog.Logger, driver *codexruntime.Driver, botAgents *botagents.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ExternalAgentCodexHandler {
@@ -662,8 +730,51 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	service.SetUserInputService(userInput)
 	service.SetACPSessionPool(acpPool)
 	service.SetExternalRuntimes(directAgents...)
+	return service
+}
+
+// injectBackgroundTaskEvents connects notifications after the application and
+// Channel runtime exist. The embedded Channel runtime depends on turn.Service,
+// so an application constructor must not depend on that runtime in return.
+func injectBackgroundTaskEvents(log *slog.Logger, bgManager *background.Manager, msgService *message.DBService, sessionService *sessionpkg.Service, routeService *route.DBService, channelRuntime channel.Runtime, channelRegistry *channel.Registry, eventHub *event.Hub) {
 	if bgManager != nil {
+		sender := channelmessagingadapter.New(channelRuntime, channelRegistry, nil)
+		notifications := application.NewBackgroundTaskNotifications(msgService, sessionService, func(ctx context.Context, sess sessionpkg.Thread, text string) error {
+			if strings.TrimSpace(sess.RouteID) == "" || sess.ChannelType == "local" {
+				return nil
+			}
+			channelRoute, err := routeService.GetByID(ctx, sess.RouteID)
+			if err != nil {
+				return err
+			}
+			if channelRoute.BotID != sess.BotID {
+				return errors.New("dependency notification route does not belong to bot")
+			}
+			if channelRoute.Platform == "local" {
+				return nil
+			}
+			target := strings.TrimSpace(channelRoute.ReplyTarget)
+			if target == "" {
+				target = strings.TrimSpace(channelRoute.ExternalConversationID)
+			}
+			if target == "" {
+				return errors.New("dependency notification route has no reply target")
+			}
+			msg := messaging.Message{Text: text, Format: messaging.MessageFormatPlain}
+			if channelRoute.ExternalThreadID != "" {
+				msg.Thread = &messaging.ThreadRef{ID: channelRoute.ExternalThreadID}
+			}
+			return sender.Send(ctx, sess.BotID, messaging.Platform(channelRoute.Platform), messaging.SendRequest{Target: target, Message: msg})
+		})
 		bgManager.SetEventFunc(func(evt background.TaskEvent) {
+			if evt.Kind == background.KindDependency && evt.SessionID != "" && evt.Event != background.TaskEventOutput {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				err := notifications.Handle(ctx, evt)
+				cancel()
+				if err != nil {
+					log.Warn("dependency task notification failed", slog.String("bot_id", evt.BotID), slog.String("session_id", evt.SessionID), slog.String("task_id", evt.TaskID), slog.Any("error", err))
+				}
+			}
 			if eventHub == nil {
 				return
 			}
@@ -681,7 +792,6 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 			})
 		})
 	}
-	return service
 }
 
 func provideDisplayService(lc fx.Lifecycle, log *slog.Logger, manager *workspace.Manager) *displaypkg.Service {
@@ -711,11 +821,12 @@ func provideWorkspaceDependencyCatalog(cfg config.Config, queries dbstore.Querie
 	if err != nil {
 		return nil, err
 	}
+	provider.SetRequiredCommands(directRuntimeDependencies)
 	provider.Configure(cfg.WorkspaceDependencies.CatalogRefreshInterval(), cfg.WorkspaceDependencies.Offline)
 	return provider, nil
 }
 
-func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, provider *workspacedeps.RemoteCatalog, cfg config.Config) *workspacedeps.Service {
+func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, provider *workspacedeps.RemoteCatalog, bgManager *background.Manager, sessions *sessionpkg.Service, cfg config.Config) *workspacedeps.Service {
 	return workspacedeps.NewService(workspacedeps.Options{
 		Workspace: workspacedeps.NewManagerWorkspaceAccess(manager),
 		Store:     workspacedeps.NewPostgresStore(queries),
@@ -734,6 +845,17 @@ func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Mana
 			}
 			return env
 		},
+		OperationSessionValidator: func(ctx context.Context, botID, sessionID string) error {
+			sess, err := sessions.Get(ctx, sessionID)
+			if err != nil {
+				return err
+			}
+			if sess.BotID != botID || !sessionpkg.IsUserFacingType(sess.Type) {
+				return errors.New("dependency operation session does not belong to this bot")
+			}
+			return nil
+		},
+		Background: bgManager,
 	})
 }
 
