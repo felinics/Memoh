@@ -2513,6 +2513,15 @@ definitions:
     properties:
       approval:
         $ref: '#/definitions/conversation.UIToolApproval'
+      args:
+        additionalProperties:
+          type: string
+        description: |-
+          Args are the machine-readable parameters of a notice block: the string
+          values of the runtime_notice event metadata (dep_id, required_version,
+          installed_version for agent_dependency_version_mismatch). The client
+          renders actions from them instead of parsing Content.
+        type: object
       attachments:
         items:
           $ref: '#/definitions/conversation.UIAttachment'

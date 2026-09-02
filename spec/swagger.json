@@ -19523,6 +19523,13 @@
                 "approval": {
                     "$ref": "#/definitions/conversation.UIToolApproval"
                 },
+                "args": {
+                    "description": "Args are the machine-readable parameters of a notice block: the string\nvalues of the runtime_notice event metadata (dep_id, required_version,\ninstalled_version for agent_dependency_version_mismatch). The client\nrenders actions from them instead of parsing Content.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "attachments": {
                     "type": "array",
                     "items": {
