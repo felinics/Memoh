@@ -2226,7 +2226,8 @@
       "modelsLoadFailed": "Agent のモデルを読み込めませんでした。Agent の設定を確認して、もう一度お試しください。",
       "openSettings": "Agent の設定を開く",
       "dependencyChecking": "依存関係を確認中…",
-      "dependencyRemoteOffline": "この Bot が接続しているコンピューターはオフラインです。オンラインになると依存関係を確認できます。"
+      "dependencyRemoteOffline": "この Bot が接続しているコンピューターはオフラインです。オンラインになると依存関係を確認できます。",
+      "dependencyInstalledEnableHint": "{name} をインストールしました。Agent を有効にすると使用できます。"
     },
     "dependencies": {
       "title": "Workspace の依存関係",
@@ -2284,7 +2285,9 @@
         "missingTitle": "Workspace がまだありません",
         "goToContainer": "Workspace タブを開く",
         "remoteOfflineTitle": "「{name}」はオフラインです",
-        "remoteOfflineDescription": "オンラインになると依存関係を管理できます。"
+        "remoteOfflineDescription": "オンラインになると依存関係を管理できます。",
+        "discoveryErrorTitle": "Workspace 内の依存関係を今すぐ検出できません",
+        "discoveryErrorRetry": "再試行"
       },
       "confirm": {
         "installTitle": "{name} をインストール",
@@ -2315,8 +2318,7 @@
         "failedHint": "失敗として記録されました。依存関係の一覧から再試行できます。ログはコピーできます。",
         "runInBackground": "バックグラウンドで実行",
         "version": "バージョン",
-        "entrypoint": "エントリーポイント",
-        "logHint": "ログは Workspace 内スクリプトの出力です"
+        "entrypoint": "エントリーポイント"
       },
       "script": {
         "title": "Workspace で実行されるスクリプト",
@@ -2352,7 +2354,14 @@
       "done": "完了",
       "errorDetails": "エラーの詳細",
       "checkUpdatesFailed": "更新を確認できませんでした",
-      "backgroundDone": "{name} が完了しました"
+      "background": {
+        "installed": "{name} をインストールしました",
+        "updated": "{name} を更新しました",
+        "reinstalled": "{name} を再インストールしました",
+        "removed": "{name} を削除しました",
+        "failed": "{name} の操作に失敗しました"
+      },
+      "busy": "この Workspace では別の依存関係の操作がまだ実行中です。"
     },
     "folders": {
       "create": "新しいフォルダ",
@@ -3477,7 +3486,6 @@
     "selectBotPlaceholder": "インストールするBotを選択してください...",
     "selectWorkspaceTarget": "Workspace",
     "dependencyInstallTitle": "{name} をインストール",
-    "dependencyInstalled": "{name} をインストールしました",
     "viewBotDependencies": "Bot の依存関係を表示",
     "envVariables": "環境変数",
     "envDescription": "必要な環境変数を構成する",

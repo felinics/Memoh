@@ -2,10 +2,14 @@
 // Live log of one streamed dependency operation. The dialog never closes on
 // its own — the user must see the final version — and it offers no cancel:
 // there is no cancel API, and aborting the HTTP stream would not stop the
-// script inside the workspace. While running, closing is refused unless the
-// caller opts into "run in background" (the panel keeps the stream alive and
-// the row shows "View progress"); after done/error the dialog closes freely.
-// Failure keeps the raw log below a summary so it can be copied whole.
+// script inside the workspace. Closing while running is always allowed and
+// means "run in background": the caller keeps the stream in the shared store
+// and the outcome lands as a toast. Failure keeps the raw log below a summary
+// so it can be copied whole.
+//
+// Layout: every grid row of the panel is `min-w-0` so a long unbreakable
+// token (an npm warning, a URL, an install path) wraps or scrolls inside its
+// box instead of widening the dialog past its rung.
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -24,13 +28,16 @@ import {
   toast,
   useClipboard,
 } from '@felinic/ui'
+import type { DependencyOperationAction } from '@/composables/api/useWorkspaceDependencies'
 import type { DependencyLogLine, DependencyProgressStatus } from '@/utils/workspace-dependency'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
 
 const props = withDefaults(defineProps<{
   open: boolean
-  /** The running-state title, already localized ("Installing Codex"). */
-  title: string
+  /** Localized dependency name; the heading. */
+  name: string
+  /** Names the running-state subtitle ("Installing X" / "Removing X"). */
+  action?: DependencyOperationAction
   lines: DependencyLogLine[]
   status: DependencyProgressStatus
   /** Localized failure summary; the raw log stays visible underneath. */
@@ -39,17 +46,15 @@ const props = withDefaults(defineProps<{
   resultVersion?: string
   /** First entrypoint path from the `done` event. */
   entrypoint?: string
-  /** Running: allow closing (the caller keeps the stream); off → close disabled. */
-  allowBackground?: boolean
   /** Error: show a Retry button (the caller replays the operation). */
   canRetry?: boolean
   /** Overrides the "Done" label when the caller's `done` leads somewhere ("View bot dependencies"). */
   doneLabel?: string
 }>(), {
+  action: 'install',
   error: '',
   resultVersion: '',
   entrypoint: '',
-  allowBackground: false,
   canRetry: true,
   doneLabel: '',
 })
@@ -64,24 +69,24 @@ const { t } = useI18n()
 const { copyText } = useClipboard()
 
 const running = computed(() => props.status === 'running')
-const canClose = computed(() => !running.value || props.allowBackground)
 
-const heading = computed(() => {
+// The subtitle states the phase, never a log line: scripts print long
+// unbroken warnings that would otherwise become the dialog's widest row.
+const subtitle = computed(() => {
   if (props.status === 'done') return t('bots.dependencies.progress.doneTitle')
   if (props.status === 'error') return t('bots.dependencies.progress.failedTitle')
-  return props.title
-})
-
-// Scripts report their stage on stderr (`dep_log`), so the latest stderr line
-// is the honest subtitle; the UI never guesses a phase of its own.
-const stageLine = computed(() => {
-  for (let index = props.lines.length - 1; index >= 0; index -= 1) {
-    const line = props.lines[index]
-    if (line && line.stream !== 'stdout' && line.data.trim()) return line.data.trim()
+  const args = { name: props.name }
+  switch (props.action) {
+    case 'remove':
+      return t('bots.dependencies.progress.removing', args)
+    case 'update':
+      return t('bots.dependencies.progress.updating', args)
+    case 'reinstall':
+      return t('bots.dependencies.progress.reinstalling', args)
+    default:
+      return t('bots.dependencies.progress.installing', args)
   }
-  return ''
 })
-const subtitle = computed(() => stageLine.value || t('bots.dependencies.progress.logHint'))
 
 const resultRows = computed<DependencyKvRow[]>(() => [
   { label: t('bots.dependencies.progress.version'), value: props.resultVersion, mono: true },
@@ -117,15 +122,6 @@ async function copyLog() {
   else toast.error(t('common.copyFailed'))
 }
 
-function onOpenChange(value: boolean) {
-  if (!value && !canClose.value) return
-  emit('update:open', value)
-}
-
-function guardDismiss(event: Event) {
-  if (!canClose.value) event.preventDefault()
-}
-
 function finish() {
   emit('done')
   emit('update:open', false)
@@ -135,27 +131,27 @@ function finish() {
 <template>
   <Dialog
     :open="open"
-    @update:open="onOpenChange"
+    @update:open="(value) => emit('update:open', value)"
   >
     <DialogPanel
       width="2xl"
       footer
-      @escape-key-down="guardDismiss"
-      @interact-outside="guardDismiss"
     >
-      <DialogHeader>
-        <DialogTitle>{{ heading }}</DialogTitle>
-        <DialogDescription class="truncate">
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
+          {{ name }}
+        </DialogTitle>
+        <DialogDescription class="break-words">
           {{ subtitle }}
         </DialogDescription>
       </DialogHeader>
 
-      <DialogBody class="space-y-4">
+      <DialogBody class="min-w-0 space-y-4">
         <div
           ref="scroller"
           role="log"
           aria-live="polite"
-          class="max-h-72 overflow-y-auto rounded-lg border border-border bg-muted-soft p-3 font-mono text-caption leading-relaxed text-foreground"
+          class="max-h-72 min-w-0 overflow-auto rounded-lg border border-border bg-muted-soft p-3 font-mono text-caption leading-relaxed text-foreground"
         >
           <p
             v-if="lines.length === 0"
@@ -166,7 +162,7 @@ function finish() {
           <div
             v-for="(line, index) in lines"
             :key="lineKey(line, index)"
-            class="whitespace-pre-wrap break-all"
+            class="min-w-0 whitespace-pre-wrap break-all"
             :class="{ 'text-muted-foreground': line.stream !== 'stdout' }"
           >
             {{ line.data }}
@@ -176,8 +172,11 @@ function finish() {
         <Alert
           v-if="status === 'error'"
           variant="destructive"
+          class="min-w-0"
         >
-          <AlertTitle>{{ error || t('bots.dependencies.progress.failedTitle') }}</AlertTitle>
+          <AlertTitle class="break-words">
+            {{ error || t('bots.dependencies.progress.failedTitle') }}
+          </AlertTitle>
           <AlertDescription>{{ t('bots.dependencies.progress.failedHint') }}</AlertDescription>
         </Alert>
 
@@ -187,7 +186,7 @@ function finish() {
         />
       </DialogBody>
 
-      <DialogFooter class="items-center gap-2 sm:justify-between">
+      <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">
         <TextButton
           :disabled="lines.length === 0"
           @click="copyLog"
@@ -195,22 +194,13 @@ function finish() {
           {{ t('common.copy') }}
         </TextButton>
         <div class="flex items-center gap-2">
-          <template v-if="running">
-            <Button
-              v-if="allowBackground"
-              variant="outline"
-              @click="emit('update:open', false)"
-            >
-              {{ t('bots.dependencies.progress.runInBackground') }}
-            </Button>
-            <Button
-              v-else
-              variant="outline"
-              disabled
-            >
-              {{ t('bots.dependencies.close') }}
-            </Button>
-          </template>
+          <Button
+            v-if="running"
+            variant="outline"
+            @click="emit('update:open', false)"
+          >
+            {{ t('bots.dependencies.progress.runInBackground') }}
+          </Button>
           <Button
             v-else-if="status === 'done'"
             @click="finish"

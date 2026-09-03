@@ -2237,7 +2237,8 @@
       "modelsLoadFailed": "Couldn’t load Agent models. Check the Agent setup and try again.",
       "openSettings": "Open Agent settings",
       "dependencyChecking": "Checking dependency…",
-      "dependencyRemoteOffline": "The bot's connected computer is offline. Dependencies can be checked once it is back online."
+      "dependencyRemoteOffline": "The bot's connected computer is offline. Dependencies can be checked once it is back online.",
+      "dependencyInstalledEnableHint": "{name} installed. Turn the agent on to use it."
     },
     "dependencies": {
       "title": "Workspace dependencies",
@@ -2295,7 +2296,9 @@
         "missingTitle": "No workspace yet",
         "goToContainer": "Open workspace tab",
         "remoteOfflineTitle": "\"{name}\" is offline",
-        "remoteOfflineDescription": "Dependencies can be managed once it is online."
+        "remoteOfflineDescription": "Dependencies can be managed once it is online.",
+        "discoveryErrorTitle": "Couldn't detect dependencies in the workspace right now",
+        "discoveryErrorRetry": "Retry"
       },
       "confirm": {
         "installTitle": "Install {name}",
@@ -2326,8 +2329,7 @@
         "failedHint": "Recorded as failed; retry from the dependency list. The full log can be copied.",
         "runInBackground": "Run in background",
         "version": "Version",
-        "entrypoint": "Entrypoint",
-        "logHint": "Log streamed from the workspace script"
+        "entrypoint": "Entrypoint"
       },
       "script": {
         "title": "Script that will run in the workspace",
@@ -2363,7 +2365,14 @@
       "done": "Done",
       "errorDetails": "Error details",
       "checkUpdatesFailed": "Couldn't check for updates",
-      "backgroundDone": "{name} finished"
+      "background": {
+        "installed": "{name} installed",
+        "updated": "{name} updated",
+        "reinstalled": "{name} reinstalled",
+        "removed": "{name} removed",
+        "failed": "{name}: operation failed"
+      },
+      "busy": "Another dependency operation is still running in this workspace."
     },
     "folders": {
       "create": "New folder",
@@ -3492,7 +3501,6 @@
     "selectBotPlaceholder": "Choose a bot to install to...",
     "selectWorkspaceTarget": "Workspace",
     "dependencyInstallTitle": "Install {name}",
-    "dependencyInstalled": "{name} installed",
     "viewBotDependencies": "View bot dependencies",
     "envVariables": "Environment Variables",
     "envDescription": "Configure the required environment variables",

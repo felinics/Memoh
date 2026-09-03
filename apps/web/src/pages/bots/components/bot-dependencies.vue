@@ -74,6 +74,25 @@
         </Button>
       </CalloutBanner>
 
+      <!-- The workspace is up but its probe script failed (an OOM-killed
+           discovery, say): the Server answers from its records alone, with no
+           actions, and names the cause here. Retry simply asks again. -->
+      <CalloutBanner
+        v-if="discoveryError"
+        tone="warning"
+        :title="t('bots.dependencies.workspace.discoveryErrorTitle')"
+        :description="discoveryError"
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          :loading="retryingDiscovery"
+          @click="retryDiscovery"
+        >
+          {{ t('bots.dependencies.workspace.discoveryErrorRetry') }}
+        </Button>
+      </CalloutBanner>
+
       <!-- Placeholders in the shape of the rows they become, so the list
            does not jump when the first answer lands. -->
       <SettingsSection v-if="loading">
@@ -165,13 +184,13 @@
 
     <DependencyProgressDialog
       :open="progressOpen"
-      :title="progressTitle"
+      :name="active ? dependencyName(active.item) : ''"
+      :action="active?.action ?? 'install'"
       :lines="active?.lines ?? []"
       :status="active?.status ?? 'running'"
       :error="active?.error"
       :result-version="active?.resultVersion"
       :entrypoint="active?.entrypoint"
-      allow-background
       @update:open="setProgressOpen"
       @retry="retry"
     />
@@ -351,6 +370,23 @@ const workspaceState = computed<DependencyWorkspaceState | undefined>(() => {
 })
 const loadFailed = computed(() => !!error.value && !data.value && !workspaceState.value)
 
+// `discovery_error` is newer than this SDK build: read it loosely until the
+// generated types catch up. Present only when the probe inside the workspace
+// failed and the list is the recorded state without `actions`.
+const discoveryError = computed(() => (
+  ((data.value as { discovery_error?: string } | undefined)?.discovery_error ?? '').trim()
+))
+const retryingDiscovery = ref(false)
+async function retryDiscovery() {
+  if (retryingDiscovery.value) return
+  retryingDiscovery.value = true
+  try {
+    await refetch()
+  } finally {
+    retryingDiscovery.value = false
+  }
+}
+
 const banner = computed(() => {
   switch (workspaceState.value) {
     case 'not_running':
@@ -391,7 +427,6 @@ const {
   active,
   progressOpen,
   running,
-  title: progressTitle,
   ownsStream,
   start,
   retry,
@@ -422,7 +457,7 @@ function onConfirmed(version: string) {
 function onPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
   switch (action.kind) {
     case 'viewProgress':
-      viewProgress()
+      viewProgress(item)
       return
     case 'retry':
       // The user already confirmed this operation once; a retry replays it.

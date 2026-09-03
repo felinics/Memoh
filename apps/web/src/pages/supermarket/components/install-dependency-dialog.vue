@@ -9,14 +9,19 @@
       width="lg"
       footer
     >
-      <DialogHeader>
-        <DialogTitle>{{ t('supermarket.dependencyInstallTitle', { name }) }}</DialogTitle>
-        <DialogDescription v-if="description">
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
+          {{ t('supermarket.dependencyInstallTitle', { name }) }}
+        </DialogTitle>
+        <DialogDescription
+          v-if="description"
+          class="break-words"
+        >
           {{ description }}
         </DialogDescription>
       </DialogHeader>
 
-      <DialogBody>
+      <DialogBody class="min-w-0">
         <form
           id="install-dependency-form"
           @submit.prevent="startInstall"
@@ -35,6 +40,7 @@
             >
               <Select
                 :model-value="displayTargetId"
+                :disabled="resumable"
                 @update:model-value="onTargetChange"
               >
                 <SelectTrigger class="w-full">
@@ -69,13 +75,14 @@
                 :placeholder="t('bots.dependencies.confirm.versionPlaceholder')"
                 autocomplete="off"
                 spellcheck="false"
+                :disabled="resumable"
               />
             </FieldStack>
           </FormStack>
         </form>
       </DialogBody>
 
-      <DialogFooter>
+      <DialogFooter class="min-w-0">
         <DialogClose as-child>
           <Button variant="outline">
             {{ t('common.cancel') }}
@@ -86,7 +93,7 @@
           type="submit"
           :disabled="!botId"
         >
-          {{ t('supermarket.install') }}
+          {{ resumable ? t('bots.dependencies.action.viewProgress') : t('supermarket.install') }}
         </Button>
       </DialogFooter>
     </DialogPanel>
@@ -96,23 +103,24 @@
        "Done" leads to that tab so the new row is the next thing seen. -->
   <DependencyProgressDialog
     :open="progressOpen"
-    :title="t('bots.dependencies.progress.installing', { name })"
-    :lines="lines"
-    :status="progressStatus"
-    :error="progressError"
-    :result-version="resultVersion"
-    :entrypoint="entrypoint"
+    :name="name"
+    action="install"
+    :lines="displayed?.lines ?? []"
+    :status="displayed?.status ?? 'running'"
+    :error="displayed?.error"
+    :result-version="displayed?.resultVersion"
+    :entrypoint="displayed?.entrypoint"
     :done-label="t('supermarket.viewBotDependencies')"
     @update:open="onProgressOpenChange"
-    @retry="consume"
+    @retry="retry"
     @done="onDone"
   />
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useQuery } from '@pinia/colada'
 import {
   Button,
   Dialog,
@@ -139,16 +147,9 @@ import {
   type WorkspaceWorkspaceTarget,
 } from '@memohai/sdk'
 import BotSelect from '@/components/bot-select/index.vue'
-import { invalidateBotDependencies } from '@/composables/api/useWorkspaceDependencies'
-import { streamDependencyOperation } from '@/composables/api/useWorkspaceDependencyStream'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import DependencyProgressDialog from '@/pages/bots/components/dependency-progress-dialog.vue'
-import { resolveApiErrorMessage } from '@/utils/api-error'
-import {
-  formatDependencyVersion,
-  type DependencyLogLine,
-  type DependencyProgressStatus,
-} from '@/utils/workspace-dependency'
+import { useDependencyOperationsStore, type DependencyOperation } from '@/store/dependency-operations'
 import {
   workspaceTargetAvailable,
   workspaceTargetName,
@@ -170,11 +171,12 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const queryCache = useQueryCache()
+const store = useDependencyOperationsStore()
 const { dependencyName, dependencyDescription } = useWorkspaceDependencyText()
 
 const name = computed(() => (props.item ? dependencyName(props.item) : ''))
 const description = computed(() => (props.item ? dependencyDescription(props.item) : ''))
+const depId = computed(() => props.item?.id ?? '')
 
 // ---- Form ---------------------------------------------------------------------
 
@@ -205,6 +207,11 @@ const targets = computed<ValidWorkspaceTarget[]>(() => (
 const primaryTargetId = computed(() => targets.value.find(target => target.primary)?.target_id ?? targets.value[0]?.target_id ?? '')
 const displayTargetId = computed(() => selectedTargetId.value || primaryTargetId.value)
 
+// The picked bot is already installing this dependency (the dialog was sent
+// to the background earlier): the submit button reopens that log instead of
+// sending a second install the Server would refuse as busy.
+const resumable = computed(() => store.get(botId.value, depId.value)?.status === 'running')
+
 function onTargetChange(value: unknown) {
   const next = typeof value === 'string' ? value : ''
   selectedTargetId.value = next === primaryTargetId.value ? '' : next
@@ -219,6 +226,10 @@ watch(() => props.open, (open) => {
   botId.value = props.defaultBotId || ''
   selectedTargetId.value = ''
   version.value = ''
+  // Coming back for a dependency whose install is still streaming for the
+  // preselected bot skips the form: there is nothing left to choose.
+  const running = store.get(botId.value, depId.value)
+  if (running?.status === 'running') show(running)
 }, { immediate: true })
 
 function onFormOpenChange(open: boolean) {
@@ -227,77 +238,60 @@ function onFormOpenChange(open: boolean) {
 
 // ---- Streamed install -----------------------------------------------------------
 
+const VIEWER_ID = 'supermarket-install-dependency'
 const progressOpen = ref(false)
-const progressStatus = ref<DependencyProgressStatus>('running')
-const progressError = ref('')
-const lines = ref<DependencyLogLine[]>([])
-const resultVersion = ref('')
-const entrypoint = ref('')
-// Frozen at start so a bot picked for the next install cannot redirect a
-// running stream's invalidation or the "view dependencies" link.
-let request = { botId: '', targetId: '', depId: '', version: '' }
+// Kept across close so the dialog fades out with its content intact even
+// after the store dropped the record.
+const displayed = shallowRef<DependencyOperation | null>(null)
 
-function startInstall() {
-  const depId = props.item?.id ?? ''
-  if (!botId.value || !depId) return
-  request = { botId: botId.value, targetId: selectedTargetId.value, depId, version: version.value.trim() }
-  void consume()
+function show(operation: DependencyOperation) {
+  displayed.value = operation
+  progressOpen.value = true
+  store.view(operation.key, VIEWER_ID)
 }
 
-async function consume() {
-  lines.value = []
-  progressStatus.value = 'running'
-  progressError.value = ''
-  resultVersion.value = ''
-  entrypoint.value = ''
-  progressOpen.value = true
-  let sequence = 0
-  try {
-    const stream = streamDependencyOperation(request.botId, request.depId, 'install', request.targetId || undefined, { version: request.version })
-    for await (const event of stream) {
-      switch (event.type) {
-        case 'log':
-          lines.value.push({ id: sequence++, stream: event.stream, data: event.data })
-          break
-        case 'done':
-          resultVersion.value = formatDependencyVersion(event.version)
-          entrypoint.value = Object.values(event.entrypoints ?? {})[0] ?? ''
-          progressStatus.value = 'done'
-          break
-        case 'error':
-          progressError.value = event.message
-          progressStatus.value = 'error'
-          break
-      }
-    }
-    // A stream that closes without a verdict is a failure the user must see.
-    if (progressStatus.value === 'running') {
-      progressError.value = t('bots.dependencies.progress.failedTitle')
-      progressStatus.value = 'error'
-    }
-  } catch (error) {
-    progressError.value = resolveApiErrorMessage(error, t('bots.dependencies.progress.failedTitle'))
-    progressStatus.value = 'error'
-  } finally {
-    void invalidateBotDependencies(queryCache, request.botId)
-    if (props.item?.category === 'agent') {
-      void queryCache.invalidateQueries({ key: ['bot-agents', request.botId] })
-    }
-    if (progressStatus.value === 'done') {
-      toast.success(t('supermarket.dependencyInstalled', { name: name.value }))
-    }
+function startInstall() {
+  const item = props.item
+  if (!item || !botId.value || !depId.value) return
+  const result = store.start({
+    botId: botId.value,
+    targetId: selectedTargetId.value,
+    item,
+    action: 'install',
+    version: version.value,
+  })
+  switch (result.kind) {
+    case 'started':
+    case 'running':
+      show(result.operation)
+      return
+    case 'busy':
+      toast.error(t('bots.dependencies.busy'))
+      return
+    default:
+      return
   }
 }
 
-// The progress dialog refuses to close while running, so a close is a verdict;
-// either way the whole flow is over and the form does not come back.
+function retry() {
+  if (displayed.value) store.retry(displayed.value.key)
+}
+
+// Closing while running sends the install to the background (the store keeps
+// the stream and toasts the outcome); closing afterwards forgets it. Either
+// way the whole flow is over and the form does not come back.
 function onProgressOpenChange(open: boolean) {
   if (open) return
   progressOpen.value = false
+  if (displayed.value) store.unview(displayed.value.key, VIEWER_ID)
   emit('update:open', false)
 }
 
 function onDone() {
-  emit('installed', request.botId)
+  if (displayed.value) emit('installed', displayed.value.botId)
 }
+
+onBeforeUnmount(() => {
+  if (progressOpen.value && displayed.value) store.unview(displayed.value.key, VIEWER_ID)
+})
 </script>

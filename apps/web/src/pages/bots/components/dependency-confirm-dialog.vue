@@ -124,12 +124,16 @@ function submit() {
       width="lg"
       footer
     >
-      <DialogHeader>
-        <DialogTitle>{{ title }}</DialogTitle>
-        <DialogDescription>{{ description }}</DialogDescription>
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
+          {{ title }}
+        </DialogTitle>
+        <DialogDescription class="break-words">
+          {{ description }}
+        </DialogDescription>
       </DialogHeader>
 
-      <DialogBody class="space-y-4">
+      <DialogBody class="min-w-0 space-y-4">
         <form
           id="dependency-confirm-form"
           @submit.prevent="submit"
@@ -159,7 +163,7 @@ function submit() {
         />
       </DialogBody>
 
-      <DialogFooter class="items-center gap-2 sm:justify-between">
+      <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">
         <TextButton
           :disabled="loading"
           @click="emit('viewScript')"

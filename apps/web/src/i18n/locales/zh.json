@@ -2237,7 +2237,8 @@
       "modelsLoadFailed": "无法加载 Agent 模型。请检查 Agent 配置后重试。",
       "openSettings": "打开 Agent 设置",
       "dependencyChecking": "正在检查依赖…",
-      "dependencyRemoteOffline": "该 Bot 连接的电脑已离线，上线后才能检查依赖。"
+      "dependencyRemoteOffline": "该 Bot 连接的电脑已离线，上线后才能检查依赖。",
+      "dependencyInstalledEnableHint": "已安装 {name}，现在可以启用该 Agent。"
     },
     "dependencies": {
       "title": "工作区依赖",
@@ -2295,7 +2296,9 @@
         "missingTitle": "尚未创建工作区",
         "goToContainer": "去工作区",
         "remoteOfflineTitle": "电脑「{name}」离线",
-        "remoteOfflineDescription": "该电脑上线后才能管理依赖。"
+        "remoteOfflineDescription": "该电脑上线后才能管理依赖。",
+        "discoveryErrorTitle": "暂时无法探测工作区里的依赖",
+        "discoveryErrorRetry": "重试"
       },
       "confirm": {
         "installTitle": "安装 {name}",
@@ -2326,8 +2329,7 @@
         "failedHint": "状态已记为失败，可在依赖列表中重试。完整日志可复制。",
         "runInBackground": "后台运行",
         "version": "版本",
-        "entrypoint": "入口",
-        "logHint": "日志来自工作区内脚本输出"
+        "entrypoint": "入口"
       },
       "script": {
         "title": "将在工作区执行的脚本",
@@ -2363,7 +2365,14 @@
       "done": "完成",
       "errorDetails": "错误详情",
       "checkUpdatesFailed": "检查更新失败",
-      "backgroundDone": "{name} 已完成"
+      "background": {
+        "installed": "已安装 {name}",
+        "updated": "已更新 {name}",
+        "reinstalled": "已重新安装 {name}",
+        "removed": "已卸载 {name}",
+        "failed": "{name} 操作失败"
+      },
+      "busy": "此工作区还有其他依赖操作在进行中。"
     },
     "folders": {
       "create": "新建文件夹",
@@ -3492,7 +3501,6 @@
     "selectBotPlaceholder": "选择要安装到的 Bot...",
     "selectWorkspaceTarget": "工作区",
     "dependencyInstallTitle": "安装 {name}",
-    "dependencyInstalled": "已安装 {name}",
     "viewBotDependencies": "查看 Bot 依赖",
     "envVariables": "环境变量",
     "envDescription": "配置所需的环境变量",

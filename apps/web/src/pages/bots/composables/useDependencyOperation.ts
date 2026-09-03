@@ -1,233 +1,107 @@
-import { computed, onBeforeUnmount, reactive, shallowRef, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, shallowRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQueryCache } from '@pinia/colada'
 import { toast } from '@felinic/ui'
-import {
-  botDependenciesQueryKey,
-  invalidateBotDependencies,
-  type DependencyItem,
-  type DependencyListResponse,
-  type DependencyOperationAction,
-  type DependencyStatus,
-} from '@/composables/api/useWorkspaceDependencies'
-import { streamDependencyOperation } from '@/composables/api/useWorkspaceDependencyStream'
-import { resolveApiErrorMessage } from '@/utils/api-error'
-import {
-  dependencyDisplayName,
-  type DependencyLogLine,
-  type DependencyProgressStatus,
-} from '@/utils/workspace-dependency'
+import type { DependencyItem, DependencyOperationAction } from '@/composables/api/useWorkspaceDependencies'
+import { useDependencyOperationsStore, type DependencyOperation } from '@/store/dependency-operations'
 
-// One streamed dependency operation at a time, owned by the panel that
-// started it. The composable holds the live log and outcome so the progress
-// dialog can be closed ("run in background") and reopened from the row without
-// losing a line, and it keeps the HTTP stream alive across dialog visibility.
-// There is deliberately no cancel: aborting the stream would not stop the
-// script inside the workspace, so the only abort is the component unmounting.
+// The Dependencies panel's view onto the shared operation store: which
+// operation its progress dialog shows, and whether it is showing it. The
+// stream itself lives in the store, so "run in background" (closing the
+// dialog, switching tabs, leaving the page) never interrupts it; the row keeps
+// "View progress" while the store still holds the stream, and the outcome
+// lands as a toast when no dialog is left to show it.
 
-export interface DependencyOperationState {
-  botId: string
-  targetId: string
-  item: DependencyItem
-  action: DependencyOperationAction
-  /** Version the user asked for; empty means the latest. Replayed by retry. */
-  version: string
-  status: DependencyProgressStatus
-  lines: DependencyLogLine[]
-  /** Localized failure summary; empty while running or after success. */
-  error: string
-  resultVersion: string
-  entrypoint: string
-}
-
-// Keeps a runaway script (npm's progress spew) from growing the reactive log
-// without bound; the head is dropped, the tail is what the user reads anyway.
-const MAX_LOG_LINES = 2000
-
-function optimisticStatus(action: DependencyOperationAction): DependencyStatus {
-  switch (action) {
-    case 'remove':
-      return 'removing'
-    case 'update':
-      return 'updating'
-    default:
-      return 'installing'
-  }
-}
-
-function progressTitleKey(action: DependencyOperationAction): string {
-  switch (action) {
-    case 'remove':
-      return 'bots.dependencies.progress.removing'
-    case 'update':
-      return 'bots.dependencies.progress.updating'
-    case 'reinstall':
-      return 'bots.dependencies.progress.reinstalling'
-    default:
-      return 'bots.dependencies.progress.installing'
-  }
-}
+let viewerSequence = 0
 
 export function useDependencyOperation(botId: Ref<string>, targetId: Ref<string>) {
   const { t } = useI18n()
-  const queryCache = useQueryCache()
+  const store = useDependencyOperationsStore()
+  const viewerId = `bot-dependencies:${++viewerSequence}`
 
-  const active = shallowRef<DependencyOperationState | null>(null)
+  // The operation the dialog renders. Kept across close so the dialog fades
+  // out with its content intact even after the store dropped the record.
+  const active = shallowRef<DependencyOperation | null>(null)
   const progressOpen = shallowRef(false)
-  let controller: AbortController | null = null
-  let lineSequence = 0
 
-  const running = computed(() => active.value?.status === 'running')
-  const title = computed(() => {
-    const state = active.value
-    if (!state) return ''
-    return t(progressTitleKey(state.action), { name: dependencyDisplayName(state.item) })
-  })
+  const running = computed(() => !!store.runningFor(botId.value))
 
   /** True for the row whose stream this client holds — it alone can show the log. */
   function ownsStream(depId: string | undefined): boolean {
-    return running.value && !!depId && active.value?.item.id === depId
+    return store.get(botId.value, depId)?.status === 'running'
   }
 
-  // The list refetches only when the stream ends, so the row would keep saying
-  // "installed" for the whole download; patching the cached status makes the
-  // badge spin immediately, and every target of the bot is invalidated after.
-  function patchCachedStatus(state: DependencyOperationState, status: DependencyStatus) {
-    const key = botDependenciesQueryKey(state.botId, state.targetId)
-    const current = queryCache.getQueryData<DependencyListResponse>(key)
-    if (!current?.items) return
-    queryCache.setQueryData<DependencyListResponse>(key, {
-      ...current,
-      items: current.items.map(entry => (entry.id === state.item.id ? { ...entry, status } : entry)),
-    })
-  }
-
-  function pushLine(state: DependencyOperationState, stream: DependencyLogLine['stream'], data: string) {
-    state.lines.push({ id: ++lineSequence, stream, data })
-    if (state.lines.length > MAX_LOG_LINES) {
-      state.lines.splice(0, state.lines.length - MAX_LOG_LINES)
+  function show(operation: DependencyOperation) {
+    if (progressOpen.value && active.value && active.value.key !== operation.key) {
+      store.unview(active.value.key, viewerId)
     }
+    active.value = operation
+    progressOpen.value = true
+    store.view(operation.key, viewerId)
   }
 
-  async function consume(state: DependencyOperationState, signal: AbortSignal) {
-    try {
-      const stream = streamDependencyOperation(
-        state.botId,
-        state.item.id ?? '',
-        state.action,
-        state.targetId || undefined,
-        { version: state.version, signal },
-      )
-      for await (const event of stream) {
-        if (signal.aborted) return
-        switch (event.type) {
-          case 'log':
-            pushLine(state, event.stream, event.data)
-            break
-          case 'done':
-            state.status = 'done'
-            state.resultVersion = event.version ?? ''
-            state.entrypoint = Object.values(event.entrypoints ?? {})[0] ?? ''
-            break
-          case 'error':
-            state.status = 'error'
-            state.error = event.message
-            break
-          default:
-            // `started` carries nothing the log needs; the first script line
-            // replaces the "Preparing…" placeholder on its own.
-            break
-        }
-      }
-      // A stream that closes without a verdict is a failure the Server did
-      // not get to report (connection dropped); the list refetch below shows
-      // whatever status it recorded.
-      if (state.status === 'running') {
-        state.status = 'error'
-        state.error = t('bots.dependencies.progress.failedTitle')
-      }
-    } catch (error) {
-      if (signal.aborted) return
-      state.status = 'error'
-      state.error = resolveApiErrorMessage(error, t('bots.dependencies.progress.failedTitle'))
-    } finally {
-      if (!signal.aborted) {
-        void invalidateBotDependencies(queryCache, state.botId)
-        if (state.item.category === 'agent') {
-          void queryCache.invalidateQueries({ key: ['bot-agents', state.botId] })
-        }
-        // Sent to the background, the dialog is not there to show the verdict;
-        // a toast is the one place the outcome can still land.
-        if (!progressOpen.value && active.value === state) {
-          if (state.status === 'done') {
-            toast.success(t('bots.dependencies.backgroundDone', { name: dependencyDisplayName(state.item) }))
-          } else {
-            toast.error(state.error)
-          }
-          active.value = null
-        }
-      }
-    }
+  function hide() {
+    if (!progressOpen.value) return
+    progressOpen.value = false
+    if (active.value) store.unview(active.value.key, viewerId)
   }
 
   /**
-   * Starts one operation and opens the progress dialog. Refused while another
-   * stream is running (the Server also rejects with `workspace_dependency.busy`).
+   * Starts one operation and opens the progress dialog. A dependency already
+   * streaming just reopens its log; another dependency streaming for this bot
+   * is refused (the Server would answer `workspace_dependency.busy`).
    */
   function start(item: DependencyItem, action: DependencyOperationAction, options: { version?: string } = {}): boolean {
-    if (running.value || !botId.value || !item.id) return false
-    controller?.abort()
-    controller = new AbortController()
-
-    const state = reactive<DependencyOperationState>({
+    const result = store.start({
       botId: botId.value,
       targetId: targetId.value,
       item,
       action,
-      version: options.version?.trim() ?? '',
-      status: 'running',
-      lines: [],
-      error: '',
-      resultVersion: '',
-      entrypoint: '',
+      version: options.version,
     })
-    active.value = state
-    progressOpen.value = true
-    patchCachedStatus(state, optimisticStatus(action))
-    void consume(state, controller.signal)
-    return true
+    switch (result.kind) {
+      case 'started':
+      case 'running':
+        show(result.operation)
+        return true
+      case 'busy':
+        toast.error(t('bots.dependencies.busy'))
+        return false
+      default:
+        return false
+    }
   }
 
   /** Replays the failed operation from the progress dialog's Retry. */
   function retry(): boolean {
-    const state = active.value
-    if (!state || state.status !== 'error') return false
-    return start(state.item, state.action, { version: state.version })
+    const operation = active.value
+    if (!operation) return false
+    return store.retry(operation.key)
   }
 
-  function viewProgress() {
-    if (active.value) progressOpen.value = true
+  function viewProgress(item: DependencyItem) {
+    const operation = store.get(botId.value, item.id)
+    if (operation) show(operation)
   }
 
-  // Closing a finished dialog forgets the operation; closing a running one only
-  // hides it (the dialog's "run in background") and the row keeps "View progress".
+  // Closing only hides the dialog: a running operation keeps streaming in the
+  // store (the row keeps "View progress"), a finished one is forgotten there.
   function setProgressOpen(open: boolean) {
-    progressOpen.value = open
-    if (!open && active.value && active.value.status !== 'running') {
-      active.value = null
+    if (open) {
+      if (active.value) show(active.value)
+      return
     }
+    hide()
   }
 
-  onBeforeUnmount(() => {
-    controller?.abort()
-    controller = null
-  })
+  // The tab is KeepAlive'd: a dialog left open while the user looks at another
+  // tab would silently swallow the verdict, so deactivating counts as closing.
+  onDeactivated(hide)
+  onBeforeUnmount(hide)
 
   return {
     active,
     progressOpen,
     running,
-    title,
     ownsStream,
     start,
     retry,

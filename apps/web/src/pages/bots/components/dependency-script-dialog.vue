@@ -24,6 +24,7 @@ import {
   DialogTitle,
   InlineLoadingRow,
   ScrollArea,
+  ScrollBar,
   SegmentedControl,
   TextButton,
   toast,
@@ -127,12 +128,16 @@ async function copyScript() {
       width="2xl"
       footer
     >
-      <DialogHeader>
-        <DialogTitle>{{ t('bots.dependencies.script.title') }}</DialogTitle>
-        <DialogDescription>{{ description }}</DialogDescription>
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
+          {{ t('bots.dependencies.script.title') }}
+        </DialogTitle>
+        <DialogDescription class="break-words">
+          {{ description }}
+        </DialogDescription>
       </DialogHeader>
 
-      <DialogBody class="space-y-4">
+      <DialogBody class="min-w-0 space-y-4">
         <SegmentedControl
           v-if="segments.length > 1"
           :model-value="currentAction"
@@ -178,13 +183,16 @@ async function copyScript() {
             </CollapsibleContent>
           </Collapsible>
 
-          <ScrollArea class="max-h-80 rounded-lg border border-border bg-muted-soft">
+          <!-- Long script lines scroll sideways inside the box; the box itself
+               never widens the dialog (min-w-0 on the grid rows above). -->
+          <ScrollArea class="max-h-80 min-w-0 rounded-lg border border-border bg-muted-soft">
             <pre class="p-3 font-mono text-caption leading-relaxed whitespace-pre text-foreground">{{ script.script }}</pre>
+            <ScrollBar orientation="horizontal" />
           </ScrollArea>
         </template>
       </DialogBody>
 
-      <DialogFooter>
+      <DialogFooter class="min-w-0">
         <Button
           variant="outline"
           @click="emit('update:open', false)"
