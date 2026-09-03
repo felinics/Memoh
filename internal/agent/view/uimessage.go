@@ -92,6 +92,12 @@ type UIExecutionTiming struct {
 	EndedAtMS   int64 `json:"ended_at_ms"`
 } // @name conversation.UIExecutionTiming
 
+// UIContextInjection marks a user-role turn the runtime injected into the
+// model context: steering sent mid-turn, or context prepared before a request.
+type UIContextInjection struct {
+	Kind string `json:"kind" enums:"steering,prepared"`
+} // @name conversation.UIContextInjection
+
 // UIStepTrace is one model request of an assistant turn: its server-observed
 // wall clock, finish reason, and provider usage, anchored to the first block
 // the request produced. Blocks up to the next trace's anchor belong to it.
@@ -148,6 +154,7 @@ type UITurn struct {
 	Kind              string                `json:"kind,omitempty"`
 	Messages          []UIMessage           `json:"messages,omitempty"`
 	StepTraces        []UIStepTrace         `json:"step_traces,omitempty"`
+	ContextInjection  *UIContextInjection   `json:"context_injection,omitempty"`
 	Text              string                `json:"text,omitempty"`
 	UserMessageKind   string                `json:"user_message_kind,omitempty"`
 	SkillActivation   *turn.SkillActivation `json:"skill_activation,omitempty"`

@@ -28,6 +28,7 @@ var (
 		[]byte(`"reply"`),
 		[]byte(`"reasoning_timing"`),
 		[]byte(`"step_trace"`),
+		[]byte(`"context_injection"`),
 		[]byte(`"skill_activation"`),
 		[]byte(`"user_message_kind"`),
 		[]byte(`"error_code"`),
@@ -289,6 +290,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				Role:              "user",
 				Text:              text,
 				UserMessageKind:   userMessageKind,
+				ContextInjection:  uiContextInjection(raw),
 				SkillActivation:   activation,
 				Attachments:       attachments,
 				Reply:             reply,
@@ -1127,6 +1129,14 @@ func uiAttachmentsFromMessageAssets(raw messagepkg.Message) []UIAttachment {
 
 func uiUserMessageKind(raw messagepkg.Message) string {
 	return stringFromAny(raw.Metadata["user_message_kind"])
+}
+
+func uiContextInjection(raw messagepkg.Message) *UIContextInjection {
+	injection := messagepkg.ContextInjectionFromMetadata(raw.Metadata)
+	if injection == nil {
+		return nil
+	}
+	return &UIContextInjection{Kind: injection.Kind}
 }
 
 func uiSkillActivationFromMessage(raw messagepkg.Message) *turn.SkillActivation {

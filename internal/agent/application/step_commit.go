@@ -121,6 +121,19 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 			}
 		}
 	}
+	// Twilight prepares context only before steps after the first, so a
+	// leading user row of a later step is runtime-injected, not the request.
+	if stepIndex > 0 {
+		for i, message := range messages {
+			if !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+				break
+			}
+			if opts.MessageMetadataByIndex == nil {
+				opts.MessageMetadataByIndex = make(map[int]map[string]any, 1)
+			}
+			opts.MessageMetadataByIndex[i] = mergeMetadata(opts.MessageMetadataByIndex[i], contextInjectionMetadata(messagepkg.ContextInjectionPrepared))
+		}
+	}
 	opts = opts.withContextLifecycleMetadata(c.service.logger, storeReq, messages)
 	inputs, err := c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 	if err != nil {
