@@ -48,8 +48,8 @@ type RunSpec struct {
 	Script  string
 	Home    string
 	ShimDir string
-	// Version is exported as MEMOH_DEP_VERSION: the target version, always
-	// the Server pin for agent dependencies and empty for "latest".
+	// Version is exported as MEMOH_DEP_VERSION: the version to install (the
+	// one requested, else the manifest pin) and empty for "latest".
 	Version string
 	// CurrentVersion is exported as MEMOH_DEP_CURRENT_VERSION during update
 	// and check_update.

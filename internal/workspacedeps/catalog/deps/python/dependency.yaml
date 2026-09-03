@@ -2,12 +2,31 @@ id: python
 name: Python
 category: runtime
 icon: python
-description: Python 3 interpreter shipped with the workspace image, including pip.
+description: Python interpreter with pip.
 
+# The image copy under /opt/memoh/toolkit is the baseline. The scripts use uv
+# to download CPython builds into MEMOH_DEP_HOME/versions/<version> (newest
+# stable release by default, or an explicit version); removing the overlay
+# returns to the image copy. uv comes from the image baseline in native
+# workspaces and from the user's machine on remote targets, hence requires.
 source: image
+requires: [uv]
 provides:
   - python3
   - pip3
 
 platforms:
   - { os: linux, arch: [amd64, arm64], libc: glibc }
+  - { os: darwin, arch: [arm64] }
+
+timeouts:
+  install: 1200
+  remove: 300
+  check_update: 60
+  version: 30
+
+scripts:
+  install: install.sh
+  update: update.sh
+  remove: remove.sh
+  check_update: check-update.sh

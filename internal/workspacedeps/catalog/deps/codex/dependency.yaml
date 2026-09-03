@@ -2,7 +2,7 @@ id: codex
 name: Codex
 category: agent
 icon: openai
-description: OpenAI Codex CLI used by the direct Codex runtime.
+description: OpenAI Codex CLI.
 
 source: managed
 requires: [node]
@@ -13,17 +13,18 @@ platforms:
   - { os: linux, arch: [amd64, arm64], libc: glibc }
   - { os: darwin, arch: [arm64] }
 
-version:
-  # Must equal protocol.PinnedCodexVersion; enforced by
-  # TestWorkspaceDependencyCatalogPinsMatchProtocolSnapshots (WD-CAT-004).
-  pin: "0.151.0"
+# No version.pin: like every managed dependency the newest npm release
+# installs by default, a specific version can be requested, check_update
+# compares against the registry, and rollback returns to the previous version.
 
 timeouts:
   install: 1200
   remove: 300
+  check_update: 120
   version: 30
 
 scripts:
   install: install.sh
   update: update.sh
   remove: remove.sh
+  check_update: check-update.sh

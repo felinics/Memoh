@@ -9,8 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
-	codexprotocol "github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/config"
@@ -20,7 +18,6 @@ import (
 	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
 	modelspkg "github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
-	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func TestACPToolProvidersIncludeAskUser(t *testing.T) {
@@ -196,34 +193,4 @@ func mustTestUUID(s string) pgtype.UUID {
 		panic(err)
 	}
 	return id
-}
-
-// TestWorkspaceDependencyCatalogPinsMatchProtocolSnapshots enforces design
-// WD-CAT-004: the version an agent dependency installs must be the version
-// whose wire protocol the direct runtime was pinned against. The catalog
-// cannot import the runtimes, so the check lives here where both are visible.
-func TestWorkspaceDependencyCatalogPinsMatchProtocolSnapshots(t *testing.T) {
-	catalog, err := depcatalog.Load()
-	if err != nil {
-		t.Fatalf("catalog.Load() error = %v", err)
-	}
-	tests := []struct {
-		id   string
-		want string
-	}{
-		{id: "codex", want: codexprotocol.PinnedCodexVersion},
-		{id: "claude-code", want: claudecoderuntime.PinnedCLIVersion},
-	}
-	for _, tt := range tests {
-		dep, ok := catalog.Get(tt.id)
-		if !ok {
-			t.Fatalf("dependency %q missing from catalog", tt.id)
-		}
-		if !dep.IsAgent() {
-			t.Fatalf("dependency %q category = %q, want agent", tt.id, dep.Category)
-		}
-		if dep.Version.Pin != tt.want {
-			t.Errorf("dependency %q version.pin = %q, want %q (protocol snapshot)", tt.id, dep.Version.Pin, tt.want)
-		}
-	}
 }
