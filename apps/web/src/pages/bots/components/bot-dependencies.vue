@@ -48,6 +48,36 @@
     </template>
 
     <div class="space-y-8">
+      <CalloutBanner
+        v-if="requestedDependencyId && !loading && !requestedDependencyInstalled"
+        tone="warning"
+        :title="t(requestedDependency ? 'bots.dependencies.requestedMissingTitle' : 'bots.dependencies.requestedUnavailableTitle', { name: requestedDependency ? dependencyName(requestedDependency) : requestedDependencyId })"
+        :description="t(requestedDependency ? 'bots.dependencies.requestedMissingDescription' : 'bots.dependencies.requestedUnavailableDescription')"
+      >
+        <Button
+          v-if="!requestedDependency"
+          variant="outline"
+          size="sm"
+          :loading="retryingDiscovery"
+          @click="retryDiscovery"
+        >
+          {{ t('common.retry') }}
+        </Button>
+      </CalloutBanner>
+      <CalloutBanner
+        v-if="data?.catalog_stale"
+        :title="t('bots.dependencies.catalogStaleTitle')"
+        :description="t('bots.dependencies.catalogStaleDescription')"
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          :loading="retryingDiscovery"
+          @click="retryDiscovery"
+        >
+          {{ t('common.retry') }}
+        </Button>
+      </CalloutBanner>
       <!-- A healthy workspace says nothing; the banner exists only while the
            rows are read-only and names the one move that unlocks them. -->
       <CalloutBanner
@@ -71,6 +101,25 @@
           @click="goToContainer"
         >
           {{ t('bots.dependencies.workspace.goToContainer') }}
+        </Button>
+      </CalloutBanner>
+
+      <!-- The workspace is up but its probe script failed (an OOM-killed
+           discovery, say): the Server answers from its records alone, with no
+           actions, and names the cause here. Retry simply asks again. -->
+      <CalloutBanner
+        v-if="discoveryError"
+        tone="warning"
+        :title="t('bots.dependencies.workspace.discoveryErrorTitle')"
+        :description="discoveryError"
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          :loading="retryingDiscovery"
+          @click="retryDiscovery"
+        >
+          {{ t('bots.dependencies.workspace.discoveryErrorRetry') }}
         </Button>
       </CalloutBanner>
 
@@ -158,6 +207,8 @@
       :item="confirm.item"
       :target-kind="targetKind"
       :target-name="targetName"
+      :loading="script.forConfirmation && script.loading"
+      :script-ready="script.forConfirmation && !!script.data?.definition_revision && !script.error"
       @update:open="(value) => { confirm.open = value }"
       @confirm="onConfirmed"
       @view-script="openScriptFromConfirm"
@@ -165,13 +216,13 @@
 
     <DependencyProgressDialog
       :open="progressOpen"
-      :title="progressTitle"
+      :name="active ? dependencyName(active.item) : ''"
+      :action="active?.action ?? 'install'"
       :lines="active?.lines ?? []"
       :status="active?.status ?? 'running'"
       :error="active?.error"
       :result-version="active?.resultVersion"
       :entrypoint="active?.entrypoint"
-      allow-background
       @update:open="setProgressOpen"
       @retry="retry"
     />
@@ -189,7 +240,7 @@
     />
 
     <ConfirmDeleteDialog
-      :open="!!removeTarget"
+      :open="!!removeTarget && !script.open && !script.loading && !!script.data?.definition_revision && script.item?.id === removeTarget.id && script.action === 'remove'"
       :title="t('bots.dependencies.remove.title', { name: removeTarget ? dependencyName(removeTarget) : '' })"
       :description="removeDescription"
       :cancel-label="t('common.cancel')"
@@ -331,11 +382,16 @@ watch(() => props.botId, () => {
 
 // ---- Dependency list --------------------------------------------------------
 
-const { data, error, isLoading, refetch } = useBotDependenciesQuery(botIdRef, selectedTargetId)
+const forceCatalogRefresh = ref(false)
+const { data, error, isLoading, refetch } = useBotDependenciesQuery(botIdRef, selectedTargetId, forceCatalogRefresh)
 
 const items = computed<DependencyItem[]>(() => data.value?.items ?? [])
-// The tab lists what is in the workspace; the Supermarket lists what could be.
-const rows = computed(() => sortDependencies(items.value.filter(dependencyIsInstalled), dependencyName))
+const requestedDependencyId = computed(() => typeof route.query.dependency_id === 'string' ? route.query.dependency_id.trim() : '')
+const requestedSessionId = computed(() => typeof route.query.session_id === 'string' ? route.query.session_id.trim() : '')
+const requestedDependency = computed(() => items.value.find(item => item.id === requestedDependencyId.value))
+const requestedDependencyInstalled = computed(() => requestedDependency.value?.status === 'installed')
+// A conversation's missing dependency is actionable here even before its first install.
+const rows = computed(() => sortDependencies(items.value.filter(item => dependencyIsInstalled(item) || item.id === requestedDependencyId.value), dependencyName))
 // Skeleton until the first answer lands — including the moment before the
 // bot id resolves and the query is still disabled, which is not "empty".
 const loading = computed(() => (isLoading.value || !botIdRef.value) && !data.value && !error.value)
@@ -350,6 +406,24 @@ const workspaceState = computed<DependencyWorkspaceState | undefined>(() => {
   return undefined
 })
 const loadFailed = computed(() => !!error.value && !data.value && !workspaceState.value)
+
+// `discovery_error` is newer than this SDK build: read it loosely until the
+// generated types catch up. Present only when the probe inside the workspace
+// failed and the list is the recorded state without `actions`.
+const discoveryError = computed(() => (
+  ((data.value as { discovery_error?: string } | undefined)?.discovery_error ?? '').trim()
+))
+const retryingDiscovery = ref(false)
+async function retryDiscovery() {
+  if (retryingDiscovery.value) return
+  retryingDiscovery.value = true
+  try {
+    forceCatalogRefresh.value = true
+    await refetch()
+  } finally {
+    retryingDiscovery.value = false
+  }
+}
 
 const banner = computed(() => {
   switch (workspaceState.value) {
@@ -391,7 +465,6 @@ const {
   active,
   progressOpen,
   running,
-  title: progressTitle,
   ownsStream,
   start,
   retry,
@@ -400,14 +473,21 @@ const {
 } = useDependencyOperation(botIdRef, selectedTargetId)
 
 const confirm = reactive<{
+  definitionRevision: string
   open: boolean
   mode: DependencyConfirmMode
   item: DependencyItem | null
   operation: DependencyOperationAction
-}>({ open: false, mode: 'install', item: null, operation: 'install' })
+}>({ open: false, mode: 'install', item: null, operation: 'install', definitionRevision: '' })
 
 function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operation: DependencyOperationAction) {
   confirm.item = item
+  confirm.definitionRevision = item.definition_revision ?? ''
+  scriptSequence++
+  script.open = false
+  script.loading = false
+  script.forConfirmation = false
+  script.data = null
   confirm.mode = mode
   confirm.operation = operation
   confirm.open = true
@@ -416,17 +496,21 @@ function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operatio
 function onConfirmed(version: string) {
   const item = confirm.item
   confirm.open = false
-  if (item) start(item, confirm.operation, { version })
+  if (item) start(item, confirm.operation, {
+    version,
+    definitionRevision: confirm.definitionRevision,
+    sessionId: item.id === requestedDependencyId.value ? requestedSessionId.value : undefined,
+  })
 }
 
 function onPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
   switch (action.kind) {
     case 'viewProgress':
-      viewProgress()
+      viewProgress(item)
       return
     case 'retry':
-      // The user already confirmed this operation once; a retry replays it.
-      start(item, action.operation ?? 'install')
+      // This may have failed in another tab or for another manager: review again.
+      openConfirm(item, action.operation === 'reinstall' ? 'reinstall' : 'install', action.operation ?? 'install')
       return
     case 'update':
       // Reads as an update either way; the Server decides whether that is an
@@ -436,7 +520,7 @@ function onPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
     default:
       // "Install" and the missing row's "Reinstall" both run the install
       // script (nothing is left to remove), so both read as an install.
-      openConfirm(item, 'install', 'install')
+      openConfirm(item, action.operation === 'reinstall' ? 'reinstall' : 'install', action.operation ?? 'install')
   }
 }
 
@@ -472,6 +556,7 @@ function onMenu(item: DependencyItem, action: DependencyMenuAction) {
       return
     case 'remove':
       removeTarget.value = item
+      void openScript(item, 'remove')
       return
     default:
       void openScript(item, defaultScriptAction(item))
@@ -480,8 +565,10 @@ function onMenu(item: DependencyItem, action: DependencyMenuAction) {
 
 function onRemoveConfirmed() {
   const item = removeTarget.value
+  const revision = script.data?.definition_revision
+  if (!item || script.item?.id !== item.id || script.action !== 'remove' || !revision) return
   removeTarget.value = null
-  if (item) start(item, 'remove')
+  start(item, 'remove', { definitionRevision: revision })
 }
 
 async function onRollbackConfirmed() {
@@ -507,6 +594,8 @@ async function onRollbackConfirmed() {
 // ---- Script preview ---------------------------------------------------------
 
 const script = reactive<{
+  definitionRevision: string
+  forConfirmation: boolean
   open: boolean
   item: DependencyItem | null
   action: ScriptAction
@@ -514,8 +603,14 @@ const script = reactive<{
   data: ScriptResponse | null
   loading: boolean
   error: string
-}>({ open: false, item: null, action: 'install', actions: [], data: null, loading: false, error: '' })
+}>({ open: false, item: null, action: 'install', actions: [], data: null, loading: false, error: '', definitionRevision: '', forConfirmation: false })
 let scriptSequence = 0
+watch([botIdRef, selectedTargetId], () => {
+  confirm.open = false
+  confirm.definitionRevision = ''
+  script.open = false
+  scriptSequence++
+})
 
 // Which scripts make sense to read for this row: the ones the Server would
 // run now, plus install (always previewable — it is what a fresh row gets).
@@ -530,9 +625,13 @@ function defaultScriptAction(item: DependencyItem): ScriptAction {
   return dependencyAllows(item, 'update') ? 'update' : 'install'
 }
 
-async function openScript(item: DependencyItem, action: ScriptAction) {
+async function openScript(item: DependencyItem, action: ScriptAction, forConfirmation = false) {
+  script.forConfirmation = forConfirmation
+  script.definitionRevision = forConfirmation ? confirm.definitionRevision : ''
   script.item = item
-  script.actions = scriptActionsFor(item)
+  script.actions = (forConfirmation || (action === 'remove' && removeTarget.value?.id === item.id))
+    ? [action]
+    : scriptActionsFor(item)
   script.open = true
   await loadScript(action)
 }
@@ -546,8 +645,12 @@ async function loadScript(action: ScriptAction) {
   script.error = ''
   script.data = null
   try {
-    const response = await fetchDependencyScript(props.botId, selectedTargetId.value, item.id, action)
-    if (sequence === scriptSequence) script.data = response
+    const response = await fetchDependencyScript(props.botId, selectedTargetId.value, item.id, action, script.definitionRevision)
+    if (sequence === scriptSequence) {
+      script.data = response
+      script.definitionRevision = response.definition_revision ?? ''
+      if (script.forConfirmation && confirm.open && confirm.item?.id === item.id) confirm.definitionRevision = script.definitionRevision
+    }
   } catch (err) {
     if (sequence === scriptSequence) script.error = resolveApiErrorMessage(err, t('common.loadFailed'))
   } finally {
@@ -565,7 +668,7 @@ function switchScriptAction(action: ScriptAction) {
 function openScriptFromConfirm() {
   const item = confirm.item
   if (!item) return
-  void openScript(item, confirm.operation === 'update' ? 'update' : 'install')
+  void openScript(item, confirm.operation, true)
 }
 
 // ---- Manual refresh, workspace start & navigation ---------------------------

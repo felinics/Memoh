@@ -208,7 +208,11 @@
       "workspace_missing": "尚未创建工作区，请先创建。",
       "remote_offline": "该电脑离线。",
       "rollback_unavailable": "没有可回滚的旧版本。",
-      "operation_failed": "依赖操作失败，请查看日志后重试。"
+      "operation_failed": "依赖操作失败，请查看日志后重试。",
+      "catalog_unavailable": "暂时无法获取依赖目录，请稍后重试。",
+      "definition_invalid": "依赖定义未通过校验，请刷新目录后重试。",
+      "definition_unavailable": "本地没有缓存这份依赖定义，请连接 Supermarket 后重试。",
+      "discovery_failed": "暂时无法检查工作区依赖，请重试。"
     },
     "acp": {
       "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
@@ -683,15 +687,42 @@
       "thoughtBriefly": "思考了几秒",
       "thoughtSeconds": "已思考 {seconds} 秒",
       "phase": {
-        "browse": { "ing": "探索中", "done": "已探索" },
-        "edit": { "ing": "修改中", "done": "已修改" },
-        "run": { "ing": "运行中", "done": "已运行" },
-        "message": { "ing": "发送中", "done": "已发送" },
-        "schedule": { "ing": "调整中", "done": "已调整" },
-        "media": { "ing": "生成中", "done": "已生成" },
-        "agent": { "ing": "委派中", "done": "已委派" },
-        "gui": { "ing": "浏览中", "done": "已浏览" },
-        "other": { "ing": "处理中", "done": "已处理" }
+        "browse": {
+          "ing": "探索中",
+          "done": "已探索"
+        },
+        "edit": {
+          "ing": "修改中",
+          "done": "已修改"
+        },
+        "run": {
+          "ing": "运行中",
+          "done": "已运行"
+        },
+        "message": {
+          "ing": "发送中",
+          "done": "已发送"
+        },
+        "schedule": {
+          "ing": "调整中",
+          "done": "已调整"
+        },
+        "media": {
+          "ing": "生成中",
+          "done": "已生成"
+        },
+        "agent": {
+          "ing": "委派中",
+          "done": "已委派"
+        },
+        "gui": {
+          "ing": "浏览中",
+          "done": "已浏览"
+        },
+        "other": {
+          "ing": "处理中",
+          "done": "已处理"
+        }
       },
       "frag": {
         "fileOperations": "{count} 次文件操作",
@@ -2314,28 +2345,12 @@
       "modelsLoadFailed": "无法加载 Agent 模型。请检查 Agent 配置后重试。",
       "openSettings": "打开 Agent 设置",
       "dependencyChecking": "正在检查依赖…",
-      "dependencyRemoteOffline": "该 Bot 连接的电脑已离线，上线后才能检查依赖。"
+      "dependencyRemoteOffline": "该 Bot 连接的电脑已离线，上线后才能检查依赖。",
+      "dependencyInstalledEnableHint": "已安装 {name}，现在可以启用该 Agent。"
     },
     "dependencies": {
       "title": "工作区依赖",
       "intro": "这个 Bot 工作区里已安装的命令行工具与运行时。新的依赖从 Supermarket 添加。",
-      "catalog": {
-        "codex": {
-          "description": "OpenAI Codex 命令行"
-        },
-        "claude-code": {
-          "description": "Anthropic Claude Code 命令行"
-        },
-        "node": {
-          "description": "JavaScript 运行时，含 npm 与 npx"
-        },
-        "python": {
-          "description": "Python 解释器，含 pip"
-        },
-        "uv": {
-          "description": "Python 包与项目管理器"
-        }
-      },
       "checkUpdates": "检查更新",
       "checkUpdatesDone": "已检查更新",
       "lastChecked": "上次检查：{time}",
@@ -2372,7 +2387,9 @@
         "missingTitle": "尚未创建工作区",
         "goToContainer": "去工作区",
         "remoteOfflineTitle": "电脑「{name}」离线",
-        "remoteOfflineDescription": "该电脑上线后才能管理依赖。"
+        "remoteOfflineDescription": "该电脑上线后才能管理依赖。",
+        "discoveryErrorTitle": "暂时无法探测工作区里的依赖",
+        "discoveryErrorRetry": "重试"
       },
       "confirm": {
         "installTitle": "安装 {name}",
@@ -2403,8 +2420,7 @@
         "failedHint": "状态已记为失败，可在依赖列表中重试。完整日志可复制。",
         "runInBackground": "后台运行",
         "version": "版本",
-        "entrypoint": "入口",
-        "logHint": "日志来自工作区内脚本输出"
+        "entrypoint": "入口"
       },
       "script": {
         "title": "将在工作区执行的脚本",
@@ -2413,7 +2429,8 @@
         "exec": "执行方式",
         "timeout": "超时",
         "timeoutValue": "{seconds} 秒",
-        "env": "环境变量（{count}）"
+        "env": "环境变量（{count}）",
+        "revision": "定义版本"
       },
       "remove": {
         "title": "卸载 {name}？",
@@ -2440,7 +2457,16 @@
       "done": "完成",
       "errorDetails": "错误详情",
       "checkUpdatesFailed": "检查更新失败",
-      "backgroundDone": "{name} 已完成"
+      "background": {
+        "installed": "已安装 {name}",
+        "updated": "已更新 {name}",
+        "reinstalled": "已重新安装 {name}",
+        "removed": "已卸载 {name}",
+        "failed": "{name} 操作失败"
+      },
+      "busy": "此工作区还有其他依赖操作在进行中。",
+      "catalogStaleTitle": "正在显示缓存的依赖",
+      "catalogStaleDescription": "暂时无法连接 Supermarket，可重试获取最新目录。"
     },
     "folders": {
       "create": "新建文件夹",
@@ -3569,7 +3595,6 @@
     "selectBotPlaceholder": "选择要安装到的 Bot...",
     "selectWorkspaceTarget": "工作区",
     "dependencyInstallTitle": "安装 {name}",
-    "dependencyInstalled": "已安装 {name}",
     "viewBotDependencies": "查看 Bot 依赖",
     "envVariables": "环境变量",
     "envDescription": "配置所需的环境变量",

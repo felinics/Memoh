@@ -25,11 +25,35 @@ export function createSessionActivity(deps: {
   ) => { source: string; visibleInRecents?: boolean }
   updateKnownSessionTitle: (sessionId: string, title: string) => void
   refreshSessionsList: (botId: string) => Promise<void>
+  refreshSessionMessages: (botId: string, sessionId: string) => Promise<void>
 }) {
   const visibleSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
   const compactingSessions = ref<Record<string, string[]>>({})
   const manualCompactions = ref(new Map<string, symbol>())
   let loadMoreRequestVersion = 0
+  const notificationRefreshes = new Map<string, { pending: boolean }>()
+
+  function refreshNotification(botId: string, sessionId: string) {
+    const key = `${botId}:${sessionId}`
+    const existing = notificationRefreshes.get(key)
+    if (existing) {
+      existing.pending = true
+      return
+    }
+    const state = { pending: false }
+    notificationRefreshes.set(key, state)
+    const generation = deps.userScopeGeneration()
+    void (async () => {
+      do {
+        state.pending = false
+        await deps.refreshSessionMessages(botId, sessionId)
+      } while (state.pending && generation === deps.userScopeGeneration())
+    })().catch((error) => {
+      console.error('Failed to refresh background notification:', error)
+    }).finally(() => {
+      if (notificationRefreshes.get(key) === state) notificationRefreshes.delete(key)
+    })
+  }
 
   function isSessionCompacting(botId: string, sessionId: string): boolean {
     return manualCompactions.value.has(`${botId}\u0000${sessionId}`)
@@ -152,6 +176,7 @@ export function createSessionActivity(deps: {
     if (event.type === 'session_touched') {
       const sessionId = event.session_id.trim()
       if (!sessionId) return
+      if (event.reason === 'background_task') refreshNotification(botId, sessionId)
       const touched = deps.touchKnownSession(sessionId, event.updated_at)
       if (touched.source === 'listed') return
       if (touched.source === 'remembered') {
@@ -184,6 +209,7 @@ export function createSessionActivity(deps: {
       compactingSessions.value = {}
       manualCompactions.value.clear()
       visibleSummaryRequests.clear()
+      notificationRefreshes.clear()
       loadMoreRequestVersion += 1
       deps.loadingMoreSessions.value = false
     },

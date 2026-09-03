@@ -19,12 +19,16 @@ import type { DependencyOperationAction } from './useWorkspaceDependencies'
 // HandlersWorkspaceDependencyStreamEvent flattens them into one all-optional
 // bag, which is why the union is spelled out here.
 export type WorkspaceDependencyStreamEvent =
-  | { type: 'started'; dependency_id: string; version?: string }
+  | { type: 'started'; dependency_id: string; version?: string; definition_revision?: string }
   | { type: 'log'; stream: 'stdout' | 'stderr'; data: string }
-  | { type: 'done'; version?: string; entrypoints?: Record<string, string> }
+  | { type: 'done'; version?: string; entrypoints?: Record<string, string>; definition_revision?: string }
   | SSEErrorEvent
 
 export interface WorkspaceDependencyStreamRequestOptions {
+  /** Conversation that requested this manager-confirmed operation. */
+  sessionId?: string
+  /** Revision returned by this operation's script preview. Omit to resolve latest. */
+  definitionRevision?: string
   /**
    * Version to install / update / reinstall to. Empty means the latest the
    * catalog script resolves (or the manifest pin). Ignored by remove.
@@ -56,6 +60,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 export function isWorkspaceDependencyStreamEvent(value: unknown): value is WorkspaceDependencyStreamEvent {
   if (!value || typeof value !== 'object') return false
   const event = value as Record<string, unknown>
+  if (event.definition_revision !== undefined && typeof event.definition_revision !== 'string') return false
   switch (event.type) {
     case 'started':
       return typeof event.dependency_id === 'string'
@@ -113,10 +118,19 @@ export async function* streamDependencyOperation(
   // An empty version sends no body: the Server then resolves the latest (or
   // the manifest pin), which is exactly what "leave blank" promises.
   const version = options.version?.trim() ?? ''
-  const versioned = { ...request, body: version ? { version } : undefined }
+  const definitionRevision = options.definitionRevision?.trim() ?? ''
+  const sessionId = options.sessionId?.trim() ?? ''
+  const versioned = {
+    ...request,
+    body: version || definitionRevision || sessionId ? {
+      version: version || undefined,
+      definition_revision: definitionRevision || undefined,
+      session_id: sessionId || undefined,
+    } : undefined,
+  }
 
   const result = action === 'remove'
-    ? await deleteBotsByBotIdDependenciesByDepId(request)
+    ? await deleteBotsByBotIdDependenciesByDepId(versioned)
     : action === 'update'
       ? await postBotsByBotIdDependenciesByDepIdUpdate(versioned)
       : action === 'reinstall'
@@ -147,7 +161,7 @@ export function openWorkspaceDependencyStream(
       options.depId,
       options.action,
       options.workspaceTargetId,
-      { version: options.version, signal: options.signal },
+      { version: options.version, definitionRevision: options.definitionRevision, sessionId: options.sessionId, signal: options.signal },
     ),
   }
 }

@@ -170,6 +170,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useQueryCache } from '@pinia/colada'
 import {
   Button,
@@ -196,7 +197,7 @@ import {
   type BotagentsBotAgent,
 } from '@memohai/sdk'
 import PasswordInput from '@/components/password-input/index.vue'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   BOT_AGENT_RUNTIME_CODEX,
   normalizeBotAgentRuntime,
@@ -221,6 +222,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ authorized: [] }>()
 const { t } = useI18n()
+const router = useRouter()
 const queryCache = useQueryCache()
 
 const runtime = computed(() => normalizeBotAgentRuntime(props.agent.runtime))
@@ -394,7 +396,22 @@ async function startDeviceLogin() {
     }
     void pollDeviceLogin(data.login_id)
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.agent.codexLoginFailed')))
+    if (isApiErrorCode(error, 'agent_dependency_missing')) {
+      toast.error(t('chat.externalAgent.dependencyMissing', { dep_id: 'Codex' }), {
+        action: {
+          label: t('chat.externalAgent.dependencyOpen'),
+          onClick: () => {
+            void router.push({
+              name: 'bot-detail',
+              params: { botName: props.botId },
+              query: { tab: 'dependencies', dependency_id: 'codex' },
+            }).catch(() => {})
+          },
+        },
+      })
+    } else {
+      toast.error(resolveApiErrorMessage(error, t('bots.agent.codexLoginFailed')))
+    }
   } finally {
     authorizing.value = false
   }

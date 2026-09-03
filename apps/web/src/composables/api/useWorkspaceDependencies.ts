@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getBotsByBotIdDependencies,
+  getWorkspaceDependenciesCatalog,
   getBotsByBotIdDependenciesByDepIdScript,
   postBotsByBotIdDependenciesByDepIdRollback,
   postBotsByBotIdDependenciesCheckUpdates,
@@ -36,7 +37,7 @@ export type ScriptResponse = HandlersWorkspaceDependencyScriptResponse
 export type ScriptEnv = HandlersWorkspaceDependencyScriptEnv
 export type ScriptAction = NonNullable<ScriptResponse['action']>
 export type DependencyOperationResponse = HandlersWorkspaceDependencyOperationResponse
-/** The operations that stream a log (design §11). Rollback is synchronous. */
+/** The operations that stream a log. Rollback is synchronous. */
 export type DependencyOperationAction = 'install' | 'update' | 'reinstall' | 'remove'
 
 export const BOT_DEPENDENCIES_QUERY_KEY = 'bot-dependencies'
@@ -57,13 +58,15 @@ function workspaceTargetQuery(targetId: string): { workspace_target_id: string }
   return trimmed ? { workspace_target_id: trimmed } : undefined
 }
 
-export function useBotDependenciesQuery(botId: Ref<string>, targetId: Ref<string>) {
+export function useBotDependenciesQuery(botId: Ref<string>, targetId: Ref<string>, forceRefresh?: Ref<boolean>) {
   return useQuery({
     key: () => botDependenciesQueryKey(botId.value, targetId.value),
     query: async () => {
+      const refresh = forceRefresh?.value ?? false
+      if (forceRefresh) forceRefresh.value = false
       const { data } = await getBotsByBotIdDependencies({
         path: { bot_id: botId.value },
-        query: workspaceTargetQuery(targetId.value),
+        query: { ...workspaceTargetQuery(targetId.value), refresh: refresh || undefined },
         throwOnError: true,
       })
       return data
@@ -73,7 +76,7 @@ export function useBotDependenciesQuery(botId: Ref<string>, targetId: Ref<string
 }
 
 /**
- * Blocking readiness check before an agent is enabled (design §9.3). Never
+ * Blocking readiness check before an agent is enabled. Never
  * starts the workspace: when it is not running `items` is empty and
  * `workspace_state` says why.
  */
@@ -108,7 +111,7 @@ export async function rollbackDependency(
 }
 
 /**
- * Manual refresh (design §10.3): re-discovers the workspace and runs the
+ * Manual refresh re-discovers the workspace and runs the
  * upstream check of every installed tool dependency, returning the refreshed
  * list. Callers still invalidate the query so the panel re-renders from cache.
  */
@@ -126,7 +129,7 @@ export async function checkDependencyUpdates(
 
 /**
  * The exact script text a dependency action would feed the workspace shell,
- * prelude included (WD-API-001). Scripts never touch the workspace disk, so
+ * prelude included. Scripts never touch the workspace disk, so
  * this is the only way to inspect them.
  */
 export async function fetchDependencyScript(
@@ -134,10 +137,11 @@ export async function fetchDependencyScript(
   targetId: string,
   depId: string,
   action: ScriptAction,
+  definitionRevision?: string,
 ): Promise<ScriptResponse> {
   const { data } = await getBotsByBotIdDependenciesByDepIdScript({
     path: { bot_id: botId, dep_id: depId },
-    query: { action, ...workspaceTargetQuery(targetId) },
+    query: { action, definition_revision: definitionRevision || undefined, ...workspaceTargetQuery(targetId) },
     throwOnError: true,
   })
   return data
@@ -149,4 +153,10 @@ export function invalidateBotDependencies(
   botId: string,
 ): Promise<unknown> {
   return queryCache.invalidateQueries({ key: [BOT_DEPENDENCIES_QUERY_KEY, botId] })
+}
+
+/** Explicit retry of the remote catalog, independently of software update checks. */
+export async function refreshDependencyCatalog() {
+  const { data } = await getWorkspaceDependenciesCatalog({ query: { refresh: true }, throwOnError: true })
+  return data
 }

@@ -499,10 +499,11 @@ Stores use Composition API style (`defineStore(() => { ... })`), with persistenc
 
 ### Streaming (Chat)
 
-A conversation is read over the **WebSocket** only. SSE is left with one job that has nothing to do with conversation contents: telling the sidebar which sessions moved.
+Live conversation turns are read over the **WebSocket**. SSE carries identifiers and invalidation hints, never conversation contents.
 
 #### Sessions activity SSE
 - **Endpoint**: `GET /bots/{bot_id}/sessions/events` — bot-wide lightweight activity stream; `session_touched` / `session_title_changed` / `session_created` for sidebar live-sort. Never carries message bodies.
+- `session_touched` with `reason: background_task` also refreshes persisted messages for an already loaded session. Notifications can arrive without a live turn; use the transcript merge path so active output survives. Coalesce pending notifications and perform a trailing refresh for the final outcome.
 - **Parsing**: handled by the generated SDK (`@memohai/sdk` `sse.get`); wrappers live in `composables/api/useChat.message-api.ts`.
 - **Retry**: `useRetryingStream` composable drives reconnection with exponential backoff.
 - There is no per-session SSE. A session's messages and run state come from the session runtime over the WebSocket, so that every subscriber of a session — this tab, another tab, another device — is reading the same projection instead of each building its own.
@@ -512,6 +513,14 @@ A conversation is read over the **WebSocket** only. SSE is left with one job tha
 - **Implementation**: `composables/api/useChat.ws.ts` wraps native `WebSocket` with send, abort, close, and auto-reconnect
 - **State**: `store/chat-list.ts` processes streaming events from either transport into reactive message blocks in real-time
 - **Abort**: Stream cancellation via `AbortSignal` (SSE) or close message (WS)
+
+## Dependency Operations
+
+- Installation, update, reinstall, and removal require script preview followed by explicit confirmation. Carry the preview's `definition_revision` into the request and retain it on retry; a retry must not silently resolve a new script.
+- Missing-agent feedback never starts installation. Its management link carries the requested dependency and source session; only a confirmed operation for that dependency forwards `session_id` for notifications. Other dependencies must not inherit the conversation association.
+- Shared operation stores use the host application's injected router, including Desktop's memory history. Never import the standalone Web router into a shared store.
+- A disconnected operation or `workspace_dependency_operation_unknown` has an unknown outcome. Display it without Retry until server reconciliation establishes the result. Full logs are manually readable regions; only concise phase changes are live announcements.
+- Dependency rows render the server's sanitized `last_error` and `retired` state so another tab can diagnose a failed or delisted installation.
 
 ## Workspace, Display, Browser Use, and Computer Use
 

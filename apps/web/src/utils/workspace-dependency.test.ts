@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { Package } from 'lucide-vue-next'
-import { Anthropic, ClaudeCodeColor, CodexColor, Nodejs, Openai, Python, Uv } from '@memohai/icon'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import {
-  dependencyIcon,
+  dependencyText,
   dependencyIsInstalled,
   dependencyMenuActions,
   dependencyNeedsAttention,
   dependencyPrimaryAction,
   dependencyRetryOperation,
   dependencyStatusBadge,
+  validDependencyVersion,
   dependencyUpdateOperation,
   formatDependencyVersion,
   sortDependencies,
@@ -286,22 +285,15 @@ describe('sortDependencies', () => {
   })
 })
 
-describe('dependencyIcon', () => {
-  it('maps the catalog icon identifier to the brand mark, id as fallback', () => {
-    expect(dependencyIcon({ id: 'codex', icon: 'openai' })).toBe(Openai)
-    expect(dependencyIcon({ id: 'claude-code', icon: 'anthropic' })).toBe(Anthropic)
-    expect(dependencyIcon({ id: 'node', icon: 'nodejs' })).toBe(Nodejs)
-    expect(dependencyIcon({ id: 'python', icon: 'python' })).toBe(Python)
-    expect(dependencyIcon({ id: 'uv', icon: 'uv' })).toBe(Uv)
-    expect(dependencyIcon({ id: 'codex' })).toBe(CodexColor)
-    expect(dependencyIcon({ id: 'claude-code' })).toBe(ClaudeCodeColor)
-    expect(dependencyIcon({ id: 'node' })).toBe(Nodejs)
-    expect(dependencyIcon({ id: 'custom', icon: 'codex' })).toBe(CodexColor)
-  })
-
-  it('falls back to the package glyph for unknown identifiers', () => {
-    expect(dependencyIcon({ id: 'hermes' })).toBe(Package)
-    expect(dependencyIcon({ id: 'custom', icon: 'something-else' })).toBe(Package)
+describe('published dependency text', () => {
+  it('localizes an unknown dependency without a frontend catalog entry', () => {
+    const remote = item({ id: 'new-tool', name: 'New tool', description: 'Published description', translations: {
+      zh: { name: '新工具', description: '远端发布的说明' }, ja: { name: '新しいツール' },
+    } })
+    expect(dependencyText(remote, 'name', 'zh-CN')).toBe('新工具')
+    expect(dependencyText(remote, 'description', 'ja')).toBe('Published description')
+    expect(dependencyText(remote, 'name', 'fr')).toBe('New tool')
+    expect(dependencyText(item({ name: '', id: 'fallback' }), 'name', 'en')).toBe('fallback')
   })
 })
 
@@ -311,5 +303,16 @@ describe('formatDependencyVersion', () => {
     expect(formatDependencyVersion('0.151.0')).toBe('0.151.0')
     expect(formatDependencyVersion('version-1')).toBe('version-1')
     expect(formatDependencyVersion(undefined)).toBe('')
+  })
+})
+
+
+describe('validDependencyVersion', () => {
+  it.each(['', '  ', 'v22.0.0', '3.15', '1.2.3-rc.1+build', 'latest', '1' + 'a'.repeat(127)])('accepts a release identifier: %j', (version) => {
+    expect(validDependencyVersion(version)).toBe(true)
+  })
+
+  it.each(['../current', '1..2', '/tmp/version', '-latest', 'https://example.com/cli', '1; id', '$(id)', '1\n2', '^1.0.0', 'x'.repeat(129)])('rejects paths, arguments and malformed versions: %j', (version) => {
+    expect(validDependencyVersion(version)).toBe(false)
   })
 })

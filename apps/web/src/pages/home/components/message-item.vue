@@ -250,13 +250,13 @@
                 />
               </div>
 
-              <!-- Missing workspace dependency (design §9.4): the rejection
-                   that started a background install. Carries its own action. -->
+              <!-- Missing dependency: manager review and installation entry. -->
               <DependencyMissingBlock
                 v-else-if="isDependencyMissingBlock(node.block)"
                 :block="(node.block as ErrorBlock)"
                 :bot-id="botId"
                 :bot-name="botName"
+                :session-id="sessionId"
               />
 
               <!-- Error block -->
@@ -430,6 +430,7 @@ const emit = defineEmits<{
 const props = defineProps<{
   message: ChatMessage
   botId?: string
+  sessionId?: string
   // Group layout for third-party synced threads: every turn left-aligned with
   // an avatar + sender name + channel badge (including the bot's own replies).
   channelThread?: boolean

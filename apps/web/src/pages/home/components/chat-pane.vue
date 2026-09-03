@@ -102,6 +102,7 @@
                       <MessageItem
                         :message="msg"
                         :bot-id="currentBotId"
+                        :session-id="activeSessionId"
                         :channel-thread="isChannelThread"
                         :channel-platform="channelPlatform"
                         :bot-name="currentBot?.name"

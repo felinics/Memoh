@@ -50,6 +50,7 @@ const statusIcon = computed(() => {
     case 'killed':
       return CircleX
     case 'stalled':
+    case 'unknown':
       return TriangleAlert
     default:
       return SquareTerminal
@@ -67,6 +68,7 @@ const iconClass = computed(() => {
     case 'killed':
       return 'text-destructive'
     case 'stalled':
+    case 'unknown':
       return 'text-warning-foreground'
     default:
       return 'text-muted-foreground'
@@ -81,6 +83,7 @@ const labelClass = computed(() => {
     case 'killed':
       return 'text-destructive'
     case 'stalled':
+    case 'unknown':
       return 'text-warning-foreground'
     default:
       return ''

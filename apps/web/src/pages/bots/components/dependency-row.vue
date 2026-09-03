@@ -8,7 +8,7 @@
 // streaming.
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Download, FileCode, MoreHorizontal, RotateCw, Trash2, Undo2 } from 'lucide-vue-next'
+import { ChevronRight, Download, FileCode, MoreHorizontal, Package, RotateCw, Trash2, Undo2 } from 'lucide-vue-next'
 import {
   Badge,
   Button,
@@ -31,7 +31,6 @@ import {
 import type { DependencyItem, DependencyWorkspaceState } from '@/composables/api/useWorkspaceDependencies'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import {
-  dependencyIcon,
   dependencyMenuActions,
   dependencyPlatformUnsupported,
   dependencyPrimaryAction,
@@ -61,16 +60,16 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { dependencyName, dependencyDescription } = useWorkspaceDependencyText()
+const { dependencyName, dependencyDescription, dependencyIconUrl } = useWorkspaceDependencyText()
 
 const name = computed(() => dependencyName(props.item))
 const description = computed(() => dependencyDescription(props.item))
 const version = computed(() => formatDependencyVersion(props.item.installed_version))
-const icon = computed(() => dependencyIcon(props.item))
+const iconUrl = computed(() => dependencyIconUrl(props.item))
 const badge = computed(() => dependencyStatusBadge(props.item))
 const unsupported = computed(() => dependencyPlatformUnsupported(props.item))
 const failed = computed(() => props.item.status === 'failed')
-const lastError = computed(() => (props.item.last_error ?? '').trim())
+const lastError = computed(() => props.item.last_error?.trim() || (props.item.last_error_code ? t(`errors.${props.item.last_error_code}`) : ''))
 const errorOpen = ref(false)
 
 const primary = computed(() => dependencyPrimaryAction(props.item, props.workspaceState, { ownsStream: props.ownsStream }))
@@ -110,8 +109,14 @@ const dimClass = computed(() => (unsupported.value ? 'opacity-40' : ''))
         class="flex size-9 items-center justify-center"
         :class="dimClass"
       >
-        <component
-          :is="icon"
+        <img
+          v-if="iconUrl"
+          :src="iconUrl"
+          class="size-5 object-contain"
+          alt=""
+        >
+        <Package
+          v-else
           class="size-5"
         />
       </span>
@@ -153,6 +158,13 @@ const dimClass = computed(() => (unsupported.value ? 'opacity-40' : ''))
           >
             <Spinner v-if="badge.spinner" />
             {{ t(badge.key, badge.args ?? {}) }}
+          </Badge>
+          <Badge
+            v-if="item.retired"
+            variant="warning"
+            size="sm"
+          >
+            {{ t('bots.dependencies.status.retired') }}
           </Badge>
         </div>
 

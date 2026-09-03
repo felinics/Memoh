@@ -1,17 +1,16 @@
 <script setup lang="ts">
-// The blocking dependency check that runs before a direct agent is enabled
-// (design §9.3). Mounted once by bot-agents.vue; `run(agent)` resolves true
-// only when the declared dependency is installed — the caller writes
-// `enabled: true` after that and never before (WD-EXT-002). Every exit that is
-// not an installed dependency resolves false: cancel, a stopped workspace the
-// user did not start, an unsupported platform, or a failed install
-// (WD-EXT-003 — the error stays in the progress dialog with the full log).
+// Preflight runs before a direct agent can be enabled. Mounted once by
+// bot-agents.vue; `run(agent)` resolves true only when its declared dependency
+// is installed, and only then does the caller write `enabled: true`.
+// Cancellation, an unavailable workspace or platform, and failed or backgrounded
+// installation all leave the agent disabled. Installation errors keep their full
+// log in the progress dialog; background completion prompts the user to enable
+// the agent instead of enabling it while the user is away.
 // No dependency is pinned, so the only operation here is an install; the
 // confirm dialog lets the user name a version, blank meaning the latest.
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useQueryCache } from '@pinia/colada'
 import {
   Button,
   Dialog,
@@ -26,20 +25,14 @@ import {
 import { postBotsByBotIdContainerStart, type BotagentsBotAgent } from '@memohai/sdk'
 import {
   fetchDependencyScript,
-  invalidateBotDependencies,
   preflightDependencies,
   type DependencyItem,
   type ScriptAction,
   type ScriptResponse,
 } from '@/composables/api/useWorkspaceDependencies'
-import { streamDependencyOperation } from '@/composables/api/useWorkspaceDependencyStream'
+import { useDependencyOperationsStore, type DependencyOperation } from '@/store/dependency-operations'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import {
-  dependencyDisplayName,
-  formatDependencyVersion,
-  type DependencyLogLine,
-  type DependencyProgressStatus,
-} from '@/utils/workspace-dependency'
+import { dependencyDisplayName } from '@/utils/workspace-dependency'
 import DependencyConfirmDialog from './dependency-confirm-dialog.vue'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
 import DependencyProgressDialog from './dependency-progress-dialog.vue'
@@ -56,7 +49,7 @@ const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const queryCache = useQueryCache()
+const store = useDependencyOperationsStore()
 
 // One run at a time: the resolver of the pending `run()` promise. Every path
 // out of the flow goes through `finish()` so a promise can never be left
@@ -75,21 +68,18 @@ const starting = ref(false)
 
 const confirmOpen = ref(false)
 const OPERATION = 'install'
-/** Version the user confirmed; empty means the latest. Replayed by Retry. */
-let requestedVersion = ''
 
+const VIEWER_ID = 'dependency-enable-flow'
 const progressOpen = ref(false)
-const progressStatus = ref<DependencyProgressStatus>('running')
-const progressError = ref('')
-const lines = ref<DependencyLogLine[]>([])
-const resultVersion = ref('')
-const entrypoint = ref('')
-const progressTitle = computed(() => t('bots.dependencies.progress.installing', { name: name.value }))
+// Kept across close so the dialog fades out with its content intact even
+// after the store dropped the record.
+const displayed = shallowRef<DependencyOperation | null>(null)
 
 const scriptOpen = ref(false)
 const scriptLoading = ref(false)
 const scriptError = ref('')
 const script = ref<ScriptResponse | null>(null)
+let scriptSequence = 0
 
 const workspaceRows = computed<DependencyKvRow[]>(() => [
   { label: t('bots.dependencies.confirm.dependency'), value: item.value?.id, mono: true },
@@ -112,8 +102,10 @@ function finish(ok: boolean) {
   settle = null
   workspaceOpen.value = false
   confirmOpen.value = false
-  progressOpen.value = false
+  hideProgress()
   scriptOpen.value = false
+  script.value = null
+  scriptSequence++
   resolve?.(ok)
 }
 
@@ -146,10 +138,18 @@ async function preflight() {
       item.value = step.item
       toast.error(t('bots.dependencies.preflight.platformUnsupported', { name: name.value }))
       return finish(false)
-    case 'install':
+    case 'install': {
       item.value = step.item
+      // An install sent to the background earlier is still streaming: reopen
+      // its log rather than asking to confirm a second one.
+      const running = store.get(props.botId, step.item.id)
+      if (running?.status === 'running') {
+        showProgress(running)
+        return
+      }
       confirmOpen.value = true
       return
+    }
     default:
       toast.error(t('bots.dependencies.preflight.failed'))
       return finish(false)
@@ -166,8 +166,8 @@ function goToContainer() {
   void router.replace({ query: { ...route.query, tab: 'container' } }).catch(() => {})
 }
 
-// The user asked for the start explicitly, so this is not the silent start
-// WD-EXT-004 forbids; the preflight is simply repeated once it is up.
+// Start only after an explicit user action, then repeat the preflight once
+// the workspace is running.
 async function startAndContinue() {
   if (starting.value) return
   starting.value = true
@@ -188,75 +188,80 @@ function onConfirmOpenChange(value: boolean) {
 }
 
 function onConfirmed(version: string) {
-  requestedVersion = version
-  startOperation()
-}
-
-function startOperation() {
   confirmOpen.value = false
-  lines.value = []
-  progressStatus.value = 'running'
-  progressError.value = ''
-  resultVersion.value = ''
-  entrypoint.value = ''
-  progressOpen.value = true
-  void consumeOperation()
-}
-
-async function consumeOperation() {
-  const depId = item.value?.id ?? ''
-  let sequence = 0
-  try {
-    for await (const event of streamDependencyOperation(props.botId, depId, OPERATION, undefined, { version: requestedVersion })) {
-      switch (event.type) {
-        case 'log':
-          lines.value.push({ id: sequence++, stream: event.stream, data: event.data })
-          break
-        case 'done':
-          resultVersion.value = formatDependencyVersion(event.version)
-          entrypoint.value = Object.values(event.entrypoints ?? {})[0] ?? ''
-          progressStatus.value = 'done'
-          break
-        case 'error':
-          progressError.value = event.message
-          progressStatus.value = 'error'
-          break
-      }
-    }
-    // A stream that closes without a verdict is a failure the user must see.
-    if (progressStatus.value === 'running') {
-      progressError.value = t('bots.dependencies.progress.failedTitle')
-      progressStatus.value = 'error'
-    }
-  } catch (error) {
-    progressError.value = resolveApiErrorMessage(error, t('bots.dependencies.progress.failedTitle'))
-    progressStatus.value = 'error'
-  } finally {
-    void invalidateBotDependencies(queryCache, props.botId)
+  const current = item.value
+  if (!current) return finish(false)
+  const result = store.start({
+    botId: props.botId,
+    targetId: '',
+    item: current,
+    action: OPERATION,
+    version,
+    definitionRevision: script.value?.definition_revision,
+    onBackgroundDone: onBackgroundDone,
+  })
+  switch (result.kind) {
+    case 'started':
+    case 'running':
+      showProgress(result.operation)
+      return
+    case 'busy':
+      toast.error(t('bots.dependencies.busy'))
+      return finish(false)
+    default:
+      return finish(false)
   }
 }
 
+// Background installation leaves the agent disabled; completion points the
+// user back at the switch instead of enabling the agent without them.
+function onBackgroundDone(operation: DependencyOperation) {
+  toast.success(t('bots.agent.dependencyInstalledEnableHint', { name: dependencyDisplayName(operation.item) }))
+}
+
+function showProgress(operation: DependencyOperation) {
+  displayed.value = operation
+  progressOpen.value = true
+  store.view(operation.key, VIEWER_ID)
+}
+
+function hideProgress() {
+  if (!progressOpen.value) return
+  progressOpen.value = false
+  if (displayed.value) store.unview(displayed.value.key, VIEWER_ID)
+}
+
+function retryOperation() {
+  if (displayed.value) store.retry(displayed.value.key)
+}
+
+// Closing a finished dialog is the verdict; closing a running one sends the
+// install to the background, which resolves the flow as "not enabled".
 function onProgressOpenChange(value: boolean) {
   if (value) return
-  // The dialog refuses to close while running, so a close is a verdict.
-  finish(progressStatus.value === 'done')
+  finish(displayed.value?.status === 'done')
 }
 
 async function openScript() {
   const depId = item.value?.id ?? ''
   const action: ScriptAction = OPERATION
+  const sequence = ++scriptSequence
   scriptOpen.value = true
   scriptLoading.value = true
   scriptError.value = ''
+  const revision = script.value?.definition_revision
   script.value = null
   try {
-    script.value = await fetchDependencyScript(props.botId, '', depId, action)
+    const result = await fetchDependencyScript(props.botId, '', depId, action, revision)
+    if (sequence === scriptSequence) script.value = result
   } catch (error) {
-    scriptError.value = resolveApiErrorMessage(error, t('common.loadFailed'))
+    if (sequence === scriptSequence) scriptError.value = resolveApiErrorMessage(error, t('common.loadFailed'))
   } finally {
-    scriptLoading.value = false
+    if (sequence === scriptSequence) scriptLoading.value = false
   }
 }
+
+onBeforeUnmount(hideProgress)
 
 defineExpose({ run, checking })
 </script>
@@ -270,22 +275,22 @@ defineExpose({ run, checking })
       width="lg"
       footer
     >
-      <DialogHeader>
-        <DialogTitle>
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
           {{ workspaceState === 'missing'
             ? t('bots.dependencies.preflight.workspaceMissingTitle')
             : t('bots.dependencies.preflight.workspaceNotRunningTitle') }}
         </DialogTitle>
-        <DialogDescription>
+        <DialogDescription class="break-words">
           {{ t('bots.dependencies.preflight.workspaceNotRunningDescription', { name }) }}
         </DialogDescription>
       </DialogHeader>
 
-      <DialogBody>
+      <DialogBody class="min-w-0">
         <DependencyKvList :rows="workspaceRows" />
       </DialogBody>
 
-      <DialogFooter class="items-center gap-2">
+      <DialogFooter class="min-w-0 items-center gap-2">
         <Button
           variant="outline"
           :disabled="starting"
@@ -317,6 +322,8 @@ defineExpose({ run, checking })
     :item="item"
     target-kind="native"
     :confirm-label="t('bots.dependencies.confirm.installAndEnable')"
+    :loading="scriptLoading"
+    :script-ready="!!script?.definition_revision && !scriptError"
     @update:open="onConfirmOpenChange"
     @confirm="onConfirmed"
     @view-script="openScript"
@@ -333,13 +340,14 @@ defineExpose({ run, checking })
 
   <DependencyProgressDialog
     :open="progressOpen"
-    :title="progressTitle"
-    :lines="lines"
-    :status="progressStatus"
-    :error="progressError"
-    :result-version="resultVersion"
-    :entrypoint="entrypoint"
+    :name="name"
+    :action="OPERATION"
+    :lines="displayed?.lines ?? []"
+    :status="displayed?.status ?? 'running'"
+    :error="displayed?.error"
+    :result-version="displayed?.resultVersion"
+    :entrypoint="displayed?.entrypoint"
     @update:open="onProgressOpenChange"
-    @retry="startOperation"
+    @retry="retryOperation"
   />
 </template>

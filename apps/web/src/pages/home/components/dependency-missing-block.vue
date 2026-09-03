@@ -5,12 +5,7 @@
     <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
     <div class="min-w-0 flex-1 space-y-1">
       <p class="whitespace-pre-wrap break-words">
-        <span
-          v-if="title"
-          class="font-medium"
-        >{{ title }}</span>
-        <span v-if="title && text"> · </span>
-        <span>{{ text }}</span>
+        {{ text }}
       </p>
 
       <!-- Live state of the background install the Server started. Rendered
@@ -29,8 +24,12 @@
           class="size-3.5 shrink-0 text-success-foreground"
         />
         <CircleX
-          v-else
+          v-else-if="taskStatus !== 'unknown'"
           class="size-3.5 shrink-0 text-destructive"
+        />
+        <TriangleAlert
+          v-else
+          class="size-3.5 shrink-0 text-warning-foreground"
         />
         <span class="shrink-0">{{ taskLabel }}</span>
         <BgTaskLiveStatus
@@ -41,6 +40,7 @@
       </div>
 
       <TextButton
+        v-if="canManage && (botName || botId)"
         class="-ml-1.5"
         @click="openDependencies"
       >
@@ -51,11 +51,11 @@
 </template>
 
 <script setup lang="ts">
-// Chat-side rendering of `agent_dependency_missing` (design §9.4). The text is
+// Chat-side rendering of `agent_dependency_missing`. The text is
 // rebuilt from the block's args through the same i18n key the Server names, so
 // it follows the viewer's locale; the Server's content is the fallback when
 // args are absent. The one action opens the bot's Dependencies tab — the
-// install itself runs there or in the background, never from a chat bubble.
+// install requires a manager to review and confirm it there.
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -64,13 +64,14 @@ import { Spinner, TextButton } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import type { ErrorBlock } from '@/store/chat-list'
 import { isBackgroundTaskActive, normalizeBackgroundStatus } from '@/store/chat/background-tasks'
-import { acpAgentDisplayName } from '@/utils/acp'
+import { hasBotPermission } from '@/utils/bot-permissions'
 import BgTaskLiveStatus from './bg-task-live-status.vue'
-import { dependencyMissingArgs } from './dependency-missing'
+import { dependencyInstallationInProgress, dependencyMissingArgs } from './dependency-missing'
 
 const props = defineProps<{
   block: ErrorBlock
   botId?: string
+  sessionId?: string
   /** The bot's route name; falls back to the id, which the route also accepts. */
   botName?: string
 }>()
@@ -81,15 +82,17 @@ const chatStore = useChatStore()
 
 const args = computed(() => dependencyMissingArgs(props.block))
 
-const title = computed(() => {
-  const depId = args.value.dep_id ?? ''
-  return depId ? acpAgentDisplayName(depId, depId) : ''
-})
+const canManage = computed(() => hasBotPermission(
+  chatStore.bots.find(bot => bot.id === props.botId)?.current_user_permissions,
+  'manage',
+))
 
 const text = computed(() => {
   const values = args.value
   if (values.dep_id) {
-    return t('chat.externalAgent.dependencyMissing', values)
+    return t(dependencyInstallationInProgress(values)
+      ? 'chat.externalAgent.dependencyMissingInstalling'
+      : 'chat.externalAgent.dependencyMissing', values)
   }
   return props.block.content
 })
@@ -101,6 +104,7 @@ const task = computed(() => {
 const taskStatus = computed(() => normalizeBackgroundStatus(task.value?.status, task.value?.event))
 const taskActive = computed(() => isBackgroundTaskActive(task.value))
 const taskLabel = computed(() => {
+  if (taskStatus.value === 'unknown') return t('bots.dependencies.progress.unknownHint')
   if (taskActive.value) return t('chat.externalAgent.dependencyMissingProgress')
   if (taskStatus.value === 'completed') return t('chat.externalAgent.dependencyMissingDone')
   return t('chat.externalAgent.dependencyMissingFailed')
@@ -109,6 +113,10 @@ const taskLabel = computed(() => {
 function openDependencies() {
   const botName = props.botName?.trim() || props.botId?.trim()
   if (!botName) return
-  void router.push({ name: 'bot-detail', params: { botName }, query: { tab: 'dependencies' } }).catch(() => {})
+  void router.push({
+    name: 'bot-detail',
+    params: { botName },
+    query: { tab: 'dependencies', dependency_id: args.value.dep_id, session_id: props.sessionId || undefined },
+  }).catch(() => {})
 }
 </script>

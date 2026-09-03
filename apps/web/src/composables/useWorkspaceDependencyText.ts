@@ -1,27 +1,19 @@
 import { useI18n } from 'vue-i18n'
 import type { HandlersWorkspaceDependencyCatalogItem } from '@memohai/sdk'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
-import { dependencyDisplayName } from '@/utils/workspace-dependency'
+import { dependencyText } from '@/utils/workspace-dependency'
+import { sdkApiUrl } from '@/lib/api-client'
 
-// Localized name and description of a catalog dependency. The Server's catalog
-// speaks English; `bots.dependencies.catalog.<id>.{name,description}` carries
-// the translation when one exists, and the Server text is the fallback so a
-// dependency the locale files do not know still reads correctly.
-
-type CatalogText = Pick<DependencyItem | HandlersWorkspaceDependencyCatalogItem, 'id' | 'name' | 'description'>
+type CatalogText = Pick<DependencyItem | HandlersWorkspaceDependencyCatalogItem, 'id' | 'name' | 'description' | 'translations' | 'icon_url'>
 
 export function useWorkspaceDependencyText() {
-  const { t, te } = useI18n()
-
-  function localized(item: CatalogText, field: 'name' | 'description', fallback: string): string {
-    const id = item.id?.trim()
-    if (!id) return fallback
-    const key = `bots.dependencies.catalog.${id}.${field}`
-    return te(key) ? t(key) : fallback
-  }
-
+  const { locale } = useI18n()
   return {
-    dependencyName: (item: CatalogText) => localized(item, 'name', dependencyDisplayName(item)),
-    dependencyDescription: (item: CatalogText) => localized(item, 'description', (item.description ?? '').trim()),
+    dependencyName: (item: CatalogText) => dependencyText(item, 'name', locale.value),
+    dependencyDescription: (item: CatalogText) => dependencyText(item, 'description', locale.value),
+    dependencyIconUrl: (item: CatalogText) => {
+      const path = item.icon_url ?? ''
+      return /^\/workspace-dependencies\/icons\/[a-f0-9]{64}$/.test(path) ? sdkApiUrl({ url: path }) : ''
+    },
   }
 }

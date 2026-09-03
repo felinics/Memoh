@@ -425,7 +425,7 @@ function openAgent(agent: BotagentsBotAgent) {
 
 const agentDependency = agentDependencyRequirement
 
-// Blocking preflight before an agent goes live (design §9.3). Resolves true
+// Blocking preflight before an agent goes live. Resolves true
 // when the agent declares no dependency or the flow ended with it satisfied;
 // the Switch stays bound to the server value, so nothing lights up until
 // `enabled: true` is actually written.
@@ -446,7 +446,7 @@ async function setAgentEnabled(agent: BotagentsBotAgent, enabled: boolean) {
   if (!id || busyAgentIDs.has(id)) return
   busyAgentIDs.add(id)
   try {
-    // WD-EXT-002: a cancelled or failed preflight writes nothing.
+    // A cancelled or failed preflight must not change the enabled state.
     if (enabled && !(await ensureAgentDependency(agent))) return
     await updateAgent({ agent, body: { enabled } })
     if (enabled && agentNeedsConfig(agent)) openAgent(agent)

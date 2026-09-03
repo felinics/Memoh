@@ -21,7 +21,7 @@ describe('agentDependencyRequirement', () => {
 })
 
 describe('resolveEnableFlowStep', () => {
-  // WD-EXT-004: a stopped or absent workspace is a guidance step, never an
+  // A stopped or absent workspace is a guidance step, never an
   // automatic start, and it wins over whatever items the answer carries.
   it('routes a non-running workspace to the guidance dialog', () => {
     expect(resolveEnableFlowStep(codex, { workspace_state: 'not_running', items: [] }))

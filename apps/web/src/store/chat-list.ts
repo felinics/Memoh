@@ -171,6 +171,11 @@ export const useChatStore = defineStore('chat', () => {
     touchKnownSession,
     updateKnownSessionTitle,
     refreshSessionsList,
+    refreshSessionMessages: async (botId, targetSessionId) => {
+      if (chatViews.getSession(botId, targetSessionId)) {
+        await refreshCurrentSession(botId, targetSessionId)
+      }
+    },
   })
   // `loadingChats` covers the bot-level boot path (sessions list fetch), so
   // the sidebar can show its skeleton + suppress its empty-state placeholder

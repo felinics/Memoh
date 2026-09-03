@@ -1,6 +1,3 @@
-import type { Component } from 'vue'
-import { Package } from 'lucide-vue-next'
-import { Anthropic, ClaudeCodeColor, CodexColor, Nodejs, Openai, Python, Uv } from '@memohai/icon'
 import type {
   DependencyAvailableAction,
   DependencyItem,
@@ -54,7 +51,7 @@ export interface DependencyMenuAction {
 
 export type DependencyConfirmMode = 'install' | 'update' | 'reinstall'
 
-export type DependencyProgressStatus = 'running' | 'done' | 'error'
+export type DependencyProgressStatus = 'running' | 'done' | 'error' | 'unknown'
 
 export interface DependencyLogLine {
   /** Stable key for rendering; callers may fall back to the index. */
@@ -67,14 +64,31 @@ export interface DependencyLogLine {
 const STATUS_KEY = 'bots.dependencies.status'
 const ACTION_KEY = 'bots.dependencies.action'
 
-export function dependencyDisplayName(item: Pick<DependencyItem, 'id' | 'name'>): string {
-  return item.name?.trim() || item.id?.trim() || ''
+type DependencyText = Pick<DependencyItem, 'id' | 'name' | 'description' | 'translations'>
+
+/** Presentation belongs to the published definition, including unknown tools. */
+export function dependencyText(item: DependencyText, field: 'name' | 'description', language: string): string {
+  const locale = language.toLowerCase().split(/[-_]/)[0] ?? 'en'
+  return item.translations?.[locale]?.[field]?.trim()
+    || item.translations?.en?.[field]?.trim()
+    || item[field]?.trim()
+    || (field === 'name' ? item.id?.trim() ?? '' : '')
+}
+
+export function dependencyDisplayName(item: DependencyText, language = 'en'): string {
+  return dependencyText(item, 'name', language)
 }
 
 /** Normalizes a version for display: trimmed, without a leading `v`. */
 export function formatDependencyVersion(version: string | undefined | null): string {
   const trimmed = (version ?? '').trim()
   return trimmed.replace(/^[vV](?=\d)/, '')
+}
+
+/** A version is a release identifier, never a path, URL, range, or shell argument. */
+export function validDependencyVersion(value: string): boolean {
+  const version = value.trim()
+  return !version || (/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(version) && !version.includes('..'))
 }
 
 export function dependencyInProgress(item: Pick<DependencyItem, 'status'>): boolean {
@@ -304,31 +318,4 @@ export function dependencyMenuActions(
     })
   }
   return items
-}
-
-/**
- * Brand mark for the catalog's `icon` identifier (falling back to the id),
- * the neutral package glyph for anything the icon library does not carry.
- */
-export function dependencyIcon(item: Pick<DependencyItem, 'id' | 'icon'>): Component {
-  const key = (item.icon?.trim() || item.id?.trim() || '').toLowerCase()
-  switch (key) {
-    case 'codex':
-      return CodexColor
-    case 'claude-code':
-      return ClaudeCodeColor
-    case 'openai':
-      return Openai
-    case 'anthropic':
-      return Anthropic
-    case 'nodejs':
-    case 'node':
-      return Nodejs
-    case 'python':
-      return Python
-    case 'uv':
-      return Uv
-    default:
-      return Package
-  }
 }

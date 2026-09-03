@@ -184,6 +184,23 @@
         <!-- Dependencies Tab: the workspace dependency catalog. A card per
              installable entry; installing streams into a bot's workspace. -->
         <TabsContent value="dependencies">
+          <CalloutBanner
+            v-if="dependenciesQuery.error.value || dependenciesQuery.data.value?.catalog_stale"
+            class="mb-4"
+            :title="dependenciesQuery.data.value ? t('bots.dependencies.catalogStaleTitle') : t('common.loadFailed')"
+            :description="dependenciesQuery.error.value
+              ? resolveApiErrorMessage(dependenciesQuery.error.value, t('common.loadFailed'))
+              : t('bots.dependencies.catalogStaleDescription')"
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              :loading="dependenciesQuery.isLoading.value"
+              @click="retryDependencies"
+            >
+              {{ t('common.retry') }}
+            </Button>
+          </CalloutBanner>
           <InlineLoadingRow
             v-if="dependenciesQuery.isLoading.value"
             class="justify-center py-8"
@@ -192,14 +209,14 @@
           </InlineLoadingRow>
 
           <div
-            v-else-if="!filteredDependencies.length"
+            v-else-if="!filteredDependencies.length && !dependenciesQuery.error.value"
             class="py-8 text-center text-xs text-muted-foreground"
           >
             {{ $t('supermarket.noDependencyResults') }}
           </div>
 
           <div
-            v-else
+            v-else-if="filteredDependencies.length"
             class="grid grid-cols-1 gap-4 sm:grid-cols-2"
           >
             <MarketItemCard
@@ -210,8 +227,14 @@
               @open="openDependencyInstall(dependency)"
             >
               <template #leading>
-                <component
-                  :is="dependencyIcon(dependency)"
+                <img
+                  v-if="dependencyIconUrl(dependency)"
+                  :src="dependencyIconUrl(dependency)"
+                  class="size-5 object-contain"
+                  alt=""
+                >
+                <Package
+                  v-else
                   class="size-5"
                 />
               </template>
@@ -253,9 +276,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
-import { ChevronLeft, ChevronRight, Github, Plug, Search } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Github, Package, Plug, Search } from 'lucide-vue-next'
 import {
   Button,
+  CalloutBanner,
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -282,7 +306,6 @@ import {
   type HandlersWorkspaceDependencyCatalogItem,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { dependencyIcon } from '@/utils/workspace-dependency'
 import PackageCard from './components/package-card.vue'
 import ConnectConnectorDialog from './components/connect-connector-dialog.vue'
 import InstallDependencyDialog from './components/install-dependency-dialog.vue'
@@ -330,7 +353,7 @@ const selectedConnector = ref<ConnectitConnector | null>(null)
 
 const dependencyDialogOpen = ref(false)
 const selectedDependency = ref<HandlersWorkspaceDependencyCatalogItem | null>(null)
-const { dependencyName, dependencyDescription } = useWorkspaceDependencyText()
+const { dependencyName, dependencyDescription, dependencyIconUrl } = useWorkspaceDependencyText()
 
 const hasNextPage = computed(() => page.value * pageSize < total.value)
 const showPagination = computed(() => page.value > 1 || hasNextPage.value)
@@ -372,19 +395,27 @@ watch(connectorsQuery.error, error => {
   if (error) toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
 })
 
+let forceDependenciesRefresh = false
 const dependenciesQuery = useQuery({
   key: () => ['workspace-dependencies-catalog'],
   query: async () => {
-    const { data } = await getWorkspaceDependenciesCatalog({ throwOnError: true })
-    return data.items ?? []
+    const refresh = forceDependenciesRefresh
+    forceDependenciesRefresh = false
+    const { data } = await getWorkspaceDependenciesCatalog({ query: { refresh: refresh || undefined }, throwOnError: true })
+    return data
   },
 })
+
+async function retryDependencies() {
+  forceDependenciesRefresh = true
+  await dependenciesQuery.refetch()
+}
 
 // Only entries the catalog can install are for sale here; the search matches
 // the localized name and description plus the commands an entry provides.
 const filteredDependencies = computed(() => {
   const query = searchQuery.value.toLowerCase()
-  const installable = (dependenciesQuery.data.value ?? []).filter(dependency => dependency.installable && dependency.id)
+  const installable = (dependenciesQuery.data.value?.items ?? []).filter(dependency => dependency.installable && dependency.id)
   if (!query) return installable
   return installable.filter(dependency =>
     [dependency.id, dependencyName(dependency), dependencyDescription(dependency), ...(dependency.provides ?? [])]

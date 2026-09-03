@@ -1,8 +1,7 @@
 import type { ContentBlock, ErrorBlock } from '@/store/chat/types'
 
 // Stable runtime feedback code for a workspace dependency the agent needs but
-// the workspace does not have (design §9.4): the Server rejects the turn and
-// starts the install in the background.
+// the workspace does not have: the Server rejects the turn without installing.
 export const AGENT_DEPENDENCY_MISSING_CODE = 'agent_dependency_missing'
 
 // Deliberately not a type predicate: the template's later `v-else-if` branch
@@ -19,4 +18,9 @@ export function dependencyMissingArgs(block: ErrorBlock): Record<string, string>
     if (trimmed) out[key] = trimmed
   }
   return out
+}
+
+/** Only an accepted operation may be described as installing. */
+export function dependencyInstallationInProgress(args: Record<string, string>): boolean {
+  return !!args.install_task_id || args.operation_in_progress === 'true'
 }

@@ -9,14 +9,19 @@
       width="lg"
       footer
     >
-      <DialogHeader>
-        <DialogTitle>{{ t('supermarket.dependencyInstallTitle', { name }) }}</DialogTitle>
-        <DialogDescription v-if="description">
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
+          {{ t('supermarket.dependencyInstallTitle', { name }) }}
+        </DialogTitle>
+        <DialogDescription
+          v-if="description"
+          class="break-words"
+        >
           {{ description }}
         </DialogDescription>
       </DialogHeader>
 
-      <DialogBody>
+      <DialogBody class="min-w-0">
         <form
           id="install-dependency-form"
           @submit.prevent="startInstall"
@@ -35,6 +40,7 @@
             >
               <Select
                 :model-value="displayTargetId"
+                :disabled="resumable"
                 @update:model-value="onTargetChange"
               >
                 <SelectTrigger class="w-full">
@@ -59,35 +65,52 @@
               </Select>
             </FieldStack>
 
-            <FieldStack
-              :label="t('bots.dependencies.confirm.version')"
-              :help="t('bots.dependencies.confirm.versionHelp')"
+            <FormField
+              v-slot="{ componentField }"
+              name="version"
             >
-              <Input
-                v-model="version"
-                class="font-mono"
-                :placeholder="t('bots.dependencies.confirm.versionPlaceholder')"
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </FieldStack>
+              <FieldStack
+                :label="t('bots.dependencies.confirm.version')"
+                :help="t('bots.dependencies.confirm.versionHelp')"
+              >
+                <FormControl>
+                  <Input
+                    v-bind="componentField"
+                    class="font-mono"
+                    :placeholder="t('bots.dependencies.confirm.versionPlaceholder')"
+                    autocomplete="off"
+                    spellcheck="false"
+                    :disabled="resumable"
+                  />
+                </FormControl>
+              </FieldStack>
+            </FormField>
           </FormStack>
         </form>
       </DialogBody>
 
-      <DialogFooter>
-        <DialogClose as-child>
-          <Button variant="outline">
-            {{ t('common.cancel') }}
-          </Button>
-        </DialogClose>
-        <Button
-          form="install-dependency-form"
-          type="submit"
-          :disabled="!botId"
+      <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">
+        <TextButton
+          v-if="script?.definition_revision"
+          :disabled="!botId || resumable"
+          @click="openScript"
         >
-          {{ t('supermarket.install') }}
-        </Button>
+          {{ t('bots.dependencies.action.viewScript') }}
+        </TextButton>
+        <div class="flex items-center gap-2">
+          <DialogClose as-child>
+            <Button variant="outline">
+              {{ t('common.cancel') }}
+            </Button>
+          </DialogClose>
+          <Button
+            form="install-dependency-form"
+            type="submit"
+            :disabled="!botId || scriptLoading"
+          >
+            {{ resumable ? t('bots.dependencies.action.viewProgress') : script?.definition_revision ? t('supermarket.install') : t('bots.dependencies.action.viewScript') }}
+          </Button>
+        </div>
       </DialogFooter>
     </DialogPanel>
   </Dialog>
@@ -96,23 +119,35 @@
        "Done" leads to that tab so the new row is the next thing seen. -->
   <DependencyProgressDialog
     :open="progressOpen"
-    :title="t('bots.dependencies.progress.installing', { name })"
-    :lines="lines"
-    :status="progressStatus"
-    :error="progressError"
-    :result-version="resultVersion"
-    :entrypoint="entrypoint"
+    :name="name"
+    action="install"
+    :lines="displayed?.lines ?? []"
+    :status="displayed?.status ?? 'running'"
+    :error="displayed?.error"
+    :result-version="displayed?.resultVersion"
+    :entrypoint="displayed?.entrypoint"
     :done-label="t('supermarket.viewBotDependencies')"
     @update:open="onProgressOpenChange"
-    @retry="consume"
+    @retry="retry"
     @done="onDone"
+  />
+  <DependencyScriptDialog
+    v-model:open="scriptOpen"
+    :script="script"
+    :loading="scriptLoading"
+    :error="scriptError"
+    :dependency-name="name"
+    action="install"
   />
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryCache } from '@pinia/colada'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import z from 'zod'
+import { useQuery } from '@pinia/colada'
 import {
   Button,
   Dialog,
@@ -124,6 +159,8 @@ import {
   DialogPanel,
   DialogTitle,
   FieldStack,
+  FormField,
+  FormControl,
   FormStack,
   Input,
   Select,
@@ -131,6 +168,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  TextButton,
   toast,
 } from '@felinic/ui'
 import {
@@ -138,17 +176,14 @@ import {
   type HandlersWorkspaceDependencyCatalogItem,
   type WorkspaceWorkspaceTarget,
 } from '@memohai/sdk'
+import { validDependencyVersion } from '@/utils/workspace-dependency'
+import { resolveApiErrorMessage } from '@/utils/api-error'
+import { fetchDependencyScript, type ScriptResponse } from '@/composables/api/useWorkspaceDependencies'
 import BotSelect from '@/components/bot-select/index.vue'
-import { invalidateBotDependencies } from '@/composables/api/useWorkspaceDependencies'
-import { streamDependencyOperation } from '@/composables/api/useWorkspaceDependencyStream'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import DependencyProgressDialog from '@/pages/bots/components/dependency-progress-dialog.vue'
-import { resolveApiErrorMessage } from '@/utils/api-error'
-import {
-  formatDependencyVersion,
-  type DependencyLogLine,
-  type DependencyProgressStatus,
-} from '@/utils/workspace-dependency'
+import DependencyScriptDialog from '@/pages/bots/components/dependency-script-dialog.vue'
+import { useDependencyOperationsStore, type DependencyOperation } from '@/store/dependency-operations'
 import {
   workspaceTargetAvailable,
   workspaceTargetName,
@@ -170,20 +205,57 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const queryCache = useQueryCache()
+const store = useDependencyOperationsStore()
 const { dependencyName, dependencyDescription } = useWorkspaceDependencyText()
 
 const name = computed(() => (props.item ? dependencyName(props.item) : ''))
 const description = computed(() => (props.item ? dependencyDescription(props.item) : ''))
+const depId = computed(() => props.item?.id ?? '')
 
 // ---- Form ---------------------------------------------------------------------
 
 const botId = ref('')
-const version = ref('')
+const form = useForm({
+  validationSchema: computed(() => toTypedSchema(z.object({
+    version: z.string().trim().refine(validDependencyVersion, t('bots.dependencies.confirm.versionInvalid')),
+  }))),
+  initialValues: { version: '' },
+})
 
 // '' means the bot's current target: the Server resolves it, the same way the
 // bot's Dependencies tab does when nothing is picked.
 const selectedTargetId = ref('')
+const scriptOpen = ref(false)
+const scriptLoading = ref(false)
+const scriptError = ref('')
+const script = shallowRef<ScriptResponse | null>(null)
+let scriptSequence = 0
+
+watch([botId, selectedTargetId, () => props.item, () => props.open], () => {
+  scriptSequence++
+  script.value = null
+  scriptOpen.value = false
+  scriptLoading.value = false
+})
+
+async function openScript() {
+  if (!botId.value || !depId.value) return
+  const sequence = ++scriptSequence
+  scriptOpen.value = true
+  scriptLoading.value = true
+  scriptError.value = ''
+  try {
+    const response = await fetchDependencyScript(
+      botId.value, selectedTargetId.value, depId.value, 'install',
+      script.value?.definition_revision || props.item?.definition_revision,
+    )
+    if (sequence === scriptSequence) script.value = response
+  } catch (error) {
+    if (sequence === scriptSequence) scriptError.value = resolveApiErrorMessage(error, t('common.loadFailed'))
+  } finally {
+    if (sequence === scriptSequence) scriptLoading.value = false
+  }
+}
 
 const { data: targetsResponse } = useQuery({
   key: () => ['bot-workspace-targets', botId.value],
@@ -205,6 +277,11 @@ const targets = computed<ValidWorkspaceTarget[]>(() => (
 const primaryTargetId = computed(() => targets.value.find(target => target.primary)?.target_id ?? targets.value[0]?.target_id ?? '')
 const displayTargetId = computed(() => selectedTargetId.value || primaryTargetId.value)
 
+// The picked bot is already installing this dependency (the dialog was sent
+// to the background earlier): the submit button reopens that log instead of
+// sending a second install the Server would refuse as busy.
+const resumable = computed(() => store.get(botId.value, depId.value)?.status === 'running')
+
 function onTargetChange(value: unknown) {
   const next = typeof value === 'string' ? value : ''
   selectedTargetId.value = next === primaryTargetId.value ? '' : next
@@ -218,7 +295,11 @@ watch(() => props.open, (open) => {
   if (!open) return
   botId.value = props.defaultBotId || ''
   selectedTargetId.value = ''
-  version.value = ''
+  form.resetForm()
+  // Coming back for a dependency whose install is still streaming for the
+  // preselected bot skips the form: there is nothing left to choose.
+  const running = store.get(botId.value, depId.value)
+  if (running?.status === 'running') show(running)
 }, { immediate: true })
 
 function onFormOpenChange(open: boolean) {
@@ -227,77 +308,65 @@ function onFormOpenChange(open: boolean) {
 
 // ---- Streamed install -----------------------------------------------------------
 
+const VIEWER_ID = 'supermarket-install-dependency'
 const progressOpen = ref(false)
-const progressStatus = ref<DependencyProgressStatus>('running')
-const progressError = ref('')
-const lines = ref<DependencyLogLine[]>([])
-const resultVersion = ref('')
-const entrypoint = ref('')
-// Frozen at start so a bot picked for the next install cannot redirect a
-// running stream's invalidation or the "view dependencies" link.
-let request = { botId: '', targetId: '', depId: '', version: '' }
+// Kept across close so the dialog fades out with its content intact even
+// after the store dropped the record.
+const displayed = shallowRef<DependencyOperation | null>(null)
 
-function startInstall() {
-  const depId = props.item?.id ?? ''
-  if (!botId.value || !depId) return
-  request = { botId: botId.value, targetId: selectedTargetId.value, depId, version: version.value.trim() }
-  void consume()
-}
-
-async function consume() {
-  lines.value = []
-  progressStatus.value = 'running'
-  progressError.value = ''
-  resultVersion.value = ''
-  entrypoint.value = ''
+function show(operation: DependencyOperation) {
+  displayed.value = operation
   progressOpen.value = true
-  let sequence = 0
-  try {
-    const stream = streamDependencyOperation(request.botId, request.depId, 'install', request.targetId || undefined, { version: request.version })
-    for await (const event of stream) {
-      switch (event.type) {
-        case 'log':
-          lines.value.push({ id: sequence++, stream: event.stream, data: event.data })
-          break
-        case 'done':
-          resultVersion.value = formatDependencyVersion(event.version)
-          entrypoint.value = Object.values(event.entrypoints ?? {})[0] ?? ''
-          progressStatus.value = 'done'
-          break
-        case 'error':
-          progressError.value = event.message
-          progressStatus.value = 'error'
-          break
-      }
-    }
-    // A stream that closes without a verdict is a failure the user must see.
-    if (progressStatus.value === 'running') {
-      progressError.value = t('bots.dependencies.progress.failedTitle')
-      progressStatus.value = 'error'
-    }
-  } catch (error) {
-    progressError.value = resolveApiErrorMessage(error, t('bots.dependencies.progress.failedTitle'))
-    progressStatus.value = 'error'
-  } finally {
-    void invalidateBotDependencies(queryCache, request.botId)
-    if (props.item?.category === 'agent') {
-      void queryCache.invalidateQueries({ key: ['bot-agents', request.botId] })
-    }
-    if (progressStatus.value === 'done') {
-      toast.success(t('supermarket.dependencyInstalled', { name: name.value }))
-    }
-  }
+  store.view(operation.key, VIEWER_ID)
 }
 
-// The progress dialog refuses to close while running, so a close is a verdict;
-// either way the whole flow is over and the form does not come back.
+const startInstall = form.handleSubmit(async ({ version }) => {
+  const item = props.item
+  if (!item || !botId.value || !depId.value || scriptLoading.value) return
+  if (!resumable.value && !script.value?.definition_revision) {
+    await openScript()
+    return
+  }
+  const result = store.start({
+    botId: botId.value,
+    targetId: selectedTargetId.value,
+    item,
+    action: 'install',
+    version,
+    definitionRevision: script.value?.definition_revision || item.definition_revision,
+  })
+  switch (result.kind) {
+    case 'started':
+    case 'running':
+      show(result.operation)
+      return
+    case 'busy':
+      toast.error(t('bots.dependencies.busy'))
+      return
+    default:
+      return
+  }
+})
+
+function retry() {
+  if (displayed.value) store.retry(displayed.value.key)
+}
+
+// Closing while running sends the install to the background (the store keeps
+// the stream and toasts the outcome); closing afterwards forgets it. Either
+// way the whole flow is over and the form does not come back.
 function onProgressOpenChange(open: boolean) {
   if (open) return
   progressOpen.value = false
+  if (displayed.value) store.unview(displayed.value.key, VIEWER_ID)
   emit('update:open', false)
 }
 
 function onDone() {
-  emit('installed', request.botId)
+  if (displayed.value) emit('installed', displayed.value.botId)
 }
+
+onBeforeUnmount(() => {
+  if (progressOpen.value && displayed.value) store.unview(displayed.value.key, VIEWER_ID)
+})
 </script>

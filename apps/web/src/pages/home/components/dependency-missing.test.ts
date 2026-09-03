@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dependencyMissingArgs, isDependencyMissingBlock } from './dependency-missing'
+import { dependencyInstallationInProgress, dependencyMissingArgs, isDependencyMissingBlock } from './dependency-missing'
 
 describe('isDependencyMissingBlock', () => {
   it('matches only the missing-dependency error code', () => {
@@ -22,5 +22,14 @@ describe('dependencyMissingArgs', () => {
       args: { dep_id: ' codex ', install_task_id: ' task-1 ', request_id: '' },
     })).toEqual({ dep_id: 'codex', install_task_id: 'task-1' })
     expect(dependencyMissingArgs({ id: 0, type: 'error', content: 'x' })).toEqual({})
+  })
+})
+
+describe('dependencyInstallationInProgress', () => {
+  it('does not promise installation without an accepted operation', () => {
+    expect(dependencyInstallationInProgress({ dep_id: 'codex' })).toBe(false)
+    expect(dependencyInstallationInProgress({ operation_in_progress: 'false' })).toBe(false)
+    expect(dependencyInstallationInProgress({ operation_in_progress: 'true' })).toBe(true)
+    expect(dependencyInstallationInProgress({ install_task_id: 'task-1' })).toBe(true)
   })
 })

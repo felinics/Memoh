@@ -208,7 +208,11 @@
       "workspace_missing": "The workspace hasn't been created yet.",
       "remote_offline": "That computer is offline.",
       "rollback_unavailable": "No previous version to roll back to.",
-      "operation_failed": "The dependency operation failed. Check the log and try again."
+      "operation_failed": "The dependency operation failed. Check the log and try again.",
+      "catalog_unavailable": "The dependency catalog is unavailable. Please try again later.",
+      "definition_invalid": "The dependency definition could not be verified. Please refresh the catalog.",
+      "definition_unavailable": "The dependency definition is not cached. Please reconnect to Supermarket and try again.",
+      "discovery_failed": "Workspace dependencies could not be inspected. Please try again."
     },
     "acp": {
       "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
@@ -683,15 +687,42 @@
       "thoughtBriefly": "Thought for a couple of seconds",
       "thoughtSeconds": "Thought for {seconds}s",
       "phase": {
-        "browse": { "ing": "Exploring", "done": "Explored" },
-        "edit": { "ing": "Editing", "done": "Edited" },
-        "run": { "ing": "Running", "done": "Ran" },
-        "message": { "ing": "Messaging", "done": "Sent" },
-        "schedule": { "ing": "Scheduling", "done": "Scheduled" },
-        "media": { "ing": "Generating", "done": "Generated" },
-        "agent": { "ing": "Delegating", "done": "Delegated" },
-        "gui": { "ing": "Browsing", "done": "Browsed" },
-        "other": { "ing": "Working", "done": "Worked" }
+        "browse": {
+          "ing": "Exploring",
+          "done": "Explored"
+        },
+        "edit": {
+          "ing": "Editing",
+          "done": "Edited"
+        },
+        "run": {
+          "ing": "Running",
+          "done": "Ran"
+        },
+        "message": {
+          "ing": "Messaging",
+          "done": "Sent"
+        },
+        "schedule": {
+          "ing": "Scheduling",
+          "done": "Scheduled"
+        },
+        "media": {
+          "ing": "Generating",
+          "done": "Generated"
+        },
+        "agent": {
+          "ing": "Delegating",
+          "done": "Delegated"
+        },
+        "gui": {
+          "ing": "Browsing",
+          "done": "Browsed"
+        },
+        "other": {
+          "ing": "Working",
+          "done": "Worked"
+        }
       },
       "frag": {
         "fileOperations": "{count} file operation | {count} file operations",
@@ -2314,28 +2345,12 @@
       "modelsLoadFailed": "Couldn’t load Agent models. Check the Agent setup and try again.",
       "openSettings": "Open Agent settings",
       "dependencyChecking": "Checking dependency…",
-      "dependencyRemoteOffline": "The bot's connected computer is offline. Dependencies can be checked once it is back online."
+      "dependencyRemoteOffline": "The bot's connected computer is offline. Dependencies can be checked once it is back online.",
+      "dependencyInstalledEnableHint": "{name} installed. Turn the agent on to use it."
     },
     "dependencies": {
       "title": "Workspace dependencies",
       "intro": "Command-line tools and runtimes installed in this bot's workspace. Add new ones from the Supermarket.",
-      "catalog": {
-        "codex": {
-          "description": "OpenAI Codex command line"
-        },
-        "claude-code": {
-          "description": "Anthropic Claude Code command line"
-        },
-        "node": {
-          "description": "JavaScript runtime with npm and npx"
-        },
-        "python": {
-          "description": "Python interpreter with pip"
-        },
-        "uv": {
-          "description": "Python package and project manager"
-        }
-      },
       "checkUpdates": "Check for updates",
       "checkUpdatesDone": "Update check finished",
       "lastChecked": "Last checked {time}",
@@ -2372,7 +2387,9 @@
         "missingTitle": "No workspace yet",
         "goToContainer": "Open workspace tab",
         "remoteOfflineTitle": "\"{name}\" is offline",
-        "remoteOfflineDescription": "Dependencies can be managed once it is online."
+        "remoteOfflineDescription": "Dependencies can be managed once it is online.",
+        "discoveryErrorTitle": "Couldn't detect dependencies in the workspace right now",
+        "discoveryErrorRetry": "Retry"
       },
       "confirm": {
         "installTitle": "Install {name}",
@@ -2403,8 +2420,7 @@
         "failedHint": "Recorded as failed; retry from the dependency list. The full log can be copied.",
         "runInBackground": "Run in background",
         "version": "Version",
-        "entrypoint": "Entrypoint",
-        "logHint": "Log streamed from the workspace script"
+        "entrypoint": "Entrypoint"
       },
       "script": {
         "title": "Script that will run in the workspace",
@@ -2413,7 +2429,8 @@
         "exec": "Executed as",
         "timeout": "Timeout",
         "timeoutValue": "{seconds}s",
-        "env": "Environment ({count})"
+        "env": "Environment ({count})",
+        "revision": "Definition revision"
       },
       "remove": {
         "title": "Remove {name}?",
@@ -2440,7 +2457,16 @@
       "done": "Done",
       "errorDetails": "Error details",
       "checkUpdatesFailed": "Couldn't check for updates",
-      "backgroundDone": "{name} finished"
+      "background": {
+        "installed": "{name} installed",
+        "updated": "{name} updated",
+        "reinstalled": "{name} reinstalled",
+        "removed": "{name} removed",
+        "failed": "{name}: operation failed"
+      },
+      "busy": "Another dependency operation is still running in this workspace.",
+      "catalogStaleTitle": "Showing cached dependencies",
+      "catalogStaleDescription": "Supermarket is unavailable. You can retry to get the latest catalog."
     },
     "folders": {
       "create": "New folder",
@@ -3569,7 +3595,6 @@
     "selectBotPlaceholder": "Choose a bot to install to...",
     "selectWorkspaceTarget": "Workspace",
     "dependencyInstallTitle": "Install {name}",
-    "dependencyInstalled": "{name} installed",
     "viewBotDependencies": "View bot dependencies",
     "envVariables": "Environment Variables",
     "envDescription": "Configure the required environment variables",

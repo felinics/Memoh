@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Confirms switching a dependency back to the version the workspace kept
-// (WD-FS-001). Rollback is a pure data switch — nothing downloads, nothing
+// Confirms switching a dependency back to the version the workspace kept.
+// Rollback is a pure data switch — nothing downloads, nothing
 // streams — so unlike the other operations it ends in a toast, not a log. The
 // caller owns the request (same contract as ConfirmDeleteDialog) and closes on
 // success.

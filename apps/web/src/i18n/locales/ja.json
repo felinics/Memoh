@@ -205,7 +205,11 @@
       "workspace_missing": "Workspace がまだ作成されていません。先に作成してください。",
       "remote_offline": "そのコンピューターはオフラインです。",
       "rollback_unavailable": "ロールバックできる以前のバージョンがありません。",
-      "operation_failed": "依存関係の操作に失敗しました。ログを確認して、もう一度お試しください。"
+      "operation_failed": "依存関係の操作に失敗しました。ログを確認して、もう一度お試しください。",
+      "catalog_unavailable": "依存関係カタログを取得できません。しばらくしてから再試行してください。",
+      "definition_invalid": "依存関係の定義を検証できませんでした。カタログを更新して再試行してください。",
+      "definition_unavailable": "この依存関係の定義はキャッシュされていません。Supermarket に接続して再試行してください。",
+      "discovery_failed": "Workspace の依存関係を確認できませんでした。再試行してください。"
     },
     "acp": {
       "request_invalid": "Agent ランタイムのリクエストが無効です。内容を確認して、もう一度お試しください。",
@@ -667,15 +671,42 @@
       "thoughtBriefly": "少し考えた",
       "thoughtSeconds": "{seconds}秒考えました",
       "phase": {
-        "browse": { "ing": "探索中", "done": "探索しました" },
-        "edit": { "ing": "編集中", "done": "編集しました" },
-        "run": { "ing": "実行中", "done": "実行しました" },
-        "message": { "ing": "送信中", "done": "送信しました" },
-        "schedule": { "ing": "変更中", "done": "変更しました" },
-        "media": { "ing": "生成中", "done": "生成しました" },
-        "agent": { "ing": "委譲中", "done": "委譲しました" },
-        "gui": { "ing": "閲覧中", "done": "閲覧しました" },
-        "other": { "ing": "作業中", "done": "作業しました" }
+        "browse": {
+          "ing": "探索中",
+          "done": "探索しました"
+        },
+        "edit": {
+          "ing": "編集中",
+          "done": "編集しました"
+        },
+        "run": {
+          "ing": "実行中",
+          "done": "実行しました"
+        },
+        "message": {
+          "ing": "送信中",
+          "done": "送信しました"
+        },
+        "schedule": {
+          "ing": "変更中",
+          "done": "変更しました"
+        },
+        "media": {
+          "ing": "生成中",
+          "done": "生成しました"
+        },
+        "agent": {
+          "ing": "委譲中",
+          "done": "委譲しました"
+        },
+        "gui": {
+          "ing": "閲覧中",
+          "done": "閲覧しました"
+        },
+        "other": {
+          "ing": "作業中",
+          "done": "作業しました"
+        }
       },
       "frag": {
         "fileOperations": "ファイル操作 {count} 件",
@@ -2313,28 +2344,12 @@
       "modelsLoadFailed": "Agent のモデルを読み込めませんでした。Agent の設定を確認して、もう一度お試しください。",
       "openSettings": "Agent の設定を開く",
       "dependencyChecking": "依存関係を確認中…",
-      "dependencyRemoteOffline": "この Bot が接続しているコンピューターはオフラインです。オンラインになると依存関係を確認できます。"
+      "dependencyRemoteOffline": "この Bot が接続しているコンピューターはオフラインです。オンラインになると依存関係を確認できます。",
+      "dependencyInstalledEnableHint": "{name} をインストールしました。Agent を有効にすると使用できます。"
     },
     "dependencies": {
       "title": "Workspace の依存関係",
       "intro": "この Bot の Workspace にインストール済みのコマンドラインツールとランタイムです。新しい依存関係は Supermarket から追加します。",
-      "catalog": {
-        "codex": {
-          "description": "OpenAI Codex コマンドライン"
-        },
-        "claude-code": {
-          "description": "Anthropic Claude Code コマンドライン"
-        },
-        "node": {
-          "description": "JavaScript ランタイム（npm・npx 付き）"
-        },
-        "python": {
-          "description": "Python インタープリター（pip 付き）"
-        },
-        "uv": {
-          "description": "Python のパッケージ・プロジェクト管理ツール"
-        }
-      },
       "checkUpdates": "更新を確認",
       "checkUpdatesDone": "更新の確認が完了しました",
       "lastChecked": "最終確認：{time}",
@@ -2371,7 +2386,9 @@
         "missingTitle": "Workspace がまだありません",
         "goToContainer": "Workspace タブを開く",
         "remoteOfflineTitle": "「{name}」はオフラインです",
-        "remoteOfflineDescription": "オンラインになると依存関係を管理できます。"
+        "remoteOfflineDescription": "オンラインになると依存関係を管理できます。",
+        "discoveryErrorTitle": "Workspace 内の依存関係を今すぐ検出できません",
+        "discoveryErrorRetry": "再試行"
       },
       "confirm": {
         "installTitle": "{name} をインストール",
@@ -2402,8 +2419,7 @@
         "failedHint": "失敗として記録されました。依存関係の一覧から再試行できます。ログはコピーできます。",
         "runInBackground": "バックグラウンドで実行",
         "version": "バージョン",
-        "entrypoint": "エントリーポイント",
-        "logHint": "ログは Workspace 内スクリプトの出力です"
+        "entrypoint": "エントリーポイント"
       },
       "script": {
         "title": "Workspace で実行されるスクリプト",
@@ -2412,7 +2428,8 @@
         "exec": "実行方法",
         "timeout": "タイムアウト",
         "timeoutValue": "{seconds} 秒",
-        "env": "環境変数（{count}）"
+        "env": "環境変数（{count}）",
+        "revision": "定義リビジョン"
       },
       "remove": {
         "title": "{name} を削除しますか？",
@@ -2439,7 +2456,16 @@
       "done": "完了",
       "errorDetails": "エラーの詳細",
       "checkUpdatesFailed": "更新を確認できませんでした",
-      "backgroundDone": "{name} が完了しました"
+      "background": {
+        "installed": "{name} をインストールしました",
+        "updated": "{name} を更新しました",
+        "reinstalled": "{name} を再インストールしました",
+        "removed": "{name} を削除しました",
+        "failed": "{name} の操作に失敗しました"
+      },
+      "busy": "この Workspace では別の依存関係の操作がまだ実行中です。",
+      "catalogStaleTitle": "キャッシュされた依存関係を表示中",
+      "catalogStaleDescription": "Supermarket に接続できません。再試行して最新のカタログを取得できます。"
     },
     "folders": {
       "create": "新しいフォルダ",
@@ -3564,7 +3590,6 @@
     "selectBotPlaceholder": "インストールするBotを選択してください...",
     "selectWorkspaceTarget": "Workspace",
     "dependencyInstallTitle": "{name} をインストール",
-    "dependencyInstalled": "{name} をインストールしました",
     "viewBotDependencies": "Bot の依存関係を表示",
     "envVariables": "環境変数",
     "envDescription": "必要な環境変数を構成する",

@@ -34,6 +34,8 @@ export interface SessionTouchedEvent {
   type: 'session_touched'
   session_id: string
   updated_at?: string
+  /** A persisted background notification may arrive without a live turn. */
+  reason?: 'background_task'
 }
 
 export interface SessionTitleChangedEvent {

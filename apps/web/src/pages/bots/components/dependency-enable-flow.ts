@@ -6,7 +6,7 @@ import type {
 } from '@/composables/api/useWorkspaceDependencies'
 import { acpAgentDisplayName } from '@/utils/acp'
 
-// Pure decision table of the "enable an agent" preflight (design §9.3). The
+// Pure decision table of the "enable an agent" preflight. The
 // flow component owns the dialogs; this module only maps the agent's declared
 // dependency plus the Server's preflight answer onto the next step, so the
 // branch list can be unit-tested without mounting anything. No dependency is
@@ -19,7 +19,7 @@ export interface EnableFlowRequirement {
 
 export type EnableFlowStep =
   | { kind: 'satisfied' }
-  /** WD-EXT-004: the UI guides the user to the workspace; it never starts it silently. */
+  /** The UI guides the user to the workspace; it never starts it silently. */
   | { kind: 'workspace'; state: 'not_running' | 'missing' }
   | { kind: 'remote_offline' }
   | { kind: 'install'; item: DependencyItem }

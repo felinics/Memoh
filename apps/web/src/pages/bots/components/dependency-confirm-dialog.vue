@@ -3,10 +3,13 @@
 // one shell — install, update, reinstall — and every one takes an optional
 // version: blank means the latest the catalog resolves, a typed one pins the
 // run. A remote target always gets the explicit "runs on your computer"
-// warning (WD-PLAT-001). Download size is not shown: the API does not report
+// warning. Download size is not shown: the API does not report
 // it, and an estimate would be invented.
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import z from 'zod'
 import {
   Button,
   CalloutBanner,
@@ -18,15 +21,18 @@ import {
   DialogPanel,
   DialogTitle,
   FieldStack,
+  FormField,
+  FormControl,
   Input,
   TextButton,
 } from '@felinic/ui'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import {
-  dependencyDisplayName,
   formatDependencyVersion,
+  validDependencyVersion,
   type DependencyConfirmMode,
 } from '@/utils/workspace-dependency'
+import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
 
 const props = withDefaults(defineProps<{
@@ -34,14 +40,17 @@ const props = withDefaults(defineProps<{
   mode: DependencyConfirmMode
   item: DependencyItem | null
   targetKind: 'native' | 'remote'
-  /** Display name of a remote target, for the WD-PLAT-001 warning. */
+  /** Display name identifying the computer where the script will run. */
   targetName?: string
   loading?: boolean
+  /** The exact script revision has been loaded for review before confirmation. */
+  scriptReady?: boolean
   /** Overrides the confirm label (the enable flow says "Install and enable"). */
   confirmLabel?: string
 }>(), {
   targetName: '',
   loading: false,
+  scriptReady: false,
   confirmLabel: '',
 })
 
@@ -53,15 +62,21 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { dependencyName } = useWorkspaceDependencyText()
 
-const name = computed(() => (props.item ? dependencyDisplayName(props.item) : ''))
+const name = computed(() => (props.item ? dependencyName(props.item) : ''))
 const installedVersion = computed(() => formatDependencyVersion(props.item?.installed_version))
 
 // Each opening starts blank: a version typed for one row must not leak into
 // the next confirmation.
-const version = ref('')
+const form = useForm({
+  validationSchema: computed(() => toTypedSchema(z.object({
+    version: z.string().trim().refine(validDependencyVersion, t('bots.dependencies.confirm.versionInvalid')),
+  }))),
+  initialValues: { version: '' },
+})
 watch(() => props.open, (open) => {
-  if (open) version.value = ''
+  if (open) form.resetForm()
 })
 
 const title = computed(() => {
@@ -110,9 +125,11 @@ function onOpenChange(value: boolean) {
   emit('update:open', value)
 }
 
-function submit() {
-  emit('confirm', version.value.trim())
-}
+const submit = form.handleSubmit(({ version }) => {
+  if (props.loading) return
+  if (!props.scriptReady) emit('viewScript')
+  else emit('confirm', version)
+})
 </script>
 
 <template>
@@ -124,29 +141,40 @@ function submit() {
       width="lg"
       footer
     >
-      <DialogHeader>
-        <DialogTitle>{{ title }}</DialogTitle>
-        <DialogDescription>{{ description }}</DialogDescription>
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
+          {{ title }}
+        </DialogTitle>
+        <DialogDescription class="break-words">
+          {{ description }}
+        </DialogDescription>
       </DialogHeader>
 
-      <DialogBody class="space-y-4">
+      <DialogBody class="min-w-0 space-y-4">
         <form
           id="dependency-confirm-form"
           @submit.prevent="submit"
         >
-          <FieldStack
-            :label="t('bots.dependencies.confirm.version')"
-            :help="t('bots.dependencies.confirm.versionHelp')"
+          <FormField
+            v-slot="{ componentField }"
+            name="version"
           >
-            <Input
-              v-model="version"
-              class="font-mono"
-              :placeholder="t('bots.dependencies.confirm.versionPlaceholder')"
-              autocomplete="off"
-              spellcheck="false"
-              :disabled="loading"
-            />
-          </FieldStack>
+            <FieldStack
+              :label="t('bots.dependencies.confirm.version')"
+              :help="t('bots.dependencies.confirm.versionHelp')"
+            >
+              <FormControl>
+                <Input
+                  v-bind="componentField"
+                  class="font-mono"
+                  :placeholder="t('bots.dependencies.confirm.versionPlaceholder')"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="loading"
+                />
+              </FormControl>
+            </FieldStack>
+          </FormField>
         </form>
 
         <DependencyKvList :rows="rows" />
@@ -159,8 +187,9 @@ function submit() {
         />
       </DialogBody>
 
-      <DialogFooter class="items-center gap-2 sm:justify-between">
+      <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">
         <TextButton
+          v-if="scriptReady"
           :disabled="loading"
           @click="emit('viewScript')"
         >
@@ -179,7 +208,7 @@ function submit() {
             type="submit"
             :loading="loading"
           >
-            {{ confirmText }}
+            {{ scriptReady ? confirmText : t('bots.dependencies.action.viewScript') }}
           </Button>
         </div>
       </DialogFooter>
