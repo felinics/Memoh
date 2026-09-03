@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"sort"
@@ -85,9 +86,9 @@ const (
 // Platform is one (os, arch set, libc) tuple a dependency can be installed on.
 // An empty Libc means the libc flavour is irrelevant for that OS (darwin).
 type Platform struct {
-	OS   string   `yaml:"os"`
-	Arch []string `yaml:"arch"`
-	Libc string   `yaml:"libc,omitempty"`
+	OS   string   `yaml:"os" json:"os"`
+	Arch []string `yaml:"arch" json:"arch"`
+	Libc string   `yaml:"libc,omitempty" json:"libc,omitempty"`
 }
 
 // VersionSpec describes which version an install should produce. Pin is
@@ -97,8 +98,8 @@ type Platform struct {
 // and a check_update script may query upstream. Channel names the upstream
 // release channel such a script follows.
 type VersionSpec struct {
-	Channel string `yaml:"channel,omitempty"`
-	Pin     string `yaml:"pin,omitempty"`
+	Channel string `yaml:"channel,omitempty" json:"channel,omitempty"`
+	Pin     string `yaml:"pin,omitempty" json:"pin,omitempty"`
 }
 
 // Default per-action timeouts in seconds, applied when the manifest omits one.
@@ -112,11 +113,11 @@ const (
 // Timeouts holds per-action script timeouts in seconds. Update defaults to
 // Install because an update is a full install into a fresh versions/ directory.
 type Timeouts struct {
-	Install     int `yaml:"install,omitempty"`
-	CheckUpdate int `yaml:"check_update,omitempty"`
-	Update      int `yaml:"update,omitempty"`
-	Remove      int `yaml:"remove,omitempty"`
-	Version     int `yaml:"version,omitempty"`
+	Install     int `yaml:"install,omitempty" json:"install,omitempty"`
+	CheckUpdate int `yaml:"check_update,omitempty" json:"check_update,omitempty"`
+	Update      int `yaml:"update,omitempty" json:"update,omitempty"`
+	Remove      int `yaml:"remove,omitempty" json:"remove,omitempty"`
+	Version     int `yaml:"version,omitempty" json:"version,omitempty"`
 }
 
 func (t Timeouts) withDefaults() Timeouts {
@@ -169,12 +170,12 @@ func (t Timeouts) Duration(action Action) time.Duration {
 // directory. An empty entry means the action is not scripted: reinstall then
 // falls back to remove → install and update falls back to install.
 type Scripts struct {
-	Install     string `yaml:"install,omitempty"`
-	CheckUpdate string `yaml:"check_update,omitempty"`
-	Update      string `yaml:"update,omitempty"`
-	Remove      string `yaml:"remove,omitempty"`
-	Reinstall   string `yaml:"reinstall,omitempty"`
-	Version     string `yaml:"version,omitempty"`
+	Install     string `yaml:"install,omitempty" json:"install,omitempty"`
+	CheckUpdate string `yaml:"check_update,omitempty" json:"check_update,omitempty"`
+	Update      string `yaml:"update,omitempty" json:"update,omitempty"`
+	Remove      string `yaml:"remove,omitempty" json:"remove,omitempty"`
+	Reinstall   string `yaml:"reinstall,omitempty" json:"reinstall,omitempty"`
+	Version     string `yaml:"version,omitempty" json:"version,omitempty"`
 }
 
 // For returns the file name configured for action, or "" when unset.
@@ -225,25 +226,39 @@ func (s Scripts) configured() []scriptRef {
 
 // Dependency is one validated catalog entry.
 type Dependency struct {
-	ID          string   `yaml:"id"`
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description,omitempty"`
-	Icon        string   `yaml:"icon,omitempty"`
-	Category    Category `yaml:"category"`
-	Source      Source   `yaml:"source"`
+	SchemaVersion string   `yaml:"schema_version,omitempty" json:"schema_version,omitempty"`
+	ID            string   `yaml:"id" json:"id"`
+	Name          string   `yaml:"name" json:"name"`
+	Description   string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Icon          string   `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Category      Category `yaml:"category" json:"category"`
+	Source        Source   `yaml:"source" json:"source"`
 	// Requires lists catalog IDs that must be present before this dependency
 	// can be installed.
-	Requires []string `yaml:"requires,omitempty"`
+	Requires []string `yaml:"requires,omitempty" json:"requires,omitempty"`
 	// Provides lists the commands that must resolve after installation.
-	Provides  []string    `yaml:"provides"`
-	Platforms []Platform  `yaml:"platforms"`
-	Version   VersionSpec `yaml:"version,omitempty"`
-	Timeouts  Timeouts    `yaml:"timeouts,omitempty"`
-	Scripts   Scripts     `yaml:"scripts,omitempty"`
+	Provides  []string    `yaml:"provides" json:"provides"`
+	Platforms []Platform  `yaml:"platforms" json:"platforms"`
+	Version   VersionSpec `yaml:"version,omitempty" json:"version,omitempty"`
+	Timeouts  Timeouts    `yaml:"timeouts,omitempty" json:"timeouts,omitempty"`
+	Scripts   Scripts     `yaml:"scripts,omitempty" json:"scripts,omitempty"`
 	// ManifestDigest is "sha256:<hex>" over dependency.yaml and every script
 	// file the manifest references, sorted by file name. It is recorded in
 	// the workspace state.json so a changed manifest can be detected.
-	ManifestDigest string `yaml:"-"`
+	ManifestDigest string                 `yaml:"-" json:"-"`
+	Translations   map[string]Translation `yaml:"translations,omitempty" json:"translations,omitempty"`
+	// Publication identity is assigned by the verified remote loader, never
+	// accepted from dependency.yaml or workspace state.
+	SourceURL  string `yaml:"-" json:"-"`
+	RegistryID string `yaml:"-" json:"-"`
+	Revision   string `yaml:"-" json:"-"`
+	IconDigest string `yaml:"-" json:"-"`
+	Retired    bool   `yaml:"-" json:"-"`
+}
+
+type Translation struct {
+	Name        string `yaml:"name,omitempty" json:"name,omitempty"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 // IsAgent reports whether the dependency is an external coding agent.
@@ -303,6 +318,13 @@ func normalizeToken(value string) string {
 // clone returns a deep copy so callers cannot mutate catalog state through
 // the returned slices.
 func (d Dependency) clone() Dependency {
+	if d.Translations != nil {
+		translations := make(map[string]Translation, len(d.Translations))
+		for language, text := range d.Translations {
+			translations[language] = text
+		}
+		d.Translations = translations
+	}
 	d.Requires = slices.Clone(d.Requires)
 	d.Provides = slices.Clone(d.Provides)
 	platforms := make([]Platform, len(d.Platforms))
@@ -325,6 +347,13 @@ func decodeManifest(data []byte) (Dependency, error) {
 			return Dependency{}, errors.New("manifest is empty")
 		}
 		return Dependency{}, err
+	}
+	if dep.SchemaVersion != "" && dep.SchemaVersion != "1" {
+		return Dependency{}, fmt.Errorf("unsupported dependency schema version %q", dep.SchemaVersion)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return Dependency{}, errors.New("manifest must contain exactly one YAML document")
 	}
 	dep.ID = strings.TrimSpace(dep.ID)
 	dep.Name = strings.TrimSpace(dep.Name)

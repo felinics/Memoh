@@ -3,7 +3,9 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -91,10 +93,10 @@ func imageFiles(manifest string) map[string]string {
 	return map[string]string{ManifestFileName: manifest}
 }
 
-func TestLoadEmbeddedCatalog(t *testing.T) {
-	c, err := Load()
+func TestLoadPublishedCatalog(t *testing.T) {
+	c, err := loadPublishedCatalog()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
 	}
 
 	var ids []string
@@ -113,7 +115,7 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	if !slices.Equal(codex.Requires, []string{"node"}) || !slices.Equal(codex.Provides, []string{"codex"}) {
 		t.Fatalf("codex requires/provides = %v/%v", codex.Requires, codex.Provides)
 	}
-	if codex.Icon != "openai" {
+	if codex.Icon != "icon.svg" {
 		t.Fatalf("codex icon = %q", codex.Icon)
 	}
 	if codex.Version.Pin != "" {
@@ -127,7 +129,7 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	}
 
 	claude := c.MustGet("claude-code")
-	if !claude.IsAgent() || claude.Icon != "anthropic" || !slices.Equal(claude.Provides, []string{"claude"}) || claude.Version.Pin != "" {
+	if !claude.IsAgent() || claude.Icon != "icon.svg" || !slices.Equal(claude.Provides, []string{"claude"}) || claude.Version.Pin != "" {
 		t.Fatalf("claude-code = %+v", claude)
 	}
 
@@ -167,9 +169,9 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	}
 }
 
-// embeddedScriptExpectations lists substrings every embedded script of a
+// publishedScriptExpectations lists substrings every published script of a
 // given action must contain, keyed by dependency id then action.
-var embeddedScriptExpectations = map[string]map[Action][]string{
+var publishedScriptExpectations = map[string]map[Action][]string{
 	"codex": {
 		ActionInstall:     {"npm view", "npm install -g", "@openai/codex"},
 		ActionUpdate:      {"npm view", "npm install -g", "@openai/codex", "MEMOH_DEP_CURRENT_VERSION"},
@@ -197,15 +199,15 @@ var embeddedScriptExpectations = map[string]map[Action][]string{
 	},
 }
 
-func TestEmbeddedScripts(t *testing.T) {
-	c, err := Load()
+func TestPublishedScripts(t *testing.T) {
+	c, err := loadPublishedCatalog()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
 	}
 	for _, dep := range c.List() {
-		expectations, known := embeddedScriptExpectations[dep.ID]
+		expectations, known := publishedScriptExpectations[dep.ID]
 		if !known {
-			t.Fatalf("no script expectations for embedded dependency %s", dep.ID)
+			t.Fatalf("no script expectations for published dependency %s", dep.ID)
 		}
 		for _, action := range []Action{ActionInstall, ActionUpdate, ActionRemove, ActionCheckUpdate} {
 			script, ok := c.Script(dep.ID, action)
@@ -286,15 +288,15 @@ func assertScriptHygiene(t *testing.T, id string, action Action, script string) 
 	}
 }
 
-// TestEmbeddedScriptsShellcheck lints every embedded script body with
+// TestPublishedScriptsShellcheck lints every published script body with
 // `shellcheck -s sh` (WD-CAT-003). It skips when shellcheck is not installed.
-func TestEmbeddedScriptsShellcheck(t *testing.T) {
+func TestPublishedScriptsShellcheck(t *testing.T) {
 	if _, err := exec.LookPath("shellcheck"); err != nil {
 		t.Skip("shellcheck not installed")
 	}
-	c, err := Load()
+	c, err := loadPublishedCatalog()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
 	}
 	for _, dep := range c.List() {
 		for _, ref := range dep.Scripts.configured() {
@@ -316,14 +318,14 @@ func TestEmbeddedScriptsShellcheck(t *testing.T) {
 	}
 }
 
-func TestEmbeddedDigestsAreStableAndDistinct(t *testing.T) {
-	first, err := Load()
+func TestPublishedDigestsAreStableAndDistinct(t *testing.T) {
+	first, err := loadPublishedCatalog()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
 	}
-	second, err := Load()
+	second, err := loadPublishedCatalog()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
 	}
 	seen := map[string]string{}
 	for _, dep := range first.List() {
@@ -789,9 +791,9 @@ func TestDigestIgnoresUnreferencedFiles(t *testing.T) {
 }
 
 func TestGetReturnsCopies(t *testing.T) {
-	c, err := Load()
+	c, err := loadPublishedCatalog()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
 	}
 	dep, _ := c.Get("codex")
 	dep.Provides[0] = "mutated"
@@ -803,9 +805,9 @@ func TestGetReturnsCopies(t *testing.T) {
 }
 
 func TestMustGetPanicsOnUnknownID(t *testing.T) {
-	c, err := Load()
+	c, err := loadPublishedCatalog()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
 	}
 	defer func() {
 		if recover() == nil {
@@ -813,4 +815,40 @@ func TestMustGetPanicsOnUnknownID(t *testing.T) {
 		}
 	}()
 	c.MustGet("ghost")
+}
+
+// Fixtures are generated by Supermarket's export-dependency-fixtures command
+// using its pinned Bun version. They are never linked into the Server.
+func loadPublishedCatalog() (*Catalog, error) {
+	rootFS, err := os.OpenRoot("testdata/remote")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rootFS.Close() }()
+	raw, err := rootFS.ReadFile("index.json")
+	if err != nil {
+		return nil, err
+	}
+	index, err := DecodeIndex(raw)
+	if err != nil {
+		return nil, err
+	}
+	definitions := make([]Definition, 0, len(index.Data))
+	for _, descriptor := range index.Data {
+		root := descriptor.DependencyID
+		metadata, err := rootFS.ReadFile(filepath.Join(root, "release.json"))
+		if err != nil {
+			return nil, err
+		}
+		archive, err := rootFS.ReadFile(filepath.Join(root, "artifact.tar.gz"))
+		if err != nil {
+			return nil, err
+		}
+		definition, err := FromArtifact(metadata, descriptor.Revision, archive, "https://supermarket.example")
+		if err != nil {
+			return nil, err
+		}
+		definitions = append(definitions, definition)
+	}
+	return New(definitions)
 }

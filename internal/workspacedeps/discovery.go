@@ -17,12 +17,27 @@ import (
 // State is the on-disk state.json of a managed dependency (design §6). It is
 // the source of truth for what the Server installed.
 type State struct {
-	DependencyID    string            `json:"dependency_id"`
-	Version         string            `json:"version"`
-	InstalledAt     time.Time         `json:"installed_at"`
-	ManifestDigest  string            `json:"manifest_digest"`
-	Entrypoints     map[string]string `json:"entrypoints"`
-	PreviousVersion string            `json:"previous_version,omitempty"`
+	SourceURL          string                `json:"source_url,omitempty"`
+	RegistryID         string                `json:"registry_id,omitempty"`
+	DefinitionRevision string                `json:"definition_revision,omitempty"`
+	Previous           *PreviousInstallation `json:"previous,omitempty"`
+	DependencyID       string                `json:"dependency_id"`
+	Version            string                `json:"version"`
+	InstalledAt        time.Time             `json:"installed_at"`
+	ManifestDigest     string                `json:"manifest_digest"`
+	Entrypoints        map[string]string     `json:"entrypoints"`
+	PreviousVersion    string                `json:"previous_version,omitempty"`
+}
+
+// PreviousInstallation binds the rollback binary to its own publication and
+// command entries. It does not authorize fetching or executing a script.
+type PreviousInstallation struct {
+	Version            string            `json:"version"`
+	SourceURL          string            `json:"source_url,omitempty"`
+	RegistryID         string            `json:"registry_id,omitempty"`
+	DefinitionRevision string            `json:"definition_revision,omitempty"`
+	ManifestDigest     string            `json:"manifest_digest"`
+	Entrypoints        map[string]string `json:"entrypoints"`
 }
 
 // Source says where a discovered copy of a dependency comes from, in

@@ -1,0 +1,74 @@
+{
+  "schema_version": "1",
+  "registry_id": "memoh",
+  "dependency_id": "node",
+  "manifest": {
+    "schema_version": "1",
+    "id": "node",
+    "name": "Node.js",
+    "description": "JavaScript runtime with npm and npx.",
+    "icon": "icon.svg",
+    "translations": {
+      "en": {
+        "description": "JavaScript runtime with npm and npx"
+      },
+      "zh": {
+        "description": "JavaScript 运行时，含 npm 与 npx"
+      },
+      "ja": {
+        "description": "JavaScript ランタイム（npm・npx 付き）"
+      }
+    },
+    "category": "runtime",
+    "source": "image",
+    "requires": [],
+    "provides": [
+      "node",
+      "npm",
+      "npx"
+    ],
+    "platforms": [
+      {
+        "os": "linux",
+        "arch": [
+          "amd64",
+          "arm64"
+        ],
+        "libc": "glibc"
+      },
+      {
+        "os": "darwin",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "timeouts": {
+      "install": 1200,
+      "remove": 300,
+      "check_update": 60,
+      "version": 30
+    },
+    "scripts": {
+      "install": "install.sh",
+      "update": "update.sh",
+      "remove": "remove.sh",
+      "check_update": "check-update.sh"
+    }
+  },
+  "manifest_digest": "sha256:3e3a1d3badd6151bdae6478fcc5095736223c60e2c6529d701d9d3f5b2db8f18",
+  "artifact": {
+    "format": "memoh_dependency_v1",
+    "digest": "c86c3877fb2a47d6e5fd1a083f3c6ec4fb2a0cd7bbf8d24099efffb9837601cb",
+    "size": 4042,
+    "uncompressed_size": 13241,
+    "archive_size": 18944,
+    "file_count": 6,
+    "content_type": "application/gzip"
+  },
+  "icon": {
+    "digest": "3856aaf4a29f690822d2d27653015019893fa082a57f382043429b8b649bc892",
+    "size": 1696,
+    "content_type": "image/svg+xml"
+  }
+}

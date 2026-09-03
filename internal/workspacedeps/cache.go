@@ -8,9 +8,10 @@ import (
 // Snapshot is one cached discovery pass for a (bot, target) pair (design
 // §8.5): the probed platform plus every observed dependency.
 type Snapshot struct {
-	Platform Platform
-	Observed map[string]Observed
-	At       time.Time
+	CatalogDigest string
+	Platform      Platform
+	Observed      map[string]Observed
+	At            time.Time
 }
 
 type cacheKey struct {
@@ -124,6 +125,17 @@ func cloneObserved(observed map[string]Observed) map[string]Observed {
 	}
 	cloned := make(map[string]Observed, len(observed))
 	for id, obs := range observed {
+		obs.Candidates = append([]Candidate(nil), obs.Candidates...)
+		if obs.State != nil {
+			state := *obs.State
+			state.Entrypoints = cloneStringMap(state.Entrypoints)
+			if state.Previous != nil {
+				previous := *state.Previous
+				previous.Entrypoints = cloneStringMap(previous.Entrypoints)
+				state.Previous = &previous
+			}
+			obs.State = &state
+		}
 		cloned[id] = obs
 	}
 	return cloned

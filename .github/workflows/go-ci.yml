@@ -12,7 +12,7 @@ on:
       - "db/postgres/migrations/**/*.sql"
       - "db/pgvector/queries/**/*.sql"
       - "db/pgvector/migrations/**/*.sql"
-      - "internal/workspacedeps/catalog/deps/**"
+      - "internal/workspacedeps/catalog/**"
       - ".github/workflows/go-ci.yml"
   pull_request:
     branches: ["main"]
@@ -25,7 +25,7 @@ on:
       - "db/postgres/migrations/**/*.sql"
       - "db/pgvector/queries/**/*.sql"
       - "db/pgvector/migrations/**/*.sql"
-      - "internal/workspacedeps/catalog/deps/**"
+      - "internal/workspacedeps/catalog/**"
       - ".github/workflows/go-ci.yml"
   workflow_dispatch:
 
@@ -54,10 +54,6 @@ jobs:
         with:
           version: v2.10.1
           only-new-issues: true
-      - name: shellcheck workspace dependency scripts
-        # Catalog scripts run inside workspaces as POSIX sh (design WD-CAT-003);
-        # ubuntu-latest ships shellcheck.
-        run: shellcheck -s sh internal/workspacedeps/catalog/deps/*/*.sh
 
   test:
     name: Test

@@ -1,0 +1,73 @@
+{
+  "schema_version": "1",
+  "registry_id": "memoh",
+  "dependency_id": "uv",
+  "manifest": {
+    "schema_version": "1",
+    "id": "uv",
+    "name": "uv",
+    "description": "Python package and project manager.",
+    "icon": "icon.svg",
+    "translations": {
+      "en": {
+        "description": "Python package and project manager"
+      },
+      "zh": {
+        "description": "Python 包与项目管理器"
+      },
+      "ja": {
+        "description": "Python のパッケージ・プロジェクト管理ツール"
+      }
+    },
+    "category": "runtime",
+    "source": "image",
+    "requires": [],
+    "provides": [
+      "uv",
+      "uvx"
+    ],
+    "platforms": [
+      {
+        "os": "linux",
+        "arch": [
+          "amd64",
+          "arm64"
+        ],
+        "libc": "glibc"
+      },
+      {
+        "os": "darwin",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "timeouts": {
+      "install": 1200,
+      "remove": 300,
+      "check_update": 60,
+      "version": 30
+    },
+    "scripts": {
+      "install": "install.sh",
+      "update": "update.sh",
+      "remove": "remove.sh",
+      "check_update": "check-update.sh"
+    }
+  },
+  "manifest_digest": "sha256:81b46d4f3cc80e84e2b69c7ad140e180d82945c560c8d5414053e51d69420511",
+  "artifact": {
+    "format": "memoh_dependency_v1",
+    "digest": "69c03dabee562b7c5e36760d7dd22cd7f8ed2d6f330a863cdb15e0ac604e0bad",
+    "size": 3645,
+    "uncompressed_size": 12842,
+    "archive_size": 18432,
+    "file_count": 6,
+    "content_type": "application/gzip"
+  },
+  "icon": {
+    "digest": "1526e0f7060de53a8533bd4bd6d3b2e2de3f5a6b099efa4fad4262f7330a967f",
+    "size": 444,
+    "content_type": "image/svg+xml"
+  }
+}

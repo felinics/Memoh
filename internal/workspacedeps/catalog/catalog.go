@@ -1,15 +1,9 @@
-// Package catalog embeds the workspace dependency catalog: one directory per
-// dependency holding a manifest (dependency.yaml) and the POSIX sh scripts
-// that install, update, and remove it.
-//
-// The catalog is the source of truth for which dependencies Memoh supports,
-// how they are installed and updated, and which of them are pinned to a fixed
-// version (design WD-MODEL-001). It is compiled into the Server binary, never
-// stored in the database, and never read from the workspace.
+// Package catalog validates immutable workspace dependency definitions.
+// Official definitions are published by Supermarket; the Server contains
+// only their parser and execution contract, never an embedded catalog.
 package catalog
 
 import (
-	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,11 +12,6 @@ import (
 	"sort"
 	"strings"
 )
-
-//go:embed deps
-var embeddedDeps embed.FS
-
-const embeddedRoot = "deps"
 
 var idPattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
@@ -36,9 +25,10 @@ type Catalog struct {
 }
 
 type entry struct {
-	dir     string
-	dep     Dependency
-	scripts map[Action]scriptFile
+	dir       string
+	dep       Dependency
+	scripts   map[Action]scriptFile
+	iconBytes []byte
 }
 
 type scriptFile struct {
@@ -47,13 +37,17 @@ type scriptFile struct {
 	found   bool
 }
 
-// Load reads and validates the catalog embedded in the Server binary.
-func Load() (*Catalog, error) {
-	sub, err := fs.Sub(embeddedDeps, embeddedRoot)
-	if err != nil {
-		return nil, fmt.Errorf("catalog: open embedded %s: %w", embeddedRoot, err)
+// Empty constructs a valid catalog before any remote definitions are cached.
+func Empty() *Catalog { return &Catalog{byID: make(map[string]*entry)} }
+
+// Fingerprint binds discovery results to the definitions that produced them.
+func (c *Catalog) Fingerprint() string {
+	files := make(map[string][]byte, len(c.byID))
+	for id, loaded := range c.byID {
+		dep := loaded.dep
+		files[id] = []byte(dep.SourceURL + "\x00" + dep.Revision + "\x00" + dep.ManifestDigest)
 	}
-	return LoadFS(sub)
+	return DigestFiles(files)
 }
 
 // LoadFS reads a catalog from fsys, treating every directory at its root as
@@ -85,7 +79,13 @@ func LoadFS(fsys fs.FS) (*Catalog, error) {
 }
 
 func loadEntry(fsys fs.FS, dir string) (*entry, error) {
-	manifest, err := fs.ReadFile(fsys, path.Join(dir, ManifestFileName))
+	return loadEntryFiles(dir, func(name string) ([]byte, error) {
+		return fs.ReadFile(fsys, path.Join(dir, name))
+	})
+}
+
+func loadEntryFiles(dir string, read func(string) ([]byte, error)) (*entry, error) {
+	manifest, err := read(ManifestFileName)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %s: read %s: %w", dir, ManifestFileName, err)
 	}
@@ -98,7 +98,7 @@ func loadEntry(fsys fs.FS, dir string) (*entry, error) {
 	for _, ref := range dep.Scripts.configured() {
 		script := scriptFile{name: ref.file}
 		if isPlainFileName(ref.file) {
-			content, err := fs.ReadFile(fsys, path.Join(dir, ref.file))
+			content, err := read(ref.file)
 			switch {
 			case err == nil:
 				script.found = true
@@ -129,6 +129,35 @@ func (c *Catalog) Validate() error {
 	seen := make(map[string]bool, len(c.entries))
 	for _, loaded := range c.entries {
 		errs = append(errs, loaded.validate(c, seen)...)
+	}
+	visiting, visited := map[string]bool{}, map[string]bool{}
+	var visit func(string) error
+	visit = func(id string) error {
+		if visiting[id] {
+			return fmt.Errorf("catalog: dependency cycle at %q", id)
+		}
+		if visited[id] {
+			return nil
+		}
+		loaded, ok := c.byID[id]
+		if !ok {
+			return nil
+		} // Missing references are reported above.
+		visiting[id] = true
+		for _, required := range loaded.dep.Requires {
+			if err := visit(required); err != nil {
+				return err
+			}
+		}
+		delete(visiting, id)
+		visited[id] = true
+		return nil
+	}
+	for _, loaded := range c.entries {
+		if err := visit(loaded.dep.ID); err != nil {
+			errs = append(errs, err)
+			break
+		}
 	}
 	return errors.Join(errs...)
 }
