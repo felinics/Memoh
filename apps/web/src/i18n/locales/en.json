@@ -2307,7 +2307,7 @@
         "dependency": "Dependency",
         "installPath": "Install location",
         "version": "Version",
-        "versionPlaceholder": "e.g. 0.151.0",
+        "versionPlaceholder": "Latest",
         "versionHelp": "Leave blank to install the latest version.",
         "remoteWarningTitle": "Runs on your computer \"{name}\"",
         "remoteWarningDescription": "The script downloads and writes files on that computer.",

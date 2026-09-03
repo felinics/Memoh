@@ -2307,7 +2307,7 @@
         "dependency": "依赖",
         "installPath": "安装位置",
         "version": "版本",
-        "versionPlaceholder": "例如 0.151.0",
+        "versionPlaceholder": "最新版本",
         "versionHelp": "留空则安装最新版。",
         "remoteWarningTitle": "将在你的电脑「{name}」上执行",
         "remoteWarningDescription": "脚本会在这台电脑上下载并写入文件。",

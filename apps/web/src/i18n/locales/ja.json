@@ -2296,7 +2296,7 @@
         "dependency": "依存関係",
         "installPath": "インストール先",
         "version": "バージョン",
-        "versionPlaceholder": "例：0.151.0",
+        "versionPlaceholder": "最新バージョン",
         "versionHelp": "空欄のままにすると最新バージョンをインストールします。",
         "remoteWarningTitle": "お使いのコンピューター「{name}」で実行されます",
         "remoteWarningDescription": "スクリプトはそのコンピューター上でファイルをダウンロードして書き込みます。",
