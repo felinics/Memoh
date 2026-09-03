@@ -168,32 +168,3 @@ func TestUpdateWorkerReportsListErrors(t *testing.T) {
 		t.Errorf("RunOnce = %d, %v; want 0 and the probe error", checks, err)
 	}
 }
-
-func TestAlignmentScan(t *testing.T) {
-	f := newServiceFixture(t)
-	f.present("agent-x", SourceManaged, "1.9.0", nil)
-	f.ws.setState("bot-b", TargetNative, WorkspaceNotRunning)
-	f.ws.setState("bot-c", TargetNative, WorkspaceMissing)
-
-	pending, err := f.svc.AlignmentScan(f.ctx(), []string{"bot-a", "bot-b", "bot-c"})
-	if err != nil {
-		t.Fatalf("AlignmentScan: %v", err)
-	}
-	if pending != 1 {
-		t.Errorf("pending = %d, want 1 (bot-a only; stopped bots are skipped)", pending)
-	}
-	if f.discovered() != 1 {
-		t.Errorf("discover calls = %d, want 1", f.discovered())
-	}
-	rec, ok := f.store.get(InstallationKey{BotID: "bot-a", WorkspaceTargetID: TargetNative, DependencyID: "agent-x"})
-	if !ok || rec.InstalledVersion != "1.9.0" || rec.LatestVersion != "2.0.0" {
-		t.Errorf("adopted record = %+v, want installed 1.9.0 with latest = pin", rec)
-	}
-
-	// A second scan re-discovers even though the cache is warm.
-	f.present("agent-x", SourceManaged, "2.0.0", nil)
-	pending, err = f.svc.AlignmentScan(f.ctx(), []string{"bot-a"})
-	if err != nil || pending != 0 || f.discovered() != 2 {
-		t.Errorf("second scan = %d, %v (discover calls = %d)", pending, err, f.discovered())
-	}
-}

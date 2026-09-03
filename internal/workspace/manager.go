@@ -731,25 +731,6 @@ func (m *Manager) ListBots(ctx context.Context) ([]string, error) {
 	return botIDs, nil
 }
 
-// RunningNativeBotIDs returns the bot IDs whose native workspace container
-// task is running right now. It reads the container runtime, not the
-// database, so it reflects what reconciliation actually managed to start.
-func (m *Manager) RunningNativeBotIDs(ctx context.Context) ([]string, error) {
-	containers, err := m.service.ListContainers(ctx)
-	if err != nil {
-		return nil, err
-	}
-	botIDs := make([]string, 0, len(containers))
-	for _, info := range containers {
-		botID, ok := BotIDFromContainerInfo(info)
-		if !ok || !m.isTaskRunning(ctx, info.ID) {
-			continue
-		}
-		botIDs = append(botIDs, botID)
-	}
-	return botIDs, nil
-}
-
 func (m *Manager) Start(ctx context.Context, botID string) error {
 	image, err := m.resolveWorkspaceImage(ctx, botID)
 	if err != nil {

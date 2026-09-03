@@ -24,11 +24,12 @@ import (
 // dependency routes use (design docs/design/workspace-dependencies.md §11).
 type workspaceDependencyService interface {
 	Dependency(depID string) (catalog.Dependency, bool)
+	Catalog() []catalog.Dependency
 	List(ctx context.Context, botID, targetID string) (workspacedeps.ListResult, error)
 	Preflight(ctx context.Context, botID, targetID string, depIDs []string) (workspacedeps.PreflightResult, error)
-	Install(ctx context.Context, botID, targetID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
-	Update(ctx context.Context, botID, targetID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
-	Reinstall(ctx context.Context, botID, targetID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+	Install(ctx context.Context, botID, targetID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+	Update(ctx context.Context, botID, targetID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+	Reinstall(ctx context.Context, botID, targetID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Remove(ctx context.Context, botID, targetID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Rollback(ctx context.Context, botID, targetID, depID string) (workspacedeps.OperationResult, error)
 	CheckUpdates(ctx context.Context, botID, targetID string) (workspacedeps.ListResult, error)
@@ -78,28 +79,75 @@ type WorkspaceDependencyItem struct {
 	PlatformReason    string `json:"platform_reason,omitempty" enums:"unsupported_platform"`
 	// Status is omitted when the dependency has no record and was not found
 	// in the workspace.
-	Status           string `json:"status,omitempty" enums:"installed,installing,updating,removing,missing,failed"`
+	Status string `json:"status,omitempty" enums:"installed,installing,updating,removing,missing,failed"`
+	// InstalledVersion is the version of the copy in effect: the one the
+	// runtime launches and the one first on PATH (managed, then image, then
+	// PATH).
 	InstalledVersion string `json:"installed_version,omitempty"`
-	// RequiredVersion is the Server pin for agent dependencies.
-	RequiredVersion string `json:"required_version,omitempty"`
-	// NeedsAlignment is set for installed agent dependencies whose version
-	// differs from RequiredVersion.
-	NeedsAlignment bool `json:"needs_alignment,omitempty"`
-	// LatestVersion is the pin for agent dependencies and the last upstream
-	// check result for tool dependencies.
+	// ImageVersion is the version of the copy the workspace image ships,
+	// omitted when the image has none. It is the baseline a managed overlay
+	// sits on and what remove returns to.
+	ImageVersion string `json:"image_version,omitempty"`
+	// Overlay is set when the copy in effect is a managed one installed over
+	// an image copy.
+	Overlay bool `json:"overlay,omitempty"`
+	// LatestVersion is the last upstream check result, omitted until a check
+	// ran.
 	LatestVersion string `json:"latest_version,omitempty"`
-	// UpdateAvailable is set for installed tool dependencies whose last
-	// upstream check reported a newer version.
+	// UpdateAvailable is set for installed dependencies whose last upstream
+	// check reported a version other than the one in effect.
 	UpdateAvailable bool       `json:"update_available,omitempty"`
 	LastCheckedAt   *time.Time `json:"last_checked_at,omitempty"`
 	LastError       string     `json:"last_error,omitempty"`
 	// PreviousVersion is the version rollback would switch back to.
 	PreviousVersion string `json:"previous_version,omitempty"`
-	// InstallPath is the dependency home for managed dependencies and the
-	// discovered command path for image-provided ones.
+	// InstallPath is the dependency home when a managed copy is in effect or
+	// can be installed, and the discovered command path when the image copy
+	// is in effect.
 	InstallPath string `json:"install_path,omitempty"`
 	// Actions lists what may be requested right now.
 	Actions []string `json:"actions" enums:"install,update,reinstall,remove,rollback,check_update"`
+}
+
+// WorkspaceDependencyCatalogPlatform is one (os, arch set, libc) tuple a
+// catalog dependency can be installed on.
+type WorkspaceDependencyCatalogPlatform struct {
+	OS   string   `json:"os"`
+	Arch []string `json:"arch"`
+	// Libc is empty when the libc flavour does not matter for the OS.
+	Libc string `json:"libc,omitempty"`
+}
+
+// WorkspaceDependencyCatalogItem is one catalog dependency as declared by its
+// manifest, independent of any bot or workspace.
+type WorkspaceDependencyCatalogItem struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Icon        string `json:"icon,omitempty"`
+	// Category is agent, runtime, or tool.
+	Category string `json:"category" enums:"agent,runtime,tool"`
+	// Provides lists the commands the dependency makes available.
+	Provides  []string                             `json:"provides"`
+	Platforms []WorkspaceDependencyCatalogPlatform `json:"platforms"`
+	// Installable is set when the catalog has an install script for the
+	// dependency, i.e. it can be installed into a workspace (as a managed
+	// overlay when the image already ships it).
+	Installable bool `json:"installable"`
+	// HasImageBaseline is set when the workspace image ships a copy of the
+	// dependency; removing a managed overlay returns to that copy.
+	HasImageBaseline bool `json:"has_image_baseline"`
+	// VersionPin is the version every install produces when the manifest
+	// locks one; omitted when installs follow the latest release.
+	VersionPin string `json:"version_pin,omitempty"`
+	// ActionsSupported lists the actions the catalog gives the dependency,
+	// before any workspace state is considered.
+	ActionsSupported []string `json:"actions_supported" enums:"install,update,reinstall,remove,rollback,check_update"`
+}
+
+// WorkspaceDependencyCatalogResponse is the whole dependency catalog.
+type WorkspaceDependencyCatalogResponse struct {
+	Items []WorkspaceDependencyCatalogItem `json:"items"`
 }
 
 // WorkspaceDependencyListResponse is the reconciled dependency view of one
@@ -121,9 +169,17 @@ type WorkspaceDependencyPreflightRequest struct {
 type WorkspaceDependencyPreflightItem struct {
 	DependencyID     string `json:"dependency_id"`
 	Name             string `json:"name"`
-	RequiredVersion  string `json:"required_version"`
 	InstalledVersion string `json:"installed_version,omitempty"`
-	State            string `json:"state" enums:"satisfied,missing,version_mismatch,platform_unsupported,unknown_dependency"`
+	State            string `json:"state" enums:"satisfied,missing,platform_unsupported,unknown_dependency"`
+}
+
+// WorkspaceDependencyInstallRequest is the optional body of install, update,
+// and reinstall.
+type WorkspaceDependencyInstallRequest struct {
+	// Version to install. Empty (or no body) installs the latest version the
+	// catalog script resolves, or the manifest pin when the dependency has
+	// one. The version recorded afterwards is the one the script reports.
+	Version string `json:"version,omitempty"`
 }
 
 // WorkspaceDependencyPreflightResponse reports whether the requested
@@ -165,8 +221,9 @@ type WorkspaceDependencyScriptResponse struct {
 
 // WorkspaceDependencyStreamEvent documents the SSE frames of install, update,
 // reinstall, and remove. Type selects which fields are present: started
-// carries dependency_id and version; log carries stream and data; done
-// carries version and entrypoints; error carries the Problem fields.
+// carries dependency_id and the requested version (absent for latest); log
+// carries stream and data; done carries the installed version and
+// entrypoints; error carries the Problem fields.
 //
 // codesync(workspace-dependency-stream): keep in sync with
 // apps/web/src/composables/api/useWorkspaceDependencyStream.ts.
@@ -211,6 +268,27 @@ type workspaceDependencyErrorEvent struct {
 	Detail    string            `json:"detail,omitempty"`
 	Message   string            `json:"message"`
 	RequestID string            `json:"request_id,omitempty"`
+}
+
+// ListWorkspaceDependencyCatalog godoc
+// @Summary List the workspace dependency catalog
+// @Description Every dependency the catalog declares, as its manifest describes it: what it provides, where it installs, whether it can be installed and whether the workspace image ships a baseline copy. Reads no workspace and needs no bot; the Supermarket shows it before a bot is chosen.
+// @Tags containerd
+// @Produce json
+// @Success 200 {object} WorkspaceDependencyCatalogResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 503 {object} apperror.Problem
+// @Router /workspace-dependencies/catalog [get].
+func (h *ContainerdHandler) ListWorkspaceDependencyCatalog(c echo.Context) error {
+	if h.workspaceDeps == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace dependency service not configured")
+	}
+	deps := h.workspaceDeps.Catalog()
+	resp := WorkspaceDependencyCatalogResponse{Items: make([]WorkspaceDependencyCatalogItem, 0, len(deps))}
+	for _, dep := range deps {
+		resp.Items = append(resp.Items, workspaceDependencyCatalogItem(dep))
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 // ListWorkspaceDependencies godoc
@@ -275,7 +353,7 @@ func (h *ContainerdHandler) CheckWorkspaceDependencyUpdates(c echo.Context) erro
 
 // PreflightWorkspaceDependencies godoc
 // @Summary Check whether dependencies are ready
-// @Description Reports for each requested dependency whether it is installed at the required version. Never starts the workspace: when it is not running, items is empty and workspace_state says why.
+// @Description Reports for each requested dependency whether a copy is installed, whatever its version. Never starts the workspace: when it is not running, items is empty and workspace_state says why.
 // @Tags containerd
 // @Accept json
 // @Produce json
@@ -320,7 +398,6 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 		items = append(items, WorkspaceDependencyPreflightItem{
 			DependencyID:     item.DependencyID,
 			Name:             item.Name,
-			RequiredVersion:  item.RequiredVersion,
 			InstalledVersion: item.InstalledVersion,
 			State:            preflightState(item),
 		})
@@ -333,12 +410,14 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 
 // InstallWorkspaceDependency godoc
 // @Summary Install a workspace dependency
-// @Description Runs the catalog install script and streams its output. A stopped native workspace is started first. Events: started, log, done, error.
+// @Description Runs the catalog install script and streams its output. The optional body names the version to install; without one the script installs the latest version (or the manifest pin). For a dependency the image already ships this installs a managed overlay that takes precedence over the image copy. A stopped native workspace is started first. Events: started, log, done, error.
 // @Tags containerd
+// @Accept json
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
 // @Param workspace_target_id query string false "Workspace target ID (defaults to the bot's current target)"
+// @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
@@ -352,12 +431,14 @@ func (h *ContainerdHandler) InstallWorkspaceDependency(c echo.Context) error {
 
 // UpdateWorkspaceDependency godoc
 // @Summary Update a workspace dependency
-// @Description Runs the catalog update script (or the install script when the manifest has none) and streams its output. For agent dependencies this aligns the installed copy with the version this Server requires.
+// @Description Runs the catalog update script (or the install script when the manifest has none) and streams its output. The optional body names the version to update to; without one the script picks the latest version (or the manifest pin). The previous version is kept for rollback.
 // @Tags containerd
+// @Accept json
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
 // @Param workspace_target_id query string false "Workspace target ID (defaults to the bot's current target)"
+// @Param payload body WorkspaceDependencyInstallRequest false "Version to update to (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
@@ -371,12 +452,14 @@ func (h *ContainerdHandler) UpdateWorkspaceDependency(c echo.Context) error {
 
 // ReinstallWorkspaceDependency godoc
 // @Summary Reinstall a workspace dependency
-// @Description Runs the catalog reinstall script, or remove followed by install, and streams the output.
+// @Description Runs the catalog reinstall script, or remove followed by install, and streams the output. The optional body names the version to install; without one the script picks the latest version (or the manifest pin).
 // @Tags containerd
+// @Accept json
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
 // @Param workspace_target_id query string false "Workspace target ID (defaults to the bot's current target)"
+// @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
@@ -390,7 +473,7 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 
 // RemoveWorkspaceDependency godoc
 // @Summary Remove a workspace dependency
-// @Description Runs the catalog remove script, deletes the generated shims, drops the installation record, and streams the output.
+// @Description Runs the catalog remove script, deletes the generated shims, drops the installation record, and streams the output. For a dependency the image ships this removes the managed overlay only; the image copy becomes the one in effect again.
 // @Tags containerd
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
@@ -404,7 +487,9 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/dependencies/{dep_id} [delete].
 func (h *ContainerdHandler) RemoveWorkspaceDependency(c echo.Context) error {
-	return h.streamWorkspaceDependencyOperation(c, catalog.ActionRemove, workspaceDependencyService.Remove)
+	return h.streamWorkspaceDependencyOperation(c, catalog.ActionRemove, func(svc workspaceDependencyService, ctx context.Context, botID, targetID, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
+		return svc.Remove(ctx, botID, targetID, depID, sink)
+	})
 }
 
 // RollbackWorkspaceDependency godoc
@@ -503,15 +588,17 @@ func (h *ContainerdHandler) GetWorkspaceDependencyScript(c echo.Context) error {
 }
 
 // workspaceDependencyOperation is the shape shared by the four streamed
-// service methods.
-type workspaceDependencyOperation func(svc workspaceDependencyService, ctx context.Context, botID, targetID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+// service methods. version is the requested version for install-like
+// actions and ignored by remove.
+type workspaceDependencyOperation func(svc workspaceDependencyService, ctx context.Context, botID, targetID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 
 // streamWorkspaceDependencyOperation runs one mutating action as an SSE
 // stream: started, then one log frame per output line, then done or error.
-// Request validation happens before the stream opens so unknown dependencies
-// and unsupported actions are ordinary Problem responses; everything the
-// service reports afterwards becomes an error frame carrying the same code.
-// Closing the request cancels the operation through its context.
+// Request validation happens before the stream opens so unknown dependencies,
+// unsupported actions, and malformed bodies are ordinary Problem responses;
+// everything the service reports afterwards becomes an error frame carrying
+// the same code. Closing the request cancels the operation through its
+// context.
 func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, action catalog.Action, run workspaceDependencyOperation) error {
 	botID, svc, err := h.workspaceDependencyRequest(c)
 	if err != nil {
@@ -521,8 +608,12 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	if err != nil {
 		return err
 	}
-	if dep.IsImageProvided() {
+	if !workspacedeps.ActionSupported(dep, action) {
 		return apperror.New(apperror.CodeWorkspaceDependencyActionUnsupported, nil)
+	}
+	version, err := workspaceDependencyRequestedVersion(c, action)
+	if err != nil {
+		return err
 	}
 	ctx, targetID, err := h.workspaceDependencyTarget(c, botID, "")
 	if err != nil {
@@ -535,11 +626,11 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	stream := newWorkspaceDependencyStream(writer, flusher, workspaceDependencyHeartbeatInterval)
 	defer stream.close()
 
-	stream.send(workspaceDependencyStartedEvent{Type: "started", DependencyID: dep.ID, Version: dep.Version.Pin})
+	stream.send(workspaceDependencyStartedEvent{Type: "started", DependencyID: dep.ID, Version: version})
 	sink := workspacedeps.LogFunc(func(name, line string) {
 		stream.send(workspaceDependencyLogEvent{Type: "log", Stream: name, Data: line})
 	})
-	result, err := run(svc, ctx, botID, targetID, dep.ID, sink)
+	result, err := run(svc, ctx, botID, targetID, dep.ID, version, sink)
 	if err != nil {
 		requestID := httpx.RequestID(c)
 		h.logger.Warn("workspace dependency operation failed",
@@ -649,6 +740,19 @@ func (h *ContainerdHandler) workspaceDependencyTarget(c echo.Context, botID, ove
 		return nil, "", workspaceTargetHTTPError(h.logger, err)
 	}
 	return ctx, targetID, nil
+}
+
+// workspaceDependencyRequestedVersion reads the optional install request
+// body. Remove takes none; a request without a body means latest.
+func workspaceDependencyRequestedVersion(c echo.Context, action catalog.Action) (string, error) {
+	if action == catalog.ActionRemove || c.Request().ContentLength == 0 {
+		return "", nil
+	}
+	var req WorkspaceDependencyInstallRequest
+	if err := c.Bind(&req); err != nil {
+		return "", apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, err, nil)
+	}
+	return strings.TrimSpace(req.Version), nil
 }
 
 // workspaceDependencyParam resolves the dep_id path parameter against the
@@ -761,6 +865,33 @@ func workspaceDependencyListResponse(result workspacedeps.ListResult) WorkspaceD
 	return resp
 }
 
+func workspaceDependencyCatalogItem(dep catalog.Dependency) WorkspaceDependencyCatalogItem {
+	item := WorkspaceDependencyCatalogItem{
+		ID:               dep.ID,
+		Name:             dep.Name,
+		Description:      dep.Description,
+		Icon:             dep.Icon,
+		Category:         string(dep.Category),
+		Provides:         append([]string{}, dep.Provides...),
+		Platforms:        make([]WorkspaceDependencyCatalogPlatform, 0, len(dep.Platforms)),
+		Installable:      workspacedeps.ActionSupported(dep, catalog.ActionInstall),
+		HasImageBaseline: dep.HasImageBaseline(),
+		VersionPin:       dep.Version.Pin,
+		ActionsSupported: make([]string, 0, len(workspacedeps.UserActions)),
+	}
+	for _, platform := range dep.Platforms {
+		item.Platforms = append(item.Platforms, WorkspaceDependencyCatalogPlatform{
+			OS:   platform.OS,
+			Arch: append([]string{}, platform.Arch...),
+			Libc: platform.Libc,
+		})
+	}
+	for _, action := range workspacedeps.SupportedActions(dep) {
+		item.ActionsSupported = append(item.ActionsSupported, string(action))
+	}
+	return item
+}
+
 func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) WorkspaceDependencyItem {
 	dep := entry.Dependency
 	item := WorkspaceDependencyItem{
@@ -774,8 +905,8 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 		PlatformSupported: entry.PlatformSupported,
 		Status:            string(entry.Status),
 		InstalledVersion:  entry.InstalledVersion,
-		RequiredVersion:   entry.RequiredVersion,
-		NeedsAlignment:    entry.NeedsAlignment,
+		ImageVersion:      entry.ImageVersion,
+		Overlay:           entry.Overlay,
 		LatestVersion:     entry.LatestVersion,
 		UpdateAvailable:   entry.UpdateAvailable,
 		Actions:           make([]string, 0, len(entry.Actions)),
@@ -791,9 +922,9 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 		item.PreviousVersion = strings.TrimSpace(state.PreviousVersion)
 	}
 	switch {
-	case dep.IsImageProvided():
+	case entry.Observed.Present && entry.Observed.Source != workspacedeps.SourceManaged:
 		item.InstallPath = entry.Observed.Command
-	case dataRoot != "":
+	case dataRoot != "" && workspacedeps.ActionSupported(dep, catalog.ActionInstall):
 		item.InstallPath = workspacedeps.Home(dataRoot, dep.ID)
 	}
 	for _, action := range entry.Actions {

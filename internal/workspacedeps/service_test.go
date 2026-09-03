@@ -460,6 +460,25 @@ func (f *serviceFixture) present(depID string, source Source, version string, st
 	}
 }
 
+// presentCandidates marks depID as discovered with several copies, the first
+// of which is the discovery winner (discovery lists managed, then toolkit,
+// then PATH).
+func (f *serviceFixture) presentCandidates(depID string, state *State, candidates ...Candidate) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	winner := candidates[0]
+	f.observed[depID] = Observed{
+		DepID:       depID,
+		Present:     true,
+		Source:      winner.Source,
+		Version:     winner.Version,
+		Command:     winner.Path,
+		Entrypoints: map[string]string{depID: winner.Path},
+		State:       state,
+		Candidates:  candidates,
+	}
+}
+
 func (f *serviceFixture) absent(depID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -584,10 +603,10 @@ func TestListReconcilesThreeStatesAndCaches(t *testing.T) {
 	}
 
 	agent := f.entry(t, result, "agent-x")
-	if agent.Status != StatusInstalled || agent.InstalledVersion != "2.0.0" || agent.RequiredVersion != "2.0.0" || agent.LatestVersion != "2.0.0" || agent.NeedsAlignment {
+	if agent.Status != StatusInstalled || agent.InstalledVersion != "2.0.0" || agent.LatestVersion != "" || agent.UpdateAvailable || agent.Overlay || agent.ImageVersion != "" {
 		t.Errorf("agent-x entry = %+v", agent)
 	}
-	if rec, _ := f.store.get(f.key("agent-x")); rec.InstalledVersion != "2.0.0" || rec.LatestVersion != "2.0.0" || rec.ManifestDigest != "sha256:aaa" {
+	if rec, _ := f.store.get(f.key("agent-x")); rec.InstalledVersion != "2.0.0" || rec.LatestVersion != "" || rec.ManifestDigest != "sha256:aaa" {
 		t.Errorf("agent-x record not corrected: %+v", rec)
 	}
 	if got := actionsOf(agent); got != "update,reinstall,remove" {
@@ -606,8 +625,11 @@ func TestListReconcilesThreeStatesAndCaches(t *testing.T) {
 	if image.Status != StatusInstalled || image.Installation == nil || image.Installation.Source != InstallationSourceImage || image.InstalledVersion != "22.0.0" {
 		t.Errorf("img-z entry = %+v, want adopted as image", image)
 	}
+	if image.ImageVersion != "22.0.0" || image.Overlay {
+		t.Errorf("img-z baseline = %+v, want the toolkit copy as image version and no overlay", image)
+	}
 	if len(image.Actions) != 0 {
-		t.Errorf("img-z actions = %v, want none", image.Actions)
+		t.Errorf("img-z actions = %v, want none without an install script", image.Actions)
 	}
 
 	mac := f.entry(t, result, "mac-only")
@@ -680,26 +702,57 @@ func TestListLeavesInProgressAndFailedRecordsAlone(t *testing.T) {
 	}
 }
 
-func TestListAgentNeedsAlignmentAndToolUpdateAvailable(t *testing.T) {
+// TestListImageBaselineAndOverlay covers the two shapes an installable
+// dependency the image also ships can take: image copy only (a baseline the
+// panel offers to install over) and a managed overlay on top of it (what
+// remove returns to the baseline).
+func TestListImageBaselineAndOverlay(t *testing.T) {
 	f := newServiceFixture(t)
 	f.present("agent-x", SourceToolkit, "1.9.0", nil)
 	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalled, InstalledVersion: "1.0.0", LatestVersion: "1.2.0"})
-	f.present("tool-y", SourceManaged, "1.0.0", &State{Version: "1.0.0", PreviousVersion: "0.9.0"})
+	managedTool := Candidate{Source: SourceManaged, Path: filepath.Join(f.home("tool-y"), "current", "bin", "tool-y"), Version: "1.0.0"}
+	imageTool := Candidate{Source: SourceToolkit, Path: "/opt/memoh/toolkit/bin/tool-y", Version: "0.9.0"}
+	f.presentCandidates("tool-y", &State{Version: "1.0.0", PreviousVersion: "0.9.5"}, managedTool, imageTool)
 
 	result, err := f.svc.List(f.ctx(), testBot, testTarget)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	agent := f.entry(t, result, "agent-x")
-	if !agent.NeedsAlignment || agent.InstalledVersion != "1.9.0" || agent.RequiredVersion != "2.0.0" || agent.Installation.Source != InstallationSourceImage {
-		t.Errorf("agent-x entry = %+v", agent)
+	if agent.InstalledVersion != "1.9.0" || agent.ImageVersion != "1.9.0" || agent.Overlay || agent.Installation.Source != InstallationSourceImage {
+		t.Errorf("agent-x entry = %+v, want the image copy as baseline", agent)
+	}
+	if got := actionsOf(agent); got != "install" {
+		t.Errorf("agent-x actions = %s, want install of an overlay only", got)
 	}
 	tool := f.entry(t, result, "tool-y")
-	if !tool.UpdateAvailable || tool.LatestVersion != "1.2.0" || tool.RequiredVersion != "" {
-		t.Errorf("tool-y entry = %+v", tool)
+	if !tool.Overlay || tool.InstalledVersion != "1.0.0" || tool.ImageVersion != "0.9.0" || tool.Installation.Source != InstallationSourceManaged {
+		t.Errorf("tool-y entry = %+v, want the managed overlay in effect over the image copy", tool)
+	}
+	if !tool.UpdateAvailable || tool.LatestVersion != "1.2.0" {
+		t.Errorf("tool-y update state = %+v", tool)
 	}
 	if got := actionsOf(tool); got != "update,reinstall,remove,rollback,check_update" {
 		t.Errorf("tool-y actions = %s", got)
+	}
+
+	// Removing the overlay uncovers the image copy, which the next discovery
+	// adopts as installed from the image.
+	f.writeState(t, "tool-y", State{Version: "1.0.0", Entrypoints: map[string]string{"tool-y": managedTool.Path}})
+	if _, err := f.svc.Remove(f.ctx(), testBot, testTarget, "tool-y", nil); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	f.presentCandidates("tool-y", nil, imageTool)
+	result, err = f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	tool = f.entry(t, result, "tool-y")
+	if tool.Status != StatusInstalled || tool.Overlay || tool.InstalledVersion != "0.9.0" || tool.ImageVersion != "0.9.0" || tool.Installation.Source != InstallationSourceImage {
+		t.Errorf("tool-y entry after remove = %+v, want the image baseline adopted", tool)
+	}
+	if got := actionsOf(tool); got != "install,check_update" {
+		t.Errorf("tool-y actions after remove = %s", got)
 	}
 }
 
@@ -719,8 +772,8 @@ func TestListWhenWorkspaceUnavailable(t *testing.T) {
 		if tool.Status != StatusInstalled || tool.InstalledVersion != "1.0.0" || len(tool.Actions) != 0 || !tool.PlatformSupported {
 			t.Errorf("offline entry = %+v", tool)
 		}
-		if agent := f.entry(t, result, "agent-x"); agent.RequiredVersion != "2.0.0" {
-			t.Errorf("offline agent entry = %+v", agent)
+		if agent := f.entry(t, result, "agent-x"); agent.Status != "" || agent.Installation != nil || agent.ImageVersion != "" || agent.Overlay {
+			t.Errorf("offline agent entry = %+v, want no discovery facts", agent)
 		}
 	}
 	if f.discovered() != 0 {
@@ -743,7 +796,7 @@ func TestPreflight(t *testing.T) {
 		t.Fatalf("Preflight = %+v", result)
 	}
 	want := map[string]PreflightItem{
-		"agent-x":  {DependencyID: "agent-x", Name: "Agent X", Satisfied: true, InstalledVersion: "2.0.0", RequiredVersion: "2.0.0"},
+		"agent-x":  {DependencyID: "agent-x", Name: "Agent X", Satisfied: true, InstalledVersion: "2.0.0"},
 		"tool-y":   {DependencyID: "tool-y", Name: "Tool Y", Reason: PreflightReasonMissing},
 		"mac-only": {DependencyID: "mac-only", Name: "Mac Only", Reason: PreflightReasonPlatformUnsupported},
 		"nope":     {DependencyID: "nope", Reason: PreflightReasonUnknownDependency},
@@ -754,14 +807,15 @@ func TestPreflight(t *testing.T) {
 		}
 	}
 
+	// Any present copy satisfies preflight; there is no version to match.
 	f.present("agent-x", SourceManaged, "1.9.0", nil)
 	f.svc.cache.Invalidate(testBot)
 	result, err = f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
-	if item := result.Items[0]; item.Satisfied || item.Reason != PreflightReasonVersionMismatch || item.InstalledVersion != "1.9.0" || item.RequiredVersion != "2.0.0" {
-		t.Errorf("mismatch item = %+v", item)
+	if item := result.Items[0]; !item.Satisfied || item.Reason != "" || item.InstalledVersion != "1.9.0" {
+		t.Errorf("older copy item = %+v, want satisfied", item)
 	}
 
 	f.ws.setState(testBot, testTarget, WorkspaceMissing)
@@ -786,7 +840,7 @@ func TestInstallSucceeds(t *testing.T) {
 	}
 	sink := newRecordingSink()
 
-	result, err := f.svc.Install(f.ctx(), testBot, "", "tool-y", sink)
+	result, err := f.svc.Install(f.ctx(), testBot, "", "tool-y", "", sink)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -839,11 +893,11 @@ func TestInstallSucceeds(t *testing.T) {
 		t.Errorf("cache was not invalidated after install (discover calls = %d)", f.discovered())
 	}
 
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", nil); err != nil {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", "", nil); err != nil {
 		t.Fatalf("Install agent: %v", err)
 	}
 	if agentSpec := f.runSpecs()[1]; agentSpec.Version != "2.0.0" {
-		t.Errorf("agent spec version = %q, want the pin", agentSpec.Version)
+		t.Errorf("agent spec version = %q, want the manifest pin when none is requested", agentSpec.Version)
 	}
 	shim, err := os.ReadFile(f.shimPath("agent-x"))
 	if err != nil {
@@ -854,13 +908,58 @@ func TestInstallSucceeds(t *testing.T) {
 	}
 }
 
+// TestInstallRequestedVersion pins the version contract: the requested
+// version reaches the script as MEMOH_DEP_VERSION (over a manifest pin), and
+// the version recorded is the one the script reports, not the request.
+func TestInstallRequestedVersion(t *testing.T) {
+	f := newServiceFixture(t)
+	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, "1.3.1"), nil })
+
+	result, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", " 1.3 ", nil)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if spec := f.runSpecs()[0]; spec.Version != "1.3" {
+		t.Errorf("MEMOH_DEP_VERSION = %q, want the trimmed request", spec.Version)
+	}
+	if result.Version != "1.3.1" || result.Installation.InstalledVersion != "1.3.1" || f.readState(t, "tool-y").Version != "1.3.1" {
+		t.Errorf("recorded version = %+v, want the script's 1.3.1", result)
+	}
+
+	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "agent-x", "2.5.0", nil); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if spec := f.runSpecs()[1]; spec.Version != "2.5.0" {
+		t.Errorf("update MEMOH_DEP_VERSION = %q, want the request over the pin", spec.Version)
+	}
+	if _, err := f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", "1.4.0", nil); err != nil {
+		t.Fatalf("Reinstall: %v", err)
+	}
+	specs := f.runSpecs()
+	if remove, install := specs[2], specs[3]; remove.Action != catalog.ActionRemove || remove.Version != "" || install.Version != "1.4.0" {
+		t.Errorf("reinstall specs = %+v / %+v", remove, install)
+	}
+
+	// A script that reports no version falls back to the request; with
+	// neither the install fails rather than recording an empty version.
+	f.setRun(func(RunSpec) (Result, error) {
+		return Result{Entrypoints: map[string]string{"tool-y": "/x"}}, nil
+	})
+	if result, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "9.9.9", nil); err != nil || result.Version != "9.9.9" {
+		t.Errorf("Install without reported version = %+v, %v", result, err)
+	}
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil); err == nil || !strings.Contains(err.Error(), "no version") {
+		t.Errorf("Install latest without reported version error = %v", err)
+	}
+}
+
 func TestInstallFailureRecordsError(t *testing.T) {
 	f := newServiceFixture(t)
 	f.setRun(func(RunSpec) (Result, error) {
 		return Result{ExitCode: 3}, &ExitError{Code: 3, StderrTail: "boom " + strings.Repeat("x", 4000)}
 	})
 
-	_, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", nil)
+	_, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil)
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("Install error = %v, want *ExitError", err)
@@ -877,7 +976,7 @@ func TestInstallFailureRecordsError(t *testing.T) {
 	}
 
 	f.setRun(func(RunSpec) (Result, error) { return Result{Version: "1.0.0"}, nil })
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", nil); err == nil || !strings.Contains(err.Error(), "entrypoints") {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil); err == nil || !strings.Contains(err.Error(), "entrypoints") {
 		t.Errorf("Install without entrypoints error = %v", err)
 	}
 	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusFailed {
@@ -900,18 +999,18 @@ func TestInstallBusy(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", nil)
+		_, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil)
 		done <- err
 	}()
 	<-started
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", nil); !errors.Is(err, ErrBusy) {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("concurrent Install error = %v, want ErrBusy", err)
 	}
 	if _, err := f.svc.Remove(f.ctx(), testBot, testTarget, "tool-y", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("concurrent Remove error = %v, want ErrBusy", err)
 	}
 	// Another dependency of the same bot is not blocked.
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", nil); err != nil {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", "", nil); err != nil {
 		t.Errorf("Install of another dependency: %v", err)
 	}
 	close(release)
@@ -925,7 +1024,7 @@ func TestInstallBusy(t *testing.T) {
 	// The prelude's lock (another Server instance) is also reported as busy
 	// and leaves the record to that instance.
 	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
-	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", nil); !errors.Is(err, ErrBusy) {
+	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("locked Update error = %v, want ErrBusy", err)
 	}
 	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusUpdating {
@@ -937,13 +1036,13 @@ func TestInstallGuards(t *testing.T) {
 	f := newServiceFixture(t)
 	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, "1.0.0"), nil })
 
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "img-z", nil); !errors.Is(err, ErrActionUnsupported) {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "img-z", "", nil); !errors.Is(err, ErrActionUnsupported) {
 		t.Errorf("image install error = %v", err)
 	}
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "nope", nil); !errors.Is(err, ErrDependencyNotFound) {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "nope", "", nil); !errors.Is(err, ErrDependencyNotFound) {
 		t.Errorf("unknown install error = %v", err)
 	}
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "mac-only", nil); !errors.Is(err, ErrPlatformUnsupported) {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "mac-only", "", nil); !errors.Is(err, ErrPlatformUnsupported) {
 		t.Errorf("unsupported platform install error = %v", err)
 	}
 	if _, err := f.svc.Remove(f.ctx(), testBot, testTarget, "mac-only", nil); err != nil {
@@ -954,11 +1053,11 @@ func TestInstallGuards(t *testing.T) {
 	}
 
 	f.ws.setState(testBot, testTarget, WorkspaceMissing)
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", nil); !errors.Is(err, ErrWorkspaceMissing) {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil); !errors.Is(err, ErrWorkspaceMissing) {
 		t.Errorf("missing workspace install error = %v", err)
 	}
 	f.ws.setState(testBot, "remote-1", WorkspaceRemoteOffline)
-	if _, err := f.svc.Install(f.ctx(), testBot, "remote-1", "tool-y", nil); !errors.Is(err, ErrRemoteOffline) {
+	if _, err := f.svc.Install(f.ctx(), testBot, "remote-1", "tool-y", "", nil); !errors.Is(err, ErrRemoteOffline) {
 		t.Errorf("offline remote install error = %v", err)
 	}
 	if len(f.ws.ensureCalls) != 0 {
@@ -966,7 +1065,7 @@ func TestInstallGuards(t *testing.T) {
 	}
 
 	f.ws.setState(testBot, testTarget, WorkspaceNotRunning)
-	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", nil); err != nil {
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil); err != nil {
 		t.Fatalf("install on stopped native workspace: %v", err)
 	}
 	if len(f.ws.ensureCalls) != 1 || f.ws.ensureCalls[0] != testBot+"/"+testTarget {
@@ -975,7 +1074,7 @@ func TestInstallGuards(t *testing.T) {
 
 	f.ws.setState(testBot, testTarget, WorkspaceNotRunning)
 	f.ws.ensureErr = errors.New("containerd down")
-	_, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", nil)
+	_, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", "", nil)
 	if !errors.Is(err, ErrWorkspaceNotRunning) || !strings.Contains(err.Error(), "containerd down") {
 		t.Errorf("failed start error = %v", err)
 	}
@@ -990,7 +1089,7 @@ func TestUpdateFallsBackToInstallScriptAndKeepsPrevious(t *testing.T) {
 	f.writeState(t, "tool-y", State{DependencyID: "tool-y", Version: "1.0.0", Entrypoints: map[string]string{"tool-y": "/old"}})
 	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, "1.1.0"), nil })
 
-	result, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", nil)
+	result, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", "", nil)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -1010,7 +1109,7 @@ func TestUpdateFallsBackToInstallScriptAndKeepsPrevious(t *testing.T) {
 	}
 
 	// Updating to the same version keeps the older fallback.
-	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", nil); err != nil {
+	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", "", nil); err != nil {
 		t.Fatalf("Update again: %v", err)
 	}
 	if state := f.readState(t, "tool-y"); state.Version != "1.1.0" || state.PreviousVersion != "1.0.0" {
@@ -1018,7 +1117,7 @@ func TestUpdateFallsBackToInstallScriptAndKeepsPrevious(t *testing.T) {
 	}
 
 	// The agent update script is used when the manifest has one.
-	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "agent-x", nil); err != nil {
+	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "agent-x", "", nil); err != nil {
 		t.Fatalf("Update agent: %v", err)
 	}
 	if spec := f.runSpecs()[2]; spec.Script != "dep_log update agent\n" || spec.Version != "2.0.0" {
@@ -1039,7 +1138,7 @@ func TestReinstallOrchestratesRemoveThenInstall(t *testing.T) {
 		return Result{}, nil
 	})
 
-	result, err := f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", nil)
+	result, err := f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", "", nil)
 	if err != nil {
 		t.Fatalf("Reinstall: %v", err)
 	}
@@ -1071,7 +1170,7 @@ func TestReinstallOrchestratesRemoveThenInstall(t *testing.T) {
 	f.setRun(func(RunSpec) (Result, error) {
 		return Result{ExitCode: 1}, &ExitError{Code: 1, StderrTail: "cannot remove"}
 	})
-	_, err = f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", nil)
+	_, err = f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", "", nil)
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("Reinstall error = %v, want *ExitError", err)
@@ -1214,6 +1313,34 @@ func TestReapStale(t *testing.T) {
 	}
 }
 
+func TestActionSupportedFollowsScripts(t *testing.T) {
+	f := newServiceFixture(t)
+	want := map[string]string{
+		"agent-x":  "install,update,reinstall,remove,rollback",
+		"tool-y":   "install,update,reinstall,remove,rollback,check_update",
+		"img-z":    "",
+		"mac-only": "install,update,reinstall,remove,rollback",
+	}
+	for _, dep := range f.svc.Catalog() {
+		parts := make([]string, 0, len(UserActions))
+		for _, action := range SupportedActions(dep) {
+			parts = append(parts, string(action))
+		}
+		if got := strings.Join(parts, ","); got != want[dep.ID] {
+			t.Errorf("%s supported actions = %q, want %q", dep.ID, got, want[dep.ID])
+		}
+	}
+	if len(f.svc.Catalog()) != len(f.cat.List()) {
+		t.Errorf("Catalog() = %d entries, want the whole catalog", len(f.svc.Catalog()))
+	}
+	if ActionSupported(catalog.Dependency{}, catalog.ActionVersion) || !ActionSupported(catalog.Dependency{Scripts: catalog.Scripts{Version: "v.sh"}}, catalog.ActionVersion) {
+		t.Error("version action must follow scripts.version")
+	}
+	if ActionSupported(catalog.Dependency{}, catalog.Action("bogus")) {
+		t.Error("unknown actions are never supported")
+	}
+}
+
 func TestScriptPreview(t *testing.T) {
 	f := newServiceFixture(t)
 	preview, err := f.svc.ScriptPreview("tool-y", catalog.ActionInstall)
@@ -1271,7 +1398,8 @@ func TestCheckUpdates(t *testing.T) {
 	if !tool.UpdateAvailable || tool.LatestVersion != "1.2.0" || tool.Installation.LastCheckedAt == nil || !tool.Installation.LastCheckedAt.Equal(f.now) {
 		t.Errorf("tool-y entry = %+v", tool)
 	}
-	if agent := f.entry(t, result, "agent-x"); !agent.NeedsAlignment || agent.LatestVersion != "2.0.0" {
+	// A pinned dependency without a check_update script is never checked.
+	if agent := f.entry(t, result, "agent-x"); agent.LatestVersion != "" || agent.UpdateAvailable {
 		t.Errorf("agent-x entry = %+v", agent)
 	}
 	if f.discovered() != 1 {
@@ -1356,7 +1484,7 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 	f.env = []string{"FOO_VERSION=1.0.0"}
 	sink := newRecordingSink()
 
-	result, err := f.svc.Install(f.ctx(), testBot, testTarget, "foo", sink)
+	result, err := f.svc.Install(f.ctx(), testBot, testTarget, "foo", "", sink)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -1389,7 +1517,7 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 	}
 
 	f.env = []string{"FOO_VERSION=1.1.0"}
-	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "foo", nil); err != nil {
+	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "foo", "", nil); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	assertShimPrints("foo 1.1.0")

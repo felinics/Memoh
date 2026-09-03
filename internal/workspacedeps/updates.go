@@ -15,35 +15,10 @@ import (
 // (WD-UPD-001).
 const DefaultUpdateCheckInterval = 24 * time.Hour
 
-// AlignmentScan re-discovers the native workspace of every given bot and
-// returns how many agent dependencies need aligning with their pin (design
-// §10.1, WD-UPD-A01). Bots whose workspace is not running are skipped; a
-// bot that fails to scan does not stop the others, and the joined errors
-// are returned next to the count.
-func (s *Service) AlignmentScan(ctx context.Context, bots []string) (int, error) {
-	pending := 0
-	var errs []error
-	for _, botID := range bots {
-		result, err := s.Refresh(ctx, botID, TargetNative)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("workspacedeps: alignment scan of bot %s: %w", botID, err))
-			continue
-		}
-		if result.Workspace != WorkspaceRunning {
-			continue
-		}
-		for _, entry := range result.Entries {
-			if entry.NeedsAlignment {
-				pending++
-			}
-		}
-	}
-	return pending, errors.Join(errs...)
-}
-
-// UpdateWorker periodically runs check_update for installed tool
-// dependencies (design §10.2). Only running native workspaces are checked;
-// remote targets are never woken (WD-UPD-002, WD-PLAT-003).
+// UpdateWorker periodically runs check_update for installed dependencies
+// that have a check_update script and no pin (design §10.2). Only running
+// native workspaces are checked; remote targets are never woken (WD-UPD-002,
+// WD-PLAT-003).
 type UpdateWorker struct {
 	service  *Service
 	interval time.Duration
@@ -159,10 +134,10 @@ type groupKey struct {
 	libc  string
 }
 
-// RunOnce performs one round: installed, unpinned tool dependencies on
-// running native workspaces are grouped by (dependency, platform), each group
-// runs check_update once, and the result fans out to every member. It
-// returns how many upstream checks ran.
+// RunOnce performs one round: installed, unpinned dependencies with a
+// check_update script on running native workspaces are grouped by
+// (dependency, platform), each group runs check_update once, and the result
+// fans out to every member. It returns how many upstream checks ran.
 func (w *UpdateWorker) RunOnce(ctx context.Context) (int, error) {
 	ctx = w.ctxFactory(ctx)
 	s := w.service
