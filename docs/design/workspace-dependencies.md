@@ -2,9 +2,9 @@
 
 ## 1. 文档目的
 
-1. 把「哪些 agent 可用」从 workspace 镜像内容变成可管理的运行时状态：agent CLI 的版本归 Server 所有（协议钉版），分发与对齐归依赖管理器；runtime/tool 类依赖由用户自由管理。
+1. 把「哪些 agent 可用」从 workspace 镜像内容变成可管理的运行时状态：agent CLI 与其他依赖同等管理——默认安装最新版、可指定版本、可查上游更新、可回滚；runtime 类依赖（node、python、uv）以「镜像底座＋可管理覆盖层」纳入同一套管理；tool 类依赖由用户自由管理。
 2. 明确 catalog、数据库、workspace 三者各自是什么的真相源，避免三处状态互相漂移。
-3. 给出 direct runtime 启动路径、workspace contract 与依赖管理之间的边界——contract v3 目前用「镜像整体判定」承担的版本对齐职责，由依赖级版本门取代。
+3. 给出 direct runtime 启动路径、workspace contract 与依赖管理之间的边界——contract v3 目前用「镜像整体判定」承担的「CLI 是否可用」职责，由依赖级 discovery 与使用点报错取代。
 
 本文基于 PR #1110–#1112（External Agent Driver 架构、direct Codex、direct Claude Code）合入后的代码形态。引用这三个 PR 分支的行号在其合入后需校对；其余引用以当前 `main` 为准。
 
@@ -16,34 +16,36 @@
 
 #1110–#1112 用 direct runtime 取代了内置 ACP：Server 不再通过 ACP wrapper 与 agent 通信，而是把 CLI 的原生协议编译进自己。
 
-- **协议是编译期耦合。** Codex 侧的 Go 协议代码由 CLI 0.151.0 的 schema 快照生成（`internal/agent/runtime/codex/protocolgen/schema/VERSION.json`，注明「diff 即表示钉住的二进制与快照不一致」）；Claude Code 侧钉住 CLI 2.1.250（`internal/agent/runtime/claudecode/protocolref/VERSION.json`），升级需人工对协议。**CLI 版本升级等于 Server 代码变更。**
+- **协议是编译期耦合。** Codex 侧的 Go 协议代码由 CLI 0.151.0 的 schema 快照生成（`internal/agent/runtime/codex/protocolgen/schema/VERSION.json`，注明「diff 即表示钉住的二进制与快照不一致」）；Claude Code 侧钉住 CLI 2.1.250（`internal/agent/runtime/claudecode/protocolref/VERSION.json`），升级需人工对协议。**协议快照同步是 Server 代码变更**——但它只决定 Server 会说哪一版协议，不决定 workspace 里装哪一版 CLI；本设计不把二者绑定（§2.2）。
 - **launcher 硬编码。** `internal/agent/runtime/codex/config.go:27` 钉死 `/opt/memoh/toolkit/bin/codex`，`internal/agent/runtime/claudecode/process.go:15` 钉死 `/opt/memoh/toolkit/bin/claude`。不走 PATH，不做解析。
-- **contract v3 把 CLI 版本对齐做成了镜像整体判定。** `internal/workspace/contract.go` 把 `bin/codex`、`bin/claude` 列为必需可执行文件，并靠抬升 `contract_version` 让旧镜像以「版本不匹配」而非「文件缺失」暴露。`docker/toolkit/install.sh` 钉 `CODEX_VERSION=0.151.0`、`CLAUDE_CODE_VERSION=2.1.250`。
+- **contract v3 把「CLI 在不在、是哪一版」做成了镜像整体判定。** `internal/workspace/contract.go` 把 `bin/codex`、`bin/claude` 列为必需可执行文件，并靠抬升 `contract_version` 让旧镜像以「版本不匹配」而非「文件缺失」暴露。`docker/toolkit/install.sh` 钉 `CODEX_VERSION=0.151.0`、`CLAUDE_CODE_VERSION=2.1.250`。
 - **版本不符目前只告警不拒绝。** Codex 握手后比较 CLI 版本与 `protocol.PinnedCodexVersion`，不符时 `Warn` 并继续服务（`internal/agent/runtime/codex/appserver.go:111-119`，注释明言「drifted binary usually still speaks a compatible superset … warn loudly instead of refusing service」）；Claude Code 在 system 消息里同样只告警（`internal/agent/runtime/claudecode/turn.go:160-163`）。协议解码对未知字段与方法容错。
 - **通用 ACP 保留**，作为自定义 Agent 通道：命令由用户自管，解析为 PATH → toolkit 回落（`internal/agent/runtime/acp/client/process.go`）。旧的 pinned toolkit adapter 机制已随内置 ACP profile 一并移除。
 - toolkit launcher wrapper 自带 PATH fallback（`docker/toolkit/bin/codex` 的 `fallback_codex`）：toolkit 自己的拷贝缺失时会执行 PATH 上的同名命令，且不做版本检查。
 
 由此产生的问题：
 
-1. **每次 Server 同步协议快照 = 重建并重新分发镜像。** 0.151 → 0.152 的升级要走完整的镜像发布链路，用户必须重建 workspace。
-2. **contract 版本随之抬升 = 判所有存量镜像不兼容。** #1110 风险栏自认「workspace contract 升级到 v3，旧 workspace image 需要重建」。这正是引入依赖管理要消灭的判决，如今每个协议快照周期重演一次。
+1. **CLI 换版本 = 重建并重新分发镜像。** 用户想用 0.152 的 Codex，必须等镜像发布链路走完并重建 workspace；镜像里写死的版本让 CLI 与镜像同寿命。
+2. **contract 版本随之抬升 = 判所有存量镜像不兼容。** #1110 风险栏自认「workspace contract 升级到 v3，旧 workspace image 需要重建」。这正是引入依赖管理要消灭的判决，如今镜像内 CLI 每换一次版本就重演一次。
 3. **`reconcileNativeWorkspace` 周期性放大判决。** 它在 `internal/workspace/manager_lifecycle.go:600` 调用 `InitializeNativeWorkspace`，后者做完整 contract 校验；Server 每次启动 reconcile 都会把旧镜像的 workspace 标记为 setup failure。
 4. **remote target 无法运行 direct runtime。** launcher 硬编码 `/opt/memoh/toolkit`，用户真机上没有这个路径。
 
 ### 2.2 目标
 
-- **镜像与 agent CLI 版本解耦。** Server 升级协议快照后，存量 workspace 通过依赖管理器把 CLI 对齐到新钉版，不重建镜像。
-- **agent 类依赖的版本归 Server 所有。** 用户决定装不装，不决定装哪个版本；「更新」意味着对齐到 Server 当前钉版。
-- **runtime/tool 类依赖按通用包管理。** node、python、uv 及后续通用工具由用户通过 UI 安装、更新、卸载。
-- 启用 agent 时阻塞检查依赖，缺失或版本不符则询问用户是否安装/更新。
-- 运行时缺失或版本不符时不阻塞，给稳定反馈码与可执行的补救动作。
-- 定期检查更新：agent 类与 Server 钉版对比，tool 类查上游。
+- **镜像与 agent CLI 解耦。** CLI 由依赖管理器在 workspace 内安装、更新、回滚，不再随镜像发布；镜像最终不内置 CLI（§15）。
+- **agent CLI 与其他依赖同等管理。** 安装默认最新版，也可指定版本；可查上游更新；可回滚。依赖管理器不为 agent CLI 设推荐版本、不做版本门；Server 协议快照版本与依赖管理无关——runtime 握手对版本差异的告警照旧，那是 runtime 自己的事。
+- **runtime 类依赖是「镜像底座＋可管理覆盖层」。** node、python、uv 由镜像自带的底座保证始终可用；用户可以在其上安装一个受管理的覆盖版本并升级、回滚，「卸载」即移除覆盖层、回到镜像版本。npm 随 node 提供，不单列。
+- **tool 类依赖按通用包管理。** 后续通用工具由用户通过 UI 安装、更新、卸载。
+- 启用 agent 时阻塞检查依赖，缺失则询问用户是否安装。
+- 运行时缺失时不阻塞，给稳定反馈码与可执行的补救动作。
+- 定期检查更新：所有配置了 `check_update` 且未锁定版本的 managed 依赖统一查上游。
 
 ### 2.3 非目标
 
 - 不做第三方依赖 registry。首版 catalog 只有内置条目。
 - 不做 host 侧共享依赖挂载（见 §12.3）。
 - 不改变 workspace 镜像的其余契约（bridge、tini、display）。
+- 不为 agent CLI 维护推荐版本或兼容矩阵。CLI 与 Server 协议快照之间的版本差异由 runtime 握手告警呈现，依赖管理器不介入、不转述。
 - 不承诺 direct runtime 在 remote target 可用。entrypoints 解析为其扫清了路径障碍（§9.2 附带收益），但 remote 支持是 runtime 侧的独立决策。
 - Hermes 已随 #1112 从产品入口移除，不进 catalog。
 
@@ -53,16 +55,15 @@
 
 | 层 | 内容 | 位置 | 是什么的真相源 |
 | --- | --- | --- | --- |
-| **Catalog** | 依赖定义、安装脚本、agent 类钉版 | Server 二进制（`//go:embed`） | 「系统支持哪些依赖，怎么装，agent 类装哪个版本」 |
+| **Catalog** | 依赖定义、安装脚本 | Server 二进制（`//go:embed`） | 「系统支持哪些依赖，怎么装」 |
 | **Installation** | bot × target × dep 的状态记录 | `bot_dependency_installations` 表 | 「用户想要什么」 |
-| **Workspace state** | 实际安装内容 | 容器内 `/data/.memoh/deps/` | 「实际有什么」 |
+| **Workspace state** | 实际安装内容（镜像底座与 managed 覆盖层） | 容器内 `/opt/memoh/toolkit`（底座）与 `/data/.memoh/deps/`（managed） | 「实际有什么」 |
 
-四条必须遵守的规则：
+三条必须遵守的规则：
 
 - **WD-MODEL-001**：Catalog 不落库。它是代码，随 Server 版本演进，需要与 driver 依赖声明一起做静态校验。
 - **WD-MODEL-002**：数据库记录意图，不记录事实。容器重建、快照回滚、agent 自行安装都会让数据库与实际状态背离，数据库不得被当作可信来源。
 - **WD-MODEL-003**：容器状态是最终事实。任何展示给用户的「已安装」都必须能追溯到一次 discovery，或一次刚完成的安装回执。
-- **WD-MODEL-004**：agent 类依赖的目标版本由 Server 决定。catalog 钉版与协议快照（`protocolgen/schema/VERSION.json`、`protocolref/VERSION.json`）的一致性必须由测试强制，禁止两处手工维护同一个版本号。
 
 ## 4. Catalog
 
@@ -75,12 +76,16 @@ internal/workspacedeps/catalog/
 ├── catalog.go                   # //go:embed deps
 └── deps/
     ├── node/
-    │   └── dependency.yaml      # source: image，无脚本
-    ├── codex/
-    │   ├── dependency.yaml      # category: agent，钉版与协议快照同源
+    │   ├── dependency.yaml      # source: image，镜像提供底座；脚本安装覆盖层
     │   ├── install.sh
     │   ├── update.sh
-    │   └── remove.sh
+    │   └── remove.sh            # 移除覆盖层，回到镜像版本
+    ├── codex/
+    │   ├── dependency.yaml      # category: agent，与其他 managed 依赖同等管理
+    │   ├── install.sh
+    │   ├── update.sh
+    │   ├── remove.sh
+    │   └── check-update.sh      # npm view 取 latest
     └── claude-code/
         └── ...
 ```
@@ -89,7 +94,7 @@ internal/workspacedeps/catalog/
 
 **为什么 embed 而不是像 `conf/providers/` 那样运行时读目录**：provider YAML 是纯数据，依赖脚本是将在 workspace 内以 root 执行的代码。运行时可改等于多一个篡改面。embed 同时保证 `manifest_digest` 稳定、部署不会漏文件。可以提供一个默认关闭的 override 目录作为调试逃生舱。
 
-改脚本需要发 Server 版本。对 agent 类这不是负担而是必然——钉版本来就跟着 Server 走；对 tool 类，这仍比「重建 workspace 镜像 + 全体用户重新拉取」轻两个数量级。
+改脚本需要发 Server 版本。脚本变更远少于依赖自身的版本变更——版本由脚本在运行时向上游查询或由用户指定，不写死在脚本里；这仍比「重建 workspace 镜像 + 全体用户重新拉取」轻两个数量级。
 
 ### 4.2 清单格式
 
@@ -110,11 +115,11 @@ platforms:
   - { os: linux,  arch: [amd64, arm64], libc: glibc }
   - { os: darwin, arch: [arm64] }
 
-version:
-  pin: "0.151.0"                 # agent 类必须钉版，测试强制与协议快照一致
+# version:
+#   pin: "0.151.0"               # 任何依赖都可选：锁定版本、不参与更新检查。内置条目一律不 pin
 
 timeouts:
-  install: 1200                  # 与镜像 MEMOH_APT_COMMAND_TIMEOUT 对齐
+  install: 1200                  # 与镜像 MEMOH_APT_COMMAND_TIMEOUT 一致
   remove: 300
   version: 30
 
@@ -126,20 +131,21 @@ scripts:
   # 设置后改为执行该脚本，脚本把 {"version":"..."} 写入 $MEMOH_DEP_RESULT
   # version: version.sh
   # reinstall 省略时由 runner 编排 remove → install
-  # agent 类不允许 check_update 脚本（见 WD-CAT-004）
+  check_update: check-update.sh  # 可选：查上游 latest；配置后进入 §10 的周期检查
 ```
 
-tool 类条目可用 `version.channel: stable` 加 `check_update` 脚本走上游查询；`pin` 非空则锁定版本、不参与更新检查。
+任何 managed 条目都可以配置 `check_update` 脚本走上游查询，agent 类（codex、claude-code）用 `npm view <pkg> version` 取 latest，与 tool 类同等；`version.pin` 对任何依赖都可选，非空则锁定版本、不参与更新检查，内置条目一律不 pin。
 
-- **WD-CAT-001**：`source: image` 的条目（node、python、uv）不得有脚本，不可卸载。它们建模成依赖只为让 UI 有统一的呈现，并为将来支持升级留出路径。
+- **WD-CAT-001**：`source: image` 表示镜像提供该依赖的底座（`/opt/memoh/toolkit`），底座不可删除、不由依赖管理器变更。条目可以带 `scripts`，此时脚本安装的是覆盖层——装到 `/data/.memoh/deps/<id>/versions/<v>`、经 `dep_switch` 切 `current`，通过 §6.1 的 PATH 优先级盖过底座；覆盖层支持 update 与 rollback，`remove` 只移除覆盖层、回到镜像版本。无脚本的 `source: image` 条目只展示，不可安装。node、python、uv 首版均带脚本；npm 随 node 提供，不单列条目。
 - **WD-CAT-002**：`platforms` 用于准入。不匹配的平台必须在 API 层拒绝并在 UI 置灰，不得依赖脚本自行报错。
 - **WD-CAT-003**：脚本必须是 POSIX `sh`，不得使用 bash 扩展或 GNU 专有的命令行为。remote target 的对端不保证是 Debian，甚至不保证是 Linux。此约束同样适用于 runner 注入的 prelude（§5.3）。
-- **WD-CAT-005**：版本探测默认为 `<候选路径> --version`，取输出中首个 `\d+\.\d+\.\d+` 形态的 token。`--version` 不可用或输出格式特殊的依赖提供可选的 `scripts.version`，经 runner 执行，候选路径由 `MEMOH_DEP_CANDIDATE` 传入，结果写 `$MEMOH_DEP_RESULT`（`{"version":"..."}`）。两种方式都只在 discovery 内使用并进 §8.5 缓存。
-- **WD-CAT-004**：`category: agent` 的条目必须钉版，且钉版与对应协议快照版本的一致性由 Go 测试强制（codex 的 `dependency.yaml` ↔ `protocol.PinnedCodexVersion`，即 `protocolgen/schema/VERSION.json` 的生成物；claude-code 的 `dependency.yaml` ↔ `claudecode.PinnedCLIVersion`）。agent 类不允许 `check_update` 脚本——它的「latest」是 Server 钉版，不需要也不允许查询上游（§10.1）。
+- **WD-CAT-005**：版本探测默认为 `<候选路径> --version`，取输出中首个 `\d+\.\d+\.\d+` 形态的 token。`--version` 不可用或输出格式特殊的依赖提供可选的 `scripts.version`，经 runner 执行，候选路径由 `MEMOH_DEP_CANDIDATE` 传入，结果写 `$MEMOH_DEP_RESULT`（`{"version":"..."}`）。两种方式都只在 discovery 内使用并进 §8.5 缓存。对 `source: image` 条目，discovery 对 toolkit 副本与覆盖层副本分别探测，两者版本都进缓存。
 
 ### 4.3 六个动作
 
-UI 暴露 install / update / reinstall / remove / rollback 五个通用动作，tool 类额外有 check-update。
+UI 暴露 install / update / reinstall / remove / rollback 五个通用动作；配置了 `check_update` 的依赖额外有 check-update。install／update／reinstall 都接受可选的目标版本，省略即最新（§11）。
+
+对 `source: image` 的底座依赖（node、python、uv），五个动作全部作用于覆盖层：`install` 装覆盖层，`update`／`rollback` 在覆盖层版本间切换，`remove` 删除覆盖层整目录后回到镜像版本——底座本身没有任何动作。
 
 `reinstall` 默认由 runner 编排 `remove → install`，清单里的 `scripts.reinstall` 是可选覆盖。
 
@@ -234,7 +240,7 @@ memoh_dep_main < /dev/null
 | `MEMOH_DEP_ID` | 依赖 ID |
 | `MEMOH_DEP_HOME` | 该依赖的根目录，由 Server 计算后传入 |
 | `MEMOH_DEP_BIN` | shim 目录，注入 PATH |
-| `MEMOH_DEP_VERSION` | 目标版本。agent 类恒为钉版；tool 类为空表示 latest |
+| `MEMOH_DEP_VERSION` | 目标版本；空或 `latest` 表示最新。脚本必须把实际安装的版本写回 `$MEMOH_DEP_RESULT` 的 `version`，Server 只信回执不信请求 |
 | `MEMOH_DEP_CURRENT_VERSION` | 当前版本，update / check-update 时有值 |
 | `MEMOH_DEP_RESULT` | 结构化结果写入路径 |
 | `MEMOH_DEP_CANDIDATE` | 仅 `scripts.version`：待探测的候选可执行文件绝对路径 |
@@ -250,7 +256,7 @@ memoh_dep_main < /dev/null
 结果格式：
 
 ```jsonc
-// check-update（仅 tool 类）
+// check-update（配置了 check_update 的依赖，含 agent 类）
 {"installed":"1.7.1","latest":"1.8.0","update_available":true}
 
 // install / update
@@ -264,7 +270,11 @@ memoh_dep_main < /dev/null
 
 ```
 /data/.memoh/deps/
-├── bin/                        # shim，注入 PATH，排在 toolkit 之前
+├── bin/                        # shim，PATH 中排在 toolkit 之前（§6.1）
+├── node/                       # source: image 条目的覆盖层，布局与 managed 相同
+│   ├── state.json
+│   ├── current -> versions/24.16.0
+│   └── versions/…
 ├── codex/
 │   ├── state.json              # 真相源
 │   ├── current -> versions/0.151.0
@@ -294,7 +304,19 @@ memoh_dep_main < /dev/null
 
 **副作用**：`CreateVersion` / `RollbackVersion` 会把 deps 一并快照与回滚。这是 §8 对账机制必须存在的直接原因。
 
-shim 的 PATH 注入是一个跨多处的集成点，实现时需逐一盘点 PATH 的构造位置：容器镜像 profile、bridge exec 环境、direct runtime 的 `containerPath` 常量（`codex/process.go:12`、`claudecode/process.go:14`）、通用 ACP 的 `defaultContainerPath`（`acp/client/process.go`）。direct runtime 与通用 ACP 因走 entrypoints 绝对路径而不依赖此注入；PATH 注入主要服务 agent 在终端里直接使用 `provides` 命令。
+### 6.1 PATH 优先级
+
+覆盖层要盖过镜像底座，唯一的机制是 PATH 顺序：`/data/.memoh/deps/bin` 必须排在 `/opt/memoh/toolkit/bin` 之前。这不只服务 agent 在终端里敲 `node`——codex／claude 的入口是 `#!/usr/bin/env node` 脚本，它们跑在哪个 node 上同样由这条 PATH 决定。
+
+PATH 的构造点有三处，全部前置：
+
+1. **bridge exec 环境**（`internal/workspace/bridgesvc/server.go` 的 `execEnv`／`execPTYEnv`）：bridge 统一把 `/data/.memoh/deps/bin` 前置到子进程 PATH——目录存在才前置，不存在时 PATH 保持原样。所有经 bridge 执行的命令（agent 工具的 exec、终端、依赖脚本自身）都从这里进入，这是唯一需要感知目录是否存在的位置。
+2. **direct runtime**：`internal/agent/runtime/codex/process.go:12` 与 `claudecode/process.go:14` 硬编码的 `containerPath` 同步前置 `/data/.memoh/deps/bin`。
+3. **通用 ACP**：`internal/agent/runtime/acp/client/process.go:20` 的 `defaultContainerPath` 同步前置。
+
+- **WD-FS-003**：三处 PATH 必须以 `/data/.memoh/deps/bin` 开头，顺序为 managed → toolkit → 系统路径。这是 `source: image` 覆盖层生效的前提；缺任何一处，用户装了新 node 而 agent 仍跑在旧 node 上，且没有任何报错。direct runtime 与通用 ACP 通过 entrypoints 绝对路径找 launcher 本体，不依赖 PATH；但 CLI 内部再起的 node／python 子进程走的是这条 PATH。
+
+`MEMOH_DEP_BIN`（§5.4）与此处是同一个目录。remote target 的目录位置随 `MEMOH_DEP_HOME` 按 target 计算而不同，首版只要求 native 生效。
 
 ## 7. 数据库
 
@@ -306,7 +328,7 @@ CREATE TABLE IF NOT EXISTS public.bot_dependency_installations (
     bot_id              UUID        NOT NULL,
     workspace_target_id TEXT        NOT NULL,
     dependency_id       TEXT        NOT NULL,
-    source              TEXT        NOT NULL,   -- image | managed，按实际提供方记录
+    source              TEXT        NOT NULL,   -- image | managed，按当前生效副本记录（底座依赖装了覆盖层即 managed）
     status              TEXT        NOT NULL,   -- 见 §8.1
     installed_version   TEXT        NOT NULL DEFAULT '',
     latest_version      TEXT        NOT NULL DEFAULT '',
@@ -333,7 +355,7 @@ CREATE TABLE IF NOT EXISTS public.bot_dependency_installations (
 - `0001_init.up.sql` 的同步以文件尾 `ALTER` 追加，保持既有列序。
 - 完成后运行 `mise exec sqlc@1.31.1 -- sqlc generate`。
 
-版本语义说明：`missing` 后的「重装」与 botbackup 导入按 `installed_version` 安装（agent 类除外，恒为当前钉版）；rollback 依据 `state.json` 的 `previous_version`，不需要额外列。
+版本语义说明：`missing` 后的「重装」与 botbackup 导入按 `installed_version` 安装，对所有依赖一致；rollback 依据 `state.json` 的 `previous_version`，不需要额外列。
 
 ## 8. 状态机与对账
 
@@ -353,7 +375,7 @@ CREATE TABLE IF NOT EXISTS public.bot_dependency_installations (
 
 每个依赖的探测顺序：`/data/.memoh/deps/<id>/state.json` → toolkit 回落路径 → `command -v`（PATH 上的副本）。最后一环不可省略——agent 在 workspace 内 `npm i -g` 装出来的副本既没有 `state.json` 也不在 toolkit 路径。
 
-agent 类依赖的 discovery 额外探测版本：`state.json` 直接记录；toolkit 或 PATH 副本按 WD-CAT-005 探测——默认 `<候选路径> --version`，清单设置了 `scripts.version` 时改走该脚本。结果进 §8.5 缓存。版本门（§9.2）依赖这个值。
+每个依赖的 discovery 都探测版本：`state.json` 直接记录；toolkit 或 PATH 副本按 WD-CAT-005 探测——默认 `<候选路径> --version`，清单设置了 `scripts.version` 时改走该脚本。对 `source: image` 的底座依赖，`Observed` 同时给出镜像版本（toolkit 副本）与覆盖层版本（`state.json`），当前生效副本按 §6.1 的 PATH 优先级判定——有覆盖层即覆盖层。结果进 §8.5 缓存，供面板展示与 launcher 解析（§9.2）使用。
 
 | 数据库 | workspace | 处理 |
 | --- | --- | --- |
@@ -367,13 +389,12 @@ agent 类依赖的 discovery 额外探测版本：`state.json` 直接记录；to
 
 | 场景 | `/data` | 结果 |
 | --- | --- | --- |
-| 重建，`preserve_data=true` | 导出后恢复（`internal/workspace/dataio.go:217`） | 记录有效；镜像可能已换，`source=image` 项需重新探测 |
+| 重建，`preserve_data=true` | 导出后恢复（`internal/workspace/dataio.go:217`） | 记录有效；镜像可能已换，底座依赖的镜像版本需重新探测（覆盖层随 `/data` 保留） |
 | 重建，`preserve_data=false` | 丢失 | 全部 `managed` 项转 `missing` |
 | `RollbackVersion` | 回到历史时点 | deps 一并回退，必须由 discovery 校正 |
-| Server 升级（协议快照变更） | 不变 | agent 类 `installed_version` ≠ 新钉版，进入待更新集合（§10.1） |
 | botbackup 导入 | 新容器 | 见下 |
 
-- **WD-STATE-004**：botbackup 只备份依赖清单（`dependency_id` + `version`），不备份二进制内容。二进制跨平台不可移植，且会让备份包膨胀到数百 MB。导入后走一次批量安装（agent 类装当前钉版，忽略备份中的版本号）。
+- **WD-STATE-004**：botbackup 只备份依赖清单（`dependency_id` + `version`），不备份二进制内容。二进制跨平台不可移植，且会让备份包膨胀到数百 MB。导入后走一次批量安装，按备份中的版本号安装，对所有依赖一致；版本在上游已不可得时该项 `failed`，用户可改装最新。
 
 ### 8.4 并发
 
@@ -383,9 +404,9 @@ agent 类依赖的 discovery 额外探测版本：`state.json` 直接记录；to
 
 ### 8.5 缓存
 
-在 workspace Manager 上维护 per-`(bot, target)` 的依赖状态缓存（含 agent 类的版本探测结果），容器重启或重建时失效（`m.grpcPool.Remove(botID)` 的各调用点是天然失效点）。
+在 workspace Manager 上维护 per-`(bot, target)` 的依赖状态缓存（含版本探测结果），容器重启或重建时失效（`m.grpcPool.Remove(botID)` 的各调用点是天然失效点）。
 
-**理由**：命令解析与版本门都在 session 启动路径上。运行时探测必须走缓存，未命中才读一次 `state.json`（单次 `ReadRaw`，远低于 exec 开销）；`--version` 探测同理。
+**理由**：命令解析在 session 启动路径上。运行时探测必须走缓存，未命中才读一次 `state.json`（单次 `ReadRaw`，远低于 exec 开销）；`--version` 探测同理。
 
 ## 9. External Agent Runtime 集成
 
@@ -395,35 +416,35 @@ agent 类依赖的 discovery 额外探测版本：`state.json` 直接记录；to
 
 ```go
 // DependencyRequirer is implemented by drivers whose CLI is provisioned as a
-// managed workspace dependency. Version is the server-pinned CLI version this
-// build's protocol snapshot was generated from.
+// managed workspace dependency. It names the dependency only; which version is
+// installed is the user's call and is never checked here.
 type DependencyRequirer interface {
-	RequiredDependency() (depID, version string)
+	RequiredDependency() (depID string)
 }
 ```
 
-- codex driver 返回 `("codex", <protocolgen 快照版本>)`，claudecode driver 返回 `("claude-code", <protocolref 快照版本>)`——版本常量与快照文件同源，不另立数字。
-- 装配点 `provideDirectAgentDrivers`（`cmd/internal/core/providers.go:611`）在启动时校验：声明的 dep 存在于 catalog、其 `provides` 包含 launcher 命令、其钉版与 driver 声明一致。校验失败即 panic——「driver 要 codex，catalog 里叫 openai-codex」这类漂移在 Server 启动时暴露，不拖到用户点安装时。（内置 ACP profile 的 `Register` panic 校验已随 #1110 移除，这里是它的继任者。）
+- codex driver 返回 `"codex"`，claudecode driver 返回 `"claude-code"`。driver 不声明版本——协议快照版本（`protocolgen/schema/VERSION.json`、`protocolref/VERSION.json`）是 runtime 的实现细节，依赖管理不引用它。
+- 装配点 `provideDirectAgentDrivers`（`cmd/internal/core/providers.go:611`）在启动时校验：声明的 dep 存在于 catalog、其 `provides` 包含 launcher 命令。校验失败即 panic——「driver 要 codex，catalog 里叫 openai-codex」这类漂移在 Server 启动时暴露，不拖到用户点安装时。（内置 ACP profile 的 `Register` panic 校验已随 #1110 移除，这里是它的继任者。）
 - 通用 ACP driver 不实现该接口：命令由用户自管，解析保持 PATH → toolkit 回落，跳过全部依赖检查。
 
-### 9.2 launcher 解析与版本门
+### 9.2 launcher 解析
 
 **这是本设计对 runtime 侧唯一的硬性改动。**
 
-现状：direct runtime 硬编码 launcher（`codex/config.go:27`、`claudecode/process.go:15`），CLI 版本与 Server 协议快照的对齐完全靠「contract v3 镜像 + install.sh 钉版」这一条链路保证。
+现状：direct runtime 硬编码 launcher（`codex/config.go:27`、`claudecode/process.go:15`），CLI 是否可用完全靠「contract v3 镜像 + install.sh 内置」这一条链路保证。
 
-改造为按序解析，候选以「钉版一致」为优先序：
+改造为按来源优先级解析，不做任何版本判断：
 
-1. `/data/.memoh/deps/<id>/state.json` 的 `entrypoints`，且记录版本 == 钉版；
-2. toolkit 回落路径 `/opt/memoh/toolkit/bin/<cli>`，且 `--version` 探测（§8.5 缓存）== 钉版；
-3. 任一可用副本（managed 优先于 toolkit）但版本 ≠ 钉版 → **仍然启动**，同时发出一次 `agent_dependency_version_mismatch` 反馈（§9.4），面板显示待对齐；
+1. `/data/.memoh/deps/<id>/state.json` 的 `entrypoints`（managed 副本）；
+2. toolkit 路径 `/opt/memoh/toolkit/bin/<cli>`（镜像内置副本；§15 移除镜像内 CLI 后此环为空）；
+3. PATH 上的同名命令（`command -v`，agent 在 workspace 内自行 `npm i -g` 的副本）；
 4. 无任何副本 → `agent_dependency_missing`，不启动。
 
-- **WD-EXT-001**：依赖管理器只安装钉版，launcher 解析以钉版一致为优先序，但版本不符**不拒绝服务**。现有 runtime 在握手时已经选择「告警不拒绝」（§2.1），协议解码对未知字段与方法容错；硬拒绝只用于「无任何副本」。不做版本区间、不做「大概兼容」的断言——不符就是不符，如实告知并给出对齐动作。版本值由 discovery 提供，禁止在 runtime 内重复探测；握手上报的实际版本只用于校正缓存。
+- **WD-EXT-001**：launcher 解析只按来源优先级 managed → toolkit → PATH 取第一个存在的副本，不做版本判断、不做版本门。CLI 与 Server 协议快照之间的版本差异由 runtime 握手自行告警（§2.1，`appserver.go:111-119`、`turn.go:160-163`），那是 runtime 的实现细节，依赖管理器不介入、不转述、不设推荐版本。硬失败只用于「无任何副本」。解析走 §8.5 缓存，禁止在 runtime 内重复探测；握手上报的实际版本可以回写缓存校正显示，但不参与解析。
 
-这与旧设计「不做任何版本信任」（原 WD-ACP-005）方向相反，理由记入 §16：旧论证依赖「ACP transcript 运行时校验兜底」，direct 协议把校验点前移到了编译期，版本一致从可选优化变成了运行前提——但「前提不满足」的处置沿用 runtime 既有的容错取向，由依赖管理器负责尽快对齐，而不是由 launcher 拒绝。
+这与旧设计「不做任何版本信任」（原 WD-ACP-005）取向一致，且更彻底：旧设计仍保留 toolkit wrapper 的隐式回落，本设计把三处来源显式排序、由 discovery 统一提供。
 
-配套收敛：toolkit launcher wrapper 的 PATH fallback（`docker/toolkit/bin/codex` 的 `fallback_codex`）在本节落地后删除。它不做版本检查，会绕过 WD-EXT-001 执行任意 PATH 上的同名命令，与版本门直接冲突；两套回落语义也必然漂移。
+配套收敛：toolkit launcher wrapper 的 PATH fallback（`docker/toolkit/bin/codex` 的 `fallback_codex`）在本节落地后删除。它是第二套解析逻辑，与本节的来源顺序必然漂移；解析只能有一处。
 
 附带收益：launcher 不再绑定 `/opt/memoh/toolkit`，remote target 运行 direct runtime 的路径障碍消除（是否支持见 §2.3）。
 
@@ -434,9 +455,9 @@ type DependencyRequirer interface {
 流程：
 
 1. 用户启用（或新建并启用）一个 direct agent。
-2. 前端调用 `POST /bots/{bot_id}/dependencies/preflight`，**阻塞等待**。
-3. 已满足（已装且版本 == 钉版）→ 正常写入 `enabled: true`。
-4. 不满足 → 弹出确认对话框：「启用 Codex 需要在工作区安装 Codex 0.151.0（约 120 MB），是否现在安装？」版本不符时文案为更新：「Codex 需要从 0.147.0 更新到 0.151.0」。
+2. 前端调用 `POST /bots/{bot_id}/dependencies/preflight`，**阻塞等待**。每个依赖只返回 `satisfied`／`missing`／`platform_unsupported`／`unknown_dependency` 之一，不含任何版本判断。
+3. `satisfied`（任一来源存在副本）→ 正常写入 `enabled: true`。
+4. `missing` → 弹出确认对话框，只有「安装」一种文案：「启用 Codex 需要在工作区安装 Codex（最新版，约 120 MB），是否现在安装？」可展开指定版本。`platform_unsupported`／`unknown_dependency` 直接报错，不给安装入口。
 5. 用户确认 → 打开安装进度对话框（SSE 日志流），完成后自动写入 `enabled: true`。
 6. 用户取消 → 开关回弹，不写入。
 
@@ -444,71 +465,64 @@ type DependencyRequirer interface {
 - **WD-EXT-003**：安装失败时开关必须回弹，错误在对话框内展示，并保留完整日志供复制。
 - **WD-EXT-004**：workspace 未运行或未创建时，preflight 不得自行拉起容器，返回 `workspace_not_running` / `workspace_missing`，UI 呈现「启动工作区」/「创建工作区」引导。install 动作对 native target 可以自动 `EnsureNativeRunning`——用户已显式点了安装；remote target 必须在线，离线即拒绝。
 
-配套 API 面：bot agents API 必须暴露 `dependency_id` 与 `required_version`（来自 driver 声明），前端才能发起 preflight 并渲染版本文案。SDK 随 swagger 再生成。
+配套 API 面：bot agents API 必须暴露 `dependency_id`（来自 driver 声明），前端才能发起 preflight。SDK 随 swagger 再生成。
 
 ### 9.4 运行时兜底
 
-配置时已满足的依赖仍可能在运行时缺失或版本不符（容器以 `preserve_data=false` 重建、快照回滚、Server 升级后钉版变更）。
+配置时已满足的依赖仍可能在运行时缺失（容器以 `preserve_data=false` 重建、快照回滚、用户手动卸载）。
 
 session 启动前做一次廉价探测（走 §8.5 缓存）。不满足时**不阻塞**，返回稳定反馈：
 
 ```go
-CodeAgentDependencyMissing         = "agent_dependency_missing"
-CodeAgentDependencyVersionMismatch = "agent_dependency_version_mismatch"
+CodeAgentDependencyMissing = "agent_dependency_missing"
 ```
 
-`missing` 阻止本次启动；`version_mismatch` 不阻止（WD-EXT-001），作为会话内一次性通知附带在流上，并让面板与角标进入待对齐状态。两者都携带 `dep_id`、`required_version`，`missing` 另带 `install_task_id`，前端据此渲染进度与取消按钮。风格与 `internal/agent/decision/feedback/` 的既有稳定反馈对齐（该包在 #1110 中已按 External Agent 语义重构，落地时挂到合入后的常量表）。
+`missing` 阻止本次启动，携带 `dep_id` 与 `install_task_id`，前端据此渲染进度与取消按钮。只有这一个反馈码：版本差异不是依赖管理器的判断对象（WD-EXT-001）。风格与 `internal/agent/decision/feedback/` 的既有稳定反馈一致（该包在 #1110 中已按 External Agent 语义重构，落地时挂到合入后的常量表）。
 
-同时把安装/更新投递到 `internal/agent/background/`，用户消息侧收到：
+同时把安装投递到 `internal/agent/background/`，用户消息侧收到：
 
-> Codex 需要更新到 0.151.0，正在后台更新（约 1-2 分钟），完成后请重发消息。
+> 工作区中没有 Codex，正在后台安装最新版（约 1-2 分钟），完成后请重发消息。
 
 - **WD-EXT-005**：运行时路径不得阻塞式安装。用户发送消息期待的是秒级响应，卡住数分钟且无解释比报错更差；安装需要联网、会失败、多个 session 会并发触发同一依赖。
 - **WD-EXT-006**：通用 ACP 路径的 `commandResolveWindow`（5 秒）不得用于等待安装。它的语义是等待刚写入的文件可见，不是等待长任务。
-- **WD-EXT-007**：版本门拒绝启动、以及会话恢复因状态不符失败时，错误必须给出稳定错误码与用户可读文案，并列出可执行动作——「更新到 0.151.0」或「回滚到 0.147.0」必须是真能点的按钮，不是一句安慰。`versions/` 保留上一版（WD-FS-001）正是为此。会话恢复侧的具体挂点在 #1110 重构后的 checkpoint 体系（`agent_session_*` 表、各 runtime 的 `checkpoint.go`），以合入后代码为准。
+- **WD-EXT-007**：因「无副本」拒绝启动、以及会话恢复因 CLI 已换版本而失败时，错误必须给出稳定错误码与用户可读文案，并列出可执行动作——「安装」或「回滚到上一版」必须是真能点的按钮，不是一句安慰。`versions/` 保留上一版（WD-FS-001）正是为此。会话恢复侧的具体挂点在 #1110 重构后的 checkpoint 体系（`agent_session_*` 表、各 runtime 的 `checkpoint.go`），以合入后代码为准。
 
-需要全自动时，做成 bot 设置项「依赖版本不符时自动对齐并等待」，默认关闭。阻塞必须是用户的显式选择。
+需要全自动时，做成 bot 设置项「依赖缺失时自动安装并等待」，默认关闭。阻塞必须是用户的显式选择。
 
 ## 10. 更新检查
 
-### 10.1 agent 类：与钉版对比
+### 10.1 统一上游检查
 
-纯 Server 侧计算：discovery 得到的 `installed_version` 与 driver 钉版比较。无容器内脚本、无 registry 查询、无 TTL。
-
-- **WD-UPD-A01**：Server 启动完成 reconcile 后，agent 类的「需要对齐」集合必须立即可见（依赖面板徽标、bot 详情页角标），不等周期任务。协议快照变更只发生在 Server 升级时，启动即是检查点。
-- **WD-UPD-A02**：不自动更新（默认）。运行时兜底（§9.4）已覆盖「用户没理会徽标直接使用」的路径，自动对齐由 §9.4 的设置项显式开启。
-- agent 类的更新确认对话框**必须**呈现版本要求的来源（「当前 Server 需要 Codex 0.151.0」）。这不是对上游语义的预测，是本 Server 构建的实现事实。
-
-### 10.2 tool 类：上游检查
+所有配置了 `check_update` 且 `version.pin` 为空的 managed 依赖——agent 类的 codex／claude-code 与 tool 类同等，`source: image` 上已装的覆盖层也算——走同一个周期 worker。agent 类的 `check-update.sh` 用 `npm view <pkg> version` 取 latest；不与 Server 协议快照比较，不存在「需要更新到某个特定版本」的集合。
 
 当前没有 Server 级的周期任务框架，`ReconcileContainers` 是 FX `OnStart` 时执行一次（`cmd/internal/core/providers.go`）。需要新增一个轻量周期 worker。
 
-- **WD-UPD-001**：默认每 24 小时一轮，仅对 `status = installed` 且 `version.pin` 为空的 tool 类条目执行。
+- **WD-UPD-001**：默认每 24 小时一轮，仅对 `status = installed`、配置了 `check_update` 且 `version.pin` 为空的 managed 条目执行，不按 `category` 区分。
 - **WD-UPD-002**：只检查处于运行状态的 native workspace。停止的容器跳过，remote target 跳过（对端是用户设备，不应被后台唤醒）。
 - **WD-UPD-003**：同一依赖的检查结果按 `(dependency_id, target 平台)` 在 team 内共享缓存。10 个 bot 都装了同一工具时，不得产生 10 次上游查询。
 - **WD-UPD-004**：检查失败只写 `last_error` 与 `last_checked_at`，不改变 `status`。网络抖动不得让已装依赖显示为异常。
 - **WD-UPD-005**：不得自动更新。更新可能引入行为变化，用户需要知道自己动了什么。
-- **WD-UPD-006**：tool 类的更新确认对话框只呈现版本对比与回滚保证，不对目标版本的兼容性做任何断言——依赖管理不解释 tool 类版本的语义。（agent 类相反，见 §10.1。）
+- **WD-UPD-006**：更新确认对话框只呈现版本对比（当前 → 最新）与回滚保证，不对目标版本的兼容性做任何断言——对所有依赖一致，agent 类也不例外。CLI 与 Server 协议快照的关系由 runtime 握手告警呈现，不在这里预告。
 
 结果写入 `latest_version` 与 `last_checked_at`。提醒对话框每个 `(bot, dep, latest_version)` 组合最多弹一次，用户忽略后不再重复，直到出现更新的版本。
 
-### 10.3 手动刷新
+### 10.2 手动刷新
 
-面板提供刷新按钮：tool 类触发一次即时 check-update 绕过 TTL；agent 类触发一次 discovery 重探。
+面板提供刷新按钮：触发一次即时 check-update 绕过 TTL，并重跑 discovery。
 
 ## 11. API
 
 ```
 GET    /bots/{bot_id}/dependencies
-       ?workspace_target_id=  列出 catalog ∪ 安装状态（含 image 来源项与 agent 类版本要求）
+       ?workspace_target_id=  列出 catalog ∪ 安装状态（含 image 底座项）
 
 POST   /bots/{bot_id}/dependencies/preflight
        body: {dependency_ids: [...]}      启用 agent 前的阻塞检查
        响应含 workspace 可用性状态（WD-EXT-004）
 
-POST   /bots/{bot_id}/dependencies/{dep_id}/install     SSE
-POST   /bots/{bot_id}/dependencies/{dep_id}/update      SSE
-POST   /bots/{bot_id}/dependencies/{dep_id}/reinstall   SSE
+POST   /bots/{bot_id}/dependencies/{dep_id}/install     SSE   body 可选 {"version": "..."}，省略为最新
+POST   /bots/{bot_id}/dependencies/{dep_id}/update      SSE   同上
+POST   /bots/{bot_id}/dependencies/{dep_id}/reinstall   SSE   同上
 POST   /bots/{bot_id}/dependencies/{dep_id}/rollback    同步（纯数据操作，无日志流）
 DELETE /bots/{bot_id}/dependencies/{dep_id}             SSE
 
@@ -516,18 +530,22 @@ POST   /bots/{bot_id}/dependencies/check-updates        手动刷新，同步
 GET    /bots/{bot_id}/dependencies/{dep_id}/script      查看待执行脚本
 ```
 
+列表项字段（节选）：`id`、`category`、`source`、`status`、`installed_version`、`latest_version`、`platform_supported`，以及两个只对底座依赖有意义的字段——`image_version`（镜像自带的底座版本，非 `source: image` 条目为空）与 `overlay`（当前生效副本是否为 managed 覆盖层）。不含任何「要求版本」字段。
+
 SSE 事件序列复用容器创建的既有模式（`internal/handlers/containerd.go`）：
 
 ```
-{"type":"started","dependency_id":"codex","version":"0.151.0"}
+{"type":"started","dependency_id":"codex","requested_version":"latest"}
 {"type":"log","stream":"stdout","data":"..."}
-{"type":"done","version":"0.151.0","entrypoints":{...}}
+{"type":"done","version":"0.152.3","entrypoints":{...}}
 {"type":"error","code":"...","message":"..."}
 ```
 
+`started` 带的是请求值，`done` 才带脚本回执的实际版本（§5.4）。
+
 - **WD-API-001**：必须提供「查看待执行脚本」接口。脚本不落盘，出问题时用户无法进入容器自行查看，这个入口是必需项而非增强。
 
-流程完成后按仓库的 API 开发工作流执行 `mise run swagger-generate` 与 `mise run sdk-generate`（含 bot agents API 的 `dependency_id` / `required_version` 字段扩展）。
+流程完成后按仓库的 API 开发工作流执行 `mise run swagger-generate` 与 `mise run sdk-generate`（含 bot agents API 的 `dependency_id` 字段扩展）。
 
 ## 12. 平台与 target
 
@@ -568,7 +586,7 @@ deps 管理器需要 `MEMOH_DEP_OS`／`_ARCH`／`_LIBC` 注入脚本环境。不
 
 目标不变：最终彻底移除 `internal/workspace/contract.go` 及其全部校验，能力可用性完全由依赖管理器负责。**时机重排：从先行止血改为最后一步**，且有明确前提（§13.3）。
 
-v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令人困惑的 missing-file 错误」。这个诉求是对的，层次是错的——整体判定只能说「镜像不兼容，请重建」；依赖级版本门说「Codex 需要 0.151.0，当前 0.147.0，点此更新」。后者严格更好，但只有 §9.2 版本门与 §8 discovery 落地后才存在。该分歧已决定：contract 直接移除，不设额外对齐门槛；移除 PR 的描述需引用本节说明版本门如何承接 v3 注释的诉求。
+v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令人困惑的 missing-file 错误」。这个诉求是对的，层次是错的——整体判定只能说「镜像不兼容，请重建」；依赖级 discovery 与使用点报错说「工作区中没有 Codex，点此安装」。后者严格更好，但只有 §9.2 launcher 解析与 §8 discovery 落地后才存在。该分歧已决定：contract 直接移除，不设额外门槛；移除 PR 的描述需引用本节说明依赖级 discovery 与使用点报错如何承接 v3 注释的诉求。
 
 ### 13.2 为什么可以最终移除
 
@@ -576,7 +594,7 @@ v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令�
 
 **fatal 类是冗余的。** 容器 `Cmd` 就是 `tini -g -- /opt/memoh/bridge`（`internal/workspace/manager.go:619`）。缺少 tini 或 bridge 时容器根本无法启动，`WaitForWorkspaceReady`（以 `Stat("/")` 探活）会先失败并返回明确错误；contract 校验自身经 bridge client 执行，bridge 不可达时它根本执行不到。这部分断言从未真正生效。
 
-**agent CLI 版本对齐由版本门承接。** contract v3 为此而生，但它以镜像为粒度：CLI 差一个版本 = 整个镜像判死 = 重建。版本门以依赖为粒度：差哪个补哪个，且给出可点的补救动作。
+**agent CLI 的可用性由依赖级 discovery 与使用点报错承接。** contract v3 为此而生，但它以镜像为粒度：CLI 缺失或换版 = 整个镜像判死 = 重建。依赖管理以依赖为粒度：缺哪个装哪个，且给出可点的补救动作。
 
 **其余全是可选能力。** node、python、uv、a11y-cli、display scripts 的缺失只影响特定功能，应当在使用点报错。那里的错误信息天然更具体——「Computer Use 需要 a11y-cli，当前 workspace 未提供」远比「workspace image is incompatible」有用。
 
@@ -586,7 +604,7 @@ v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令�
 
 前提（三条全部满足）：
 
-1. §9.2 版本门在 direct runtime 启动路径生效；
+1. §9.2 launcher 解析在 direct runtime 启动路径生效；
 2. §8 discovery 上线，「这个 workspace 实际有什么」有事实来源；
 3. §9.3 / §9.4 的启用检查与运行时兜底上线，失败有补救路径。
 
@@ -596,7 +614,7 @@ v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令�
 
 ### 13.4 接受的代价
 
-不兼容镜像的失败会推迟到实际使用点。这是明确接受的：失败信息更具体，指向具体缺失或版本不符的能力；discovery 承担「实际有什么」的回答，比一次性校验更贴近事实；用户可以安装或对齐缺失依赖，而不是被判为不兼容后无路可走。
+不兼容镜像的失败会推迟到实际使用点。这是明确接受的：失败信息更具体，指向具体缺失的能力；discovery 承担「实际有什么」的回答，比一次性校验更贴近事实；用户可以安装缺失依赖，而不是被判为不兼容后无路可走。
 
 ## 14. 安全边界
 
@@ -613,31 +631,33 @@ v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令�
 | --- | --- | --- |
 | 0 | rebase 前提：#1110–#1112 合入 | 本设计的 runtime 侧引用全部以合入后代码为准 |
 | 1 | §5.2 `ExecStream.CloseSend` | 独立，单测覆盖 |
-| 2 | catalog 加载 + runner + discovery + §12.4 平台探测 | 此时镜像仍内置 CLI，可对照验证；含 WD-CAT-004 钉版同源测试 |
+| 2 | catalog 加载 + runner + discovery + §12.4 平台探测 | 此时镜像仍内置 CLI，可对照验证 |
 | 3 | §7 数据库 + §11 API + SSE + rollback | |
-| 4 | §9.2 launcher 解析与版本门 + §9.4 反馈码 + wrapper fallback 收敛 | 依赖阶段 2 的 discovery |
+| 4 | §9.2 launcher 解析 + §9.4 反馈码 + wrapper fallback 收敛 | 依赖阶段 2 的 discovery |
 | 5 | §9.3 启用时阻塞检查 + 前端依赖面板 + bot agents API 字段 | |
-| 6 | §10 更新检查（agent 类对比钉版；tool 类上游检查） | |
-| 7 | 从 `docker/toolkit/install.sh` 移除 codex/claude 与 toolkit wrapper，镜像瘦身 | 一步删除，不保留种子副本；依赖阶段 4/5，否则新 workspace 无 CLI 可用。新镜像首次启用 direct agent 需下载 CLI，由 §9.3 的安装对话框承接 |
-| 8 | §13 contract 移除 | 前提见 §13.3 |
+| 6 | §10 更新检查（统一上游检查 worker） | |
+| 7 | 去钉版与覆盖层：catalog 去 `pin`、agent 类 `check_update` 脚本；node／python／uv 覆盖层脚本；API `version` 参数与 `image_version`／`overlay` 字段；§6.1 PATH 前置（bridge + 三处 `containerPath`）；前端版本选择与「移除覆盖层」文案 | 阶段 2–6 中以早期形态合入的版本判断在此收敛；此后所有依赖同等管理 |
+| 8 | 从 `docker/toolkit/install.sh` 移除 codex/claude 与 toolkit wrapper，镜像瘦身 | 一步删除，不保留种子副本；依赖阶段 4/5/7，否则新 workspace 无 CLI 可用。新镜像首次启用 direct agent 需下载 CLI（默认最新版），由 §9.3 的安装对话框承接 |
+| 9 | §13 contract 移除 | 前提见 §13.3 |
 
-上表是逻辑阶段；实际提交按 `workspace-dependencies-plan.md` 合并为 5 个代码 PR 叠成一个栈（阶段 1–2 → core，3 与 6 → service-api，4 → runtime，5 → web，7–8 → image-contract）。阶段 1 不依赖其余阶段。与旧版设计的关键差异：contract 移除从阶段 0 挪到阶段 8——在 direct 世界里它承担着 CLI 版本对齐的守门职责，替代机制（版本门 + discovery + 兜底）就位之前不能删。
+上表是逻辑阶段；实际提交按 `workspace-dependencies-plan.md` 合并为 6 个代码 PR 叠成一个栈（阶段 1–2 → core，3 与 6 → service-api，4 → runtime，5 → web，7 → versions-overlays，8–9 → image-contract）。阶段 1 不依赖其余阶段。与旧版设计的关键差异：contract 移除从阶段 0 挪到最后——在 direct 世界里它承担着「CLI 在不在」的守门职责，替代机制（launcher 解析 + discovery + 兜底）就位之前不能删。
 
 ## 16. 决策记录
 
 | 议题 | 决定 | 理由 |
 | --- | --- | --- |
-| workspace contract 是否保留 | 最终移除，时机从先行改为最后 | fatal 类断言被容器启动路径覆盖；v3 新增的「CLI 版本对齐」职责由依赖级版本门承接后，整体判定失去存在理由。见 §13 |
-| 版本信任如何维护 | **推翻旧决定：agent 类只安装钉版，解析以钉版优先，不符告知不拒绝** | 旧设计禁止版本信任（原 WD-ACP-005），依据是 ACP transcript 运行时校验兜底；direct 协议由钉版 CLI 的 schema 快照编译期生成，版本一致是运行前提而非预测。「支持 0.151.0」是本构建的实现事实。处置上沿用 runtime 既有的「告警不拒绝」（`appserver.go:111-119`）：硬拒绝会让每次 Server 升级后所有旧镜像 workspace 停摆，直到用户更新。见 §9.2 |
-| agent 类版本归谁 | Server（协议快照） | 用户只决定装不装；「更新」= 对齐到钉版。快照同步本就发生在 Server 仓库（`mise run codex-schema-sync`），版本随 Server 发布是既成事实，本设计把「分发」从镜像链路挪到依赖管理器 |
-| 钉版如何防漂移 | catalog pin 与 `VERSION.json` 快照用测试强制一致（WD-CAT-004） | 同一个版本号出现两处即会漂移，静态校验是 driver 装配校验（§9.1）的同一取向 |
-| 依赖管理是否解释版本语义 | tool 类不解释；agent 类必须解释 | tool 类的兼容性断言是预测（维持旧决定）；agent 类的版本要求是 Server 实现事实，隐瞒它才是错误。见 §10.1 |
+| workspace contract 是否保留 | 最终移除，时机从先行改为最后 | fatal 类断言被容器启动路径覆盖；v3 新增的「CLI 是否可用」职责由依赖级 discovery 与使用点报错承接后，整体判定失去存在理由。见 §13 |
+| agent CLI 版本如何管理 | **不钉版、不设推荐版本，与其他依赖同等：默认最新、可指定版本、可查上游更新、可回滚（用户决定）** | Server 协议快照版本是 runtime 实现细节，握手告警照旧（`appserver.go:111-119`、`turn.go:160-163`）；依赖管理器不做任何版本门或推荐。维持旧设计「不做任何版本信任」（原 WD-ACP-005）的取向。见 §9.2、§10 |
+| agent 类版本归谁 | 用户，与其他依赖一致 | 快照同步仍发生在 Server 仓库（`mise run codex-schema-sync`），但那只决定 Server 会说哪一版协议，不决定 workspace 装哪一版 CLI；二者差异由 runtime 握手告警呈现 |
+| node／python／uv 如何建模 | 镜像底座＋可管理覆盖层 | 底座保证始终可用且不可删；覆盖层装在 `/data`，支持升级回滚，卸载即回到镜像版本。npm 随 node 提供不单列。见 WD-CAT-001 |
+| 覆盖层如何生效 | PATH 优先级由 bridge 注入 | bridge exec 环境把 `/data/.memoh/deps/bin` 前置（目录存在才前置）；direct runtime 与通用 ACP 的 `containerPath` 同步前置。见 §6.1、WD-FS-003 |
+| 依赖管理是否解释版本语义 | 否，对所有依赖一致 | 兼容性断言是预测；agent 类也不例外——CLI 与协议快照的关系由 runtime 握手告警呈现，不由依赖管理器预告。见 §10 |
 | rollback 是否独立动作 | 是，第六动作，纯数据操作无脚本 | 旧设计把「回退」当作补救承诺却未定义动作；回滚在「新版本坏了」时执行，不得依赖脚本、网络或上游 |
-| toolkit wrapper 的 PATH fallback | 随版本门落地删除 | 不做版本检查的回落会绕过 WD-EXT-001，两套回落语义必然漂移。见 §9.2 |
+| toolkit wrapper 的 PATH fallback | 随 launcher 解析落地删除 | 第二套解析逻辑与 §9.2 的来源顺序必然漂移；解析只能有一处 |
 | Hermes | 不进 catalog | 已随 #1112 从产品入口移除 |
 | 镜像内 CLI 是否保留种子副本 | 不保留，一步删除 | 保留种子等于两套分发路径并存，toolkit 回落会掩盖依赖管理器的缺陷；首次启用的下载成本由安装对话框显式承接 |
 | 版本探测方式 | 默认 `--version`，清单可选 `scripts.version` 覆盖 | 多数 CLI 的 `--version` 足够；输出格式特殊或无该参数的依赖不应迫使 discovery 内置解析特例。见 WD-CAT-005 |
-| `requires` 是否带版本区间 | 不带 | 镜像提供的 node／python 版本由镜像自身保证，再加一层区间只增加维护面 |
+| `requires` 是否带版本区间 | 不带 | 底座版本由镜像保证，覆盖层版本由用户决定；再加一层区间只增加维护面，且会重新引入版本判断 |
 | reinstall 是否独立脚本 | 否，默认由 runner 编排 | 见 §4.3 |
-| tool 类更新检查在何处执行 | workspace 内 | 可复用脚本的镜像源配置，无需为各生态重新实现版本查询；代价是容器须运行中，与 WD-UPD-002 一致。agent 类不适用（无上游查询，见 §10.1） |
+| 更新检查在何处执行 | workspace 内 | 可复用脚本的镜像源配置，无需为各生态重新实现版本查询；代价是容器须运行中，与 WD-UPD-002 一致。对所有依赖一致 |
 | 依赖是否共享挂载 | 否 | 见 §12.3 |
