@@ -98,6 +98,14 @@ func (s *Service) sessionModelPreference(ctx context.Context, sessionID string) 
 	if row.PreferredReasoningEffort.Valid {
 		effort = strings.TrimSpace(row.PreferredReasoningEffort.String)
 	}
+	// The pair is one value: a half pair (NULL model, surviving effort) arises
+	// when ON DELETE SET NULL clears only the model column, and honoring the
+	// effort alone would pin it onto whatever model the chain falls back to —
+	// the cross-model effort memory the spec rules out (§3.7). The frontend
+	// already treats a NULL model as no memory; match it here.
+	if modelID == "" {
+		effort = ""
+	}
 	return modelID, effort
 }
 

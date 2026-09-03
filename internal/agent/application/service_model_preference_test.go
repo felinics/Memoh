@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
@@ -177,6 +179,52 @@ func TestWriteBackSessionModelPreference(t *testing.T) {
 		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, nil, "", "")
 		if len(fake.updatedPrefs) != 1 || fake.updatedPrefs[0].PreferredReasoningEffort.Valid {
 			t.Fatalf("writes = %+v, want one write with NULL effort", fake.updatedPrefs)
+		}
+	})
+}
+
+// A half pair (NULL model, surviving effort) arises when ON DELETE SET NULL
+// clears only the model column. The effort must be dropped with the model —
+// honoring it alone would pin it onto whatever model the chain falls back
+// to, the cross-model effort memory the spec rules out (§3.7). A full pair
+// still round-trips.
+func TestSessionModelPreferenceHalfPair(t *testing.T) {
+	ctx := context.Background()
+	const sessionID = "00000000-0000-0000-0000-000000000617"
+
+	var id pgtype.UUID
+	if err := id.Scan(sessionID); err != nil {
+		t.Fatalf("scan session id: %v", err)
+	}
+
+	newSvc := func(session sqlc.BotSession) *Service {
+		return newModelSelectionService(t, &modelSelectionFakeQueries{session: session})
+	}
+
+	t.Run("NULL model drops the surviving effort", func(t *testing.T) {
+		svc := newSvc(sqlc.BotSession{
+			ID:                       id,
+			PreferredReasoningEffort: pgtype.Text{String: "high", Valid: true},
+		})
+		modelID, effort := svc.sessionModelPreference(ctx, sessionID)
+		if modelID != "" || effort != "" {
+			t.Fatalf("half pair = (%q, %q), want no memory", modelID, effort)
+		}
+	})
+
+	t.Run("full pair round-trips", func(t *testing.T) {
+		var modelUUID pgtype.UUID
+		if err := modelUUID.Scan("00000000-0000-0000-0000-000000000618"); err != nil {
+			t.Fatalf("scan model id: %v", err)
+		}
+		svc := newSvc(sqlc.BotSession{
+			ID:                       id,
+			PreferredChatModelID:     modelUUID,
+			PreferredReasoningEffort: pgtype.Text{String: "high", Valid: true},
+		})
+		modelID, effort := svc.sessionModelPreference(ctx, sessionID)
+		if modelID != modelUUID.String() || effort != "high" {
+			t.Fatalf("full pair = (%q, %q), want (%s, high)", modelID, effort, modelUUID.String())
 		}
 	})
 }

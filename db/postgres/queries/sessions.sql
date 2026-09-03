@@ -619,11 +619,15 @@ WHERE publication.team_id = public.memoh_current_team_id()
 -- name: UpdateSessionModelPreference :exec
 -- Preference write-back (issue #879). Deliberately does NOT touch
 -- updated_at: sidebar recency must not move on picker changes or
--- per-turn write-backs.
+-- per-turn write-backs. The explicit team predicate matches every other
+-- query in this file (defense-in-depth under FORCE RLS), and the deleted_at
+-- guard keeps late writes out of soft-deleted sessions.
 UPDATE bot_sessions
 SET preferred_chat_model_id = $2,
     preferred_reasoning_effort = $3
-WHERE id = $1;
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+  AND deleted_at IS NULL;
 
 -- name: GetLatestSessionModelPreference :one
 -- Welcome composer seed: the bot's most recent native user-facing session
@@ -633,7 +637,8 @@ WHERE id = $1;
 -- sessions never seed.
 SELECT preferred_chat_model_id, preferred_reasoning_effort
 FROM bot_sessions
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND created_by_user_id = $2
   AND runtime_type = 'model'
   AND session_mode IN ('chat', 'discuss')

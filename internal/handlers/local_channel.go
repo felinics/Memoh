@@ -2530,14 +2530,30 @@ func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, ch
 	if h == nil || h.sessionService == nil {
 		return sessionpkg.Thread{}, errors.New("session service not configured")
 	}
-	return h.sessionService.Create(ctx, sessionpkg.CreateInput{
-		BotID:                    strings.TrimSpace(botID),
-		ChannelType:              h.channelType.String(),
-		Type:                     sessionpkg.TypeChat,
-		CreatedByUserID:          strings.TrimSpace(channelIdentityID),
-		PreferredChatModelID:     strings.TrimSpace(modelID),
-		PreferredReasoningEffort: strings.TrimSpace(reasoningEffort),
-	})
+	input := sessionpkg.CreateInput{
+		BotID:           strings.TrimSpace(botID),
+		ChannelType:     h.channelType.String(),
+		Type:            sessionpkg.TypeChat,
+		CreatedByUserID: strings.TrimSpace(channelIdentityID),
+	}
+	// Reconcile a carried pair exactly like the REST first-send (spec §3.3:
+	// every write point reconciles). Without it a stale composer draft naming
+	// a deleted model dies as an FK violation, a slug degrades to a (NULL,
+	// effort) half pair, and an illegal effort lands in the row raw. Messages
+	// that omit the pair (default-sourced) keep both fields empty → NULL
+	// preference, and the session follows the bot default live.
+	if strings.TrimSpace(modelID) != "" || strings.TrimSpace(reasoningEffort) != "" {
+		if h.agentService == nil {
+			return sessionpkg.Thread{}, errors.New("agent service not configured")
+		}
+		prefModelID, prefEffort, err := h.agentService.ReconcileSessionModelPreference(ctx, input.BotID, modelID, reasoningEffort)
+		if err != nil {
+			return sessionpkg.Thread{}, err
+		}
+		input.PreferredChatModelID = prefModelID
+		input.PreferredReasoningEffort = prefEffort
+	}
+	return h.sessionService.Create(ctx, input)
 }
 
 func (h *LocalChannelHandler) wsSessionSupportsRequestedSkills(ctx context.Context, sessionID string) (bool, error) {

@@ -459,7 +459,8 @@ func (q *Queries) ForkSessionFromAssistantTurn(ctx context.Context, arg ForkSess
 const getLatestSessionModelPreference = `-- name: GetLatestSessionModelPreference :one
 SELECT preferred_chat_model_id, preferred_reasoning_effort
 FROM bot_sessions
-WHERE bot_id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
   AND created_by_user_id = $2
   AND runtime_type = 'model'
   AND session_mode IN ('chat', 'discuss')
@@ -1471,7 +1472,9 @@ const updateSessionModelPreference = `-- name: UpdateSessionModelPreference :exe
 UPDATE bot_sessions
 SET preferred_chat_model_id = $2,
     preferred_reasoning_effort = $3
-WHERE id = $1
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+  AND deleted_at IS NULL
 `
 
 type UpdateSessionModelPreferenceParams struct {
@@ -1482,7 +1485,9 @@ type UpdateSessionModelPreferenceParams struct {
 
 // Preference write-back (issue #879). Deliberately does NOT touch
 // updated_at: sidebar recency must not move on picker changes or
-// per-turn write-backs.
+// per-turn write-backs. The explicit team predicate matches every other
+// query in this file (defense-in-depth under FORCE RLS), and the deleted_at
+// guard keeps late writes out of soft-deleted sessions.
 func (q *Queries) UpdateSessionModelPreference(ctx context.Context, arg UpdateSessionModelPreferenceParams) error {
 	_, err := q.db.Exec(ctx, updateSessionModelPreference, arg.ID, arg.PreferredChatModelID, arg.PreferredReasoningEffort)
 	return err

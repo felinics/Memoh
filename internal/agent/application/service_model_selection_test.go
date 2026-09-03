@@ -396,13 +396,19 @@ type modelSelectionFakeQueries struct {
 	provider       sqlc.Provider
 	sessionModelID pgtype.UUID
 	updatedPrefs   []sqlc.UpdateSessionModelPreferenceParams
+	// session is the row GetSessionByID serves; the zero value is the "no
+	// memory" default every derived fake wants (issue #879). Half-pair tests
+	// set it explicitly.
+	session sqlc.BotSession
 }
 
-// GetSessionByID returns a zero row: no persisted model preference, which is
-// the "no memory" default every derived fake wants (issue #879). Kept out of
-// the embedded store so a preference read can never panic on the nil
-// interface.
-func (*modelSelectionFakeQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+// GetSessionByID returns the configured row (zero row by default: no
+// persisted model preference). Kept out of the embedded store so a
+// preference read can never panic on the nil interface.
+func (f *modelSelectionFakeQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+	if f.session.ID.Valid {
+		return f.session, nil
+	}
 	return sqlc.BotSession{ID: id}, nil
 }
 
