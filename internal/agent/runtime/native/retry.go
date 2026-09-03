@@ -28,14 +28,17 @@ var errEOFPattern = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
 // serverErrPattern matches "api error 5XX" where XX is any two digits.
 var serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
 
-// DefaultRetryConfig returns the default retry strategy: 10 attempts total,
-// first 5 fast (no delay), last 5 with exponential backoff.
+// DefaultRetryConfig returns the default retry strategy: 5 attempts total.
+// Only the first retry fires immediately — it absorbs network blips and
+// instant upstream rejections. Later attempts back off 1s→8s with jitter, so
+// a sustained overload window (typically tens of seconds) is ridden out
+// without hammering the upstream with a burst of immediate retries.
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxAttempts:  10,
-		FastAttempts: 5,
+		MaxAttempts:  5,
+		FastAttempts: 1,
 		BaseDelay:    1 * time.Second,
-		MaxDelay:     30 * time.Second,
+		MaxDelay:     8 * time.Second,
 	}
 }
 
