@@ -44,6 +44,7 @@ type ScriptPreview struct {
 // Placeholders for environment values the preview cannot know.
 const (
 	previewInstalledVersion = "<installed version>"
+	previewRequestedVersion = "<requested version or latest>"
 	previewPreviousVersion  = "<previous version>"
 	previewProbedAtRunTime  = "<probed at run time>"
 	previewResultNonce      = "<nonce>"
@@ -122,11 +123,16 @@ func previewTimeout(dep catalog.Dependency, action catalog.Action) time.Duration
 	return dep.Timeouts.Duration(action)
 }
 
-// previewVersion mirrors the MEMOH_DEP_VERSION each service method passes.
+// previewVersion mirrors the MEMOH_DEP_VERSION each service method passes
+// (targetVersion): the manifest pin when there is one, otherwise whatever
+// version the request names, or nothing for latest.
 func previewVersion(dep catalog.Dependency, action catalog.Action) string {
 	switch action {
 	case catalog.ActionInstall, catalog.ActionUpdate, catalog.ActionReinstall:
-		return dep.Version.Pin
+		if dep.Version.Pin != "" {
+			return dep.Version.Pin
+		}
+		return previewRequestedVersion
 	case ActionRollback:
 		return previewPreviousVersion
 	default:

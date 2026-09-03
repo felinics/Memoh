@@ -3,9 +3,9 @@
 // that install, update, and remove it.
 //
 // The catalog is the source of truth for which dependencies Memoh supports,
-// how they are installed, and which version agent dependencies are pinned to
-// (design WD-MODEL-001). It is compiled into the Server binary, never stored
-// in the database, and never read from the workspace.
+// how they are installed and updated, and which of them are pinned to a fixed
+// version (design WD-MODEL-001). It is compiled into the Server binary, never
+// stored in the database, and never read from the workspace.
 package catalog
 
 import (
@@ -184,29 +184,26 @@ func (e *entry) validate(c *Catalog, seen map[string]bool) []error {
 		}
 	}
 
+	// Script consistency. A managed dependency exists only through its
+	// scripts, so install is mandatory. An image-baseline dependency may
+	// declare scripts to install overlay versions, or none at all. Either way
+	// anything that installs must be removable, and every other scripted
+	// action presumes an installed overlay.
 	configured := dep.Scripts.configured()
-	switch dep.Source {
-	case SourceImage:
-		if len(configured) > 0 {
-			fail("source image must not declare scripts (WD-CAT-001)")
-		}
-		if dep.Category == CategoryAgent {
-			fail("source image cannot be used with category agent")
-		}
-	case SourceManaged:
-		if dep.Scripts.Install == "" {
-			fail("source managed requires scripts.install")
-		}
-		if dep.Scripts.Remove == "" {
-			fail("source managed requires scripts.remove")
-		}
+	if dep.Source == SourceManaged && dep.Scripts.Install == "" {
+		fail("source managed requires scripts.install")
 	}
-	if dep.Category == CategoryAgent {
-		if dep.Version.Pin == "" {
-			fail("category agent requires version.pin (WD-CAT-004)")
-		}
-		if dep.Scripts.CheckUpdate != "" {
-			fail("category agent must not declare scripts.check_update (WD-CAT-004)")
+	if dep.Source == SourceImage && dep.Category == CategoryAgent {
+		fail("source image cannot be used with category agent")
+	}
+	if dep.Scripts.Install != "" && dep.Scripts.Remove == "" {
+		fail("scripts.remove is required when scripts.install is set")
+	}
+	if dep.Scripts.Install == "" {
+		for _, action := range []Action{ActionUpdate, ActionReinstall, ActionCheckUpdate, ActionVersion} {
+			if dep.Scripts.For(action) != "" {
+				fail("scripts.%s requires scripts.install", action)
+			}
 		}
 	}
 	for _, ref := range configured {

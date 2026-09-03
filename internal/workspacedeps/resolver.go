@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 // Service is the launcher resolver behind the External Agent runtimes
@@ -18,27 +19,15 @@ var (
 
 // ResolveLauncher picks the copy of depID's primary command a driver should
 // execute in the bot's current workspace target. Candidates are ranked by
-// design §9.2: managed at the required version, toolkit at the required
-// version, any managed copy, any toolkit copy, any PATH copy. A copy whose
-// version differs from the required one is still returned with Mismatch set
-// (WD-EXT-001); an unknown version is not a mismatch. When no copy exists the
-// install is handed to the background manager and the error is a
-// *external.DependencyMissingError carrying that task id (WD-EXT-005).
-//
-// An empty requiredVersion falls back to the catalog pin. Dependencies that
-// ship with the workspace image are not resolved here and report
-// ErrDependencyNotFound, as does an id outside the catalog.
-func (s *Service) ResolveLauncher(ctx context.Context, botID, depID, requiredVersion string) (external.Launcher, error) {
+// source (design §9.2): the managed copy, then the image toolkit copy, then
+// any PATH copy; versions play no part. When no copy exists the install is
+// handed to the background manager and the error is a
+// *external.DependencyMissingError carrying that task id (WD-EXT-005). An id
+// outside the catalog reports ErrDependencyNotFound.
+func (s *Service) ResolveLauncher(ctx context.Context, botID, depID string) (external.Launcher, error) {
 	dep, err := s.dependency(depID)
 	if err != nil {
 		return external.Launcher{}, err
-	}
-	if dep.IsImageProvided() {
-		return external.Launcher{}, fmt.Errorf("%w: %s ships with the workspace image and has no launcher to resolve", ErrDependencyNotFound, dep.ID)
-	}
-	requiredVersion = strings.TrimSpace(requiredVersion)
-	if requiredVersion == "" {
-		requiredVersion = dep.Version.Pin
 	}
 	targetID, err := s.workspace.CurrentTargetID(ctx, botID)
 	if err != nil {
@@ -51,7 +40,7 @@ func (s *Service) ResolveLauncher(ctx context.Context, botID, depID, requiredVer
 	}
 	key := InstallationKey{BotID: botID, WorkspaceTargetID: targetID, DependencyID: dep.ID}
 
-	candidate, ok := selectLauncherCandidate(snap.Observed[dep.ID].Candidates, requiredVersion)
+	candidate, ok := selectLauncherCandidate(snap.Observed[dep.ID].Candidates)
 	if !ok {
 		s.forgetLaunched(key)
 		taskID, spawnErr := s.EnsureInstalledAsync(ctx, botID, targetID, dep.ID)
@@ -63,35 +52,31 @@ func (s *Service) ResolveLauncher(ctx context.Context, botID, depID, requiredVer
 				slog.Any("error", spawnErr),
 			)
 		}
-		return external.Launcher{}, &external.DependencyMissingError{
-			DependencyID:    dep.ID,
-			RequiredVersion: requiredVersion,
-			TaskID:          taskID,
-		}
+		return external.Launcher{}, &external.DependencyMissingError{DependencyID: dep.ID, TaskID: taskID}
 	}
 	s.rememberLaunched(key, candidate.Path)
 	return external.Launcher{
-		Path:     candidate.Path,
-		Version:  candidate.Version,
-		Source:   launcherSource(candidate.Source),
-		Mismatch: candidate.Version != "" && requiredVersion != "" && candidate.Version != requiredVersion,
+		Path:    candidate.Path,
+		Version: candidate.Version,
+		Source:  launcherSource(candidate.Source),
 	}, nil
 }
 
 // EnsureInstalledAsync starts a background install of depID for (bot, target)
-// and returns the task id. The same (bot, target, dependency) never gets two
-// concurrent tasks: while one is running its id is returned again. When
-// another operation already holds the dependency's lock (a UI-driven install,
-// for instance) nothing is started and the id is empty; the same holds when
-// the service has no background manager.
+// and returns the task id. The install takes the manifest pin when there is
+// one and otherwise the latest version. The same (bot, target, dependency)
+// never gets two concurrent tasks: while one is running its id is returned
+// again. When another operation already holds the dependency's lock (a
+// UI-driven install, for instance) nothing is started and the id is empty;
+// the same holds when the service has no background manager.
 func (s *Service) EnsureInstalledAsync(ctx context.Context, botID, targetID, depID string) (string, error) {
 	targetID = normalizeTargetID(targetID)
 	dep, err := s.dependency(depID)
 	if err != nil {
 		return "", err
 	}
-	if dep.IsImageProvided() {
-		return "", fmt.Errorf("%w: %s ships with the workspace image", ErrActionUnsupported, dep.ID)
+	if !ActionSupported(dep, catalog.ActionInstall) {
+		return "", fmt.Errorf("%w: %s has no install script", ErrActionUnsupported, dep.ID)
 	}
 	if s.background == nil {
 		return "", nil
@@ -122,7 +107,7 @@ func (s *Service) EnsureInstalledAsync(ctx context.Context, botID, targetID, dep
 			s.resolverMu.Unlock()
 		}()
 		sink := LogFunc(func(stream, line string) { log(stream, line+"\n") })
-		if _, err := s.Install(runCtx, botID, targetID, dep.ID, sink); err != nil {
+		if _, err := s.Install(runCtx, botID, targetID, dep.ID, "", sink); err != nil {
 			return err
 		}
 		// Install already drops the snapshot on success; repeating it here
@@ -179,37 +164,16 @@ func (s *Service) forgetLaunched(key InstallationKey) {
 }
 
 // selectLauncherCandidate applies the design §9.2 order to discovered copies:
-// managed at the required version, toolkit at the required version, any
-// managed copy, any toolkit copy, then any PATH copy. Within a tier the
-// discovery order is kept. An empty requiredVersion skips the version tiers.
-func selectLauncherCandidate(candidates []Candidate, requiredVersion string) (Candidate, bool) {
-	if len(candidates) == 0 {
-		return Candidate{}, false
-	}
-	type tier struct {
-		source  Source
-		pinned  bool
-		version string
-	}
-	tiers := []tier{
-		{source: SourceManaged, pinned: true, version: requiredVersion},
-		{source: SourceToolkit, pinned: true, version: requiredVersion},
-		{source: SourceManaged},
-		{source: SourceToolkit},
-		{source: SourcePath},
-	}
-	for _, t := range tiers {
-		if t.pinned && t.version == "" {
-			continue
-		}
+// the managed copy, then the toolkit copy, then a PATH copy. Within a source
+// the discovery order is kept. This is the same precedence the shim
+// directory gives the managed copy on PATH, so the launcher and a terminal
+// agree on which copy runs.
+func selectLauncherCandidate(candidates []Candidate) (Candidate, bool) {
+	for _, source := range []Source{SourceManaged, SourceToolkit, SourcePath} {
 		for _, candidate := range candidates {
-			if candidate.Source != t.source || candidate.Path == "" {
-				continue
+			if candidate.Source == source && candidate.Path != "" {
+				return candidate, true
 			}
-			if t.pinned && candidate.Version != t.version {
-				continue
-			}
-			return candidate, true
 		}
 	}
 	return Candidate{}, false

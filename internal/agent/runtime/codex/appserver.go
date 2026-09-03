@@ -33,9 +33,8 @@ type appServer struct {
 	mountCtx    context.Context
 	mountCancel context.CancelFunc
 
-	// launcher is the CLI copy this process runs. When the resolver flagged
-	// a version mismatch the server still runs (design WD-EXT-001) and each
-	// thread is told once; mismatchNoticed records which threads were told.
+	// launcher is the CLI copy this process runs; codexVersion is the version
+	// it reported during the initialize handshake.
 	launcher     external.Launcher
 	codexVersion string
 
@@ -56,8 +55,7 @@ type appServer struct {
 	toolMounts map[string]*toolmount.Mount
 	// logins tracks in-flight device-code logins by login id; outcomes arrive
 	// via the account/login/completed notification.
-	logins          map[string]*loginOutcome
-	mismatchNoticed map[string]bool
+	logins map[string]*loginOutcome
 }
 
 // loginOutcome is the terminal state of one device-code login.
@@ -94,7 +92,6 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		toollessThreads: map[string]bool{},
 		logins:          map[string]*loginOutcome{},
 		toolMounts:      map[string]*toolmount.Mount{},
-		mismatchNoticed: map[string]bool{},
 	}
 	srv.conn = newConn(proc, srv, logger)
 
@@ -254,35 +251,6 @@ func (s *appServer) threadToolless(threadID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.toollessThreads[threadID]
-}
-
-// claimLauncherMismatchNotice reports whether threadID must still be told
-// that this server runs a CLI at a version other than the pinned one, and
-// marks it told. It is false when the launcher matches or the thread has
-// already been told: the notice is once per thread per app-server.
-func (s *appServer) claimLauncherMismatchNotice(threadID string) bool {
-	if !s.launcher.Mismatch {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.mismatchNoticed[threadID] {
-		return false
-	}
-	if s.mismatchNoticed == nil {
-		s.mismatchNoticed = map[string]bool{}
-	}
-	s.mismatchNoticed[threadID] = true
-	return true
-}
-
-// installedLauncherVersion is the version to show in a mismatch notice: the
-// resolver's observation, or the handshake's when discovery had none.
-func (s *appServer) installedLauncherVersion() string {
-	if v := strings.TrimSpace(s.launcher.Version); v != "" {
-		return v
-	}
-	return strings.TrimSpace(s.codexVersion)
 }
 
 // HandleServerRequest routes app-server → Memoh requests to the owning turn.

@@ -1,9 +1,20 @@
+# Overlay downloads use UV_RELEASES_URL (default
+# https://github.com/astral-sh/uv/releases): archives come from
+# <UV_RELEASES_URL>/download/<version>/uv-<triple>.tar.gz and "latest" is
+# resolved from where <UV_RELEASES_URL>/latest redirects, falling back to the
+# GitHub releases API. This is deliberately not UV_MIRROR, which
+# docker/toolkit/install.sh uses with a different meaning (a
+# .../releases/latest/download base that cannot address a specific version).
 id: uv
 name: uv
 category: runtime
 icon: uv
-description: uv Python package and project manager shipped with the workspace image, including uvx.
+description: Python package and project manager.
 
+# The image copy under /opt/memoh/toolkit is the baseline. The scripts
+# install overlay versions from the GitHub releases into
+# MEMOH_DEP_HOME/versions/<version> (newest release by default, or an
+# explicit version); removing the overlay returns to the image copy.
 source: image
 provides:
   - uv
@@ -11,3 +22,16 @@ provides:
 
 platforms:
   - { os: linux, arch: [amd64, arm64], libc: glibc }
+  - { os: darwin, arch: [arm64] }
+
+timeouts:
+  install: 1200
+  remove: 300
+  check_update: 60
+  version: 30
+
+scripts:
+  install: install.sh
+  update: update.sh
+  remove: remove.sh
+  check_update: check-update.sh

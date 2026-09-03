@@ -644,10 +644,9 @@ func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderun
 }
 
 // validateDriverDependencies checks every driver that declares a workspace
-// dependency (external.DependencyRequirer): the dependency is in the catalog,
-// is an agent dependency (managed, pinned), its pin equals the version the
-// driver's protocol snapshot was generated from, and its primary command is
-// the runtime's launcher. All violations are reported together.
+// dependency (external.DependencyRequirer): the dependency is in the catalog
+// and its primary command is the runtime's launcher. All violations are
+// reported together.
 func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalog) error {
 	if cat == nil {
 		return errors.New("validate direct agent dependencies: catalog is nil")
@@ -669,12 +668,6 @@ func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalo
 		if !ok {
 			fail("not in the catalog")
 			continue
-		}
-		if !dep.IsAgent() {
-			fail("category is %q, want agent", dep.Category)
-		}
-		if dep.Version.Pin != req.Version {
-			fail("catalog pin %q differs from the driver's protocol snapshot version %q", dep.Version.Pin, req.Version)
 		}
 		command, known := directRuntimeLaunchers[runtimeType]
 		switch {
@@ -1090,47 +1083,13 @@ func injectScheduleBotAgents(scheduleService *schedule.Service, botAgentsService
 	scheduleService.SetBotAgents(botAgentsService)
 }
 
-func startContainerReconciliation(lc fx.Lifecycle, log *slog.Logger, manager *workspace.Manager, workspaceDeps *workspacedeps.Service, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
+func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			go func() {
-				manager.ReconcileContainers(ctx)
-				// The alignment scan runs once the containers are back so a
-				// Server upgrade that moved an agent pin shows up in the
-				// dependency panel right away (WD-UPD-A01). It outlives the
-				// start context: reconciliation alone can take longer than
-				// the start timeout.
-				scanWorkspaceDependencyAlignment(context.WithoutCancel(ctx), log, manager, workspaceDeps)
-			}()
+			go manager.ReconcileContainers(ctx)
 			return nil
 		},
 	})
-}
-
-func scanWorkspaceDependencyAlignment(ctx context.Context, log *slog.Logger, manager *workspace.Manager, workspaceDeps *workspacedeps.Service) {
-	bots, err := manager.RunningNativeBotIDs(ctx)
-	if err != nil {
-		log.Warn("dependency alignment scan skipped: list running workspaces failed", slog.Any("error", err))
-		return
-	}
-	if len(bots) == 0 {
-		return
-	}
-	pending, err := workspaceDeps.AlignmentScan(ctx, bots)
-	if err != nil {
-		log.Warn("dependency alignment scan finished with errors",
-			slog.Int("bots", len(bots)),
-			slog.Int("pending", pending),
-			slog.Any("error", err),
-		)
-		return
-	}
-	if pending > 0 {
-		log.Info("agent dependencies need alignment with the Server pins",
-			slog.Int("bots", len(bots)),
-			slog.Int("pending", pending),
-		)
-	}
 }
 
 // EnsureAdminUser bootstraps the admin account on first start. Exported

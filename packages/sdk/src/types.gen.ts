@@ -590,7 +590,6 @@ export type BotagentsCreateRequest = {
 
 export type BotagentsDependencyRequirement = {
     dependency_id?: string;
-    required_version?: string;
 };
 
 export type BotagentsListResponse = {
@@ -1407,9 +1406,9 @@ export type ConversationUiMessage = {
     approval?: ConversationUiToolApproval;
     /**
      * Args are the machine-readable parameters of a notice block: the string
-     * values of the runtime_notice event metadata (dep_id, required_version,
-     * installed_version for agent_dependency_version_mismatch). The client
-     * renders actions from them instead of parsing Content.
+     * values of the runtime_notice event metadata (dep_id and install_task_id
+     * for a workspace dependency notice, for instance). The client renders
+     * actions from them instead of parsing Content.
      */
     args?: {
         [key: string]: string;
@@ -2510,6 +2509,65 @@ export type HandlersUpdateContainerResourceLimitsRequest = {
     storage_bytes?: number;
 };
 
+export type HandlersWorkspaceDependencyCatalogItem = {
+    /**
+     * ActionsSupported lists the actions the catalog gives the dependency,
+     * before any workspace state is considered.
+     */
+    actions_supported?: Array<'install' | 'update' | 'reinstall' | 'remove' | 'rollback' | 'check_update'>;
+    /**
+     * Category is agent, runtime, or tool.
+     */
+    category?: 'agent' | 'runtime' | 'tool';
+    description?: string;
+    /**
+     * HasImageBaseline is set when the workspace image ships a copy of the
+     * dependency; removing a managed overlay returns to that copy.
+     */
+    has_image_baseline?: boolean;
+    icon?: string;
+    id?: string;
+    /**
+     * Installable is set when the catalog has an install script for the
+     * dependency, i.e. it can be installed into a workspace (as a managed
+     * overlay when the image already ships it).
+     */
+    installable?: boolean;
+    name?: string;
+    platforms?: Array<HandlersWorkspaceDependencyCatalogPlatform>;
+    /**
+     * Provides lists the commands the dependency makes available.
+     */
+    provides?: Array<string>;
+    /**
+     * VersionPin is the version every install produces when the manifest
+     * locks one; omitted when installs follow the latest release.
+     */
+    version_pin?: string;
+};
+
+export type HandlersWorkspaceDependencyCatalogPlatform = {
+    arch?: Array<string>;
+    /**
+     * Libc is empty when the libc flavour does not matter for the OS.
+     */
+    libc?: string;
+    os?: string;
+};
+
+export type HandlersWorkspaceDependencyCatalogResponse = {
+    items?: Array<HandlersWorkspaceDependencyCatalogItem>;
+};
+
+export type HandlersWorkspaceDependencyInstallRequest = {
+    /**
+     * Version to install. Empty (or no body) installs the latest version the
+     * catalog script resolves, or the manifest pin when the dependency has
+     * one. The version recorded afterwards is the one the script reports.
+     */
+    version?: string;
+};
+
 export type HandlersWorkspaceDependencyItem = {
     /**
      * Actions lists what may be requested right now.
@@ -2523,24 +2581,36 @@ export type HandlersWorkspaceDependencyItem = {
     icon?: string;
     id?: string;
     /**
-     * InstallPath is the dependency home for managed dependencies and the
-     * discovered command path for image-provided ones.
+     * ImageVersion is the version of the copy the workspace image ships,
+     * omitted when the image has none. It is the baseline a managed overlay
+     * sits on and what remove returns to.
+     */
+    image_version?: string;
+    /**
+     * InstallPath is the dependency home when a managed copy is in effect or
+     * can be installed, and the discovered command path when the image copy
+     * is in effect.
      */
     install_path?: string;
+    /**
+     * InstalledVersion is the version of the copy in effect: the one the
+     * runtime launches and the one first on PATH (managed, then image, then
+     * PATH).
+     */
     installed_version?: string;
     last_checked_at?: string;
     last_error?: string;
     /**
-     * LatestVersion is the pin for agent dependencies and the last upstream
-     * check result for tool dependencies.
+     * LatestVersion is the last upstream check result, omitted until a check
+     * ran.
      */
     latest_version?: string;
     name?: string;
     /**
-     * NeedsAlignment is set for installed agent dependencies whose version
-     * differs from RequiredVersion.
+     * Overlay is set when the copy in effect is a managed one installed over
+     * an image copy.
      */
-    needs_alignment?: boolean;
+    overlay?: boolean;
     platform_reason?: 'unsupported_platform';
     /**
      * PlatformSupported is false when the probed workspace platform is not
@@ -2556,10 +2626,6 @@ export type HandlersWorkspaceDependencyItem = {
      */
     provides?: Array<string>;
     /**
-     * RequiredVersion is the Server pin for agent dependencies.
-     */
-    required_version?: string;
-    /**
      * Source is image for dependencies shipped with the workspace image and
      * managed for dependencies installed by catalog scripts.
      */
@@ -2570,8 +2636,8 @@ export type HandlersWorkspaceDependencyItem = {
      */
     status?: 'installed' | 'installing' | 'updating' | 'removing' | 'missing' | 'failed';
     /**
-     * UpdateAvailable is set for installed tool dependencies whose last
-     * upstream check reported a newer version.
+     * UpdateAvailable is set for installed dependencies whose last upstream
+     * check reported a version other than the one in effect.
      */
     update_available?: boolean;
 };
@@ -2602,8 +2668,7 @@ export type HandlersWorkspaceDependencyPreflightItem = {
     dependency_id?: string;
     installed_version?: string;
     name?: string;
-    required_version?: string;
-    state?: 'satisfied' | 'missing' | 'version_mismatch' | 'platform_unsupported' | 'unknown_dependency';
+    state?: 'satisfied' | 'missing' | 'platform_unsupported' | 'unknown_dependency';
 };
 
 export type HandlersWorkspaceDependencyPreflightRequest = {
@@ -7759,7 +7824,10 @@ export type DeleteBotsByBotIdDependenciesByDepIdResponses = {
 export type DeleteBotsByBotIdDependenciesByDepIdResponse = DeleteBotsByBotIdDependenciesByDepIdResponses[keyof DeleteBotsByBotIdDependenciesByDepIdResponses];
 
 export type PostBotsByBotIdDependenciesByDepIdInstallData = {
-    body?: never;
+    /**
+     * Version to install (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID
@@ -7814,7 +7882,10 @@ export type PostBotsByBotIdDependenciesByDepIdInstallResponses = {
 export type PostBotsByBotIdDependenciesByDepIdInstallResponse = PostBotsByBotIdDependenciesByDepIdInstallResponses[keyof PostBotsByBotIdDependenciesByDepIdInstallResponses];
 
 export type PostBotsByBotIdDependenciesByDepIdReinstallData = {
-    body?: never;
+    /**
+     * Version to install (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID
@@ -7991,7 +8062,10 @@ export type GetBotsByBotIdDependenciesByDepIdScriptResponses = {
 export type GetBotsByBotIdDependenciesByDepIdScriptResponse = GetBotsByBotIdDependenciesByDepIdScriptResponses[keyof GetBotsByBotIdDependenciesByDepIdScriptResponses];
 
 export type PostBotsByBotIdDependenciesByDepIdUpdateData = {
-    body?: never;
+    /**
+     * Version to update to (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID
@@ -16584,3 +16658,32 @@ export type GetWebhookTunnelStatusResponses = {
 };
 
 export type GetWebhookTunnelStatusResponse = GetWebhookTunnelStatusResponses[keyof GetWebhookTunnelStatusResponses];
+
+export type GetWorkspaceDependenciesCatalogData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/workspace-dependencies/catalog';
+};
+
+export type GetWorkspaceDependenciesCatalogErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetWorkspaceDependenciesCatalogError = GetWorkspaceDependenciesCatalogErrors[keyof GetWorkspaceDependenciesCatalogErrors];
+
+export type GetWorkspaceDependenciesCatalogResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyCatalogResponse;
+};
+
+export type GetWorkspaceDependenciesCatalogResponse = GetWorkspaceDependenciesCatalogResponses[keyof GetWorkspaceDependenciesCatalogResponses];

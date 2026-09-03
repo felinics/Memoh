@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
 var errListDirEntryLimit = errors.New("directory listing exceeds the requested entry bound")
@@ -629,33 +630,63 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	return nil
 }
 
+// depsShimDir is the directory of managed dependency shims
+// (workspacedeps.ShimDir over the data mount, design §6). When it exists it
+// is put first on PATH for every command the bridge runs, so a managed
+// overlay of an image runtime (node, python, uv) wins over the toolkit copy
+// in the agent's terminal as well as in Memoh's own execs. A variable so
+// tests can point it at a directory of their own.
+var depsShimDir = vpath.DataMount + "/.memoh/deps/bin"
+
+// defaultExecPath is the PATH given to a command whose environment has none,
+// which only happens with CleanEnv and no explicit PATH entry.
+const defaultExecPath = "/opt/memoh/toolkit/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+// execEnv builds the environment of a workspace command. CleanEnv drops the
+// bridge's own environment, UnsetEnv removes the named (or prefixed) keys
+// from it, and Env is appended last so explicit entries win. The shim
+// directory is then put ahead of PATH when it exists; both the pipe and the
+// PTY exec paths go through here.
 func execEnv(input *pb.ExecInput) []string {
-	if input == nil {
-		return nil
-	}
-	env := input.GetEnv()
-	unset := input.GetUnsetEnv()
-	clean := input.GetCleanEnv()
-	if !clean && len(env) == 0 && len(unset) == 0 {
-		return nil
-	}
 	out := []string{}
-	if !clean {
+	if !input.GetCleanEnv() {
 		out = append(out, os.Environ()...)
 	}
-	if len(unset) > 0 {
+	if unset := input.GetUnsetEnv(); len(unset) > 0 {
 		out = filterUnsetEnv(out, unset)
 	}
-	out = append(out, env...)
-	return out
+	out = append(out, input.GetEnv()...)
+	return prependPathDir(out, depsShimDir)
 }
 
 func execPTYEnv(input *pb.ExecInput) []string {
-	env := execEnv(input)
-	if env == nil {
-		env = os.Environ()
+	return append(execEnv(input), "TERM=xterm-256color")
+}
+
+// prependPathDir puts dir first on the PATH entry of env when dir is an
+// existing directory. The last PATH entry is the one exec honours, so that
+// is the one rewritten; an env without PATH gets one built on
+// defaultExecPath. A PATH that already starts with dir is left alone so
+// repeated application, or a caller that did the same, never stacks copies.
+func prependPathDir(env []string, dir string) []string {
+	if dir == "" {
+		return env
 	}
-	return append(env, "TERM=xterm-256color")
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return env
+	}
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if !ok || key != "PATH" {
+			continue
+		}
+		if value == dir || strings.HasPrefix(value, dir+":") {
+			return env
+		}
+		env[i] = "PATH=" + dir + ":" + value
+		return env
+	}
+	return append(env, "PATH="+dir+":"+defaultExecPath)
 }
 
 func filterUnsetEnv(env []string, unset []string) []string {

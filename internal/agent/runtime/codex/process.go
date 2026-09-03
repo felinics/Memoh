@@ -7,9 +7,13 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
-const containerPath = "/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
+// containerPath is the PATH the app-server and every command it spawns see.
+// The managed dependency shim directory (design §6) comes first so a managed
+// overlay of an image runtime (node, python, uv) wins over the toolkit copy.
+const containerPath = vpath.DataMount + "/.memoh/deps/bin:/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
 
 type appServerProcess = agentprocess.Process
 

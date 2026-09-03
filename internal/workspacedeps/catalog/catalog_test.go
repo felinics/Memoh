@@ -1,12 +1,18 @@
 package catalog
 
 import (
+	"bytes"
+	"context"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
+// validImageYAML is an image-baseline dependency without scripts: visible in
+// the catalog, not installable.
 const validImageYAML = `id: node
 name: Node.js
 category: runtime
@@ -14,6 +20,15 @@ source: image
 provides: [node, npm]
 platforms:
   - { os: linux, arch: [amd64, arm64], libc: glibc }
+`
+
+// validOverlayYAML is an image-baseline dependency whose scripts install
+// overlay versions on top of the image copy.
+const validOverlayYAML = validImageYAML + `scripts:
+  install: install.sh
+  update: update.sh
+  remove: remove.sh
+  check_update: check-update.sh
 `
 
 const validManagedYAML = `id: tool-a
@@ -29,6 +44,8 @@ scripts:
   remove: remove.sh
 `
 
+// validAgentYAML is an unpinned agent: latest by default, upstream checks
+// allowed, exactly like any other managed dependency.
 const validAgentYAML = `id: agent-a
 name: Agent A
 category: agent
@@ -37,15 +54,17 @@ requires: [node]
 provides: [agent-a]
 platforms:
   - { os: linux, arch: [amd64], libc: glibc }
-version:
-  pin: "1.2.3"
 scripts:
   install: install.sh
   update: update.sh
   remove: remove.sh
+  check_update: check-update.sh
 `
 
 const scriptBody = "dep_log installing\ndep_result '{}'\n"
+
+// allScriptNames are the script files the fixtures may reference.
+var allScriptNames = []string{"install.sh", "update.sh", "remove.sh", "check-update.sh"}
 
 // testFS builds a catalog filesystem from dir → file name → content.
 func testFS(dirs map[string]map[string]string) fstest.MapFS {
@@ -58,13 +77,14 @@ func testFS(dirs map[string]map[string]string) fstest.MapFS {
 	return fsys
 }
 
-func managedFiles(manifest string) map[string]string {
-	return map[string]string{
-		ManifestFileName: manifest,
-		"install.sh":     scriptBody,
-		"update.sh":      scriptBody,
-		"remove.sh":      scriptBody,
+// withScripts returns the manifest next to every script file in
+// allScriptNames; unreferenced files do not affect validation or digests.
+func withScripts(manifest string) map[string]string {
+	files := map[string]string{ManifestFileName: manifest}
+	for _, name := range allScriptNames {
+		files[name] = scriptBody
 	}
+	return files
 }
 
 func imageFiles(manifest string) map[string]string {
@@ -87,16 +107,19 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	}
 
 	codex := c.MustGet("codex")
-	if !codex.IsAgent() || codex.IsImageProvided() {
+	if !codex.IsAgent() || codex.HasImageBaseline() || codex.IsImageProvided() || !codex.Installable() {
 		t.Fatalf("codex category/source = %q/%q", codex.Category, codex.Source)
 	}
 	if !slices.Equal(codex.Requires, []string{"node"}) || !slices.Equal(codex.Provides, []string{"codex"}) {
 		t.Fatalf("codex requires/provides = %v/%v", codex.Requires, codex.Provides)
 	}
-	if codex.Icon != "openai" || codex.Version.Pin == "" {
-		t.Fatalf("codex icon/pin = %q/%q", codex.Icon, codex.Version.Pin)
+	if codex.Icon != "openai" {
+		t.Fatalf("codex icon = %q", codex.Icon)
 	}
-	if codex.Timeouts.Install != 1200 || codex.Timeouts.Update != 1200 || codex.Timeouts.Remove != 300 {
+	if codex.Version.Pin != "" {
+		t.Fatalf("codex must not be pinned: agent CLIs install latest by default, got pin %q", codex.Version.Pin)
+	}
+	if codex.Timeouts.Install != 1200 || codex.Timeouts.Update != 1200 || codex.Timeouts.Remove != 300 || codex.Timeouts.CheckUpdate != 120 {
 		t.Fatalf("codex timeouts = %+v", codex.Timeouts)
 	}
 	if !codex.SupportsPlatform("linux", "amd64", "glibc") || !codex.SupportsPlatform("darwin", "arm64", "") {
@@ -104,19 +127,39 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	}
 
 	claude := c.MustGet("claude-code")
-	if !claude.IsAgent() || claude.Icon != "anthropic" || !slices.Equal(claude.Provides, []string{"claude"}) {
+	if !claude.IsAgent() || claude.Icon != "anthropic" || !slices.Equal(claude.Provides, []string{"claude"}) || claude.Version.Pin != "" {
 		t.Fatalf("claude-code = %+v", claude)
 	}
 
+	for _, id := range []string{"node", "python", "uv"} {
+		dep := c.MustGet(id)
+		if !dep.HasImageBaseline() || !dep.IsImageProvided() || dep.IsAgent() {
+			t.Fatalf("%s category/source = %q/%q", id, dep.Category, dep.Source)
+		}
+		if !dep.Installable() || dep.Scripts.Update == "" || dep.Scripts.Remove == "" || dep.Scripts.CheckUpdate == "" {
+			t.Fatalf("%s must declare overlay scripts, got %+v", id, dep.Scripts)
+		}
+		if dep.Version.Pin != "" {
+			t.Fatalf("%s must not be pinned, got %q", id, dep.Version.Pin)
+		}
+		if !dep.SupportsPlatform("linux", "amd64", "glibc") || !dep.SupportsPlatform("linux", "arm64", "glibc") || !dep.SupportsPlatform("darwin", "arm64", "") {
+			t.Fatalf("%s platforms = %+v", id, dep.Platforms)
+		}
+		if dep.SupportsPlatform("linux", "amd64", "musl") {
+			t.Fatalf("%s must not claim musl support", id)
+		}
+	}
 	node := c.MustGet("node")
-	if !node.IsImageProvided() || node.IsAgent() || !slices.Equal(node.Provides, []string{"node", "npm", "npx"}) {
-		t.Fatalf("node = %+v", node)
+	if !slices.Equal(node.Provides, []string{"node", "npm", "npx"}) || len(node.Requires) != 0 {
+		t.Fatalf("node provides/requires = %v/%v", node.Provides, node.Requires)
 	}
-	if python := c.MustGet("python"); !slices.Equal(python.Provides, []string{"python3", "pip3"}) {
-		t.Fatalf("python provides = %v", python.Provides)
+	python := c.MustGet("python")
+	if !slices.Equal(python.Provides, []string{"python3", "pip3"}) || !slices.Equal(python.Requires, []string{"uv"}) {
+		t.Fatalf("python provides/requires = %v/%v", python.Provides, python.Requires)
 	}
-	if uv := c.MustGet("uv"); !slices.Equal(uv.Provides, []string{"uv", "uvx"}) {
-		t.Fatalf("uv provides = %v", uv.Provides)
+	uv := c.MustGet("uv")
+	if !slices.Equal(uv.Provides, []string{"uv", "uvx"}) || len(uv.Requires) != 0 {
+		t.Fatalf("uv provides/requires = %v/%v", uv.Provides, uv.Requires)
 	}
 
 	if _, ok := c.Get("ghost"); ok {
@@ -124,48 +167,152 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	}
 }
 
+// embeddedScriptExpectations lists substrings every embedded script of a
+// given action must contain, keyed by dependency id then action.
+var embeddedScriptExpectations = map[string]map[Action][]string{
+	"codex": {
+		ActionInstall:     {"npm view", "npm install -g", "@openai/codex"},
+		ActionUpdate:      {"npm view", "npm install -g", "@openai/codex", "MEMOH_DEP_CURRENT_VERSION"},
+		ActionCheckUpdate: {"npm view", "@openai/codex"},
+	},
+	"claude-code": {
+		ActionInstall:     {"npm view", "npm install -g", "@anthropic-ai/claude-code"},
+		ActionUpdate:      {"npm view", "npm install -g", "@anthropic-ai/claude-code", "MEMOH_DEP_CURRENT_VERSION"},
+		ActionCheckUpdate: {"npm view", "@anthropic-ai/claude-code"},
+	},
+	"node": {
+		ActionInstall:     {"NODEJS_MIRROR", "index.json", `"lts":"`, "--strip-components=1", `\"npm\":`, `\"npx\":`},
+		ActionUpdate:      {"NODEJS_MIRROR", "index.json", "MEMOH_DEP_CURRENT_VERSION"},
+		ActionCheckUpdate: {"NODEJS_MIRROR", "index.json", `"lts":"`},
+	},
+	"python": {
+		ActionInstall:     {"uv python list --only-downloads", "uv python install", "--no-bin", `\"pip3\":`},
+		ActionUpdate:      {"uv python install", "MEMOH_DEP_CURRENT_VERSION"},
+		ActionCheckUpdate: {"uv python list --only-downloads"},
+	},
+	"uv": {
+		ActionInstall:     {"UV_RELEASES_URL", "/releases/tag/", "tag_name", "uv-$triple.tar.gz", `\"uvx\":`},
+		ActionUpdate:      {"UV_RELEASES_URL", "MEMOH_DEP_CURRENT_VERSION"},
+		ActionCheckUpdate: {"UV_RELEASES_URL", "/releases/tag/", "tag_name"},
+	},
+}
+
 func TestEmbeddedScripts(t *testing.T) {
 	c, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	for _, id := range []string{"codex", "claude-code"} {
-		for _, action := range []Action{ActionInstall, ActionUpdate} {
-			script, ok := c.Script(id, action)
+	for _, dep := range c.List() {
+		expectations, known := embeddedScriptExpectations[dep.ID]
+		if !known {
+			t.Fatalf("no script expectations for embedded dependency %s", dep.ID)
+		}
+		for _, action := range []Action{ActionInstall, ActionUpdate, ActionRemove, ActionCheckUpdate} {
+			script, ok := c.Script(dep.ID, action)
 			if !ok {
-				t.Fatalf("Script(%s, %s) missing", id, action)
+				t.Fatalf("Script(%s, %s) missing", dep.ID, action)
 			}
-			for _, needle := range []string{"npm install -g", "dep_switch", "dep_result", "$MEMOH_DEP_HOME/versions/$MEMOH_DEP_VERSION"} {
+			assertScriptHygiene(t, dep.ID, action, script)
+			for _, needle := range expectations[action] {
 				if !strings.Contains(script, needle) {
-					t.Errorf("Script(%s, %s) lacks %q", id, action, needle)
+					t.Errorf("Script(%s, %s) lacks %q", dep.ID, action, needle)
 				}
 			}
-			if strings.Contains(script, "/data") {
-				t.Errorf("Script(%s, %s) hard-codes /data (WD-EXEC-001)", id, action)
-			}
-			for _, fn := range []string{"dep_log()", "dep_result()", "dep_switch()"} {
-				if strings.Contains(script, fn) {
-					t.Errorf("Script(%s, %s) redefines prelude function %s", id, action, fn)
+			switch action {
+			case ActionInstall, ActionUpdate:
+				// Every install-like script resolves MEMOH_DEP_VERSION (empty or
+				// "latest" means newest), builds the tree in a staging directory,
+				// verifies it, commits it through the shared commit_staged sequence
+				// (set the existing directory aside → move the staged tree in →
+				// switch → delete the old tree, WD-FS-001), and reports the actual
+				// version plus entrypoints.
+				for _, needle := range []string{
+					"MEMOH_DEP_VERSION", "$MEMOH_DEP_HOME/versions", `.staging-$MEMOH_DEP_ID.$$`,
+					"commit_staged() {", `mv "$2" "$2.previous-$$"`, `rm -rf "$2.previous-$$"`, "dep_switch \"$2\"",
+					"commit_staged \"$stage/root\"", "dep_result", `\"version\":`, `\"entrypoints\":`, "$MEMOH_DEP_HOME/current/bin",
+				} {
+					if !strings.Contains(script, needle) {
+						t.Errorf("Script(%s, %s) lacks %q", dep.ID, action, needle)
+					}
+				}
+				if strings.Contains(script, "versions/$MEMOH_DEP_VERSION") {
+					t.Errorf("Script(%s, %s) names the version directory after the raw request instead of the resolved version", dep.ID, action)
+				}
+				if strings.Contains(script, `rm -rf "$target"`) || strings.Contains(script, `mkdir -p "$target"`) {
+					t.Errorf("Script(%s, %s) touches the version directory in place instead of staging (WD-FS-001)", dep.ID, action)
+				}
+			case ActionRemove:
+				if !strings.Contains(script, `rm -rf "$MEMOH_DEP_HOME"`) || !strings.Contains(script, "dep_result '{}'") {
+					t.Errorf("Script(%s, remove) = %q", dep.ID, script)
+				}
+			case ActionCheckUpdate:
+				for _, needle := range []string{"MEMOH_DEP_CURRENT_VERSION", `\"installed\":`, `\"latest\":`, `\"update_available\":`, "exit 1"} {
+					if !strings.Contains(script, needle) {
+						t.Errorf("Script(%s, check_update) lacks %q", dep.ID, needle)
+					}
 				}
 			}
 		}
-		remove, ok := c.Script(id, ActionRemove)
-		if !ok || !strings.Contains(remove, `rm -rf "$MEMOH_DEP_HOME"`) || !strings.Contains(remove, "dep_result '{}'") {
-			t.Errorf("Script(%s, remove) = %q, ok=%v", id, remove, ok)
-		}
-		for _, action := range []Action{ActionCheckUpdate, ActionReinstall, ActionVersion} {
-			if _, ok := c.Script(id, action); ok {
-				t.Errorf("Script(%s, %s) should not be configured", id, action)
+		for _, action := range []Action{ActionReinstall, ActionVersion} {
+			if _, ok := c.Script(dep.ID, action); ok {
+				t.Errorf("Script(%s, %s) should not be configured", dep.ID, action)
 			}
-		}
-	}
-	for _, id := range []string{"node", "python", "uv"} {
-		if _, ok := c.Script(id, ActionInstall); ok {
-			t.Errorf("Script(%s, install) should not exist for image dependencies", id)
 		}
 	}
 	if _, ok := c.Script("ghost", ActionInstall); ok {
 		t.Error("Script(ghost) should report missing")
+	}
+}
+
+// assertScriptHygiene checks the rules every catalog script must follow:
+// no hard-coded data mount (WD-EXEC-001), no redefinition of prelude
+// functions (§5.3), a shellcheck directive so editors lint it as sh, and a
+// non-zero exit on its failure paths.
+func assertScriptHygiene(t *testing.T, id string, action Action, script string) {
+	t.Helper()
+	if strings.Contains(script, "/data") {
+		t.Errorf("Script(%s, %s) hard-codes /data (WD-EXEC-001)", id, action)
+	}
+	for _, fn := range []string{"dep_log()", "dep_result()", "dep_switch()", "memoh_dep_main"} {
+		if strings.Contains(script, fn) {
+			t.Errorf("Script(%s, %s) redefines prelude symbol %s", id, action, fn)
+		}
+	}
+	if !strings.HasPrefix(script, "# shellcheck shell=sh\n") {
+		t.Errorf("Script(%s, %s) must start with the shellcheck shell directive", id, action)
+	}
+	if strings.Contains(script, "#!/bin/bash") || strings.Contains(script, "[[ ") {
+		t.Errorf("Script(%s, %s) uses bash syntax (WD-CAT-003)", id, action)
+	}
+}
+
+// TestEmbeddedScriptsShellcheck lints every embedded script body with
+// `shellcheck -s sh` (WD-CAT-003). It skips when shellcheck is not installed.
+func TestEmbeddedScriptsShellcheck(t *testing.T) {
+	if _, err := exec.LookPath("shellcheck"); err != nil {
+		t.Skip("shellcheck not installed")
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	for _, dep := range c.List() {
+		for _, ref := range dep.Scripts.configured() {
+			script, ok := c.Script(dep.ID, ref.action)
+			if !ok {
+				t.Fatalf("Script(%s, %s) missing", dep.ID, ref.action)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cmd := exec.CommandContext(ctx, "shellcheck", "-s", "sh", "-")
+			cmd.Stdin = strings.NewReader(script)
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			cmd.Stderr = &out
+			if err := cmd.Run(); err != nil || out.Len() != 0 {
+				t.Errorf("shellcheck on %s/%s: %v\n%s", dep.ID, ref.file, err, out.String())
+			}
+			cancel()
+		}
 	}
 }
 
@@ -195,9 +342,9 @@ func TestEmbeddedDigestsAreStableAndDistinct(t *testing.T) {
 
 func TestLoadFSAcceptsValidCatalog(t *testing.T) {
 	fsys := testFS(map[string]map[string]string{
-		"node":    imageFiles(validImageYAML),
-		"tool-a":  managedFiles(validManagedYAML),
-		"agent-a": managedFiles(validAgentYAML),
+		"node":    withScripts(validOverlayYAML),
+		"tool-a":  withScripts(validManagedYAML),
+		"agent-a": withScripts(validAgentYAML),
 	})
 	fsys["README.md"] = &fstest.MapFile{Data: []byte("root files are ignored")}
 	c, err := LoadFS(fsys)
@@ -220,15 +367,45 @@ func TestLoadFSAcceptsValidCatalog(t *testing.T) {
 	if _, ok := c.Script("tool-a", ActionUpdate); ok {
 		t.Fatal("update should not be configured for tool-a")
 	}
+	node := c.MustGet("node")
+	if !node.HasImageBaseline() || !node.Installable() {
+		t.Fatalf("node overlay entry = %+v", node)
+	}
+	if script, ok := c.Script("node", ActionCheckUpdate); !ok || script != scriptBody {
+		t.Fatalf("Script(node, check_update) = %q, %v", script, ok)
+	}
+	agent := c.MustGet("agent-a")
+	if !agent.IsAgent() || agent.Version.Pin != "" || agent.Scripts.CheckUpdate == "" {
+		t.Fatalf("unpinned agent = %+v", agent)
+	}
 	if c.Validate() != nil {
 		t.Fatal("Validate() on a loaded catalog should pass")
+	}
+}
+
+func TestImageBaselineWithoutScriptsIsNotInstallable(t *testing.T) {
+	c, err := LoadFS(testFS(map[string]map[string]string{"node": imageFiles(validImageYAML)}))
+	if err != nil {
+		t.Fatalf("LoadFS() error = %v", err)
+	}
+	node := c.MustGet("node")
+	if !node.HasImageBaseline() || !node.IsImageProvided() {
+		t.Fatalf("node should have an image baseline: %+v", node)
+	}
+	if node.Installable() {
+		t.Fatal("an image entry without scripts must not be installable")
+	}
+	for _, action := range scriptActions {
+		if _, ok := c.Script("node", action); ok {
+			t.Errorf("Script(node, %s) should not be configured", action)
+		}
 	}
 }
 
 func TestTimeoutDefaultsFollowInstall(t *testing.T) {
 	fsys := testFS(map[string]map[string]string{
 		"node": imageFiles(validImageYAML),
-		"tool-a": managedFiles(strings.Replace(validManagedYAML, "scripts:\n",
+		"tool-a": withScripts(strings.Replace(validManagedYAML, "scripts:\n",
 			"timeouts:\n  install: 100\nscripts:\n", 1)),
 	})
 	c, err := LoadFS(fsys)
@@ -241,6 +418,108 @@ func TestTimeoutDefaultsFollowInstall(t *testing.T) {
 	}
 	if got.Duration(ActionVersion).Seconds() != 30 {
 		t.Fatalf("Duration(version) = %s", got.Duration(ActionVersion))
+	}
+}
+
+// TestValidateAcceptsVersionAndSourceCombinations covers the rules that were
+// deliberately relaxed: pin is optional everywhere, agents may check upstream,
+// and image-baseline entries may carry overlay scripts.
+func TestValidateAcceptsVersionAndSourceCombinations(t *testing.T) {
+	replace := func(base, old, repl string) string {
+		if !strings.Contains(base, old) {
+			t.Fatalf("test fixture: %q not found in manifest", old)
+		}
+		return strings.Replace(base, old, repl, 1)
+	}
+	tests := []struct {
+		name  string
+		files map[string]string
+		check func(t *testing.T, dep Dependency)
+	}{
+		{
+			name:  "agent without pin",
+			files: withScripts(validAgentYAML),
+			check: func(t *testing.T, dep Dependency) {
+				if dep.Version.Pin != "" || dep.Scripts.CheckUpdate == "" {
+					t.Fatalf("dep = %+v", dep)
+				}
+			},
+		},
+		{
+			name:  "agent with pin",
+			files: withScripts(validAgentYAML + "version:\n  pin: \"1.2.3\"\n"),
+			check: func(t *testing.T, dep Dependency) {
+				if dep.Version.Pin != "1.2.3" {
+					t.Fatalf("pin = %q", dep.Version.Pin)
+				}
+			},
+		},
+		{
+			name:  "agent with pin and check_update",
+			files: withScripts(validAgentYAML + "version:\n  pin: \"1.2.3\"\n  channel: stable\n"),
+			check: func(t *testing.T, dep Dependency) {
+				if dep.Version.Pin != "1.2.3" || dep.Version.Channel != "stable" || dep.Scripts.CheckUpdate == "" {
+					t.Fatalf("dep = %+v", dep)
+				}
+			},
+		},
+		{
+			name:  "tool with pin",
+			files: withScripts(replace(validManagedYAML, "id: tool-a", "id: agent-a") + "version:\n  pin: \"9.9.9\"\n"),
+			check: func(t *testing.T, dep Dependency) {
+				if dep.Version.Pin != "9.9.9" {
+					t.Fatalf("pin = %q", dep.Version.Pin)
+				}
+			},
+		},
+		{
+			name:  "image entry with overlay scripts",
+			files: withScripts(replace(validOverlayYAML, "id: node", "id: agent-a")),
+			check: func(t *testing.T, dep Dependency) {
+				if !dep.HasImageBaseline() || !dep.Installable() || dep.Scripts.CheckUpdate == "" {
+					t.Fatalf("dep = %+v", dep)
+				}
+			},
+		},
+		{
+			name:  "image entry with install and remove only",
+			files: withScripts(replace(validImageYAML, "id: node", "id: agent-a") + "scripts:\n  install: install.sh\n  remove: remove.sh\n"),
+			check: func(t *testing.T, dep Dependency) {
+				if !dep.Installable() || dep.Scripts.Update != "" {
+					t.Fatalf("dep = %+v", dep)
+				}
+			},
+		},
+		{
+			name:  "image entry with pin",
+			files: withScripts(replace(validOverlayYAML, "id: node", "id: agent-a") + "version:\n  pin: \"22.12.0\"\n"),
+			check: func(t *testing.T, dep Dependency) {
+				if dep.Version.Pin != "22.12.0" || !dep.HasImageBaseline() {
+					t.Fatalf("dep = %+v", dep)
+				}
+			},
+		},
+		{
+			name:  "image entry without scripts",
+			files: imageFiles(replace(validImageYAML, "id: node", "id: agent-a")),
+			check: func(t *testing.T, dep Dependency) {
+				if dep.Installable() {
+					t.Fatalf("dep = %+v", dep)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Every fixture is stored under agent-a so requires: [node] keeps
+			// resolving against the plain image entry.
+			fsys := testFS(map[string]map[string]string{"node": imageFiles(validImageYAML), "agent-a": tt.files})
+			c, err := LoadFS(fsys)
+			if err != nil {
+				t.Fatalf("LoadFS() error = %v", err)
+			}
+			tt.check(t, c.MustGet("agent-a"))
+		})
 	}
 }
 
@@ -262,123 +541,126 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 	}{
 		{
 			name: "empty id",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "id: tool-a", `id: ""`))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "id: tool-a", `id: ""`))),
 			want: `id must not be empty (directory "tool-a")`,
 		},
 		{
 			name: "invalid id characters",
-			fsys: withNode("Tool_A", managedFiles(replace(validManagedYAML, "id: tool-a", "id: Tool_A"))),
+			fsys: withNode("Tool_A", withScripts(replace(validManagedYAML, "id: tool-a", "id: Tool_A"))),
 			want: `id "Tool_A" must only contain [a-z0-9-]`,
 		},
 		{
 			name: "id differs from directory",
-			fsys: withNode("tool-b", managedFiles(validManagedYAML)),
+			fsys: withNode("tool-b", withScripts(validManagedYAML)),
 			want: `id "tool-a" does not match directory name "tool-b"`,
 		},
 		{
 			name: "duplicate id",
 			fsys: testFS(map[string]map[string]string{
 				"node":   imageFiles(validImageYAML),
-				"tool-a": managedFiles(validManagedYAML),
-				"tool-b": managedFiles(validManagedYAML),
+				"tool-a": withScripts(validManagedYAML),
+				"tool-b": withScripts(validManagedYAML),
 			}),
 			want: `id "tool-a" is declared by more than one directory`,
 		},
 		{
 			name: "missing name",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "name: Tool A\n", ""))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "name: Tool A\n", ""))),
 			want: `dependency "tool-a": name must not be empty`,
 		},
 		{
 			name: "unknown category",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "category: tool", "category: plugin"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "category: tool", "category: plugin"))),
 			want: `category "plugin" must be one of agent, runtime, tool`,
 		},
 		{
 			name: "unknown source",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "source: managed", "source: remote"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "source: managed", "source: remote"))),
 			want: `source "remote" must be one of managed, image`,
 		},
 		{
 			name: "empty provides",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "provides: [tool-a]", "provides: []"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "provides: [tool-a]", "provides: []"))),
 			want: "provides must list at least one command",
 		},
 		{
 			name: "empty platforms",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML,
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML,
 				"platforms:\n  - { os: linux, arch: [amd64, arm64], libc: glibc }\n", "platforms: []\n"))),
 			want: "platforms must list at least one platform",
 		},
 		{
 			name: "platform without os",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML,
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML,
 				"{ os: linux, arch: [amd64, arm64], libc: glibc }", "{ arch: [amd64] }"))),
 			want: "platforms[0]: os must not be empty",
 		},
 		{
 			name: "platform without arch",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML,
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML,
 				"{ os: linux, arch: [amd64, arm64], libc: glibc }", "{ os: linux }"))),
 			want: "platforms[0]: arch must list at least one architecture",
 		},
 		{
 			name: "requires unknown dependency",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "requires: [node]", "requires: [ghost]"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "requires: [node]", "requires: [ghost]"))),
 			want: `requires unknown dependency "ghost"`,
 		},
 		{
 			name: "requires itself",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "requires: [node]", "requires: [tool-a]"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "requires: [node]", "requires: [tool-a]"))),
 			want: "requires must not reference itself",
-		},
-		{
-			name: "image source with scripts",
-			fsys: testFS(map[string]map[string]string{"node": {
-				ManifestFileName: validImageYAML + "scripts:\n  install: install.sh\n",
-				"install.sh":     scriptBody,
-			}}),
-			want: "source image must not declare scripts (WD-CAT-001)",
 		},
 		{
 			name: "image source for agent",
 			fsys: testFS(map[string]map[string]string{"node": imageFiles(replace(validImageYAML,
-				"category: runtime", "category: agent\nversion:\n  pin: \"1.0.0\""))}),
+				"category: runtime", "category: agent"))}),
 			want: "source image cannot be used with category agent",
 		},
 		{
-			name: "agent without pin",
-			fsys: withNode("agent-a", managedFiles(replace(validAgentYAML, "version:\n  pin: \"1.2.3\"\n", ""))),
-			want: "category agent requires version.pin (WD-CAT-004)",
-		},
-		{
-			name: "agent with check_update script",
-			fsys: withNode("agent-a", func() map[string]string {
-				files := managedFiles(validAgentYAML + "  check_update: check.sh\n")
-				files["check.sh"] = scriptBody
-				return files
-			}()),
-			want: "category agent must not declare scripts.check_update (WD-CAT-004)",
-		},
-		{
 			name: "managed without install script",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "  install: install.sh\n", ""))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "  install: install.sh\n", ""))),
 			want: "source managed requires scripts.install",
 		},
 		{
 			name: "managed without remove script",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "  remove: remove.sh\n", ""))),
-			want: "source managed requires scripts.remove",
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "  remove: remove.sh\n", ""))),
+			want: "scripts.remove is required when scripts.install is set",
+		},
+		{
+			name: "image install without remove script",
+			fsys: testFS(map[string]map[string]string{"node": withScripts(validImageYAML + "scripts:\n  install: install.sh\n")}),
+			want: "scripts.remove is required when scripts.install is set",
+		},
+		{
+			name: "image update without install script",
+			fsys: testFS(map[string]map[string]string{"node": withScripts(validImageYAML + "scripts:\n  update: update.sh\n")}),
+			want: "scripts.update requires scripts.install",
+		},
+		{
+			name: "image check_update without install script",
+			fsys: testFS(map[string]map[string]string{"node": withScripts(validImageYAML + "scripts:\n  check_update: check-update.sh\n")}),
+			want: "scripts.check_update requires scripts.install",
+		},
+		{
+			name: "image version without install script",
+			fsys: testFS(map[string]map[string]string{"node": withScripts(validImageYAML + "scripts:\n  version: install.sh\n")}),
+			want: "scripts.version requires scripts.install",
+		},
+		{
+			name: "image remove without install script",
+			fsys: testFS(map[string]map[string]string{"node": withScripts(validImageYAML + "scripts:\n  remove: remove.sh\n")}),
+			want: "",
 		},
 		{
 			name: "script file missing",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "install: install.sh", "install: missing.sh"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "install: install.sh", "install: missing.sh"))),
 			want: `scripts.install: file "missing.sh" does not exist`,
 		},
 		{
 			name: "script file empty",
 			fsys: withNode("tool-a", func() map[string]string {
-				files := managedFiles(validManagedYAML)
+				files := withScripts(validManagedYAML)
 				files["remove.sh"] = " \n"
 				return files
 			}()),
@@ -386,17 +668,17 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 		},
 		{
 			name: "script path escapes directory",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "install: install.sh", "install: ../install.sh"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "install: install.sh", "install: ../install.sh"))),
 			want: `scripts.install: "../install.sh" must be a plain file name`,
 		},
 		{
 			name: "negative timeout",
-			fsys: withNode("tool-a", managedFiles(replace(validManagedYAML, "scripts:\n", "timeouts:\n  remove: -5\nscripts:\n"))),
+			fsys: withNode("tool-a", withScripts(replace(validManagedYAML, "scripts:\n", "timeouts:\n  remove: -5\nscripts:\n"))),
 			want: "timeouts.remove must be positive",
 		},
 		{
 			name: "unknown manifest field",
-			fsys: withNode("tool-a", managedFiles(validManagedYAML+"flavour: spicy\n")),
+			fsys: withNode("tool-a", withScripts(validManagedYAML+"flavour: spicy\n")),
 			want: "field flavour not found",
 		},
 		{
@@ -406,7 +688,7 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 		},
 		{
 			name: "empty manifest",
-			fsys: withNode("tool-a", managedFiles("")),
+			fsys: withNode("tool-a", withScripts("")),
 			want: "manifest is empty",
 		},
 	}
@@ -414,6 +696,14 @@ func TestValidateRejectsInvalidManifests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, err := LoadFS(tt.fsys)
+			if tt.want == "" {
+				// A remove-only image entry is odd but harmless: there is nothing
+				// to install, so the rule set has nothing to say about it.
+				if err != nil {
+					t.Fatalf("LoadFS() error = %v, want success", err)
+				}
+				return
+			}
 			if err == nil {
 				t.Fatalf("LoadFS() succeeded with %d dependencies, want error containing %q", len(c.List()), tt.want)
 			}
@@ -473,7 +763,7 @@ func TestDigestFiles(t *testing.T) {
 }
 
 func TestDigestIgnoresUnreferencedFiles(t *testing.T) {
-	files := managedFiles(validManagedYAML)
+	files := withScripts(validManagedYAML)
 	plain := testFS(map[string]map[string]string{"node": imageFiles(validImageYAML), "tool-a": files})
 	extra := testFS(map[string]map[string]string{"node": imageFiles(validImageYAML), "tool-a": files})
 	extra["tool-a/NOTES.md"] = &fstest.MapFile{Data: []byte("unreferenced")}

@@ -39,11 +39,11 @@ type BotAgent struct {
 }
 
 // DependencyRequirement names the managed workspace dependency a direct
-// runtime needs and the version this server build is pinned to. The web
-// preflight (POST /bots/{bot_id}/dependencies/preflight) keys on both.
+// runtime needs. No version is declared: the dependency manager installs
+// whatever version the user asks for (latest by default). The web preflight
+// (POST /bots/{bot_id}/dependencies/preflight) keys on the id.
 type DependencyRequirement struct {
-	DependencyID    string `json:"dependency_id"`
-	RequiredVersion string `json:"required_version"`
+	DependencyID string `json:"dependency_id"`
 }
 
 type CreateRequest struct {

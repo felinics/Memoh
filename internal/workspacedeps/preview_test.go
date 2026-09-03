@@ -51,7 +51,16 @@ func TestScriptPreviewDetailsMirrorsRunnerEnvironment(t *testing.T) {
 		t.Errorf("MEMOH_DEP_BIN = %q", got.Value)
 	}
 	if got := previewEnv(t, preview, "MEMOH_DEP_VERSION"); got.Value != "2.0.0" {
-		t.Errorf("MEMOH_DEP_VERSION = %q, want the pin", got.Value)
+		t.Errorf("MEMOH_DEP_VERSION = %q, want the manifest pin", got.Value)
+	}
+	// An unpinned dependency installs the requested version or latest, which
+	// only the request knows.
+	toolPreview, err := f.svc.ScriptPreviewDetails(f.ctx(), testBot, testTarget, "tool-y", catalog.ActionUpdate)
+	if err != nil {
+		t.Fatalf("tool preview: %v", err)
+	}
+	if got := previewEnv(t, toolPreview, "MEMOH_DEP_VERSION"); got.Value != previewRequestedVersion {
+		t.Errorf("unpinned MEMOH_DEP_VERSION = %q, want %q", got.Value, previewRequestedVersion)
 	}
 	if got := previewEnv(t, preview, "MEMOH_DEP_OS"); got.Value != previewProbedAtRunTime {
 		t.Errorf("MEMOH_DEP_OS = %q, want placeholder", got.Value)

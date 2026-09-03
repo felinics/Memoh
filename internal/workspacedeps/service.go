@@ -27,7 +27,6 @@ const ActionRollback catalog.Action = "rollback"
 // Preflight reasons a dependency requirement is not satisfied.
 const (
 	PreflightReasonMissing             = "missing"
-	PreflightReasonVersionMismatch     = "version_mismatch"
 	PreflightReasonPlatformUnsupported = "platform_unsupported"
 	PreflightReasonUnknownDependency   = "unknown_dependency"
 )
@@ -148,19 +147,23 @@ type Entry struct {
 	Observed     Observed
 	// Status is the reconciled status. The zero value means "not installed":
 	// no record and nothing discovered.
-	Status           Status
+	Status Status
+	// InstalledVersion is the version of the copy in effect: the one the
+	// launcher resolver runs and the one the shim directory puts first on
+	// PATH (managed, then toolkit, then PATH).
 	InstalledVersion string
-	// RequiredVersion is the catalog pin for agent dependencies and empty
-	// otherwise (design §10.1).
-	RequiredVersion string
-	// LatestVersion is the pin for agent dependencies and the last upstream
-	// check result for tool dependencies.
+	// ImageVersion is the version of the copy the workspace image ships in
+	// its toolkit, empty when the image has none. It is the baseline a
+	// managed overlay sits on and what remove returns to.
+	ImageVersion string
+	// Overlay is set when the copy in effect is a managed one installed over
+	// an image copy: removing it uncovers the ImageVersion copy.
+	Overlay bool
+	// LatestVersion is the last check_update result recorded for the
+	// dependency, empty until a check ran.
 	LatestVersion string
-	// NeedsAlignment is set for present agent dependencies whose version
-	// differs from the pin.
-	NeedsAlignment bool
-	// UpdateAvailable is set for present tool dependencies whose last
-	// upstream check reported a newer version.
+	// UpdateAvailable is set for present dependencies whose last upstream
+	// check reported a version other than the one in effect.
 	UpdateAvailable   bool
 	PlatformSupported bool
 	// Actions lists what the UI may offer right now.
@@ -191,9 +194,9 @@ type PreflightItem struct {
 	Satisfied bool
 	// Reason is empty when Satisfied, otherwise one of the PreflightReason
 	// constants.
-	Reason           string
+	Reason string
+	// InstalledVersion is the version of the copy in effect, when present.
 	InstalledVersion string
-	RequiredVersion  string
 }
 
 // PreflightResult reports whether a set of dependencies is ready to use.
@@ -325,13 +328,7 @@ func (s *Service) reconcile(ctx context.Context, key InstallationKey, dep catalo
 		if err != nil {
 			return Entry{}, fmt.Errorf("workspacedeps: adopt %s: %w", dep.ID, err)
 		}
-		// Adoption records the intent columns; the fact columns that Upsert
-		// does not carry (the agent pin as latest_version) follow.
-		corrected, err := s.correctRecord(ctx, key, adopted, obs, dep)
-		if err != nil {
-			return Entry{}, err
-		}
-		rec = &corrected
+		rec = &adopted
 	case rec != nil && obs.Present:
 		corrected, err := s.correctRecord(ctx, key, *rec, obs, dep)
 		if err != nil {
@@ -369,11 +366,6 @@ func (s *Service) correctRecord(ctx context.Context, key InstallationKey, rec In
 		upd.InstalledVersion = &version
 		changed = true
 	}
-	if dep.IsAgent() && rec.LatestVersion != dep.Version.Pin {
-		pin := dep.Version.Pin
-		upd.LatestVersion = &pin
-		changed = true
-	}
 	if digest := observedDigest(obs); digest != "" && rec.ManifestDigest != digest {
 		upd.ManifestDigest = &digest
 		changed = true
@@ -395,40 +387,55 @@ func buildEntry(entry Entry, dep catalog.Dependency, rec *Installation, obs Obse
 		entry.InstalledVersion = rec.InstalledVersion
 		entry.LatestVersion = rec.LatestVersion
 	}
-	if dep.IsAgent() {
-		entry.RequiredVersion = dep.Version.Pin
-		entry.LatestVersion = dep.Version.Pin
-	}
-	// The version shown is that of the copy the launcher resolver would run,
-	// not necessarily the discovery winner: a managed 0.147.0 next to a
-	// toolkit copy at the pin runs the toolkit copy, and the panel must not
-	// ask for an alignment the runtime does not need (nor the other way
-	// round). The record keeps the discovery winner's version, which is what
-	// the Server installed.
 	if obs.Present {
-		if version := launcherVersion(obs, entry.RequiredVersion); version != "" {
-			entry.InstalledVersion = version
+		// The version shown is that of the copy in effect, which is what the
+		// launcher resolver runs and what the shim directory puts first on
+		// PATH (managed → toolkit → PATH). The record keeps the discovery
+		// winner's version, which is the same copy in practice.
+		effective, image := effectiveCandidate(obs), imageCandidate(obs)
+		if effective.Version != "" {
+			entry.InstalledVersion = effective.Version
 		}
-	}
-	if dep.IsAgent() {
-		entry.NeedsAlignment = obs.Present && entry.InstalledVersion != dep.Version.Pin
-	} else if obs.Present && entry.LatestVersion != "" {
-		entry.UpdateAvailable = entry.LatestVersion != entry.InstalledVersion
+		entry.ImageVersion = image.Version
+		entry.Overlay = effective.Source == SourceManaged && image.Path != ""
+		entry.UpdateAvailable = entry.LatestVersion != "" && entry.LatestVersion != entry.InstalledVersion
 	}
 	entry.Actions = availableActions(dep, rec, obs)
 	return entry
 }
 
-// launcherVersion is the version of the copy the launcher resolver would
-// execute for the dependency (selectLauncherCandidate, design §9.2), falling
-// back to the discovery winner when no candidate qualifies. The panel
-// (buildEntry) and Preflight both go through it so neither can disagree with
-// the runtime about whether a version mismatch exists.
-func launcherVersion(obs Observed, requiredVersion string) string {
-	if candidate, ok := selectLauncherCandidate(obs.Candidates, requiredVersion); ok {
-		return candidate.Version
+// effectiveCandidate is the discovered copy in effect for a present
+// dependency: the one selectLauncherCandidate picks (managed → toolkit →
+// PATH), falling back to the discovery winner. The panel (buildEntry),
+// Preflight, and the launcher resolver all go through the same order so none
+// of them can disagree about which copy runs.
+func effectiveCandidate(obs Observed) Candidate {
+	if candidate, ok := selectLauncherCandidate(obs.Candidates); ok {
+		return candidate
 	}
-	return obs.Version
+	return Candidate{Source: obs.Source, Path: obs.Command, Version: obs.Version}
+}
+
+// imageCandidate is the toolkit copy discovery found, i.e. what the
+// workspace image ships. The zero Candidate means the image has none.
+func imageCandidate(obs Observed) Candidate {
+	for _, candidate := range obs.Candidates {
+		if candidate.Source == SourceToolkit && candidate.Path != "" {
+			return candidate
+		}
+	}
+	return Candidate{}
+}
+
+// hasManagedCopy reports whether discovery found a Server-installed copy
+// (one with a usable state.json), whatever else is present next to it.
+func hasManagedCopy(obs Observed) bool {
+	for _, candidate := range obs.Candidates {
+		if candidate.Source == SourceManaged && candidate.Path != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // offlineEntry builds an Entry from the record alone, for a workspace that
@@ -443,45 +450,96 @@ func offlineEntry(dep catalog.Dependency, rec *Installation, platform Platform) 
 		entry.InstalledVersion = rec.InstalledVersion
 		entry.LatestVersion = rec.LatestVersion
 	}
-	if dep.IsAgent() {
-		entry.RequiredVersion = dep.Version.Pin
-		entry.LatestVersion = dep.Version.Pin
-	}
 	return entry
 }
 
-// availableActions lists the actions the current state allows.
-func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) []catalog.Action {
-	if dep.IsImageProvided() {
-		return nil
+// ActionSupported reports whether the catalog gives the dependency a way to
+// perform action: its own script, or the documented fallback (update runs
+// install; reinstall runs remove then install). Rollback needs no script.
+// Dependencies without an install script only ship with the image; nothing
+// can be installed over them or removed from them.
+func ActionSupported(dep catalog.Dependency, action catalog.Action) bool {
+	switch action {
+	case catalog.ActionInstall:
+		return dep.Scripts.Install != ""
+	case catalog.ActionUpdate:
+		return dep.Scripts.Update != "" || dep.Scripts.Install != ""
+	case catalog.ActionRemove:
+		return dep.Scripts.Remove != ""
+	case catalog.ActionReinstall:
+		return dep.Scripts.Reinstall != "" || (dep.Scripts.Remove != "" && dep.Scripts.Install != "")
+	case catalog.ActionCheckUpdate:
+		return dep.Scripts.CheckUpdate != ""
+	case catalog.ActionVersion:
+		return dep.Scripts.Version != ""
+	case ActionRollback:
+		// Rollback needs no script, but only an installed overlay keeps a
+		// previous version to switch back to.
+		return dep.Scripts.Install != ""
+	default:
+		return false
 	}
+}
+
+// UserActions is the order in which the actions a user may request are
+// reported: the five scripted actions of design §4.3 plus rollback.
+var UserActions = []catalog.Action{
+	catalog.ActionInstall,
+	catalog.ActionUpdate,
+	catalog.ActionReinstall,
+	catalog.ActionRemove,
+	ActionRollback,
+	catalog.ActionCheckUpdate,
+}
+
+// SupportedActions lists, in UserActions order, the actions the catalog lets
+// the dependency perform regardless of any workspace state.
+func SupportedActions(dep catalog.Dependency) []catalog.Action {
+	actions := make([]catalog.Action, 0, len(UserActions))
+	for _, action := range UserActions {
+		if ActionSupported(dep, action) {
+			actions = append(actions, action)
+		}
+	}
+	return actions
+}
+
+// availableActions lists the actions the current state allows. A managed
+// copy is what install produces and what update, reinstall, remove, and
+// rollback operate on; an image copy underneath it is only ever a baseline.
+// Update checks follow the script and the pin, not the category: an agent
+// CLI is checked upstream like any other tool.
+func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) []catalog.Action {
 	if rec != nil && rec.Status.InProgress() {
 		return nil
 	}
-	if !obs.Present {
-		actions := []catalog.Action{catalog.ActionInstall}
-		if rec != nil {
+	var actions []catalog.Action
+	switch {
+	case !ActionSupported(dep, catalog.ActionInstall):
+		// Image only: there is no overlay to manage.
+	case !hasManagedCopy(obs):
+		actions = append(actions, catalog.ActionInstall)
+		if rec != nil && !obs.Present {
 			// A missing or failed record can be dropped without a workspace
 			// copy to delete; remove runs the script (a no-op then) and
 			// deletes the intent.
 			actions = append(actions, catalog.ActionRemove)
 		}
-		return actions
+	default:
+		actions = append(actions, catalog.ActionUpdate, catalog.ActionReinstall, catalog.ActionRemove)
+		if obs.State != nil && strings.TrimSpace(obs.State.PreviousVersion) != "" {
+			actions = append(actions, ActionRollback)
+		}
 	}
-	actions := []catalog.Action{catalog.ActionUpdate, catalog.ActionReinstall, catalog.ActionRemove}
-	if obs.State != nil && strings.TrimSpace(obs.State.PreviousVersion) != "" {
-		actions = append(actions, ActionRollback)
-	}
-	if !dep.IsAgent() && dep.Scripts.CheckUpdate != "" {
+	if obs.Present && upstreamCheckable(dep) {
 		actions = append(actions, catalog.ActionCheckUpdate)
 	}
 	return actions
 }
 
-// Preflight checks whether every dependency in depIDs is present at the
-// required version (design §9.3). It never starts a workspace: when the
-// target cannot be inspected Items is empty and Workspace says why
-// (WD-EXT-004).
+// Preflight checks whether every dependency in depIDs is present (design
+// §9.3). It never starts a workspace: when the target cannot be inspected
+// Items is empty and Workspace says why (WD-EXT-004).
 func (s *Service) Preflight(ctx context.Context, botID, targetID string, depIDs []string) (PreflightResult, error) {
 	targetID = normalizeTargetID(targetID)
 	state, err := s.workspace.State(ctx, botID, targetID)
@@ -511,33 +569,29 @@ func preflightItem(cat *catalog.Catalog, snap Snapshot, depID string) PreflightI
 	}
 	item.Name = dep.Name
 	obs := snap.Observed[depID]
-	if dep.IsAgent() {
-		item.RequiredVersion = dep.Version.Pin
-	}
-	// The verdict follows the copy the launcher resolver would run, the same
-	// way the panel's entry does (launcherVersion), so the UI never reports a
-	// mismatch the runtime would not see, or the other way round.
-	version := launcherVersion(obs, item.RequiredVersion)
 	switch {
 	case !obs.Present && !dep.SupportsPlatform(snap.Platform.OS, snap.Platform.Arch, snap.Platform.Libc):
 		item.Reason = PreflightReasonPlatformUnsupported
 	case !obs.Present:
 		item.Reason = PreflightReasonMissing
-	case item.RequiredVersion != "" && version != item.RequiredVersion:
-		item.InstalledVersion = version
-		item.Reason = PreflightReasonVersionMismatch
 	default:
-		item.InstalledVersion = version
+		// The version reported is that of the copy the launcher resolver
+		// runs, the same one the panel shows (effectiveCandidate).
+		item.InstalledVersion = effectiveCandidate(obs).Version
 		item.Satisfied = true
 	}
 	return item
 }
 
-// Install runs the install script and records the result. A stopped native
+// Install runs the install script and records the result. version is the
+// version to install; empty means the manifest pin when there is one and
+// otherwise whatever the script considers latest. The version recorded is
+// the one the script reports, not the one requested. A stopped native
 // workspace is started first; a missing one or an offline remote target is
-// refused (WD-EXT-004).
-func (s *Service) Install(ctx context.Context, botID, targetID, depID string, sink LogSink) (OperationResult, error) {
-	op, err := s.begin(ctx, botID, targetID, depID, true)
+// refused (WD-EXT-004). For a dependency the image already ships the result
+// is a managed overlay that shadows the image copy.
+func (s *Service) Install(ctx context.Context, botID, targetID, depID, version string, sink LogSink) (OperationResult, error) {
+	op, err := s.begin(ctx, botID, targetID, depID, version, true)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -546,10 +600,9 @@ func (s *Service) Install(ctx context.Context, botID, targetID, depID string, si
 }
 
 // Update runs the update script, falling back to the install script when the
-// manifest has none (design §4.3). For agent dependencies this aligns the
-// copy with the Server pin.
-func (s *Service) Update(ctx context.Context, botID, targetID, depID string, sink LogSink) (OperationResult, error) {
-	op, err := s.begin(ctx, botID, targetID, depID, true)
+// manifest has none (design §4.3). version follows the Install rules.
+func (s *Service) Update(ctx context.Context, botID, targetID, depID, version string, sink LogSink) (OperationResult, error) {
+	op, err := s.begin(ctx, botID, targetID, depID, version, true)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -559,9 +612,9 @@ func (s *Service) Update(ctx context.Context, botID, targetID, depID string, sin
 
 // Reinstall runs the manifest's reinstall script or, when there is none,
 // remove followed by install under a single lock (design §4.3). A failed
-// remove stops the operation.
-func (s *Service) Reinstall(ctx context.Context, botID, targetID, depID string, sink LogSink) (OperationResult, error) {
-	op, err := s.begin(ctx, botID, targetID, depID, true)
+// remove stops the operation. version follows the Install rules.
+func (s *Service) Reinstall(ctx context.Context, botID, targetID, depID, version string, sink LogSink) (OperationResult, error) {
+	op, err := s.begin(ctx, botID, targetID, depID, version, true)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -587,7 +640,7 @@ func (s *Service) Reinstall(ctx context.Context, botID, targetID, depID string, 
 	if err := op.deleteShims(ctx, shimNames(op.dep, previous)); err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
-	result, err := s.runScript(ctx, op, catalog.ActionInstall, installScript, op.dep.Version.Pin, "", 0, sink)
+	result, err := s.runScript(ctx, op, catalog.ActionInstall, installScript, op.version, "", 0, sink)
 	if err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
@@ -595,8 +648,11 @@ func (s *Service) Reinstall(ctx context.Context, botID, targetID, depID string, 
 }
 
 // Remove runs the remove script, deletes the shims, and drops the record.
+// For a dependency the image ships this removes the managed overlay only:
+// the next discovery finds the image copy again and adopts it as installed
+// from the image.
 func (s *Service) Remove(ctx context.Context, botID, targetID, depID string, sink LogSink) (OperationResult, error) {
-	op, err := s.begin(ctx, botID, targetID, depID, false)
+	op, err := s.begin(ctx, botID, targetID, depID, "", false)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -626,7 +682,7 @@ func (s *Service) Remove(ctx context.Context, botID, targetID, depID string, sin
 // state.json (design §4.3). It runs no catalog script and needs no network;
 // the only workspace command is the symlink switch through the prelude.
 func (s *Service) Rollback(ctx context.Context, botID, targetID, depID string) (OperationResult, error) {
-	op, err := s.begin(ctx, botID, targetID, depID, false)
+	op, err := s.begin(ctx, botID, targetID, depID, "", false)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -666,8 +722,8 @@ func (s *Service) Rollback(ctx context.Context, botID, targetID, depID string) (
 }
 
 // CheckUpdates is the manual refresh (design §10.3): it re-discovers the
-// target, then runs check_update for every present tool dependency that
-// follows a channel and writes the result to its record.
+// target, then runs check_update for every present, unpinned dependency with
+// a check_update script and writes the result to its record.
 func (s *Service) CheckUpdates(ctx context.Context, botID, targetID string) (ListResult, error) {
 	targetID = normalizeTargetID(targetID)
 	result, err := s.list(ctx, botID, targetID, true)
@@ -707,9 +763,6 @@ func (s *Service) ScriptPreview(depID string, action catalog.Action) (string, er
 	dep, err := s.dependency(depID)
 	if err != nil {
 		return "", err
-	}
-	if dep.IsImageProvided() {
-		return "", fmt.Errorf("%w: %s ships with the workspace image", ErrActionUnsupported, dep.ID)
 	}
 	if action == ActionRollback {
 		return WrapScript(rollbackScript), nil
@@ -793,8 +846,11 @@ func (s *Service) operationBudget(rec Installation) time.Duration {
 
 // operation is the prepared context of one mutating action.
 type operation struct {
-	key      InstallationKey
-	dep      catalog.Dependency
+	key InstallationKey
+	dep catalog.Dependency
+	// version is the MEMOH_DEP_VERSION install-like scripts receive: the
+	// requested version, else the manifest pin, else empty for latest.
+	version  string
 	client   *bridge.Client
 	dataRoot string
 	home     string
@@ -806,20 +862,17 @@ type operation struct {
 // begin validates the dependency, takes the in-memory lock, makes sure the
 // workspace can run scripts, and resolves everything the action needs. The
 // caller must release the returned operation.
-func (s *Service) begin(ctx context.Context, botID, targetID, depID string, requirePlatform bool) (*operation, error) {
+func (s *Service) begin(ctx context.Context, botID, targetID, depID, version string, requirePlatform bool) (*operation, error) {
 	targetID = normalizeTargetID(targetID)
 	dep, err := s.dependency(depID)
 	if err != nil {
 		return nil, err
 	}
-	if dep.IsImageProvided() {
-		return nil, fmt.Errorf("%w: %s ships with the workspace image", ErrActionUnsupported, dep.ID)
-	}
 	key := InstallationKey{BotID: botID, WorkspaceTargetID: targetID, DependencyID: dep.ID}
 	if !s.locks.tryLock(key) {
 		return nil, ErrBusy
 	}
-	op := &operation{key: key, dep: dep, release: func() { s.locks.unlock(key) }}
+	op := &operation{key: key, dep: dep, version: targetVersion(dep, version), release: func() { s.locks.unlock(key) }}
 	if err := s.prepare(ctx, op, requirePlatform); err != nil {
 		op.release()
 		return nil, err
@@ -910,7 +963,7 @@ func (s *Service) provision(ctx context.Context, op *operation, action catalog.A
 	if err := s.markInProgress(ctx, op.key, status); err != nil {
 		return OperationResult{}, err
 	}
-	result, err := s.runScript(ctx, op, action, script, op.dep.Version.Pin, stateVersion(previous), 0, sink)
+	result, err := s.runScript(ctx, op, action, script, op.version, stateVersion(previous), 0, sink)
 	if err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
@@ -918,11 +971,14 @@ func (s *Service) provision(ctx context.Context, op *operation, action catalog.A
 }
 
 // commit turns a successful install-like run into workspace state and a
-// record: state.json, shims, then the installed row (design §6).
+// record: state.json, shims, then the installed row (design §6). The version
+// recorded is the one the script reported through dep_result; the requested
+// version only stands in when the script reported none, which "latest"
+// never can.
 func (s *Service) commit(ctx context.Context, op *operation, action catalog.Action, result Result, previous *State) (OperationResult, error) {
 	version := strings.TrimSpace(result.Version)
 	if version == "" {
-		version = op.dep.Version.Pin
+		version = op.version
 	}
 	if version == "" {
 		return OperationResult{}, s.fail(ctx, op, errors.New("workspacedeps: script reported no version"))
@@ -1115,10 +1171,20 @@ type updateCheck struct {
 }
 
 // upstreamCheckable reports whether a dependency takes part in upstream
-// update checks (WD-UPD-001): a managed, unpinned tool with a check_update
-// script.
+// update checks (WD-UPD-001): it has a check_update script and no pin. The
+// category does not matter; an agent CLI follows upstream like any tool.
 func upstreamCheckable(dep catalog.Dependency) bool {
-	return !dep.IsAgent() && !dep.IsImageProvided() && dep.Version.Pin == "" && dep.Scripts.CheckUpdate != ""
+	return dep.Version.Pin == "" && dep.Scripts.CheckUpdate != ""
+}
+
+// targetVersion is the MEMOH_DEP_VERSION an install-like action passes: the
+// version the caller asked for, else the manifest pin, else empty so the
+// script installs whatever it considers latest.
+func targetVersion(dep catalog.Dependency, requested string) string {
+	if requested = strings.TrimSpace(requested); requested != "" {
+		return requested
+	}
+	return dep.Version.Pin
 }
 
 // checkUpdate runs the check_update script and decodes its result. The exit
@@ -1186,9 +1252,16 @@ func (s *Service) recordCheck(ctx context.Context, key InstallationKey, check up
 }
 
 // Dependency returns the catalog entry with the given id. Handlers use it to
-// validate a request and read the pinned version before an operation starts.
+// validate a request before an operation starts.
 func (s *Service) Dependency(depID string) (catalog.Dependency, bool) {
 	return s.catalog.Get(strings.TrimSpace(depID))
+}
+
+// Catalog returns every catalog dependency in catalog order. It reads no
+// workspace: this is the bot-independent view the Supermarket shows before a
+// bot is chosen.
+func (s *Service) Catalog() []catalog.Dependency {
+	return s.catalog.List()
 }
 
 func (s *Service) dependency(depID string) (catalog.Dependency, error) {
