@@ -34,7 +34,7 @@
 
 - **镜像与 agent CLI 解耦。** CLI 由依赖管理器在 workspace 内安装、更新、回滚，不再随镜像发布；镜像最终不内置 CLI（§15）。
 - **agent CLI 与其他依赖同等管理。** 安装默认最新版，也可指定版本；可查上游更新；可回滚。依赖管理器不为 agent CLI 设推荐版本、不做版本门；Server 协议快照版本与依赖管理无关——runtime 握手对版本差异的告警照旧，那是 runtime 自己的事。
-- **runtime 类依赖是「镜像底座＋可管理覆盖层」。** node、python、uv 由镜像自带的底座保证始终可用；用户可以在其上安装一个受管理的覆盖版本并升级、回滚，「卸载」即移除覆盖层、回到镜像版本。npm 随 node 提供，不单列。
+- **runtime 类依赖是「镜像底座＋可管理覆盖层」。** node、python、uv 由镜像底座保证始终可用；用户可以在其上安装一个受管理的覆盖版本并升级、回滚，「卸载」即移除覆盖层、回到镜像版本。npm 随 node 提供，不单列。
 - **tool 类依赖按通用包管理。** 后续通用工具由用户通过 UI 安装、更新、卸载。
 - 启用 agent 时阻塞检查依赖，缺失则询问用户是否安装。
 - 运行时缺失时不阻塞，给稳定反馈码与可执行的补救动作。
@@ -76,7 +76,7 @@ internal/workspacedeps/catalog/
 ├── catalog.go                   # //go:embed deps
 └── deps/
     ├── node/
-    │   ├── dependency.yaml      # source: image，镜像提供底座；脚本安装覆盖层
+    │   ├── dependency.yaml      # source: image，镜像底座；脚本安装覆盖层
     │   ├── install.sh
     │   ├── update.sh
     │   └── remove.sh            # 移除覆盖层，回到镜像版本
@@ -102,8 +102,8 @@ internal/workspacedeps/catalog/
 # internal/workspacedeps/catalog/deps/codex/dependency.yaml
 id: codex
 name: Codex
-category: agent                  # agent | runtime | tool
-icon: openai
+category: agent                  # agent | runtime | tool；仅供 catalog 校验与后端逻辑，不在 UI 分组
+icon: openai                     # icon 库标识（@memohai/icon 组件名的 kebab-case），与 provider 一致
 description: OpenAI Codex CLI（direct runtime）
 
 source: managed                  # managed | image
@@ -135,6 +135,12 @@ scripts:
 ```
 
 任何 managed 条目都可以配置 `check_update` 脚本走上游查询，agent 类（codex、claude-code）用 `npm view <pkg> version` 取 latest，与 tool 类同等；`version.pin` 对任何依赖都可选，非空则锁定版本、不参与更新检查，内置条目一律不 pin。
+
+展示类字段的语义：
+
+- `icon` 是 icon 库标识——`@memohai/icon` 组件名的 kebab-case（`openai`、`anthropic`、`nodejs`、`python`、`uv`），与 LLM provider 的 `icon` 字段是同一套标识。SVG 进 `packages/icons`，前端按标识映射组件；不接受 URL 或内联 SVG。标识与依赖 `id` 独立（`node` 条目的图标是 `nodejs`）。首版需补 `nodejs`／`python`／`uv` 三个图标，`openai`／`anthropic` 已在库中。
+- `category` 仅供 catalog 校验与后端逻辑（driver 依赖校验、日志、测试断言），不在 UI 分组——依赖面板平铺（§9.5）。
+- `name`／`description` 是回退文案。前端按依赖 `id` 走 i18n，只对 i18n 中不存在的 id 显示 catalog 文本（WD-UI-002）。
 
 - **WD-CAT-001**：`source: image` 表示镜像提供该依赖的底座（`/opt/memoh/toolkit`），底座不可删除、不由依赖管理器变更。条目可以带 `scripts`，此时脚本安装的是覆盖层——装到 `/data/.memoh/deps/<id>/versions/<v>`、经 `dep_switch` 切 `current`，通过 §6.1 的 PATH 优先级盖过底座；覆盖层支持 update 与 rollback，`remove` 只移除覆盖层、回到镜像版本。无脚本的 `source: image` 条目只展示，不可安装。node、python、uv 首版均带脚本；npm 随 node 提供，不单列条目。
 - **WD-CAT-002**：`platforms` 用于准入。不匹配的平台必须在 API 层拒绝并在 UI 置灰，不得依赖脚本自行报错。
@@ -489,6 +495,26 @@ CodeAgentDependencyMissing = "agent_dependency_missing"
 
 需要全自动时，做成 bot 设置项「依赖缺失时自动安装并等待」，默认关闭。阻塞必须是用户的显式选择。
 
+### 9.5 面板与 Supermarket
+
+依赖的用户界面分两处，职责不重叠：
+
+| 位置 | 职责 | 数据来源 |
+| --- | --- | --- |
+| Bot 详情页「依赖」tab | 管理**已安装**的依赖：状态、版本、更新／重装／卸载／回滚／查看脚本 | `GET /bots/{bot_id}/dependencies`，前端只保留有安装记录或 discovery 探测到副本的条目（含镜像底座、`failed`／`missing` 记录） |
+| Supermarket「依赖」tab | **发现与安装**：列出 catalog 全部可安装依赖 | `GET /workspace-dependencies/catalog`，与 bot 无关 |
+
+- **Bot 页平铺，不按 `category` 分组。** 按本地化名称排序，需要处理的条目（`failed`、`missing`、有更新、进行中）排前。catalog 里未安装的条目不出现；列表为空时空态引导去 Supermarket。`GET /bots/{bot_id}/dependencies` 本身仍返回 catalog ∪ 状态（§11）——过滤在前端做，Supermarket 选定 Bot 后复用同一接口取 `platform_supported` 与当前状态。
+- **「依赖」tab 位于 bot 详情页的 capability 组，MCP 之后**，不在 runtime 组：依赖决定 bot 能做什么，与 Skills、MCP 同类；容器、网络、资源限制才是 runtime。
+- **Supermarket 负责发现与安装。** 条目点击后选择 Bot（与 workspace target）、可选填版本，调用 `POST /bots/{bot_id}/dependencies/{dep_id}/install`，走与 Bot 页同一条 SSE 进度流；成功后引导到该 Bot 的依赖 tab。`platforms` 不匹配（WD-CAT-002）与不可安装条目（无脚本的 `source: image`）在选定 Bot 后置灰；已安装的条目直接给「去依赖页」。
+- **底座与 managed 条目同形。** 未装覆盖层的 node、python、uv 与其他条目是同一行结构、同一组动作位置，差别只体现在动作集——底座没有卸载与回滚（没有覆盖层可移除）；装了覆盖层后与其他条目完全一致。`image_version`／`overlay` 字段只用于决定动作集与确认框的事实陈述，不渲染为标签。
+
+规范：
+
+- **WD-UI-001**：同类条目同形同动作集。不得用标签、徽标或描述解释条目「来自哪里」（镜像／managed／PATH）或「不能做什么」；限制通过动作集自然表达——不可用的动作不出现，而不是出现后附一句说明。确认框只陈述事实结果（如「将移除 24.20.0，工作区回到 24.14.0」），不解释机制。
+- **WD-UI-002**：面向用户的依赖名称与描述走 i18n，按依赖 `id` 取本地化文案；仅对 i18n 中不存在的 id 回退到 catalog 的 `name`／`description`。catalog 文案是回退，不是 UI 真相源。
+- **WD-UI-003**：安装／更新／重装对话框提供可选的版本输入（留空＝最新），不展示由后端决定的「目标版本」——请求发出前前端不知道也不猜最新版本是什么；实际版本以 SSE `done` 事件的回执为准（§11）。
+
 ## 10. 更新检查
 
 ### 10.1 统一上游检查
@@ -528,9 +554,13 @@ DELETE /bots/{bot_id}/dependencies/{dep_id}             SSE
 
 POST   /bots/{bot_id}/dependencies/check-updates        手动刷新，同步
 GET    /bots/{bot_id}/dependencies/{dep_id}/script      查看待执行脚本
+
+GET    /workspace-dependencies/catalog                   与 bot 无关：catalog 全部条目，供 Supermarket「依赖」tab（§9.5）
 ```
 
-列表项字段（节选）：`id`、`category`、`source`、`status`、`installed_version`、`latest_version`、`platform_supported`，以及两个只对底座依赖有意义的字段——`image_version`（镜像自带的底座版本，非 `source: image` 条目为空）与 `overlay`（当前生效副本是否为 managed 覆盖层）。不含任何「要求版本」字段。
+列表项字段（节选）：`id`、`category`、`source`、`status`、`installed_version`、`latest_version`、`platform_supported`，以及两个只对底座依赖有意义的字段——`image_version`（镜像底座的版本，非 `source: image` 条目为空）与 `overlay`（当前生效副本是否为 managed 覆盖层）。不含任何「要求版本」字段。列表返回 catalog ∪ 状态的全集；「只显示已安装」是 Bot 页的前端过滤（§9.5），接口不带 `installed_only` 之类参数。
+
+`GET /workspace-dependencies/catalog` 条目字段：`id`、`name`、`description`、`icon`、`category`、`provides`、`platforms`、`installable`（有 `scripts.install`）、`has_image_baseline`（`source: image`）、`version_pin`（可选，非空即锁定版本）、`actions_supported`（该条目在 catalog 层面支持的动作集，如 `[install, update, reinstall, remove, rollback, check_update]`）。只要求登录，不需要 bot 权限；不含任何 bot 状态——平台准入与已安装判定在用户选定 Bot 后经 `GET /bots/{bot_id}/dependencies` 得出，install 接口仍按 WD-CAT-002 兜底拒绝。
 
 SSE 事件序列复用容器创建的既有模式（`internal/handlers/containerd.go`）：
 
@@ -634,9 +664,9 @@ v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令�
 | 2 | catalog 加载 + runner + discovery + §12.4 平台探测 | 此时镜像仍内置 CLI，可对照验证 |
 | 3 | §7 数据库 + §11 API + SSE + rollback | |
 | 4 | §9.2 launcher 解析 + §9.4 反馈码 + wrapper fallback 收敛 | 依赖阶段 2 的 discovery |
-| 5 | §9.3 启用时阻塞检查 + 前端依赖面板 + bot agents API 字段 | |
+| 5 | §9.3 启用时阻塞检查 + 前端依赖面板 + bot agents API 字段 | 面板最终形态见 §9.5，在阶段 7 收敛 |
 | 6 | §10 更新检查（统一上游检查 worker） | |
-| 7 | 去钉版与覆盖层：catalog 去 `pin`、agent 类 `check_update` 脚本；node／python／uv 覆盖层脚本；API `version` 参数与 `image_version`／`overlay` 字段；§6.1 PATH 前置（bridge + 三处 `containerPath`）；前端版本选择与「移除覆盖层」文案 | 阶段 2–6 中以早期形态合入的版本判断在此收敛；此后所有依赖同等管理 |
+| 7 | 去钉版与覆盖层：catalog 去 `pin`、agent 类 `check_update` 脚本；node／python／uv 覆盖层脚本；API `version` 参数与 `image_version`／`overlay` 字段、`GET /workspace-dependencies/catalog`；§6.1 PATH 前置（bridge + 三处 `containerPath`）；前端按 §9.5 收敛——可选版本输入、平铺且只显示已安装、tab 挪到 capability 组、Supermarket「依赖」tab、依赖图标 | 阶段 2–6 中以早期形态合入的版本判断在此收敛；此后所有依赖同等管理 |
 | 8 | 从 `docker/toolkit/install.sh` 移除 codex/claude 与 toolkit wrapper，镜像瘦身 | 一步删除，不保留种子副本；依赖阶段 4/5/7，否则新 workspace 无 CLI 可用。新镜像首次启用 direct agent 需下载 CLI（默认最新版），由 §9.3 的安装对话框承接 |
 | 9 | §13 contract 移除 | 前提见 §13.3 |
 
@@ -661,3 +691,8 @@ v3 的注释主张「不兼容必须以 contract 版本差呈现，而不是令�
 | reinstall 是否独立脚本 | 否，默认由 runner 编排 | 见 §4.3 |
 | 更新检查在何处执行 | workspace 内 | 可复用脚本的镜像源配置，无需为各生态重新实现版本查询；代价是容器须运行中，与 WD-UPD-002 一致。对所有依赖一致 |
 | 依赖是否共享挂载 | 否 | 见 §12.3 |
+| 依赖 tab 是否分类 | 不分类，平铺；按名称排序，需处理的排前 | 首版条目不足十个，分组只增加视觉层级；`category` 留给 catalog 校验与后端逻辑。见 §4.2、§9.5 |
+| Bot 页显示范围与 Supermarket 分工 | Bot 页只显示已安装（含镜像底座与 `failed`／`missing` 记录），空态引导去 Supermarket；Supermarket 新增「依赖」tab，列出 catalog 全部可安装依赖并发起安装（`GET /workspace-dependencies/catalog`） | 管理与发现是两种任务；把未安装条目混进 Bot 页会让「已安装」列表被 catalog 淹没。接口仍返回全集，过滤在前端。见 §9.5、§11 |
+| icon 来源 | icon 库标识（`@memohai/icon` 组件名的 kebab-case），与 LLM provider 一致；SVG 进 `packages/icons`，首版补 `nodejs`／`python`／`uv` | 复用既有 provider 图标管线与映射方式；catalog 不携带图片资源，也不引入 URL 图标的外链与尺寸问题。见 §4.2 |
+| 「依赖」tab 所在分组 | capability 组，MCP 之后 | 依赖决定 bot 能做什么，与 Skills、MCP 同类；runtime 组是容器、网络、资源限制。见 §9.5 |
+| UI 文案规则 | 同形同动作集、不贴来源标签、不写限制说明；名称与描述本地化、回退 catalog；版本输入可选、不展示后端决定的目标版本 | 「镜像自带」标签与「由 Workspace 镜像提供，不可卸载。」是把实现机制翻译给用户；限制由动作集表达、结果由确认框陈述即足够。见 WD-UI-001–003 |

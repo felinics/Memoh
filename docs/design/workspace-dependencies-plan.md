@@ -87,7 +87,7 @@ gh stack submit --auto   # 非交互：自动标题，新 PR 一律 draft；加 
 | 2 | `workspace-deps/02-service-api` | 迁移/queries/sqlc/store；service 状态机与并发；HTTP API 与 SSE；agent 类对齐扫描（在层 5 移除）；tool 类更新 worker（层 5 扩展到全部依赖）；swagger/SDK | 3、6 | L |
 | 3 | `workspace-deps/03-runtime` | `external` 依赖端口与反馈码；`background.SpawnManaged`；resolver；codex/claudecode 集成；装配与启动校验；toolkit wrapper fallback 删除；bot agents API 的 `dependency` 字段 | 4 | M |
 | 4 | `workspace-deps/04-web` | SSE composable、进度对话框、依赖 tab、启用前 preflight、徽标与提醒、聊天侧反馈渲染、i18n | 5、6（前端） | L |
-| 5 | `workspace-deps/05-versions-overlays` | catalog 去钉版＋agent 类 `check-update.sh`＋node/python/uv 覆盖层脚本；service/API 去对齐、`version` 请求参数、`image_version`/`overlay`；`external` 端口去版本、驱动去 mismatch 通知；bridge `execEnv` 与三处 `containerPath` 前置 `/data/.memoh/deps/bin`；前端版本输入与「移除覆盖层」文案 | 7 | M |
+| 5 | `workspace-deps/05-versions-overlays` | catalog 去钉版＋agent 类 `check-update.sh`＋node/python/uv 覆盖层脚本；service/API 去对齐、`version` 请求参数、`image_version`/`overlay`；`external` 端口去版本、驱动去 mismatch 通知；bridge `execEnv` 与三处 `containerPath` 前置 `/data/.memoh/deps/bin`；`GET /workspace-dependencies/catalog`；前端按设计 §9.5 收敛——可选版本输入、依赖面板平铺且只显示已安装、tab 挪到 capability 组、Supermarket「依赖」tab、`packages/icons` 依赖图标 | 7 | M |
 | 6 | `workspace-deps/06-image-contract` | install.sh 删 CLI、删 toolkit wrapper、删 `contract.go` 及全部引用、CI | 8、9 | M |
 
 - 层 1 与层 2 可并行开发（层 2 先对接 fake runner），合入顺序仍是 1 → 2。
@@ -211,7 +211,7 @@ func (Drivers) RequiredDependencies() map[string]Requirement
 - `apps/web/src/composables/api/useWorkspaceDependencyStream.ts`：照 `useDisplayPrepareStream.ts:42-79`（`client.sse.post` + `fetchSSEProblem` + `localizeSSEErrorEvent` + `normalizeSSEFailure`），事件 `started | log | done | error`，type guard 标 `codesync(workspace-dependency-stream)`。
 - `apps/web/src/pages/bots/components/dependency-progress-dialog.vue`：`Dialog` + 日志区（仿 `bot-create-terminal.vue` 的 `role="log"` 与自动滚底，**只用语义 token**——原件的 `bg-zinc-950`/`text-emerald-400` 是老债，新文件零配额）+ 错误区 + 「复制日志」（`useClipboard().copyText`）+ 取消。
 - `apps/web/src/pages/bots/components/bot-dependencies.vue`：`PageShell variant="tab"` + `SettingsSection`/`SettingsRow`；版本 `Badge font="mono"`；状态 `StatusDot`/`Badge`（installed=success、missing=warning、failed=destructive、待对齐=info——在层 5 移除）；操作 `DropdownMenu`（更新／重装／卸载／回滚／查看脚本）；target 选择与刷新；行内「有更新／需对齐」徽标（「需对齐」在层 5 移除）。query key `['bot-dependencies', botId, targetId]`，mutation 走 `useDialogMutation`。
-- `apps/web/src/pages/bots/detail.vue`：`tabList`（L395-431）加 `dependencies`（lucide `Package`）；`searchIndex`（L433-460）；`groupedTabs.runtimeKeys`（L521-535）；侧栏 `NavItem`（L186-206）传计数。`NavItem` 的 `trailing` 插槽渲染 `BadgeCount`（`packages/ui/src/components/badge/BadgeCount.vue`）——`packages/ui` 是子模块，先在 felinics/ui 出 PR，再在本层更新指针。
+- `apps/web/src/pages/bots/detail.vue`：`tabList`（L395-431）加 `dependencies`（lucide `Package`）；`searchIndex`（L433-460）；`groupedTabs.runtimeKeys`（L521-535，层 5 挪到 `capabilityKeys`）；侧栏 `NavItem`（L186-206）传计数。`NavItem` 的 `trailing` 插槽渲染 `BadgeCount`（`packages/ui/src/components/badge/BadgeCount.vue`）——`packages/ui` 是子模块，先在 felinics/ui 出 PR，再在本层更新指针。
 - `bot-agents.vue:399 setAgentEnabled`：`enabled && agent.dependency` → `preflight` → 未通过弹确认 `Dialog`（缺失／不符两种文案；「不符」在层 5 移除，只剩「安装」）→ 进度对话框 → 成功后 `updateAgent({enabled: true})`；取消或失败不写 enabled；`workspace_not_running` 提示并链到容器 tab。`add-bot-agent-dialog.vue`：direct 类型创建传 `enabled: false`，成功后走同一流程再 PATCH。
 - 提醒对话框按 `(bot, dep, latest_version)` 去重，键存 `localStorage`。
 - 聊天侧：渲染 feedback 错误的组件对 `agent_dependency_missing` 展示后台任务进度（`install_task_id`），对 `agent_dependency_version_mismatch` 展示「去对齐」入口（在层 5 删除）。
@@ -229,7 +229,7 @@ func (Drivers) RequiredDependencies() map[string]Requirement
 - `codex/{install,update}.sh`、`claude-code/{install,update}.sh`：`ver="${MEMOH_DEP_VERSION:-latest}"`，为 `latest` 时先 `npm view <pkg> version` 解析成具体版本，装到 `versions/$ver`，回执 `version` 写解析后的实际版本（§5.4）。
 - `node/{install,update,remove}.sh`：下载逻辑照 `docker/toolkit/install.sh:452-475`（`NODEJS_MIRROR`／`NODEJS_MUSL_MIRROR`，musl 分支按 `MEMOH_DEP_LIBC`），`ver` 为空时取 `${NODEJS_MIRROR}/index.json` 首项；解包到 `versions/$ver`，回执 entrypoints `node`／`npm`／`npx`；`remove.sh` 删 `$MEMOH_DEP_HOME`（只删覆盖层，底座不动）。
 - `python/{install,update,remove}.sh`：照 `install.sh:516-537` 的 python-build-standalone 归档；`uv/{install,update,remove}.sh`：GitHub release 归档解到 `versions/$ver`。三者 `dependency.yaml` 保持 `source: image`，加 `scripts` 与 `check_update`。
-- `Validate()`：`source: image` 允许脚本（无脚本条目标记为不可安装）；删 agent pin／无 `check_update` 规则；`check_update` 要求同时存在 `install`。
+- `Validate()`：`source: image` 允许脚本（无脚本条目标记为不可安装）；删 agent pin／无 `check_update` 规则；`check_update` 要求同时存在 `install`；`icon` 非空且为 kebab-case 标识（`^[a-z0-9]+(-[a-z0-9]+)*$`，设计 §4.2）。五个清单的 `icon`：`codex` → `openai`、`claude-code` → `anthropic`、`node` → `nodejs`、`python` → `python`、`uv` → `uv`。`category` 继续参与校验，但不再进任何 UI 分组逻辑。
 - 删 `cmd/internal/core/providers_test.go` 的钉版同源测试。
 
 **service／API**
@@ -237,7 +237,8 @@ func (Drivers) RequiredDependencies() map[string]Requirement
 - `internal/workspacedeps/service.go`：`List` 去 `RequiredVersion`/`NeedsAlignment`，加 `ImageVersion`（discovery 的 toolkit 副本版本）与 `Overlay`（生效副本来自 `state.json`）；`Install/Update/Reinstall` 加 `version string` 参数（空 → `latest`）传 `MEMOH_DEP_VERSION`，写库以回执 `version` 为准；`Remove` 对 `source: image` 条目只删覆盖层目录，随后重跑 discovery 让 `installed_version` 回到镜像版本、`source` 回 `image`；`Preflight` 结果收窄为 `satisfied`／`missing`／`platform_unsupported`／`unknown_dependency`。
 - 删层 2 的 agent 类对齐扫描（reconcile 后的 discovery 预热保留，不写 `latest_version`）。
 - `updates.go`：过滤条件改为「`status=installed` ∧ 清单有 `check_update` ∧ `version.pin` 为空」，不按 category 过滤。
-- `internal/handlers/workspace_dependencies.go`：install／update／reinstall 请求体加可选 `{"version": "..."}`；list item DTO 删 `required_version`/`needs_alignment`、加 `image_version`/`overlay`；SSE `started` 事件字段改 `requested_version`。`internal/handlers/bot_agents.go` 的 `dependency` 只剩 `dependency_id`。`mise run swagger-generate && mise run sdk-generate`。
+- `internal/handlers/workspace_dependencies.go`：install／update／reinstall 请求体加可选 `{"version": "..."}`；list item DTO 删 `required_version`/`needs_alignment`、加 `image_version`/`overlay`（列表仍返回 catalog ∪ 状态全集，「只显示已安装」由前端过滤，不加 `installed_only` 参数）；SSE `started` 事件字段改 `requested_version`。`internal/handlers/bot_agents.go` 的 `dependency` 只剩 `dependency_id`。
+- 新增 `GET /workspace-dependencies/catalog`（设计 §11、§9.5）：`ListWorkspaceDependencyCatalog` 挂在同一 handler，路由在 `ContainerdHandler.Register` 追加但不带 bot 前缀，只要求登录（JWT 中间件），不走 `requireBotAccessWithPermission`；DTO 字段 `id`、`name`、`description`、`icon`、`category`、`provides`、`platforms`、`installable`、`has_image_baseline`、`version_pin`（omitempty）、`actions_supported`——后三者由 catalog 清单推导（`scripts.*` 有哪些、`source`、`version.pin`），不含任何 bot 状态。`mise run swagger-generate && mise run sdk-generate`。
 
 **external 端口与驱动**
 
@@ -253,11 +254,19 @@ func (Drivers) RequiredDependencies() map[string]Requirement
 
 **前端**
 
-- `apps/web/src/pages/bots/components/bot-dependencies.vue`：安装／更新对话框加版本输入（`Input`，留空＝最新，提示文案）；`source: image` 行显示「镜像 `image_version`」与 `overlay` 徽标，卸载文案改「移除覆盖层，回到镜像版本 x」；删「需对齐」徽标与 info 态。
-- `bot-agents.vue`：preflight 确认框只剩「安装」文案（可展开版本输入）；删 mismatch 分支。聊天侧删 `dependencyVersionMismatch` 渲染。
-- i18n 三语：删 `chat.externalAgent.dependencyVersionMismatch`、`bots.dependencies.needsAlignment`；加 `bots.dependencies.version.latestHint`、`bots.dependencies.overlay`、`bots.dependencies.removeOverlay`。`docs/design/workspace-dependencies-ux.html` 同步。
+按设计 §9.5 与 WD-UI-001–003 收敛，六条产品决定：平铺不分类；Bot 页只显示已安装；Supermarket 新增「依赖」tab；`icon` 为 icon 库标识；tab 在 capability 组；同形同动作集、不贴来源标签、不写限制说明、名称描述本地化、版本输入可选。
 
-**测试**：catalog `Validate` 正反例更新（image 带脚本合法、agent 无 pin 合法）；runner 用 fake bridge 验证 `MEMOH_DEP_VERSION` 为空时脚本回执版本被采纳；service `Remove` 对 image 条目只删覆盖层并回写、`Install(version)` 透传；bridgesvc `prependDepsBin` 三组；resolver 三来源顺序无版本判断；handler `version` 参数透传与 DTO 字段；vitest 覆盖 `overlay` 徽标映射。人工 happy path 见 §2。
+- `apps/web/src/pages/bots/components/bot-dependencies.vue`：**平铺、只显示已安装**。删 `category` 分组与 `SettingsSection` 分节（`bots.dependencies.group.*`），列表按本地化名称排序，需处理的条目（`failed`、`missing`、有更新、进行中）排前；对 `GET /bots/{bot_id}/dependencies` 的返回做客户端过滤，只保留有安装记录（`status` 非「未安装」）或 discovery 探测到副本（含 `image_version` 非空的镜像底座）的条目；空态改为引导去 Supermarket「依赖」tab（`RouterLink` 到 `/supermarket?tab=dependencies`），删「没有可管理的依赖」文案。
+- `dependency-row.vue`：同形同动作集（WD-UI-001）。删「镜像自带」／「已管理」来源徽标（`bots.dependencies.source.*`）与「由 Workspace 镜像提供，不可卸载。」说明（`bots.dependencies.imageProvidedDescription`）；行结构统一为「图标＋本地化名称＋版本 `Badge font="mono"`＋状态＋动作菜单」；动作集按字段推导——底座未装覆盖层（`overlay=false` 且 `source=image`）只有安装／查看脚本，装了覆盖层或 managed 条目为更新／重装／卸载／回滚／查看脚本；删「需对齐」徽标与 info 态。图标走 `dependencyIcon(item.icon)`。名称与描述取 `bots.dependencies.catalog.<id>.{name,description}`，`te()` 不存在时回退 `item.name`／`item.description`（WD-UI-002）。
+- `dependency-confirm-dialog.vue`：安装／更新／重装对话框加可选版本输入（`Input`，留空＝最新，`bots.dependencies.version.latestHint`）；删「目标版本」行（`bots.dependencies.confirm.targetVersion`）——实际版本只在进度对话框的 `done` 事件出现（WD-UI-003）；卸载确认框只陈述结果：覆盖层项「将移除 {from}，工作区回到 {to}」（`from` 为覆盖层版本、`to` 为 `image_version`），managed 项「将移除 {version}」。
+- `dependency-enable-flow.vue`／`bot-agents.vue`：preflight 确认框只剩「安装」（可展开版本输入）；删 mismatch 分支与 `action.align`／`confirm.align*`。聊天侧删 `dependencyVersionMismatch` 渲染。
+- `apps/web/src/pages/bots/detail.vue`：`dependencies` 从 `groupedTabs.runtimeKeys` 挪到 `capabilityKeys`，位于 `mcp` 之后（`['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'dependencies', 'memory']`）；`searchIndex` 与侧栏 `NavItem` 顺序同步。
+- Supermarket：`apps/web/src/pages/supermarket/index.vue` 新增 `TabsTrigger value="dependencies"`（`supermarket.dependenciesSection`，排在 skills 之后），列表来自 `GET /workspace-dependencies/catalog`（query key `['workspace-dependency-catalog']`），卡片复用 `market-item-card.vue` 形态，图标 `dependencyIcon`，名称描述同样按 id 本地化；新增 `components/install-dependency-dialog.vue`：选择 Bot → 选择 workspace target → 可选版本输入 → `POST /bots/{bot_id}/dependencies/{dep_id}/install`，复用 `useWorkspaceDependencyStream` 与 `dependency-progress-dialog.vue`；选定 Bot 后调 `GET /bots/{bot_id}/dependencies` 取该条目的 `platform_supported`／`status`，不支持置灰、已安装直接给「去依赖页」；成功后跳到 `/bots/{id}?tab=dependencies`。`useSyncedQueryParam('tab')` 的合法值加 `dependencies`。
+- 图标：`packages/icons/icons/` 加 `nodejs.svg`、`python.svg`、`uv.svg`；`scripts/manifest.ts` 新增 `workspaceDependencies` 组（`nodejs`、`python`、`uv`——`openai`、`anthropic` 已在 `llmProviders`）并并入 `manifest`，`mise run icons-generate`。`apps/web/src/utils/dependency-icon.ts` 新增 `dependencyIcon(icon: string, color = false): Component`——按 catalog `icon` 标识映射 `@memohai/icon` 组件，写法照 `utils/bot-agent.ts:105` 的 `botAgentIcon`，未知标识回退 lucide `Package`。
+- i18n 三语（`i18n.test.ts` 校验）：**删** `chat.externalAgent.dependencyVersionMismatch`、`bots.dependencies.status.needsAlignment`、`bots.dependencies.action.align`、`bots.dependencies.confirm.align*`、`bots.dependencies.group.*`、`bots.dependencies.source.*`、`bots.dependencies.imageProvidedDescription`、`bots.dependencies.confirm.targetVersion`、`bots.dependencies.emptyTitle`；**加** `bots.dependencies.version.latestHint`、`bots.dependencies.confirm.removeOverlayDescription`（「将移除 {from}，工作区回到 {to}」）、`bots.dependencies.confirm.removeDescription`（「将移除 {version}」）、`bots.dependencies.empty.*`（空态标题与「去 Supermarket」动作）、`bots.dependencies.catalog.{codex,claude-code,node,python,uv}.{name,description}`（按依赖 id 本地化，未知 id 回退 catalog 文本）、`supermarket.dependenciesSection`、`supermarket.installDependency.*`（选 Bot、选 target、版本输入、去依赖页）。`docs/design/workspace-dependencies-ux.html` 同步。
+- PR 描述截图清单（前缀 `v5-*`）：`v5-bot-deps-flat.png`（Bot 页平铺，底座与 managed 同形）、`v5-bot-deps-empty.png`（空态引导 Supermarket）、`v5-remove-overlay-confirm.png`（卸载确认框的事实陈述）、`v5-install-version-input.png`（可选版本输入、无目标版本行）、`v5-detail-tab-capability-group.png`（tab 在 capability 组 MCP 之后）、`v5-supermarket-deps-tab.png`、`v5-supermarket-install-dialog.png`。
+
+**测试**：catalog `Validate` 正反例更新（image 带脚本合法、agent 无 pin 合法）；runner 用 fake bridge 验证 `MEMOH_DEP_VERSION` 为空时脚本回执版本被采纳；service `Remove` 对 image 条目只删覆盖层并回写、`Install(version)` 透传；bridgesvc `prependDepsBin` 三组；resolver 三来源顺序无版本判断；handler `version` 参数透传与 DTO 字段、`GET /workspace-dependencies/catalog` 的字段推导与「未登录 401、无 bot 权限也可读」；vitest 覆盖已安装过滤与排序（需处理的排前）、动作集推导（底座／覆盖层／managed 三态）、`dependencyIcon` 未知标识回退、名称描述本地化回退、Supermarket 安装对话框的置灰与「去依赖页」分支。人工 happy path 见 §2，另加：Supermarket 装 node 覆盖层 → 跳到 Bot 依赖 tab 看到同形条目 → 卸载确认框显示「将移除 x，工作区回到 y」。
 
 ### 层 6 `06-image-contract`
 
@@ -290,6 +299,6 @@ func (Drivers) RequiredDependencies() map[string]Requirement
 
 ## 5. 已决与遗留
 
-已决：agent CLI 不钉版、不设推荐版本，与其他依赖同等管理——默认最新、可指定版本、`check_update` 查上游、可回滚（层 5）；node／python／uv 为镜像底座＋可管理覆盖层，卸载即移除覆盖层（层 5）；PATH 优先级由 bridge `execEnv` 前置 `/data/.memoh/deps/bin`（目录存在才前置），三处 `containerPath` 同步（层 5）；contract 直接移除（层 6）；镜像内 CLI 一步删除（层 6）；版本探测默认 `--version`、可选 `scripts.version`（层 1）；创建 direct agent 由前端显式传 `enabled: false`（层 3、4）；tab 计数角标做 `NavItem` 插槽（层 4）。
+已决：agent CLI 不钉版、不设推荐版本，与其他依赖同等管理——默认最新、可指定版本、`check_update` 查上游、可回滚（层 5）；node／python／uv 为镜像底座＋可管理覆盖层，卸载即移除覆盖层（层 5）；PATH 优先级由 bridge `execEnv` 前置 `/data/.memoh/deps/bin`（目录存在才前置），三处 `containerPath` 同步（层 5）；contract 直接移除（层 6）；镜像内 CLI 一步删除（层 6）；版本探测默认 `--version`、可选 `scripts.version`（层 1）；创建 direct agent 由前端显式传 `enabled: false`（层 3、4）；tab 计数角标做 `NavItem` 插槽（层 4）；依赖 tab 平铺不分类，`category` 只供 catalog 校验与后端逻辑（层 5）；Bot 页只显示已安装（含镜像底座与 `failed`／`missing` 记录），空态引导去 Supermarket，接口仍返回全集、过滤在前端（层 5）；Supermarket 新增「依赖」tab 与 `GET /workspace-dependencies/catalog`，安装走同一 SSE 流、成功后引导到 Bot 依赖 tab（层 5）；`icon` 为 icon 库标识，与 provider 一致，`packages/icons` 补 `nodejs`／`python`／`uv`（层 5）；「依赖」tab 在 capability 组 MCP 之后（层 5）；UI 文案规则 WD-UI-001–003——同形同动作集、不贴来源标签、不写限制说明、确认框只陈述事实结果、名称描述按 id 本地化回退 catalog、版本输入可选且不展示后端决定的目标版本（层 5）。
 
 遗留：`docs/design/workspace-dependencies-ux.html` 仍有 ACP/Hermes 时代的文案与条目，随层 4 的实际 UI 一起更新。
