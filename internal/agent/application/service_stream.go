@@ -27,6 +27,7 @@ type terminalSnapshot struct {
 	sdkMessages     []sdk.Message
 	usage           json.RawMessage
 	reasoningTiming []messagepkg.ReasoningTimingSegment
+	stepTraces      []messagepkg.StepTraceMetadata
 	deferredToolID  string
 	aborted         bool
 	visibleOutput   bool
@@ -234,8 +235,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
 		reasoningTiming := newReasoningTimingTracker(nil)
+		stepTrace := newStepTraceTracker(nil)
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
 		configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+		configureNativeStepTrace(&cfg, stepTrace, stepCommitter)
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 		terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 		var lifecycleCause error
@@ -325,6 +328,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				if snap, ok := extractTerminalSnapshot(data); ok {
 					if stepCommitter == nil {
 						snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+						snap.stepTraces = stepTrace.take()
 					}
 					snap.visibleOutput = hasVisibleOutput
 					snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
@@ -587,8 +591,10 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+	configureNativeStepTrace(&cfg, stepTrace, stepCommitter)
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	var lifecycleCause error
@@ -676,6 +682,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				if stepCommitter == nil {
 					snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+					snap.stepTraces = stepTrace.take()
 				}
 				snap.visibleOutput = hasVisibleOutput
 				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
@@ -890,6 +897,7 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 		RequireCompletePersist: true,
 		ContextLifecycle:       rc.runConfig.ContextLifecycle,
 		ReasoningTiming:        snap.reasoningTiming,
+		StepTraces:             snap.stepTraces,
 	})
 	if err != nil {
 		return nil, err

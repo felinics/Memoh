@@ -27,6 +27,7 @@ type storeRoundOptions struct {
 	AllowEmptyAssistantText           bool
 	MessageMetadataByIndex            map[int]map[string]any
 	ReasoningTiming                   []messagepkg.ReasoningTimingSegment
+	StepTraces                        []messagepkg.StepTraceMetadata
 	RequireCompletePersist            bool
 	CleanupRuntimeDecisionProjections bool
 	AgentPublication                  *messagepkg.AgentPublication
@@ -252,6 +253,7 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 	// Project timing only at the final persistence boundary, after callers have
 	// finished filtering, repairing, or augmenting the rows being stored.
 	opts = opts.withReasoningTimingMetadata(messages)
+	opts = opts.withStepTraceMetadata(messages)
 	// Check bot setting for full tool result persistence.
 	pruneToolResults := true
 	if botSettings, err := s.loadBotSettings(ctx, req.BotID); err == nil {

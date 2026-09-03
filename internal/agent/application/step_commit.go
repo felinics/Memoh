@@ -22,6 +22,7 @@ type agentStepCommitter struct {
 	rc              resolvedContext
 	persister       messagepkg.AgentStepPersister
 	reasoningTiming *reasoningTimingTracker
+	stepTrace       *stepTraceTracker
 
 	mu                   sync.Mutex
 	turnRequestMessageID string
@@ -79,6 +80,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		timingState = "interrupted"
 	}
 	reasoningTiming := c.reasoningTiming.take(timingState)
+	stepTraces := c.stepTrace.take()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -109,6 +111,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		AllowPendingToolCalls: step.DeferredToolApproval != nil,
 		ContextLifecycle:      c.rc.runConfig.ContextLifecycle,
 		ReasoningTiming:       reasoningTiming,
+		StepTraces:            stepTraces,
 	}
 	if interrupted {
 		opts.MessageMetadataByIndex = make(map[int]map[string]any)

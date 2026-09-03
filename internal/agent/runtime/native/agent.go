@@ -221,7 +221,18 @@ func (a *Agent) Stream(ctx context.Context, cfg RunConfig) <-chan StreamEvent {
 		defer close(ch)
 		a.runStream(ctx, cfg, ch)
 	}()
-	return ch
+	if cfg.OnAgentEventObserved == nil {
+		return ch
+	}
+	observed := make(chan StreamEvent)
+	go func() {
+		defer close(observed)
+		for event := range ch {
+			cfg.OnAgentEventObserved(event)
+			observed <- event
+		}
+	}()
+	return observed
 }
 
 // Generate runs the agent in non-streaming mode, returning the complete result.

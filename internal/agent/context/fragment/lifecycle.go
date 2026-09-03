@@ -101,6 +101,28 @@ type LifecycleSnapshot struct {
 	LoopSelectionMode         string              `json:"loop_selection_mode,omitempty"`
 	Steps                     []StepSnapshot      `json:"steps,omitempty"`
 	MemoryRecall              *MemoryRecallTrace  `json:"memory_recall,omitempty"`
+	RunTrace                  *RunTrace           `json:"run_trace,omitempty"`
+}
+
+// RunTrace is the fixed-size timing and usage rollup of one run: request
+// count, wall clock per lane, and provider tokens. TTFT belongs to the first
+// request; DecodeMs and DecodeOutputTokens cover only requests that reported
+// both a first token and output tokens, so a throughput reading stays honest.
+type RunTrace struct {
+	Steps              int   `json:"steps"`
+	ToolCalls          int   `json:"tool_calls,omitempty"`
+	StartedAtMS        int64 `json:"started_at_ms,omitempty"`
+	EndedAtMS          int64 `json:"ended_at_ms,omitempty"`
+	LLMMs              int64 `json:"llm_ms,omitempty"`
+	ToolMs             int64 `json:"tool_ms,omitempty"`
+	TTFTMs             int64 `json:"ttft_ms,omitempty"`
+	DecodeMs           int64 `json:"decode_ms,omitempty"`
+	DecodeOutputTokens int   `json:"decode_output_tokens,omitempty"`
+	InputTokens        int   `json:"input_tokens,omitempty"`
+	CachedInputTokens  int   `json:"cached_input_tokens,omitempty"`
+	CacheWriteTokens   int   `json:"cache_write_tokens,omitempty"`
+	OutputTokens       int   `json:"output_tokens,omitempty"`
+	ReasoningTokens    int   `json:"reasoning_tokens,omitempty"`
 }
 
 type MemoryRecallTrace struct {
@@ -130,11 +152,23 @@ type LifecycleHolder struct {
 	mu       sync.RWMutex
 	snapshot LifecycleSnapshot
 	ledger   *MutationLedger
+	runTrace func() *RunTrace
 	set      bool
 }
 
 func NewLifecycleHolder() *LifecycleHolder {
 	return &LifecycleHolder{}
+}
+
+// SetRunTraceSource registers the run rollup read at snapshot time, so the
+// terminal write sees the complete trace regardless of manifest replacement.
+func (h *LifecycleHolder) SetRunTraceSource(source func() *RunTrace) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.runTrace = source
+	h.mu.Unlock()
 }
 
 func (h *LifecycleHolder) SetMemoryRecall(trace MemoryRecallTrace) {
@@ -183,10 +217,17 @@ func (h *LifecycleHolder) Snapshot() (LifecycleSnapshot, bool) {
 	h.mu.RLock()
 	snapshot := cloneLifecycleSnapshot(h.snapshot)
 	ledger := h.ledger
+	runTrace := h.runTrace
 	ok := h.set
 	h.mu.RUnlock()
 	if !ok {
 		return LifecycleSnapshot{}, false
+	}
+	if runTrace != nil {
+		if trace := runTrace(); trace != nil {
+			copied := *trace
+			snapshot.RunTrace = &copied
+		}
 	}
 	if ledger != nil {
 		snapshot.Mutations = ledger.Records()

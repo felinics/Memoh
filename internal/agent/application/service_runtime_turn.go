@@ -161,6 +161,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		s.sessionRuntime.MarkInlineDecisionRun(req.BotID, req.ThreadID, req.RunID)
 	}
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	sess, err := s.sessionService.Get(ctx, req.ThreadID)
 	if err != nil {
 		return err
@@ -198,6 +199,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
 	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	contextLifecycle := contextfrag.NewLifecycleHolder()
+	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)
 	}
@@ -313,6 +315,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 
 	emitWithContext := func(deliveryCtx context.Context, ev native.StreamEvent) {
 		reasoningTiming.observe(ev)
+		stepTrace.observe(ev)
 		if isRuntimeDecisionProjectionEvent(ev) && recordProjection(ev) {
 			completeProjection(ev.ToolCallID, s.persistRuntimeDecisionProjection(context.WithoutCancel(ctx), req, ev))
 		}
@@ -597,7 +600,9 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	})
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
 	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
+	stepTrace := newStepTraceTracker(nil)
 	contextLifecycle := contextfrag.NewLifecycleHolder()
+	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)
 	}
@@ -653,6 +658,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 				idleCancel.RecordToolCall()
 			}
 			reasoningTiming.observe(ev)
+			stepTrace.observe(ev)
 		}),
 	})
 	if idleCancel.DidFire() {
