@@ -915,7 +915,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated, type Ref } from 'vue'
 import {
   ImagePlus,
   Paperclip,
@@ -1114,7 +1114,7 @@ function useDelayedTrue(source: Ref<boolean>, delayMs: number): Ref<boolean> {
     if (timer) { clearTimeout(timer); timer = undefined }
     visible.value = false
   }, { immediate: true })
-  onUnmounted(() => { if (timer) clearTimeout(timer) })
+  onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
   return visible
 }
 
@@ -1123,6 +1123,8 @@ const pendingPairPatchSession = ref('')
 
 function persistComposerPair() {
   if (activeUsesExternalAgentComposer.value) return // ACP double-write is its own path
+  const botId = currentBotId.value
+  if (!botId) return
   const sessionId = paneTarget.value.sessionId
   const modelId = overrideModelId.value.trim()
   if (!modelId) return
@@ -1134,7 +1136,7 @@ function persistComposerPair() {
     return
   }
   pendingPairPatchSession.value = sessionId
-  updateSessionModelPreference(currentBotId.value, sessionId, modelId, effort)
+  updateSessionModelPreference(botId, sessionId, modelId, effort)
     .catch(() => { /* best-effort; next send is the retry */ })
     .finally(() => {
       if (pendingPairPatchSession.value === sessionId) pendingPairPatchSession.value = ''
@@ -1164,6 +1166,8 @@ function clearPairDraft() {
 async function seedWelcomePair() {
   if (activeUsesExternalAgentComposer.value || paneTarget.value.sessionId) return
   if (pairSource.value === 'user') return // this device already picked
+  const botId = currentBotId.value
+  if (!botId) return
   const draft = readPairDraft()
   if (draft) {
     overrideModelId.value = draft.model_id
@@ -1172,10 +1176,13 @@ async function seedWelcomePair() {
     return
   }
   try {
-    const seed = await fetchModelPreferenceSeed(currentBotId.value)
+    const seed = await fetchModelPreferenceSeed(botId)
     // The user may have picked something or opened a session while the seed
     // was in flight; only apply to a still-welcome, still-unpicked composer.
-    if (!seed.model_id || paneTarget.value.sessionId || pairSource.value === 'user') return
+    // Read through paneView (not the pairSource computed): the compiler
+    // narrowed that chain to exclude 'user' after the early return above,
+    // and this post-await re-check is exactly what the narrowing can't see.
+    if (!seed.model_id || paneTarget.value.sessionId || paneView.value.pairSource.value === 'user') return
     overrideModelId.value = seed.model_id
     overrideReasoningEffort.value = seed.reasoning_effort || botSettings.value?.reasoning_effort || 'medium'
     paneView.value.pairSource.value = 'session'
