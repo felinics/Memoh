@@ -54,8 +54,14 @@ rm -rf "$versions/.staging-$MEMOH_DEP_ID."* "$versions/"*.previous-*
 mkdir -p "$stage/root"
 
 dep_log "Updating $pkg from ${MEMOH_DEP_CURRENT_VERSION:-unknown} to $ver in $stage"
+# npm 11 stops running a global package's install scripts unless they are
+# allowed explicitly; keep the npm 10 behaviour the toolkit image had.
+allow_scripts=""
+case "$(npm --version 2>/dev/null | cut -d. -f1)" in
+  1[1-9]|[2-9][0-9]) allow_scripts="--allow-scripts=$pkg" ;;
+esac
 if ! npm install -g --prefix "$stage/root" --include=optional --omit=dev --no-audit --no-fund \
-  --registry "$registry" "$pkg@$ver"; then
+  ${allow_scripts:+"$allow_scripts"} --registry "$registry" "$pkg@$ver"; then
   dep_log "npm install of $pkg@$ver failed"
   rm -rf "$stage"
   exit 1
