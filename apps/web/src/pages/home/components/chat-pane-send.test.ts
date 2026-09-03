@@ -1,10 +1,28 @@
+// jsdom's localStorage is unavailable under this runner (node shadows it),
+// so the pair-draft tests run against a Map-backed stub, matching the
+// markdown test's precedent.
+const pairDraftStorage = new Map<string, string>()
+Object.defineProperty(globalThis, 'localStorage', {
+  value: {
+    getItem: (k: string) => pairDraftStorage.get(k) ?? null,
+    setItem: (k: string, v: string) => void pairDraftStorage.set(k, String(v)),
+    removeItem: (k: string) => void pairDraftStorage.delete(k),
+    clear: () => pairDraftStorage.clear(),
+  },
+})
 import { describe, expect, it } from 'vitest'
 import {
   captureChatPaneSendContext,
+  carriedPairForSource,
+  clearComposerPairDraft,
   composerHasNoModel,
+  composerPairDraftKey,
   matchesChatPaneSendContext,
   pinnedSubagentModelId,
+  readComposerPairDraft,
   shouldRefreshACPComposerConfig,
+  welcomeSendConsumedDraft,
+  writeComposerPairDraft,
 } from './chat-pane-send'
 
 describe('chat pane send context', () => {
@@ -106,5 +124,43 @@ describe('pinned subagent model', () => {
     expect(pinnedSubagentModelId('subagent', {}, models)).toBe('')
     expect(pinnedSubagentModelId('subagent', { model_uuid: '  ' }, models)).toBe('')
     expect(pinnedSubagentModelId('subagent', { model_uuid: 'model-gone' }, models)).toBe('')
+  })
+})
+
+describe('carried pair gate (issue #879)', () => {
+  it.each([
+    { source: 'user', want: { modelId: 'm-1', reasoningEffort: 'high' } },
+    { source: 'session', want: { modelId: 'm-1', reasoningEffort: 'high' } },
+    { source: 'default', want: { modelId: '', reasoningEffort: '' } },
+    { source: 'unset', want: { modelId: '', reasoningEffort: '' } },
+  ])('source $source carries $want', ({ source, want }) => {
+    expect(carriedPairForSource(source, ' m-1 ', ' high ')).toEqual(want)
+  })
+})
+
+describe('composer pair draft', () => {
+  it('round-trips and clears per bot', () => {
+    writeComposerPairDraft('bot-1', { model_id: 'm-1', reasoning_effort: 'high' })
+    writeComposerPairDraft('bot-2', { model_id: 'm-2', reasoning_effort: 'low' })
+    expect(readComposerPairDraft('bot-1')).toEqual({ model_id: 'm-1', reasoning_effort: 'high' })
+    clearComposerPairDraft('bot-1')
+    expect(readComposerPairDraft('bot-1')).toBeNull()
+    expect(readComposerPairDraft('bot-2')).toEqual({ model_id: 'm-2', reasoning_effort: 'low' })
+  })
+
+  it('treats a model-less payload as no draft', () => {
+    localStorage.setItem(composerPairDraftKey('bot-1'), JSON.stringify({ reasoning_effort: 'high' }))
+    expect(readComposerPairDraft('bot-1')).toBeNull()
+  })
+})
+
+describe('welcome send consumes the draft', () => {
+  it('clears only on a successful welcome send', () => {
+    expect(welcomeSendConsumedDraft({ sessionId: '' }, { ok: true })).toBe(true)
+    expect(welcomeSendConsumedDraft({}, { ok: true })).toBe(true)
+    // An existing-session send never touches the draft...
+    expect(welcomeSendConsumedDraft({ sessionId: 's-1' }, { ok: true })).toBe(false)
+    // ...and neither does a failed welcome send (the pick was never persisted).
+    expect(welcomeSendConsumedDraft({ sessionId: '' }, { ok: false })).toBe(false)
   })
 })

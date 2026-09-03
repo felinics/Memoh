@@ -972,7 +972,7 @@ import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { provideConnectorLogos } from '../composables/useConnectorLogos'
 import { fetchSafeSkillCatalog, fetchSession, fetchModelPreferenceSeed, updateSessionModelPreference, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
-import { captureChatPaneSendContext, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig } from './chat-pane-send'
+import { captureChatPaneSendContext, carriedPairForSource, clearComposerPairDraft, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, readComposerPairDraft, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft, writeComposerPairDraft } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
@@ -1084,14 +1084,7 @@ const pairSource = computed(() => paneView.value.pairSource.value)
 // session) are carried on send/retry/edit/createSession. Default-sourced and
 // unset pairs are omitted so the session keeps following the bot default live
 // (P10′) and the server never freezes an unpicked default into the session.
-const pairCarried = computed(() => {
-  const source = pairSource.value
-  if (source !== 'user' && source !== 'session') return { modelId: '', reasoningEffort: '' }
-  return {
-    modelId: overrideModelId.value.trim(),
-    reasoningEffort: overrideReasoningEffort.value.trim(),
-  }
-})
+const pairCarried = computed(() => carriedPairForSource(pairSource.value, overrideModelId.value, overrideReasoningEffort.value))
 
 // ── Session model preference (issue #879) ────────────────────────────────
 // The composer pair (model, effort) is a session attribute: PATCH it
@@ -1118,7 +1111,6 @@ function useDelayedTrue(source: Ref<boolean>, delayMs: number): Ref<boolean> {
   return visible
 }
 
-const pairDraftKey = computed(() => `memoh:composer-pair:${currentBotId.value}`)
 const pendingPairPatchSession = ref('')
 
 function persistComposerPair() {
@@ -1130,9 +1122,7 @@ function persistComposerPair() {
   if (!modelId) return
   const effort = overrideReasoningEffort.value.trim()
   if (!sessionId) {
-    try {
-      localStorage.setItem(pairDraftKey.value, JSON.stringify({ model_id: modelId, reasoning_effort: effort }))
-    } catch { /* private mode / quota: the draft simply doesn't persist */ }
+    writeComposerPairDraft(botId, { model_id: modelId, reasoning_effort: effort })
     return
   }
   pendingPairPatchSession.value = sessionId
@@ -1143,23 +1133,6 @@ function persistComposerPair() {
     })
 }
 
-function readPairDraft(): { model_id: string, reasoning_effort: string } | null {
-  try {
-    const raw = localStorage.getItem(pairDraftKey.value)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as { model_id?: string, reasoning_effort?: string }
-    return parsed.model_id ? { model_id: parsed.model_id, reasoning_effort: parsed.reasoning_effort ?? '' } : null
-  } catch {
-    return null
-  }
-}
-
-function clearPairDraft() {
-  try {
-    localStorage.removeItem(pairDraftKey.value)
-  } catch { /* ignore */ }
-}
-
 // Welcome seed chain (spec §3.4): draft (this device, source user) > latest
 // native session pair (server, source session — carried on first send) > bot
 // default (source default, initFromBotSettings owns that level).
@@ -1168,13 +1141,18 @@ async function seedWelcomePair() {
   if (pairSource.value === 'user') return // this device already picked
   const botId = currentBotId.value
   if (!botId) return
-  const draft = readPairDraft()
+  const draft = readComposerPairDraft(botId)
   if (draft) {
     overrideModelId.value = draft.model_id
     overrideReasoningEffort.value = draft.reasoning_effort || botSettings.value?.reasoning_effort || 'medium'
     paneView.value.pairSource.value = 'user'
     return
   }
+  // The seed is fetched for THIS bot and THIS view: capture both before the
+  // await. Switching bots (or repointing the pane) mid-flight must drop the
+  // late seed — otherwise bot A's pair lands in bot B's welcome composer and
+  // is carried into B's first send.
+  const seedView = paneView.value
   try {
     const seed = await fetchModelPreferenceSeed(botId)
     // The user may have picked something or opened a session while the seed
@@ -1182,6 +1160,7 @@ async function seedWelcomePair() {
     // Read through paneView (not the pairSource computed): the compiler
     // narrowed that chain to exclude 'user' after the early return above,
     // and this post-await re-check is exactly what the narrowing can't see.
+    if (currentBotId.value !== botId || paneView.value !== seedView) return
     if (!seed.model_id || paneTarget.value.sessionId || paneView.value.pairSource.value === 'user') return
     overrideModelId.value = seed.model_id
     overrideReasoningEffort.value = seed.reasoning_effort || botSettings.value?.reasoning_effort || 'medium'
@@ -2413,14 +2392,13 @@ watch(currentBotId, () => {
 // sources — a user pick (or a draft pair promoted into the session view)
 // survives the session row landing late, which is also what keeps the first
 // send from flashing back to the bot default (P9′).
-watch(() => [paneTarget.value.sessionId, activeSession.value?.id], ([sessionId], previous) => {
+watch(() => [paneTarget.value.sessionId, activeSession.value?.id], ([sessionId]) => {
   if (directDraftPromotionPending) return
   if (activeUsesExternalAgentComposer.value) return
   if (!sessionId) {
     void seedWelcomePair()
     return
   }
-  if (previous && !previous[0] && sessionId) clearPairDraft() // welcome → session: draft consumed
   if (pendingPairPatchSession.value === sessionId) return // our PATCH is in flight; stay optimistic
   if (pairSource.value !== 'unset' && pairSource.value !== 'default') return
   const sess = activeSession.value
@@ -3526,6 +3504,14 @@ async function handleSend() {
     if (commandPanelEvent.value?.type !== 'command_error') {
       composerError.value = result.error || t('chat.sendFailed')
     }
+    return
+  }
+  // The draft is consumed only here: a welcome send succeeded, so the pair
+  // now lives server-side (spec P2′). Clearing any earlier — e.g. on a
+  // welcome→session repoint — would wipe an unsent pick when the user merely
+  // opens a historical session; a failed send keeps the draft for the retry.
+  if (welcomeSendConsumedDraft(sentContext.target, result)) {
+    clearComposerPairDraft(sentContext.target.botId)
   }
 }
 </script>
