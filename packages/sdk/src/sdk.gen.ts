@@ -266,7 +266,7 @@ export const getBotsByBotIdAgents = <ThrowOnError extends boolean = false>(optio
 /**
  * Add an Agent to a bot
  *
- * Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.
+ * Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id) when the runtime declares one.
  */
 export const postBotsByBotIdAgents = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdAgentsData, ThrowOnError>): RequestResult<PostBotsByBotIdAgentsResponses, PostBotsByBotIdAgentsErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdAgentsResponses, PostBotsByBotIdAgentsErrors, ThrowOnError>({
     url: '/bots/{bot_id}/agents',

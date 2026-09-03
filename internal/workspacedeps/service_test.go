@@ -1928,11 +1928,10 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 	}
 }
 
-// TestListAlignmentFollowsLauncherCandidate pins the panel to the copy the
-// launcher resolver runs (design §9.2): a managed copy behind the pin next to a
-// toolkit copy at the pin needs no alignment, because the runtime executes the
-// toolkit copy. Preflight must agree with the panel in both directions.
-func TestListAlignmentFollowsLauncherCandidate(t *testing.T) {
+// TestListFollowsLauncherCandidate pins the panel to the copy the launcher
+// resolver runs (design §9.2): the managed copy wins over a toolkit copy
+// whatever their versions, and Preflight reports the same copy.
+func TestListFollowsLauncherCandidate(t *testing.T) {
 	f := newServiceFixture(t)
 	f.seed("agent-x", StatusInstalled, "1.9.0")
 	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("2.0.0"))
@@ -1942,10 +1941,9 @@ func TestListAlignmentFollowsLauncherCandidate(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 	agent := f.entry(t, result, "agent-x")
-	if agent.NeedsAlignment || agent.InstalledVersion != "2.0.0" || agent.RequiredVersion != "2.0.0" || agent.Status != StatusInstalled {
-		t.Errorf("agent-x entry = %+v", agent)
+	if agent.InstalledVersion != "1.9.0" || agent.ImageVersion != "2.0.0" || !agent.Overlay || agent.Status != StatusInstalled {
+		t.Errorf("agent-x entry = %+v, want the managed overlay in effect", agent)
 	}
-	// The record still describes what the Server installed.
 	if rec, ok := f.store.get(f.key("agent-x")); !ok || rec.InstalledVersion != "1.9.0" || rec.Source != InstallationSourceManaged {
 		t.Errorf("agent-x record = %+v", rec)
 	}
@@ -1953,25 +1951,24 @@ func TestListAlignmentFollowsLauncherCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
-	if item := pre.Items[0]; !item.Satisfied || item.InstalledVersion != "2.0.0" {
+	if item := pre.Items[0]; !item.Satisfied || item.InstalledVersion != "1.9.0" {
 		t.Errorf("preflight item = %+v", item)
 	}
 
-	// Without a copy at the pin the managed one runs, and the panel asks for
-	// alignment with that version.
-	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("1.8.0"))
+	// Without a managed copy the toolkit copy runs and the record follows it.
+	f.seedCandidates(testTarget, toolkit("1.8.0"), onPath("3.0.0"))
 	result, err = f.svc.List(f.ctx(), testBot, testTarget)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if agent := f.entry(t, result, "agent-x"); !agent.NeedsAlignment || agent.InstalledVersion != "1.9.0" {
-		t.Errorf("agent-x entry = %+v", agent)
+	if agent := f.entry(t, result, "agent-x"); agent.Overlay || agent.InstalledVersion != "1.8.0" || agent.ImageVersion != "1.8.0" || agent.Installation.Source != InstallationSourceImage {
+		t.Errorf("agent-x entry = %+v, want the image copy in effect", agent)
 	}
 	pre, err = f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
-	if item := pre.Items[0]; item.Satisfied || item.Reason != PreflightReasonVersionMismatch || item.InstalledVersion != "1.9.0" {
+	if item := pre.Items[0]; !item.Satisfied || item.InstalledVersion != "1.8.0" {
 		t.Errorf("preflight item = %+v", item)
 	}
 }

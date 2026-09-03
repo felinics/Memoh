@@ -12,7 +12,6 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
-	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
@@ -47,7 +46,7 @@ type Driver struct {
 	toolGateway toolmount.Gateway
 	logger      *slog.Logger
 	// launchers picks the codex CLI copy to run per bot (design §9.2). Nil
-	// falls back to the toolkit path without a version gate.
+	// falls back to the toolkit path.
 	launchers external.LauncherResolver
 
 	// servers owns the shared per-Agent app-server lifecycle: reference
@@ -84,9 +83,11 @@ func (*Driver) RuntimeType() string { return RuntimeType }
 var _ external.DependencyRequirer = (*Driver)(nil)
 
 // RequiredDependency implements external.DependencyRequirer: the codex CLI
-// is a managed workspace dependency pinned to the protocol snapshot version.
-func (*Driver) RequiredDependency() (string, string) {
-	return dependencyID, protocol.PinnedCodexVersion
+// is a managed workspace dependency. No version is declared; the handshake in
+// startAppServerSession warns when the running CLI drifts from the protocol
+// snapshot.
+func (*Driver) RequiredDependency() string {
+	return dependencyID
 }
 
 // SetLauncherResolver installs the workspace dependency resolver. Setter
@@ -535,7 +536,7 @@ func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.La
 	if d.launchers == nil {
 		return external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}, nil
 	}
-	launcher, err := d.launchers.ResolveLauncher(ctx, botID, dependencyID, protocol.PinnedCodexVersion)
+	launcher, err := d.launchers.ResolveLauncher(ctx, botID, dependencyID)
 	if err != nil {
 		var missing *external.DependencyMissingError
 		if errors.As(err, &missing) {
@@ -564,9 +565,8 @@ func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentf
 		"chat.externalAgent.dependencyMissing",
 		message,
 		map[string]string{
-			"dep_id":           firstNonEmpty(missing.DependencyID, dependencyID),
-			"required_version": firstNonEmpty(missing.RequiredVersion, protocol.PinnedCodexVersion),
-			"install_task_id":  strings.TrimSpace(missing.TaskID),
+			"dep_id":          firstNonEmpty(missing.DependencyID, dependencyID),
+			"install_task_id": strings.TrimSpace(missing.TaskID),
 		},
 	)
 }
@@ -599,38 +599,11 @@ func wrapServerError(err error) error {
 // Thread config is fixed at start, so a thread that began without a tool
 // gateway stays toolless for the app-server's life; re-notice every turn,
 // since silent capability loss is exactly what this channel exists to
-// prevent. A launcher version mismatch is told once per thread (design
-// WD-EXT-001): the turn still runs, and the notice carries what the UI needs
-// to offer the alignment action.
+// prevent.
 func emitThreadNotices(srv *appServer, threadID string, sink external.EventSink) {
 	if srv.threadToolless(threadID) {
 		toolmount.EmitUnavailableNotice(sink, "this conversation started without Memoh tools; start a new session to restore them")
 	}
-	if srv.claimLauncherMismatchNotice(threadID) {
-		emitLauncherMismatchNotice(sink, srv.installedLauncherVersion())
-	}
-}
-
-// emitLauncherMismatchNotice is the agent_dependency_version_mismatch notice
-// (design §9.4). It rides the stream as a runtime_notice whose code is the
-// feedback code and whose metadata carries dep_id, required_version, and
-// installed_version.
-func emitLauncherMismatchNotice(sink external.EventSink, installedVersion string) {
-	installed := strings.TrimSpace(installedVersion)
-	if installed == "" {
-		installed = "an unknown version"
-	}
-	sink.EmitStreamEvent(event.StreamEvent{
-		Type: event.RuntimeNotice,
-		Code: agentfeedback.CodeAgentDependencyVersionMismatch,
-		Delta: fmt.Sprintf("Codex %s is installed in this workspace but this Memoh build expects %s. The session runs on the installed version; update Codex to %s to align them.",
-			installed, protocol.PinnedCodexVersion, protocol.PinnedCodexVersion),
-		Metadata: map[string]any{
-			"dep_id":            dependencyID,
-			"required_version":  protocol.PinnedCodexVersion,
-			"installed_version": strings.TrimSpace(installedVersion),
-		},
-	})
 }
 
 // acquireServer returns the bot's live app-server plus a release the caller

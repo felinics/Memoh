@@ -13,7 +13,6 @@ import (
 
 	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
 	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
-	codexprotocol "github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
@@ -24,6 +23,7 @@ import (
 	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
 	modelspkg "github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
+	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func TestACPToolProvidersIncludeAskUser(t *testing.T) {
@@ -207,7 +207,6 @@ func mustTestUUID(s string) pgtype.UUID {
 type dependencyDriverStub struct {
 	runtimeType string
 	depID       string
-	version     string
 }
 
 func (d dependencyDriverStub) RuntimeType() string { return d.runtimeType }
@@ -216,7 +215,7 @@ func (dependencyDriverStub) Prompt(context.Context, external.PromptInput) (exter
 	return external.PromptResult{}, nil
 }
 
-func (d dependencyDriverStub) RequiredDependency() (string, string) { return d.depID, d.version }
+func (d dependencyDriverStub) RequiredDependency() string { return d.depID }
 
 // plainDriverStub declares no dependency, like the generic ACP runtime.
 type plainDriverStub struct{}
@@ -227,8 +226,8 @@ func (plainDriverStub) Prompt(context.Context, external.PromptInput) (external.P
 	return external.PromptResult{}, nil
 }
 
-// driverTestCatalog builds a catalog holding a codex agent dependency pinned
-// to 1.0.0 with the given provides list, plus a tool dependency.
+// driverTestCatalog builds a catalog holding a codex agent dependency with
+// the given provides list, plus a tool dependency.
 func driverTestCatalog(t *testing.T, codexProvides string) *depcatalog.Catalog {
 	t.Helper()
 	codexYAML := `id: codex
@@ -238,8 +237,6 @@ source: managed
 provides: [` + codexProvides + `]
 platforms:
   - { os: linux, arch: [amd64], libc: glibc }
-version:
-  pin: "1.0.0"
 scripts:
   install: install.sh
   remove: remove.sh
@@ -281,8 +278,8 @@ func TestValidateDriverDependencies(t *testing.T) {
 
 	t.Run("real declarations pass", func(t *testing.T) {
 		drivers := external.Drivers{
-			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex", version: codexprotocol.PinnedCodexVersion},
-			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code", version: claudecoderuntime.PinnedCLIVersion},
+			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
+			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code"},
 			plainDriverStub{},
 		}
 		if err := validateDriverDependencies(drivers, embedded); err != nil {
@@ -318,33 +315,27 @@ func TestValidateDriverDependencies(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "pin differs from the protocol snapshot",
-			provides: "codex",
-			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex", version: "9.9.9"},
-			want:     `catalog pin "1.0.0" differs from the driver's protocol snapshot version "9.9.9"`,
-		},
-		{
 			name:     "dependency not in the catalog",
 			provides: "codex",
-			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "openai-codex", version: "1.0.0"},
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "openai-codex"},
 			want:     `workspace dependency "openai-codex": not in the catalog`,
 		},
 		{
 			name:     "primary command is not the launcher",
 			provides: "codex-cli, codex",
-			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex", version: "1.0.0"},
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
 			want:     `primary command [codex-cli codex] (provides[0]) is not the runtime launcher "codex"`,
 		},
 		{
-			name:     "dependency is not an agent",
+			name:     "dependency provides a different command",
 			provides: "codex",
-			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "tool-z", version: ""},
-			want:     `category is "tool", want agent`,
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "tool-z"},
+			want:     `primary command [tool-z] (provides[0]) is not the runtime launcher "codex"`,
 		},
 		{
 			name:     "runtime without a registered launcher command",
 			provides: "codex",
-			driver:   dependencyDriverStub{runtimeType: "gemini", depID: "codex", version: "1.0.0"},
+			driver:   dependencyDriverStub{runtimeType: "gemini", depID: "codex"},
 			want:     "no launcher command registered",
 		},
 	}
@@ -367,13 +358,13 @@ func TestValidateDriverDependencies(t *testing.T) {
 	t.Run("all violations reported together", func(t *testing.T) {
 		cat := driverTestCatalog(t, "codex-cli")
 		err := validateDriverDependencies(external.Drivers{
-			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex", version: "9.9.9"},
-			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code", version: "1.0.0"},
+			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
+			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code"},
 		}, cat)
 		if err == nil {
 			t.Fatal("validateDriverDependencies() = nil, want error")
 		}
-		for _, want := range []string{"catalog pin", "provides[0]", `"claude-code": not in the catalog`} {
+		for _, want := range []string{"provides[0]", `"claude-code": not in the catalog`} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("validateDriverDependencies() error = %q, want it to contain %q", err, want)
 			}

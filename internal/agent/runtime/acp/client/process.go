@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	stderrTailLimit      = 8 * 1024
-	defaultContainerPath = "/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
+	stderrTailLimit = 8 * 1024
+	// defaultContainerPath is the PATH ACP agents run with. The managed
+	// dependency shim directory (design §6) comes first so a managed overlay
+	// of an image runtime (node, python, uv) wins over the toolkit copy.
+	defaultContainerPath = dataMountPath + "/.memoh/deps/bin:" + containerToolkitBin + ":/usr/local/bin:/usr/bin:/bin"
 	containerToolkitBin  = "/opt/memoh/toolkit/bin"
 	noProjectWorkDirPart = "/.memoh/acp-work/no-project/"
 )

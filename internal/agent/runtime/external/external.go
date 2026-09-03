@@ -292,16 +292,17 @@ type PromptResult struct {
 }
 
 // DependencyRequirer is implemented by drivers whose CLI is provisioned as a
-// managed workspace dependency (design §9.1). Version is the server-pinned
-// CLI version this build's protocol snapshot was generated from.
+// managed workspace dependency (design §9.1). The CLI version is not part of
+// the declaration: the dependency manager installs whatever version the user
+// asks for (latest by default), and the runtime's own handshake warns when
+// the copy it talks to drifts from its protocol snapshot.
 type DependencyRequirer interface {
-	RequiredDependency() (depID, version string)
+	RequiredDependency() (depID string)
 }
 
 // DependencyRequirement is a driver's declared workspace dependency.
 type DependencyRequirement struct {
 	DependencyID string
-	Version      string
 }
 
 // RequiredDependencies maps runtime type to the dependency each driver
@@ -314,15 +315,11 @@ func (drivers Drivers) RequiredDependencies() map[string]DependencyRequirement {
 		if !ok {
 			continue
 		}
-		depID, version := requirer.RequiredDependency()
-		depID = strings.TrimSpace(depID)
+		depID := strings.TrimSpace(requirer.RequiredDependency())
 		if depID == "" {
 			continue
 		}
-		out[strings.TrimSpace(driver.RuntimeType())] = DependencyRequirement{
-			DependencyID: depID,
-			Version:      strings.TrimSpace(version),
-		}
+		out[strings.TrimSpace(driver.RuntimeType())] = DependencyRequirement{DependencyID: depID}
 	}
 	return out
 }
@@ -343,18 +340,14 @@ type Launcher struct {
 	// Version is the observed CLI version, empty when unknown.
 	Version string
 	Source  LauncherSource
-	// Mismatch is set when Version is known and differs from the required
-	// version. The driver still launches (design WD-EXT-001) but must surface
-	// a one-time notice per thread.
-	Mismatch bool
 }
 
-// LauncherResolver picks the CLI copy a driver should execute, preferring a
-// copy at the required version (design §9.2). A missing dependency yields a
-// *DependencyMissingError whose TaskID identifies the background install the
-// resolver may already have started.
+// LauncherResolver picks the CLI copy a driver should execute: the managed
+// copy first, then the image toolkit, then PATH (design §9.2). A missing
+// dependency yields a *DependencyMissingError whose TaskID identifies the
+// background install the resolver may already have started.
 type LauncherResolver interface {
-	ResolveLauncher(ctx context.Context, botID, depID, requiredVersion string) (Launcher, error)
+	ResolveLauncher(ctx context.Context, botID, depID string) (Launcher, error)
 }
 
 // VersionObserver lets drivers feed the CLI version reported during the
@@ -369,17 +362,13 @@ var ErrDependencyMissing = errors.New("workspace dependency is not installed")
 // DependencyMissingError reports that no copy of the dependency exists in the
 // workspace. TaskID is the background installation task, if one was started.
 type DependencyMissingError struct {
-	DependencyID    string
-	RequiredVersion string
-	TaskID          string
+	DependencyID string
+	TaskID       string
 }
 
 func (e *DependencyMissingError) Error() string {
 	if e == nil {
 		return ErrDependencyMissing.Error()
-	}
-	if e.RequiredVersion != "" {
-		return fmt.Sprintf("workspace dependency %s@%s is not installed", e.DependencyID, e.RequiredVersion)
 	}
 	return fmt.Sprintf("workspace dependency %s is not installed", e.DependencyID)
 }

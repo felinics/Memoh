@@ -1335,7 +1335,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.",
+                "description": "Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id) when the runtime declares one.",
                 "consumes": [
                     "application/json"
                 ],
@@ -17291,9 +17291,6 @@ const docTemplate = `{
             "properties": {
                 "dependency_id": {
                     "type": "string"
-                },
-                "required_version": {
-                    "type": "string"
                 }
             }
         },
@@ -19533,7 +19530,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/conversation.UIToolApproval"
                 },
                 "args": {
-                    "description": "Args are the machine-readable parameters of a notice block: the string\nvalues of the runtime_notice event metadata (dep_id, required_version,\ninstalled_version for agent_dependency_version_mismatch). The client\nrenders actions from them instead of parsing Content.",
+                    "description": "Args are the machine-readable parameters of a notice block: the string\nvalues of the runtime_notice event metadata (dep_id and install_task_id\nfor a workspace dependency notice, for instance). The client renders\nactions from them instead of parsing Content.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"

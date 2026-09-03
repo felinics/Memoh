@@ -73,9 +73,9 @@ type UIMessage struct {
 	ReasoningTiming   *UIReasoningTiming   `json:"reasoning_timing,omitempty"`
 	Code              string               `json:"code,omitempty"`
 	// Args are the machine-readable parameters of a notice block: the string
-	// values of the runtime_notice event metadata (dep_id, required_version,
-	// installed_version for agent_dependency_version_mismatch). The client
-	// renders actions from them instead of parsing Content.
+	// values of the runtime_notice event metadata (dep_id and install_task_id
+	// for a workspace dependency notice, for instance). The client renders
+	// actions from them instead of parsing Content.
 	Args map[string]string `json:"args,omitempty"`
 } // @name conversation.UIMessage
 

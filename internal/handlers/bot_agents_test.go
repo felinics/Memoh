@@ -86,7 +86,6 @@ func (q *botAgentsQueries) UpdateBotAgent(_ context.Context, params sqlc.UpdateB
 type dependencyDriver struct {
 	runtimeType string
 	depID       string
-	version     string
 }
 
 func (d dependencyDriver) RuntimeType() string { return d.runtimeType }
@@ -95,7 +94,7 @@ func (dependencyDriver) Prompt(context.Context, external.PromptInput) (external.
 	return external.PromptResult{}, nil
 }
 
-func (d dependencyDriver) RequiredDependency() (string, string) { return d.depID, d.version }
+func (d dependencyDriver) RequiredDependency() string { return d.depID }
 
 // plainDriver is a runtime without a dependency declaration (the generic ACP
 // runtime, or a direct runtime whose CLI is not yet managed).
@@ -159,14 +158,14 @@ func decodeBotAgent(t *testing.T, raw []byte) map[string]any {
 	return got
 }
 
-func assertDependency(t *testing.T, agent map[string]any, depID, version string) {
+func assertDependency(t *testing.T, agent map[string]any, depID string) {
 	t.Helper()
 	dependency, ok := agent["dependency"].(map[string]any)
 	if !ok {
 		t.Fatalf("agent %v: dependency = %#v, want object", agent["runtime"], agent["dependency"])
 	}
-	if dependency["dependency_id"] != depID || dependency["required_version"] != version {
-		t.Fatalf("agent %v: dependency = %#v, want %s@%s", agent["runtime"], dependency, depID, version)
+	if dependency["dependency_id"] != depID || len(dependency) != 1 {
+		t.Fatalf("agent %v: dependency = %#v, want only dependency_id %s", agent["runtime"], dependency, depID)
 	}
 }
 
@@ -183,7 +182,7 @@ func TestBotAgentsHandlerListReportsRuntimeDependency(t *testing.T) {
 		botAgentRow(botAgentsTestACPID, botagents.RuntimeACP, true),
 	}}
 	handler := newBotAgentsTestHandler(queries,
-		dependencyDriver{runtimeType: botagents.RuntimeCodex, depID: "codex", version: "0.151.0"},
+		dependencyDriver{runtimeType: botagents.RuntimeCodex, depID: "codex"},
 		plainDriver{runtimeType: "acp_agent"},
 	)
 
@@ -205,7 +204,7 @@ func TestBotAgentsHandlerListReportsRuntimeDependency(t *testing.T) {
 	if len(got.Items) != 2 {
 		t.Fatalf("items = %d, want 2", len(got.Items))
 	}
-	assertDependency(t, got.Items[0], "codex", "0.151.0")
+	assertDependency(t, got.Items[0], "codex")
 	assertNoDependency(t, got.Items[1])
 }
 
@@ -215,7 +214,7 @@ func TestBotAgentsHandlerGetDependencyFollowsDriverDeclaration(t *testing.T) {
 		driver  external.Driver
 		wantDep bool
 	}{
-		{name: "driver declares dependency", driver: dependencyDriver{runtimeType: botagents.RuntimeClaudeCode, depID: "claude-code", version: "2.1.0"}, wantDep: true},
+		{name: "driver declares dependency", driver: dependencyDriver{runtimeType: botagents.RuntimeClaudeCode, depID: "claude-code"}, wantDep: true},
 		{name: "driver without declaration", driver: plainDriver{runtimeType: botagents.RuntimeClaudeCode}, wantDep: false},
 	}
 	for _, tc := range tests {
@@ -236,7 +235,7 @@ func TestBotAgentsHandlerGetDependencyFollowsDriverDeclaration(t *testing.T) {
 			}
 			got := decodeBotAgent(t, rec.Body.Bytes())
 			if tc.wantDep {
-				assertDependency(t, got, "claude-code", "2.1.0")
+				assertDependency(t, got, "claude-code")
 			} else {
 				assertNoDependency(t, got)
 			}
@@ -257,7 +256,7 @@ func TestBotAgentsHandlerCreateHonorsEnabled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			queries := &botAgentsQueries{}
 			handler := newBotAgentsTestHandler(queries,
-				dependencyDriver{runtimeType: botagents.RuntimeCodex, depID: "codex", version: "0.151.0"},
+				dependencyDriver{runtimeType: botagents.RuntimeCodex, depID: "codex"},
 			)
 
 			ctx, rec := botAgentsRequest(t, http.MethodPost, "/bots/"+botAgentsTestBotID+"/agents", tc.body)
@@ -279,7 +278,7 @@ func TestBotAgentsHandlerCreateHonorsEnabled(t *testing.T) {
 			if got["enabled"] != tc.wantEnabled {
 				t.Fatalf("response enabled = %#v, want %v", got["enabled"], tc.wantEnabled)
 			}
-			assertDependency(t, got, "codex", "0.151.0")
+			assertDependency(t, got, "codex")
 		})
 	}
 }
@@ -289,7 +288,7 @@ func TestBotAgentsHandlerUpdateReportsRuntimeDependency(t *testing.T) {
 		botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, false),
 	}}
 	handler := newBotAgentsTestHandler(queries,
-		dependencyDriver{runtimeType: botagents.RuntimeCodex, depID: "codex", version: "0.151.0"},
+		dependencyDriver{runtimeType: botagents.RuntimeCodex, depID: "codex"},
 	)
 
 	ctx, rec := botAgentsRequest(t, http.MethodPatch, "/bots/"+botAgentsTestBotID+"/agents/"+botAgentsTestCodexID, `{"enabled":true}`)
@@ -305,7 +304,7 @@ func TestBotAgentsHandlerUpdateReportsRuntimeDependency(t *testing.T) {
 	if got["enabled"] != true {
 		t.Fatalf("response enabled = %#v, want true", got["enabled"])
 	}
-	assertDependency(t, got, "codex", "0.151.0")
+	assertDependency(t, got, "codex")
 }
 
 // catalogDriver is a direct runtime whose model catalog call fails the way
@@ -333,8 +332,8 @@ func TestBotAgentsHandlerListModelsPassesThroughRuntimeFeedback(t *testing.T) {
 		"no codex launcher in workspace",
 		http.StatusConflict,
 		"chat.externalAgent.dependencyMissing",
-		"Codex 0.151.0 is not installed in the workspace",
-		map[string]string{"dep_id": "codex", "required_version": "0.151.0", "install_task_id": "task-1"},
+		"Codex is not installed in the workspace",
+		map[string]string{"dep_id": "codex", "install_task_id": "task-1"},
 	)
 	queries := &botAgentsQueries{rows: []sqlc.BotAgent{
 		botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true),
@@ -368,7 +367,7 @@ func TestBotAgentsHandlerListModelsPassesThroughRuntimeFeedback(t *testing.T) {
 	if got.Code != agentfeedback.CodeAgentDependencyMissing {
 		t.Fatalf("code = %q, want %q: %s", got.Code, agentfeedback.CodeAgentDependencyMissing, rec.Body.String())
 	}
-	for key, want := range map[string]string{"dep_id": "codex", "required_version": "0.151.0", "install_task_id": "task-1"} {
+	for key, want := range map[string]string{"dep_id": "codex", "install_task_id": "task-1"} {
 		if got.Args[key] != want {
 			t.Fatalf("args[%s] = %q, want %q: %s", key, got.Args[key], want, rec.Body.String())
 		}

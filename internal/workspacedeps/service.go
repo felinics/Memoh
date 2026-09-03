@@ -506,22 +506,6 @@ func effectiveCandidate(obs Observed) Candidate {
 	return Candidate{Source: obs.Source, Path: obs.Command, Version: obs.Version}
 }
 
-// selectLauncherCandidate applies the design §9.2 order to discovered copies:
-// the managed copy, then the toolkit copy, then a PATH copy. Within a source
-// the discovery order is kept. This is the same precedence the shim
-// directory gives the managed copy on PATH, so the launcher and a terminal
-// agree on which copy runs.
-func selectLauncherCandidate(candidates []Candidate) (Candidate, bool) {
-	for _, source := range []Source{SourceManaged, SourceToolkit, SourcePath} {
-		for _, candidate := range candidates {
-			if candidate.Source == source && candidate.Path != "" {
-				return candidate, true
-			}
-		}
-	}
-	return Candidate{}, false
-}
-
 // imageCandidate is the toolkit copy discovery found, i.e. what the
 // workspace image ships. The zero Candidate means the image has none.
 func imageCandidate(obs Observed) Candidate {

@@ -419,9 +419,9 @@ func cloneToolStreamMessage(message UIMessage) UIMessage {
 
 // noticeArgsFromMetadata projects the string-valued entries of a
 // runtime_notice's metadata into the notice's Args. Runtimes put the
-// machine-readable notice parameters there (dep_id, required_version,
-// installed_version for agent_dependency_version_mismatch); nested objects and
-// non-string scalars are not part of that vocabulary and are dropped. Empty
+// machine-readable notice parameters there (dep_id and install_task_id for a
+// workspace dependency notice, for instance); nested objects and non-string
+// scalars are not part of that vocabulary and are dropped. Empty
 // values are dropped too, since the client treats an absent key and an unknown
 // value alike. The result is nil when nothing survives so the field is omitted
 // from the wire shape.

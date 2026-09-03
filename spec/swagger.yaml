@@ -956,8 +956,6 @@ definitions:
     properties:
       dependency_id:
         type: string
-      required_version:
-        type: string
     type: object
   botagents.ListResponse:
     properties:
@@ -2518,9 +2516,9 @@ definitions:
           type: string
         description: |-
           Args are the machine-readable parameters of a notice block: the string
-          values of the runtime_notice event metadata (dep_id, required_version,
-          installed_version for agent_dependency_version_mismatch). The client
-          renders actions from them instead of parsing Content.
+          values of the runtime_notice event metadata (dep_id and install_task_id
+          for a workspace dependency notice, for instance). The client renders
+          actions from them instead of parsing Content.
         type: object
       attachments:
         items:
@@ -7548,7 +7546,7 @@ paths:
       description: Add a named Agent backed by a runtime descriptor. Omit enabled
         to create it enabled; pass enabled=false to hold a direct-runtime Agent back
         until its workspace dependency preflight passes. The response reports that
-        dependency (dependency_id, required_version) when the runtime declares one.
+        dependency (dependency_id) when the runtime declares one.
       parameters:
       - description: Bot ID
         in: path

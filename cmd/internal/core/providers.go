@@ -644,10 +644,9 @@ func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderun
 }
 
 // validateDriverDependencies checks every driver that declares a workspace
-// dependency (external.DependencyRequirer): the dependency is in the catalog,
-// is an agent dependency (managed, pinned), its pin equals the version the
-// driver's protocol snapshot was generated from, and its primary command is
-// the runtime's launcher. All violations are reported together.
+// dependency (external.DependencyRequirer): the dependency is in the catalog
+// and its primary command is the runtime's launcher. All violations are
+// reported together.
 func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalog) error {
 	if cat == nil {
 		return errors.New("validate direct agent dependencies: catalog is nil")
@@ -669,12 +668,6 @@ func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalo
 		if !ok {
 			fail("not in the catalog")
 			continue
-		}
-		if !dep.IsAgent() {
-			fail("category is %q, want agent", dep.Category)
-		}
-		if dep.Version.Pin != req.Version {
-			fail("catalog pin %q differs from the driver's protocol snapshot version %q", dep.Version.Pin, req.Version)
 		}
 		command, known := directRuntimeLaunchers[runtimeType]
 		switch {
