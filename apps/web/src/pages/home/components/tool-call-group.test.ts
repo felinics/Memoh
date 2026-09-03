@@ -22,11 +22,12 @@ import ToolCallGroup from './tool-call-group.vue'
 //    block used to keep the header saying "Thinking…" indefinitely on a
 //    finished turn.
 //
-// 2. The two-layer adaptive header: while a segment streams, the header names
-//    the phase + live tally and a "now" line below rolls the current call;
-//    once the segment settles, the header shows the final tally plus the diff
-//    totals. This guards against regressing to a bare ticker of the latest
-//    call (which hid the aggregate view until the segment settled).
+// 2. The two-layer adaptive header: while a segment streams, a muted phase
+//    verb ("Exploring") leads the header with live bare-count details
+//    ("2 files, ran 1 command"), and a "now" line below rolls the current
+//    call; once the segment settles, the verb turns past tense ("Explored")
+//    and diff totals appear. This guards against regressing to a bare ticker
+//    of the latest call (which hid the aggregate view until settle).
 
 interface MountedGroup {
   app: ReturnType<typeof createApp>
@@ -63,22 +64,36 @@ function mountGroup(items: ContentBlock[], active: boolean | undefined): HTMLDiv
           process: {
             thought: 'Thought',
             steps: '{count} steps',
-            browse: 'Read {count} files',
-            edit: 'Edited {count} files',
-            run: 'Ran {count} commands',
+            fragmentSeparator: ', ',
             phase: {
-              browse: 'Exploring',
-              edit: 'Editing',
-              run: 'Running',
-              message: 'Messaging',
-              schedule: 'Scheduling',
-              media: 'Generating',
-              agent: 'Delegating',
-              gui: 'Browsing',
-              other: 'Working',
+              browse: { ing: 'Exploring', done: 'Explored' },
+              edit: { ing: 'Editing', done: 'Edited' },
+              run: { ing: 'Running', done: 'Ran' },
+              message: { ing: 'Messaging', done: 'Sent' },
+              schedule: { ing: 'Scheduling', done: 'Scheduled' },
+              media: { ing: 'Generating', done: 'Generated' },
+              agent: { ing: 'Delegating', done: 'Delegated' },
+              gui: { ing: 'Browsing', done: 'Browsed' },
+              other: { ing: 'Working', done: 'Worked' },
+            },
+            frag: {
+              files: '{count} files',
+              searches: '{count} searches',
+              commands: '{count} commands',
+              messages: '{count} messages',
+              schedules: '{count} schedules',
+              media: '{count} media files',
+              agents: '{count} agents',
+              sites: '{count} sites',
             },
           },
-          tools: { run: 'Run', read: 'Read', exec: 'Run', edit: 'Edit' },
+          tools: {
+            run: 'Run',
+            read: 'Read',
+            exec: 'Run',
+            edit: 'Edit',
+            pending: { generic: 'Working…' },
+          },
         },
       },
     },
@@ -88,17 +103,15 @@ function mountGroup(items: ContentBlock[], active: boolean | undefined): HTMLDiv
   return root
 }
 
+// The header row is the toggleable button; its whole text covers verb +
+// details + diffs.
 function headerText(root: HTMLElement): string {
-  // The header label is the span inside the toggleable header row; the capsule
-  // body holds the per-item rows, so restricting to the first button-bound
-  // region would be brittle — take the first span with the tracking class.
-  const spans = [...root.querySelectorAll('span')]
-  const header = spans.find(span => (span.textContent ?? '').length > 0)
-  return header?.textContent ?? ''
+  const button = root.querySelector('button')
+  return button?.textContent ?? ''
 }
 
 function nowLine(root: HTMLElement): HTMLElement | null {
-  return root.querySelector('.live-peek-line')
+  return root.querySelector('.now-line')
 }
 
 function bgExecTool(id: number, running: boolean): ToolCallBlockType {
@@ -137,21 +150,22 @@ function reasoning(id: number): ThinkingBlockType {
 describe('ToolCallGroup live header gating (#1106)', () => {
   it('keeps the live two-layer header while the turn is streaming', () => {
     const root = mountGroup([bgExecTool(1, true), reasoning(2)], true)
-    // Header = the segment's phase (a command run), now line = the model's
-    // current step — the layering the old ticker-only header couldn't express.
-    expect(headerText(root)).toBe('Running')
+    // Single-tool segment: header keeps the tool's own specific label; the now
+    // line carries the model's current step. No phase verb stutter ("Running
+    // Run xray run") and no bare ticker of the latest item.
+    expect(headerText(root)).toContain('xray run')
     expect(nowLine(root)?.textContent).toContain('Thinking')
   })
 
   it('drops the live header when the turn finished even if a background tool is still running', () => {
     const root = mountGroup([bgExecTool(1, true), reasoning(2)], false)
-    // Aggregate summary, not "Thinking" — the model is done; only the spawned
-    // command is alive, and its own row reports that.
+    // Settled single-tool label, not "Thinking" — the model is done; only the
+    // spawned command is alive, and its own row reports that.
     expect(headerText(root)).not.toBe('Thinking')
     expect(nowLine(root)).toBeNull()
   })
 
-  it('shows the aggregate summary once the turn finished and tools settled', () => {
+  it('shows the settled label once the turn finished and tools settled', () => {
     const root = mountGroup([bgExecTool(1, false), reasoning(2)], false)
     expect(headerText(root)).not.toBe('Thinking')
     expect(nowLine(root)).toBeNull()
@@ -159,34 +173,33 @@ describe('ToolCallGroup live header gating (#1106)', () => {
 })
 
 describe('ToolCallGroup adaptive header layers', () => {
-  it('names the phase and live tally in the header while streaming, and rolls the current call below', () => {
+  it('names the phase and live bare counts in the header, and rolls the current call below', () => {
     const root = mountGroup([
       toolBlock('read', { path: 'src/auth/session.ts' }),
       toolBlock('read', { path: 'src/auth/cookie.ts' }),
       toolBlock('exec', { command: 'pnpm test' }, true),
     ], true)
 
-    expect(headerText(root)).toContain('Exploring')
-    expect(headerText(root)).toContain('Read 2 files')
-    expect(headerText(root)).toContain('Ran 1 command')
+    const header = headerText(root)
+    expect(header).toContain('Exploring')
+    expect(header).toContain('2 files')
+    expect(header).toContain('1 command')
     expect(nowLine(root)?.textContent).toContain('pnpm test')
   })
 
-  it('settles to the final tally with diff totals and no now line', () => {
+  it('settles to a past-tense verb with final counts and diff totals', () => {
     const root = mountGroup([
       toolBlock('edit', { path: 'a.ts', old_text: 'l1\nl2\nl3', new_text: 'n1\nn2\nn3\nn4\nn5' }),
       toolBlock('edit', { path: 'b.ts', old_text: 'l1\nl2', new_text: 'n1\nn2\nn3\nn4' }),
     ], false)
 
     const header = headerText(root)
-    expect(header).toContain('Edited 2 files')
+    expect(header).toContain('Edited')
+    expect(header).toContain('2 files')
+    expect(header).toContain('+9')
+    expect(header).toContain('-5')
     expect(header).not.toContain('Editing')
     expect(nowLine(root)).toBeNull()
-    // Diff totals are separate mono spans next to the label, not part of the
-    // label text — assert them on the header row as a whole.
-    const row = root.querySelector('button')
-    expect(row?.textContent).toContain('+9')
-    expect(row?.textContent).toContain('-5')
   })
 
   it('keeps diff totals hidden while the segment is still streaming', () => {
@@ -195,9 +208,42 @@ describe('ToolCallGroup adaptive header layers', () => {
       toolBlock('edit', { path: 'b.ts', old_text: 'l1', new_text: 'n1\nn2' }),
     ], true)
 
-    const row = root.querySelector('button')
-    expect(headerText(root)).toContain('Editing')
-    expect(row?.textContent).not.toContain('+4')
+    const header = headerText(root)
+    expect(header).toContain('Editing')
+    expect(header).not.toContain('+4')
+  })
+
+  it('keeps a lone live tool on its own specific label, no phase verb', () => {
+    const root = mountGroup([
+      toolBlock('read', { path: 'src/main.ts' }),
+      reasoning(2),
+    ], true)
+
+    const header = headerText(root)
+    expect(header).toContain('main.ts')
+    expect(header).not.toContain('Exploring')
+    expect(nowLine(root)?.textContent).toContain('Thinking')
+  })
+
+  it('keeps a lone settled tool on its own specific label, no verb', () => {
+    const root = mountGroup([
+      toolBlock('exec', { command: 'pnpm build' }),
+      reasoning(2),
+    ], false)
+
+    const header = headerText(root)
+    expect(header).toContain('pnpm build')
+    expect(header).not.toContain('Ran')
+  })
+
+  it('shows the pending label in the now line while a tool input is still streaming in', () => {
+    const root = mountGroup([
+      toolBlock('read', { path: 'a.ts' }),
+      toolBlock('read', { path: 'b.ts' }),
+      toolBlock('exec', {}, true),
+    ], true)
+
+    expect(nowLine(root)?.textContent).toContain('Working…')
   })
 
   it('hides the now line once the user opens the body', async () => {

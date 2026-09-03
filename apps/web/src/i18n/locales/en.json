@@ -667,16 +667,27 @@
       "thoughtBriefly": "Thought for a couple of seconds",
       "thoughtSeconds": "Thought for {seconds}s",
       "phase": {
-        "browse": "Exploring",
-        "edit": "Editing",
-        "run": "Running",
-        "message": "Messaging",
-        "schedule": "Scheduling",
-        "media": "Generating",
-        "agent": "Delegating",
-        "gui": "Browsing",
-        "other": "Working"
+        "browse": { "ing": "Exploring", "done": "Explored" },
+        "edit": { "ing": "Editing", "done": "Edited" },
+        "run": { "ing": "Running", "done": "Ran" },
+        "message": { "ing": "Messaging", "done": "Sent" },
+        "schedule": { "ing": "Scheduling", "done": "Scheduled" },
+        "media": { "ing": "Generating", "done": "Generated" },
+        "agent": { "ing": "Delegating", "done": "Delegated" },
+        "gui": { "ing": "Browsing", "done": "Browsed" },
+        "other": { "ing": "Working", "done": "Worked" }
       },
+      "frag": {
+        "files": "{count} files",
+        "searches": "{count} searches",
+        "commands": "{count} commands",
+        "messages": "{count} messages",
+        "schedules": "{count} schedules",
+        "media": "{count} media files",
+        "agents": "{count} agents",
+        "sites": "{count} sites"
+      },
+      "fragmentSeparator": ", ",
       "thinkingHints": [
         "Connecting the dots",
         "Piecing it together",
@@ -687,9 +698,6 @@
         "Weighing the options",
         "Taking a closer look"
       ]
-    },
-    "runtime": {
-      "working": "Working"
     },
     "currentBot": "Current Bot",
     "inputPlaceholder": "Ask anything…",

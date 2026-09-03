@@ -667,16 +667,27 @@
       "thoughtBriefly": "思考了几秒",
       "thoughtSeconds": "已思考 {seconds} 秒",
       "phase": {
-        "browse": "探索中",
-        "edit": "修改中",
-        "run": "运行中",
-        "message": "发送中",
-        "schedule": "调整中",
-        "media": "生成中",
-        "agent": "委派中",
-        "gui": "浏览中",
-        "other": "处理中"
+        "browse": { "ing": "探索中", "done": "已探索" },
+        "edit": { "ing": "修改中", "done": "已修改" },
+        "run": { "ing": "运行中", "done": "已运行" },
+        "message": { "ing": "发送中", "done": "已发送" },
+        "schedule": { "ing": "调整中", "done": "已调整" },
+        "media": { "ing": "生成中", "done": "已生成" },
+        "agent": { "ing": "委派中", "done": "已委派" },
+        "gui": { "ing": "浏览中", "done": "已浏览" },
+        "other": { "ing": "处理中", "done": "已处理" }
       },
+      "frag": {
+        "files": "{count} 个文件",
+        "searches": "{count} 次搜索",
+        "commands": "{count} 条命令",
+        "messages": "{count} 条消息",
+        "schedules": "{count} 个定时任务",
+        "media": "{count} 个媒体文件",
+        "agents": "{count} 个 Agent",
+        "sites": "{count} 个网站"
+      },
+      "fragmentSeparator": "、",
       "thinkingHints": [
         "正在连接线索",
         "正在拼合信息",
@@ -687,9 +698,6 @@
         "正在权衡选项",
         "正在仔细查看"
       ]
-    },
-    "runtime": {
-      "working": "工作中"
     },
     "currentBot": "当前 Bot",
     "inputPlaceholder": "问点什么…",

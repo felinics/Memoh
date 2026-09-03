@@ -651,19 +651,27 @@
       "thoughtBriefly": "少し考えた",
       "thoughtSeconds": "{seconds}秒考えました",
       "phase": {
-        "browse": "探索中",
-        "edit": "編集中",
-        "run": "実行中",
-        "message": "送信中",
-        "schedule": "変更中",
-        "media": "生成中",
-        "agent": "委譲中",
-        "gui": "閲覧中",
-        "other": "作業中"
-      }
-    },
-    "runtime": {
-      "working": "作業中"
+        "browse": { "ing": "探索中", "done": "探索しました" },
+        "edit": { "ing": "編集中", "done": "編集しました" },
+        "run": { "ing": "実行中", "done": "実行しました" },
+        "message": { "ing": "送信中", "done": "送信しました" },
+        "schedule": { "ing": "変更中", "done": "変更しました" },
+        "media": { "ing": "生成中", "done": "生成しました" },
+        "agent": { "ing": "委譲中", "done": "委譲しました" },
+        "gui": { "ing": "閲覧中", "done": "閲覧しました" },
+        "other": { "ing": "作業中", "done": "作業しました" }
+      },
+      "frag": {
+        "files": "{count} ファイル",
+        "searches": "{count} 件の検索",
+        "commands": "{count} コマンド",
+        "messages": "{count} 件のメッセージ",
+        "schedules": "{count} 件のスケジュール",
+        "media": "{count} 個のメディアファイル",
+        "agents": "{count} のAgent",
+        "sites": "{count} 件のサイト"
+      },
+      "fragmentSeparator": "、"
     },
     "currentBot": "現在のBot",
     "inputPlaceholder": "質問を入力してください…",

@@ -379,9 +379,6 @@
               :command-panel="composerCommandPanel"
               :error-message="composerError"
               :pending-user-input="pendingUserInput"
-              :runtime-active="runtimeLineActive"
-              :runtime-started-at="runtimeLineStartedAt"
-              :runtime-steps="runtimeLineSteps"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"
               @reveal-composer="handleDockRevealComposer"
@@ -1144,38 +1141,6 @@ const pendingUserInput = computed<UIUserInput | null>(() => (
 const { items: pendingApprovals } = usePendingApprovals(messages)
 
 const hasPendingToolApproval = computed(() => pendingApprovals.value.length > 0)
-
-// Inputs for the dock's runtime line. The line claims "the agent is working",
-// so its active gate is stricter than `streaming` alone: a turn blocked on an
-// approval or an ask_user answer is waiting on the USER, and the panel for
-// that decision is already telling it — the line would argue with it.
-const runtimeLineActive = computed(() =>
-  streaming.value && !pendingUserInput.value && !hasPendingToolApproval.value)
-
-// The streaming assistant turn, when one is visible in this pane. Its
-// timestamp is the turn's real start (survives pane remounts mid-stream);
-// its tool-block count is the line's growing "steps" signal.
-const streamingTurn = computed(() => {
-  if (!streaming.value) return null
-  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
-    const message = messages.value[i]!
-    if (message.role === 'assistant' && message.streaming) return message
-  }
-  return null
-})
-
-const runtimeLineStartedAt = computed(() => {
-  const timestamp = streamingTurn.value?.timestamp
-  if (!timestamp) return null
-  const ms = Date.parse(timestamp)
-  return Number.isFinite(ms) ? ms : null
-})
-
-const runtimeLineSteps = computed(() => {
-  const turn = streamingTurn.value
-  if (!turn || turn.role !== 'assistant') return 0
-  return turn.messages.filter(block => block.type === 'tool').length
-})
 
 const canForkAssistant = computed(() =>
   !streaming.value
