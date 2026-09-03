@@ -194,7 +194,6 @@
     },
     "workspace": {
       "unreachable": "The workspace could not be reached.",
-      "image_incompatible": "This workspace image is incompatible. Rebuild it from the current Memoh workspace image and try again.",
       "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
       "display_prepare_failed": "Display preparation failed."
     },

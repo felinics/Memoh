@@ -21,17 +21,17 @@ func TestCreateBotHTTPErrorMapsNameConflictToStableCode(t *testing.T) {
 	}
 }
 
-func TestCreateBotHTTPErrorMapsWorkspaceContractFailureToStableCode(t *testing.T) {
+func TestCreateBotHTTPErrorMapsWorkspaceBootstrapFailureToStableCode(t *testing.T) {
 	cause := errors.Join(
-		workspace.ErrWorkspaceImageIncompatible,
-		errors.New("missing /opt/memoh/toolkit/bin/node"),
+		workspace.ErrWorkspaceTemplateBootstrapFailed,
+		errors.New("write /data/AGENTS.md: permission denied"),
 	)
 	err := createBotHTTPError(cause, true)
-	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceImageIncompatible {
-		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceImageIncompatible)
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceTemplateBootstrapFailed {
+		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceTemplateBootstrapFailed)
 	}
-	if got := apperror.CauseOf(err); !errors.Is(got, workspace.ErrWorkspaceImageIncompatible) {
-		t.Fatalf("cause = %v, want workspace image incompatibility", got)
+	if got := apperror.CauseOf(err); !errors.Is(got, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("cause = %v, want workspace template bootstrap failure", got)
 	}
 }
 
@@ -93,31 +93,31 @@ func TestDisplayPrepareStreamBreakUsesPrepareFailedCode(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSetupAppErrorKeepsContractDiagnosticPrivate(t *testing.T) {
+func TestWorkspaceSetupAppErrorKeepsBootstrapDiagnosticPrivate(t *testing.T) {
 	cause := errors.Join(
-		workspace.ErrWorkspaceImageIncompatible,
-		errors.New("missing /opt/memoh/toolkit/bin/node"),
+		workspace.ErrWorkspaceTemplateBootstrapFailed,
+		errors.New("write /data/AGENTS.md: permission denied"),
 	)
-	event, ok := newWorkspaceSetupAppError(cause, "req-contract")
+	event, ok := newWorkspaceSetupAppError(cause, "req-bootstrap")
 	if !ok {
-		t.Fatal("newWorkspaceSetupAppError() did not recognize contract error")
+		t.Fatal("newWorkspaceSetupAppError() did not recognize bootstrap error")
 	}
-	if event.Code != string(apperror.CodeWorkspaceImageIncompatible) {
+	if event.Code != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
 		t.Fatalf("code = %q", event.Code)
 	}
 	if event.I18nKey != "" {
 		t.Fatalf("i18n_key = %q, want empty", event.I18nKey)
 	}
-	if event.Detail != "The workspace image is incompatible with this version of Memoh." {
+	if event.Detail != "The workspace files could not be initialized." {
 		t.Fatalf("detail = %q", event.Detail)
 	}
 	if event.Message != event.Detail {
 		t.Fatalf("message = %q, detail = %q", event.Message, event.Detail)
 	}
-	if strings.Contains(event.Message, "/opt/memoh") || strings.Contains(event.Detail, "/opt/memoh") {
+	if strings.Contains(event.Message, "/data/AGENTS.md") || strings.Contains(event.Detail, "/data/AGENTS.md") {
 		t.Fatal("private workspace path leaked into SSE event")
 	}
-	if event.RequestID != "req-contract" {
+	if event.RequestID != "req-bootstrap" {
 		t.Fatalf("request_id = %q", event.RequestID)
 	}
 }

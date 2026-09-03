@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# The workspace image is the complete bot runtime contract. The Server only
-# supplies the bridge binary; tools, display dependencies, and runtime scripts
-# are immutable image content.
+# The workspace image is the bot runtime base. The Server only supplies the
+# bridge binary; base tools (node, python, uv), display dependencies, and
+# runtime scripts are immutable image content. Agent CLIs are not part of the
+# image: the workspace dependency manager installs them into /data per bot.
 
 FROM rust:1.90-alpine AS a11y-cli-builder
 RUN apk add --no-cache musl-dev
@@ -79,7 +80,6 @@ RUN set -eux; \
 
 COPY --from=toolkit-builder /opt/memoh/toolkit /opt/memoh/toolkit
 COPY scripts/desktop-style.sh scripts/display-apply-style.sh scripts/display-prepare.sh /opt/memoh/scripts/
-COPY docker/workspace-contract.json /opt/memoh/workspace-contract.json
 RUN printf '%s\n' 'export PATH="/opt/memoh/toolkit/bin:$PATH"' > /etc/profile.d/memoh-toolkit.sh \
   && chmod 0755 /opt/memoh/scripts/*.sh \
   && test -x /usr/bin/tini \
@@ -87,9 +87,7 @@ RUN printf '%s\n' 'export PATH="/opt/memoh/toolkit/bin:$PATH"' > /etc/profile.d/
   && test -x /opt/memoh/toolkit/bin/python3 \
   && test -x /opt/memoh/toolkit/bin/uv \
   && test -x /opt/memoh/toolkit/display/bin/a11y-cli \
-  && /bin/bash -lc 'node --version >/dev/null && npm --version >/dev/null' \
-  && /opt/memoh/toolkit/bin/codex --version >/dev/null \
-  && /opt/memoh/toolkit/bin/claude --version >/dev/null
+  && /bin/bash -lc 'node --version >/dev/null && npm --version >/dev/null'
 
 # Standalone bridge-over-TCP image used only by live ACP tests.
 FROM workspace AS toolkit-acp-bridge-live

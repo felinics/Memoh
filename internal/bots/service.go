@@ -598,8 +598,7 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 					slog.Any("error", recordErr),
 				)
 			}
-			if errors.Is(err, workspace.ErrWorkspaceImageIncompatible) ||
-				errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+			if errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
 				setupErr = err
 			}
 		} else if clearErr := s.ClearContainerSetupFailure(lifecycleCtx, botID); clearErr != nil {

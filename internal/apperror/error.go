@@ -25,7 +25,6 @@ const (
 	CodeContextBudgetUnsatisfied                Code = "context.budget_unsatisfied"
 	CodeContextProtectedOverflow                Code = "context.protected_overflow"
 	CodeWorkspaceUnreachable                    Code = "workspace.unreachable"
-	CodeWorkspaceImageIncompatible              Code = "workspace.image_incompatible"
 	CodeWorkspaceTemplateBootstrapFailed        Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayPrepareFailed           Code = "workspace.display_prepare_failed"
 	CodeWorkspaceDependencyNotFound             Code = "workspace_dependency.not_found"
@@ -219,10 +218,6 @@ var catalog = map[Code]Definition{
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",
-	},
-	CodeWorkspaceImageIncompatible: {
-		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "The workspace image is incompatible with this version of Memoh.",
 	},
 	CodeWorkspaceTemplateBootstrapFailed: {
 		HTTPStatus: http.StatusInternalServerError,

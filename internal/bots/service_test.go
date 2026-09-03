@@ -338,7 +338,7 @@ func TestRunCreateLifecycleRecordsSetupFailureAndLeavesBotReady(t *testing.T) {
 	}
 }
 
-func TestRunCreateLifecycleReturnsContractErrorAfterLeavingBotReady(t *testing.T) {
+func TestRunCreateLifecycleReturnsBootstrapErrorAfterLeavingBotReady(t *testing.T) {
 	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
 	botID := botUUID.String()
 	status := ""
@@ -355,15 +355,15 @@ func TestRunCreateLifecycleReturnsContractErrorAfterLeavingBotReady(t *testing.T
 		},
 	}
 	setupErr := errors.Join(
-		workspace.ErrWorkspaceImageIncompatible,
-		errors.New("missing /opt/memoh/toolkit/bin/node"),
+		workspace.ErrWorkspaceTemplateBootstrapFailed,
+		errors.New("write /data/AGENTS.md: permission denied"),
 	)
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
 	svc.SetContainerLifecycle(&fakeContainerLifecycle{setupErr: setupErr})
 
 	err := svc.runCreateLifecycle(context.Background(), botID)
-	if !errors.Is(err, workspace.ErrWorkspaceImageIncompatible) {
-		t.Fatalf("run create lifecycle error = %v, want image incompatibility", err)
+	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("run create lifecycle error = %v, want template bootstrap failure", err)
 	}
 	if status != BotStatusReady {
 		t.Fatalf("bot status = %q, want %q", status, BotStatusReady)

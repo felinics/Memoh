@@ -22,8 +22,6 @@
 #   PYTHON_EXTRA_ARCHES Optional space-separated extra Python runtime arches:
 #                       amd64/x86_64 or arm64/aarch64. Useful for emulated
 #                       workspace images in local development.
-#   CODEX_VERSION       Default: pinned @openai/codex version below
-#   CLAUDE_CODE_VERSION Default: pinned @anthropic-ai/claude-code version below (direct runtime CLI)
 #   ALPINE_MIRROR       Default: https://dl-cdn.alpinelinux.org/alpine
 #   DEBIAN_MIRROR       Default: https://deb.debian.org/debian
 #   DEBIAN_VERSION      Default: bookworm
@@ -42,8 +40,6 @@ NODE_VERSION=24.14.0
 NPM_VERSION=10.9.2
 PYTHON_VERSION="${PYTHON_VERSION:-3.14.6}"
 PYTHON_STANDALONE_TAG="${PYTHON_STANDALONE_TAG:-20260623}"
-CODEX_VERSION="${CODEX_VERSION:-0.151.0}"
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.250}"
 
 if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
   echo "ERROR: toolkit_output_dir is required." >&2
@@ -75,8 +71,8 @@ DEBIAN_VERSION="${DEBIAN_VERSION:-bookworm}"
 UV_MIRROR="${UV_MIRROR:-https://github.com/astral-sh/uv/releases/latest/download}"
 
 case "$ARCH" in
-  amd64) NODE_ARCH=x64;  UV_ARCH=x86_64;  APK_ARCH=x86_64;  DEB_ARCH=amd64; NPM_CPU=x64;  PYTHON_ARCH=x86_64 ;;
-  arm64) NODE_ARCH=arm64; UV_ARCH=aarch64; APK_ARCH=aarch64; DEB_ARCH=arm64; NPM_CPU=arm64; PYTHON_ARCH=aarch64 ;;
+  amd64) NODE_ARCH=x64;  UV_ARCH=x86_64;  APK_ARCH=x86_64;  DEB_ARCH=amd64; PYTHON_ARCH=x86_64 ;;
+  arm64) NODE_ARCH=arm64; UV_ARCH=aarch64; APK_ARCH=aarch64; DEB_ARCH=arm64; PYTHON_ARCH=aarch64 ;;
   *) echo "ERROR: unsupported arch: $ARCH" >&2; exit 1 ;;
 esac
 
@@ -246,7 +242,7 @@ install_ca_bundle() {
     fi
   done
 
-  echo "warning: no host CA bundle found; ACP agents may fail HTTPS requests in minimal workspace images." >&2
+  echo "warning: no host CA bundle found; toolkit wrappers and managed dependency shims may fail HTTPS requests in minimal workspace images." >&2
 }
 
 apk_package_filename_from_index() {
@@ -539,115 +535,6 @@ install_python_runtime() {
     rm -f "$OUTDIR/python-$libc"
     ln -s "$(basename "$dest_dir")" "$OUTDIR/python-$libc"
   fi
-}
-
-npm_cli() {
-  node_dir="$1"
-  echo "$OUTDIR/$node_dir/lib/node_modules/npm/bin/npm-cli.js"
-}
-
-run_toolkit_npm() {
-  node_dir="$1"
-  shift
-  node_bin="$OUTDIR/$node_dir/bin/node"
-  npm_bin="$(npm_cli "$node_dir")"
-  if [ ! -x "$node_bin" ] || [ ! -f "$npm_bin" ]; then
-    return 1
-  fi
-
-  case "$node_dir" in
-    node-musl)
-      if [ -d "$OUTDIR/node-musl/runtime-lib" ]; then
-        PATH="$OUTDIR/$node_dir/bin:$PATH" \
-          LD_LIBRARY_PATH="$OUTDIR/node-musl/runtime-lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-          "$node_bin" "$npm_bin" "$@"
-      else
-        PATH="$OUTDIR/$node_dir/bin:$PATH" "$node_bin" "$npm_bin" "$@"
-      fi
-      ;;
-    *)
-      PATH="$OUTDIR/$node_dir/bin:$PATH" "$node_bin" "$npm_bin" "$@"
-      ;;
-  esac
-}
-
-install_agent_packages_with_toolkit_npm() {
-  node_dir="$1"
-  run_toolkit_npm "$node_dir" \
-    install \
-    -g \
-    --prefix "$OUTDIR/agents" \
-    --include=optional \
-    --omit=dev \
-    --no-audit \
-    --no-fund \
-    --registry "$NPM_MIRROR" \
-    --os=linux \
-    --cpu="$NPM_CPU" \
-    --libc=glibc \
-    "@openai/codex@$CODEX_VERSION" \
-    "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
-}
-
-install_agent_packages_with_host_npm() {
-  npm \
-    install \
-    -g \
-    --prefix "$OUTDIR/agents" \
-    --include=optional \
-    --omit=dev \
-    --no-audit \
-    --no-fund \
-    --registry "$NPM_MIRROR" \
-    --os=linux \
-    --cpu="$NPM_CPU" \
-    --libc=glibc \
-    "@openai/codex@$CODEX_VERSION" \
-    "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
-}
-
-# agent_package_at_version checks that an installed Agent npm package matches the
-# pinned version, so bumping a pin in this script triggers a reinstall instead
-# of being silently skipped by the file-existence check.
-agent_package_at_version() {
-  pkg_json="$OUTDIR/agents/lib/node_modules/$1/package.json"
-  [ -f "$pkg_json" ] || return 1
-  installed="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg_json" | head -n 1)"
-  [ "$installed" = "$2" ]
-}
-
-install_agent_packages() {
-  codex_bin="$OUTDIR/agents/lib/node_modules/@openai/codex/bin/codex.js"
-  claude_code_bin="$OUTDIR/agents/bin/claude"
-  if [ -f "$codex_bin" ] && [ -x "$claude_code_bin" ] &&
-    agent_package_at_version "@openai/codex" "$CODEX_VERSION" &&
-    agent_package_at_version "@anthropic-ai/claude-code" "$CLAUDE_CODE_VERSION"; then
-    echo "Agent packages already installed at pinned versions; skipping npm install."
-    return
-  fi
-
-  echo "Installing Agent packages for linux-${NPM_CPU}..."
-  mkdir -p "$OUTDIR/agents"
-
-  # On Linux builders, prefer the freshly downloaded target Node/npm so Docker
-  # builds do not depend on a host npm install. On macOS development hosts the
-  # downloaded Linux Node cannot run, so fall back to the project npm.
-  if [ "$(uname -s)" = "Linux" ]; then
-    if install_agent_packages_with_toolkit_npm node-glibc; then
-      return
-    fi
-    if install_agent_packages_with_toolkit_npm node-musl; then
-      return
-    fi
-  fi
-
-  if command -v npm >/dev/null 2>&1; then
-    install_agent_packages_with_host_npm
-    return
-  fi
-
-  echo "ERROR: npm is required to install Codex ACP packages into the workspace toolkit." >&2
-  exit 1
 }
 
 install_toolkit_wrappers() {
@@ -952,7 +839,6 @@ if [ "${MEMOH_TOOLKIT_GLIBC_ONLY:-0}" != "1" ]; then
 fi
 
 install_uv
-install_agent_packages
 install_toolkit_wrappers
 install_ca_bundle
 
