@@ -23,8 +23,10 @@ type Category string
 
 // Dependency categories.
 const (
-	// CategoryAgent is an external coding agent CLI (Codex, Claude Code). Its
-	// target version is pinned by the Server and never queried upstream.
+	// CategoryAgent is an external coding agent CLI (Codex, Claude Code). It is
+	// managed like any other dependency: the newest release installs by
+	// default, an explicit version can be requested, upstream can be checked
+	// for updates, and rollback is available.
 	CategoryAgent Category = "agent"
 	// CategoryRuntime is a language runtime such as Node.js or Python.
 	CategoryRuntime Category = "runtime"
@@ -49,8 +51,11 @@ const (
 	// SourceManaged dependencies are installed by the catalog scripts into
 	// MEMOH_DEP_HOME and can be updated, rolled back, and removed.
 	SourceManaged Source = "managed"
-	// SourceImage dependencies ship with the workspace image. They have no
-	// scripts and cannot be removed (WD-CAT-001).
+	// SourceImage dependencies ship with the workspace image, which provides
+	// the baseline copy under the toolkit. When the manifest declares scripts
+	// the catalog installs overlay versions into MEMOH_DEP_HOME on top of that
+	// baseline; removing the overlay returns to the image copy. Without
+	// scripts the entry is informational and cannot be installed.
 	SourceImage Source = "image"
 )
 
@@ -85,9 +90,12 @@ type Platform struct {
 	Libc string   `yaml:"libc,omitempty"`
 }
 
-// VersionSpec describes which version an install should produce. Agent
-// dependencies must set Pin (WD-CAT-004); tool dependencies may follow a
-// Channel and use a check_update script instead.
+// VersionSpec describes which version an install should produce. Pin is
+// optional for every dependency: when set, installs always produce that
+// version and the dependency takes no part in upstream update checks. When
+// empty, an install without an explicit version selects the newest release
+// and a check_update script may query upstream. Channel names the upstream
+// release channel such a script follows.
 type VersionSpec struct {
 	Channel string `yaml:"channel,omitempty"`
 	Pin     string `yaml:"pin,omitempty"`
@@ -243,10 +251,25 @@ func (d Dependency) IsAgent() bool {
 	return d.Category == CategoryAgent
 }
 
-// IsImageProvided reports whether the dependency ships with the workspace
-// image rather than being installed by catalog scripts.
-func (d Dependency) IsImageProvided() bool {
+// HasImageBaseline reports whether the workspace image ships a baseline copy
+// of the dependency. Such a dependency is always present in a native
+// workspace; catalog scripts, when declared, install overlay versions on top
+// of the baseline and removing the overlay falls back to the image copy.
+func (d Dependency) HasImageBaseline() bool {
 	return d.Source == SourceImage
+}
+
+// IsImageProvided is an alias of HasImageBaseline kept for existing callers.
+func (d Dependency) IsImageProvided() bool {
+	return d.HasImageBaseline()
+}
+
+// Installable reports whether the catalog can install the dependency, i.e.
+// the manifest declares an install script. Image-baseline entries without
+// scripts are visible in the catalog but cannot be installed, updated, or
+// removed.
+func (d Dependency) Installable() bool {
+	return strings.TrimSpace(d.Scripts.Install) != ""
 }
 
 // SupportsPlatform reports whether the dependency can be installed on the
