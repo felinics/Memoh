@@ -57,7 +57,6 @@ type ClassifyInput struct {
 	Surface            Surface
 	IsGroup            bool
 	Directed           bool
-	SupportsMode       bool
 	BotAliases         []string
 	KnownCommand       func(resource string) bool
 	WebActionSupported func(resource, action string) bool
@@ -90,12 +89,8 @@ func Classify(input ClassifyInput) Decision {
 		return Decision{Kind: DecisionReject, Code: CodeInvalidSkillSlashSyntax, Directed: effectiveDirected, Invocation: &invocation}
 	}
 
-	if input.Surface == SurfaceChannel && input.SupportsMode && isModePrefix(parsed.Resource) {
-		remainder := strings.TrimSpace(invocation.Rest)
-		if strings.HasPrefix(remainder, "/") || isSlashLike(remainder, input.BotAliases) {
-			return Decision{Kind: DecisionReject, Code: CodeUnknownSlash, Directed: effectiveDirected, Invocation: &invocation}
-		}
-		return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected, Invocation: &invocation}
+	if input.Surface == SurfaceChannel && isRemovedModeCommand(parsed.Resource) {
+		return Decision{Kind: DecisionReject, Code: CodeUnknownSlash, Directed: effectiveDirected, Invocation: &invocation}
 	}
 
 	if isCommandName(invocation.Selector) && isKnown(input.KnownCommand, parsed.Resource) {
@@ -143,16 +138,11 @@ func Classify(input ClassifyInput) Decision {
 	return Decision{Kind: DecisionNormalChat, Directed: effectiveDirected, Invocation: &invocation}
 }
 
-func isSlashLike(text string, aliases []string) bool {
-	_, err := commandsyntax.ParseInvocation(commandsyntax.InvocationInput{Text: text, BotAliases: aliases})
-	return err == nil
-}
-
 func isKnown(fn func(string) bool, resource string) bool {
 	return fn != nil && fn(resource)
 }
 
-func isModePrefix(resource string) bool {
+func isRemovedModeCommand(resource string) bool {
 	switch resource {
 	case "now", "btw", "next":
 		return true

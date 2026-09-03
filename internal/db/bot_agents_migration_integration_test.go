@@ -19,8 +19,8 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 		pool := freshMigratedDB(t)
 		assertDirectScheduleRequiresBotAgent(t, ctx, pool, true)
 
-		// Cross everything from 0141 up so later migrations (0142 Agent
-		// credentials, ...) never silently shrink the descent.
+		// Cross everything from 0141 up so later migrations (Agent credentials,
+		// run finishing, session input queues, ...) never silently shrink the descent.
 		stepDown(t, dsn, countMigrationsFrom(t, "0141_bot_agents.up.sql"))
 		assertBotAgentsSchema(t, ctx, pool, false)
 
@@ -77,7 +77,7 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 			t.Fatalf("seed schedule: %v", err)
 		}
 
-		stepUp(t, dsn, 1)
+		stepUp(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, true)
 		assertBotAgentConstraintsValidated(t, ctx, pool, false)
 
@@ -111,9 +111,9 @@ func TestBotAgentsMigrationAndCanonicalSchema(t *testing.T) {
 			t.Fatalf("Native bot created %d persisted Agent rows, want 0", nativeRows)
 		}
 
-		stepDown(t, dsn, 1)
+		stepDown(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, false)
-		stepUp(t, dsn, 1)
+		stepUp(t, dsn, 2)
 		assertBotAgentsSchema(t, ctx, pool, true)
 		assertBotAgentConstraintsValidated(t, ctx, pool, false)
 		// Return to head so later suites see a fully migrated database.

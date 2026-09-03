@@ -81,6 +81,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		ChatID:          botID,
 		ThreadID:        payload.SessionID,
 		RunID:           admission.RunID,
+		RunHandle:       admission.Handle,
 		Query:           payload.Command,
 		UserID:          payload.OwnerUserID,
 		Token:           token,

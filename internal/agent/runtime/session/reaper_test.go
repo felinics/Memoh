@@ -295,6 +295,27 @@ func TestReaperRetriesWaitingDecisionRecoveryAfterTokenHandoff(t *testing.T) {
 	}
 }
 
+func TestReaperRunsQueueRecoveryBeforeMarkingRunLost(t *testing.T) {
+	t.Parallel()
+	runs := newFakeLedger()
+	runs.insertClaimed("run-queued-recovery", "session-queued-recovery", 5, "generation-1")
+	live := newFakeLiveness("generation-1")
+	live.setCandidates(LeaseCandidate{Key: Key{BotID: testBotID, SessionID: "session-queued-recovery"}, RunID: "run-queued-recovery", FencingToken: 5})
+	reaper := newTestReaper(t, runs, live)
+	called := false
+	reaper.SetQueueRunRecoverer(func(_ context.Context, candidate LeaseCandidate) (bool, error) {
+		called = candidate.RunID == "run-queued-recovery"
+		return true, nil
+	})
+	reaper.tick(context.Background())
+	if !called {
+		t.Fatal("queue recovery hook was not called")
+	}
+	if got := runs.state("run-queued-recovery"); got != ledger.StateRunning {
+		t.Fatalf("state = %q, want running when queue recovery succeeds", got)
+	}
+}
+
 func TestReaperRunsTerminalReconcilerOnlyAsLeader(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {

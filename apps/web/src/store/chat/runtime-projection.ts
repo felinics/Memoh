@@ -8,6 +8,7 @@ import type {
   UIRuntimeSnapshotEvent,
   UITurn,
 } from '@/composables/api/useChat.types'
+import { RUNTIME_STEER_TURN_PREFIX } from './types'
 
 export interface RuntimeTranscriptSlice {
   runId: string
@@ -16,6 +17,7 @@ export interface RuntimeTranscriptSlice {
   // for frames from before this field existed or from the rare pre-ledger run;
   // the transcript falls back to turnId-only matching for those.
   invocationId: string
+  continuation?: boolean
   status: RuntimeCurrentRunView['status'] | null
   operation: RuntimeRunOperation | null
   turns: UITurn[]
@@ -78,6 +80,13 @@ function cloneRunView(run: RuntimeCurrentRunView): RuntimeCurrentRunView {
   return {
     ...run,
     messages: messages.map(cloneUIMessage),
+    user_turns: run.user_turns?.map(turn => ({
+      ...turn,
+      attachments: turn.attachments?.map(attachment => ({ ...attachment })),
+      reply: turn.reply ? { ...turn.reply } : undefined,
+      forward: turn.forward ? { ...turn.forward } : undefined,
+    })),
+    steer_turns: run.steer_turns?.map(turn => ({ ...turn })),
     request_user_turn: run.request_user_turn
       ? {
           ...run.request_user_turn,
@@ -103,6 +112,7 @@ function emptyTranscript(): RuntimeTranscriptSlice {
     runId: '',
     turnId: '',
     invocationId: '',
+    continuation: false,
     status: null,
     operation: null,
     turns: [],
@@ -114,12 +124,25 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   if (!run) return emptyTranscript()
   const turnId = run.turn_id.trim()
   const turns: UITurn[] = []
-  const userTurn = run.request_user_turn ?? run.operation?.replacement_user_turn
-  if (userTurn) {
+  const fallbackUserTurn = run.request_user_turn ?? run.operation?.replacement_user_turn
+  const userTurns = run.user_turns?.length
+    ? run.user_turns
+    : fallbackUserTurn
+      ? [fallbackUserTurn]
+      : []
+  const active = isRuntimeRunActive(run.status)
+  const steerTurns = [...(run.steer_turns ?? [])]
+    .filter(steer => steer.status === 'applied' || active)
+    .sort((left, right) => left.after_message_id - right.after_message_id
+      || Date.parse(left.timestamp) - Date.parse(right.timestamp)
+      || left.item_id.localeCompare(right.item_id))
+  const steerDurableTurnIds = new Set(steerTurns.map(steer => steer.turn_id?.trim()).filter(Boolean))
+  for (const userTurn of userTurns.filter(turn => !steerDurableTurnIds.has(turn.turn_id.trim()))) {
+    const userTurnId = userTurn.turn_id.trim() || turnId
     turns.push({
       ...userTurn,
-      turn_id: turnId,
-      id: `runtime:${turnId}:user`,
+      turn_id: userTurnId,
+      id: `runtime:${userTurnId}:user`,
     })
   }
   // A settled run with no streamed content has nothing to project. Emitting the
@@ -128,45 +151,75 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   // database history is authoritative, and idle snapshots arrive with
   // messages:null (e.g. after a backend restart, whose ledger view carries no
   // streamed blocks).
-  const projectsAssistantContent = isRuntimeRunActive(run.status)
+  const projectsAssistantContent = active
     || run.messages.length > 0
     || Boolean(run.error_code)
     || Boolean(run.error)
   if (projectsAssistantContent) {
-    turns.push({
-      turn_id: turnId,
-      role: 'assistant',
-      id: `runtime:${turnId}:assistant`,
-      timestamp: run.started_at,
-      // Share message identity with the run view: consumers normalize into
-      // their own view blocks without mutating UIMessage input, so re-cloning
-      // every message per projection was pure O(all-content) waste.
-      messages: [...run.messages],
-    })
-    if ((run.error_code || run.error) && !run.messages.some(message => message.type === 'error')) {
-      turns[turns.length - 1] = {
-        ...turns[turns.length - 1]!,
-        role: 'assistant',
-        messages: [
-          ...run.messages,
-          {
-            id: nextMessageId(run.messages),
-            type: 'error',
-            code: run.error_code,
-            content: run.error ?? '',
-          },
-        ],
-      }
+    const assistantMessages = [...run.messages]
+    if ((run.error_code || run.error) && !assistantMessages.some(message => message.type === 'error')) {
+      assistantMessages.push({
+        id: nextMessageId(assistantMessages),
+        type: 'error',
+        code: run.error_code,
+        content: run.error ?? '',
+      })
     }
+    let segmentStart = 0
+    let segmentTurnId = turnId
+    let segmentTimestamp = run.started_at
+    for (const steer of steerTurns) {
+      let segmentEnd = segmentStart
+      while (segmentEnd < assistantMessages.length
+        && assistantMessages[segmentEnd]!.id <= steer.after_message_id) {
+        segmentEnd += 1
+      }
+      const segment = assistantMessages.slice(segmentStart, segmentEnd)
+      if (segment.length > 0) {
+        turns.push(runtimeAssistantTurn(segmentTurnId, segmentTimestamp, segment))
+      }
+      const durable = steer.turn_id
+        ? userTurns.find(turn => turn.turn_id.trim() === steer.turn_id?.trim())
+        : undefined
+      const steerTurnId = durable?.turn_id.trim() || `${RUNTIME_STEER_TURN_PREFIX}${steer.item_id}`
+      turns.push({
+        ...(durable ?? {
+          turn_id: steerTurnId,
+          role: 'user' as const,
+          text: steer.text,
+          timestamp: steer.timestamp,
+        }),
+        turn_id: steerTurnId,
+        id: `runtime:${RUNTIME_STEER_TURN_PREFIX}${steer.item_id}:user`,
+      })
+      segmentStart = segmentEnd
+      segmentTurnId = `${RUNTIME_STEER_TURN_PREFIX}${steer.item_id}:assistant`
+      segmentTimestamp = steer.timestamp
+    }
+    // The final segment is the only live assistant after a steer boundary. It
+    // intentionally exists while empty so the running indicator stays below
+    // the newly admitted user input until the next model delta arrives.
+    turns.push(runtimeAssistantTurn(segmentTurnId, segmentTimestamp, assistantMessages.slice(segmentStart)))
   }
   return {
     runId: run.run_id,
     turnId,
     invocationId: run.invocation_id?.trim() ?? '',
+    continuation: Boolean(run.source_follow_up_item_id?.trim()),
     status: run.status,
     operation: run.operation ? { ...run.operation } : null,
     turns,
     streaming: isRuntimeRunActive(run.status),
+  }
+}
+
+function runtimeAssistantTurn(turnId: string, timestamp: string, messages: UIMessage[]): UITurn {
+  return {
+    turn_id: turnId,
+    role: 'assistant',
+    id: `runtime:${turnId}:assistant`,
+    timestamp,
+    messages,
   }
 }
 
@@ -207,6 +260,37 @@ function applyRunPatch(
   }
 
   const messages = delta.reset_messages ? [] : next.messages
+  const fallbackUserTurn = next.request_user_turn ?? next.operation?.replacement_user_turn
+  const userTurns = next.user_turns?.length
+    ? [...next.user_turns]
+    : fallbackUserTurn
+      ? [{ ...fallbackUserTurn }]
+      : []
+  const steerTurns = [...(next.steer_turns ?? [])]
+  for (const incoming of delta.user_turn_upserts ?? []) {
+    const turnId = incoming.turn_id.trim()
+    if (!turnId) continue
+    const cloned = {
+      ...incoming,
+      attachments: incoming.attachments?.map(attachment => ({ ...attachment })),
+      reply: incoming.reply ? { ...incoming.reply } : undefined,
+      forward: incoming.forward ? { ...incoming.forward } : undefined,
+    }
+    const index = userTurns.findIndex(turn => turn.turn_id.trim() === turnId)
+    if (index < 0) userTurns.push(cloned)
+    else userTurns[index] = cloned
+  }
+  for (const incoming of delta.steer_turn_upserts ?? []) {
+    const itemId = incoming.item_id.trim()
+    if (!itemId) continue
+    const index = steerTurns.findIndex(turn => turn.item_id.trim() === itemId)
+    if (index < 0) steerTurns.push({ ...incoming })
+    else steerTurns[index] = { ...incoming }
+  }
+  const removedSteerItems = new Set((delta.steer_turn_removals ?? []).map(item => item.trim()).filter(Boolean))
+  const retainedSteerTurns = removedSteerItems.size > 0
+    ? steerTurns.filter(turn => !removedSteerItems.has(turn.item_id.trim()))
+    : steerTurns
   for (const append of delta.message_appends ?? []) {
     const index = messages.findIndex(message => message.id === append.id && message.type === append.type)
     if (index < 0) {
@@ -243,7 +327,7 @@ function applyRunPatch(
     else messages[index] = { ...cloned, id: messages[index]!.id }
   }
   messages.sort((left, right) => left.id - right.id)
-  return { ...next, messages }
+  return { ...next, messages, user_turns: userTurns, steer_turns: retainedSteerTurns }
 }
 
 // Delta-only patch step, exported for the batching runtime client: accumulate

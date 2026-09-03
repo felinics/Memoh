@@ -222,10 +222,9 @@ func TestClassifyWebKnownCommands(t *testing.T) {
 
 func TestClassifyModeSlashRemainderRejects(t *testing.T) {
 	decision := Classify(ClassifyInput{
-		Text:         "/btw /help",
-		Surface:      SurfaceChannel,
-		Directed:     true,
-		SupportsMode: true,
+		Text:     "/btw /help",
+		Surface:  SurfaceChannel,
+		Directed: true,
 	})
 	if decision.Kind != DecisionReject || decision.Code != CodeUnknownSlash {
 		t.Fatalf("decision = %#v, want slash reject", decision)
@@ -273,18 +272,15 @@ func TestClassifyKnownCommandIgnoresAttachments(t *testing.T) {
 	}
 }
 
-// TestClassifyModePrefixWithAttachmentsStaysNormalChat: "/now" + photo is a
-// normal chat message in now-mode, not a rejected control message.
-func TestClassifyModePrefixWithAttachmentsStaysNormalChat(t *testing.T) {
+func TestClassifyRemovedModePrefixWithAttachmentsIsUnknown(t *testing.T) {
 	decision := Classify(ClassifyInput{
 		Text:           "/now look at this",
 		Surface:        SurfaceChannel,
 		Directed:       true,
-		SupportsMode:   true,
 		HasAttachments: true,
 	})
-	if decision.Kind != DecisionNormalChat {
-		t.Fatalf("decision = %#v, want normal chat for mode prefix with attachments", decision)
+	if decision.Kind != DecisionReject || decision.Code != CodeUnknownSlash {
+		t.Fatalf("decision = %#v, want unknown slash", decision)
 	}
 }
 

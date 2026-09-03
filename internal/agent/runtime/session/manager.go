@@ -57,6 +57,8 @@ type Manager struct {
 	decisionStore          DecisionStore
 	terminalObserver       func(context.Context, TerminalRun)
 	terminalReconciler     func(context.Context) error
+	continuationRecoverer  func(context.Context) error
+	queueRunRecoverer      func(context.Context, LeaseCandidate) (bool, error)
 	historyResetHandler    HistoryResetHandler
 	pendingCommands        map[string]map[*commandWaiter]struct{}
 	inflightCommandTargets map[string]struct{}
@@ -94,6 +96,7 @@ type runControl struct {
 	botID             string
 	sessionID         string
 	runID             string
+	ownerID           string
 	turnID            string
 	generation        string
 	fencingToken      int64
@@ -117,6 +120,13 @@ type runControl struct {
 	decisionMu        sync.Mutex
 	decisionReady     chan struct{}
 	decisionReadyOnce sync.Once
+	// stepMu guards the step cursor: the highest durable step index whose
+	// step_end marker this run has consumed into the live projection. Queue
+	// steer anchoring waits on it so the anchor never precedes output that the
+	// model loop already produced but the event consumer has not applied yet.
+	stepMu       sync.Mutex
+	stepConsumed int
+	stepChanged  chan struct{}
 	// pendingDecisions tracks every decision that still awaits a terminal
 	// status. decisionInline marks runtimes that block inside the same turn
 	// instead of parking and re-entering through EventAgentStart.
@@ -163,7 +173,7 @@ func (c *runControl) handle() RunHandle {
 	if c == nil {
 		return RunHandle{}
 	}
-	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, TurnID: c.turnID, Generation: c.generation, FencingToken: c.fencingToken}
+	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, OwnerID: c.ownerID, TurnID: c.turnID, Generation: c.generation, FencingToken: c.fencingToken}
 }
 
 func (c *runControl) beginDecisionWait(decisionID string) {
@@ -276,6 +286,52 @@ func (c *runControl) decisionReadySignal() <-chan struct{} {
 	c.decisionMu.Lock()
 	defer c.decisionMu.Unlock()
 	return c.decisionReady
+}
+
+// markStepConsumed records that the live projection now holds every part of
+// durable step stepIndex. Waiters blocked in awaitStepConsumed are woken.
+func (c *runControl) markStepConsumed(stepIndex int) {
+	if c == nil {
+		return
+	}
+	c.stepMu.Lock()
+	defer c.stepMu.Unlock()
+	if stepIndex+1 > c.stepConsumed {
+		c.stepConsumed = stepIndex + 1
+	}
+	if c.stepChanged != nil {
+		close(c.stepChanged)
+		c.stepChanged = nil
+	}
+}
+
+// awaitStepConsumed blocks until the projection has consumed step stepIndex,
+// the context ends, or the run's lifecycle context ends. Callers only pass an
+// index whose step_end marker the native loop has already emitted, so the wait
+// is bounded by event consumption, not by model progress.
+func (c *runControl) awaitStepConsumed(ctx context.Context, stepIndex int) error {
+	if c == nil {
+		return nil
+	}
+	for {
+		c.stepMu.Lock()
+		if c.stepConsumed > stepIndex {
+			c.stepMu.Unlock()
+			return nil
+		}
+		if c.stepChanged == nil {
+			c.stepChanged = make(chan struct{})
+		}
+		changed := c.stepChanged
+		c.stepMu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.lifecycleCtx.Done():
+			return ErrRunOwnershipLost
+		}
+	}
 }
 
 type Options struct {
@@ -453,6 +509,28 @@ func (m *Manager) SetTerminalReconciler(reconciler func(context.Context) error) 
 	}
 	m.mu.Lock()
 	m.terminalReconciler = reconciler
+	m.mu.Unlock()
+}
+
+// SetContinuationRecoverer installs the application-owned ownerless
+// continuation scan used by the session reaper.
+func (m *Manager) SetContinuationRecoverer(recoverer func(context.Context) error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.continuationRecoverer = recoverer
+	m.mu.Unlock()
+}
+
+// SetQueueRunRecoverer installs the application-owned recovery for a running
+// session whose durable queue claim survived an owner lease expiry.
+func (m *Manager) SetQueueRunRecoverer(recoverer func(context.Context, LeaseCandidate) (bool, error)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.queueRunRecoverer = recoverer
 	m.mu.Unlock()
 }
 
@@ -743,6 +821,12 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
 	reaper.SetTerminalObserver(m.reconcileAndObserveTerminalRun)
 	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
+	m.mu.Lock()
+	continuationRecoverer := m.continuationRecoverer
+	queueRunRecoverer := m.queueRunRecoverer
+	m.mu.Unlock()
+	reaper.SetContinuationRecoverer(continuationRecoverer)
+	reaper.SetQueueRunRecoverer(queueRunRecoverer)
 	if err := reaper.Start(ctx); err != nil {
 		return err
 	}
@@ -836,6 +920,90 @@ func (m *Manager) StartRunHandle(ctx context.Context, botID, sessionID, runID st
 	return m.StartRunWithAdmissionBuilderHandle(ctx, botID, sessionID, runID, func(context.Context, RunHandle) (RunAdmissionView, error) {
 		return RunAdmissionView{}, nil
 	}, abortCh, cancel, injectCh)
+}
+
+// StartExistingRun claims an already-created durable run (currently used for
+// ownerless follow-up continuations). The caller must have conditionally
+// acquired the run's database owner/fencing token first; this method only
+// establishes the local runtime control and distributed projection.
+func (m *Manager) StartExistingRun(ctx context.Context, handle RunHandle, builder func(context.Context, RunHandle) (RunAdmissionView, error), ownershipCancel context.CancelCauseFunc, abortCh chan<- struct{}, cancel context.CancelFunc, injectCh chan<- turn.InjectMessage) (RunHandle, error) {
+	if handle.BotID == "" || handle.SessionID == "" || handle.RunID == "" || handle.FencingToken <= 0 {
+		return RunHandle{}, errors.New("existing run handle is incomplete")
+	}
+	if strings.TrimSpace(handle.OwnerID) == "" || strings.TrimSpace(handle.OwnerID) != m.ownerID {
+		return RunHandle{}, ErrRunOwnershipLost
+	}
+	result, _, err := m.startRun(ctx, runStart{
+		botID: handle.BotID, sessionID: handle.SessionID, runID: handle.RunID,
+		fencingToken: handle.FencingToken, turnID: handle.TurnID,
+		builder: builder, ownershipCancel: ownershipCancel,
+		abortCh: abortCh, cancel: cancel, injectCh: injectCh,
+	})
+	return result, err
+}
+
+// WaitSessionSlotFor waits until the session's authoritative live slot is
+// free for runID: no active run occupies it, or runID already does. Queue
+// continuations use this instead of naming a parent run, because a FIFO
+// follow-up admitted during R0 may be handed off by R1 or a later run.
+func (m *Manager) WaitSessionSlotFor(ctx context.Context, botID, sessionID, runID string) error {
+	if m == nil || m.backend == nil {
+		return ErrManagerClosed
+	}
+	botID = strings.TrimSpace(botID)
+	sessionID = strings.TrimSpace(sessionID)
+	runID = strings.TrimSpace(runID)
+	if botID == "" || sessionID == "" || runID == "" {
+		return errors.New("bot_id, session_id, and run_id are required")
+	}
+	sub, err := m.Subscribe(ctx, botID, sessionID)
+	if err != nil {
+		return err
+	}
+	defer sub.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-sub.C:
+			if !ok {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return ErrManagerClosed
+			}
+			snapshot := event.Snapshot
+			if snapshot == nil {
+				currentSnapshot, err := m.Snapshot(ctx, botID, sessionID)
+				if err != nil {
+					return err
+				}
+				snapshot = &currentSnapshot
+			}
+			current := snapshot.CurrentRunView
+			if current == nil || current.RunID == runID || !isActiveRunStatus(current.Status) {
+				return nil
+			}
+		}
+	}
+}
+
+// OwnerID returns this manager's stable execution-owner identity.
+func (m *Manager) OwnerID() string {
+	if m == nil {
+		return ""
+	}
+	return m.ownerID
+}
+
+// LivenessGeneration returns the current live-backend incarnation for
+// application-owned recovery code. It is read-only; ownership still changes
+// only through the durable fenced claim.
+func (m *Manager) LivenessGeneration(ctx context.Context) (string, error) {
+	if m == nil {
+		return "", ErrManagerClosed
+	}
+	return m.livenessGeneration(ctx)
 }
 
 // StartRunWithAdmissionBuilderHandle reserves the cross-server run before
@@ -942,7 +1110,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 	ctx = admissionCtx
 
 	runGeneration := m.newGeneration()
-	handle := RunHandle{BotID: botID, SessionID: sessionID, RunID: runID, TurnID: start.turnID, Generation: runGeneration, FencingToken: start.fencingToken}
+	handle := RunHandle{BotID: botID, SessionID: sessionID, RunID: runID, OwnerID: m.ownerID, TurnID: start.turnID, Generation: runGeneration, FencingToken: start.fencingToken}
 	if handle.FencingToken > 0 {
 		ctx = runtimefence.WithContext(ctx, runtimefence.Fence{
 			BotID:     handle.BotID,
@@ -955,6 +1123,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		botID:           botID,
 		sessionID:       sessionID,
 		runID:           runID,
+		ownerID:         m.ownerID,
 		turnID:          start.turnID,
 		generation:      runGeneration,
 		fencingToken:    start.fencingToken,
@@ -1159,6 +1328,13 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		run.Status = RunStatusRunning
 		run.RequestUserTurn = admission.RequestUserTurn
 		run.Operation = admission.Operation
+		run.SourceFollowUpItemID = admission.SourceFollowUpItemID
+		switch {
+		case admission.RequestUserTurn != nil:
+			run.UserTurns = []chatview.UITurn{*admission.RequestUserTurn}
+		case admission.Operation != nil && admission.Operation.ReplacementUserTurn != nil:
+			run.UserTurns = []chatview.UITurn{*admission.Operation.ReplacementUserTurn}
+		}
 		run.UpdatedAt = now
 		return snapshot, true, nil
 	}, func(snapshot Snapshot) RuntimeDelta {
@@ -1724,6 +1900,12 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	case native.EventError:
 	default:
 		messages = ctrl.converter.HandleEvent(chatview.UIStreamEventFromAgentEvent(event))
+	}
+	if event.Type == native.EventStepEnd {
+		// The marker itself changes nothing visible; it only advances the step
+		// cursor that queue steer anchoring waits on.
+		ctrl.markStepConsumed(event.StepNumber)
+		return nil, nil
 	}
 	delta, visibleChange := runtimeDeltaForAgentEvent(event, messages)
 	if !visibleChange {

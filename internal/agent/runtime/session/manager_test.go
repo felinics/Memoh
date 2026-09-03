@@ -4244,6 +4244,66 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	}
 }
 
+func TestRuntimeManagerWaitSessionSlotForWaitsOnAnyOtherActiveRun(t *testing.T) {
+	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-wait-slot")
+	const (
+		sessionID = "session-wait-slot"
+		occupant  = "run-occupant"
+		waiter    = "run-waiter"
+	)
+	if err := manager.StartRun(context.Background(), testBotID, sessionID, occupant, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		t.Fatalf("start occupant run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, sessionID, occupant)
+
+	waitCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	waited := make(chan error, 1)
+	go func() {
+		// The waiter names itself, not the occupant: a continuation cannot know
+		// which earlier run handed it off.
+		waited <- manager.WaitSessionSlotFor(waitCtx, testBotID, sessionID, waiter)
+	}()
+	select {
+	case err := <-waited:
+		t.Fatalf("wait returned while another run held the slot: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	if err := manager.FinishRun(context.Background(), handle, RunStatusCompleted, ""); err != nil {
+		t.Fatalf("finish occupant run: %v", err)
+	}
+	select {
+	case err := <-waited:
+		if err != nil {
+			t.Fatalf("wait for slot: %v", err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("wait did not observe the released slot")
+	}
+
+	// The slot is free for a run that already owns it.
+	if err := manager.StartRun(context.Background(), testBotID, sessionID, waiter, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		t.Fatalf("start waiter run: %v", err)
+	}
+	if err := manager.WaitSessionSlotFor(waitCtx, testBotID, sessionID, waiter); err != nil {
+		t.Fatalf("own run should not block on itself: %v", err)
+	}
+}
+
+func TestRuntimeManagerStartExistingRunRejectsForeignOwner(t *testing.T) {
+	manager := testRuntimeManager(t, NewMemoryBackend(), "local-owner")
+	_, err := manager.StartExistingRun(
+		context.Background(),
+		RunHandle{BotID: testBotID, SessionID: testSessionID, RunID: testRunID, OwnerID: "foreign-owner", FencingToken: 1},
+		func(context.Context, RunHandle) (RunAdmissionView, error) { return RunAdmissionView{}, nil },
+		func(error) {}, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1),
+	)
+	if !errors.Is(err, ErrRunOwnershipLost) {
+		t.Fatalf("foreign owner start = %v, want ErrRunOwnershipLost", err)
+	}
+}
+
 func TestRuntimeManagerPublishesStableStreamErrorCode(t *testing.T) {
 	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-coded-error")
 	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {

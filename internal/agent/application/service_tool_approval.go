@@ -13,6 +13,7 @@ import (
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/models"
@@ -41,6 +42,7 @@ type CommittedToolApprovalResponse struct {
 	request         toolapproval.Request
 	input           ToolApprovalResponseInput
 	runID           string
+	runHandle       sessionruntime.RunHandle
 	isExternalAgent bool
 	activePrompt    *externalAgentActivePromptSubscription
 	ackOnly         bool
@@ -240,7 +242,7 @@ func (s *Service) continueCommittedToolApprovalResponse(
 	default:
 		return fmt.Errorf("committed tool approval has unexpected status %q", target.Status)
 	}
-	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, runID, lifecycle, eventCh)
+	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, runID, committed.runHandle, lifecycle, eventCh)
 }
 
 func (s *Service) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -395,6 +397,7 @@ func (s *Service) storeToolResultAndContinue(
 	input ToolApprovalResponseInput,
 	result sdk.ToolResultPart,
 	runID string,
+	runHandle sessionruntime.RunHandle,
 	lifecycle *continuationLifecycleResult,
 	eventCh chan<- WSStreamEvent,
 ) error {
@@ -421,7 +424,7 @@ func (s *Service) storeToolResultAndContinue(
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueToolApprovalSession(ctx, approval, input, runID, lifecycle, eventCh)
+	return s.continueToolApprovalSession(ctx, approval, input, runID, runHandle, lifecycle, eventCh)
 }
 
 func (s *Service) continueToolApprovalSession(
@@ -429,6 +432,7 @@ func (s *Service) continueToolApprovalSession(
 	approval toolapproval.Request,
 	input ToolApprovalResponseInput,
 	runID string,
+	runHandle sessionruntime.RunHandle,
 	runtimeLifecycle *continuationLifecycleResult,
 	eventCh chan<- WSStreamEvent,
 ) error {
@@ -478,6 +482,7 @@ func (s *Service) continueToolApprovalSession(
 
 	req := ChatRequest{
 		RunID:                   cfg.RunID,
+		RunHandle:               runHandle,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
@@ -490,8 +495,14 @@ func (s *Service) continueToolApprovalSession(
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
+	continuationRC := resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}}
+	stepCommitter, stopQueueBinding, err := s.bindQueueContinuation(ctx, &req, &cfg, continuationRC)
+	if err != nil {
+		return err
+	}
+	defer stopQueueBinding()
 	reasoningTiming := newReasoningTimingTracker(nil)
-	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
+	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
 	defer idleCancel.Stop()
 	stream := s.agent.Stream(idleCtx, cfg)
@@ -542,19 +553,27 @@ func (s *Service) continueToolApprovalSession(
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
-				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				if stepCommitter == nil {
+					snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				}
 				snap.visibleOutput = hasVisibleOutput
 				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
 				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
 					lifecycleCause = agentAbortCause(ctx)
 				}
-				if storeErr := s.persistTerminalSnapshot(
-					context.WithoutCancel(ctx),
-					req,
-					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
-					snap,
-				); storeErr != nil {
+				var storeErr error
+				if stepCommitter != nil {
+					storeErr = stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage))
+				} else {
+					storeErr = s.persistTerminalSnapshot(
+						context.WithoutCancel(ctx),
+						req,
+						resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
+						snap,
+					)
+				}
+				if storeErr != nil {
 					lifecycleCause = storeErr
 					lifecycleDeferred = false
 					return storeErr
@@ -569,6 +588,19 @@ func (s *Service) continueToolApprovalSession(
 				lifecycleCause = context.Cause(ctx)
 				return lifecycleCause
 			}
+		}
+	}
+	if !stored && stepCommitter != nil {
+		if storeErr := stepCommitter.finish(ctx, 0); storeErr != nil {
+			lifecycleCause = storeErr
+			return storeErr
+		}
+		stored = true
+	}
+	if stepCommitter != nil {
+		if commitErr := stepCommitter.err(); commitErr != nil && ctx.Err() == nil {
+			lifecycleCause = commitErr
+			return commitErr
 		}
 	}
 	if idleCancel.DidFire() {

@@ -63,6 +63,13 @@ function userMessage(id: string, text = id): ChatMessage {
   }
 }
 
+function provisionalSteerMessage(id: string, text = id): ChatMessage {
+  return {
+    ...userMessage(id, text),
+    turnId: `queue-steer:${id}`,
+  }
+}
+
 function assistantMessage(id: string): ChatMessage {
   return {
     id,
@@ -380,5 +387,68 @@ describe('useChatScroll gesture and layout handling', () => {
 
     expect(harness.scroll.turnReserveStyle('optimistic-user-2')).toBeUndefined()
     expect(harness.scroll.turnReserveStyle('server-user-2')).toEqual(reserve)
+  })
+
+  it('hands the pin reserve from the active turn to a provisional steer', async () => {
+    const harness = mountHarness([
+      userMessage('user-1'),
+      assistantMessage('assistant-1'),
+    ])
+    harness.geometry.scrollHeight = 800
+    harness.geometry.clientHeight = 300
+    harness.viewport.scrollTop = 500
+
+    const firstTurn = document.createElement('div')
+    const firstPrompt = document.createElement('div')
+    firstPrompt.dataset.messageId = 'user-1'
+    firstTurn.append(firstPrompt)
+    harness.content.append(firstTurn)
+    harness.lastTurnEl.value = firstTurn
+    await flushDom()
+    harness.scroll.pinAfterSend()
+
+    const secondTurn = document.createElement('div')
+    const secondPrompt = document.createElement('div')
+    secondPrompt.dataset.messageId = 'user-2'
+    secondTurn.append(secondPrompt)
+    secondTurn.getBoundingClientRect = () => rect(120, 60)
+    secondPrompt.getBoundingClientRect = () => rect(120, 40)
+    Object.defineProperty(secondTurn, 'offsetHeight', {
+      configurable: true,
+      get: () => Math.max(60, Number.parseFloat(secondTurn.style.minHeight) || 0),
+    })
+    Object.defineProperty(secondPrompt, 'offsetHeight', {
+      configurable: true,
+      get: () => 40,
+    })
+    harness.messages.value.push(userMessage('user-2'), assistantMessage('assistant-2'))
+    harness.content.append(secondTurn)
+    harness.lastTurnEl.value = secondTurn
+    await flushDom()
+    expect(harness.scroll.turnReserveStyle('user-2')).toBeDefined()
+
+    const steerTurn = document.createElement('div')
+    const steerPrompt = document.createElement('div')
+    steerPrompt.dataset.messageId = 'steer-user'
+    steerTurn.append(steerPrompt)
+    steerTurn.getBoundingClientRect = () => rect(120, 60)
+    steerPrompt.getBoundingClientRect = () => rect(120, 40)
+    Object.defineProperty(steerTurn, 'offsetHeight', {
+      configurable: true,
+      get: () => Math.max(60, Number.parseFloat(steerTurn.style.minHeight) || 0),
+    })
+    Object.defineProperty(steerPrompt, 'offsetHeight', {
+      configurable: true,
+      get: () => 40,
+    })
+    harness.messages.value.push(provisionalSteerMessage('steer-user'))
+    harness.content.append(steerTurn)
+    harness.lastTurnEl.value = steerTurn
+
+    harness.scroll.pinAfterSteer('user-2')
+    await flushDom()
+
+    expect(harness.scroll.turnReserveStyle('user-2')).toBeUndefined()
+    expect(harness.scroll.turnReserveStyle('steer-user')).toBeDefined()
   })
 })

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,6 +105,59 @@ func TestAgentStreamObservesReasoningEndBeforeStepCommit(t *testing.T) {
 	}
 }
 
+func TestAgentStreamReopensAfterFinalSteer(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	var secondInput atomic.Bool
+	var continueAfter atomic.Bool
+	nextInputs := []sdk.Message{}
+	provider := agentStreamTestProvider(func(_ context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+		call := calls.Add(1)
+		if call == 2 {
+			for _, message := range params.Messages {
+				if strings.Contains(messageContentText(message), "change direction") {
+					secondInput.Store(true)
+				}
+			}
+		}
+		return closedAgentTestStream(&sdk.StartPart{}, &sdk.StartStepPart{}, &sdk.TextDeltaPart{ID: "text", Text: "answer"}, &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}, &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}), nil
+	})
+	a := New(Deps{})
+	var commits int
+	events := a.Stream(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("hello")}, Identity: SessionContext{BotID: "bot-1"},
+		ContinueAfterFinal: &continueAfter, NextModelInputs: &nextInputs,
+		OnStepCommitted: func(_ context.Context, _ int, _ *sdk.StepResult) error {
+			commits++
+			if commits == 1 {
+				nextInputs = []sdk.Message{sdk.UserMessage("change direction")}
+				continueAfter.Store(true)
+			}
+			return nil
+		},
+	})
+	var terminal int
+	for event := range events {
+		if event.IsTerminal() {
+			terminal++
+		}
+	}
+	if calls.Load() != 2 || !secondInput.Load() || terminal != 1 {
+		t.Fatalf("calls=%d second_input=%v terminal=%d", calls.Load(), secondInput.Load(), terminal)
+	}
+}
+
+func messageContentText(message sdk.Message) string {
+	var out strings.Builder
+	for _, part := range message.Content {
+		if text, ok := part.(sdk.TextPart); ok {
+			out.WriteString(text.Text)
+		}
+	}
+	return out.String()
+}
+
 // TestAgentStreamEmitsToolCallInputStartThenStart asserts that a tool call
 // produces a lightweight EventToolCallInputStart (name + call ID, no input)
 // when the SDK emits ToolInputStartPart, followed by a EventToolCallStart
@@ -139,11 +194,16 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 		events = append(events, event)
 	}
 
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d: %#v", len(events), events)
+	if len(events) != 5 {
+		t.Fatalf("expected 5 events, got %d: %#v", len(events), events)
 	}
 	if events[0].Type != EventAgentStart {
 		t.Fatalf("expected first event %q, got %#v", EventAgentStart, events[0])
+	}
+	// step_end follows every part of the step and precedes the terminal event;
+	// it carries the durable step index the following commit uses.
+	if events[3].Type != EventStepEnd || events[3].StepNumber != 0 {
+		t.Fatalf("expected step_end for step 0 before agent_end, got %#v", events[3])
 	}
 	if events[1].Type != EventToolCallInputStart || events[1].ToolCallID != "call-1" || events[1].ToolName != "write" {
 		t.Fatalf("unexpected tool call input start event: %#v", events[1])
@@ -158,8 +218,8 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	if !reflect.DeepEqual(events[2].Input, expectedInput) {
 		t.Fatalf("expected tool call start input %#v, got %#v", expectedInput, events[2].Input)
 	}
-	if events[3].Type != EventAgentEnd {
-		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[3])
+	if events[4].Type != EventAgentEnd {
+		t.Fatalf("expected terminal event %q, got %#v", EventAgentEnd, events[4])
 	}
 	if commits != 1 {
 		t.Fatalf("committed steps = %d, want 1", commits)

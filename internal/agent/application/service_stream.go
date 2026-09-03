@@ -11,7 +11,6 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
@@ -231,11 +230,16 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		go s.maybeGenerateSessionTitle(context.WithoutCancel(streamCtx), streamReq, streamReq.RawQuery)
 
 		cfg := rc.runConfig
+		cfg.StepIndexOffset = streamReq.StepIndexOffset
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
 		reasoningTiming := newReasoningTimingTracker(nil)
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
 		configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+		if stepCommitter != nil {
+			cfg.ContinueAfterFinal = &stepCommitter.continueAfterFinal
+			cfg.NextModelInputs = &stepCommitter.nextModelInputs
+		}
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 		terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 		var lifecycleCause error
@@ -260,6 +264,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		var terminalEventSeen bool
 		var agentStreamErr error
 		var failureEventForwarded bool
+		var deferredRuntimeTerminal *native.StreamEvent
 		for event := range eventCh {
 			idleCancel.Reset() // each event resets the idle timer
 
@@ -321,6 +326,19 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				continue
 			}
 			var terminalPersistErr error
+			// A durable queue step must commit before its terminal runtime event
+			// marks the live projection completed. Otherwise CommitStep cannot
+			// publish the claimed steer or create the follow-up continuation: the
+			// manager quite correctly rejects a queue mutation against a terminal
+			// run. Non-terminal events retain their low-latency publication path.
+			if streamReq.PublishRuntimeEvents && s.publishTurnEvent != nil {
+				if event.IsTerminal() && stepCommitter != nil {
+					terminal := event
+					deferredRuntimeTerminal = &terminal
+				} else if publishErr := s.publishTurnEvent(streamCtx, streamReq.RunHandle, event); publishErr != nil {
+					s.logger.Warn("continuation runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
+				}
+			}
 			if event.IsTerminal() && len(event.Messages) > 0 {
 				if snap, ok := extractTerminalSnapshot(data); ok {
 					if stepCommitter == nil {
@@ -363,9 +381,6 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			if event.IsTerminal() && !stored && !runOwnershipLost(streamCtx) && terminalPersistErr == nil {
 				switch {
 				case !hasVisibleOutput:
-					// A terminal event before any visible assistant output has no
-					// output row to persist. The admitted user message is already
-					// durable for both clean completion and cancellation.
 					stored = true
 				case stepCommitter != nil:
 					if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
@@ -381,12 +396,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				}
 			}
 			if event.IsTerminal() && (terminalPersistErr != nil || runOwnershipLost(streamCtx)) {
-				// A terminal runtime proposal is recoverable only after the output
-				// it names is durable. Withhold the terminal event on persistence
-				// failure; the error channel finishes the run as failed instead.
 				if terminalPersistErr != nil && agentStreamErr == nil {
 					agentStreamErr = terminalPersistErr
 				}
+				deferredRuntimeTerminal = nil
 				continue
 			}
 
@@ -444,6 +457,11 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 						slog.String("chat_id", streamReq.ChatID),
 					)
 				}
+			}
+		}
+		if deferredRuntimeTerminal != nil && streamReq.PublishRuntimeEvents && s.publishTurnEvent != nil {
+			if publishErr := s.publishTurnEvent(context.WithoutCancel(streamCtx), streamReq.RunHandle, *deferredRuntimeTerminal); publishErr != nil {
+				s.logger.Warn("continuation terminal runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
 			}
 		}
 		if commitErr := stepCommitter.err(); commitErr != nil && streamCtx.Err() == nil {
@@ -584,11 +602,16 @@ func (s *Service) streamChatWSResultWithHooks(
 	}()
 
 	cfg := rc.runConfig
+	cfg.StepIndexOffset = req.StepIndexOffset
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
 	reasoningTiming := newReasoningTimingTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+	if stepCommitter != nil {
+		cfg.ContinueAfterFinal = &stepCommitter.continueAfterFinal
+		cfg.NextModelInputs = &stepCommitter.nextModelInputs
+	}
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	var lifecycleCause error
@@ -671,7 +694,6 @@ func (s *Service) streamChatWSResultWithHooks(
 			continue
 		}
 
-		var terminalPersistErr error
 		if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				if stepCommitter == nil {
@@ -687,9 +709,8 @@ func (s *Service) streamChatWSResultWithHooks(
 				}
 				if !stored && !runOwnershipLost(ctx) && stepCommitter != nil {
 					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
-						terminalPersistErr = runtimeHistoryError(storeErr)
 						if lifecycleCause == nil {
-							lifecycleCause = terminalPersistErr
+							lifecycleCause = storeErr
 						}
 						s.logger.Error("ws step finalization failed", slog.Any("error", storeErr))
 					} else {
@@ -699,9 +720,8 @@ func (s *Service) streamChatWSResultWithHooks(
 				} else if !stored && !runOwnershipLost(ctx) {
 					persisted, storeErr := s.persistTerminalSnapshotResult(context.WithoutCancel(ctx), req, rc, snap)
 					if storeErr != nil {
-						terminalPersistErr = runtimeHistoryError(storeErr)
 						if lifecycleCause == nil {
-							lifecycleCause = terminalPersistErr
+							lifecycleCause = storeErr
 						}
 						s.logger.Error("ws persist failed", slog.Any("error", storeErr))
 					} else {
@@ -711,39 +731,8 @@ func (s *Service) streamChatWSResultWithHooks(
 				}
 			}
 		}
-		if event.IsTerminal() && !stored && !runOwnershipLost(ctx) && terminalPersistErr == nil {
-			switch {
-			case !hasVisibleOutput:
-				// A terminal event before any visible assistant output has no
-				// output row to persist. The admitted user message is already
-				// durable for both clean completion and cancellation.
-				stored = true
-			case stepCommitter != nil:
-				if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
-					terminalPersistErr = runtimeHistoryError(storeErr)
-				} else {
-					persistedMessages = stepCommitter.persistedMessages()
-					stored = true
-				}
-			default:
-				terminalPersistErr = runtimeHistoryError(errors.New("agent terminal event has no persistable snapshot"))
-			}
-			if terminalPersistErr != nil && lifecycleCause == nil {
-				lifecycleCause = terminalPersistErr
-			}
-		}
-		if event.IsTerminal() && terminalPersistErr != nil {
-			// postPersist and terminal publication both require the canonical
-			// history write. Returning here keeps the runtime recoverable instead
-			// of proposing completion for output that never committed.
-			lifecycleDeferred = false
-			return persistedMessages, terminalPersistErr
-		}
-		if event.IsTerminal() && runOwnershipLost(ctx) {
-			return persistedMessages, sessionruntime.ErrRunOwnershipLost
-		}
 
-		if event.IsTerminal() && postPersist != nil && !postPersistApplied {
+		if event.IsTerminal() && postPersist != nil && stepCommitter == nil && !postPersistApplied {
 			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 				lifecycleCause = err
 				lifecycleDeferred = false
@@ -825,7 +814,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		}
 	}
 
-	if postPersist != nil && !postPersistApplied {
+	if postPersist != nil && stepCommitter == nil && !postPersistApplied {
 		if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 			lifecycleCause = err
 			lifecycleDeferred = false

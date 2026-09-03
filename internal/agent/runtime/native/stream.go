@@ -35,6 +35,7 @@ const (
 	EventAgentAbort          = event.AgentAbort
 	EventAbort               = event.AgentAbort
 	EventRetry               = event.Retry
+	EventStepEnd             = event.StepEnd
 	EventProgress            = event.Progress
 	EventError               = event.Error
 )

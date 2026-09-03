@@ -333,6 +333,7 @@ FROM session_runs
 WHERE team_id = public.memoh_current_team_id()
   AND state = 'accepted'
   AND owner_id IS NULL
+  AND source_follow_up_item_id IS NULL
   AND created_at < now() - make_interval(secs => sqlc.arg(grace_seconds)::double precision)
 ORDER BY created_at, run_id
 LIMIT sqlc.arg(batch_size);

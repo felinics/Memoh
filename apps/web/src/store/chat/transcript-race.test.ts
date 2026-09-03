@@ -83,6 +83,29 @@ describe('chat transcript projection identity', () => {
     expect(transcript.messages[1]?.id).toBe(assistantTurn.id)
   })
 
+  it('keeps multiple applied steer inputs as distinct live user turns', () => {
+    const { transcript } = makeTranscript()
+    const { userTurn, assistantTurn } = appendUnboundOptimisticPair(transcript)
+
+    transcript.applyRuntimeTranscript(sliceFor('turn-1', 'invocation-1', {
+      turns: [
+        rawUser('runtime-user', 'hello first'),
+        { ...rawUser('runtime-steer-1', 'first steer'), turn_id: 'turn-steer-1' },
+        { ...rawUser('runtime-steer-2', 'second steer'), turn_id: 'turn-steer-2' },
+        rawAssistant('runtime-assistant'),
+      ],
+    }))
+
+    expect(transcript.messages.map(turn => [turn.role, turn.turnId])).toEqual([
+      ['user', 'turn-1'],
+      ['user', 'turn-steer-1'],
+      ['user', 'turn-steer-2'],
+      ['assistant', 'turn-1'],
+    ])
+    expect(transcript.messages[0]?.id).toBe(userTurn.id)
+    expect(transcript.messages[3]?.id).toBe(assistantTurn.id)
+  })
+
   it('merges when the acceptance pre-stamped the assistant before the frame arrived', () => {
     const { transcript } = makeTranscript()
     const { userTurn, assistantTurn } = appendUnboundOptimisticPair(transcript)
@@ -111,6 +134,20 @@ describe('chat transcript projection identity', () => {
     // The unbound local pair is untouched and still first.
     expect(transcript.messages[0]?.turnId ?? '').toBe('')
     expect(transcript.messages[1]?.turnId ?? '').toBe('')
+  })
+
+  it('marks a server-owned continuation user turn for immediate layout handoff', () => {
+    const { transcript } = makeTranscript()
+    transcript.applyRuntimeTranscript(sliceFor('turn-continuation', 'continuation:item-1', {
+      continuation: true,
+      turns: [rawUser('runtime-user', 'follow-up input'), rawAssistant('runtime-assistant')],
+    }))
+
+    expect(transcript.messages[0]).toMatchObject({
+      role: 'user',
+      text: 'follow-up input',
+      runtimeContinuation: true,
+    })
   })
 
   it('treats the acceptance as a no-op once the frame already bound the pair', () => {

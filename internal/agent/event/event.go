@@ -34,6 +34,12 @@ const (
 	// in the conversation (tools unavailable, an interaction declined).
 	// Code carries the machine-readable reason, Delta the human text.
 	RuntimeNotice StreamEventType = "runtime_notice"
+	// StepEnd marks that every streamed part of one model step has been
+	// emitted. StepNumber carries the durable step index. It is a sequencing
+	// marker for the session runtime, carries no visible content, and is
+	// emitted before the step's commit barrier runs, so a consumer that has
+	// seen it holds the complete pre-commit projection of that step.
+	StepEnd StreamEventType = "step_end"
 )
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON

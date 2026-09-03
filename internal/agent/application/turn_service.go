@@ -70,9 +70,11 @@ func (s *Service) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (tur
 
 	req := chatRequestFromCommand(cmd)
 	req.RunID = admission.RunID
+	req.RunHandle = admission.Handle
 	req.TurnID = admission.TurnID
 	req.TurnPosition = &admission.TurnPosition
 	req.InjectCh = injectCh
+	req.QueueInjectCh = injectCh
 	req.OutboundAssetCollector = func() []turn.OutboundAssetRef {
 		assetMu.Lock()
 		defer assetMu.Unlock()

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +16,28 @@ import (
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 )
+
+func TestRuntimeDecisionContinuationLogsPrivateCause(t *testing.T) {
+	var logs bytes.Buffer
+	service := &Service{logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	privateCause := errors.New("private provider rejection")
+	service.logRuntimeDecisionContinuationFailure(sessionruntime.Command{
+		RunID: "run-log", TargetID: "decision-log", Type: sessionruntime.CommandUserInputResponse,
+	}, apperror.Wrap(apperror.CodeAgentResponseInterrupted, privateCause, nil))
+
+	got := logs.String()
+	for _, want := range []string{
+		"runtime decision continuation failed",
+		"private provider rejection",
+		"run_id=run-log",
+		"decision_id=decision-log",
+		"command_type=user_input_response",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("continuation failure log %q does not contain %q", got, want)
+		}
+	}
+}
 
 func newWaitingDecisionRuntime(t *testing.T) (*sessionruntime.Manager, sessionruntime.RunHandle) {
 	t.Helper()

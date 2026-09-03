@@ -235,7 +235,11 @@ func normalizeRunAdmission(admission RunAdmissionView) (RunAdmissionView, error)
 	if err != nil {
 		return RunAdmissionView{}, err
 	}
-	return RunAdmissionView{RequestUserTurn: requestUserTurn, Operation: operation}, nil
+	return RunAdmissionView{
+		RequestUserTurn:      requestUserTurn,
+		Operation:            operation,
+		SourceFollowUpItemID: strings.TrimSpace(admission.SourceFollowUpItemID),
+	}, nil
 }
 
 func normalizeRequestUserTurn(turn *chatview.UITurn) (*chatview.UITurn, error) {

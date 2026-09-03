@@ -4607,6 +4607,43 @@ definitions:
       provider:
         type: string
     type: object
+  handlers.enqueueQueueRequest:
+    properties:
+      invocation_id:
+        type: string
+      text:
+        type: string
+    required:
+    - invocation_id
+    - text
+    type: object
+  handlers.followUpQueueItemResponse:
+    properties:
+      enqueued_during_run_id:
+        type: string
+      item_id:
+        type: string
+      position:
+        type: integer
+      status:
+        $ref: '#/definitions/queue.Status'
+      text:
+        type: string
+    type: object
+  handlers.followUpQueueReorderRequest:
+    properties:
+      before:
+        $ref: '#/definitions/queue.FollowUpPendingRef'
+      item:
+        $ref: '#/definitions/queue.FollowUpPendingRef'
+    type: object
+  handlers.followUpQueueResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.followUpQueueItemResponse'
+        type: array
+    type: object
   handlers.forkSessionRequest:
     properties:
       message_id:
@@ -4774,10 +4811,48 @@ definitions:
       state:
         type: string
     type: object
+  handlers.sessionQueueResponse:
+    properties:
+      follow_up:
+        items:
+          $ref: '#/definitions/handlers.followUpQueueItemResponse'
+        type: array
+      steer:
+        items:
+          $ref: '#/definitions/handlers.steerQueueItemResponse'
+        type: array
+    type: object
   handlers.skillsOpResponse:
     properties:
       ok:
         type: boolean
+    type: object
+  handlers.steerQueueItemResponse:
+    properties:
+      item_id:
+        type: string
+      position:
+        type: integer
+      status:
+        $ref: '#/definitions/queue.Status'
+      target_run_id:
+        type: string
+      text:
+        type: string
+    type: object
+  handlers.steerQueueReorderRequest:
+    properties:
+      before:
+        $ref: '#/definitions/queue.SteerPendingRef'
+      item:
+        $ref: '#/definitions/queue.SteerPendingRef'
+    type: object
+  handlers.steerQueueResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.steerQueueItemResponse'
+        type: array
     type: object
   handlers.synthesizeRequest:
     properties:
@@ -4799,6 +4874,13 @@ definitions:
         type: boolean
       shell:
         type: string
+    type: object
+  handlers.updateQueueRequest:
+    properties:
+      text:
+        type: string
+    required:
+    - text
     type: object
   handlers.updateSessionRequest:
     properties:
@@ -5451,6 +5533,30 @@ definitions:
       sort_order:
         type: integer
       type:
+        type: string
+    type: object
+  queue.FollowUpPendingRef:
+    properties:
+      item_id:
+        type: string
+    type: object
+  queue.Status:
+    enum:
+    - accepted
+    - claimed
+    - applied
+    - rejected
+    - canceled
+    type: string
+    x-enum-varnames:
+    - Accepted
+    - Claimed
+    - Applied
+    - Rejected
+    - Canceled
+  queue.SteerPendingRef:
+    properties:
+      item_id:
         type: string
     type: object
   reasoning.Options:
@@ -11421,6 +11527,225 @@ paths:
       summary: Get session context lifecycle
       tags:
       - sessions
+  /bots/{bot_id}/sessions/{session_id}/follow-up-queue:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.followUpQueueResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List pending follow-up inputs
+      tags:
+      - sessions
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Follow-up payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.enqueueQueueRequest'
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/handlers.followUpQueueItemResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Enqueue follow-up input for the active session run
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Queue item ID
+        in: path
+        name: item_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Cancel an accepted follow-up input
+      tags:
+      - sessions
+    patch:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Queue item ID
+        in: path
+        name: item_id
+        required: true
+        type: string
+      - description: Updated follow-up payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.updateQueueRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.followUpQueueItemResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Edit an accepted follow-up input
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id}/steer:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Follow-up queue item ID
+        in: path
+        name: item_id
+        required: true
+        type: string
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/handlers.steerQueueItemResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Promote an accepted follow-up input to steer the active run
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/follow-up-queue/reorder:
+    put:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Typed follow-up queue references
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.followUpQueueReorderRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.followUpQueueResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Reorder accepted follow-up inputs
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:
     post:
       parameters:
@@ -11464,6 +11789,31 @@ paths:
       summary: Fork a chat session from an assistant reply
       tags:
       - sessions
+  /bots/{bot_id}/sessions/{session_id}/queue:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.sessionQueueResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List pending steer and follow-up inputs in one response
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/status:
     get:
       description: Get aggregated info for a chat session including message count,
@@ -11501,6 +11851,187 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Get session info
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/steer-queue:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.steerQueueResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List pending steer inputs
+      tags:
+      - sessions
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Steer payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.enqueueQueueRequest'
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/handlers.steerQueueItemResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Enqueue steer input for the active session run
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/steer-queue/{item_id}:
+    delete:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Queue item ID
+        in: path
+        name: item_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Cancel an accepted steer input
+      tags:
+      - sessions
+    patch:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Queue item ID
+        in: path
+        name: item_id
+        required: true
+        type: string
+      - description: Updated steer payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.updateQueueRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.steerQueueItemResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Edit an accepted steer input
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/steer-queue/reorder:
+    put:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Typed steer queue references
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.steerQueueReorderRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.steerQueueResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Reorder accepted steer inputs
       tags:
       - sessions
   /bots/{bot_id}/sessions/events:

@@ -351,6 +351,7 @@ owner_lease_ttl = "45s"
 [session_runtime.redis]
 url = "redis://redis.example:6379/2"
 key_prefix = "test:runtime:"
+
 `)
 	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)

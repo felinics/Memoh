@@ -2594,6 +2594,28 @@ export type HandlersEmailOAuthStatusResponse = {
     provider?: string;
 };
 
+export type HandlersEnqueueQueueRequest = {
+    invocation_id: string;
+    text: string;
+};
+
+export type HandlersFollowUpQueueItemResponse = {
+    enqueued_during_run_id?: string;
+    item_id?: string;
+    position?: number;
+    status?: QueueStatus;
+    text?: string;
+};
+
+export type HandlersFollowUpQueueReorderRequest = {
+    before?: QueueFollowUpPendingRef;
+    item?: QueueFollowUpPendingRef;
+};
+
+export type HandlersFollowUpQueueResponse = {
+    items?: Array<HandlersFollowUpQueueItemResponse>;
+};
+
 export type HandlersForkSessionRequest = {
     /**
      * MessageID is the pre-turn spelling of TurnID, resolved server-side to the
@@ -2699,8 +2721,30 @@ export type HandlersOauthExchangeRequest = {
     state?: string;
 };
 
+export type HandlersSessionQueueResponse = {
+    follow_up?: Array<HandlersFollowUpQueueItemResponse>;
+    steer?: Array<HandlersSteerQueueItemResponse>;
+};
+
 export type HandlersSkillsOpResponse = {
     ok?: boolean;
+};
+
+export type HandlersSteerQueueItemResponse = {
+    item_id?: string;
+    position?: number;
+    status?: QueueStatus;
+    target_run_id?: string;
+    text?: string;
+};
+
+export type HandlersSteerQueueReorderRequest = {
+    before?: QueueSteerPendingRef;
+    item?: QueueSteerPendingRef;
+};
+
+export type HandlersSteerQueueResponse = {
+    items?: Array<HandlersSteerQueueItemResponse>;
 };
 
 export type HandlersSynthesizeRequest = {
@@ -2716,6 +2760,10 @@ export type HandlersSynthesizeResponse = {
 export type HandlersTerminalInfoResponse = {
     available?: boolean;
     shell?: string;
+};
+
+export type HandlersUpdateQueueRequest = {
+    text: string;
 };
 
 export type HandlersUpdateSessionRequest = {
@@ -3116,6 +3164,16 @@ export type ProvidertemplatesModelResponse = {
     name?: string;
     sort_order?: number;
     type?: string;
+};
+
+export type QueueFollowUpPendingRef = {
+    item_id?: string;
+};
+
+export type QueueStatus = 'accepted' | 'claimed' | 'applied' | 'rejected' | 'canceled';
+
+export type QueueSteerPendingRef = {
+    item_id?: string;
 };
 
 export type ReasoningOptions = {
@@ -9951,6 +10009,269 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses = {
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses];
 
+export type GetBotsByBotIdSessionsBySessionIdFollowUpQueueData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/follow-up-queue';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdFollowUpQueueErrors = {
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdFollowUpQueueError = GetBotsByBotIdSessionsBySessionIdFollowUpQueueErrors[keyof GetBotsByBotIdSessionsBySessionIdFollowUpQueueErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdFollowUpQueueResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFollowUpQueueResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdFollowUpQueueResponse = GetBotsByBotIdSessionsBySessionIdFollowUpQueueResponses[keyof GetBotsByBotIdSessionsBySessionIdFollowUpQueueResponses];
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueData = {
+    /**
+     * Follow-up payload
+     */
+    body: HandlersEnqueueQueueRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/follow-up-queue';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueError = PostBotsByBotIdSessionsBySessionIdFollowUpQueueErrors[keyof PostBotsByBotIdSessionsBySessionIdFollowUpQueueErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueResponses = {
+    /**
+     * Accepted
+     */
+    202: HandlersFollowUpQueueItemResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueResponse = PostBotsByBotIdSessionsBySessionIdFollowUpQueueResponses[keyof PostBotsByBotIdSessionsBySessionIdFollowUpQueueResponses];
+
+export type PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderData = {
+    /**
+     * Typed follow-up queue references
+     */
+    body: HandlersFollowUpQueueReorderRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/follow-up-queue/reorder';
+};
+
+export type PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderError = PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderErrors[keyof PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderErrors];
+
+export type PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFollowUpQueueResponse;
+};
+
+export type PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderResponse = PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderResponses[keyof PutBotsByBotIdSessionsBySessionIdFollowUpQueueReorderResponses];
+
+export type DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Queue item ID
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id}';
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdError = DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors[keyof DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors];
+
+export type DeleteBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdData = {
+    /**
+     * Updated follow-up payload
+     */
+    body: HandlersUpdateQueueRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Queue item ID
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id}';
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdError = PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdErrors];
+
+export type PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersFollowUpQueueItemResponse;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdResponse = PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdResponses[keyof PatchBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdResponses];
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Follow-up queue item ID
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id}/steer';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerError = PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerErrors[keyof PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerResponses = {
+    /**
+     * Accepted
+     */
+    202: HandlersSteerQueueItemResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerResponse = PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerResponses[keyof PostBotsByBotIdSessionsBySessionIdFollowUpQueueByItemIdSteerResponses];
+
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**
      * Fork source turn
@@ -10000,6 +10321,40 @@ export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
 
 export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
 
+export type GetBotsByBotIdSessionsBySessionIdQueueData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/queue';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdQueueErrors = {
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdQueueError = GetBotsByBotIdSessionsBySessionIdQueueErrors[keyof GetBotsByBotIdSessionsBySessionIdQueueErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdQueueResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSessionQueueResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdQueueResponse = GetBotsByBotIdSessionsBySessionIdQueueResponses[keyof GetBotsByBotIdSessionsBySessionIdQueueResponses];
+
 export type GetBotsByBotIdSessionsBySessionIdStatusData = {
     body?: never;
     path: {
@@ -10046,6 +10401,223 @@ export type GetBotsByBotIdSessionsBySessionIdStatusResponses = {
 };
 
 export type GetBotsByBotIdSessionsBySessionIdStatusResponse = GetBotsByBotIdSessionsBySessionIdStatusResponses[keyof GetBotsByBotIdSessionsBySessionIdStatusResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdSteerQueueData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/steer-queue';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdSteerQueueErrors = {
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdSteerQueueError = GetBotsByBotIdSessionsBySessionIdSteerQueueErrors[keyof GetBotsByBotIdSessionsBySessionIdSteerQueueErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdSteerQueueResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSteerQueueResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdSteerQueueResponse = GetBotsByBotIdSessionsBySessionIdSteerQueueResponses[keyof GetBotsByBotIdSessionsBySessionIdSteerQueueResponses];
+
+export type PostBotsByBotIdSessionsBySessionIdSteerQueueData = {
+    /**
+     * Steer payload
+     */
+    body: HandlersEnqueueQueueRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/steer-queue';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdSteerQueueErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdSteerQueueError = PostBotsByBotIdSessionsBySessionIdSteerQueueErrors[keyof PostBotsByBotIdSessionsBySessionIdSteerQueueErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdSteerQueueResponses = {
+    /**
+     * Accepted
+     */
+    202: HandlersSteerQueueItemResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdSteerQueueResponse = PostBotsByBotIdSessionsBySessionIdSteerQueueResponses[keyof PostBotsByBotIdSessionsBySessionIdSteerQueueResponses];
+
+export type PutBotsByBotIdSessionsBySessionIdSteerQueueReorderData = {
+    /**
+     * Typed steer queue references
+     */
+    body: HandlersSteerQueueReorderRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/steer-queue/reorder';
+};
+
+export type PutBotsByBotIdSessionsBySessionIdSteerQueueReorderErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PutBotsByBotIdSessionsBySessionIdSteerQueueReorderError = PutBotsByBotIdSessionsBySessionIdSteerQueueReorderErrors[keyof PutBotsByBotIdSessionsBySessionIdSteerQueueReorderErrors];
+
+export type PutBotsByBotIdSessionsBySessionIdSteerQueueReorderResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSteerQueueResponse;
+};
+
+export type PutBotsByBotIdSessionsBySessionIdSteerQueueReorderResponse = PutBotsByBotIdSessionsBySessionIdSteerQueueReorderResponses[keyof PutBotsByBotIdSessionsBySessionIdSteerQueueReorderResponses];
+
+export type DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Queue item ID
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/steer-queue/{item_id}';
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdError = DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors[keyof DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors];
+
+export type DeleteBotsByBotIdSessionsBySessionIdSteerQueueByItemIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdData = {
+    /**
+     * Updated steer payload
+     */
+    body: HandlersUpdateQueueRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Queue item ID
+         */
+        item_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/steer-queue/{item_id}';
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdError = PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdErrors];
+
+export type PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSteerQueueItemResponse;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdResponse = PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdResponses[keyof PatchBotsByBotIdSessionsBySessionIdSteerQueueByItemIdResponses];
 
 export type DeleteBotsByBotIdSettingsData = {
     body?: never;

@@ -40,8 +40,10 @@ type Reaper struct {
 	ownerID                string
 	logger                 *slog.Logger
 	recoverWaitingDecision func(context.Context, LeaseCandidate) (bool, error)
+	recoverQueueRun        func(context.Context, LeaseCandidate) (bool, error)
 	terminalObserver       func(context.Context, TerminalRun)
 	terminalReconciler     func(context.Context) error
+	continuationRecoverer  func(context.Context) error
 
 	// generation is the liveness incarnation last observed. Runs stamped with
 	// anything else were claimed by a backend that no longer exists.
@@ -71,6 +73,16 @@ func (r *Reaper) SetWaitingDecisionRecoverer(recoverer func(context.Context, Lea
 	r.recoverWaitingDecision = recoverer
 }
 
+// SetQueueRunRecoverer installs the owner-local recovery for a run that has a
+// durable queue claim. It runs before the generic lost transition, allowing a
+// replacement owner to reclaim the same claim under a new fencing token.
+func (r *Reaper) SetQueueRunRecoverer(recoverer func(context.Context, LeaseCandidate) (bool, error)) {
+	if r == nil {
+		return
+	}
+	r.recoverQueueRun = recoverer
+}
+
 // SetTerminalObserver installs the sink for authoritative durable outcomes.
 func (r *Reaper) SetTerminalObserver(observer func(context.Context, TerminalRun)) {
 	if r == nil {
@@ -86,6 +98,16 @@ func (r *Reaper) SetTerminalReconciler(reconciler func(context.Context) error) {
 		return
 	}
 	r.terminalReconciler = reconciler
+}
+
+// SetContinuationRecoverer installs the ownerless continuation scan. It is
+// intentionally separate from generic orphan reaping: continuation runs are
+// durable accepted work and must first win their own fencing CAS.
+func (r *Reaper) SetContinuationRecoverer(recoverer func(context.Context) error) {
+	if r == nil {
+		return
+	}
+	r.continuationRecoverer = recoverer
 }
 
 // NewReaper builds a reaper for one manager. It shares the manager's derived
@@ -193,6 +215,11 @@ func (r *Reaper) tick(ctx context.Context) {
 			r.logger.Warn("reconcile session runtime terminal observations failed", slog.Any("error", err))
 		}
 	}
+	if r.continuationRecoverer != nil {
+		if err := r.continuationRecoverer(context.WithoutCancel(ctx)); err != nil {
+			r.logger.Warn("recover ownerless continuation runs failed", slog.Any("error", err))
+		}
+	}
 }
 
 // reapExpiredLeases handles the ordinary case: an owner stopped renewing. The
@@ -220,6 +247,19 @@ func (r *Reaper) reapExpiredLeases(ctx context.Context) error {
 			if recovered {
 				if _, err := r.liveness.ReleaseLeaseCandidate(ctx, candidate); err != nil {
 					errs = append(errs, fmt.Errorf("release reclaimed session runtime lease candidate: %w", err))
+				}
+				continue
+			}
+		}
+		if getErr == nil && run.State == ledger.StateRunning && r.recoverQueueRun != nil {
+			recovered, recoverErr := r.recoverQueueRun(ctx, candidate)
+			if recoverErr != nil {
+				errs = append(errs, fmt.Errorf("recover queued session runtime run: %w", recoverErr))
+				continue
+			}
+			if recovered {
+				if _, err := r.liveness.ReleaseLeaseCandidate(ctx, candidate); err != nil {
+					errs = append(errs, fmt.Errorf("release reclaimed queued session runtime lease candidate: %w", err))
 				}
 				continue
 			}

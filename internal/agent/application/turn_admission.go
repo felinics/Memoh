@@ -52,6 +52,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 		return
 	}
 	s.sessionRuntime = manager
+	s.sessionManager = manager
 	s.decisionRuntime = manager
 	s.abortRuntime = manager
 	s.publishTurnEvent = func(ctx context.Context, handle sessionruntime.RunHandle, event native.StreamEvent) error {
@@ -60,8 +61,14 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	}
 	manager.SetDecisionStore(s)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
-	manager.SetTerminalObserver(s.reconcileTerminalContextLifecycle)
+	manager.SetTerminalObserver(func(ctx context.Context, terminal sessionruntime.TerminalRun) {
+		s.reconcileTerminalContextLifecycle(ctx, terminal)
+		s.reconcileTerminalQueue(ctx, terminal)
+		s.reconcileLostQueueContinuation(ctx, terminal)
+	})
 	manager.SetTerminalReconciler(s.reconcileTerminalContextLifecycles)
+	manager.SetContinuationRecoverer(s.recoverQueueContinuations)
+	manager.SetQueueRunRecoverer(s.recoverQueuedSteerRun)
 }
 
 // admitTurnRun puts a StartTurnCommand through durable admission and answers in

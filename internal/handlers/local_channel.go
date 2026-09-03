@@ -506,7 +506,6 @@ func (h *LocalChannelHandler) classifyWebSlash(text string, hasAttachments bool,
 		Surface:        surface,
 		IsGroup:        false,
 		Directed:       true,
-		SupportsMode:   false,
 		KnownCommand: func(resource string) bool {
 			if resource == "help" || resource == "skill" || resource == "permission" {
 				return true
@@ -1438,6 +1437,8 @@ type wsRunAdmissionBuilder func(context.Context, sessionruntime.RunHandle) (sess
 type wsAdmittedTurn struct {
 	TurnID   string
 	Position *int64
+	Handle   sessionruntime.RunHandle
+	InjectCh chan turn.InjectMessage
 }
 
 // wsSubmission is the canonical form of what a client sent. Its bytes decide
@@ -1702,6 +1703,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 	sendWSRunAccepted(writer, ref, admission.Accepted)
 
 	eventCh := make(chan application.WSStreamEvent, 64)
+	injectCh := make(chan turn.InjectMessage, 16)
 	forwarded := make(chan struct{})
 	releaseCompaction := h.agentService.DeferSessionCompaction(botID, ref.SessionID, ref.RunID)
 	go func() {
@@ -1711,8 +1713,9 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 				defer onFinish()
 			}
 			defer close(eventCh)
-			return runner(streamCtx, ref, wsAdmittedTurn{TurnID: admission.TurnID, Position: admission.TurnPosition}, eventCh, abortCh)
+			return runner(streamCtx, ref, wsAdmittedTurn{TurnID: admission.TurnID, Position: admission.TurnPosition, Handle: admission.Handle, InjectCh: injectCh}, eventCh, abortCh)
 		}()
+		close(injectCh)
 		// Every event this run produced has to be published before the run is
 		// declared finished, or a subscriber is shown the terminal state and then
 		// handed output that supposedly preceded it. The forwarder cannot outlive
@@ -2322,6 +2325,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						WorkspaceTargetID:       workspaceTargetID,
 						ToolHTTPURL:             buildACPMCPToolsURL(c, botID),
 						AgentCommand:            decision.AgentCommand,
+						RunHandle:               admittedTurn.Handle,
+						InjectCh:                admittedTurn.InjectCh,
+						QueueInjectCh:           admittedTurn.InjectCh,
 					}
 					if preparedActivationReq != nil {
 						req.Messages = preparedActivationReq.Messages
@@ -2401,6 +2407,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					input.RunID = runRef.RunID
 					input.TurnID = admittedTurn.TurnID
 					input.TurnPosition = admittedTurn.Position
+					input.RunHandle = admittedTurn.Handle
+					input.InjectCh = admittedTurn.InjectCh
 					return h.agentService.RetryLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
 			)
@@ -2494,6 +2502,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					input.RunID = runRef.RunID
 					input.TurnID = admittedTurn.TurnID
 					input.TurnPosition = admittedTurn.Position
+					input.RunHandle = admittedTurn.Handle
+					input.InjectCh = admittedTurn.InjectCh
 					input.Attachments = editAdmission.preparedAttachments()
 					return h.agentService.EditLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
