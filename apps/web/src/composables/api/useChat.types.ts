@@ -188,8 +188,39 @@ export interface UIToolMessage {
   progress?: unknown[]
   approval?: UIToolApproval
   execution_location?: UIExecutionLocation
+  execution_timing?: UIExecutionTiming
   user_input?: UIUserInput
   background_task?: UIBackgroundTask
+}
+
+// Server-observed wall clock of one tool execution, Unix milliseconds.
+export interface UIExecutionTiming {
+  started_at_ms: number
+  ended_at_ms: number
+}
+
+export interface UIStepTraceUsage {
+  input_tokens?: number
+  cached_input_tokens?: number
+  cache_write_tokens?: number
+  output_tokens?: number
+  reasoning_tokens?: number
+}
+
+// One model request of an assistant turn, anchored to the first block it
+// produced; blocks up to the next trace's anchor belong to it.
+export interface UIStepTrace {
+  first_message_id: number
+  step_index: number
+  started_at_ms: number
+  first_token_at_ms?: number
+  ended_at_ms: number
+  finish_reason?: string
+  usage?: UIStepTraceUsage
+}
+
+export interface UIContextInjection {
+  kind: 'steering' | 'prepared' | (string & {})
 }
 
 export interface UIExecutionLocation {
@@ -314,6 +345,7 @@ export interface UIUserTurn {
   role: 'user'
   text: string
   user_message_kind?: string
+  context_injection?: UIContextInjection
   skill_activation?: UISkillActivation
   attachments?: UIAttachment[]
   reply?: UIReplyRef
@@ -332,6 +364,7 @@ export interface UIAssistantTurn {
   turn_position?: number
   role: 'assistant'
   messages: UIMessage[]
+  step_traces?: UIStepTrace[]
   timestamp: string
   platform?: string
   external_message_id?: string
@@ -444,6 +477,7 @@ export interface RuntimeCurrentRunView {
   finish_proposed_at?: string
   steer?: RuntimeSteerState
   operation?: RuntimeRunOperation
+  step_traces?: UIStepTrace[]
 }
 
 export interface RuntimeSnapshot {
@@ -484,6 +518,7 @@ export interface RuntimeDelta {
   progress_appends?: RuntimeProgressAppend[]
   message_upserts?: UIMessage[]
   reset_messages?: boolean
+  step_trace_appends?: UIStepTrace[]
 }
 
 export interface UIRuntimeSnapshotEvent {
