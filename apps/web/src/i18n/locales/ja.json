@@ -649,7 +649,21 @@
       "steps": "{count} ステップ",
       "thought": "考え",
       "thoughtBriefly": "少し考えた",
-      "thoughtSeconds": "{seconds}秒考えました"
+      "thoughtSeconds": "{seconds}秒考えました",
+      "phase": {
+        "browse": "探索中",
+        "edit": "編集中",
+        "run": "実行中",
+        "message": "送信中",
+        "schedule": "変更中",
+        "media": "生成中",
+        "agent": "委譲中",
+        "gui": "閲覧中",
+        "other": "作業中"
+      }
+    },
+    "runtime": {
+      "working": "作業中"
     },
     "currentBot": "現在のBot",
     "inputPlaceholder": "質問を入力してください…",

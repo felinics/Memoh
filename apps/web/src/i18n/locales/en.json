@@ -666,6 +666,17 @@
       "thought": "Thought",
       "thoughtBriefly": "Thought for a couple of seconds",
       "thoughtSeconds": "Thought for {seconds}s",
+      "phase": {
+        "browse": "Exploring",
+        "edit": "Editing",
+        "run": "Running",
+        "message": "Messaging",
+        "schedule": "Scheduling",
+        "media": "Generating",
+        "agent": "Delegating",
+        "gui": "Browsing",
+        "other": "Working"
+      },
       "thinkingHints": [
         "Connecting the dots",
         "Piecing it together",
@@ -676,6 +687,9 @@
         "Weighing the options",
         "Taking a closer look"
       ]
+    },
+    "runtime": {
+      "working": "Working"
     },
     "currentBot": "Current Bot",
     "inputPlaceholder": "Ask anything…",

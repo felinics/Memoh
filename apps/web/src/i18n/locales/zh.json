@@ -666,6 +666,17 @@
       "thought": "已思考",
       "thoughtBriefly": "思考了几秒",
       "thoughtSeconds": "已思考 {seconds} 秒",
+      "phase": {
+        "browse": "探索中",
+        "edit": "修改中",
+        "run": "运行中",
+        "message": "发送中",
+        "schedule": "调整中",
+        "media": "生成中",
+        "agent": "委派中",
+        "gui": "浏览中",
+        "other": "处理中"
+      },
       "thinkingHints": [
         "正在连接线索",
         "正在拼合信息",
@@ -676,6 +687,9 @@
         "正在权衡选项",
         "正在仔细查看"
       ]
+    },
+    "runtime": {
+      "working": "工作中"
     },
     "currentBot": "当前 Bot",
     "inputPlaceholder": "问点什么…",

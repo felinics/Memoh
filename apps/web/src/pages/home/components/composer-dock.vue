@@ -26,6 +26,26 @@
       :user-input="pendingUserInput"
       @reveal-composer="handleUserInputReveal"
     />
+    <!-- The runtime line hugs the box the way the panel does, but it is a
+         STATUS member, not a stack member: nothing to click, nothing to
+         answer. The pane gates `runtimeActive` (streaming AND not blocked on
+         the user) so the line never argues with an approval/ask_user panel
+         about what the turn is waiting on. -->
+    <Transition
+      enter-active-class="transition-opacity duration-150 ease-out"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition-opacity duration-100 ease-in"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <ComposerRuntimeLine
+        v-if="runtimeActive"
+        :active="runtimeActive"
+        :started-at="runtimeStartedAt"
+        :steps="runtimeSteps"
+      />
+    </Transition>
     <div
       v-show="composerVisible"
       ref="boxEl"
@@ -66,6 +86,7 @@
 import { computed, ref, watch } from 'vue'
 import { useElementSize } from '@vueuse/core'
 import ComposerPanel from './composer-panel.vue'
+import ComposerRuntimeLine from './composer-runtime-line.vue'
 import ChatUserInputForm from './chat-user-input-form.vue'
 import { COMPOSER_MASK_BELOW_PX } from '../composables/useComposerLayout'
 import type { PendingApprovalItem } from '../composables/usePendingApprovals'
@@ -85,6 +106,12 @@ const props = defineProps<{
   commandPanel: CommandPanelData | null
   errorMessage: string
   pendingUserInput: UIUserInput | null
+  // Runtime-line inputs, owned by the pane (it alone knows the streaming turn
+  // and what the turn is blocked on). All three are inert unless
+  // runtimeActive is on.
+  runtimeActive?: boolean
+  runtimeStartedAt?: number | null
+  runtimeSteps?: number
 }>()
 
 const emit = defineEmits<{
