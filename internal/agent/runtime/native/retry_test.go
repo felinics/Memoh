@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestRetryableStreamErrorSeparatesProviderStatusFromApplicationTimeout(t *testing.T) {
@@ -28,5 +29,21 @@ func TestRetryableStreamErrorSeparatesProviderStatusFromApplicationTimeout(t *te
 				t.Fatalf("isRetryableStreamError(%q) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestRetryDelayToleratesUnsetDelayFields pins the misconfiguration guard:
+// callers may set only MaxAttempts (leaving the delay fields at their zero
+// values), and retryDelay must fire immediately instead of panicking inside
+// rand.Int64N on a non-positive argument.
+func TestRetryDelayToleratesUnsetDelayFields(t *testing.T) {
+	t.Parallel()
+
+	if got := retryDelay(2, RetryConfig{MaxAttempts: 3}); got != 0 {
+		t.Fatalf("retryDelay(2, delays unset) = %v, want 0", got)
+	}
+	nano := RetryConfig{MaxAttempts: 3, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}
+	if got := retryDelay(2, nano); got != 0 {
+		t.Fatalf("retryDelay(2, 1ns delays) = %v, want 0 (delay/2 == 0 must not reach Int64N)", got)
 	}
 }

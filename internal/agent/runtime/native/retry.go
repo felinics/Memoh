@@ -89,8 +89,15 @@ func retryDelay(attempt int, cfg RetryConfig) time.Duration {
 	}
 	delay := cfg.BaseDelay * time.Duration(1<<backoffIdx)
 	delay = min(delay, cfg.MaxDelay)
-	// Add jitter: random value in [0, delay/2), so final delay is in [delay/2, delay).
+	// Int64N panics on a non-positive argument, so a config that leaves the
+	// delay fields at (near-)zero values must never reach it. "No delay
+	// configured" means the same as a fast attempt: fire immediately.
+	half := delay / 2
+	if half <= 0 {
+		return 0
+	}
+	// Add jitter: random value in [0, half), so final delay is in [half, delay).
 	// math/rand is intentional here — cryptographic randomness is not needed for backoff jitter.
-	jitter := time.Duration(rand.Int64N(int64(delay / 2))) //nolint:gosec // G404: jitter does not need crypto/rand
-	return delay/2 + jitter
+	jitter := time.Duration(rand.Int64N(int64(half))) //nolint:gosec // G404: jitter does not need crypto/rand
+	return half + jitter
 }
