@@ -523,7 +523,7 @@ func (m *Manager) Kill(taskID string) error {
 		task.mu.Unlock()
 		return fmt.Errorf("task %s is not running (status: %s)", taskID, task.Status)
 	}
-	if task.Kind == KindAgent && task.Status == TaskRunning {
+	if (task.Kind == KindAgent || task.Kind == KindDependency) && task.Status == TaskRunning {
 		if task.stopRequested {
 			task.mu.Unlock()
 			return fmt.Errorf("task %s stop already requested", taskID)
@@ -532,7 +532,7 @@ func (m *Manager) Kill(taskID string) error {
 		task.mu.Unlock()
 
 		task.Cancel()
-		m.logger.Info("background agent task stop requested", slog.String("task_id", taskID))
+		m.logger.Info("background managed task stop requested", slog.String("task_id", taskID))
 		return nil
 	}
 	task.Status = TaskKilled
@@ -654,6 +654,8 @@ func (m *Manager) WaitForSessionTask(ctx context.Context, botID, sessionID, task
 			return task.Snapshot(), WaitFailed, nil
 		case status == TaskKilled:
 			return task.Snapshot(), WaitKilled, nil
+		case status == TaskUnknown:
+			return task.Snapshot(), WaitUnknown, nil
 		case stalled:
 			return task.Snapshot(), WaitStalled, nil
 		}
@@ -730,7 +732,7 @@ func (m *Manager) Cleanup(maxAge time.Duration) {
 		// queued subagent requests may legitimately wait longer than one cleanup
 		// interval before promotion.
 		t.mu.Lock()
-		terminal := t.Status == TaskCompleted || t.Status == TaskFailed || t.Status == TaskKilled
+		terminal := t.Status == TaskCompleted || t.Status == TaskFailed || t.Status == TaskKilled || t.Status == TaskUnknown
 		old := !t.CompletedAt.IsZero() && t.CompletedAt.Before(cutoff)
 		t.mu.Unlock()
 		if terminal && old {

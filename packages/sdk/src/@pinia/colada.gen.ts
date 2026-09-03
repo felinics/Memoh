@@ -468,7 +468,7 @@ export const getBotsByBotIdAgentsQuery = defineQueryOptions<Options<GetBotsByBot
 /**
  * Add an Agent to a bot
  *
- * Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.
+ * Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id) when the runtime declares one.
  */
 export const postBotsByBotIdAgentsMutation = (options?: Partial<Options<PostBotsByBotIdAgentsData>>): UseMutationOptions<PostBotsByBotIdAgentsResponse, Options<PostBotsByBotIdAgentsData>, PostBotsByBotIdAgentsError> => ({
     mutation: async (vars) => {

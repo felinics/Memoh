@@ -1335,7 +1335,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.",
+                "description": "Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id) when the runtime declares one.",
                 "consumes": [
                     "application/json"
                 ],
@@ -17350,7 +17350,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "dependency": {
-                    "description": "Dependency is the workspace dependency the agent's runtime declares\n(design §9.3). It is derived from the driver at read time, never\npersisted, and omitted for runtimes without a declaration (ACP).",
+                    "description": "Dependency comes from the runtime driver at read time. It is not\npersisted and is omitted for runtimes without a declaration (ACP).",
                     "allOf": [
                         {
                             "$ref": "#/definitions/botagents.DependencyRequirement"
@@ -17401,9 +17401,6 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "dependency_id": {
-                    "type": "string"
-                },
-                "required_version": {
                     "type": "string"
                 }
             }
@@ -19654,7 +19651,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/conversation.UIToolApproval"
                 },
                 "args": {
-                    "description": "Args are the machine-readable parameters of a notice block: the string\nvalues of the runtime_notice event metadata (dep_id, required_version,\ninstalled_version for agent_dependency_version_mismatch). The client\nrenders actions from them instead of parsing Content.",
+                    "description": "Args are the machine-readable parameters of a notice block: the string\nvalues of the runtime_notice event metadata (dep_id and install_task_id\nfor a workspace dependency notice, for instance). The client renders\nactions from them instead of parsing Content.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -22688,6 +22685,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "definition_revision": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "description": "SessionID optionally routes operation progress to its originating conversation.",
                     "type": "string"
                 },
                 "version": {

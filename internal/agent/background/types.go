@@ -16,6 +16,8 @@ const (
 	TaskCompleted TaskStatus = "completed"
 	TaskFailed    TaskStatus = "failed"
 	TaskKilled    TaskStatus = "killed"
+	// TaskUnknown means supervision ended without proof of process exit.
+	TaskUnknown TaskStatus = "unknown"
 )
 
 // Task represents a single background task (a container command execution
@@ -61,6 +63,7 @@ const (
 	WaitCompleted WaitOutcome = "completed"
 	WaitFailed    WaitOutcome = "failed"
 	WaitKilled    WaitOutcome = "killed"
+	WaitUnknown   WaitOutcome = "unknown"
 	WaitStalled   WaitOutcome = "stalled"
 	// WaitIdle means the command is still running but produced no new output
 	// for the idle threshold — for server-style commands this usually means
@@ -250,6 +253,7 @@ const (
 	TaskEventCompleted TaskEventType = "completed"
 	TaskEventFailed    TaskEventType = "failed"
 	TaskEventKilled    TaskEventType = "killed"
+	TaskEventUnknown   TaskEventType = "unknown"
 	TaskEventStalled   TaskEventType = "stalled"
 )
 

@@ -1907,24 +1907,24 @@ func TestUIMessageStreamConverterRuntimeNoticeCarriesMetadataArgs(t *testing.T) 
 
 	messages := NewUIMessageStreamConverter().HandleEvent(UIMessageStreamEvent{
 		Type:  "runtime_notice",
-		Code:  "agent_dependency_version_mismatch",
-		Delta: " Codex 0.147.0 is installed but this build expects 0.151.0. ",
+		Code:  "agent_dependency_missing",
+		Delta: " Codex is not installed in this workspace; installing it in the background. ",
 		Metadata: map[string]any{
-			"dep_id":            "codex",
-			"required_version":  " 0.151.0 ",
-			"installed_version": "",
-			"attempts":          2,
-			"detail":            map[string]any{"path": "/opt/memoh/toolkit/bin/codex"},
+			"dep_id":          "codex",
+			"install_task_id": " task-42 ",
+			"installed_path":  "",
+			"attempts":        2,
+			"detail":          map[string]any{"path": "/opt/memoh/toolkit/bin/codex"},
 		},
 	})
 	want := UIMessage{
 		ID:      0,
 		Type:    UIMessageNotice,
-		Name:    "agent_dependency_version_mismatch",
-		Content: "Codex 0.147.0 is installed but this build expects 0.151.0.",
+		Name:    "agent_dependency_missing",
+		Content: "Codex is not installed in this workspace; installing it in the background.",
 		// Only string values survive; empty ones are dropped so the client
-		// treats "unknown installed version" and "no key" alike.
-		Args: map[string]string{"dep_id": "codex", "required_version": "0.151.0"},
+		// treats "unknown value" and "no key" alike.
+		Args: map[string]string{"dep_id": "codex", "install_task_id": "task-42"},
 	}
 	if len(messages) != 1 || !reflect.DeepEqual(messages[0], want) {
 		t.Fatalf("notice = %#v, want %#v", messages, want)

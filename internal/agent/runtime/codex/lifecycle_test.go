@@ -228,3 +228,39 @@ func TestServerTableReapsExitedProcess(t *testing.T) {
 	}
 	releaseFresh()
 }
+
+func TestLauncherRefreshDrainsOnlyTheObservedServer(t *testing.T) {
+	starter := &fakeStarter{}
+	table := newServerTable(starter.start, slog.Default())
+	t.Cleanup(table.closeAll)
+	old, releaseOld, err := table.acquire(t.Context(), "bot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseOld()
+	table.recycleResource("bot", old)
+	if old.(*fakeResource).closed.Load() {
+		t.Fatal("launcher refresh interrupted the active turn")
+	}
+	fresh, releaseFresh, err := table.acquire(t.Context(), "bot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseFresh()
+	if fresh == old {
+		t.Fatal("next turn reused the obsolete launcher")
+	}
+	table.recycleResource("bot", old)
+	subsequent, releaseSubsequent, err := table.acquire(t.Context(), "bot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseSubsequent()
+	if subsequent != fresh {
+		t.Fatal("a stale concurrent discovery result recycled the fresh server")
+	}
+	releaseOld()
+	if !old.(*fakeResource).closed.Load() {
+		t.Fatal("old launcher remained running after its last turn finished")
+	}
+}

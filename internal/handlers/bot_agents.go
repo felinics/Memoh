@@ -81,7 +81,7 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 
 // Create godoc
 // @Summary Add an Agent to a bot
-// @Description Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id, required_version) when the runtime declares one.
+// @Description Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id) when the runtime declares one.
 // @Tags bot-agents
 // @Accept json
 // @Produce json
@@ -265,7 +265,7 @@ func botAgentHTTPError(err error) error {
 }
 
 // withDependency projects the driver-declared workspace dependency onto the
-// agent (design §9.3) so the web can run the install preflight before
+// agent so the web can run the install preflight before
 // enabling it. Direct agents share the runtimekind vocabulary with their
 // driver (botagents.RuntimeCodex == codex.RuntimeType), so the agent's
 // runtime is the lookup key; runtimes without a declaration leave it nil.
@@ -287,8 +287,5 @@ func dependencyFor(requirements map[string]external.DependencyRequirement, runti
 	if !ok {
 		return nil
 	}
-	return &botagents.DependencyRequirement{
-		DependencyID:    requirement.DependencyID,
-		RequiredVersion: requirement.Version,
-	}
+	return &botagents.DependencyRequirement{DependencyID: requirement.DependencyID}
 }

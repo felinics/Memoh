@@ -29,9 +29,8 @@ type BotAgent struct {
 	// empty means not connected (legacy metadata path).
 	AgentCredentialID string         `json:"agent_credential_id,omitempty"`
 	Metadata          map[string]any `json:"metadata"`
-	// Dependency is the workspace dependency the agent's runtime declares
-	// (design §9.3). It is derived from the driver at read time, never
-	// persisted, and omitted for runtimes without a declaration (ACP).
+	// Dependency comes from the runtime driver at read time. It is not
+	// persisted and is omitted for runtimes without a declaration (ACP).
 	Dependency *DependencyRequirement `json:"dependency,omitempty"`
 	CreatedAt  time.Time              `json:"created_at"`
 	UpdatedAt  time.Time              `json:"updated_at"`
@@ -39,11 +38,11 @@ type BotAgent struct {
 }
 
 // DependencyRequirement names the managed workspace dependency a direct
-// runtime needs and the version this server build is pinned to. The web
-// preflight (POST /bots/{bot_id}/dependencies/preflight) keys on both.
+// runtime needs. No version is declared: the dependency manager installs
+// whatever version the user asks for (latest by default). The web preflight
+// (POST /bots/{bot_id}/dependencies/preflight) keys on the id.
 type DependencyRequirement struct {
-	DependencyID    string `json:"dependency_id"`
-	RequiredVersion string `json:"required_version"`
+	DependencyID string `json:"dependency_id"`
 }
 
 type CreateRequest struct {

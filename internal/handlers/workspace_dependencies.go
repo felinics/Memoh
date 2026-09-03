@@ -214,6 +214,8 @@ type WorkspaceDependencyPreflightItem struct {
 // WorkspaceDependencyInstallRequest is the optional body of install, update,
 // and reinstall.
 type WorkspaceDependencyInstallRequest struct {
+	// SessionID optionally routes operation progress to its originating conversation.
+	SessionID          string `json:"session_id,omitempty"`
 	DefinitionRevision string `json:"definition_revision,omitempty"`
 	// Version to install. Empty (or no body) installs the latest version the
 	// catalog script resolves, or the manifest pin when the dependency has
@@ -690,6 +692,15 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 		return workspaceDependencyError(err)
 	}
 	ctx = workspacedeps.WithDefinitionRevision(ctx, preview.Revision)
+	if validator, ok := svc.(interface {
+		ValidateOperationSession(context.Context, string, string) error
+	}); ok {
+		if err := validator.ValidateOperationSession(ctx, botID, request.SessionID); err != nil {
+			return workspaceDependencyError(err)
+		}
+	} else if request.SessionID != "" {
+		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
+	}
 	// A browser disconnect must not cancel a download already admitted by Manage
 	// authorization and pinned to the reviewed definition revision.
 	ctx = context.WithoutCancel(ctx)
@@ -705,7 +716,16 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	sink := workspacedeps.LogFunc(func(name, line string) {
 		stream.send(workspaceDependencyLogEvent{Type: "log", Stream: name, Data: line})
 	})
-	result, err := run(svc, ctx, botID, targetID, depID, version, sink)
+	var result workspacedeps.OperationResult
+	if authorized, ok := svc.(interface {
+		RunAuthorizedOperation(context.Context, string, string, string, string, string, func(context.Context, workspacedeps.LogSink) (workspacedeps.OperationResult, error), workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+	}); ok {
+		result, err = authorized.RunAuthorizedOperation(ctx, botID, targetID, depID, request.SessionID, string(action)+" "+depID, func(opCtx context.Context, opSink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
+			return run(svc, opCtx, botID, targetID, depID, version, opSink)
+		}, sink)
+	} else {
+		result, err = run(svc, ctx, botID, targetID, depID, version, sink)
+	}
 	if err != nil {
 		requestID := httpx.RequestID(c)
 		attrs := []any{
@@ -878,6 +898,7 @@ func workspaceDependencyOperationRequest(c echo.Context, action catalog.Action) 
 		}
 	}
 	req.Version = strings.TrimSpace(req.Version)
+	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.DefinitionRevision = strings.TrimSpace(req.DefinitionRevision)
 	if !catalog.ValidRevision(req.DefinitionRevision) {
 		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)

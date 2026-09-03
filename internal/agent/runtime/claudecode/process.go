@@ -8,13 +8,20 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
 const (
-	containerPath = "/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
-	// defaultLauncherPath is the toolkit copy of the CLI. It is used only when
-	// no external.LauncherResolver is installed on the Driver; with a resolver
-	// the copy to execute follows design §9.2 (managed → toolkit → PATH).
+	// containerPath is the PATH the CLI and every command it spawns see. The
+	// managed dependency shim directory comes first so a managed
+	// overlay of an image runtime (node, python, uv) wins over the toolkit
+	// copy.
+	containerPath = vpath.DataMount + "/.memoh/deps/bin:/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
+	// defaultLauncherPath is the toolkit path of the CLI. It is used only when
+	// no external.LauncherResolver is installed on the Driver. The canonical
+	// workspace image does not ship an agent CLI, so this only resolves in
+	// custom images that provide one; with a resolver the copy to execute
+	// follows source precedence (managed → toolkit → PATH).
 	defaultLauncherPath = "/opt/memoh/toolkit/bin/claude"
 	configDir           = "/data/.claude"
 	defaultProjectPath  = "/data"

@@ -55,7 +55,7 @@ func (*BackgroundProvider) Usage(_ context.Context, _ SessionContext, available 
 	if len(parts) == 0 {
 		return ""
 	}
-	parts = append(parts, "After starting long work in the background, call `wait_until(task_id)`: it returns with a `reason` (completed/failed/killed/stalled/idle/timeout) and the latest `output_tail`. For finite work (installs, builds, tests), re-wait until it completes, then read `result` via `get_background_status(task_id)`. For servers/watchers that never exit, `reason: \"idle\"` with a ready message in `output_tail` means the service is up — proceed instead of waiting for completion.")
+	parts = append(parts, "After starting long work in the background, call `wait_until(task_id)`: it returns with a `reason` (completed/failed/killed/unknown/stalled/idle/timeout) and the latest `output_tail`. For finite work (installs, builds, tests), re-wait until it completes, then read `result` via `get_background_status(task_id)`. For servers/watchers that never exit, `reason: \"idle\"` with a ready message in `output_tail` means the service is up — proceed instead of waiting for completion.")
 	return usageSection("Background Tasks", parts)
 }
 
@@ -92,7 +92,7 @@ func (p *BackgroundProvider) Tools(_ context.Context, session SessionContext) ([
 		},
 		{
 			Name:        ToolWaitUntil().String(),
-			Description: "Observe a background task for a bounded time. Returns with a reason: completed/failed/killed, stalled (interactive prompt), idle (still running but output quiet for idle_timeout), or timeout — always with the latest output_tail. For servers/watchers that never exit (dev server, watch mode), reason 'idle' plus a ready message in output_tail (e.g. a local URL) means the service is up; do not keep waiting for completion.",
+			Description: "Observe a background task for a bounded time. Returns with a reason: completed/failed/killed, unknown (execution connection lost; refresh dependency state before retrying), stalled (interactive prompt), idle (still running but output quiet for idle_timeout), or timeout — always with the latest output_tail. For servers/watchers that never exit (dev server, watch mode), reason 'idle' plus a ready message in output_tail (e.g. a local URL) means the service is up; do not keep waiting for completion.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -301,7 +301,7 @@ func (p *BackgroundProvider) execKillBackground(_ context.Context, session Sessi
 	if err := p.bgManager.KillForSession(session.BotID, session.SessionID, taskID); err != nil {
 		return nil, err
 	}
-	return map[string]any{"ok": true, "message": fmt.Sprintf("Task %s has been killed.", taskID)}, nil
+	return map[string]any{"ok": true, "message": fmt.Sprintf("Stop requested for task %s. Check its status to confirm the execution outcome.", taskID)}, nil
 }
 
 func backgroundStatusMap(session SessionContext, s background.TaskSnapshot) map[string]any {

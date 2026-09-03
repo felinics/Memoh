@@ -12,14 +12,19 @@ import (
 // eventRecorder collects task events behind a mutex; managed tasks emit from
 // their own goroutine.
 type eventRecorder struct {
-	mu     sync.Mutex
-	events []TaskEvent
+	mu      sync.Mutex
+	events  []TaskEvent
+	changed chan struct{}
 }
 
 func (r *eventRecorder) record(event TaskEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.events = append(r.events, event)
+	if r.changed != nil {
+		close(r.changed)
+	}
+	r.changed = make(chan struct{})
 }
 
 func (r *eventRecorder) types() []TaskEventType {
@@ -32,29 +37,32 @@ func (r *eventRecorder) types() []TaskEventType {
 	return out
 }
 
-func (r *eventRecorder) last() TaskEvent {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.events) == 0 {
-		return TaskEvent{}
-	}
-	return r.events[len(r.events)-1]
-}
-
 // awaitTerminal waits for the terminal event, which is emitted after the
 // waiter has already been woken by the status change.
 func (r *eventRecorder) awaitTerminal(t *testing.T) TaskEvent {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		switch last := r.last(); last.Event {
-		case TaskEventCompleted, TaskEventFailed, TaskEventKilled:
-			return last
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	for {
+		r.mu.Lock()
+		if r.changed == nil {
+			r.changed = make(chan struct{})
 		}
-		time.Sleep(5 * time.Millisecond)
+		changed := r.changed
+		if len(r.events) > 0 {
+			last := r.events[len(r.events)-1]
+			if last.Event == TaskEventCompleted || last.Event == TaskEventFailed || last.Event == TaskEventKilled {
+				r.mu.Unlock()
+				return last
+			}
+		}
+		r.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			t.Fatalf("no terminal event arrived: %v", r.types())
+		}
 	}
-	t.Fatalf("no terminal event arrived: %v", r.types())
-	return TaskEvent{}
 }
 
 func waitManaged(t *testing.T, mgr *Manager, taskID string) (TaskSnapshot, WaitOutcome) {
@@ -192,13 +200,51 @@ func TestSpawnManagedKillCancelsRunAndKeepsKilledState(t *testing.T) {
 	if snap.Status != TaskKilled || outcome != WaitKilled {
 		t.Fatalf("status = %s outcome = %s, want killed", snap.Status, outcome)
 	}
-	// The run returning after Kill must not publish a second terminal event.
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	rec.awaitTerminal(t)
 	got := rec.types()
 	if len(got) != 2 || got[0] != TaskEventStarted || got[1] != TaskEventKilled {
 		t.Fatalf("events = %v, want started then killed only", got)
+	}
+}
+
+func TestManagedCancellationWaitsForOperationOutcome(t *testing.T) {
+	mgr := New(nil)
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	taskID := mgr.SpawnManaged(t.Context(), "bot1", "sess1", "Install Tool", func(ctx context.Context, _ func(string, string)) error {
+		if _, limited := ctx.Deadline(); limited {
+			t.Error("managed wrapper imposed a deadline shorter than its manifest")
+		}
+		<-ctx.Done()
+		close(cancelled)
+		<-release
+		return ctx.Err()
+	})
+	if err := mgr.Kill(taskID); err != nil {
+		t.Fatal(err)
+	}
+	<-cancelled
+	if snap := mgr.Get(taskID).Snapshot(); snap.Status != TaskRunning {
+		t.Fatalf("task became terminal before operation stopped: %+v", snap)
+	}
+	close(release)
+	snap, outcome := waitManaged(t, mgr, taskID)
+	if snap.Status != TaskKilled || outcome != WaitKilled {
+		t.Fatalf("task=%+v outcome=%s", snap, outcome)
+	}
+}
+
+func TestManagedCancellationWithoutConfirmedExitStaysUnknown(t *testing.T) {
+	mgr := New(nil)
+	taskID := mgr.SpawnManaged(t.Context(), "bot1", "sess1", "Install Tool", func(ctx context.Context, _ func(string, string)) error {
+		<-ctx.Done()
+		return errors.Join(ctx.Err(), ErrManagedOutcomeUnknown)
+	})
+	if err := mgr.Kill(taskID); err != nil {
+		t.Fatal(err)
+	}
+	snap, outcome := waitManaged(t, mgr, taskID)
+	if snap.Status != TaskUnknown || outcome != WaitUnknown {
+		t.Fatalf("unconfirmed stop reported as terminal success/failure: %+v %s", snap, outcome)
 	}
 }

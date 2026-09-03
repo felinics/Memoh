@@ -141,9 +141,16 @@ func (t *serverTable) releaseFunc(entry *serverEntry) func() {
 // the displaced one dies when idle — immediately if nothing holds it, at the
 // last release otherwise, or on startup completion if it was still starting.
 func (t *serverTable) recycle(botID string) {
+	t.recycleResource(botID, nil)
+}
+
+// recycleResource only displaces the observed generation. Discovery runs
+// outside the table lock; another caller may already have replaced it by the
+// time the discovery result arrives.
+func (t *serverTable) recycleResource(botID string, expected recyclable) {
 	t.mu.Lock()
 	entry := t.entries[botID]
-	if entry == nil {
+	if entry == nil || (expected != nil && entry.resource != expected) {
 		t.mu.Unlock()
 		return
 	}

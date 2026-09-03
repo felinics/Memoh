@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
-	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
@@ -46,8 +46,8 @@ type Driver struct {
 	userInput   UserInputService
 	toolGateway toolmount.Gateway
 	logger      *slog.Logger
-	// launchers picks the codex CLI copy to run per bot (design §9.2). Nil
-	// falls back to the toolkit path without a version gate.
+	// launchers picks the codex CLI copy to run per bot. Nil
+	// falls back to the toolkit path.
 	launchers external.LauncherResolver
 
 	// servers owns the shared per-Agent app-server lifecycle: reference
@@ -84,9 +84,11 @@ func (*Driver) RuntimeType() string { return RuntimeType }
 var _ external.DependencyRequirer = (*Driver)(nil)
 
 // RequiredDependency implements external.DependencyRequirer: the codex CLI
-// is a managed workspace dependency pinned to the protocol snapshot version.
-func (*Driver) RequiredDependency() (string, string) {
-	return dependencyID, protocol.PinnedCodexVersion
+// is a managed workspace dependency. No version is declared; the handshake in
+// startAppServerSession warns when the running CLI drifts from the protocol
+// snapshot.
+func (*Driver) RequiredDependency() string {
+	return dependencyID
 }
 
 // SetLauncherResolver installs the workspace dependency resolver. Setter
@@ -506,6 +508,9 @@ func (d *Driver) startServer(ctx context.Context, key string) (recyclable, error
 	if err != nil {
 		return nil, fmt.Errorf("workspace info for bot %s: %w", botID, err)
 	}
+	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
+		return nil, err
+	}
 	if cfg.Auth == AuthChatGPT && credential.ID != "" {
 		if err := materializeChatGPTCredential(ctx, client, botAgentID, credential); err != nil {
 			return nil, external.CredentialError(err)
@@ -527,15 +532,14 @@ func (d *Driver) startServer(ctx context.Context, key string) (recyclable, error
 	return srv, nil
 }
 
-// resolveLauncher picks the codex CLI copy for botID (design §9.2). Without a
-// resolver the toolkit path is used as before. A missing dependency becomes
-// the stable agent_dependency_missing feedback so the user learns what is
-// being installed and when to retry, instead of a bare exec failure.
+// resolveLauncher discovers the codex CLI copy without installing it. A
+// missing dependency tells the user whether an administrator must act or an
+// existing operation is still in progress.
 func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.Launcher, error) {
 	if d.launchers == nil {
 		return external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}, nil
 	}
-	launcher, err := d.launchers.ResolveLauncher(ctx, botID, dependencyID, protocol.PinnedCodexVersion)
+	launcher, err := d.launchers.ResolveLauncher(ctx, botID, dependencyID)
 	if err != nil {
 		var missing *external.DependencyMissingError
 		if errors.As(err, &missing) {
@@ -549,13 +553,12 @@ func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.La
 	return launcher, nil
 }
 
-// dependencyMissingFeedback is the user-facing shape of a missing codex CLI
-// (design §9.4): it blocks this turn and names the background install task,
-// if one was started, so the UI can show progress and a cancel action.
+// dependencyMissingFeedback blocks a turn until the dependency is available.
 func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentfeedback.Error {
-	message := "Codex is not installed in this workspace yet. Install it from the bot's dependencies and send the message again."
-	if strings.TrimSpace(missing.TaskID) != "" {
-		message = "Codex is not installed in this workspace yet; installation has started in the background. Send the message again when it finishes."
+	message := "Codex is not installed in this workspace. Ask a bot administrator to install it from the bot's dependencies, then send the message again."
+	operationInProgress := missing.OperationInProgress || strings.TrimSpace(missing.TaskID) != ""
+	if operationInProgress {
+		message = "Codex is not installed in this workspace yet; a dependency operation is already in progress. Send the message again when it finishes."
 	}
 	return agentfeedback.New(
 		agentfeedback.CodeAgentDependencyMissing,
@@ -564,9 +567,9 @@ func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentf
 		"chat.externalAgent.dependencyMissing",
 		message,
 		map[string]string{
-			"dep_id":           firstNonEmpty(missing.DependencyID, dependencyID),
-			"required_version": firstNonEmpty(missing.RequiredVersion, protocol.PinnedCodexVersion),
-			"install_task_id":  strings.TrimSpace(missing.TaskID),
+			"dep_id":                firstNonEmpty(missing.DependencyID, dependencyID),
+			"install_task_id":       strings.TrimSpace(missing.TaskID),
+			"operation_in_progress": strconv.FormatBool(operationInProgress),
 		},
 	)
 }
@@ -599,45 +602,37 @@ func wrapServerError(err error) error {
 // Thread config is fixed at start, so a thread that began without a tool
 // gateway stays toolless for the app-server's life; re-notice every turn,
 // since silent capability loss is exactly what this channel exists to
-// prevent. A launcher version mismatch is told once per thread (design
-// WD-EXT-001): the turn still runs, and the notice carries what the UI needs
-// to offer the alignment action.
+// prevent.
 func emitThreadNotices(srv *appServer, threadID string, sink external.EventSink) {
 	if srv.threadToolless(threadID) {
 		toolmount.EmitUnavailableNotice(sink, "this conversation started without Memoh tools; start a new session to restore them")
 	}
-	if srv.claimLauncherMismatchNotice(threadID) {
-		emitLauncherMismatchNotice(sink, srv.installedLauncherVersion())
-	}
-}
-
-// emitLauncherMismatchNotice is the agent_dependency_version_mismatch notice
-// (design §9.4). It rides the stream as a runtime_notice whose code is the
-// feedback code and whose metadata carries dep_id, required_version, and
-// installed_version.
-func emitLauncherMismatchNotice(sink external.EventSink, installedVersion string) {
-	installed := strings.TrimSpace(installedVersion)
-	if installed == "" {
-		installed = "an unknown version"
-	}
-	sink.EmitStreamEvent(event.StreamEvent{
-		Type: event.RuntimeNotice,
-		Code: agentfeedback.CodeAgentDependencyVersionMismatch,
-		Delta: fmt.Sprintf("Codex %s is installed in this workspace but this Memoh build expects %s. The session runs on the installed version; update Codex to %s to align them.",
-			installed, protocol.PinnedCodexVersion, protocol.PinnedCodexVersion),
-		Metadata: map[string]any{
-			"dep_id":            dependencyID,
-			"required_version":  protocol.PinnedCodexVersion,
-			"installed_version": strings.TrimSpace(installedVersion),
-		},
-	})
 }
 
 // acquireServer returns the bot's live app-server plus a release the caller
 // must defer; the reference keeps the server alive across a concurrent
 // recycle (which drains instead of killing).
 func (d *Driver) acquireServer(ctx context.Context, botID, botAgentID string) (*appServer, func(), error) {
-	resource, release, err := d.servers.acquire(ctx, serverKey(botID, botAgentID))
+	info, err := d.bridges.WorkspaceInfo(ctx, botID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := external.RequireContainerWorkspace(info, RuntimeType); err != nil {
+		return nil, nil, err
+	}
+	key := serverKey(botID, botAgentID)
+	if current := d.servers.peek(key); current != nil && d.launchers != nil {
+		launcher, err := d.resolveLauncher(ctx, botID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !current.(*appServer).matchesLauncher(launcher) {
+			// A dependency update takes effect on new work. References held by
+			// existing turns keep their process alive until they finish.
+			d.servers.recycleResource(key, current)
+		}
+	}
+	resource, release, err := d.servers.acquire(ctx, key)
 	if err != nil {
 		return nil, nil, err
 	}

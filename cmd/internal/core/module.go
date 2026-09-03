@@ -133,6 +133,7 @@ func ServerModule() fx.Option {
 		),
 		fx.Invoke(
 			injectToolProviders,
+			injectBackgroundTaskEvents,
 			injectACPToolProviders,
 			injectBotConnectorLifecycle,
 			injectBotContainerLifecycle,

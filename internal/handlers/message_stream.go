@@ -143,11 +143,7 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 				if !canDeliverSessionActivity(c.Request().Context(), channelIdentityID, botID, perms, cache, message.SessionID) {
 					continue
 				}
-				if err := writeSSEJSON(writer, flusher, map[string]any{
-					"type":       "session_touched",
-					"session_id": message.SessionID,
-					"updated_at": message.CreatedAt,
-				}); err != nil {
+				if err := writeSSEJSON(writer, flusher, messageSessionActivity(message)); err != nil {
 					return nil
 				}
 			case messageevent.EventTypeSessionTitleUpdated:
@@ -210,6 +206,21 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			}
 		}
 	}
+}
+
+func messageSessionActivity(message messagepkg.Message) map[string]any {
+	activity := map[string]any{
+		"type":       "session_touched",
+		"session_id": message.SessionID,
+		"updated_at": message.CreatedAt,
+	}
+	if taskID, _ := message.Metadata["background_task_id"].(string); strings.TrimSpace(taskID) != "" {
+		// The conversation refreshes its persisted history for asynchronous
+		// lifecycle notices. Neither message content nor task logs belong in
+		// this bot-wide stream.
+		activity["reason"] = "background_task"
+	}
+	return activity
 }
 
 func (h *MessageHandler) visibleCompactingSessions(ctx context.Context, userID, botID string, perms []string, cache *sessionCache) []string {

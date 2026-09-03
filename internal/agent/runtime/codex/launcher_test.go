@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/event"
-	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // fakeLauncherResolver scripts one ResolveLauncher answer and records the
@@ -24,8 +25,8 @@ type fakeLauncherResolver struct {
 
 type resolveCall struct{ botID, depID, version string }
 
-func (f *fakeLauncherResolver) ResolveLauncher(_ context.Context, botID, depID, requiredVersion string) (external.Launcher, error) {
-	f.calls = append(f.calls, resolveCall{botID, depID, requiredVersion})
+func (f *fakeLauncherResolver) ResolveLauncher(_ context.Context, botID, depID string) (external.Launcher, error) {
+	f.calls = append(f.calls, resolveCall{botID: botID, depID: depID})
 	if f.err != nil {
 		return external.Launcher{}, f.err
 	}
@@ -39,8 +40,8 @@ func (f *fakeLauncherResolver) ObserveLauncherVersion(_ context.Context, botID, 
 // resolveOnly is a resolver without a version cache.
 type resolveOnly struct{ inner *fakeLauncherResolver }
 
-func (r resolveOnly) ResolveLauncher(ctx context.Context, botID, depID, requiredVersion string) (external.Launcher, error) {
-	return r.inner.ResolveLauncher(ctx, botID, depID, requiredVersion)
+func (r resolveOnly) ResolveLauncher(ctx context.Context, botID, depID string) (external.Launcher, error) {
+	return r.inner.ResolveLauncher(ctx, botID, depID)
 }
 
 type captureSink struct{ events []event.StreamEvent }
@@ -51,14 +52,18 @@ func newTestAppServer(launcher external.Launcher) *appServer {
 	return &appServer{
 		launcher:        launcher,
 		toollessThreads: map[string]bool{},
-		mismatchNoticed: map[string]bool{},
 	}
 }
 
-func TestRequiredDependencyIsCodexAtProtocolPin(t *testing.T) {
-	depID, version := (&Driver{}).RequiredDependency()
-	if depID != "codex" || version != protocol.PinnedCodexVersion {
-		t.Fatalf("RequiredDependency() = (%q, %q), want (codex, %s)", depID, version, protocol.PinnedCodexVersion)
+func TestRequiredDependencyIsCodex(t *testing.T) {
+	if depID := (&Driver{}).RequiredDependency(); depID != "codex" {
+		t.Fatalf("RequiredDependency() = %q, want codex", depID)
+	}
+}
+
+func TestContainerPathPrefersManagedOverlays(t *testing.T) {
+	if !strings.HasPrefix(containerPath, "/data/.memoh/deps/bin:/opt/memoh/toolkit/bin:") {
+		t.Fatalf("containerPath = %q, want the managed shim directory ahead of the toolkit", containerPath)
 	}
 }
 
@@ -67,7 +72,7 @@ func TestResolveLauncherWithoutResolverUsesToolkitPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveLauncher: %v", err)
 	}
-	if launcher.Path != defaultLauncherPath || launcher.Source != external.LauncherSourceToolkit || launcher.Mismatch {
+	if launcher.Path != defaultLauncherPath || launcher.Source != external.LauncherSourceToolkit {
 		t.Fatalf("launcher = %+v, want toolkit default", launcher)
 	}
 	if got := appServerCommand(launcher.Path); got != "/opt/memoh/toolkit/bin/codex app-server" {
@@ -78,7 +83,7 @@ func TestResolveLauncherWithoutResolverUsesToolkitPath(t *testing.T) {
 func TestResolveLauncherManagedPathReachesCommandLine(t *testing.T) {
 	resolver := &fakeLauncherResolver{launcher: external.Launcher{
 		Path:    "/data/.memoh/deps/codex/versions/0.151.0/bin/codex",
-		Version: protocol.PinnedCodexVersion,
+		Version: "0.151.0",
 		Source:  external.LauncherSourceManaged,
 	}}
 	d := &Driver{launchers: resolver}
@@ -86,7 +91,7 @@ func TestResolveLauncherManagedPathReachesCommandLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveLauncher: %v", err)
 	}
-	if len(resolver.calls) != 1 || resolver.calls[0] != (resolveCall{"bot-1", "codex", protocol.PinnedCodexVersion}) {
+	if len(resolver.calls) != 1 || resolver.calls[0] != (resolveCall{botID: "bot-1", depID: "codex"}) {
 		t.Fatalf("resolver calls = %+v", resolver.calls)
 	}
 	if got, want := appServerCommand(launcher.Path), "/data/.memoh/deps/codex/versions/0.151.0/bin/codex app-server"; got != want {
@@ -115,9 +120,8 @@ func TestAppServerCommandQuotesUnsafePaths(t *testing.T) {
 
 func TestResolveLauncherMissingDependencyIsStableFeedback(t *testing.T) {
 	resolver := &fakeLauncherResolver{err: &external.DependencyMissingError{
-		DependencyID:    "codex",
-		RequiredVersion: protocol.PinnedCodexVersion,
-		TaskID:          "task-42",
+		DependencyID: "codex",
+		TaskID:       "task-42",
 	}}
 	d := &Driver{launchers: resolver}
 	_, err := d.resolveLauncher(context.Background(), "bot-1")
@@ -135,9 +139,9 @@ func TestResolveLauncherMissingDependencyIsStableFeedback(t *testing.T) {
 		t.Fatalf("feedback shape = %+v", feedback)
 	}
 	want := map[string]string{
-		"dep_id":           "codex",
-		"required_version": protocol.PinnedCodexVersion,
-		"install_task_id":  "task-42",
+		"dep_id":                "codex",
+		"install_task_id":       "task-42",
+		"operation_in_progress": "true",
 	}
 	for key, value := range want {
 		if feedback.Args[key] != value {
@@ -167,8 +171,8 @@ func TestResolveLauncherMissingWithoutInstallTaskKeepsArgs(t *testing.T) {
 	if !errors.As(err, &feedback) {
 		t.Fatalf("error %T is not agent feedback: %v", err, err)
 	}
-	if feedback.Args["required_version"] != protocol.PinnedCodexVersion {
-		t.Fatalf("required_version = %q, want the pin", feedback.Args["required_version"])
+	if feedback.Args["dep_id"] != "codex" {
+		t.Fatalf("dep_id = %q, want codex", feedback.Args["dep_id"])
 	}
 	if _, ok := feedback.Args["install_task_id"]; !ok {
 		t.Fatal("install_task_id key missing when no task was started")
@@ -196,65 +200,20 @@ func TestResolveLauncherOtherErrorsAreWrapped(t *testing.T) {
 	}
 }
 
-func TestLauncherMismatchNoticeOncePerThread(t *testing.T) {
-	srv := newTestAppServer(external.Launcher{
-		Path:     "/opt/memoh/toolkit/bin/codex",
-		Version:  "0.147.0",
-		Source:   external.LauncherSourceToolkit,
-		Mismatch: true,
-	})
-	sink := &captureSink{}
-
-	emitThreadNotices(srv, "thread-a", sink)
-	if len(sink.events) != 1 {
-		t.Fatalf("first turn emitted %d events, want 1: %+v", len(sink.events), sink.events)
-	}
-	notice := sink.events[0]
-	if notice.Type != event.RuntimeNotice || notice.Code != agentfeedback.CodeAgentDependencyVersionMismatch {
-		t.Fatalf("notice = %+v", notice)
-	}
-	if notice.Delta == "" {
-		t.Fatal("notice has no human-readable text")
-	}
-	wantMeta := map[string]any{
-		"dep_id":            "codex",
-		"required_version":  protocol.PinnedCodexVersion,
-		"installed_version": "0.147.0",
-	}
-	for key, value := range wantMeta {
-		if notice.Metadata[key] != value {
-			t.Errorf("metadata[%q] = %v, want %v", key, notice.Metadata[key], value)
-		}
-	}
-
-	emitThreadNotices(srv, "thread-a", sink)
-	if len(sink.events) != 1 {
-		t.Fatalf("second turn re-emitted the notice: %+v", sink.events)
-	}
-	emitThreadNotices(srv, "thread-b", sink)
-	if len(sink.events) != 2 {
-		t.Fatalf("a different thread was not told: %d events", len(sink.events))
-	}
-}
-
-func TestLauncherMismatchNoticeSkippedWhenAligned(t *testing.T) {
-	srv := newTestAppServer(external.Launcher{Path: defaultLauncherPath, Version: protocol.PinnedCodexVersion})
+func TestThreadNoticesOnlyReportToollessThreads(t *testing.T) {
+	srv := newTestAppServer(external.Launcher{Path: defaultLauncherPath, Version: "0.147.0", Source: external.LauncherSourceToolkit})
 	sink := &captureSink{}
 	emitThreadNotices(srv, "thread-a", sink)
 	if len(sink.events) != 0 {
-		t.Fatalf("aligned launcher emitted %+v", sink.events)
+		t.Fatalf("a thread with tools emitted %+v", sink.events)
 	}
 
-	// Toolless threads keep their every-turn notice, ahead of the mismatch.
-	srv = newTestAppServer(external.Launcher{Path: defaultLauncherPath, Mismatch: true})
-	srv.codexVersion = "0.150.0"
+	// Toolless threads keep their every-turn notice.
 	srv.setThreadToolless("thread-a", true)
 	emitThreadNotices(srv, "thread-a", sink)
-	if len(sink.events) != 2 || sink.events[0].Code != "tools_unavailable" || sink.events[1].Code != agentfeedback.CodeAgentDependencyVersionMismatch {
+	emitThreadNotices(srv, "thread-a", sink)
+	if len(sink.events) != 2 || sink.events[0].Code != "tools_unavailable" || sink.events[1].Code != "tools_unavailable" {
 		t.Fatalf("events = %+v", sink.events)
-	}
-	if sink.events[1].Metadata["installed_version"] != "0.150.0" {
-		t.Fatalf("handshake version not used when discovery had none: %+v", sink.events[1].Metadata)
 	}
 }
 
@@ -282,5 +241,56 @@ func TestSetLauncherResolverInstallsResolver(t *testing.T) {
 	launcher, err := d.resolveLauncher(context.Background(), "bot-1")
 	if err != nil || launcher.Path != "/x/codex" {
 		t.Fatalf("launcher = %+v, err = %v", launcher, err)
+	}
+}
+
+func TestMissingDependencyReportsAdministrativeOperation(t *testing.T) {
+	missing := &external.DependencyMissingError{DependencyID: dependencyID, OperationInProgress: true}
+	feedback := dependencyMissingFeedback(missing)
+	if feedback.Args["operation_in_progress"] != "true" || !strings.Contains(feedback.Message, "already in progress") {
+		t.Fatalf("existing administrative operation was lost: %+v", feedback)
+	}
+	if feedback.Args["install_task_id"] != "" {
+		t.Fatal("administrative operation invented a background task")
+	}
+	missing.OperationInProgress = false
+	feedback = dependencyMissingFeedback(missing)
+	if feedback.Args["operation_in_progress"] != "false" || !strings.Contains(feedback.Message, "administrator") {
+		t.Fatalf("missing dependency should ask an administrator to install it: %+v", feedback)
+	}
+}
+
+func TestRunningServerDetectsLauncherReplacement(t *testing.T) {
+	toolkit := external.Launcher{Path: defaultLauncherPath, Version: "0.149.0", Source: external.LauncherSourceToolkit}
+	srv := newTestAppServer(toolkit)
+	srv.codexVersion = "0.150.0"
+	if !srv.matchesLauncher(external.Launcher{Path: toolkit.Path, Source: toolkit.Source, Version: "0.150.0"}) {
+		t.Fatal("handshake version correction should preserve the running server")
+	}
+	managed := external.Launcher{Path: "/data/.memoh/deps/codex/current/bin/codex", Version: "0.150.0", Source: external.LauncherSourceManaged}
+	if srv.matchesLauncher(managed) {
+		t.Fatal("managed installation should replace the toolkit process")
+	}
+	srv.launcher = managed
+	managed.Version = "0.151.0"
+	if srv.matchesLauncher(managed) {
+		t.Fatal("updated CLI behind the same current symlink should replace the process")
+	}
+}
+
+type remoteBridgeSource struct{ BridgeSource }
+
+func (remoteBridgeSource) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
+	return bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendRemote, DefaultWorkDir: "/home/alice/workspace"}, nil
+}
+
+func TestAcquireServerRejectsRemoteBeforeReusingOrStartingProcess(t *testing.T) {
+	// No process table or executable bridge is available. The workspace must
+	// be rejected before either can be touched, even with a resolvable CLI.
+	d := &Driver{bridges: remoteBridgeSource{}, launchers: &fakeLauncherResolver{launcher: external.Launcher{Path: "/home/alice/codex"}}}
+	_, _, err := d.acquireServer(t.Context(), "bot", "agent")
+	var feedback *agentfeedback.Error
+	if !errors.As(err, &feedback) || feedback.Reason != "remote_workspace_unsupported" {
+		t.Fatalf("remote process use was not blocked: %v", err)
 	}
 }

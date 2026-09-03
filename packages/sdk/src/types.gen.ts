@@ -560,9 +560,8 @@ export type BotagentsBotAgent = {
     created_at?: string;
     deleted_at?: string;
     /**
-     * Dependency is the workspace dependency the agent's runtime declares
-     * (design §9.3). It is derived from the driver at read time, never
-     * persisted, and omitted for runtimes without a declaration (ACP).
+     * Dependency comes from the runtime driver at read time. It is not
+     * persisted and is omitted for runtimes without a declaration (ACP).
      */
     dependency?: BotagentsDependencyRequirement;
     enabled?: boolean;
@@ -590,7 +589,6 @@ export type BotagentsCreateRequest = {
 
 export type BotagentsDependencyRequirement = {
     dependency_id?: string;
-    required_version?: string;
 };
 
 export type BotagentsListResponse = {
@@ -1415,9 +1413,9 @@ export type ConversationUiMessage = {
     approval?: ConversationUiToolApproval;
     /**
      * Args are the machine-readable parameters of a notice block: the string
-     * values of the runtime_notice event metadata (dep_id, required_version,
-     * installed_version for agent_dependency_version_mismatch). The client
-     * renders actions from them instead of parsing Content.
+     * values of the runtime_notice event metadata (dep_id and install_task_id
+     * for a workspace dependency notice, for instance). The client renders
+     * actions from them instead of parsing Content.
      */
     args?: {
         [key: string]: string;
@@ -2586,6 +2584,10 @@ export type HandlersWorkspaceDependencyCatalogResponse = {
 
 export type HandlersWorkspaceDependencyInstallRequest = {
     definition_revision?: string;
+    /**
+     * SessionID optionally routes operation progress to its originating conversation.
+     */
+    session_id?: string;
     /**
      * Version to install. Empty (or no body) installs the latest version the
      * catalog script resolves, or the manifest pin when the dependency has

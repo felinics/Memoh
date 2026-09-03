@@ -1,13 +1,14 @@
 package workspacedeps
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/felinics/memoh/internal/agent/background"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 const (
@@ -60,41 +61,41 @@ func TestResolveLauncherOrdersCandidates(t *testing.T) {
 		want       external.Launcher
 	}{
 		{
-			name:       "managed at pin beats everything",
-			candidates: []Candidate{managed("2.0.0"), toolkit("2.0.0"), onPath("2.0.0")},
-			want:       external.Launcher{Path: managedPath, Version: "2.0.0", Source: external.LauncherSourceManaged},
+			name:       "managed beats everything whatever the versions",
+			candidates: []Candidate{managed("1.9.0"), toolkit("2.0.0"), onPath("3.0.0")},
+			want:       external.Launcher{Path: managedPath, Version: "1.9.0", Source: external.LauncherSourceManaged},
 		},
 		{
-			name:       "toolkit at pin beats a managed copy off pin",
-			candidates: []Candidate{managed("1.9.0"), toolkit("2.0.0"), onPath("2.0.0")},
-			want:       external.Launcher{Path: toolkitPath, Version: "2.0.0", Source: external.LauncherSourceToolkit},
+			name:       "discovery order within the tiers does not matter",
+			candidates: []Candidate{onPath("3.0.0"), toolkit("2.0.0"), managed("1.9.0")},
+			want:       external.Launcher{Path: managedPath, Version: "1.9.0", Source: external.LauncherSourceManaged},
 		},
 		{
-			name:       "any managed copy beats toolkit and PATH off pin",
-			candidates: []Candidate{managed("1.9.0"), toolkit("1.8.0"), onPath("2.0.0")},
-			want:       external.Launcher{Path: managedPath, Version: "1.9.0", Source: external.LauncherSourceManaged, Mismatch: true},
-		},
-		{
-			name:       "any toolkit copy beats PATH",
+			name:       "toolkit beats PATH",
 			candidates: []Candidate{toolkit("1.8.0"), onPath("2.0.0")},
-			want:       external.Launcher{Path: toolkitPath, Version: "1.8.0", Source: external.LauncherSourceToolkit, Mismatch: true},
+			want:       external.Launcher{Path: toolkitPath, Version: "1.8.0", Source: external.LauncherSourceToolkit},
 		},
 		{
 			name:       "PATH copy is the last resort",
 			candidates: []Candidate{onPath("1.0.0")},
-			want:       external.Launcher{Path: pathCopy, Version: "1.0.0", Source: external.LauncherSourcePath, Mismatch: true},
+			want:       external.Launcher{Path: pathCopy, Version: "1.0.0", Source: external.LauncherSourcePath},
 		},
 		{
-			name:       "unknown version is not a mismatch",
+			name:       "unknown version is still the managed copy",
 			candidates: []Candidate{managed(""), toolkit("1.8.0")},
 			want:       external.Launcher{Path: managedPath, Source: external.LauncherSourceManaged},
+		},
+		{
+			name:       "candidates without a path are skipped",
+			candidates: []Candidate{{Source: SourceManaged, Version: "1.9.0"}, toolkit("1.8.0")},
+			want:       external.Launcher{Path: toolkitPath, Version: "1.8.0", Source: external.LauncherSourceToolkit},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newServiceFixture(t)
 			f.seedCandidates(testTarget, tt.candidates...)
-			got, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0")
+			got, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x")
 			if err != nil {
 				t.Fatalf("ResolveLauncher: %v", err)
 			}
@@ -108,21 +109,21 @@ func TestResolveLauncherOrdersCandidates(t *testing.T) {
 	}
 }
 
-func TestResolveLauncherDefaultsToCatalogPinAndDiscoversOnMiss(t *testing.T) {
+func TestResolveLauncherDiscoversOnMiss(t *testing.T) {
 	f := newServiceFixture(t)
 	f.present("agent-x", SourceManaged, "1.9.0", nil)
 
-	got, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "")
+	got, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x")
 	if err != nil {
 		t.Fatalf("ResolveLauncher: %v", err)
 	}
-	if !got.Mismatch || got.Version != "1.9.0" || got.Source != external.LauncherSourceManaged {
-		t.Fatalf("launcher = %+v, want a mismatch against the 2.0.0 pin", got)
+	if got.Version != "1.9.0" || got.Source != external.LauncherSourceManaged {
+		t.Fatalf("launcher = %+v, want the discovered managed copy", got)
 	}
 	if f.discovered() != 1 {
 		t.Fatalf("discover calls = %d, want one discovery on cache miss", f.discovered())
 	}
-	if _, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", ""); err != nil {
+	if _, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x"); err != nil {
 		t.Fatalf("ResolveLauncher again: %v", err)
 	}
 	if f.discovered() != 1 {
@@ -136,7 +137,7 @@ func TestResolveLauncherUsesCurrentTarget(t *testing.T) {
 	f.seedCandidates(testTarget, managed("2.0.0"))
 	f.seedCandidates("remote-1", onPath("2.0.0"))
 
-	got, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0")
+	got, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x")
 	if err != nil {
 		t.Fatalf("ResolveLauncher: %v", err)
 	}
@@ -145,117 +146,108 @@ func TestResolveLauncherUsesCurrentTarget(t *testing.T) {
 	}
 
 	f.ws.setCurrentTarget("", errors.New("primary lookup failed"))
-	if _, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0"); err == nil || err.Error() != "primary lookup failed" {
+	if _, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x"); err == nil || err.Error() != "primary lookup failed" {
 		t.Fatalf("error = %v, want the target lookup failure", err)
 	}
 }
 
-func TestResolveLauncherRejectsImageAndUnknownDependencies(t *testing.T) {
+func TestResolveLauncherRejectsUnknownDependencies(t *testing.T) {
 	f := newServiceFixture(t)
-	for _, depID := range []string{"img-z", "nope"} {
-		_, err := f.svc.ResolveLauncher(f.ctx(), testBot, depID, "1.0.0")
-		if !errors.Is(err, ErrDependencyNotFound) {
-			t.Errorf("ResolveLauncher(%s) error = %v, want ErrDependencyNotFound", depID, err)
-		}
+	if _, err := f.svc.ResolveLauncher(f.ctx(), testBot, "nope"); !errors.Is(err, ErrDependencyNotFound) {
+		t.Errorf("ResolveLauncher(nope) error = %v, want ErrDependencyNotFound", err)
 	}
 	if f.discovered() != 0 {
-		t.Fatalf("discover calls = %d, want none for rejected dependencies", f.discovered())
+		t.Fatalf("discover calls = %d, want none for a rejected dependency", f.discovered())
+	}
+
+	// A dependency the image ships resolves to its toolkit copy like any
+	// other; a missing one without an install script reports missing with no
+	// task, since nothing can be installed.
+	f.present("img-z", SourceToolkit, "22.0.0", nil)
+	got, err := f.svc.ResolveLauncher(f.ctx(), testBot, "img-z")
+	if err != nil || got.Source != external.LauncherSourceToolkit || got.Version != "22.0.0" {
+		t.Fatalf("ResolveLauncher(img-z) = %+v, %v; want the toolkit copy", got, err)
+	}
+	f.absent("img-z")
+	f.svc.cache.Invalidate(testBot)
+	_, err = f.svc.ResolveLauncher(f.ctx(), testBot, "img-z")
+	var missing *external.DependencyMissingError
+	if !errors.As(err, &missing) || missing.DependencyID != "img-z" || missing.TaskID != "" {
+		t.Fatalf("ResolveLauncher(absent img-z) error = %v, want missing without a task", err)
 	}
 }
 
-func TestResolveLauncherMissingStartsOneBackgroundInstall(t *testing.T) {
+func TestResolveLauncherMissingNeverStartsUnapprovedInstall(t *testing.T) {
 	f := newServiceFixture(t)
 	mgr := background.New(slog.New(slog.DiscardHandler))
 	f.svc.background = mgr
 	f.seedCandidates(testTarget)
-
-	release := make(chan struct{})
-	started := make(chan struct{}, 1)
-	f.setRun(func(spec RunSpec) (Result, error) {
-		started <- struct{}{}
-		<-release
-		return f.installResult(spec.DepID, "2.0.0"), nil
-	})
-
-	_, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0")
-	var missing *external.DependencyMissingError
-	if !errors.As(err, &missing) || !errors.Is(err, external.ErrDependencyMissing) {
-		t.Fatalf("error = %v, want DependencyMissingError", err)
+	for range 3 {
+		_, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x")
+		var missing *external.DependencyMissingError
+		if !errors.As(err, &missing) || missing.TaskID != "" || missing.OperationInProgress {
+			t.Fatalf("missing = %+v, err = %v", missing, err)
+		}
 	}
-	if missing.DependencyID != "agent-x" || missing.RequiredVersion != "2.0.0" || missing.TaskID == "" {
-		t.Fatalf("missing = %+v", missing)
+	if len(f.runSpecs()) != 0 {
+		t.Fatal("a conversation executed an unapproved script")
 	}
-	task := mgr.Get(missing.TaskID)
-	if task == nil {
-		t.Fatal("no background task registered")
+	if len(mgr.ListForSession(testBot, "")) != 0 {
+		t.Fatal("a conversation created a background install")
 	}
-	if snap := task.Snapshot(); snap.Kind != background.KindDependency || snap.BotID != testBot || snap.Description != "Install Agent X 2.0.0" {
-		t.Fatalf("task = %+v", snap)
-	}
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("install script did not start")
-	}
-
-	// A second resolution while the install runs reuses the task.
-	_, err = f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0")
-	var again *external.DependencyMissingError
-	if !errors.As(err, &again) || again.TaskID != missing.TaskID {
-		t.Fatalf("second error = %v, want the same task id %s", err, missing.TaskID)
-	}
-
-	close(release)
-	snap := waitTask(t, mgr, missing.TaskID)
-	if snap.Status != background.TaskCompleted {
-		t.Fatalf("task = %+v, want completed", snap)
-	}
-	if rec, ok := f.store.get(f.key("agent-x")); !ok || rec.Status != StatusInstalled || rec.InstalledVersion != "2.0.0" {
-		t.Fatalf("record = %+v", rec)
-	}
-	if _, cached := f.svc.cache.Get(testBot, testTarget); cached {
-		t.Fatal("snapshot was not invalidated after the install")
-	}
-
-	// Once the task is gone the next miss starts a fresh install.
-	f.seedCandidates(testTarget)
-	waitInstallCleared(t, f.svc, f.key("agent-x"))
-	_, err = f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0")
-	var fresh *external.DependencyMissingError
-	if !errors.As(err, &fresh) || fresh.TaskID == "" || fresh.TaskID == missing.TaskID {
-		t.Fatalf("third error = %v, want a new task", err)
-	}
-	waitTask(t, mgr, fresh.TaskID)
 }
 
-func TestResolveLauncherMissingWhenInstallFails(t *testing.T) {
+func TestResolveLauncherReportsExistingOperation(t *testing.T) {
 	f := newServiceFixture(t)
-	mgr := background.New(slog.New(slog.DiscardHandler))
-	f.svc.background = mgr
 	f.seedCandidates(testTarget)
-	f.setRun(func(RunSpec) (Result, error) {
-		return Result{ExitCode: 3}, &ExitError{Code: 3, StderrTail: "boom"}
-	})
-
-	_, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0")
+	key := f.key("agent-x")
+	if !f.svc.locks.tryLock(key) {
+		t.Fatal("lock unavailable")
+	}
+	defer f.svc.locks.unlock(key)
+	_, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x")
 	var missing *external.DependencyMissingError
-	if !errors.As(err, &missing) || missing.TaskID == "" {
-		t.Fatalf("error = %v, want a missing error with a task", err)
+	if !errors.As(err, &missing) || !missing.OperationInProgress || missing.TaskID != "" {
+		t.Fatalf("missing = %+v, err = %v", missing, err)
 	}
-	snap := waitTask(t, mgr, missing.TaskID)
-	if snap.Status != background.TaskFailed || snap.Error == "" {
-		t.Fatalf("task = %+v, want failed with the install error", snap)
+	if len(f.runSpecs()) != 0 {
+		t.Fatal("resolver ran a second operation")
 	}
-	if rec, ok := f.store.get(f.key("agent-x")); !ok || rec.Status != StatusFailed {
-		t.Fatalf("record = %+v, want failed", rec)
+}
+
+func TestResolveLauncherColdCatalogStillDiscoversBuiltin(t *testing.T) {
+	f := newServiceFixture(t)
+	f.svc.catalog = catalog.Empty()
+	f.svc.provider = &offlineResolverCatalog{}
+	f.present("codex", SourceToolkit, "0.100.0", nil)
+	launcher, err := f.svc.ResolveLauncher(f.ctx(), testBot, "codex")
+	if err != nil || launcher.Source != external.LauncherSourceToolkit || launcher.Version != "0.100.0" {
+		t.Fatalf("launcher = %+v, %v", launcher, err)
 	}
+	if f.discovered() != 1 || len(f.runSpecs()) != 0 {
+		t.Fatal("cold launch must discover installed binaries without installing")
+	}
+}
+
+type offlineResolverCatalog struct{ CatalogProvider }
+
+func (*offlineResolverCatalog) Cached(context.Context) (CatalogResult, error) {
+	return CatalogResult{Catalog: catalog.Empty()}, nil
+}
+
+func (*offlineResolverCatalog) Snapshot(context.Context, bool) (CatalogResult, error) {
+	panic("launcher attempted registry request")
+}
+
+func (*offlineResolverCatalog) Definition(context.Context, string, string) (catalog.Definition, error) {
+	panic("launcher fetched a script")
 }
 
 func TestResolveLauncherMissingWithoutBackground(t *testing.T) {
 	f := newServiceFixture(t)
 	f.seedCandidates(testTarget)
 
-	_, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0")
+	_, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x")
 	var missing *external.DependencyMissingError
 	if !errors.As(err, &missing) {
 		t.Fatalf("error = %v, want DependencyMissingError", err)
@@ -268,41 +260,22 @@ func TestResolveLauncherMissingWithoutBackground(t *testing.T) {
 	}
 }
 
-func TestEnsureInstalledAsyncSkipsWhenOperationHoldsLock(t *testing.T) {
-	f := newServiceFixture(t)
-	f.svc.background = background.New(slog.New(slog.DiscardHandler))
-	key := f.key("agent-x")
-	if !f.svc.locks.tryLock(key) {
-		t.Fatal("could not take the lock")
-	}
-	defer f.svc.locks.unlock(key)
-
-	taskID, err := f.svc.EnsureInstalledAsync(f.ctx(), testBot, "", "agent-x")
-	if err != nil || taskID != "" {
-		t.Fatalf("EnsureInstalledAsync = %q, %v; want no task while another operation runs", taskID, err)
-	}
-	if _, err := f.svc.EnsureInstalledAsync(f.ctx(), testBot, "", "img-z"); !errors.Is(err, ErrActionUnsupported) {
-		t.Fatalf("image dependency error = %v, want ErrActionUnsupported", err)
-	}
-	if _, err := f.svc.EnsureInstalledAsync(f.ctx(), testBot, "", "nope"); !errors.Is(err, ErrDependencyNotFound) {
-		t.Fatalf("unknown dependency error = %v, want ErrDependencyNotFound", err)
-	}
-}
-
 func TestObserveLauncherVersionRewritesTheLaunchedCopy(t *testing.T) {
 	f := newServiceFixture(t)
-	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("2.0.0"))
+	// Discovery listed the toolkit copy first; the resolver still launches
+	// the managed one, and the handshake version must land on that copy.
+	f.seedCandidates(testTarget, toolkit("2.0.0"), managed("1.9.0"))
 
-	if _, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x", "2.0.0"); err != nil {
+	if _, err := f.svc.ResolveLauncher(f.ctx(), testBot, "agent-x"); err != nil {
 		t.Fatalf("ResolveLauncher: %v", err)
 	}
-	f.svc.ObserveLauncherVersion(f.ctx(), testBot, "agent-x", "2.1.0")
+	f.svc.ObserveLauncherVersion(f.ctx(), testBot, "agent-x", "1.9.5")
 	got := f.cachedCandidates(testTarget)
-	if got[0].Version != "1.9.0" || got[1].Version != "2.1.0" {
-		t.Fatalf("candidates = %+v, want the toolkit copy corrected and the managed one untouched", got)
+	if got[0].Version != "2.0.0" || got[1].Version != "1.9.5" {
+		t.Fatalf("candidates = %+v, want the managed copy corrected and the toolkit one untouched", got)
 	}
 	snap, _ := f.svc.cache.Get(testBot, testTarget)
-	if snap.Observed["agent-x"].Version != "1.9.0" {
+	if snap.Observed["agent-x"].Version != "2.0.0" {
 		t.Fatalf("winner version = %q, want unchanged", snap.Observed["agent-x"].Version)
 	}
 
@@ -326,25 +299,25 @@ func TestObserveLauncherVersionRewritesTheLaunchedCopy(t *testing.T) {
 
 func TestPreflightFollowsLauncherSelection(t *testing.T) {
 	f := newServiceFixture(t)
-	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("2.0.0"))
+	f.seedCandidates(testTarget, toolkit("2.0.0"), managed("1.9.0"))
 
 	result, err := f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
 	item := result.Items[0]
-	if !item.Satisfied || item.InstalledVersion != "2.0.0" || item.Reason != "" {
-		t.Fatalf("item = %+v, want satisfied by the toolkit copy at the pin", item)
+	if !item.Satisfied || item.InstalledVersion != "1.9.0" || item.Reason != "" {
+		t.Fatalf("item = %+v, want the managed copy the resolver would run", item)
 	}
 
-	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("1.8.0"), onPath("2.0.0"))
+	f.seedCandidates(testTarget, onPath("2.0.0"), toolkit("1.8.0"))
 	result, err = f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
 	if err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
 	item = result.Items[0]
-	if item.Satisfied || item.Reason != PreflightReasonVersionMismatch || item.InstalledVersion != "1.9.0" {
-		t.Fatalf("item = %+v, want a mismatch on the managed copy the resolver would run", item)
+	if !item.Satisfied || item.InstalledVersion != "1.8.0" {
+		t.Fatalf("item = %+v, want the toolkit copy ahead of PATH", item)
 	}
 }
 
@@ -361,39 +334,4 @@ func TestNewServiceWiresBackground(t *testing.T) {
 	if svc.background != mgr {
 		t.Fatal("Options.Background was not stored")
 	}
-}
-
-func waitTask(t *testing.T, mgr *background.Manager, taskID string) background.TaskSnapshot {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		task := mgr.Get(taskID)
-		if task == nil {
-			t.Fatalf("task %s disappeared", taskID)
-		}
-		snap := task.Snapshot()
-		if snap.Status == background.TaskCompleted || snap.Status == background.TaskFailed || snap.Status == background.TaskKilled {
-			return snap
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("task %s did not finish", taskID)
-	return background.TaskSnapshot{}
-}
-
-// waitInstallCleared waits for the resolver to forget a finished install; the
-// cleanup runs after the task's terminal state is published.
-func waitInstallCleared(t *testing.T, svc *Service, key InstallationKey) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		svc.resolverMu.Lock()
-		_, running := svc.installs[key]
-		svc.resolverMu.Unlock()
-		if !running {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("install for %+v was not cleared", key)
 }
