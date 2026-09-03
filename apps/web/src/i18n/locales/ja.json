@@ -191,7 +191,6 @@
     },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
-      "image_incompatible": "Workspace イメージに互換性がありません。最新の Memoh Workspace イメージを基に再構築してください。",
       "template_bootstrap_failed": "Workspace ファイルを初期化できませんでした。Workspace を再構築してからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
     },

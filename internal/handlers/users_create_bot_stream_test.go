@@ -248,13 +248,13 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	}
 }
 
-func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T) {
+func TestCreateBotStreamReportsStableBootstrapErrorAndLeavesBotReady(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000108"
 	botID := "00000000-0000-0000-0000-000000000208"
 	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
 	setupErr := errors.Join(
-		workspace.ErrWorkspaceImageIncompatible,
-		errors.New("missing /opt/memoh/toolkit/bin/node"),
+		workspace.ErrWorkspaceTemplateBootstrapFailed,
+		errors.New("write /data/AGENTS.md: permission denied"),
 	)
 	handler := &UsersHandler{
 		logger:         slog.Default(),
@@ -264,8 +264,8 @@ func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
-		"name": "incompatible-workspace-bot",
-		"display_name": "Incompatible Workspace Bot",
+		"name": "bootstrap-failed-bot",
+		"display_name": "Bootstrap Failed Bot",
 		"acl_preset": "allow_all",
 		"wait_for_ready": true
 	}`))
@@ -282,11 +282,11 @@ func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T
 	if last["type"] != "error" {
 		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
 	}
-	if last["code"] != string(apperror.CodeWorkspaceImageIncompatible) {
-		t.Fatalf("error code = %#v, want %q", last["code"], apperror.CodeWorkspaceImageIncompatible)
+	if last["code"] != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("error code = %#v, want %q", last["code"], apperror.CodeWorkspaceTemplateBootstrapFailed)
 	}
 	message, _ := last["message"].(string)
-	if strings.Contains(message, "/opt/memoh") {
+	if strings.Contains(message, "/data/AGENTS.md") {
 		t.Fatalf("private workspace path leaked in message %q", message)
 	}
 	if streamDB.status != bots.BotStatusReady {

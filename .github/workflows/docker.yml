@@ -61,7 +61,6 @@ jobs:
               - 'docker/nginx.conf'
             workspace:
               - 'docker/Dockerfile.workspace'
-              - 'docker/workspace-contract.json'
               - 'docker/toolkit/**'
               - 'crates/**'
               - 'Cargo.toml'
@@ -132,6 +131,10 @@ jobs:
         if: steps.should-build.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
+      - name: Test toolkit wrapper assembly
+        if: steps.should-build.outputs.skip != 'true' && matrix.image == 'workspace' && matrix.platform == 'linux/amd64'
+        run: sh docker/toolkit/install-wrappers.test.sh
+
       - name: Set up Go
         if: steps.should-build.outputs.skip != 'true' && matrix.image == 'server'
         uses: actions/setup-go@v5
@@ -197,17 +200,15 @@ jobs:
             type=gha,scope=${{ steps.resolve.outputs.artifact_key }}-${{ matrix.platform }},mode=max,ignore-error=true
             ${{ env.PUSH == 'true' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3}-{4},mode=max,compression=zstd,ignore-error=true', env.REGISTRY, github.repository_owner, matrix.image, steps.resolve.outputs.artifact_key, matrix.platform == 'linux/amd64' && 'amd64' || 'arm64') || '' }}
 
-      - name: Smoke-test workspace contract
+      - name: Smoke-test workspace image
         if: steps.should-build.outputs.skip != 'true' && env.PUSH != 'true' && matrix.image == 'workspace' && matrix.platform == 'linux/amd64'
         run: |
           docker run --rm memoh-ci-workspace:debian sh -eux -c '
-            grep -q "\"contract_version\": 3" /opt/memoh/workspace-contract.json
             ldd --version >/dev/null
             node --version
             python3 --version
             uv --version
-            test -x /opt/memoh/toolkit/bin/codex
-            test -x /opt/memoh/toolkit/bin/claude
+            flock -n -E 75 /tmp/memoh-workspace-lock-check true
             test -x /opt/memoh/toolkit/display/bin/a11y-cli
             sh -n /opt/memoh/scripts/display-prepare.sh
             sh -n /opt/memoh/scripts/display-apply-style.sh

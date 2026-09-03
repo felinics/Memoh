@@ -472,9 +472,6 @@ func accountNotFound(err error) bool {
 }
 
 func createBotHTTPError(err error, ownerFromToken bool) error {
-	if errors.Is(err, workspace.ErrWorkspaceImageIncompatible) {
-		return apperror.Wrap(apperror.CodeWorkspaceImageIncompatible, err, nil)
-	}
 	if errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
 		return apperror.Wrap(apperror.CodeWorkspaceTemplateBootstrapFailed, err, nil)
 	}

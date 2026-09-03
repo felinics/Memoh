@@ -194,7 +194,6 @@
     },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
-      "image_incompatible": "工作区镜像与当前版本不兼容，请基于最新 Memoh Workspace 镜像重建后重试。",
       "template_bootstrap_failed": "工作区文件初始化失败，请尝试重建工作区。",
       "display_prepare_failed": "显示环境准备失败，请稍后重试。"
     },
