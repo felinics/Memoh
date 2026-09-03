@@ -49,6 +49,9 @@
           <TabsTrigger value="skills">
             {{ $t('supermarket.skillsSection') }}
           </TabsTrigger>
+          <TabsTrigger value="dependencies">
+            {{ $t('supermarket.dependenciesSection') }}
+          </TabsTrigger>
         </TabsList>
 
         <!-- Skills Tab -->
@@ -178,6 +181,54 @@
             </MarketItemCard>
           </div>
         </TabsContent>
+        <!-- Dependencies Tab: the workspace dependency catalog. A card per
+             installable entry; installing streams into a bot's workspace. -->
+        <TabsContent value="dependencies">
+          <InlineLoadingRow
+            v-if="dependenciesQuery.isLoading.value"
+            class="justify-center py-8"
+          >
+            {{ $t('common.loading') }}
+          </InlineLoadingRow>
+
+          <div
+            v-else-if="!filteredDependencies.length"
+            class="py-8 text-center text-xs text-muted-foreground"
+          >
+            {{ $t('supermarket.noDependencyResults') }}
+          </div>
+
+          <div
+            v-else
+            class="grid grid-cols-1 gap-4 sm:grid-cols-2"
+          >
+            <MarketItemCard
+              v-for="dependency in filteredDependencies"
+              :key="dependency.id"
+              :name="dependencyName(dependency)"
+              :description="dependencyDescription(dependency)"
+              @open="openDependencyInstall(dependency)"
+            >
+              <template #leading>
+                <component
+                  :is="dependencyIcon(dependency)"
+                  class="size-5"
+                />
+              </template>
+              <template
+                v-if="dependency.actions_supported?.includes('install')"
+                #actions
+              >
+                <Button
+                  size="sm"
+                  @click="openDependencyInstall(dependency)"
+                >
+                  {{ $t('supermarket.installToBot') }}
+                </Button>
+              </template>
+            </MarketItemCard>
+          </div>
+        </TabsContent>
       </Tabs>
 
       <ConnectConnectorDialog
@@ -185,6 +236,13 @@
         :connector="selectedConnector"
         :default-bot-id="defaultBotId"
         @connected="openBotConnectors"
+      />
+
+      <InstallDependencyDialog
+        v-model:open="dependencyDialogOpen"
+        :item="selectedDependency"
+        :default-bot-id="defaultBotId"
+        @installed="openBotDependencies"
       />
     </div>
   </PageShell>
@@ -217,16 +275,21 @@ import {
   getConnectorsCatalog,
   getSupermarketRegistries,
   getSupermarketPackages,
+  getWorkspaceDependenciesCatalog,
   type ConnectitConnector,
   type HandlersSupermarketSkillPackageSummary,
   type HandlersSupermarketRegistry,
+  type HandlersWorkspaceDependencyCatalogItem,
 } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { dependencyIcon } from '@/utils/workspace-dependency'
 import PackageCard from './components/package-card.vue'
 import ConnectConnectorDialog from './components/connect-connector-dialog.vue'
+import InstallDependencyDialog from './components/install-dependency-dialog.vue'
 import MarketItemCard from './components/market-item-card.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
+import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { useCapabilitiesStore } from '@/store/capabilities'
 
 const { t } = useI18n()
@@ -243,8 +306,8 @@ const allRegistriesValue = 'all'
 const activeTab = computed({
   get: () => {
     const valid = capabilitiesStore.connectors
-      ? ['connectors', 'skills']
-      : ['skills']
+      ? ['connectors', 'skills', 'dependencies']
+      : ['skills', 'dependencies']
     const fallback = capabilitiesStore.connectors ? 'connectors' : 'skills'
     return valid.includes(tabParam.value) ? tabParam.value : fallback
   },
@@ -264,6 +327,10 @@ const packagesLoading = ref(false)
 
 const connectorDialogOpen = ref(false)
 const selectedConnector = ref<ConnectitConnector | null>(null)
+
+const dependencyDialogOpen = ref(false)
+const selectedDependency = ref<HandlersWorkspaceDependencyCatalogItem | null>(null)
+const { dependencyName, dependencyDescription } = useWorkspaceDependencyText()
 
 const hasNextPage = computed(() => page.value * pageSize < total.value)
 const showPagination = computed(() => page.value > 1 || hasNextPage.value)
@@ -302,6 +369,30 @@ const filteredConnectors = computed(() => {
 })
 
 watch(connectorsQuery.error, error => {
+  if (error) toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
+})
+
+const dependenciesQuery = useQuery({
+  key: () => ['workspace-dependencies-catalog'],
+  query: async () => {
+    const { data } = await getWorkspaceDependenciesCatalog({ throwOnError: true })
+    return data.items ?? []
+  },
+})
+
+// Only entries the catalog can install are for sale here; the search matches
+// the localized name and description plus the commands an entry provides.
+const filteredDependencies = computed(() => {
+  const query = searchQuery.value.toLowerCase()
+  const installable = (dependenciesQuery.data.value ?? []).filter(dependency => dependency.installable && dependency.id)
+  if (!query) return installable
+  return installable.filter(dependency =>
+    [dependency.id, dependencyName(dependency), dependencyDescription(dependency), ...(dependency.provides ?? [])]
+      .some(value => value?.toLowerCase().includes(query)),
+  )
+})
+
+watch(dependenciesQuery.error, error => {
   if (error) toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
 })
 
@@ -359,6 +450,20 @@ function openBotConnectors(botId: string) {
     name: 'bot-detail',
     params: { botName: botId },
     query: { tab: 'connectors' },
+  })
+}
+
+function openDependencyInstall(dependency: HandlersWorkspaceDependencyCatalogItem) {
+  if (!dependency.actions_supported?.includes('install')) return
+  selectedDependency.value = dependency
+  dependencyDialogOpen.value = true
+}
+
+function openBotDependencies(botId: string) {
+  void router.push({
+    name: 'bot-detail',
+    params: { botName: botId },
+    query: { tab: 'dependencies' },
   })
 }
 

@@ -6,7 +6,8 @@
 // not an installed dependency resolves false: cancel, a stopped workspace the
 // user did not start, an unsupported platform, or a failed install
 // (WD-EXT-003 — the error stays in the progress dialog with the full log).
-// Agent CLIs carry no version pin, so the only operation here is an install.
+// No dependency is pinned, so the only operation here is an install; the
+// confirm dialog lets the user name a version, blank meaning the latest.
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -74,6 +75,8 @@ const starting = ref(false)
 
 const confirmOpen = ref(false)
 const OPERATION = 'install'
+/** Version the user confirmed; empty means the latest. Replayed by Retry. */
+let requestedVersion = ''
 
 const progressOpen = ref(false)
 const progressStatus = ref<DependencyProgressStatus>('running')
@@ -90,7 +93,6 @@ const script = ref<ScriptResponse | null>(null)
 
 const workspaceRows = computed<DependencyKvRow[]>(() => [
   { label: t('bots.dependencies.confirm.dependency'), value: item.value?.id, mono: true },
-  { label: t('bots.dependencies.confirm.targetVersion'), value: formatDependencyVersion(item.value?.required_version), mono: true },
 ])
 
 async function run(agent: BotagentsBotAgent): Promise<boolean> {
@@ -185,6 +187,11 @@ function onConfirmOpenChange(value: boolean) {
   if (!value) finish(false)
 }
 
+function onConfirmed(version: string) {
+  requestedVersion = version
+  startOperation()
+}
+
 function startOperation() {
   confirmOpen.value = false
   lines.value = []
@@ -200,7 +207,7 @@ async function consumeOperation() {
   const depId = item.value?.id ?? ''
   let sequence = 0
   try {
-    for await (const event of streamDependencyOperation(props.botId, depId, OPERATION)) {
+    for await (const event of streamDependencyOperation(props.botId, depId, OPERATION, undefined, { version: requestedVersion })) {
       switch (event.type) {
         case 'log':
           lines.value.push({ id: sequence++, stream: event.stream, data: event.data })
@@ -311,7 +318,7 @@ defineExpose({ run, checking })
     target-kind="native"
     :confirm-label="t('bots.dependencies.confirm.installAndEnable')"
     @update:open="onConfirmOpenChange"
-    @confirm="startOperation"
+    @confirm="onConfirmed"
     @view-script="openScript"
   />
 

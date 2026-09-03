@@ -88,7 +88,7 @@ const title = computed(() => {
 
 const text = computed(() => {
   const values = args.value
-  if (values.dep_id && values.required_version) {
+  if (values.dep_id) {
     return t('chat.externalAgent.dependencyMissing', values)
   }
   return props.block.content
