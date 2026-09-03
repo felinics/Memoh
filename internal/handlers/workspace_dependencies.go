@@ -156,6 +156,11 @@ type WorkspaceDependencyListResponse struct {
 	WorkspaceState string                       `json:"workspace_state" enums:"running,not_running,missing,remote_offline"`
 	Platform       *WorkspaceDependencyPlatform `json:"platform,omitempty"`
 	Items          []WorkspaceDependencyItem    `json:"items"`
+	// DiscoveryError is set when the workspace is running but could not be
+	// inspected (the discovery command was killed or timed out). Items then
+	// reflect the installation records alone, without workspace facts or
+	// actions; a refresh retries discovery.
+	DiscoveryError string `json:"discovery_error,omitempty"`
 }
 
 // WorkspaceDependencyPreflightRequest names the dependencies an agent needs.
@@ -633,14 +638,26 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	result, err := run(svc, ctx, botID, targetID, dep.ID, version, sink)
 	if err != nil {
 		requestID := httpx.RequestID(c)
-		h.logger.Warn("workspace dependency operation failed",
+		attrs := []any{
 			slog.String("bot_id", botID),
 			slog.String("workspace_target_id", targetID),
 			slog.String("dependency_id", dep.ID),
 			slog.String("action", string(action)),
 			slog.String("request_id", requestID),
 			slog.Any("error", err),
-		)
+		}
+		switch {
+		case errors.Is(err, workspacedeps.ErrBusy):
+			// Operations never queue (design §8.4): a second request for the
+			// same dependency is refused by design, not failed.
+			h.logger.Info("workspace dependency operation refused: another operation is in progress", attrs...)
+		case ctx.Err() != nil:
+			// The client went away; the service has already recorded the
+			// operation as failed.
+			h.logger.Info("workspace dependency operation cancelled by the client", attrs...)
+		default:
+			h.logger.Warn("workspace dependency operation failed", attrs...)
+		}
 		stream.send(newWorkspaceDependencyErrorEvent(err, requestID))
 		return nil
 	}
@@ -851,6 +868,7 @@ func workspaceDependencyListResponse(result workspacedeps.ListResult) WorkspaceD
 	resp := WorkspaceDependencyListResponse{
 		WorkspaceState: string(result.Workspace),
 		Items:          make([]WorkspaceDependencyItem, 0, len(result.Entries)),
+		DiscoveryError: result.DiscoveryError,
 	}
 	if result.Platform.OS != "" {
 		resp.Platform = &WorkspaceDependencyPlatform{

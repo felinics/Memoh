@@ -88,7 +88,10 @@ func TestUpdateWorkerRunOnceDedupesAndFansOut(t *testing.T) {
 	}
 
 	// A failed round records the error and the time, nothing else (WD-UPD-004).
+	// A day later bot-e's cached snapshot has expired; probe it again so it
+	// still forms its own platform group.
 	f.now = f.now.Add(24 * time.Hour)
+	f.svc.cache.Put("bot-e", TargetNative, Snapshot{Platform: Platform{OS: "linux", Arch: "arm64", Libc: "musl", TmpDir: "/tmp"}})
 	f.setRun(func(RunSpec) (Result, error) {
 		return Result{ExitCode: 1}, &ExitError{Code: 1, StderrTail: "npm view: ETIMEDOUT"}
 	})

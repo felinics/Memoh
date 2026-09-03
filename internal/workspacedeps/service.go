@@ -39,6 +39,23 @@ const (
 	rollbackTimeout = 2 * time.Minute
 	// staleReapMessage is written to last_error by ReapStale.
 	staleReapMessage = "operation did not finish within its timeout and was marked failed by the stale reaper"
+	// interruptedMessage is written to last_error when List finds an
+	// in-progress record whose operation is provably gone (WD-STATE-002).
+	interruptedMessage = "operation interrupted"
+	// cancelledMessagePrefix marks a last_error caused by the request going
+	// away (closed dialog, dropped connection, shutdown) rather than by the
+	// script.
+	cancelledMessagePrefix = "operation cancelled: "
+	// finalizeTimeout bounds the writes that record an operation's outcome
+	// once its script has finished or failed. They run on a context detached
+	// from the request so a closed dialog, a dropped connection, or the
+	// shutdown window still leaves a terminal record behind instead of an
+	// installing/updating/removing row nobody owns.
+	finalizeTimeout = 10 * time.Second
+	// staleOperationAge is how long an in-progress record must have gone
+	// untouched before List may treat it as interrupted. An operation that
+	// is running has taken its workspace lock well within that time.
+	staleOperationAge = 60 * time.Second
 	// rollbackScript is the whole body run by Rollback: switch `current` to
 	// the previous version. state.json is rewritten by the Server afterwards.
 	rollbackScript = `dep_switch "$MEMOH_DEP_HOME/versions/$MEMOH_DEP_VERSION"` + "\n"
@@ -112,6 +129,9 @@ func NewService(opts Options) *Service {
 	if s.now == nil {
 		s.now = time.Now
 	}
+	// Snapshot ages are compared with record timestamps, so the cache and
+	// the service must read the same clock.
+	s.cache.now = s.now
 	s.workspace.OnBridgeReset(s.cache.Invalidate)
 	return s
 }
@@ -163,6 +183,11 @@ type ListResult struct {
 	// which only happens for offline remote targets.
 	DataRoot string
 	Entries  []Entry
+	// DiscoveryError is set when the workspace is running but could not be
+	// inspected (the discovery exec was killed or timed out, the bridge did
+	// not answer). Entries then reflect the records alone, carry no
+	// discovery facts, and offer no actions.
+	DiscoveryError string
 }
 
 // PreflightItem is the verdict for one required dependency (design §9.3).
@@ -241,7 +266,27 @@ func (s *Service) list(ctx context.Context, botID, targetID string, force bool) 
 
 	snap, err := s.snapshot(ctx, botID, targetID, force)
 	if err != nil {
-		return ListResult{}, err
+		if ctx.Err() != nil {
+			return ListResult{}, err
+		}
+		// The workspace runs but could not be inspected: the discovery exec
+		// was killed or timed out, or the bridge did not answer. The records
+		// still say what the user asked for, so report them with the problem
+		// instead of failing the whole list. A stopped workspace never gets
+		// here; it keeps its own semantics above.
+		s.logger.Warn("workspace dependency discovery failed; listing records only",
+			slog.String("bot_id", botID),
+			slog.String("workspace_target_id", targetID),
+			slog.Any("error", err),
+		)
+		result.DiscoveryError = truncateMessage(err.Error())
+		if snap, ok := s.cache.Get(botID, targetID); ok {
+			result.Platform = snap.Platform
+		}
+		for _, dep := range deps {
+			result.Entries = append(result.Entries, offlineEntry(dep, byDep[dep.ID], result.Platform))
+		}
+		return result, nil
 	}
 	result.Platform = snap.Platform
 	for _, dep := range deps {
@@ -274,7 +319,7 @@ func (s *Service) snapshot(ctx context.Context, botID, targetID string, force bo
 	if err != nil {
 		return Snapshot{}, err
 	}
-	snap := Snapshot{Platform: platform, Observed: observed}
+	snap := Snapshot{Platform: platform, Observed: observed, At: s.now()}
 	s.cache.Put(botID, targetID, snap)
 	return snap, nil
 }
@@ -282,9 +327,12 @@ func (s *Service) snapshot(ctx context.Context, botID, targetID string, force bo
 // reconcile applies the three-state table of design §8.2 to one dependency
 // and builds its Entry. Records in a transient state are displayed as they
 // are and never written: an operation in flight must not be flipped by a
-// concurrent List, and touching the row would postpone the stale reaper.
-// Failed records keep their status so the failure stays visible until the
-// next operation replaces it, but their observed facts are corrected.
+// concurrent List, and touching the row would postpone the stale reaper. The
+// one exception is a record whose operation is provably gone (interrupted);
+// it is marked failed on the spot so the UI offers a retry instead of waiting
+// for the reaper. Failed records keep their status so the failure stays
+// visible until the next operation replaces it, but their observed facts are
+// corrected.
 func (s *Service) reconcile(ctx context.Context, key InstallationKey, dep catalog.Dependency, snap Snapshot, rec *Installation) (Entry, error) {
 	obs := snap.Observed[dep.ID]
 	entry := Entry{
@@ -293,6 +341,18 @@ func (s *Service) reconcile(ctx context.Context, key InstallationKey, dep catalo
 		PlatformSupported: dep.SupportsPlatform(snap.Platform.OS, snap.Platform.Arch, snap.Platform.Libc),
 	}
 	switch {
+	case rec != nil && rec.Status.InProgress() && s.interrupted(key, *rec, snap):
+		failed, err := s.store.SetStatus(ctx, key, StatusFailed, interruptedMessage)
+		if err != nil {
+			return Entry{}, fmt.Errorf("workspacedeps: mark interrupted %s failed: %w", dep.ID, err)
+		}
+		s.logger.Warn("interrupted dependency operation marked failed",
+			slog.String("bot_id", key.BotID),
+			slog.String("workspace_target_id", key.WorkspaceTargetID),
+			slog.String("dependency_id", key.DependencyID),
+			slog.String("status", string(rec.Status)),
+		)
+		rec = &failed
 	case rec != nil && rec.Status.InProgress():
 		// Read-only: the operation owns the row, and any write here would
 		// refresh updated_at and postpone the stale reaper (WD-STATE-002).
@@ -322,6 +382,36 @@ func (s *Service) reconcile(ctx context.Context, key InstallationKey, dep catalo
 		rec = &missing
 	}
 	return buildEntry(entry, dep, rec, obs), nil
+}
+
+// interrupted reports whether an in-progress record belongs to an operation
+// that is provably gone, so List may mark it failed at once (WD-STATE-002
+// applied at read time). Three facts must agree, because in a multi-instance
+// deployment another Server may be running the operation: this process holds
+// no lock on the key, the record has gone untouched for staleOperationAge,
+// and the workspace shows no lock directory for the dependency in a
+// discovery taken after the run had that long to create one. A record that
+// has outlived its whole budget (script timeout plus lock grace) is gone by
+// the prelude's own rule whatever the lock directory says; the reaper would
+// reach the same verdict on its next pass.
+func (s *Service) interrupted(key InstallationKey, rec Installation, snap Snapshot) bool {
+	if !rec.Status.InProgress() || s.locks.locked(key) {
+		return false
+	}
+	age := s.now().Sub(rec.UpdatedAt)
+	if age <= staleOperationAge {
+		return false
+	}
+	if age > s.operationBudget(rec) {
+		return true
+	}
+	if snap.Observed[rec.DependencyID].LockHeld {
+		return false
+	}
+	// A cached snapshot may predate the operation, or have been taken before
+	// its script reached the prelude; only one taken well after the record
+	// went in progress can vouch for the lock's absence.
+	return snap.At.Sub(rec.UpdatedAt) > staleOperationAge
 }
 
 // correctRecord writes the discovered facts into a record that discovery
@@ -434,7 +524,8 @@ func hasManagedCopy(obs Observed) bool {
 }
 
 // offlineEntry builds an Entry from the record alone, for a workspace that
-// cannot be inspected. Nothing can run, so no actions are offered.
+// cannot be inspected: one that is not running, or one whose discovery
+// failed. Without facts no action is offered.
 func offlineEntry(dep catalog.Dependency, rec *Installation, platform Platform) Entry {
 	entry := Entry{Dependency: dep, Installation: rec, PlatformSupported: true}
 	if platform.OS != "" {
@@ -626,7 +717,7 @@ func (s *Service) Reinstall(ctx context.Context, botID, targetID, depID, version
 		return OperationResult{}, fmt.Errorf("%w: %s has no install script", ErrActionUnsupported, op.dep.ID)
 	}
 	previous := s.readStateBestEffort(ctx, op)
-	if err := s.markInProgress(ctx, op.key, StatusInstalling); err != nil {
+	if err := s.markInProgress(ctx, op, StatusInstalling); err != nil {
 		return OperationResult{}, err
 	}
 	if _, err := s.runScript(ctx, op, catalog.ActionRemove, removeScript, "", stateVersion(previous), 0, sink); err != nil {
@@ -657,17 +748,21 @@ func (s *Service) Remove(ctx context.Context, botID, targetID, depID string, sin
 		return OperationResult{}, fmt.Errorf("%w: %s has no remove script", ErrActionUnsupported, op.dep.ID)
 	}
 	previous := s.readStateBestEffort(ctx, op)
-	if err := s.markInProgress(ctx, op.key, StatusRemoving); err != nil {
+	if err := s.markInProgress(ctx, op, StatusRemoving); err != nil {
 		return OperationResult{}, err
 	}
 	if _, err := s.runScript(ctx, op, catalog.ActionRemove, script, "", stateVersion(previous), 0, sink); err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
-	if err := op.deleteShims(ctx, shimNames(op.dep, previous)); err != nil {
+	// The script has run; finishing up must not depend on the request still
+	// being there.
+	finalCtx, cancel := finalizeContext(ctx)
+	defer cancel()
+	if err := op.deleteShims(finalCtx, shimNames(op.dep, previous)); err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
-	if err := s.store.Delete(ctx, op.key); err != nil && !errors.Is(err, ErrInstallationNotFound) {
-		return OperationResult{}, fmt.Errorf("workspacedeps: delete record for %s: %w", op.dep.ID, err)
+	if err := s.store.Delete(finalCtx, op.key); err != nil && !errors.Is(err, ErrInstallationNotFound) {
+		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: delete record for %s: %w", op.dep.ID, err))
 	}
 	s.cache.Invalidate(op.key.BotID)
 	return OperationResult{DependencyID: op.dep.ID, Action: catalog.ActionRemove}, nil
@@ -696,7 +791,7 @@ func (s *Service) Rollback(ctx context.Context, botID, targetID, depID string) (
 		}
 		return OperationResult{}, fmt.Errorf("workspacedeps: stat previous version of %s: %w", op.dep.ID, err)
 	}
-	if err := s.markInProgress(ctx, op.key, StatusUpdating); err != nil {
+	if err := s.markInProgress(ctx, op, StatusUpdating); err != nil {
 		return OperationResult{}, err
 	}
 	if _, err := s.runScript(ctx, op, ActionRollback, rollbackScript, previous, current.Version, rollbackTimeout, nil); err != nil {
@@ -710,7 +805,9 @@ func (s *Service) Rollback(ctx context.Context, botID, targetID, depID string) (
 		Entrypoints:     current.Entrypoints,
 		PreviousVersion: current.Version,
 	}
-	if err := op.writeState(ctx, state); err != nil {
+	finalCtx, cancel := finalizeContext(ctx)
+	defer cancel()
+	if err := op.writeState(finalCtx, state); err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
 	return s.record(ctx, op, ActionRollback, state)
@@ -722,7 +819,8 @@ func (s *Service) Rollback(ctx context.Context, botID, targetID, depID string) (
 func (s *Service) CheckUpdates(ctx context.Context, botID, targetID string) (ListResult, error) {
 	targetID = normalizeTargetID(targetID)
 	result, err := s.list(ctx, botID, targetID, true)
-	if err != nil || result.Workspace != WorkspaceRunning {
+	if err != nil || result.Workspace != WorkspaceRunning || result.DiscoveryError != "" {
+		// Without discovery facts there is nothing to check against.
 		return result, err
 	}
 	client, dataRoot, err := s.target(ctx, botID, targetID)
@@ -852,6 +950,11 @@ type operation struct {
 	shimDir  string
 	platform Platform
 	release  func()
+	// marked is set once markInProgress wrote the record; prior is what the
+	// record said before that, nil when it did not exist. Both let a busy
+	// verdict from the prelude undo the write (see restore).
+	marked bool
+	prior  *Installation
 }
 
 // begin validates the dependency, takes the in-memory lock, makes sure the
@@ -955,7 +1058,7 @@ func (s *Service) provision(ctx context.Context, op *operation, action catalog.A
 		return OperationResult{}, fmt.Errorf("%w: %s has no %s script", ErrActionUnsupported, op.dep.ID, action)
 	}
 	previous := s.readStateBestEffort(ctx, op)
-	if err := s.markInProgress(ctx, op.key, status); err != nil {
+	if err := s.markInProgress(ctx, op, status); err != nil {
 		return OperationResult{}, err
 	}
 	result, err := s.runScript(ctx, op, action, script, op.version, stateVersion(previous), 0, sink)
@@ -969,7 +1072,9 @@ func (s *Service) provision(ctx context.Context, op *operation, action catalog.A
 // record: state.json, shims, then the installed row (design §6). The version
 // recorded is the one the script reported through dep_result; the requested
 // version only stands in when the script reported none, which "latest"
-// never can.
+// never can. Once the script has succeeded the outcome is persisted on the
+// finalization context: a request that went away meanwhile must not leave
+// the workspace half committed and the record in progress.
 func (s *Service) commit(ctx context.Context, op *operation, action catalog.Action, result Result, previous *State) (OperationResult, error) {
 	version := strings.TrimSpace(result.Version)
 	if version == "" {
@@ -997,19 +1102,25 @@ func (s *Service) commit(ctx context.Context, op *operation, action catalog.Acti
 			state.PreviousVersion = previous.Version
 		}
 	}
-	if err := op.writeState(ctx, state); err != nil {
+	finalCtx, cancel := finalizeContext(ctx)
+	defer cancel()
+	if err := op.writeState(finalCtx, state); err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
-	if err := WriteShims(ctx, op.client, op.shimDir, state.Entrypoints, op.dep.IsAgent()); err != nil {
+	if err := WriteShims(finalCtx, op.client, op.shimDir, state.Entrypoints, op.dep.IsAgent()); err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
 	}
 	return s.record(ctx, op, action, state)
 }
 
 // record writes the installed row for a state.json the Server just wrote and
-// invalidates the bot's discovery cache.
+// invalidates the bot's discovery cache. The write runs on the finalization
+// context; should it still fail, the record is marked failed rather than
+// left in progress.
 func (s *Service) record(ctx context.Context, op *operation, action catalog.Action, state State) (OperationResult, error) {
-	rec, err := s.store.Upsert(ctx, UpsertInstallation{
+	storeCtx, cancel := finalizeContext(ctx)
+	defer cancel()
+	rec, err := s.store.Upsert(storeCtx, UpsertInstallation{
 		InstallationKey:  op.key,
 		Source:           InstallationSourceManaged,
 		Status:           StatusInstalled,
@@ -1017,7 +1128,7 @@ func (s *Service) record(ctx context.Context, op *operation, action catalog.Acti
 		ManifestDigest:   state.ManifestDigest,
 	})
 	if err != nil {
-		return OperationResult{}, fmt.Errorf("workspacedeps: record %s %s: %w", action, op.dep.ID, err)
+		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: record %s %s: %w", action, op.dep.ID, err))
 	}
 	s.cache.Invalidate(op.key.BotID)
 	return OperationResult{
@@ -1058,11 +1169,22 @@ func (s *Service) runScript(ctx context.Context, op *operation, action catalog.A
 }
 
 // markInProgress moves the record into a transient status, creating it when
-// the dependency was never recorded.
-func (s *Service) markInProgress(ctx context.Context, key InstallationKey, status Status) error {
-	_, err := s.store.SetStatus(ctx, key, status, "")
-	if errors.Is(err, ErrInstallationNotFound) {
+// the dependency was never recorded. It remembers what the record said
+// before so a busy verdict from the prelude can put it back (restore).
+func (s *Service) markInProgress(ctx context.Context, op *operation, status Status) error {
+	key := op.key
+	prior, err := s.store.Get(ctx, key)
+	switch {
+	case errors.Is(err, ErrInstallationNotFound):
 		_, err = s.store.Upsert(ctx, UpsertInstallation{InstallationKey: key, Source: InstallationSourceManaged, Status: status})
+		if err == nil {
+			op.marked, op.prior = true, nil
+		}
+	case err == nil:
+		_, err = s.store.SetStatus(ctx, key, status, "")
+		if err == nil {
+			op.marked, op.prior = true, &prior
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("workspacedeps: mark %s %s: %w", key.DependencyID, status, err)
@@ -1070,15 +1192,30 @@ func (s *Service) markInProgress(ctx context.Context, key InstallationKey, statu
 	return nil
 }
 
-// fail records a failed operation and returns the cause. A busy error leaves
-// the record alone: the instance holding the workspace lock owns its state.
+// finalizeContext derives the context for the writes that record an
+// operation's outcome: detached from the request's cancellation, so a closed
+// dialog or a shutdown window cannot strand the record in progress, and
+// bounded so a stuck store or bridge cannot hold the operation forever.
+func finalizeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), finalizeTimeout)
+}
+
+// fail records a failed operation and returns the cause. When the cause is
+// that the request went away, last_error says so. A busy verdict means the
+// instance holding the workspace lock owns the record's state: the row is put
+// back to what it said before this operation touched it, never marked failed.
 func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 	if errors.Is(cause, ErrBusy) {
+		s.restore(ctx, op)
 		return cause
 	}
-	// A cancelled request must still leave a failed record behind.
-	storeCtx := context.WithoutCancel(ctx)
-	if _, err := s.store.SetStatus(storeCtx, op.key, StatusFailed, truncateError(cause)); err != nil {
+	message := cause.Error()
+	if ctx.Err() != nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		message = cancelledMessagePrefix + message
+	}
+	storeCtx, cancel := finalizeContext(ctx)
+	defer cancel()
+	if _, err := s.store.SetStatus(storeCtx, op.key, StatusFailed, truncateMessage(message)); err != nil {
 		s.logger.Warn("record failed dependency operation",
 			slog.String("bot_id", op.key.BotID),
 			slog.String("dependency_id", op.dep.ID),
@@ -1087,6 +1224,37 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 	}
 	s.cache.Invalidate(op.key.BotID)
 	return cause
+}
+
+// restore undoes markInProgress after the prelude reported the dependency's
+// workspace lock as held by another Server instance (design §8.4). That
+// instance owns the record, so the row goes back to what it said before this
+// operation wrote to it, or away again when this operation created it.
+// Leaving our own in-progress status behind would show an operation nobody
+// runs and nobody could finish.
+func (s *Service) restore(ctx context.Context, op *operation) {
+	if !op.marked {
+		return
+	}
+	storeCtx, cancel := finalizeContext(ctx)
+	defer cancel()
+	var err error
+	if op.prior == nil {
+		err = s.store.Delete(storeCtx, op.key)
+		if errors.Is(err, ErrInstallationNotFound) {
+			err = nil
+		}
+	} else {
+		_, err = s.store.SetStatus(storeCtx, op.key, op.prior.Status, op.prior.LastError)
+	}
+	if err != nil {
+		s.logger.Warn("restore dependency record after busy verdict",
+			slog.String("bot_id", op.key.BotID),
+			slog.String("dependency_id", op.dep.ID),
+			slog.Any("error", err),
+		)
+	}
+	op.marked = false
 }
 
 // readState decodes the dependency's state.json; nil when there is none.
@@ -1225,7 +1393,12 @@ func (s *Service) checkUpdate(ctx context.Context, client *bridge.Client, dataRo
 
 // recordCheck writes a check result to one record. Failures only touch
 // last_error and last_checked_at; the status stays as it was (WD-UPD-004).
+// A busy verdict is not a check result at all — another operation holds the
+// dependency — and leaves the record untouched.
 func (s *Service) recordCheck(ctx context.Context, key InstallationKey, check updateCheck, checkErr error) error {
+	if errors.Is(checkErr, ErrBusy) {
+		return nil
+	}
 	now := s.now().UTC()
 	upd := ObservedUpdate{LastCheckedAt: &now}
 	if checkErr != nil {
@@ -1237,7 +1410,9 @@ func (s *Service) recordCheck(ctx context.Context, key InstallationKey, check up
 		upd.LatestVersion = &latest
 		upd.LastError = &cleared
 	}
-	if _, err := s.store.UpdateObserved(ctx, key, upd); err != nil {
+	storeCtx, cancel := finalizeContext(ctx)
+	defer cancel()
+	if _, err := s.store.UpdateObserved(storeCtx, key, upd); err != nil {
 		if errors.Is(err, ErrInstallationNotFound) {
 			return nil
 		}
@@ -1363,5 +1538,11 @@ func shimNames(dep catalog.Dependency, state *State) []string {
 }
 
 func truncateError(err error) string {
-	return textutil.TruncateRunesWithSuffix(strings.TrimSpace(err.Error()), lastErrorLimit, "...")
+	return truncateMessage(err.Error())
+}
+
+// truncateMessage caps a message at lastErrorLimit runes for storage and API
+// responses.
+func truncateMessage(message string) string {
+	return textutil.TruncateRunesWithSuffix(strings.TrimSpace(message), lastErrorLimit, "...")
 }

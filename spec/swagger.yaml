@@ -4638,6 +4638,13 @@ definitions:
     type: object
   handlers.WorkspaceDependencyListResponse:
     properties:
+      discovery_error:
+        description: |-
+          DiscoveryError is set when the workspace is running but could not be
+          inspected (the discovery command was killed or timed out). Items then
+          reflect the installation records alone, without workspace facts or
+          actions; a refresh retries discovery.
+        type: string
       items:
         items:
           $ref: '#/definitions/handlers.WorkspaceDependencyItem'

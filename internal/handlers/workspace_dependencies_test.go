@@ -422,6 +422,63 @@ func TestListWorkspaceDependenciesOmitsPlatformWhenUnknown(t *testing.T) {
 	}
 }
 
+// TestListWorkspaceDependenciesReportsDiscoveryError covers the degraded
+// list: a running workspace whose discovery failed still answers 200 with the
+// records and names the problem in discovery_error, which is omitted when
+// discovery worked.
+func TestListWorkspaceDependenciesReportsDiscoveryError(t *testing.T) {
+	deps := depsTestCatalog()
+	svc := &fakeWorkspaceDependencyService{
+		deps: deps,
+		list: workspacedeps.ListResult{
+			Workspace:      workspacedeps.WorkspaceRunning,
+			DataRoot:       "/data",
+			DiscoveryError: "workspacedeps: discovery script exited 137 before finishing",
+			Entries: []workspacedeps.Entry{{
+				Dependency:        deps["codex"],
+				Installation:      &workspacedeps.Installation{Status: workspacedeps.StatusFailed, LastError: "operation interrupted"},
+				Status:            workspacedeps.StatusFailed,
+				PlatformSupported: true,
+			}},
+		},
+	}
+	h := newDepsTestHandler("admin", svc)
+	rec, err := depsCall{method: http.MethodGet, target: "/bots/x/dependencies"}.invoke(t, h.ListWorkspaceDependencies)
+	if err != nil {
+		t.Fatalf("ListWorkspaceDependencies: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 despite the discovery failure", rec.Code)
+	}
+	raw := decodeJSON[map[string]any](t, rec)
+	if raw["workspace_state"] != "running" || raw["discovery_error"] != "workspacedeps: discovery script exited 137 before finishing" {
+		t.Errorf("response = %v", raw)
+	}
+	if _, ok := raw["platform"]; ok {
+		t.Errorf("platform must be omitted when unknown: %v", raw)
+	}
+	items, _ := raw["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %v", raw["items"])
+	}
+	codex := items[0].(map[string]any)
+	if codex["status"] != "failed" || codex["last_error"] != "operation interrupted" {
+		t.Errorf("codex = %v", codex)
+	}
+	if actions, _ := codex["actions"].([]any); actions == nil || len(actions) != 0 {
+		t.Errorf("actions = %v, want [] without facts", codex["actions"])
+	}
+
+	svc.list.DiscoveryError = ""
+	rec, err = depsCall{method: http.MethodGet, target: "/bots/x/dependencies"}.invoke(t, h.ListWorkspaceDependencies)
+	if err != nil {
+		t.Fatalf("ListWorkspaceDependencies: %v", err)
+	}
+	if raw := decodeJSON[map[string]any](t, rec); raw["discovery_error"] != nil {
+		t.Errorf("discovery_error must be omitted when discovery worked: %v", raw)
+	}
+}
+
 func TestListWorkspaceDependenciesPassesWorkspaceTarget(t *testing.T) {
 	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog()}
 	h := newDepsTestHandler("admin", svc)
@@ -731,6 +788,36 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 	}
 	if svc.calls[len(svc.calls)-1] != "remove" {
 		t.Errorf("calls = %v", svc.calls)
+	}
+}
+
+// TestWorkspaceDependencyStreamLogsRefusalsBelowWarn pins the log level of
+// the two outcomes that are not faults: a busy verdict (operations never
+// queue) and the client going away. A script failure stays a warning.
+func TestWorkspaceDependencyStreamLogsRefusalsBelowWarn(t *testing.T) {
+	var logs strings.Builder
+	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog(), opErr: workspacedeps.ErrBusy}
+	h := newDepsTestHandler("admin", svc)
+	h.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency); err != nil {
+		t.Fatalf("UpdateWorkspaceDependency: %v", err)
+	}
+	out := logs.String()
+	if strings.Contains(out, "level=WARN") || strings.Contains(out, "level=ERROR") {
+		t.Errorf("busy verdict logged above INFO:\n%s", out)
+	}
+	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "another operation is in progress") {
+		t.Errorf("busy verdict not logged at INFO:\n%s", out)
+	}
+
+	logs.Reset()
+	svc.opErr = &workspacedeps.ExitError{Code: 1, StderrTail: "boom"}
+	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency); err != nil {
+		t.Fatalf("UpdateWorkspaceDependency: %v", err)
+	}
+	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "operation failed") {
+		t.Errorf("script failure not logged at WARN:\n%s", out)
 	}
 }
 

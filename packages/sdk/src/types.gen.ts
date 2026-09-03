@@ -2619,6 +2619,13 @@ export type HandlersWorkspaceDependencyItem = {
 };
 
 export type HandlersWorkspaceDependencyListResponse = {
+    /**
+     * DiscoveryError is set when the workspace is running but could not be
+     * inspected (the discovery command was killed or timed out). Items then
+     * reflect the installation records alone, without workspace facts or
+     * actions; a refresh retries discovery.
+     */
+    discovery_error?: string;
     items?: Array<HandlersWorkspaceDependencyItem>;
     platform?: HandlersWorkspaceDependencyPlatform;
     workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';

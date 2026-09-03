@@ -22607,6 +22607,10 @@
         "handlers.WorkspaceDependencyListResponse": {
             "type": "object",
             "properties": {
+                "discovery_error": {
+                    "description": "DiscoveryError is set when the workspace is running but could not be\ninspected (the discovery command was killed or timed out). Items then\nreflect the installation records alone, without workspace facts or\nactions; a refresh retries discovery.",
+                    "type": "string"
+                },
                 "items": {
                     "type": "array",
                     "items": {

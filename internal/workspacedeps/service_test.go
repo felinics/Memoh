@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -1021,14 +1022,334 @@ func TestInstallBusy(t *testing.T) {
 		t.Errorf("runs = %d, want 2 (the busy calls never ran a script)", len(f.runSpecs()))
 	}
 
-	// The prelude's lock (another Server instance) is also reported as busy
-	// and leaves the record to that instance.
+	// The prelude's lock (another Server instance) is also reported as busy.
+	// That instance owns the record, so the row goes back to what it said
+	// before this call marked it: installed, by the first Install above.
 	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
 	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("locked Update error = %v, want ErrBusy", err)
 	}
-	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusUpdating {
-		t.Errorf("record after locked run = %+v, want updating left in place", rec)
+	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusInstalled || rec.LastError != "" {
+		t.Errorf("record after locked run = %+v, want the pre-operation record restored", rec)
+	}
+	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusInstalling, StatusInstalled, StatusUpdating, StatusInstalled) {
+		t.Errorf("status history = %v", got)
+	}
+}
+
+// TestBusyVerdictRestoresRecord pins what "the lock holder owns the record"
+// means for the row this instance already marked: it is put back exactly,
+// whatever it said, and removed again when this operation created it. A
+// stale in-progress row from a killed run is left for the reaper, not marked
+// failed on the strength of a lock we do not understand.
+func TestBusyVerdictRestoresRecord(t *testing.T) {
+	f := newServiceFixture(t)
+	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
+	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusFailed, InstalledVersion: "1.0.0", LastError: "boom"})
+	f.store.seed(Installation{BotID: testBot, DependencyID: "mac-only", Source: InstallationSourceManaged, Status: StatusInstalling, UpdatedAt: f.now.Add(-time.Hour)})
+	before := f.store.writeCount()
+
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Install error = %v, want ErrBusy", err)
+	}
+	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusFailed || rec.LastError != "boom" || rec.InstalledVersion != "1.0.0" {
+		t.Errorf("failed record after busy verdict = %+v, want it restored verbatim", rec)
+	}
+
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", "", nil); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Install error = %v, want ErrBusy", err)
+	}
+	if rec, ok := f.store.get(f.key("agent-x")); ok {
+		t.Errorf("record created for the busy operation survived: %+v", rec)
+	}
+
+	if _, err := f.svc.Remove(f.ctx(), testBot, testTarget, "mac-only", nil); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Remove error = %v, want ErrBusy", err)
+	}
+	if rec, _ := f.store.get(f.key("mac-only")); rec.Status != StatusInstalling || rec.LastError != "" {
+		t.Errorf("stale in-progress record after busy verdict = %+v, want it left as it was", rec)
+	}
+	// Every mark was undone by exactly one write; no failed status was recorded.
+	if got := f.store.writeCount() - before; got != 6 {
+		t.Errorf("store writes = %d, want 6 (three marks, three restores)", got)
+	}
+	want := map[string][]Status{
+		"tool-y":   {StatusInstalling, StatusFailed},
+		"agent-x":  {StatusInstalling},
+		"mac-only": {StatusRemoving, StatusInstalling},
+	}
+	for dep, statuses := range want {
+		if got := f.store.statuses(f.key(dep)); !statusesEqual(got, statuses...) {
+			t.Errorf("%s status history = %v, want %v", dep, got, statuses)
+		}
+	}
+}
+
+// cancelSensitiveStore fails every write whose context is already done, the
+// way a database driver does, so tests can prove that the writes recording an
+// outcome are detached from the request that started the operation.
+type cancelSensitiveStore struct {
+	Store
+}
+
+func (s cancelSensitiveStore) Upsert(ctx context.Context, in UpsertInstallation) (Installation, error) {
+	if err := ctx.Err(); err != nil {
+		return Installation{}, err
+	}
+	return s.Store.Upsert(ctx, in)
+}
+
+func (s cancelSensitiveStore) SetStatus(ctx context.Context, key InstallationKey, status Status, lastError string) (Installation, error) {
+	if err := ctx.Err(); err != nil {
+		return Installation{}, err
+	}
+	return s.Store.SetStatus(ctx, key, status, lastError)
+}
+
+func (s cancelSensitiveStore) UpdateObserved(ctx context.Context, key InstallationKey, upd ObservedUpdate) (Installation, error) {
+	if err := ctx.Err(); err != nil {
+		return Installation{}, err
+	}
+	return s.Store.UpdateObserved(ctx, key, upd)
+}
+
+func (s cancelSensitiveStore) Delete(ctx context.Context, key InstallationKey) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.Store.Delete(ctx, key)
+}
+
+// TestCancelledOperationRecordsFailure covers the user closing the dialog (or
+// the connection dropping) while the script runs: the record must end up
+// failed with a last_error that says why, not stay in progress for the reaper.
+func TestCancelledOperationRecordsFailure(t *testing.T) {
+	f := newServiceFixture(t)
+	f.svc.store = cancelSensitiveStore{f.store}
+	ctx, cancel := context.WithCancel(f.ctx())
+	defer cancel()
+	f.svc.run = func(ctx context.Context, _ *bridge.Client, spec RunSpec, _ LogSink) (Result, error) {
+		cancel()
+		<-ctx.Done()
+		return Result{}, fmt.Errorf("workspacedeps: script for %s interrupted: %w", spec.DepID, ctx.Err())
+	}
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	_, err := f.svc.Install(ctx, testBot, testTarget, "tool-y", "", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Install error = %v, want context.Canceled", err)
+	}
+	rec, ok := f.store.get(f.key("tool-y"))
+	if !ok || rec.Status != StatusFailed {
+		t.Fatalf("record after cancelled install = %+v (found %v), want failed", rec, ok)
+	}
+	if !strings.HasPrefix(rec.LastError, cancelledMessagePrefix) || !strings.Contains(rec.LastError, "context canceled") {
+		t.Errorf("last_error = %q, want %q followed by the cause", rec.LastError, cancelledMessagePrefix)
+	}
+	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusInstalling, StatusFailed) {
+		t.Errorf("status history = %v", got)
+	}
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if f.discovered() != 2 {
+		t.Errorf("discovery cache not invalidated after the failure (discover calls = %d)", f.discovered())
+	}
+}
+
+// TestCancelledRequestStillCommitsFinishedScript covers the other side of the
+// window: the script has already succeeded when the request goes away. The
+// workspace state, the shims, and the record are still written, and a remove
+// still drops its record.
+func TestCancelledRequestStillCommitsFinishedScript(t *testing.T) {
+	f := newServiceFixture(t)
+	f.svc.store = cancelSensitiveStore{f.store}
+	ctx, cancel := context.WithCancel(f.ctx())
+	defer cancel()
+	f.svc.run = func(_ context.Context, _ *bridge.Client, spec RunSpec, _ LogSink) (Result, error) {
+		cancel()
+		if spec.Action == catalog.ActionRemove {
+			return Result{}, nil
+		}
+		return f.installResult(spec.DepID, "1.0.0"), nil
+	}
+
+	result, err := f.svc.Install(ctx, testBot, testTarget, "tool-y", "", nil)
+	if err != nil {
+		t.Fatalf("Install after the request went away: %v", err)
+	}
+	if result.Version != "1.0.0" || result.Installation.Status != StatusInstalled {
+		t.Errorf("result = %+v", result)
+	}
+	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusInstalled || rec.InstalledVersion != "1.0.0" {
+		t.Errorf("record = %+v, want installed", rec)
+	}
+	if state := f.readState(t, "tool-y"); state.Version != "1.0.0" {
+		t.Errorf("state.json = %+v", state)
+	}
+	if _, err := os.Stat(f.shimPath("tool-y")); err != nil {
+		t.Errorf("shim missing after commit: %v", err)
+	}
+
+	ctx, cancel = context.WithCancel(f.ctx())
+	defer cancel()
+	if _, err := f.svc.Remove(ctx, testBot, testTarget, "tool-y", nil); err != nil {
+		t.Fatalf("Remove after the request went away: %v", err)
+	}
+	if rec, ok := f.store.get(f.key("tool-y")); ok {
+		t.Errorf("record survived remove: %+v", rec)
+	}
+	if _, err := os.Stat(f.shimPath("tool-y")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("shim survived remove (err = %v)", err)
+	}
+}
+
+// TestListReclaimsInterruptedOperations covers the read-time recovery of
+// WD-STATE-002: an in-progress record is marked failed at once only when
+// nothing can still be running it.
+func TestListReclaimsInterruptedOperations(t *testing.T) {
+	cases := []struct {
+		name      string
+		age       func(dep catalog.Dependency) time.Duration
+		lockHeld  bool
+		localLock bool
+		want      Status
+	}{
+		{name: "stale without lock", age: func(catalog.Dependency) time.Duration { return 2 * time.Minute }, want: StatusFailed},
+		{name: "fresh without lock", age: func(catalog.Dependency) time.Duration { return 30 * time.Second }, want: StatusInstalling},
+		{name: "stale with lock held", age: func(catalog.Dependency) time.Duration { return 2 * time.Minute }, lockHeld: true, want: StatusInstalling},
+		{name: "stale but running in this process", age: func(catalog.Dependency) time.Duration { return 2 * time.Minute }, localLock: true, want: StatusInstalling},
+		{name: "beyond its budget with lock held", age: func(dep catalog.Dependency) time.Duration {
+			return dep.Timeouts.Duration(catalog.ActionReinstall) + lockStaleGrace + time.Minute
+		}, lockHeld: true, want: StatusFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newServiceFixture(t)
+			dep := f.cat.MustGet("tool-y")
+			f.store.seed(Installation{BotID: testBot, WorkspaceTargetID: testTarget, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalling, UpdatedAt: f.now.Add(-tc.age(dep))})
+			if tc.lockHeld {
+				f.mu.Lock()
+				f.observed["tool-y"] = Observed{DepID: "tool-y", LockHeld: true}
+				f.mu.Unlock()
+			}
+			if tc.localLock {
+				key := f.key("tool-y")
+				f.svc.locks.tryLock(key)
+				defer f.svc.locks.unlock(key)
+			}
+
+			result, err := f.svc.List(f.ctx(), testBot, testTarget)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			entry := f.entry(t, result, "tool-y")
+			rec, _ := f.store.get(f.key("tool-y"))
+			if entry.Status != tc.want || rec.Status != tc.want {
+				t.Fatalf("entry status = %s, record status = %s, want %s", entry.Status, rec.Status, tc.want)
+			}
+			if tc.want == StatusFailed {
+				if rec.LastError != interruptedMessage || actionsOf(entry) != "install,remove" {
+					t.Errorf("reclaimed record = %+v, actions = %s", rec, actionsOf(entry))
+				}
+				return
+			}
+			if rec.LastError != "" || len(entry.Actions) != 0 || f.store.writeCount() != 0 {
+				t.Errorf("in-progress record was touched: %+v, actions = %v, writes = %d", rec, entry.Actions, f.store.writeCount())
+			}
+		})
+	}
+}
+
+// TestListReclaimOnlyTrustsSnapshotsTakenAfterTheOperation guards the cached
+// snapshot: one discovered before the operation started cannot vouch for the
+// lock's absence, so the record waits for a fresh discovery.
+func TestListReclaimOnlyTrustsSnapshotsTakenAfterTheOperation(t *testing.T) {
+	f := newServiceFixture(t)
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	f.seed("tool-y", StatusInstalling, "")
+	f.now = f.now.Add(2 * time.Minute)
+
+	result, err := f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusInstalling {
+		t.Errorf("entry from the stale snapshot = %+v, want still installing", entry)
+	}
+	if f.discovered() != 1 {
+		t.Fatalf("discover calls = %d, want the cached snapshot reused", f.discovered())
+	}
+
+	result, err = f.svc.Refresh(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusFailed || entry.Installation.LastError != interruptedMessage {
+		t.Errorf("entry after a fresh discovery = %+v, want interrupted → failed", entry)
+	}
+}
+
+// TestListDegradesWhenDiscoveryFails covers a discovery exec that is killed
+// or times out: the list still answers from the records and reports the
+// problem instead of failing, nothing is cached, and the paths that need
+// facts (preflight, update checks) do not pretend to have them.
+func TestListDegradesWhenDiscoveryFails(t *testing.T) {
+	f := newServiceFixture(t)
+	f.seed("tool-y", StatusInstalled, "1.0.0")
+	f.store.seed(Installation{BotID: testBot, DependencyID: "agent-x", Source: InstallationSourceManaged, Status: StatusFailed, LastError: "boom"})
+	f.svc.discover = func(context.Context, *bridge.Client, *catalog.Catalog, string, []string, Platform) (map[string]Observed, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.discoverCalls++
+		return nil, errors.New("workspacedeps: discovery script exited 137 before finishing: ")
+	}
+
+	result, err := f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if result.Workspace != WorkspaceRunning || !strings.Contains(result.DiscoveryError, "exited 137") || len(result.Entries) != len(f.cat.List()) {
+		t.Fatalf("result = %+v", result)
+	}
+	tool := f.entry(t, result, "tool-y")
+	if tool.Status != StatusInstalled || tool.InstalledVersion != "1.0.0" || tool.Observed.Present || len(tool.Actions) != 0 {
+		t.Errorf("tool-y entry = %+v, want the record alone", tool)
+	}
+	agent := f.entry(t, result, "agent-x")
+	if agent.Status != StatusFailed || agent.Installation == nil || agent.Installation.LastError != "boom" {
+		t.Errorf("agent-x entry = %+v", agent)
+	}
+	if f.store.writeCount() != 0 {
+		t.Errorf("records were written without facts: %d writes", f.store.writeCount())
+	}
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if f.discovered() != 2 {
+		t.Errorf("discover calls = %d, want a failed discovery not to be cached", f.discovered())
+	}
+
+	if _, err := f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"tool-y"}); err == nil {
+		t.Error("Preflight must not answer without discovery facts")
+	}
+	checked, err := f.svc.CheckUpdates(f.ctx(), testBot, testTarget)
+	if err != nil || checked.DiscoveryError == "" || len(f.runSpecs()) != 0 {
+		t.Errorf("CheckUpdates = %+v, %v (runs = %d); want the degraded list and no checks", checked.DiscoveryError, err, len(f.runSpecs()))
+	}
+
+	// A request that went away is not a discovery failure to report.
+	ctx, cancel := context.WithCancel(f.ctx())
+	cancel()
+	f.svc.discover = func(ctx context.Context, _ *bridge.Client, _ *catalog.Catalog, _ string, _ []string, _ Platform) (map[string]Observed, error) {
+		return nil, ctx.Err()
+	}
+	if _, err := f.svc.List(ctx, testBot, testTarget); !errors.Is(err, context.Canceled) {
+		t.Errorf("List on a cancelled request = %v, want context.Canceled", err)
 	}
 }
 
@@ -1417,9 +1738,22 @@ func TestCheckUpdates(t *testing.T) {
 		t.Errorf("tool-y entry after failed check = %+v / %+v", tool, tool.Installation)
 	}
 
+	// A busy verdict (another operation holds the dependency) is not a check
+	// result: the record keeps its last check untouched.
+	before, _ := f.store.get(f.key("tool-y"))
+	f.now = f.now.Add(time.Hour)
+	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
+	if _, err := f.svc.CheckUpdates(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	after, _ := f.store.get(f.key("tool-y"))
+	if after.LastError != before.LastError || after.LatestVersion != before.LatestVersion || !after.LastCheckedAt.Equal(*before.LastCheckedAt) {
+		t.Errorf("record after busy check = %+v, want %+v untouched", after, before)
+	}
+
 	f.ws.setState(testBot, testTarget, WorkspaceNotRunning)
 	result, err = f.svc.CheckUpdates(f.ctx(), testBot, testTarget)
-	if err != nil || result.Workspace != WorkspaceNotRunning || len(f.runSpecs()) != 2 {
+	if err != nil || result.Workspace != WorkspaceNotRunning || len(f.runSpecs()) != 3 {
 		t.Errorf("CheckUpdates on stopped workspace = %+v, %v (runs = %d)", result.Workspace, err, len(f.runSpecs()))
 	}
 }
