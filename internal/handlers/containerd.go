@@ -341,7 +341,9 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/mcp-stdio", h.CreateMCPStdio)
 	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
 	root.POST("/tools", h.HandleMCPTools)
-	// Workspace dependency routes (design docs/design/workspace-dependencies.md §11)
+	// Workspace dependency routes (design docs/design/workspace-dependencies.md §11).
+	// The catalog is bot independent and needs only a signed-in user.
+	e.GET("/workspace-dependencies/catalog", h.ListWorkspaceDependencyCatalog)
 	deps := e.Group("/bots/:bot_id/dependencies")
 	deps.GET("", h.ListWorkspaceDependencies)
 	deps.POST("/preflight", h.PreflightWorkspaceDependencies)

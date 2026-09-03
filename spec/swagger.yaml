@@ -4447,6 +4447,91 @@ definitions:
       storage_bytes:
         type: integer
     type: object
+  handlers.WorkspaceDependencyCatalogItem:
+    properties:
+      actions_supported:
+        description: |-
+          ActionsSupported lists the actions the catalog gives the dependency,
+          before any workspace state is considered.
+        items:
+          enum:
+          - install
+          - update
+          - reinstall
+          - remove
+          - rollback
+          - check_update
+          type: string
+        type: array
+      category:
+        description: Category is agent, runtime, or tool.
+        enum:
+        - agent
+        - runtime
+        - tool
+        type: string
+      description:
+        type: string
+      has_image_baseline:
+        description: |-
+          HasImageBaseline is set when the workspace image ships a copy of the
+          dependency; removing a managed overlay returns to that copy.
+        type: boolean
+      icon:
+        type: string
+      id:
+        type: string
+      installable:
+        description: |-
+          Installable is set when the catalog has an install script for the
+          dependency, i.e. it can be installed into a workspace (as a managed
+          overlay when the image already ships it).
+        type: boolean
+      name:
+        type: string
+      platforms:
+        items:
+          $ref: '#/definitions/handlers.WorkspaceDependencyCatalogPlatform'
+        type: array
+      provides:
+        description: Provides lists the commands the dependency makes available.
+        items:
+          type: string
+        type: array
+      version_pin:
+        description: |-
+          VersionPin is the version every install produces when the manifest
+          locks one; omitted when installs follow the latest release.
+        type: string
+    type: object
+  handlers.WorkspaceDependencyCatalogPlatform:
+    properties:
+      arch:
+        items:
+          type: string
+        type: array
+      libc:
+        description: Libc is empty when the libc flavour does not matter for the OS.
+        type: string
+      os:
+        type: string
+    type: object
+  handlers.WorkspaceDependencyCatalogResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.WorkspaceDependencyCatalogItem'
+        type: array
+    type: object
+  handlers.WorkspaceDependencyInstallRequest:
+    properties:
+      version:
+        description: |-
+          Version to install. Empty (or no body) installs the latest version the
+          catalog script resolves, or the manifest pin when the dependency has
+          one. The version recorded afterwards is the one the script reports.
+        type: string
+    type: object
   handlers.WorkspaceDependencyItem:
     properties:
       actions:
@@ -4474,12 +4559,23 @@ definitions:
         type: string
       id:
         type: string
+      image_version:
+        description: |-
+          ImageVersion is the version of the copy the workspace image ships,
+          omitted when the image has none. It is the baseline a managed overlay
+          sits on and what remove returns to.
+        type: string
       install_path:
         description: |-
-          InstallPath is the dependency home for managed dependencies and the
-          discovered command path for image-provided ones.
+          InstallPath is the dependency home when a managed copy is in effect or
+          can be installed, and the discovered command path when the image copy
+          is in effect.
         type: string
       installed_version:
+        description: |-
+          InstalledVersion is the version of the copy in effect: the one the
+          runtime launches and the one first on PATH (managed, then image, then
+          PATH).
         type: string
       last_checked_at:
         type: string
@@ -4487,15 +4583,15 @@ definitions:
         type: string
       latest_version:
         description: |-
-          LatestVersion is the pin for agent dependencies and the last upstream
-          check result for tool dependencies.
+          LatestVersion is the last upstream check result, omitted until a check
+          ran.
         type: string
       name:
         type: string
-      needs_alignment:
+      overlay:
         description: |-
-          NeedsAlignment is set for installed agent dependencies whose version
-          differs from RequiredVersion.
+          Overlay is set when the copy in effect is a managed one installed over
+          an image copy.
         type: boolean
       platform_reason:
         enum:
@@ -4514,9 +4610,6 @@ definitions:
         items:
           type: string
         type: array
-      required_version:
-        description: RequiredVersion is the Server pin for agent dependencies.
-        type: string
       source:
         description: |-
           Source is image for dependencies shipped with the workspace image and
@@ -4539,8 +4632,8 @@ definitions:
         type: string
       update_available:
         description: |-
-          UpdateAvailable is set for installed tool dependencies whose last
-          upstream check reported a newer version.
+          UpdateAvailable is set for installed dependencies whose last upstream
+          check reported a version other than the one in effect.
         type: boolean
     type: object
   handlers.WorkspaceDependencyListResponse:
@@ -4591,13 +4684,10 @@ definitions:
         type: string
       name:
         type: string
-      required_version:
-        type: string
       state:
         enum:
         - satisfied
         - missing
-        - version_mismatch
         - platform_unsupported
         - unknown_dependency
         type: string
@@ -9566,7 +9656,9 @@ paths:
   /bots/{bot_id}/dependencies/{dep_id}:
     delete:
       description: Runs the catalog remove script, deletes the generated shims, drops
-        the installation record, and streams the output.
+        the installation record, and streams the output. For a dependency the image
+        ships this removes the managed overlay only; the image copy becomes the one
+        in effect again.
       parameters:
       - description: Bot ID
         in: path
@@ -9614,7 +9706,12 @@ paths:
       - containerd
   /bots/{bot_id}/dependencies/{dep_id}/install:
     post:
-      description: 'Runs the catalog install script and streams its output. A stopped
+      consumes:
+      - application/json
+      description: 'Runs the catalog install script and streams its output. The optional
+        body names the version to install; without one the script installs the latest
+        version (or the manifest pin). For a dependency the image already ships this
+        installs a managed overlay that takes precedence over the image copy. A stopped
         native workspace is started first. Events: started, log, done, error.'
       parameters:
       - description: Bot ID
@@ -9631,6 +9728,11 @@ paths:
         in: query
         name: workspace_target_id
         type: string
+      - description: Version to install (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       produces:
       - text/event-stream
       responses:
@@ -9663,8 +9765,11 @@ paths:
       - containerd
   /bots/{bot_id}/dependencies/{dep_id}/reinstall:
     post:
+      consumes:
+      - application/json
       description: Runs the catalog reinstall script, or remove followed by install,
-        and streams the output.
+        and streams the output. The optional body names the version to install; without
+        one the script picks the latest version (or the manifest pin).
       parameters:
       - description: Bot ID
         in: path
@@ -9680,6 +9785,11 @@ paths:
         in: query
         name: workspace_target_id
         type: string
+      - description: Version to install (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       produces:
       - text/event-stream
       responses:
@@ -9830,9 +9940,12 @@ paths:
       - containerd
   /bots/{bot_id}/dependencies/{dep_id}/update:
     post:
+      consumes:
+      - application/json
       description: Runs the catalog update script (or the install script when the
-        manifest has none) and streams its output. For agent dependencies this aligns
-        the installed copy with the version this Server requires.
+        manifest has none) and streams its output. The optional body names the version
+        to update to; without one the script picks the latest version (or the manifest
+        pin). The previous version is kept for rollback.
       parameters:
       - description: Bot ID
         in: path
@@ -9848,6 +9961,11 @@ paths:
         in: query
         name: workspace_target_id
         type: string
+      - description: Version to update to (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       produces:
       - text/event-stream
       responses:
@@ -9926,8 +10044,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Reports for each requested dependency whether it is installed
-        at the required version. Never starts the workspace: when it is not running,
+      description: 'Reports for each requested dependency whether a copy is installed,
+        whatever its version. Never starts the workspace: when it is not running,
         items is empty and workspace_state says why.'
       parameters:
       - description: Bot ID
@@ -17216,4 +17334,28 @@ paths:
       summary: Get webhook tunnel status
       tags:
       - system
+  /workspace-dependencies/catalog:
+    get:
+      description: 'Every dependency the catalog declares, as its manifest describes
+        it: what it provides, where it installs, whether it can be installed and whether
+        the workspace image ships a baseline copy. Reads no workspace and needs no
+        bot; the Supermarket shows it before a bot is chosen.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyCatalogResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List the workspace dependency catalog
+      tags:
+      - containerd
 swagger: "2.0"

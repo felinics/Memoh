@@ -4630,7 +4630,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/dependencies/preflight": {
             "post": {
-                "description": "Reports for each requested dependency whether it is installed at the required version. Never starts the workspace: when it is not running, items is empty and workspace_state says why.",
+                "description": "Reports for each requested dependency whether a copy is installed, whatever its version. Never starts the workspace: when it is not running, items is empty and workspace_state says why.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4707,7 +4707,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/dependencies/{dep_id}": {
             "delete": {
-                "description": "Runs the catalog remove script, deletes the generated shims, drops the installation record, and streams the output.",
+                "description": "Runs the catalog remove script, deletes the generated shims, drops the installation record, and streams the output. For a dependency the image ships this removes the managed overlay only; the image copy becomes the one in effect again.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -4779,7 +4779,10 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/dependencies/{dep_id}/install": {
             "post": {
-                "description": "Runs the catalog install script and streams its output. A stopped native workspace is started first. Events: started, log, done, error.",
+                "description": "Runs the catalog install script and streams its output. The optional body names the version to install; without one the script installs the latest version (or the manifest pin). For a dependency the image already ships this installs a managed overlay that takes precedence over the image copy. A stopped native workspace is started first. Events: started, log, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "text/event-stream"
                 ],
@@ -4807,6 +4810,14 @@ const docTemplate = `{
                         "description": "Workspace target ID (defaults to the bot's current target)",
                         "name": "workspace_target_id",
                         "in": "query"
+                    },
+                    {
+                        "description": "Version to install (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -4851,7 +4862,10 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/dependencies/{dep_id}/reinstall": {
             "post": {
-                "description": "Runs the catalog reinstall script, or remove followed by install, and streams the output.",
+                "description": "Runs the catalog reinstall script, or remove followed by install, and streams the output. The optional body names the version to install; without one the script picks the latest version (or the manifest pin).",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "text/event-stream"
                 ],
@@ -4879,6 +4893,14 @@ const docTemplate = `{
                         "description": "Workspace target ID (defaults to the bot's current target)",
                         "name": "workspace_target_id",
                         "in": "query"
+                    },
+                    {
+                        "description": "Version to install (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -5093,7 +5115,10 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/dependencies/{dep_id}/update": {
             "post": {
-                "description": "Runs the catalog update script (or the install script when the manifest has none) and streams its output. For agent dependencies this aligns the installed copy with the version this Server requires.",
+                "description": "Runs the catalog update script (or the install script when the manifest has none) and streams its output. The optional body names the version to update to; without one the script picks the latest version (or the manifest pin). The previous version is kept for rollback.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "text/event-stream"
                 ],
@@ -5121,6 +5146,14 @@ const docTemplate = `{
                         "description": "Workspace target ID (defaults to the bot's current target)",
                         "name": "workspace_target_id",
                         "in": "query"
+                    },
+                    {
+                        "description": "Version to update to (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -15788,6 +15821,38 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/workspace-dependencies/catalog": {
+            "get": {
+                "description": "Every dependency the catalog declares, as its manifest describes it: what it provides, where it installs, whether it can be installed and whether the workspace image ships a baseline copy. Reads no workspace and needs no bot; the Supermarket shows it before a bot is chosen.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "List the workspace dependency catalog",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -22332,6 +22397,110 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.WorkspaceDependencyCatalogItem": {
+            "type": "object",
+            "properties": {
+                "actions_supported": {
+                    "description": "ActionsSupported lists the actions the catalog gives the dependency,\nbefore any workspace state is considered.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "install",
+                            "update",
+                            "reinstall",
+                            "remove",
+                            "rollback",
+                            "check_update"
+                        ]
+                    }
+                },
+                "category": {
+                    "description": "Category is agent, runtime, or tool.",
+                    "type": "string",
+                    "enum": [
+                        "agent",
+                        "runtime",
+                        "tool"
+                    ]
+                },
+                "description": {
+                    "type": "string"
+                },
+                "has_image_baseline": {
+                    "description": "HasImageBaseline is set when the workspace image ships a copy of the\ndependency; removing a managed overlay returns to that copy.",
+                    "type": "boolean"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installable": {
+                    "description": "Installable is set when the catalog has an install script for the\ndependency, i.e. it can be installed into a workspace (as a managed\noverlay when the image already ships it).",
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "platforms": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogPlatform"
+                    }
+                },
+                "provides": {
+                    "description": "Provides lists the commands the dependency makes available.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "version_pin": {
+                    "description": "VersionPin is the version every install produces when the manifest\nlocks one; omitted when installs follow the latest release.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyCatalogPlatform": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "libc": {
+                    "description": "Libc is empty when the libc flavour does not matter for the OS.",
+                    "type": "string"
+                },
+                "os": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyCatalogResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogItem"
+                    }
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyInstallRequest": {
+            "type": "object",
+            "properties": {
+                "version": {
+                    "description": "Version to install. Empty (or no body) installs the latest version the\ncatalog script resolves, or the manifest pin when the dependency has\none. The version recorded afterwards is the one the script reports.",
+                    "type": "string"
+                }
+            }
+        },
         "handlers.WorkspaceDependencyItem": {
             "type": "object",
             "properties": {
@@ -22368,11 +22537,16 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "image_version": {
+                    "description": "ImageVersion is the version of the copy the workspace image ships,\nomitted when the image has none. It is the baseline a managed overlay\nsits on and what remove returns to.",
+                    "type": "string"
+                },
                 "install_path": {
-                    "description": "InstallPath is the dependency home for managed dependencies and the\ndiscovered command path for image-provided ones.",
+                    "description": "InstallPath is the dependency home when a managed copy is in effect or\ncan be installed, and the discovered command path when the image copy\nis in effect.",
                     "type": "string"
                 },
                 "installed_version": {
+                    "description": "InstalledVersion is the version of the copy in effect: the one the\nruntime launches and the one first on PATH (managed, then image, then\nPATH).",
                     "type": "string"
                 },
                 "last_checked_at": {
@@ -22382,14 +22556,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "latest_version": {
-                    "description": "LatestVersion is the pin for agent dependencies and the last upstream\ncheck result for tool dependencies.",
+                    "description": "LatestVersion is the last upstream check result, omitted until a check\nran.",
                     "type": "string"
                 },
                 "name": {
                     "type": "string"
                 },
-                "needs_alignment": {
-                    "description": "NeedsAlignment is set for installed agent dependencies whose version\ndiffers from RequiredVersion.",
+                "overlay": {
+                    "description": "Overlay is set when the copy in effect is a managed one installed over\nan image copy.",
                     "type": "boolean"
                 },
                 "platform_reason": {
@@ -22413,10 +22587,6 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "required_version": {
-                    "description": "RequiredVersion is the Server pin for agent dependencies.",
-                    "type": "string"
-                },
                 "source": {
                     "description": "Source is image for dependencies shipped with the workspace image and\nmanaged for dependencies installed by catalog scripts.",
                     "type": "string",
@@ -22438,7 +22608,7 @@ const docTemplate = `{
                     ]
                 },
                 "update_available": {
-                    "description": "UpdateAvailable is set for installed tool dependencies whose last\nupstream check reported a newer version.",
+                    "description": "UpdateAvailable is set for installed dependencies whose last upstream\ncheck reported a version other than the one in effect.",
                     "type": "boolean"
                 }
             }
@@ -22515,15 +22685,11 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "required_version": {
-                    "type": "string"
-                },
                 "state": {
                     "type": "string",
                     "enum": [
                         "satisfied",
                         "missing",
-                        "version_mismatch",
                         "platform_unsupported",
                         "unknown_dependency"
                     ]
