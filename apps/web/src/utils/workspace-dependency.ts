@@ -1,6 +1,6 @@
 import type { Component } from 'vue'
-import { Bot, Layers, Package } from 'lucide-vue-next'
-import { Anthropic, ClaudeCodeColor, CodexColor, Openai } from '@memohai/icon'
+import { Package } from 'lucide-vue-next'
+import { Anthropic, ClaudeCodeColor, CodexColor, Nodejs, Openai, Python, Uv } from '@memohai/icon'
 import type {
   DependencyAvailableAction,
   DependencyItem,
@@ -39,7 +39,7 @@ export interface DependencyPrimaryAction {
   disabled: boolean
 }
 
-export type DependencyMenuActionKind = 'reinstall' | 'rollback' | 'viewScript' | 'remove'
+export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'viewScript' | 'remove'
 
 export interface DependencyMenuAction {
   kind: DependencyMenuActionKind
@@ -52,7 +52,7 @@ export interface DependencyMenuAction {
   separatorBefore: boolean
 }
 
-export type DependencyConfirmMode = 'install' | 'update' | 'align' | 'reinstall'
+export type DependencyConfirmMode = 'install' | 'update' | 'reinstall'
 
 export type DependencyProgressStatus = 'running' | 'done' | 'error'
 
@@ -86,10 +86,31 @@ export function dependencyPlatformUnsupported(item: Pick<DependencyItem, 'platfo
 }
 
 /**
- * Installed row whose last upstream check reported a newer version. No
- * dependency is pinned by the Server any more — agents and tools alike install
- * the latest and can be updated or rolled back — so the rule is the same for
- * every category and never reads `required_version` / `needs_alignment`.
+ * Rows the bot's Dependencies tab lists: anything with a record (`status`) or
+ * a copy in effect (`installed_version`, image copies included). A catalog
+ * entry that was never installed belongs to the Supermarket, not here.
+ */
+export function dependencyIsInstalled(item: Pick<DependencyItem, 'status' | 'installed_version'>): boolean {
+  return !!item.status || !!formatDependencyVersion(item.installed_version)
+}
+
+/**
+ * Panel order: rows that need a hand (failed / missing / update available)
+ * first, then by display name. One flat list — agents, runtimes, and tools
+ * are the same kind of thing to the user.
+ */
+export function sortDependencies<T extends DependencyItem>(items: T[], nameOf: (item: T) => string = dependencyDisplayName): T[] {
+  return [...items].sort((a, b) => {
+    const attention = Number(dependencyNeedsAttention(b)) - Number(dependencyNeedsAttention(a))
+    if (attention !== 0) return attention
+    return nameOf(a).localeCompare(nameOf(b), undefined, { sensitivity: 'base' })
+  })
+}
+
+/**
+ * Installed row whose last upstream check reported a version other than the
+ * copy in effect. The Server pins nothing, so the rule is the same for every
+ * dependency: the check-update result is the only source of "newer".
  */
 export function dependencyUpdateAvailable(
   item: Pick<DependencyItem, 'status' | 'update_available' | 'latest_version' | 'installed_version'>,
@@ -102,9 +123,9 @@ export function dependencyUpdateAvailable(
 
 /**
  * Whether the Server lets this action be requested right now (`actions`).
- * Buttons key off this list, never off `source`: an image-provided row gets
- * no buttons today only because the Server lists nothing for it, and will
- * grow an install the day the Server does.
+ * Every button keys off this list and nothing else — the Server alone knows
+ * what a row can do (an image copy takes an overlay install, a managed copy
+ * takes update / reinstall / remove).
  */
 export function dependencyAllows(item: Pick<DependencyItem, 'actions'>, action: DependencyAvailableAction): boolean {
   return (item.actions ?? []).includes(action)
@@ -199,9 +220,20 @@ export function dependencyPrimaryAction(
     if (!dependencyAllows(item, 'install')) return null
     return { kind: 'install', labelKey: `${ACTION_KEY}.install`, operation: 'install', variant: 'default', disabled }
   }
-  if (dependencyUpdateAvailable(item) && dependencyAllows(item, 'update')) {
-    return { kind: 'update', labelKey: `${ACTION_KEY}.update`, operation: 'update', variant: 'default', disabled }
+  if (dependencyUpdateAvailable(item)) {
+    // An image copy has no managed copy to update in place; the Server offers
+    // install instead, which lays the newer version over it. Same button.
+    const operation = dependencyUpdateOperation(item)
+    if (!operation) return null
+    return { kind: 'update', labelKey: `${ACTION_KEY}.update`, operation, variant: 'default', disabled }
   }
+  return null
+}
+
+/** The operation "Update" runs on this row, or null when the Server allows neither. */
+export function dependencyUpdateOperation(item: Pick<DependencyItem, 'actions'>): DependencyOperationAction | null {
+  if (dependencyAllows(item, 'update')) return 'update'
+  if (dependencyAllows(item, 'install')) return 'install'
   return null
 }
 
@@ -211,10 +243,9 @@ export function dependencyMenuActions(
   item: DependencyItem,
   workspaceState: DependencyWorkspaceState | undefined,
 ): DependencyMenuAction[] {
-  // A row backed by catalog scripts can always show them — including while an
-  // operation runs and `actions` is empty. Image-provided rows have no scripts
-  // until the Server lists a scripted action for them.
-  const scripted = item.source !== 'image' || SCRIPTED_ACTIONS.some(action => dependencyAllows(item, action))
+  // A row the Server can run a script for can always show that script —
+  // including while an operation runs and `actions` is momentarily empty.
+  const scripted = dependencyInProgress(item) || SCRIPTED_ACTIONS.some(action => dependencyAllows(item, action))
   // Script preview is rendered by the Server from the catalog; it needs no
   // workspace, so it stays clickable while everything else is read-only.
   const viewScript: DependencyMenuAction = {
@@ -230,6 +261,18 @@ export function dependencyMenuActions(
 
   const readonly = workspaceState !== 'running' || dependencyInProgress(item)
   const items: DependencyMenuAction[] = []
+  // Install on an installed row lays a chosen version over the copy in effect.
+  // It moves to the primary button when it doubles as the row's update.
+  const installIsPrimary = dependencyUpdateAvailable(item) && dependencyUpdateOperation(item) === 'install'
+  if (item.status === 'installed' && dependencyAllows(item, 'install') && !installIsPrimary) {
+    items.push({
+      kind: 'install',
+      labelKey: `${ACTION_KEY}.install`,
+      destructive: false,
+      disabled: readonly,
+      separatorBefore: false,
+    })
+  }
   if (dependencyAllows(item, 'reinstall')) {
     items.push({
       kind: 'reinstall',
@@ -264,11 +307,10 @@ export function dependencyMenuActions(
 }
 
 /**
- * Brand mark when the catalog names one (`icon`, else the id), otherwise a
- * lucide glyph per category. `@memohai/icon` ships no node / python / uv marks,
- * so runtimes and tools deliberately fall back to the neutral glyph.
+ * Brand mark for the catalog's `icon` identifier (falling back to the id),
+ * the neutral package glyph for anything the icon library does not carry.
  */
-export function dependencyIcon(item: Pick<DependencyItem, 'id' | 'icon' | 'category'>): Component {
+export function dependencyIcon(item: Pick<DependencyItem, 'id' | 'icon'>): Component {
   const key = (item.icon?.trim() || item.id?.trim() || '').toLowerCase()
   switch (key) {
     case 'codex':
@@ -279,12 +321,13 @@ export function dependencyIcon(item: Pick<DependencyItem, 'id' | 'icon' | 'categ
       return Openai
     case 'anthropic':
       return Anthropic
-  }
-  switch (item.category) {
-    case 'agent':
-      return Bot
-    case 'runtime':
-      return Layers
+    case 'nodejs':
+    case 'node':
+      return Nodejs
+    case 'python':
+      return Python
+    case 'uv':
+      return Uv
     default:
       return Package
   }

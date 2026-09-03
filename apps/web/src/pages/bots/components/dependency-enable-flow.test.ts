@@ -5,7 +5,7 @@ import {
   resolveEnableFlowStep,
 } from './dependency-enable-flow'
 
-const codex = { dependencyId: 'codex', requiredVersion: '' }
+const codex = { dependencyId: 'codex' }
 
 describe('agentDependencyRequirement', () => {
   it('returns null for runtimes without a declaration', () => {
@@ -14,9 +14,8 @@ describe('agentDependencyRequirement', () => {
     expect(agentDependencyRequirement(null)).toBeNull()
   })
 
-  it('trims the declared id and version hint', () => {
-    expect(agentDependencyRequirement({ dependency: { dependency_id: ' codex ', required_version: ' 0.151.0 ' } }))
-      .toEqual({ dependencyId: 'codex', requiredVersion: '0.151.0' })
+  it('trims the declared id', () => {
+    expect(agentDependencyRequirement({ dependency: { dependency_id: ' codex ' } })).toEqual(codex)
     expect(agentDependencyRequirement({ dependency: { dependency_id: 'codex' } })).toEqual(codex)
   })
 })
@@ -38,10 +37,9 @@ describe('resolveEnableFlowStep', () => {
       workspace_state: 'running',
       items: [{ dependency_id: 'codex', state: 'satisfied', installed_version: '0.151.0' }],
     })).toEqual({ kind: 'satisfied' })
-    // Agent CLIs are not pinned: a version the Server calls mismatched still enables.
     expect(resolveEnableFlowStep(codex, {
       workspace_state: 'running',
-      items: [{ dependency_id: 'codex', state: 'version_mismatch', installed_version: '0.147.0', required_version: '0.151.0' }],
+      items: [{ dependency_id: 'codex', state: 'satisfied', installed_version: '0.147.0' }],
     })).toEqual({ kind: 'satisfied' })
   })
 
@@ -59,8 +57,6 @@ describe('resolveEnableFlowStep', () => {
       status: undefined,
       platform_supported: true,
     })
-    // No version → the confirm dialog says "latest".
-    expect(step.kind === 'install' && step.item.required_version).toBeUndefined()
   })
 
   it('reports unsupported platforms and unknown answers without an install step', () => {
@@ -79,9 +75,9 @@ describe('resolveEnableFlowStep', () => {
 })
 
 describe('dependencyItemFromPreflight', () => {
-  it('falls back to the brand display name and keeps a reported version hint', () => {
+  it('falls back to the brand display name and keeps the installed version', () => {
     expect(dependencyItemFromPreflight(codex)).toMatchObject({ id: 'codex', name: 'Codex', platform_supported: true })
-    expect(dependencyItemFromPreflight(codex, { dependency_id: 'codex', state: 'missing', required_version: '0.151.0' }))
-      .toMatchObject({ required_version: '0.151.0' })
+    expect(dependencyItemFromPreflight(codex, { dependency_id: 'codex', state: 'satisfied', installed_version: ' 0.151.0 ' }))
+      .toMatchObject({ status: 'installed', installed_version: '0.151.0' })
   })
 })

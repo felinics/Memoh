@@ -24,18 +24,26 @@ export type WorkspaceDependencyStreamEvent =
   | { type: 'done'; version?: string; entrypoints?: Record<string, string> }
   | SSEErrorEvent
 
-export interface WorkspaceDependencyStreamOptions {
-  botId: string
-  depId: string
-  action: DependencyOperationAction
-  /** Omitted → the Server uses the bot's current target. */
-  workspaceTargetId?: string
+export interface WorkspaceDependencyStreamRequestOptions {
+  /**
+   * Version to install / update / reinstall to. Empty means the latest the
+   * catalog script resolves (or the manifest pin). Ignored by remove.
+   */
+  version?: string
   /**
    * Aborts the HTTP stream only. There is no cancel API: the script keeps
    * running inside the workspace and the row keeps its in-progress status
    * until the Server records the outcome.
    */
   signal?: AbortSignal
+}
+
+export interface WorkspaceDependencyStreamOptions extends WorkspaceDependencyStreamRequestOptions {
+  botId: string
+  depId: string
+  action: DependencyOperationAction
+  /** Omitted → the Server uses the bot's current target. */
+  workspaceTargetId?: string
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -78,7 +86,7 @@ export async function* streamDependencyOperation(
   depId: string,
   action: DependencyOperationAction,
   workspaceTargetId?: string,
-  signal?: AbortSignal,
+  options: WorkspaceDependencyStreamRequestOptions = {},
 ): AsyncGenerator<WorkspaceDependencyStreamEvent, void, unknown> {
   let streamError: unknown
 
@@ -89,7 +97,7 @@ export async function* streamDependencyOperation(
     path: { bot_id: botId, dep_id: depId },
     query: workspaceTargetId ? { workspace_target_id: workspaceTargetId } : undefined,
     headers: { Accept: 'text/event-stream' },
-    signal,
+    signal: options.signal,
     fetch: fetchSSEProblem,
     onSseError: (error: unknown) => {
       streamError = error
@@ -102,13 +110,18 @@ export async function* streamDependencyOperation(
     sseMaxRetryAttempts: 1,
   }
 
+  // An empty version sends no body: the Server then resolves the latest (or
+  // the manifest pin), which is exactly what "leave blank" promises.
+  const version = options.version?.trim() ?? ''
+  const versioned = { ...request, body: version ? { version } : undefined }
+
   const result = action === 'remove'
     ? await deleteBotsByBotIdDependenciesByDepId(request)
     : action === 'update'
-      ? await postBotsByBotIdDependenciesByDepIdUpdate(request)
+      ? await postBotsByBotIdDependenciesByDepIdUpdate(versioned)
       : action === 'reinstall'
-        ? await postBotsByBotIdDependenciesByDepIdReinstall(request)
-        : await postBotsByBotIdDependenciesByDepIdInstall(request)
+        ? await postBotsByBotIdDependenciesByDepIdReinstall(versioned)
+        : await postBotsByBotIdDependenciesByDepIdInstall(versioned)
 
   for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
     if (!isWorkspaceDependencyStreamEvent(event)) {
@@ -134,7 +147,7 @@ export function openWorkspaceDependencyStream(
       options.depId,
       options.action,
       options.workspaceTargetId,
-      options.signal,
+      { version: options.version, signal: options.signal },
     ),
   }
 }

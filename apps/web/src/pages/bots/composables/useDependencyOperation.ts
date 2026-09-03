@@ -30,6 +30,8 @@ export interface DependencyOperationState {
   targetId: string
   item: DependencyItem
   action: DependencyOperationAction
+  /** Version the user asked for; empty means the latest. Replayed by retry. */
+  version: string
   status: DependencyProgressStatus
   lines: DependencyLogLine[]
   /** Localized failure summary; empty while running or after success. */
@@ -114,7 +116,7 @@ export function useDependencyOperation(botId: Ref<string>, targetId: Ref<string>
         state.item.id ?? '',
         state.action,
         state.targetId || undefined,
-        signal,
+        { version: state.version, signal },
       )
       for await (const event of stream) {
         if (signal.aborted) return
@@ -172,7 +174,7 @@ export function useDependencyOperation(botId: Ref<string>, targetId: Ref<string>
    * Starts one operation and opens the progress dialog. Refused while another
    * stream is running (the Server also rejects with `workspace_dependency.busy`).
    */
-  function start(item: DependencyItem, action: DependencyOperationAction): boolean {
+  function start(item: DependencyItem, action: DependencyOperationAction, options: { version?: string } = {}): boolean {
     if (running.value || !botId.value || !item.id) return false
     controller?.abort()
     controller = new AbortController()
@@ -182,6 +184,7 @@ export function useDependencyOperation(botId: Ref<string>, targetId: Ref<string>
       targetId: targetId.value,
       item,
       action,
+      version: options.version?.trim() ?? '',
       status: 'running',
       lines: [],
       error: '',
@@ -199,7 +202,7 @@ export function useDependencyOperation(botId: Ref<string>, targetId: Ref<string>
   function retry(): boolean {
     const state = active.value
     if (!state || state.status !== 'error') return false
-    return start(state.item, state.action)
+    return start(state.item, state.action, { version: state.version })
   }
 
   function viewProgress() {

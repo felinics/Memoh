@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { Bot, Layers, Package } from 'lucide-vue-next'
-import { ClaudeCodeColor, CodexColor } from '@memohai/icon'
+import { Package } from 'lucide-vue-next'
+import { Anthropic, ClaudeCodeColor, CodexColor, Nodejs, Openai, Python, Uv } from '@memohai/icon'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import {
   dependencyIcon,
+  dependencyIsInstalled,
   dependencyMenuActions,
   dependencyNeedsAttention,
   dependencyPrimaryAction,
   dependencyRetryOperation,
   dependencyStatusBadge,
+  dependencyUpdateOperation,
   formatDependencyVersion,
+  sortDependencies,
 } from './workspace-dependency'
 
 function item(overrides: Partial<DependencyItem> = {}): DependencyItem {
@@ -25,9 +28,25 @@ function item(overrides: Partial<DependencyItem> = {}): DependencyItem {
   }
 }
 
+// The shape the Server reports for a copy the workspace image ships: installed,
+// with install (an overlay) and check_update as the only actions.
+function imageCopy(overrides: Partial<DependencyItem> = {}): DependencyItem {
+  return item({
+    id: 'node',
+    name: 'Node.js',
+    category: 'runtime',
+    source: 'image',
+    status: 'installed',
+    installed_version: '24.14.0',
+    image_version: '24.14.0',
+    actions: ['install', 'check_update'],
+    ...overrides,
+  })
+}
+
 describe('dependencyStatusBadge', () => {
   it('flags an unsupported platform before anything else', () => {
-    const badge = dependencyStatusBadge(item({ platform_supported: false, status: 'installed', needs_alignment: true }))
+    const badge = dependencyStatusBadge(item({ platform_supported: false, status: 'installed', update_available: true }))
     expect(badge).toMatchObject({ variant: 'outline', key: 'bots.dependencies.status.unsupported', spinner: false })
     expect(badge.tooltipKey).toBe('bots.dependencies.status.unsupportedTooltip')
   })
@@ -56,17 +75,14 @@ describe('dependencyStatusBadge', () => {
     expect(dependencyStatusBadge({ ...tool, update_available: true })).toMatchObject({ key: 'bots.dependencies.status.updateAvailable' })
     expect(dependencyStatusBadge(item({ status: 'installed', installed_version: '0.150.0', latest_version: 'v0.151.0' })))
       .toMatchObject({ key: 'bots.dependencies.status.updateAvailable', args: { version: '0.151.0' } })
+    expect(dependencyStatusBadge(imageCopy({ latest_version: '24.15.0' }))).toMatchObject({ key: 'bots.dependencies.status.updateAvailable' })
   })
 
-  it('never reads the retired Server pin (required_version / needs_alignment)', () => {
-    expect(dependencyStatusBadge(item({
-      status: 'installed',
-      installed_version: '0.147.0',
-      required_version: 'v0.151.0',
-      needs_alignment: true,
-    }))).toEqual({ variant: 'success', key: 'bots.dependencies.status.installed', spinner: false })
-    expect(dependencyStatusBadge(item({ id: 'node', category: 'runtime', status: 'installed', needs_alignment: true })))
-      .toMatchObject({ variant: 'success' })
+  it('reads installed as installed whatever the copy comes from', () => {
+    expect(dependencyStatusBadge(item({ status: 'installed', installed_version: '0.147.0' })))
+      .toEqual({ variant: 'success', key: 'bots.dependencies.status.installed', spinner: false })
+    expect(dependencyStatusBadge(imageCopy())).toMatchObject({ variant: 'success' })
+    expect(dependencyStatusBadge(imageCopy({ id: 'codex', overlay: true, install_path: '/data/.memoh/deps/codex' }))).toMatchObject({ variant: 'success' })
   })
 
   it('falls back to not-installed when the catalog has no record', () => {
@@ -127,17 +143,23 @@ describe('dependencyPrimaryAction', () => {
       operation: 'update',
     })
     expect(dependencyPrimaryAction(item({ ...updatable, id: 'uv', category: 'tool' }), running)).toMatchObject({ kind: 'update' })
-    // The retired pin never drives a button.
-    expect(dependencyPrimaryAction(item({ status: 'installed', needs_alignment: true, required_version: '9', actions: ['update'] }), running)).toBeNull()
   })
 
-  it('follows the Server action list, not the source', () => {
-    // No install listed → no button, even for a managed row without a record.
+  it('updates an image copy through an overlay install when the Server offers only install', () => {
+    expect(dependencyPrimaryAction(imageCopy({ latest_version: '24.15.0' }), running)).toMatchObject({
+      kind: 'update',
+      labelKey: 'bots.dependencies.action.update',
+      operation: 'install',
+    })
+    expect(dependencyUpdateOperation({ actions: ['install', 'check_update'] })).toBe('install')
+    expect(dependencyUpdateOperation({ actions: ['update', 'install'] })).toBe('update')
+    expect(dependencyUpdateOperation({ actions: ['reinstall'] })).toBeNull()
+  })
+
+  it('follows the Server action list and nothing else', () => {
+    // No install listed → no button, even without a record.
     expect(dependencyPrimaryAction(item({ actions: [] }), running)).toBeNull()
     expect(dependencyPrimaryAction(item({ status: 'missing', actions: ['remove'] }), running)).toBeNull()
-    // An image-provided row grows an install the day the Server lists one.
-    expect(dependencyPrimaryAction(item({ id: 'node', category: 'runtime', source: 'image', actions: ['install'] }), running))
-      .toMatchObject({ kind: 'install' })
     expect(dependencyPrimaryAction(item({ status: 'installed', installed_version: '1', latest_version: '2', actions: ['reinstall'] }), running))
       .toBeNull()
   })
@@ -153,9 +175,9 @@ describe('dependencyPrimaryAction', () => {
     })
   })
 
-  it('has no primary button for up-to-date, image-provided, or unsupported rows', () => {
+  it('has no primary button for up-to-date or unsupported rows', () => {
     expect(dependencyPrimaryAction(item({ status: 'installed', actions: ['update', 'reinstall', 'remove'] }), running)).toBeNull()
-    expect(dependencyPrimaryAction(item({ id: 'node', category: 'runtime', source: 'image', status: 'installed' }), running)).toBeNull()
+    expect(dependencyPrimaryAction(imageCopy(), running)).toBeNull()
     expect(dependencyPrimaryAction(item({ platform_supported: false, actions: ['install'] }), running)).toBeNull()
   })
 
@@ -177,6 +199,14 @@ describe('dependencyMenuActions', () => {
     expect(actions[3]).toMatchObject({ destructive: true, disabled: false })
   })
 
+  it('offers install and script for an up-to-date image copy the Server lets you lay a version over', () => {
+    const actions = dependencyMenuActions(imageCopy(), 'running')
+    expect(actions.map(action => action.kind)).toEqual(['install', 'viewScript'])
+    expect(actions[0]).toMatchObject({ labelKey: 'bots.dependencies.action.install', disabled: false })
+    // Once install doubles as the row's Update button, the menu does not repeat it.
+    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+  })
+
   it('keeps only the script preview clickable while the workspace is read-only', () => {
     const actions = dependencyMenuActions(item({
       status: 'installed',
@@ -184,6 +214,7 @@ describe('dependencyMenuActions', () => {
       actions: ['update', 'reinstall', 'remove', 'rollback'],
     }), 'not_running')
     expect(actions.filter(action => !action.disabled).map(action => action.kind)).toEqual(['viewScript'])
+    expect(dependencyMenuActions(imageCopy(), 'not_running').filter(action => !action.disabled).map(action => action.kind)).toEqual(['viewScript'])
   })
 
   it('offers script and remove for a missing row, script only for an uninstalled one', () => {
@@ -202,38 +233,75 @@ describe('dependencyMenuActions', () => {
     expect(kinds).toEqual(['reinstall', 'viewScript', 'remove'])
   })
 
-  it('gives image-provided rows no menu until the Server lists a scripted action', () => {
-    expect(dependencyMenuActions(item({ id: 'node', category: 'runtime', source: 'image', status: 'installed' }), 'running')).toEqual([])
-    expect(dependencyMenuActions(item({ id: 'node', category: 'runtime', source: 'image', status: 'installed', actions: ['install'] }), 'running')
-      .map(action => action.kind)).toEqual(['viewScript'])
+  it('has no menu at all when the Server lists no scripted action', () => {
+    expect(dependencyMenuActions(item({ status: 'installed', actions: ['check_update'] }), 'running')).toEqual([])
+    expect(dependencyMenuActions(item({ status: 'installed', actions: [] }), 'running')).toEqual([])
   })
 
   it('leaves only the script preview on an unsupported platform', () => {
     expect(dependencyMenuActions(item({ platform_supported: false, status: 'installed', actions: ['update'] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
-    expect(dependencyMenuActions(item({ platform_supported: false, source: 'image' }), 'running')).toEqual([])
+    expect(dependencyMenuActions(item({ platform_supported: false }), 'running')).toEqual([])
   })
 })
 
 describe('dependencyNeedsAttention', () => {
-  it('counts missing, failed, and updatable rows — never the retired pin', () => {
+  it('counts missing, failed, and updatable rows', () => {
     expect(dependencyNeedsAttention(item({ status: 'missing' }))).toBe(true)
     expect(dependencyNeedsAttention(item({ status: 'failed' }))).toBe(true)
     expect(dependencyNeedsAttention(item({ status: 'installed', update_available: true }))).toBe(true)
-    expect(dependencyNeedsAttention(item({ id: 'uv', category: 'tool', status: 'installed', update_available: true }))).toBe(true)
-    expect(dependencyNeedsAttention(item({ status: 'installed', needs_alignment: true, required_version: '9' }))).toBe(false)
+    expect(dependencyNeedsAttention(imageCopy({ update_available: true }))).toBe(true)
     expect(dependencyNeedsAttention(item({ status: 'installed' }))).toBe(false)
+    expect(dependencyNeedsAttention(imageCopy())).toBe(false)
     expect(dependencyNeedsAttention(item())).toBe(false)
   })
 })
 
+describe('dependencyIsInstalled', () => {
+  it('lists rows with a record or a copy in effect, never a bare catalog entry', () => {
+    expect(dependencyIsInstalled(item({ status: 'installed' }))).toBe(true)
+    expect(dependencyIsInstalled(item({ status: 'failed' }))).toBe(true)
+    expect(dependencyIsInstalled(item({ status: 'missing' }))).toBe(true)
+    expect(dependencyIsInstalled(imageCopy({ status: undefined }))).toBe(true)
+    expect(dependencyIsInstalled(item())).toBe(false)
+    expect(dependencyIsInstalled(item({ installed_version: '  ' }))).toBe(false)
+  })
+})
+
+describe('sortDependencies', () => {
+  it('puts rows that need a hand first, then sorts by name regardless of category', () => {
+    const sorted = sortDependencies([
+      imageCopy({ id: 'uv', name: 'uv' }),
+      item({ id: 'codex', name: 'Codex', status: 'installed' }),
+      imageCopy({ id: 'python', name: 'Python', latest_version: '3.15.0' }),
+      item({ id: 'claude-code', name: 'Claude Code', status: 'failed' }),
+      imageCopy(),
+    ])
+    expect(sorted.map(entry => entry.id)).toEqual(['claude-code', 'python', 'codex', 'node', 'uv'])
+  })
+
+  it('sorts by the caller\'s display name and leaves the input untouched', () => {
+    const input = [item({ id: 'b', name: 'B' }), item({ id: 'a', name: 'A' })]
+    expect(sortDependencies(input, entry => entry.id === 'b' ? 'Alpha' : 'Beta').map(entry => entry.id)).toEqual(['b', 'a'])
+    expect(input.map(entry => entry.id)).toEqual(['b', 'a'])
+  })
+})
+
 describe('dependencyIcon', () => {
-  it('uses brand marks for the agents and category glyphs otherwise', () => {
-    expect(dependencyIcon({ id: 'codex', category: 'agent' })).toBe(CodexColor)
-    expect(dependencyIcon({ id: 'claude-code', category: 'agent' })).toBe(ClaudeCodeColor)
-    expect(dependencyIcon({ id: 'custom', icon: 'codex', category: 'tool' })).toBe(CodexColor)
-    expect(dependencyIcon({ id: 'hermes', category: 'agent' })).toBe(Bot)
-    expect(dependencyIcon({ id: 'node', category: 'runtime' })).toBe(Layers)
-    expect(dependencyIcon({ id: 'uv', category: 'tool' })).toBe(Package)
+  it('maps the catalog icon identifier to the brand mark, id as fallback', () => {
+    expect(dependencyIcon({ id: 'codex', icon: 'openai' })).toBe(Openai)
+    expect(dependencyIcon({ id: 'claude-code', icon: 'anthropic' })).toBe(Anthropic)
+    expect(dependencyIcon({ id: 'node', icon: 'nodejs' })).toBe(Nodejs)
+    expect(dependencyIcon({ id: 'python', icon: 'python' })).toBe(Python)
+    expect(dependencyIcon({ id: 'uv', icon: 'uv' })).toBe(Uv)
+    expect(dependencyIcon({ id: 'codex' })).toBe(CodexColor)
+    expect(dependencyIcon({ id: 'claude-code' })).toBe(ClaudeCodeColor)
+    expect(dependencyIcon({ id: 'node' })).toBe(Nodejs)
+    expect(dependencyIcon({ id: 'custom', icon: 'codex' })).toBe(CodexColor)
+  })
+
+  it('falls back to the package glyph for unknown identifiers', () => {
+    expect(dependencyIcon({ id: 'hermes' })).toBe(Package)
+    expect(dependencyIcon({ id: 'custom', icon: 'something-else' })).toBe(Package)
   })
 })
 

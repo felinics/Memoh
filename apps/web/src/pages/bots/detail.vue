@@ -419,7 +419,6 @@ const tabList = computed(() => {
     { value: 'desktop', label: 'bots.tabs.desktop', icon: Monitor, component: BotDesktop, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'remote-runtime', label: 'bots.tabs.remoteRuntime', icon: Laptop, component: BotRemoteRuntime, params: { 'bot-id': bot_id } },
     { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {}, containerWorkspaceOnly: true },
-    { value: 'dependencies', label: 'bots.tabs.dependencies', icon: Package, component: BotDependencies, params: { 'bot-id': bot_id } },
     { value: 'network', label: 'bots.tabs.network', icon: Globe, component: BotNetwork, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'memory', label: 'bots.tabs.memory', icon: Database, component: BotMemory, params: { 'bot-id': bot_id } },
     { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
@@ -432,6 +431,7 @@ const tabList = computed(() => {
       ? [{ value: 'connectors', label: 'bots.tabs.connectors', icon: Plug, component: BotConnectors, params: { 'bot-id': bot_id } }]
       : []),
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
+    { value: 'dependencies', label: 'bots.tabs.dependencies', icon: Package, component: BotDependencies, params: { 'bot-id': bot_id } },
     { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
@@ -543,8 +543,8 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'memory']
-  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'dependencies', 'network', 'schedule', 'compaction']
+  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'dependencies', 'memory']
+  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
   const securityKeys = ['access', 'email']
 
   return [

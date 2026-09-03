@@ -1,12 +1,14 @@
 <script setup lang="ts">
-// One dependency in the panel: brand mark, name + version + status, the one
-// primary action the state calls for, and a menu for the rest. Every rule
-// that decides what shows lives in utils/workspace-dependency (unit-tested);
-// this file only lays the answers out. The row never starts anything itself —
-// it emits the chosen action and the panel owns confirmation and streaming.
+// One dependency in the panel: brand mark, name + version + status, a line of
+// description, the one primary action the state calls for, and a menu for the
+// rest. Every row has the same shape whatever the copy comes from; every rule
+// that decides what shows lives in utils/workspace-dependency (unit-tested),
+// and this file only lays the answers out. The row never starts anything
+// itself — it emits the chosen action and the panel owns confirmation and
+// streaming.
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, FileCode, MoreHorizontal, RotateCw, Trash2, Undo2 } from 'lucide-vue-next'
+import { ChevronRight, Download, FileCode, MoreHorizontal, RotateCw, Trash2, Undo2 } from 'lucide-vue-next'
 import {
   Badge,
   Button,
@@ -27,8 +29,8 @@ import {
   TooltipTrigger,
 } from '@felinic/ui'
 import type { DependencyItem, DependencyWorkspaceState } from '@/composables/api/useWorkspaceDependencies'
+import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import {
-  dependencyDisplayName,
   dependencyIcon,
   dependencyMenuActions,
   dependencyPlatformUnsupported,
@@ -59,8 +61,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { dependencyName, dependencyDescription } = useWorkspaceDependencyText()
 
-const name = computed(() => dependencyDisplayName(props.item))
+const name = computed(() => dependencyName(props.item))
+const description = computed(() => dependencyDescription(props.item))
 const version = computed(() => formatDependencyVersion(props.item.installed_version))
 const icon = computed(() => dependencyIcon(props.item))
 const badge = computed(() => dependencyStatusBadge(props.item))
@@ -68,14 +72,6 @@ const unsupported = computed(() => dependencyPlatformUnsupported(props.item))
 const failed = computed(() => props.item.status === 'failed')
 const lastError = computed(() => (props.item.last_error ?? '').trim())
 const errorOpen = ref(false)
-
-// Image-provided rows say so instead of repeating the catalog blurb: the one
-// thing a user wants to know about them is why "Remove" is greyed out.
-const description = computed(() => (
-  props.item.source === 'image'
-    ? t('bots.dependencies.imageProvidedDescription')
-    : (props.item.description ?? '').trim()
-))
 
 const primary = computed(() => dependencyPrimaryAction(props.item, props.workspaceState, { ownsStream: props.ownsStream }))
 const menu = computed(() => dependencyMenuActions(props.item, props.workspaceState))
@@ -89,6 +85,8 @@ function menuDisabled(action: DependencyMenuAction): boolean {
 
 function menuIcon(kind: DependencyMenuActionKind) {
   switch (kind) {
+    case 'install':
+      return Download
     case 'reinstall':
       return RotateCw
     case 'rollback':
@@ -155,14 +153,6 @@ const dimClass = computed(() => (unsupported.value ? 'opacity-40' : ''))
           >
             <Spinner v-if="badge.spinner" />
             {{ t(badge.key, badge.args ?? {}) }}
-          </Badge>
-
-          <Badge
-            v-if="item.source === 'image'"
-            variant="outline"
-            size="sm"
-          >
-            {{ t('bots.dependencies.source.image') }}
           </Badge>
         </div>
 

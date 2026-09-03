@@ -43,12 +43,15 @@ const props = withDefaults(defineProps<{
   allowBackground?: boolean
   /** Error: show a Retry button (the caller replays the operation). */
   canRetry?: boolean
+  /** Overrides the "Done" label when the caller's `done` leads somewhere ("View bot dependencies"). */
+  doneLabel?: string
 }>(), {
   error: '',
   resultVersion: '',
   entrypoint: '',
   allowBackground: false,
   canRetry: true,
+  doneLabel: '',
 })
 
 const emit = defineEmits<{
@@ -212,7 +215,7 @@ function finish() {
             v-else-if="status === 'done'"
             @click="finish"
           >
-            {{ t('bots.dependencies.done') }}
+            {{ doneLabel || t('bots.dependencies.done') }}
           </Button>
           <template v-else>
             <Button

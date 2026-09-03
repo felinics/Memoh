@@ -1082,13 +1082,11 @@
       "attachmentUnavailable": "The attachment could not be made available to the external agent. Please attach it again.",
       "imageInputUnsupported": "This external agent cannot read the attached image.",
       "invalidChatRuntime": "The selected chat runtime is invalid.",
-      "dependencyMissing": "{dep_id} isn't installed in this workspace; installing {required_version} in the background. Resend your message when it finishes.",
-      "dependencyVersionMismatch": "{dep_id} is {installed_version}; this server requires {required_version}. Continuing with the installed version.",
+      "dependencyMissing": "{dep_id} isn't installed in this workspace; installing it in the background. Resend your message when it finishes.",
       "dependencyMissingProgress": "Installing in the background…",
       "dependencyMissingDone": "Installed. You can resend now.",
       "dependencyMissingFailed": "Background install failed. Retry from the bot's Dependencies tab.",
-      "dependencyOpen": "Open dependencies",
-      "dependencyAlign": "Align version"
+      "dependencyOpen": "Open dependencies"
     },
     "sessionFilterAll": "All",
     "searchSessionPlaceholder": "Search",
@@ -2238,24 +2236,34 @@
       "codexLoginFailed": "Codex account authorization failed. Try again.",
       "modelsLoadFailed": "Couldn’t load Agent models. Check the Agent setup and try again.",
       "openSettings": "Open Agent settings",
-      "dependencyRequired": "Requires {name} {version} in the workspace",
       "dependencyChecking": "Checking dependency…",
-      "dependencySatisfied": "{name} {version} is installed",
       "dependencyRemoteOffline": "The bot's connected computer is offline. Dependencies can be checked once it is back online."
     },
     "dependencies": {
       "title": "Workspace dependencies",
-      "intro": "Manage the agent CLIs, runtimes, and tools installed in this bot's workspace.",
-      "group": {
-        "agent": "Agent CLI",
-        "runtime": "Runtimes",
-        "tool": "Tools"
+      "intro": "Command-line tools and runtimes installed in this bot's workspace. Add new ones from the Supermarket.",
+      "catalog": {
+        "codex": {
+          "description": "OpenAI Codex command line"
+        },
+        "claude-code": {
+          "description": "Anthropic Claude Code command line"
+        },
+        "node": {
+          "description": "JavaScript runtime with npm and npx"
+        },
+        "python": {
+          "description": "Python interpreter with pip"
+        },
+        "uv": {
+          "description": "Python package and project manager"
+        }
       },
       "checkUpdates": "Check for updates",
       "checkUpdatesDone": "Update check finished",
       "lastChecked": "Last checked {time}",
-      "imageProvidedDescription": "Provided by the workspace image; cannot be removed.",
-      "emptyTitle": "No dependencies to manage",
+      "emptyTitle": "Nothing installed in this workspace yet",
+      "emptyAction": "Add from Supermarket",
       "loadFailed": "Couldn't load dependencies",
       "close": "Close",
       "status": {
@@ -2266,20 +2274,14 @@
         "installing": "Installing",
         "updating": "Updating",
         "removing": "Removing",
-        "needsAlignment": "Update to {version} required",
         "updateAvailable": "{version} available",
         "unsupported": "Unsupported",
         "unsupportedTooltip": "This dependency isn't available on the workspace platform."
-      },
-      "source": {
-        "image": "From image",
-        "managed": "Managed"
       },
       "action": {
         "install": "Install",
         "reinstall": "Reinstall",
         "update": "Update",
-        "align": "Align version",
         "rollback": "Roll back to {version}",
         "rollbackPlain": "Roll back",
         "remove": "Remove",
@@ -2299,23 +2301,19 @@
         "installTitle": "Install {name}",
         "reinstallTitle": "Reinstall {name}",
         "updateTitle": "Update {name}",
-        "alignTitle": "Update {name} to the version this server requires",
-        "alignDescription": "This server requires {name} {version}.",
-        "updateDescription": "Updates from {from} to {to}. The new version installs alongside the current one and switches over only on success; you can roll back afterwards.",
-        "installDescription": "Downloads and installs {name} {version} into the workspace.",
-        "installLatestDescription": "Downloads and installs the latest {name} into the workspace.",
+        "updateDescription": "Currently {from}. The new version installs first and switches over only on success; the current one stays untouched on failure, and you can roll back afterwards.",
+        "installDescription": "Downloads and installs {name} into the workspace.",
         "reinstallDescription": "Removes the current copy of {name} and installs it again. Agents that depend on it can't start until it finishes.",
         "dependency": "Dependency",
-        "targetVersion": "Target version",
         "installPath": "Install location",
-        "downloadSize": "Download",
+        "version": "Version",
+        "versionPlaceholder": "Latest",
+        "versionHelp": "Leave blank to install the latest version.",
         "remoteWarningTitle": "Runs on your computer \"{name}\"",
         "remoteWarningDescription": "The script downloads and writes files on that computer.",
         "installConfirm": "Install",
         "updateConfirm": "Update",
-        "alignConfirm": "Update to {version}",
-        "installAndEnable": "Install and enable",
-        "alignAndEnable": "Update and enable"
+        "installAndEnable": "Install and enable"
       },
       "progress": {
         "installing": "Installing {name}",
@@ -2342,7 +2340,8 @@
       },
       "remove": {
         "title": "Remove {name}?",
-        "description": "Deletes every version under {path}. Agents that depend on it can't start until it is reinstalled."
+        "description": "Deletes every version under {path}. Agents that depend on it can't start until it is reinstalled.",
+        "overlayDescription": "Removes {installed}; the workspace goes back to {image_version}."
       },
       "rollback": {
         "title": "Roll back {name}",
@@ -2359,13 +2358,7 @@
         "workspaceNotRunningDescription": "Enabling {name} needs a running workspace to install its dependency.",
         "workspaceMissingTitle": "Create the workspace first",
         "startAndContinue": "Start and continue",
-        "platformUnsupported": "{name} isn't available on this workspace platform",
-        "enabled": "{name} installed and enabled"
-      },
-      "notice": {
-        "title": "Dependency updates available",
-        "description": "Nothing updates automatically; confirm each one from the list.",
-        "gotIt": "Got it"
+        "platformUnsupported": "{name} isn't available on this workspace platform"
       },
       "done": "Done",
       "errorDetails": "Error details",
@@ -3488,13 +3481,19 @@
     "skillsSection": "Skills",
     "packagesSection": "Packages",
     "connectorsSection": "Connectors",
+    "dependenciesSection": "Dependencies",
     "noResults": "No results found",
     "noPackageResults": "No packages found",
     "noConnectorResults": "No connectors found",
+    "noDependencyResults": "No dependencies found",
     "install": "Install",
     "installToBot": "Install to Bot",
     "selectBot": "Select a bot",
     "selectBotPlaceholder": "Choose a bot to install to...",
+    "selectWorkspaceTarget": "Workspace",
+    "dependencyInstallTitle": "Install {name}",
+    "dependencyInstalled": "{name} installed",
+    "viewBotDependencies": "View bot dependencies",
     "envVariables": "Environment Variables",
     "envDescription": "Configure the required environment variables",
     "installSuccess": "Installed successfully",

@@ -1,12 +1,11 @@
 <script setup lang="ts">
-// Confirmation before a streamed dependency operation starts. Four modes share
-// one shell; what changes is the copy: an align must name where the version
-// requirement comes from (the Server pin, design §10.1), a tool update states
-// only the version pair and the rollback guarantee (WD-UPD-006), and a remote
-// target always gets the explicit "runs on your computer" warning (WD-PLAT-001).
-// Download size is not shown: the API does not report it, and an estimate
-// would be invented.
-import { computed } from 'vue'
+// Confirmation before a streamed dependency operation starts. Three modes share
+// one shell — install, update, reinstall — and every one takes an optional
+// version: blank means the latest the catalog resolves, a typed one pins the
+// run. A remote target always gets the explicit "runs on your computer"
+// warning (WD-PLAT-001). Download size is not shown: the API does not report
+// it, and an estimate would be invented.
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Button,
@@ -18,6 +17,8 @@ import {
   DialogHeader,
   DialogPanel,
   DialogTitle,
+  FieldStack,
+  Input,
   TextButton,
 } from '@felinic/ui'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
@@ -46,7 +47,8 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  confirm: []
+  /** The trimmed version the user typed; empty means the latest. */
+  confirm: [version: string]
   viewScript: []
 }>()
 
@@ -54,20 +56,12 @@ const { t } = useI18n()
 
 const name = computed(() => (props.item ? dependencyDisplayName(props.item) : ''))
 const installedVersion = computed(() => formatDependencyVersion(props.item?.installed_version))
-const requiredVersion = computed(() => formatDependencyVersion(props.item?.required_version))
-const latestVersion = computed(() => formatDependencyVersion(props.item?.latest_version))
 
-// The version the operation lands on: agents follow the Server pin, tools the
-// last upstream check; an install without either resolves to "latest".
-const targetVersion = computed(() => {
-  switch (props.mode) {
-    case 'align':
-      return requiredVersion.value
-    case 'update':
-      return latestVersion.value || requiredVersion.value
-    default:
-      return requiredVersion.value || latestVersion.value
-  }
+// Each opening starts blank: a version typed for one row must not leak into
+// the next confirmation.
+const version = ref('')
+watch(() => props.open, (open) => {
+  if (open) version.value = ''
 })
 
 const title = computed(() => {
@@ -77,8 +71,6 @@ const title = computed(() => {
       return t('bots.dependencies.confirm.reinstallTitle', args)
     case 'update':
       return t('bots.dependencies.confirm.updateTitle', args)
-    case 'align':
-      return t('bots.dependencies.confirm.alignTitle', args)
     default:
       return t('bots.dependencies.confirm.installTitle', args)
   }
@@ -89,25 +81,14 @@ const description = computed(() => {
     case 'reinstall':
       return t('bots.dependencies.confirm.reinstallDescription', { name: name.value })
     case 'update':
-      return t('bots.dependencies.confirm.updateDescription', {
-        from: installedVersion.value,
-        to: targetVersion.value,
-      })
-    case 'align':
-      return t('bots.dependencies.confirm.alignDescription', {
-        name: name.value,
-        version: targetVersion.value,
-      })
+      return t('bots.dependencies.confirm.updateDescription', { from: installedVersion.value })
     default:
-      return targetVersion.value
-        ? t('bots.dependencies.confirm.installDescription', { name: name.value, version: targetVersion.value })
-        : t('bots.dependencies.confirm.installLatestDescription', { name: name.value })
+      return t('bots.dependencies.confirm.installDescription', { name: name.value })
   }
 })
 
 const rows = computed<DependencyKvRow[]>(() => [
   { label: t('bots.dependencies.confirm.dependency'), value: props.item?.id, mono: true },
-  { label: t('bots.dependencies.confirm.targetVersion'), value: targetVersion.value, mono: true },
   { label: t('bots.dependencies.confirm.installPath'), value: props.item?.install_path, mono: true },
 ])
 
@@ -118,8 +99,6 @@ const confirmText = computed(() => {
       return t('bots.dependencies.action.reinstall')
     case 'update':
       return t('bots.dependencies.confirm.updateConfirm')
-    case 'align':
-      return t('bots.dependencies.confirm.alignConfirm', { version: targetVersion.value })
     default:
       return t('bots.dependencies.confirm.installConfirm')
   }
@@ -129,6 +108,10 @@ function onOpenChange(value: boolean) {
   // The request is in flight once confirmed; closing would orphan the stream.
   if (!value && props.loading) return
   emit('update:open', value)
+}
+
+function submit() {
+  emit('confirm', version.value.trim())
 }
 </script>
 
@@ -147,6 +130,25 @@ function onOpenChange(value: boolean) {
       </DialogHeader>
 
       <DialogBody class="space-y-4">
+        <form
+          id="dependency-confirm-form"
+          @submit.prevent="submit"
+        >
+          <FieldStack
+            :label="t('bots.dependencies.confirm.version')"
+            :help="t('bots.dependencies.confirm.versionHelp')"
+          >
+            <Input
+              v-model="version"
+              class="font-mono"
+              :placeholder="t('bots.dependencies.confirm.versionPlaceholder')"
+              autocomplete="off"
+              spellcheck="false"
+              :disabled="loading"
+            />
+          </FieldStack>
+        </form>
+
         <DependencyKvList :rows="rows" />
 
         <CalloutBanner
@@ -173,8 +175,9 @@ function onOpenChange(value: boolean) {
             {{ t('common.cancel') }}
           </Button>
           <Button
+            form="dependency-confirm-form"
+            type="submit"
             :loading="loading"
-            @click="emit('confirm')"
           >
             {{ confirmText }}
           </Button>

@@ -107,6 +107,16 @@ const emailProviders: string[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// Workspace Runtimes (workspace dependency catalog marks)
+// ---------------------------------------------------------------------------
+
+const runtimes: string[] = [
+  ...withVariants('nodejs', ['color']),
+  ...withVariants('python', ['color']),
+  ...withVariants('uv', ['color']),
+]
+
+// ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
 
@@ -115,4 +125,5 @@ export const manifest: string[] = [
   ...searchProviders,
   ...channelPlatforms,
   ...emailProviders,
+  ...runtimes,
 ]
