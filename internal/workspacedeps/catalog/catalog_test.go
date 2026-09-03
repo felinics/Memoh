@@ -1,9 +1,16 @@
 package catalog
 
 import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 // validImageYAML is an image-baseline dependency without scripts: visible in
@@ -84,6 +91,176 @@ func withScripts(manifest string) map[string]string {
 
 func imageFiles(manifest string) map[string]string {
 	return map[string]string{ManifestFileName: manifest}
+}
+
+func TestLoadPublishedCatalog(t *testing.T) {
+	c, err := loadPublishedCatalog()
+	if err != nil {
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
+	}
+
+	var ids []string
+	for _, dep := range c.List() {
+		ids = append(ids, dep.ID)
+	}
+	want := []string{"claude-code", "codex", "node", "python", "uv"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("List() ids = %v, want %v", ids, want)
+	}
+
+	codex := c.MustGet("codex")
+	if !codex.IsAgent() || codex.HasImageBaseline() || codex.IsImageProvided() || !codex.Installable() {
+		t.Fatalf("codex category/source = %q/%q", codex.Category, codex.Source)
+	}
+	if !slices.Equal(codex.Requires, []string{"node"}) || !slices.Equal(codex.Provides, []string{"codex"}) {
+		t.Fatalf("codex requires/provides = %v/%v", codex.Requires, codex.Provides)
+	}
+	if codex.Icon != "icon.svg" {
+		t.Fatalf("codex icon = %q", codex.Icon)
+	}
+	if codex.Version.Pin != "" {
+		t.Fatalf("codex must not be pinned: agent CLIs install latest by default, got pin %q", codex.Version.Pin)
+	}
+	if codex.Timeouts.Install != 1200 || codex.Timeouts.Update != 1200 || codex.Timeouts.Remove != 300 || codex.Timeouts.CheckUpdate != 120 {
+		t.Fatalf("codex timeouts = %+v", codex.Timeouts)
+	}
+	if !codex.SupportsPlatform("linux", "amd64", "glibc") || !codex.SupportsPlatform("darwin", "arm64", "") {
+		t.Fatalf("codex platforms = %+v", codex.Platforms)
+	}
+
+	claude := c.MustGet("claude-code")
+	if !claude.IsAgent() || claude.Icon != "icon.svg" || !slices.Equal(claude.Provides, []string{"claude"}) || claude.Version.Pin != "" {
+		t.Fatalf("claude-code = %+v", claude)
+	}
+
+	for _, id := range []string{"node", "python", "uv"} {
+		dep := c.MustGet(id)
+		if !dep.HasImageBaseline() || !dep.IsImageProvided() || dep.IsAgent() {
+			t.Fatalf("%s category/source = %q/%q", id, dep.Category, dep.Source)
+		}
+		if !dep.Installable() || dep.Scripts.Update == "" || dep.Scripts.Remove == "" || dep.Scripts.CheckUpdate == "" {
+			t.Fatalf("%s must declare overlay scripts, got %+v", id, dep.Scripts)
+		}
+		if dep.Version.Pin != "" {
+			t.Fatalf("%s must not be pinned, got %q", id, dep.Version.Pin)
+		}
+		if !dep.SupportsPlatform("linux", "amd64", "glibc") || !dep.SupportsPlatform("linux", "arm64", "glibc") || !dep.SupportsPlatform("darwin", "arm64", "") {
+			t.Fatalf("%s platforms = %+v", id, dep.Platforms)
+		}
+		if dep.SupportsPlatform("linux", "amd64", "musl") {
+			t.Fatalf("%s must not claim musl support", id)
+		}
+	}
+	node := c.MustGet("node")
+	if !slices.Equal(node.Provides, []string{"node", "npm", "npx"}) || len(node.Requires) != 0 {
+		t.Fatalf("node provides/requires = %v/%v", node.Provides, node.Requires)
+	}
+	python := c.MustGet("python")
+	if !slices.Equal(python.Provides, []string{"python3", "pip3"}) || !slices.Equal(python.Requires, []string{"uv"}) {
+		t.Fatalf("python provides/requires = %v/%v", python.Provides, python.Requires)
+	}
+	uv := c.MustGet("uv")
+	if !slices.Equal(uv.Provides, []string{"uv", "uvx"}) || len(uv.Requires) != 0 {
+		t.Fatalf("uv provides/requires = %v/%v", uv.Provides, uv.Requires)
+	}
+
+	if _, ok := c.Get("ghost"); ok {
+		t.Fatal("Get(ghost) should report missing")
+	}
+}
+
+// Consumer checks cover the publication contract. Installation transaction
+// behavior is tested by the producer against fault-injected downloads/filesystems.
+func TestPublishedScriptHygiene(t *testing.T) {
+	c, err := loadPublishedCatalog()
+	if err != nil {
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
+	}
+	for _, dep := range c.List() {
+		for _, ref := range dep.Scripts.configured() {
+			script, ok := c.Script(dep.ID, ref.action)
+			if !ok {
+				t.Fatalf("Script(%s, %s) missing", dep.ID, ref.action)
+			}
+			assertScriptHygiene(t, dep.ID, ref.action, script)
+		}
+	}
+}
+
+// assertScriptHygiene checks the rules every catalog script must follow:
+// no hard-coded data mount, no redefinition of prelude
+// functions, a shellcheck directive so editors lint it as sh, and a
+// non-zero exit on its failure paths.
+func assertScriptHygiene(t *testing.T, id string, action Action, script string) {
+	t.Helper()
+	if strings.Contains(script, "/data") {
+		t.Errorf("Script(%s, %s) hard-codes /data", id, action)
+	}
+	for _, fn := range []string{"dep_log()", "dep_result()", "dep_switch()", "memoh_dep_main"} {
+		if strings.Contains(script, fn) {
+			t.Errorf("Script(%s, %s) redefines prelude symbol %s", id, action, fn)
+		}
+	}
+	if !strings.HasPrefix(script, "# shellcheck shell=sh\n") {
+		t.Errorf("Script(%s, %s) must start with the shellcheck shell directive", id, action)
+	}
+	if strings.Contains(script, "#!/bin/bash") || strings.Contains(script, "[[ ") {
+		t.Errorf("Script(%s, %s) uses bash syntax", id, action)
+	}
+}
+
+// TestPublishedScriptsShellcheck lints every published script body with
+// `shellcheck -s sh`. It skips when shellcheck is not installed.
+func TestPublishedScriptsShellcheck(t *testing.T) {
+	if _, err := exec.LookPath("shellcheck"); err != nil {
+		t.Skip("shellcheck not installed")
+	}
+	c, err := loadPublishedCatalog()
+	if err != nil {
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
+	}
+	for _, dep := range c.List() {
+		for _, ref := range dep.Scripts.configured() {
+			script, ok := c.Script(dep.ID, ref.action)
+			if !ok {
+				t.Fatalf("Script(%s, %s) missing", dep.ID, ref.action)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			cmd := exec.CommandContext(ctx, "shellcheck", "-s", "sh", "-")
+			cmd.Stdin = strings.NewReader(script)
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			cmd.Stderr = &out
+			if err := cmd.Run(); err != nil || out.Len() != 0 {
+				t.Errorf("shellcheck on %s/%s: %v\n%s", dep.ID, ref.file, err, out.String())
+			}
+			cancel()
+		}
+	}
+}
+
+func TestPublishedDigestsAreStableAndDistinct(t *testing.T) {
+	first, err := loadPublishedCatalog()
+	if err != nil {
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
+	}
+	second, err := loadPublishedCatalog()
+	if err != nil {
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
+	}
+	seen := map[string]string{}
+	for _, dep := range first.List() {
+		if !strings.HasPrefix(dep.ManifestDigest, "sha256:") || len(dep.ManifestDigest) != len("sha256:")+64 {
+			t.Fatalf("%s digest = %q", dep.ID, dep.ManifestDigest)
+		}
+		if other := second.MustGet(dep.ID); other.ManifestDigest != dep.ManifestDigest {
+			t.Fatalf("%s digest changed between loads: %q vs %q", dep.ID, dep.ManifestDigest, other.ManifestDigest)
+		}
+		if prev, dup := seen[dep.ManifestDigest]; dup {
+			t.Fatalf("%s and %s share digest %s", prev, dep.ID, dep.ManifestDigest)
+		}
+		seen[dep.ManifestDigest] = dep.ID
+	}
 }
 
 func TestLoadFSAcceptsValidCatalog(t *testing.T) {
@@ -532,4 +709,67 @@ func TestDigestIgnoresUnreferencedFiles(t *testing.T) {
 	if first.MustGet("tool-a").ManifestDigest == third.MustGet("tool-a").ManifestDigest {
 		t.Fatal("referenced script changes must affect the manifest digest")
 	}
+}
+
+func TestGetReturnsCopies(t *testing.T) {
+	c, err := loadPublishedCatalog()
+	if err != nil {
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
+	}
+	dep, _ := c.Get("codex")
+	dep.Provides[0] = "mutated"
+	dep.Platforms[0].Arch[0] = "mutated"
+	fresh := c.MustGet("codex")
+	if fresh.Provides[0] != "codex" || fresh.Platforms[0].Arch[0] != "amd64" {
+		t.Fatalf("catalog state mutated through Get: %+v", fresh)
+	}
+}
+
+func TestMustGetPanicsOnUnknownID(t *testing.T) {
+	c, err := loadPublishedCatalog()
+	if err != nil {
+		t.Fatalf("loadPublishedCatalog() error = %v", err)
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("MustGet(ghost) should panic")
+		}
+	}()
+	c.MustGet("ghost")
+}
+
+// Fixtures are generated by Supermarket's export-dependency-fixtures command
+// using its pinned Bun version. They are never linked into the Server.
+func loadPublishedCatalog() (*Catalog, error) {
+	rootFS, err := os.OpenRoot("testdata/remote")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rootFS.Close() }()
+	raw, err := rootFS.ReadFile("index.json")
+	if err != nil {
+		return nil, err
+	}
+	index, err := DecodeIndex(raw)
+	if err != nil {
+		return nil, err
+	}
+	definitions := make([]Definition, 0, len(index.Data))
+	for _, descriptor := range index.Data {
+		root := descriptor.DependencyID
+		metadata, err := rootFS.ReadFile(filepath.Join(root, "release.json"))
+		if err != nil {
+			return nil, err
+		}
+		archive, err := rootFS.ReadFile(filepath.Join(root, "artifact.tar.gz"))
+		if err != nil {
+			return nil, err
+		}
+		definition, err := FromArtifact(metadata, descriptor.Revision, archive, "https://supermarket.example")
+		if err != nil {
+			return nil, err
+		}
+		definitions = append(definitions, definition)
+	}
+	return New(definitions)
 }

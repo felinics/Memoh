@@ -220,3 +220,22 @@ config_path = "conf/oauth-clients.toml"
 [web]
 host = "127.0.0.1"
 port = 8082
+
+# Workspace dependency management. Durations are seconds; zero uses defaults.
+[workspace_dependencies]
+# Disable catalog refresh and automatic upstream update checks for disconnected
+# deployments. Existing commands and cached definitions remain usable. Populate
+# the cache before disconnecting; uncached installs require a reachable registry.
+offline = false
+catalog_refresh_interval_seconds = 600
+update_check_interval_seconds = 86400
+reap_interval_seconds = 60
+discovery_cache_ttl_seconds = 600
+
+# These explicit recipe mirror overrides are optional. The same four names may
+# be supplied in the Server environment. Other environment keys are not passed.
+# [workspace_dependencies.script_env]
+# NODEJS_MIRROR = "https://nodejs.org/dist"
+# UV_RELEASES_URL = "https://github.com/astral-sh/uv/releases"
+# NPM_MIRROR = "https://registry.npmjs.org"
+# UV_PYTHON_INSTALL_MIRROR = "https://github.com/astral-sh/python-build-standalone/releases/download"

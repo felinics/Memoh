@@ -1,0 +1,75 @@
+{
+  "schema_version": "1",
+  "registry_id": "memoh",
+  "dependency_id": "python",
+  "manifest": {
+    "schema_version": "1",
+    "id": "python",
+    "name": "Python",
+    "description": "Python interpreter with pip.",
+    "icon": "icon.svg",
+    "translations": {
+      "en": {
+        "description": "Python interpreter with pip"
+      },
+      "zh": {
+        "description": "Python 解释器，含 pip"
+      },
+      "ja": {
+        "description": "Python インタープリター（pip 付き）"
+      }
+    },
+    "category": "runtime",
+    "source": "image",
+    "requires": [
+      "uv"
+    ],
+    "provides": [
+      "python3",
+      "pip3"
+    ],
+    "platforms": [
+      {
+        "os": "linux",
+        "arch": [
+          "amd64",
+          "arm64"
+        ],
+        "libc": "glibc"
+      },
+      {
+        "os": "darwin",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "timeouts": {
+      "install": 1200,
+      "remove": 300,
+      "check_update": 60,
+      "version": 30
+    },
+    "scripts": {
+      "install": "install.sh",
+      "update": "update.sh",
+      "remove": "remove.sh",
+      "check_update": "check-update.sh"
+    }
+  },
+  "manifest_digest": "sha256:8bb8fabd9c6754bd186d6fb5d706eaf3339f1af68d6ed000983fb7da0aee25b0",
+  "artifact": {
+    "format": "memoh_dependency_v1",
+    "digest": "df5f8f81183cb8d443b24d52f8ff7fcb24e0cb5d0257dc59b2e5cbfdaffbed47",
+    "size": 4900,
+    "uncompressed_size": 16979,
+    "archive_size": 23040,
+    "file_count": 6,
+    "content_type": "application/gzip"
+  },
+  "icon": {
+    "digest": "651b4d5b41dbf56d36f2df5ac704d2b86c692af7e165db5c3f27aabdf14d07e8",
+    "size": 1606,
+    "content_type": "image/svg+xml"
+  }
+}

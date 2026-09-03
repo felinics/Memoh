@@ -344,6 +344,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	// Workspace dependency routes (design docs/design/workspace-dependencies.md §11).
 	// The catalog is bot independent and needs only a signed-in user.
 	e.GET("/workspace-dependencies/catalog", h.ListWorkspaceDependencyCatalog)
+	e.GET("/workspace-dependencies/icons/:digest", h.GetWorkspaceDependencyIcon)
 	deps := e.Group("/bots/:bot_id/dependencies")
 	deps.GET("", h.ListWorkspaceDependencies)
 	deps.POST("/preflight", h.PreflightWorkspaceDependencies)

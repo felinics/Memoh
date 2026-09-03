@@ -200,21 +200,21 @@ func TestPostgresStoreLifecycle(t *testing.T) {
 		t.Fatalf("list by status missing = %+v, want %+v", missing, second)
 	}
 
-	// Delete removes the row; a second delete and a Get report not found.
+	// A second conditional delete is unmatched; a Get confirms the row is gone.
 	if err := store.Delete(ctx, key); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if err := store.Delete(ctx, key); !errors.Is(err, ErrInstallationNotFound) {
-		t.Fatalf("second delete error = %v, want ErrInstallationNotFound", err)
+	if err := store.Delete(ctx, key); !errors.Is(err, ErrBusy) {
+		t.Fatalf("second delete error = %v, want ErrBusy", err)
 	}
 	if _, err := store.Get(ctx, key); !errors.Is(err, ErrInstallationNotFound) {
 		t.Fatalf("get after delete error = %v, want ErrInstallationNotFound", err)
 	}
-	if _, err := store.SetStatus(ctx, key, StatusFailed, ""); !errors.Is(err, ErrInstallationNotFound) {
-		t.Fatalf("set status after delete error = %v, want ErrInstallationNotFound", err)
+	if _, err := store.SetStatus(ctx, key, StatusFailed, ""); !errors.Is(err, ErrBusy) {
+		t.Fatalf("set status after delete error = %v, want ErrBusy", err)
 	}
-	if _, err := store.UpdateObserved(ctx, key, ObservedUpdate{}); !errors.Is(err, ErrInstallationNotFound) {
-		t.Fatalf("update observed after delete error = %v, want ErrInstallationNotFound", err)
+	if _, err := store.UpdateObserved(ctx, key, ObservedUpdate{}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("update observed after delete error = %v, want ErrBusy", err)
 	}
 }
 

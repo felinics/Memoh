@@ -11,14 +11,12 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-// DefaultUpdateCheckInterval is how often the update worker runs a round
-// (WD-UPD-001).
+// DefaultUpdateCheckInterval is how often the update worker runs a round.
 const DefaultUpdateCheckInterval = 24 * time.Hour
 
 // UpdateWorker periodically runs check_update for installed dependencies
-// that have a check_update script and no pin (design §10.2). Only running
-// native workspaces are checked; remote targets are never woken (WD-UPD-002,
-// WD-PLAT-003).
+// that have a check_update script and no pin. Only running
+// native workspaces are checked; remote targets are never woken.
 type UpdateWorker struct {
 	service  *Service
 	interval time.Duration
@@ -118,7 +116,7 @@ func (w *UpdateWorker) loop(ctx context.Context, done chan struct{}) {
 }
 
 // checkGroup is one upstream query shared by every record with the same
-// dependency and platform (WD-UPD-003).
+// dependency and platform.
 type checkGroup struct {
 	dep      groupKey
 	client   *bridge.Client
@@ -139,6 +137,10 @@ type groupKey struct {
 // (dependency, platform), each group runs check_update once, and the result
 // fans out to every member. It returns how many upstream checks ran.
 func (w *UpdateWorker) RunOnce(ctx context.Context) (int, error) {
+	ctx, _, catalogErr := w.service.prepareCatalog(ctx, true, false)
+	if catalogErr != nil {
+		return 0, catalogErr
+	}
 	ctx = w.ctxFactory(ctx)
 	s := w.service
 	records, err := s.store.ListByStatus(ctx, StatusInstalled)
@@ -149,15 +151,34 @@ func (w *UpdateWorker) RunOnce(ctx context.Context) (int, error) {
 	checks := 0
 	for _, key := range order {
 		group := groups[key]
-		dep, _ := s.catalog.Get(key.depID)
-		check, checkErr := s.checkUpdate(ctx, group.client, group.dataRoot, group.platform, dep, group.members[0].InstalledVersion)
+		// The workspace selected for this grouped check is a real script
+		// execution site, so it must participate in the same lock as installs.
+		source := group.members[0]
+		sourceKey := InstallationKey{BotID: source.BotID, WorkspaceTargetID: source.WorkspaceTargetID, DependencyID: source.DependencyID}
+		if !s.locks.tryLock(sourceKey) {
+			continue
+		}
+		dep, _ := s.catalogFor(ctx).Get(key.depID)
+		check, checkErr := s.checkUpdate(ctx, group.client, group.dataRoot, group.platform, dep, source.InstalledVersion)
 		checks++
 		for _, rec := range group.members {
 			recKey := InstallationKey{BotID: rec.BotID, WorkspaceTargetID: rec.WorkspaceTargetID, DependencyID: rec.DependencyID}
-			if err := s.recordCheck(ctx, recKey, check, checkErr); err != nil {
-				errs = append(errs, err)
+			if recKey != sourceKey && !s.locks.tryLock(recKey) {
+				continue
+			}
+			current, getErr := s.store.Get(ctx, recKey)
+			if getErr == nil && current.Status == StatusInstalled {
+				if err := s.recordCheck(ctx, recKey, check, checkErr); err != nil {
+					errs = append(errs, err)
+				}
+			} else if getErr != nil && !errors.Is(getErr, ErrInstallationNotFound) {
+				errs = append(errs, getErr)
+			}
+			if recKey != sourceKey {
+				s.locks.unlock(recKey)
 			}
 		}
+		s.locks.unlock(sourceKey)
 	}
 	return checks, errors.Join(errs...)
 }
@@ -178,7 +199,7 @@ func (w *UpdateWorker) groupRecords(ctx context.Context, records []Installation)
 	var errs []error
 
 	for _, rec := range records {
-		dep, ok := s.catalog.Get(rec.DependencyID)
+		dep, ok := s.catalogFor(ctx).Get(rec.DependencyID)
 		if !ok || !upstreamCheckable(dep) || !isNativeTarget(rec.WorkspaceTargetID) {
 			continue
 		}

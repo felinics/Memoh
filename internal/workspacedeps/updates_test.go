@@ -87,8 +87,11 @@ func TestUpdateWorkerRunOnceDedupesAndFansOut(t *testing.T) {
 		t.Errorf("failed record was checked: %+v", rec)
 	}
 
-	// A failed round records the error and the time, nothing else (WD-UPD-004).
+	// A failed round records the error and the time, nothing else.
+	// A day later bot-e's cached snapshot has expired; probe it again so it
+	// still forms its own platform group.
 	f.now = f.now.Add(24 * time.Hour)
+	f.svc.cache.Put("bot-e", TargetNative, Snapshot{Platform: Platform{OS: "linux", Arch: "arm64", Libc: "musl", TmpDir: "/tmp"}})
 	f.setRun(func(RunSpec) (Result, error) {
 		return Result{ExitCode: 1}, &ExitError{Code: 1, StderrTail: "npm view: ETIMEDOUT"}
 	})
@@ -166,5 +169,29 @@ func TestUpdateWorkerReportsListErrors(t *testing.T) {
 	checks, err := worker.RunOnce(f.ctx())
 	if checks != 0 || !errors.Is(err, probeErr) {
 		t.Errorf("RunOnce = %d, %v; want 0 and the probe error", checks, err)
+	}
+}
+
+func TestUpdateWorkerSharesInstallLock(t *testing.T) {
+	f := newServiceFixture(t)
+	key := seedInstalled(f, testBot, TargetNative, "tool-y", "1.0.0")
+	worker := NewUpdateWorker(f.svc, 0, slog.New(slog.DiscardHandler))
+	f.svc.locks.tryLock(key)
+	checks, err := worker.RunOnce(f.ctx())
+	f.svc.locks.unlock(key)
+	if err != nil || checks != 0 || len(f.runSpecs()) != 0 {
+		t.Fatalf("busy workspace was checked: checks=%d err=%v", checks, err)
+	}
+	f.setRun(func(RunSpec) (Result, error) {
+		if _, err := f.svc.Install(f.ctx(), testBot, TargetNative, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
+			t.Errorf("install during update check = %v", err)
+		}
+		return Result{Raw: json.RawMessage(checkPayload)}, nil
+	})
+	if checks, err := worker.RunOnce(f.ctx()); err != nil || checks != 1 {
+		t.Fatalf("available workspace check: %d %v", checks, err)
+	}
+	if f.svc.locks.locked(key) {
+		t.Fatal("update check retained operation lock")
 	}
 }

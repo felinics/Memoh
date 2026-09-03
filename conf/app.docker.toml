@@ -118,3 +118,12 @@ config_path = "conf/oauth-clients.toml"
 [web]
 host = "127.0.0.1"
 port = 8082
+
+# Dependency maintenance; use offline=true to disable registry refresh/update
+# checks. Recipe scripts still use their own network access when manually run.
+[workspace_dependencies]
+offline = false
+catalog_refresh_interval_seconds = 600
+update_check_interval_seconds = 86400
+reap_interval_seconds = 60
+discovery_cache_ttl_seconds = 600

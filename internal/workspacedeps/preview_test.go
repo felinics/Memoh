@@ -3,6 +3,7 @@ package workspacedeps
 import (
 	"context"
 	"errors"
+	"path"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestScriptPreviewDetailsMirrorsRunnerEnvironment(t *testing.T) {
 	if preview.Digest != agent.ManifestDigest || !strings.HasPrefix(preview.Digest, "sha256:") {
 		t.Errorf("digest = %q, want manifest digest %q", preview.Digest, agent.ManifestDigest)
 	}
-	if preview.Exec != "exec sh -s" {
+	if preview.Exec != scriptExecCommand {
 		t.Errorf("exec = %q", preview.Exec)
 	}
 	if preview.TimeoutSeconds != agent.Timeouts.For(catalog.ActionInstall) {
@@ -65,14 +66,32 @@ func TestScriptPreviewDetailsMirrorsRunnerEnvironment(t *testing.T) {
 	if got := previewEnv(t, preview, "MEMOH_DEP_OS"); got.Value != previewProbedAtRunTime {
 		t.Errorf("MEMOH_DEP_OS = %q, want placeholder", got.Value)
 	}
-	if got := previewEnv(t, preview, "MEMOH_DEP_RESULT"); !strings.Contains(got.Value, "memoh-dep-agent-x-") || !strings.Contains(got.Value, previewResultNonce) {
+	if got := previewEnv(t, preview, "MEMOH_DEP_RESULT"); got.Value != path.Join(operationRoot(Home(f.dataRoot, "agent-x"), "agent-x"), previewResultNonce, "result.json") {
 		t.Errorf("MEMOH_DEP_RESULT = %q", got.Value)
 	}
 	if got := previewEnv(t, preview, "NPM_MIRROR"); got.Secret || got.Value != "https://registry.example" {
 		t.Errorf("NPM_MIRROR = %+v", got)
 	}
-	if got := previewEnv(t, preview, "NPM_TOKEN"); !got.Secret || got.Value != "" {
-		t.Errorf("NPM_TOKEN = %+v, want secret with no value", got)
+	for _, entry := range preview.Env {
+		if entry.Key == "NPM_TOKEN" {
+			t.Errorf("unsupported environment should not appear in preview: %+v", entry)
+		}
+	}
+
+	if got := previewEnv(t, preview, "MEMOH_DEP_OPERATION_DIR"); got.Value != path.Join(operationRoot(Home(f.dataRoot, "agent-x"), "agent-x"), previewResultNonce) {
+		t.Errorf("operation receipt directory = %q", got.Value)
+	}
+	checkPreview, err := f.svc.ScriptPreviewDetails(f.ctx(), testBot, testTarget, "tool-y", catalog.ActionCheckUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range checkPreview.Env {
+		if entry.Key == "MEMOH_DEP_OPERATION_DIR" {
+			t.Errorf("read-only check published mutation receipt: %+v", entry)
+		}
+	}
+	if got := previewEnv(t, checkPreview, "MEMOH_DEP_RESULT"); !strings.Contains(got.Value, "memoh-dep-tool-y-") {
+		t.Errorf("check result path = %q", got.Value)
 	}
 
 	// Once the target has been probed the real platform is reported.
@@ -104,5 +123,18 @@ func TestScriptPreviewDetailsErrors(t *testing.T) {
 	}
 	if _, err := f.svc.ScriptPreviewDetails(context.Background(), testBot, testTarget, "agent-x", catalog.ActionCheckUpdate); !errors.Is(err, ErrActionUnsupported) {
 		t.Errorf("unscripted action error = %v", err)
+	}
+}
+
+func TestScriptPreviewRedactsPrivateMirrorCredentials(t *testing.T) {
+	f := newServiceFixture(t)
+	f.env = []string{"NPM_MIRROR=https://user:password@registry.example/download?token=private"}
+	preview, err := f.svc.ScriptPreviewDetails(f.ctx(), testBot, testTarget, "agent-x", catalog.ActionInstall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := previewEnv(t, preview, "NPM_MIRROR").Value
+	if strings.Contains(value, "user:password") || strings.Contains(value, "private") || !strings.Contains(value, "registry.example") {
+		t.Fatalf("unsafe mirror preview: %s", value)
 	}
 }

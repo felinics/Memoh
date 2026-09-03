@@ -154,7 +154,7 @@ func TestObservedParamsWritesProvidedValues(t *testing.T) {
 	}
 }
 
-func TestPostgresStoreMapsNoRowsToNotFound(t *testing.T) {
+func TestPostgresStoreDistinguishesReadMissFromUnmatchedWrite(t *testing.T) {
 	q := &fakeDependencyQueries{
 		get: func(dbsqlc.GetBotDependencyInstallationParams) (dbsqlc.BotDependencyInstallation, error) {
 			return dbsqlc.BotDependencyInstallation{}, pgx.ErrNoRows
@@ -172,11 +172,11 @@ func TestPostgresStoreMapsNoRowsToNotFound(t *testing.T) {
 	if _, err := store.Get(ctx, testKey()); !errors.Is(err, ErrInstallationNotFound) {
 		t.Fatalf("Get error = %v, want ErrInstallationNotFound", err)
 	}
-	if _, err := store.SetStatus(ctx, testKey(), StatusFailed, "x"); !errors.Is(err, ErrInstallationNotFound) {
-		t.Fatalf("SetStatus error = %v, want ErrInstallationNotFound", err)
+	if _, err := store.SetStatus(ctx, testKey(), StatusFailed, "x"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("SetStatus error = %v, want ErrBusy", err)
 	}
-	if _, err := store.UpdateObserved(ctx, testKey(), ObservedUpdate{}); !errors.Is(err, ErrInstallationNotFound) {
-		t.Fatalf("UpdateObserved error = %v, want ErrInstallationNotFound", err)
+	if _, err := store.UpdateObserved(ctx, testKey(), ObservedUpdate{}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("UpdateObserved error = %v, want ErrBusy", err)
 	}
 }
 
@@ -196,7 +196,7 @@ func TestPostgresStoreWrapsOtherErrors(t *testing.T) {
 	}
 }
 
-func TestPostgresStoreDeleteReportsNotFound(t *testing.T) {
+func TestPostgresStoreDeleteReportsUnmatchedWrite(t *testing.T) {
 	var affected int64
 	q := &fakeDependencyQueries{
 		del: func(arg dbsqlc.DeleteBotDependencyInstallationParams) (int64, error) {
@@ -208,8 +208,8 @@ func TestPostgresStoreDeleteReportsNotFound(t *testing.T) {
 	}
 	store := NewPostgresStore(q)
 
-	if err := store.Delete(context.Background(), testKey()); !errors.Is(err, ErrInstallationNotFound) {
-		t.Fatalf("Delete of missing row error = %v, want ErrInstallationNotFound", err)
+	if err := store.Delete(context.Background(), testKey()); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Delete of missing row error = %v, want ErrBusy", err)
 	}
 	affected = 1
 	if err := store.Delete(context.Background(), testKey()); err != nil {

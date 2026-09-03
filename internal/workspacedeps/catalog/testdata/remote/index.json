@@ -1,0 +1,383 @@
+{
+  "total": 5,
+  "page": 1,
+  "limit": 256,
+  "revision": "cf0884fd22c57024eeec56746af48d7573016c4ee3889a62febca646892e843a",
+  "data": [
+    {
+      "schema_version": "1",
+      "registry_id": "memoh",
+      "dependency_id": "claude-code",
+      "manifest": {
+        "schema_version": "1",
+        "id": "claude-code",
+        "name": "Claude Code",
+        "description": "Anthropic Claude Code CLI.",
+        "icon": "icon.svg",
+        "translations": {
+          "en": {
+            "description": "Anthropic Claude Code command line"
+          },
+          "zh": {
+            "description": "Anthropic Claude Code 命令行"
+          },
+          "ja": {
+            "description": "Anthropic Claude Code コマンドライン"
+          }
+        },
+        "category": "agent",
+        "source": "managed",
+        "requires": [
+          "node"
+        ],
+        "provides": [
+          "claude"
+        ],
+        "platforms": [
+          {
+            "os": "linux",
+            "arch": [
+              "amd64",
+              "arm64"
+            ],
+            "libc": "glibc"
+          },
+          {
+            "os": "darwin",
+            "arch": [
+              "arm64"
+            ]
+          }
+        ],
+        "timeouts": {
+          "install": 1200,
+          "remove": 300,
+          "check_update": 120,
+          "version": 30
+        },
+        "scripts": {
+          "install": "install.sh",
+          "update": "update.sh",
+          "remove": "remove.sh",
+          "check_update": "check-update.sh"
+        }
+      },
+      "manifest_digest": "sha256:8a4d3a93ce8f9471470d2d53964565c2e9b56272f97ec2d334a4159cecae3a71",
+      "artifact": {
+        "format": "memoh_dependency_v1",
+        "digest": "24e140d142569f11b8748961ee595f031335d4a088aef882f10517a0551665d9",
+        "size": 3605,
+        "uncompressed_size": 12793,
+        "archive_size": 17920,
+        "file_count": 6,
+        "content_type": "application/gzip"
+      },
+      "icon": {
+        "digest": "c156209ad5008df828d3b17f8be508dae6f962bebe09a77abcb522f5f60f4f2f",
+        "size": 425,
+        "content_type": "image/svg+xml"
+      },
+      "revision": "049ef7fe90f3e8c359235973c18cd1c012c83ee5d04c2217b2cf0a7663c8936f"
+    },
+    {
+      "schema_version": "1",
+      "registry_id": "memoh",
+      "dependency_id": "codex",
+      "manifest": {
+        "schema_version": "1",
+        "id": "codex",
+        "name": "Codex",
+        "description": "OpenAI Codex CLI.",
+        "icon": "icon.svg",
+        "translations": {
+          "en": {
+            "description": "OpenAI Codex command line"
+          },
+          "zh": {
+            "description": "OpenAI Codex 命令行"
+          },
+          "ja": {
+            "description": "OpenAI Codex コマンドライン"
+          }
+        },
+        "category": "agent",
+        "source": "managed",
+        "requires": [
+          "node"
+        ],
+        "provides": [
+          "codex"
+        ],
+        "platforms": [
+          {
+            "os": "linux",
+            "arch": [
+              "amd64",
+              "arm64"
+            ],
+            "libc": "glibc"
+          },
+          {
+            "os": "darwin",
+            "arch": [
+              "arm64"
+            ]
+          }
+        ],
+        "timeouts": {
+          "install": 1200,
+          "remove": 300,
+          "check_update": 120,
+          "version": 30
+        },
+        "scripts": {
+          "install": "install.sh",
+          "update": "update.sh",
+          "remove": "remove.sh",
+          "check_update": "check-update.sh"
+        }
+      },
+      "manifest_digest": "sha256:fae739876c6e7fb675cd9963d027eb4cd089d4702f73d89d9ee26169b05f2e62",
+      "artifact": {
+        "format": "memoh_dependency_v1",
+        "digest": "cdbc0492cccdd4b4a769e3c742ac4b7c58b18195807b8957f87ce764fa93a24b",
+        "size": 4012,
+        "uncompressed_size": 12501,
+        "archive_size": 18432,
+        "file_count": 6,
+        "content_type": "application/gzip"
+      },
+      "icon": {
+        "digest": "e1b70b6412ebeb2505ee9d4ebc7f6d4c49365699453b139ba40520a4039df1f3",
+        "size": 1754,
+        "content_type": "image/svg+xml"
+      },
+      "revision": "67824da4524c22b4a2efb7783ab233a6570e3ee6d81ba22d5101cb3f64931028"
+    },
+    {
+      "schema_version": "1",
+      "registry_id": "memoh",
+      "dependency_id": "node",
+      "manifest": {
+        "schema_version": "1",
+        "id": "node",
+        "name": "Node.js",
+        "description": "JavaScript runtime with npm and npx.",
+        "icon": "icon.svg",
+        "translations": {
+          "en": {
+            "description": "JavaScript runtime with npm and npx"
+          },
+          "zh": {
+            "description": "JavaScript 运行时，含 npm 与 npx"
+          },
+          "ja": {
+            "description": "JavaScript ランタイム（npm・npx 付き）"
+          }
+        },
+        "category": "runtime",
+        "source": "image",
+        "requires": [],
+        "provides": [
+          "node",
+          "npm",
+          "npx"
+        ],
+        "platforms": [
+          {
+            "os": "linux",
+            "arch": [
+              "amd64",
+              "arm64"
+            ],
+            "libc": "glibc"
+          },
+          {
+            "os": "darwin",
+            "arch": [
+              "arm64"
+            ]
+          }
+        ],
+        "timeouts": {
+          "install": 1200,
+          "remove": 300,
+          "check_update": 60,
+          "version": 30
+        },
+        "scripts": {
+          "install": "install.sh",
+          "update": "update.sh",
+          "remove": "remove.sh",
+          "check_update": "check-update.sh"
+        }
+      },
+      "manifest_digest": "sha256:879b663c7b812b7e73a2d2507c6c638a3375566e0e5cfe183fd1cb69e9d01516",
+      "artifact": {
+        "format": "memoh_dependency_v1",
+        "digest": "47517335fd8ca6380d84487c159d6ce8da5d5f79add3d0f50be54272222baf23",
+        "size": 4890,
+        "uncompressed_size": 17114,
+        "archive_size": 23040,
+        "file_count": 6,
+        "content_type": "application/gzip"
+      },
+      "icon": {
+        "digest": "3856aaf4a29f690822d2d27653015019893fa082a57f382043429b8b649bc892",
+        "size": 1696,
+        "content_type": "image/svg+xml"
+      },
+      "revision": "ec27d74e61287b3ab59e931500af3e706551b40e79626e4b75cdaf49c02f5419"
+    },
+    {
+      "schema_version": "1",
+      "registry_id": "memoh",
+      "dependency_id": "python",
+      "manifest": {
+        "schema_version": "1",
+        "id": "python",
+        "name": "Python",
+        "description": "Python interpreter with pip.",
+        "icon": "icon.svg",
+        "translations": {
+          "en": {
+            "description": "Python interpreter with pip"
+          },
+          "zh": {
+            "description": "Python 解释器，含 pip"
+          },
+          "ja": {
+            "description": "Python インタープリター（pip 付き）"
+          }
+        },
+        "category": "runtime",
+        "source": "image",
+        "requires": [
+          "uv"
+        ],
+        "provides": [
+          "python3",
+          "pip3"
+        ],
+        "platforms": [
+          {
+            "os": "linux",
+            "arch": [
+              "amd64",
+              "arm64"
+            ],
+            "libc": "glibc"
+          },
+          {
+            "os": "darwin",
+            "arch": [
+              "arm64"
+            ]
+          }
+        ],
+        "timeouts": {
+          "install": 1200,
+          "remove": 300,
+          "check_update": 60,
+          "version": 30
+        },
+        "scripts": {
+          "install": "install.sh",
+          "update": "update.sh",
+          "remove": "remove.sh",
+          "check_update": "check-update.sh"
+        }
+      },
+      "manifest_digest": "sha256:8bb8fabd9c6754bd186d6fb5d706eaf3339f1af68d6ed000983fb7da0aee25b0",
+      "artifact": {
+        "format": "memoh_dependency_v1",
+        "digest": "df5f8f81183cb8d443b24d52f8ff7fcb24e0cb5d0257dc59b2e5cbfdaffbed47",
+        "size": 4900,
+        "uncompressed_size": 16979,
+        "archive_size": 23040,
+        "file_count": 6,
+        "content_type": "application/gzip"
+      },
+      "icon": {
+        "digest": "651b4d5b41dbf56d36f2df5ac704d2b86c692af7e165db5c3f27aabdf14d07e8",
+        "size": 1606,
+        "content_type": "image/svg+xml"
+      },
+      "revision": "2ce8fa4ac8ee787bfcba1359583de3c45b9535216ae773a12e2d355e4ddcdbc7"
+    },
+    {
+      "schema_version": "1",
+      "registry_id": "memoh",
+      "dependency_id": "uv",
+      "manifest": {
+        "schema_version": "1",
+        "id": "uv",
+        "name": "uv",
+        "description": "Python package and project manager.",
+        "icon": "icon.svg",
+        "translations": {
+          "en": {
+            "description": "Python package and project manager"
+          },
+          "zh": {
+            "description": "Python 包与项目管理器"
+          },
+          "ja": {
+            "description": "Python のパッケージ・プロジェクト管理ツール"
+          }
+        },
+        "category": "runtime",
+        "source": "image",
+        "requires": [],
+        "provides": [
+          "uv",
+          "uvx"
+        ],
+        "platforms": [
+          {
+            "os": "linux",
+            "arch": [
+              "amd64",
+              "arm64"
+            ],
+            "libc": "glibc"
+          },
+          {
+            "os": "darwin",
+            "arch": [
+              "arm64"
+            ]
+          }
+        ],
+        "timeouts": {
+          "install": 1200,
+          "remove": 300,
+          "check_update": 60,
+          "version": 30
+        },
+        "scripts": {
+          "install": "install.sh",
+          "update": "update.sh",
+          "remove": "remove.sh",
+          "check_update": "check-update.sh"
+        }
+      },
+      "manifest_digest": "sha256:b5fe97a81fd29ca4207379c2d26ab3c1fcf9faf14deaa42b692ffe4c2ba04463",
+      "artifact": {
+        "format": "memoh_dependency_v1",
+        "digest": "5eda746075379e86f9bfcf5101c9ae4254a07a5ee90d6c44715cee5000b4f0ee",
+        "size": 4511,
+        "uncompressed_size": 17040,
+        "archive_size": 22528,
+        "file_count": 6,
+        "content_type": "application/gzip"
+      },
+      "icon": {
+        "digest": "1526e0f7060de53a8533bd4bd6d3b2e2de3f5a6b099efa4fad4262f7330a967f",
+        "size": 444,
+        "content_type": "image/svg+xml"
+      },
+      "revision": "b2eb24ccf60c448251f597f5fd7be93e17a8fe2c982e939f489cb46099e05a4f"
+    }
+  ]
+}

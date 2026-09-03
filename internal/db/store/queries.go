@@ -26,6 +26,10 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	ClaimBotDependencyOperation(ctx context.Context, arg dbsqlc.ClaimBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
+	FinishBotDependencyOperation(ctx context.Context, arg dbsqlc.FinishBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
+	DeleteBotDependencyOperation(ctx context.Context, arg dbsqlc.DeleteBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
+	PruneWorkspaceDependencyDefinitions(ctx context.Context, sourceURL string) (int64, error)
 	CreateAgentCredential(ctx context.Context, arg dbsqlc.CreateAgentCredentialParams) (dbsqlc.AgentCredential, error)
 	GetAgentCredential(ctx context.Context, id pgtype.UUID) (dbsqlc.AgentCredential, error)
 	GetBotAgentCredential(ctx context.Context, arg dbsqlc.GetBotAgentCredentialParams) (dbsqlc.GetBotAgentCredentialRow, error)
@@ -195,6 +199,11 @@ type Queries interface {
 	GetBotSkillPackageInstallation(ctx context.Context, arg dbsqlc.GetBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
 	GetBotSkillPackageInstallationByID(ctx context.Context, arg dbsqlc.GetBotSkillPackageInstallationByIDParams) (dbsqlc.BotSkillPackageInstallation, error)
 	GetBotDependencyInstallation(ctx context.Context, arg dbsqlc.GetBotDependencyInstallationParams) (dbsqlc.BotDependencyInstallation, error)
+	GetWorkspaceDependencyDefinition(ctx context.Context, arg dbsqlc.GetWorkspaceDependencyDefinitionParams) (dbsqlc.GetWorkspaceDependencyDefinitionRow, error)
+	FindWorkspaceDependencyIcon(ctx context.Context, arg dbsqlc.FindWorkspaceDependencyIconParams) (dbsqlc.FindWorkspaceDependencyIconRow, error)
+	CacheWorkspaceDependencyDefinition(ctx context.Context, arg dbsqlc.CacheWorkspaceDependencyDefinitionParams) (int64, error)
+	GetWorkspaceDependencyCatalog(ctx context.Context, sourceURL string) (dbsqlc.WorkspaceDependencyCatalog, error)
+	CacheWorkspaceDependencyCatalog(ctx context.Context, arg dbsqlc.CacheWorkspaceDependencyCatalogParams) (int64, error)
 	GetBotStorageBinding(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotStorageBinding, error)
 	GetHistoryTurnByID(ctx context.Context, arg dbsqlc.GetHistoryTurnByIDParams) (HistoryTurn, error)
 	GetVisibleHistoryTurnByMessage(ctx context.Context, arg dbsqlc.GetVisibleHistoryTurnByMessageParams) (HistoryTurn, error)

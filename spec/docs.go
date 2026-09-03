@@ -4521,6 +4521,12 @@ const docTemplate = `{
                         "description": "Workspace target ID (defaults to the bot's current target)",
                         "name": "workspace_target_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Refresh definitions and workspace discovery",
+                        "name": "refresh",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4735,6 +4741,14 @@ const docTemplate = `{
                         "description": "Workspace target ID (defaults to the bot's current target)",
                         "name": "workspace_target_id",
                         "in": "query"
+                    },
+                    {
+                        "description": "Prepared definition revision (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -5070,6 +5084,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Workspace target ID (defaults to the bot's current target)",
                         "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep a previously prepared definition revision",
+                        "name": "definition_revision",
                         "in": "query"
                     }
                 ],
@@ -15875,6 +15895,14 @@ const docTemplate = `{
                     "containerd"
                 ],
                 "summary": "List the workspace dependency catalog",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Refresh the remote catalog",
+                        "name": "refresh",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -15890,6 +15918,46 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspace-dependencies/icons/{digest}": {
+            "get": {
+                "produces": [
+                    "image/svg+xml"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Read a cached verified dependency icon",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SHA-256 digest",
+                        "name": "digest",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -22494,6 +22562,9 @@ const docTemplate = `{
                         "tool"
                     ]
                 },
+                "definition_revision": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -22502,6 +22573,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "icon": {
+                    "type": "string"
+                },
+                "icon_url": {
                     "type": "string"
                 },
                 "id": {
@@ -22525,6 +22599,18 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "retired": {
+                    "type": "boolean"
+                },
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyTranslation"
                     }
                 },
                 "version_pin": {
@@ -22554,6 +22640,12 @@ const docTemplate = `{
         "handlers.WorkspaceDependencyCatalogResponse": {
             "type": "object",
             "properties": {
+                "catalog_fetched_at": {
+                    "type": "string"
+                },
+                "catalog_stale": {
+                    "type": "boolean"
+                },
                 "items": {
                     "type": "array",
                     "items": {
@@ -22565,6 +22657,9 @@ const docTemplate = `{
         "handlers.WorkspaceDependencyInstallRequest": {
             "type": "object",
             "properties": {
+                "definition_revision": {
+                    "type": "string"
+                },
                 "version": {
                     "description": "Version to install. Empty (or no body) installs the latest version the\ncatalog script resolves, or the manifest pin when the dependency has\none. The version recorded afterwards is the one the script reports.",
                     "type": "string"
@@ -22598,10 +22693,16 @@ const docTemplate = `{
                         "tool"
                     ]
                 },
+                "definition_revision": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
                 "icon": {
+                    "type": "string"
+                },
+                "icon_url": {
                     "type": "string"
                 },
                 "id": {
@@ -22623,6 +22724,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "last_error": {
+                    "type": "string"
+                },
+                "last_error_code": {
                     "type": "string"
                 },
                 "latest_version": {
@@ -22657,6 +22761,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "registry_id": {
+                    "type": "string"
+                },
+                "retired": {
+                    "type": "boolean"
+                },
                 "source": {
                     "description": "Source is image for dependencies shipped with the workspace image and\nmanaged for dependencies installed by catalog scripts.",
                     "type": "string",
@@ -22677,6 +22787,12 @@ const docTemplate = `{
                         "failed"
                     ]
                 },
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyTranslation"
+                    }
+                },
                 "update_available": {
                     "description": "UpdateAvailable is set for installed dependencies whose last upstream\ncheck reported a version other than the one in effect.",
                     "type": "boolean"
@@ -22686,6 +22802,16 @@ const docTemplate = `{
         "handlers.WorkspaceDependencyListResponse": {
             "type": "object",
             "properties": {
+                "catalog_fetched_at": {
+                    "type": "string"
+                },
+                "catalog_stale": {
+                    "type": "boolean"
+                },
+                "discovery_error": {
+                    "description": "DiscoveryError is set when the workspace is running but could not be\ninspected (the discovery command was killed or timed out). Items then\nreflect the installation records alone, without workspace facts or\nactions; a refresh retries discovery.",
+                    "type": "string"
+                },
                 "items": {
                     "type": "array",
                     "items": {
@@ -22710,6 +22836,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "action": {
+                    "type": "string"
+                },
+                "definition_revision": {
                     "type": "string"
                 },
                 "dependency_id": {
@@ -22829,6 +22958,9 @@ const docTemplate = `{
                         "rollback"
                     ]
                 },
+                "definition_revision": {
+                    "type": "string"
+                },
                 "dependency_id": {
                     "type": "string"
                 },
@@ -22867,6 +22999,9 @@ const docTemplate = `{
                 "data": {
                     "type": "string"
                 },
+                "definition_revision": {
+                    "type": "string"
+                },
                 "dependency_id": {
                     "type": "string"
                 },
@@ -22902,6 +23037,17 @@ const docTemplate = `{
                     ]
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyTranslation": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }

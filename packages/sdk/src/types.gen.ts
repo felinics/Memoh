@@ -2510,6 +2510,7 @@ export type HandlersWorkspaceDependencyCatalogItem = {
      * Category is agent, runtime, or tool.
      */
     category?: 'agent' | 'runtime' | 'tool';
+    definition_revision?: string;
     description?: string;
     /**
      * HasImageBaseline is set when the workspace image ships a copy of the
@@ -2517,6 +2518,7 @@ export type HandlersWorkspaceDependencyCatalogItem = {
      */
     has_image_baseline?: boolean;
     icon?: string;
+    icon_url?: string;
     id?: string;
     /**
      * Installable is set when the catalog has an install script for the
@@ -2530,6 +2532,11 @@ export type HandlersWorkspaceDependencyCatalogItem = {
      * Provides lists the commands the dependency makes available.
      */
     provides?: Array<string>;
+    registry_id?: string;
+    retired?: boolean;
+    translations?: {
+        [key: string]: HandlersWorkspaceDependencyTranslation;
+    };
     /**
      * VersionPin is the version every install produces when the manifest
      * locks one; omitted when installs follow the latest release.
@@ -2547,10 +2554,13 @@ export type HandlersWorkspaceDependencyCatalogPlatform = {
 };
 
 export type HandlersWorkspaceDependencyCatalogResponse = {
+    catalog_fetched_at?: string;
+    catalog_stale?: boolean;
     items?: Array<HandlersWorkspaceDependencyCatalogItem>;
 };
 
 export type HandlersWorkspaceDependencyInstallRequest = {
+    definition_revision?: string;
     /**
      * Version to install. Empty (or no body) installs the latest version the
      * catalog script resolves, or the manifest pin when the dependency has
@@ -2568,8 +2578,10 @@ export type HandlersWorkspaceDependencyItem = {
      * Category is agent, runtime, or tool.
      */
     category?: 'agent' | 'runtime' | 'tool';
+    definition_revision?: string;
     description?: string;
     icon?: string;
+    icon_url?: string;
     id?: string;
     /**
      * ImageVersion is the version of the copy the workspace image ships,
@@ -2591,6 +2603,7 @@ export type HandlersWorkspaceDependencyItem = {
     installed_version?: string;
     last_checked_at?: string;
     last_error?: string;
+    last_error_code?: string;
     /**
      * LatestVersion is the last upstream check result, omitted until a check
      * ran.
@@ -2616,6 +2629,8 @@ export type HandlersWorkspaceDependencyItem = {
      * Provides lists the commands the dependency makes available.
      */
     provides?: Array<string>;
+    registry_id?: string;
+    retired?: boolean;
     /**
      * Source is image for dependencies shipped with the workspace image and
      * managed for dependencies installed by catalog scripts.
@@ -2626,6 +2641,9 @@ export type HandlersWorkspaceDependencyItem = {
      * in the workspace.
      */
     status?: 'installed' | 'installing' | 'updating' | 'removing' | 'missing' | 'failed';
+    translations?: {
+        [key: string]: HandlersWorkspaceDependencyTranslation;
+    };
     /**
      * UpdateAvailable is set for installed dependencies whose last upstream
      * check reported a version other than the one in effect.
@@ -2634,6 +2652,15 @@ export type HandlersWorkspaceDependencyItem = {
 };
 
 export type HandlersWorkspaceDependencyListResponse = {
+    catalog_fetched_at?: string;
+    catalog_stale?: boolean;
+    /**
+     * DiscoveryError is set when the workspace is running but could not be
+     * inspected (the discovery command was killed or timed out). Items then
+     * reflect the installation records alone, without workspace facts or
+     * actions; a refresh retries discovery.
+     */
+    discovery_error?: string;
     items?: Array<HandlersWorkspaceDependencyItem>;
     platform?: HandlersWorkspaceDependencyPlatform;
     workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
@@ -2641,6 +2668,7 @@ export type HandlersWorkspaceDependencyListResponse = {
 
 export type HandlersWorkspaceDependencyOperationResponse = {
     action?: string;
+    definition_revision?: string;
     dependency_id?: string;
     entrypoints?: {
         [key: string]: string;
@@ -2686,6 +2714,7 @@ export type HandlersWorkspaceDependencyScriptEnv = {
 
 export type HandlersWorkspaceDependencyScriptResponse = {
     action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
+    definition_revision?: string;
     dependency_id?: string;
     digest?: string;
     env?: Array<HandlersWorkspaceDependencyScriptEnv>;
@@ -2700,6 +2729,7 @@ export type HandlersWorkspaceDependencyStreamEvent = {
     };
     code?: string;
     data?: string;
+    definition_revision?: string;
     dependency_id?: string;
     detail?: string;
     entrypoints?: {
@@ -2710,6 +2740,11 @@ export type HandlersWorkspaceDependencyStreamEvent = {
     stream?: 'stdout' | 'stderr';
     type?: 'started' | 'log' | 'done' | 'error';
     version?: string;
+};
+
+export type HandlersWorkspaceDependencyTranslation = {
+    description?: string;
+    name?: string;
 };
 
 export type HandlersAcpRuntimeCreateRequest = {
@@ -7647,6 +7682,10 @@ export type GetBotsByBotIdDependenciesData = {
          * Workspace target ID (defaults to the bot's current target)
          */
         workspace_target_id?: string;
+        /**
+         * Refresh definitions and workspace discovery
+         */
+        refresh?: boolean;
     };
     url: '/bots/{bot_id}/dependencies';
 };
@@ -7791,7 +7830,10 @@ export type PostBotsByBotIdDependenciesPreflightResponses = {
 export type PostBotsByBotIdDependenciesPreflightResponse = PostBotsByBotIdDependenciesPreflightResponses[keyof PostBotsByBotIdDependenciesPreflightResponses];
 
 export type DeleteBotsByBotIdDependenciesByDepIdData = {
-    body?: never;
+    /**
+     * Prepared definition revision (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID
@@ -8045,6 +8087,10 @@ export type GetBotsByBotIdDependenciesByDepIdScriptData = {
          * Workspace target ID (defaults to the bot's current target)
          */
         workspace_target_id?: string;
+        /**
+         * Keep a previously prepared definition revision
+         */
+        definition_revision?: string;
     };
     url: '/bots/{bot_id}/dependencies/{dep_id}/script';
 };
@@ -16722,7 +16768,12 @@ export type GetWebhookTunnelStatusResponse = GetWebhookTunnelStatusResponses[key
 export type GetWorkspaceDependenciesCatalogData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Refresh the remote catalog
+         */
+        refresh?: boolean;
+    };
     url: '/workspace-dependencies/catalog';
 };
 
@@ -16747,3 +16798,35 @@ export type GetWorkspaceDependenciesCatalogResponses = {
 };
 
 export type GetWorkspaceDependenciesCatalogResponse = GetWorkspaceDependenciesCatalogResponses[keyof GetWorkspaceDependenciesCatalogResponses];
+
+export type GetWorkspaceDependenciesIconsByDigestData = {
+    body?: never;
+    path: {
+        /**
+         * SHA-256 digest
+         */
+        digest: string;
+    };
+    query?: never;
+    url: '/workspace-dependencies/icons/{digest}';
+};
+
+export type GetWorkspaceDependenciesIconsByDigestErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type GetWorkspaceDependenciesIconsByDigestError = GetWorkspaceDependenciesIconsByDigestErrors[keyof GetWorkspaceDependenciesIconsByDigestErrors];
+
+export type GetWorkspaceDependenciesIconsByDigestResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};

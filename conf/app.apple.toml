@@ -81,3 +81,12 @@ base_url = "https://supermarket.memoh.ai"
 
 [oauth_clients]
 config_path = "conf/oauth-clients.toml"
+
+# Dependency maintenance; use offline=true to disable registry refresh/update
+# checks. Recipe scripts still use their own network access when manually run.
+[workspace_dependencies]
+offline = false
+catalog_refresh_interval_seconds = 600
+update_check_interval_seconds = 86400
+reap_interval_seconds = 60
+discovery_cache_ttl_seconds = 600

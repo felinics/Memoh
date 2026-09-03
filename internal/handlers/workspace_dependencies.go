@@ -6,11 +6,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"golang.org/x/time/rate"
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
@@ -20,11 +22,14 @@ import (
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
+var workspaceDependencyIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
 // workspaceDependencyService is the slice of *workspacedeps.Service the
-// dependency routes use (design docs/design/workspace-dependencies.md §11).
+// dependency routes use.
 type workspaceDependencyService interface {
-	Dependency(depID string) (catalog.Dependency, bool)
-	Catalog() []catalog.Dependency
+	Refresh(ctx context.Context, botID, targetID string) (workspacedeps.ListResult, error)
+	Icon(ctx context.Context, digest string) ([]byte, error)
+	Catalog(ctx context.Context, refresh bool) (workspacedeps.CatalogView, error)
 	List(ctx context.Context, botID, targetID string) (workspacedeps.ListResult, error)
 	Preflight(ctx context.Context, botID, targetID string, depIDs []string) (workspacedeps.PreflightResult, error)
 	Install(ctx context.Context, botID, targetID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
@@ -62,9 +67,15 @@ type WorkspaceDependencyPlatform struct {
 // WorkspaceDependencyItem is one catalog dependency reconciled with its
 // installation record and the workspace.
 type WorkspaceDependencyItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	LastErrorCode      string                                    `json:"last_error_code,omitempty"`
+	RegistryID         string                                    `json:"registry_id,omitempty"`
+	DefinitionRevision string                                    `json:"definition_revision,omitempty"`
+	IconURL            string                                    `json:"icon_url,omitempty"`
+	Translations       map[string]WorkspaceDependencyTranslation `json:"translations,omitempty"`
+	Retired            bool                                      `json:"retired,omitempty"`
+	ID                 string                                    `json:"id"`
+	Name               string                                    `json:"name"`
+	Description        string                                    `json:"description,omitempty"`
 	// Category is agent, runtime, or tool.
 	Category string `json:"category" enums:"agent,runtime,tool"`
 	// Source is image for dependencies shipped with the workspace image and
@@ -121,10 +132,15 @@ type WorkspaceDependencyCatalogPlatform struct {
 // WorkspaceDependencyCatalogItem is one catalog dependency as declared by its
 // manifest, independent of any bot or workspace.
 type WorkspaceDependencyCatalogItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Icon        string `json:"icon,omitempty"`
+	RegistryID         string                                    `json:"registry_id,omitempty"`
+	DefinitionRevision string                                    `json:"definition_revision,omitempty"`
+	IconURL            string                                    `json:"icon_url,omitempty"`
+	Translations       map[string]WorkspaceDependencyTranslation `json:"translations,omitempty"`
+	Retired            bool                                      `json:"retired,omitempty"`
+	ID                 string                                    `json:"id"`
+	Name               string                                    `json:"name"`
+	Description        string                                    `json:"description,omitempty"`
+	Icon               string                                    `json:"icon,omitempty"`
 	// Category is agent, runtime, or tool.
 	Category string `json:"category" enums:"agent,runtime,tool"`
 	// Provides lists the commands the dependency makes available.
@@ -145,17 +161,39 @@ type WorkspaceDependencyCatalogItem struct {
 	ActionsSupported []string `json:"actions_supported" enums:"install,update,reinstall,remove,rollback,check_update"`
 }
 
+type WorkspaceDependencyTranslation struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+func dependencyTranslations(dep catalog.Dependency) map[string]WorkspaceDependencyTranslation {
+	result := make(map[string]WorkspaceDependencyTranslation, len(dep.Translations))
+	for language, text := range dep.Translations {
+		result[language] = WorkspaceDependencyTranslation{Name: text.Name, Description: text.Description}
+	}
+	return result
+}
+
 // WorkspaceDependencyCatalogResponse is the whole dependency catalog.
 type WorkspaceDependencyCatalogResponse struct {
-	Items []WorkspaceDependencyCatalogItem `json:"items"`
+	CatalogStale     bool                             `json:"catalog_stale"`
+	CatalogFetchedAt *time.Time                       `json:"catalog_fetched_at,omitempty"`
+	Items            []WorkspaceDependencyCatalogItem `json:"items"`
 }
 
 // WorkspaceDependencyListResponse is the reconciled dependency view of one
 // workspace target.
 type WorkspaceDependencyListResponse struct {
-	WorkspaceState string                       `json:"workspace_state" enums:"running,not_running,missing,remote_offline"`
-	Platform       *WorkspaceDependencyPlatform `json:"platform,omitempty"`
-	Items          []WorkspaceDependencyItem    `json:"items"`
+	CatalogStale     bool                         `json:"catalog_stale"`
+	CatalogFetchedAt *time.Time                   `json:"catalog_fetched_at,omitempty"`
+	WorkspaceState   string                       `json:"workspace_state" enums:"running,not_running,missing,remote_offline"`
+	Platform         *WorkspaceDependencyPlatform `json:"platform,omitempty"`
+	Items            []WorkspaceDependencyItem    `json:"items"`
+	// DiscoveryError is set when the workspace is running but could not be
+	// inspected (the discovery command was killed or timed out). Items then
+	// reflect the installation records alone, without workspace facts or
+	// actions; a refresh retries discovery.
+	DiscoveryError string `json:"discovery_error,omitempty"`
 }
 
 // WorkspaceDependencyPreflightRequest names the dependencies an agent needs.
@@ -176,6 +214,7 @@ type WorkspaceDependencyPreflightItem struct {
 // WorkspaceDependencyInstallRequest is the optional body of install, update,
 // and reinstall.
 type WorkspaceDependencyInstallRequest struct {
+	DefinitionRevision string `json:"definition_revision,omitempty"`
 	// Version to install. Empty (or no body) installs the latest version the
 	// catalog script resolves, or the manifest pin when the dependency has
 	// one. The version recorded afterwards is the one the script reports.
@@ -192,11 +231,12 @@ type WorkspaceDependencyPreflightResponse struct {
 // WorkspaceDependencyOperationResponse is the receipt of a synchronous
 // operation such as rollback.
 type WorkspaceDependencyOperationResponse struct {
-	DependencyID string            `json:"dependency_id"`
-	Action       string            `json:"action"`
-	Version      string            `json:"version,omitempty"`
-	Entrypoints  map[string]string `json:"entrypoints,omitempty"`
-	Status       string            `json:"status,omitempty"`
+	DefinitionRevision string            `json:"definition_revision,omitempty"`
+	DependencyID       string            `json:"dependency_id"`
+	Action             string            `json:"action"`
+	Version            string            `json:"version,omitempty"`
+	Entrypoints        map[string]string `json:"entrypoints,omitempty"`
+	Status             string            `json:"status,omitempty"`
 }
 
 // WorkspaceDependencyScriptEnv is one environment variable the script sees.
@@ -207,16 +247,16 @@ type WorkspaceDependencyScriptEnv struct {
 	Secret bool   `json:"secret"`
 }
 
-// WorkspaceDependencyScriptResponse is the exact script an action would run
-// (WD-API-001).
+// WorkspaceDependencyScriptResponse is the exact script an action would run.
 type WorkspaceDependencyScriptResponse struct {
-	DependencyID   string                         `json:"dependency_id"`
-	Action         string                         `json:"action" enums:"install,update,remove,reinstall,rollback"`
-	Digest         string                         `json:"digest"`
-	Exec           string                         `json:"exec"`
-	TimeoutSeconds int                            `json:"timeout_seconds"`
-	Env            []WorkspaceDependencyScriptEnv `json:"env"`
-	Script         string                         `json:"script"`
+	DefinitionRevision string                         `json:"definition_revision,omitempty"`
+	DependencyID       string                         `json:"dependency_id"`
+	Action             string                         `json:"action" enums:"install,update,remove,reinstall,rollback"`
+	Digest             string                         `json:"digest"`
+	Exec               string                         `json:"exec"`
+	TimeoutSeconds     int                            `json:"timeout_seconds"`
+	Env                []WorkspaceDependencyScriptEnv `json:"env"`
+	Script             string                         `json:"script"`
 }
 
 // WorkspaceDependencyStreamEvent documents the SSE frames of install, update,
@@ -228,25 +268,27 @@ type WorkspaceDependencyScriptResponse struct {
 // codesync(workspace-dependency-stream): keep in sync with
 // apps/web/src/composables/api/useWorkspaceDependencyStream.ts.
 type WorkspaceDependencyStreamEvent struct {
-	Type         string            `json:"type" enums:"started,log,done,error"`
-	DependencyID string            `json:"dependency_id,omitempty"`
-	Version      string            `json:"version,omitempty"`
-	Stream       string            `json:"stream,omitempty" enums:"stdout,stderr"`
-	Data         string            `json:"data,omitempty"`
-	Entrypoints  map[string]string `json:"entrypoints,omitempty"`
-	Code         string            `json:"code,omitempty"`
-	Args         map[string]string `json:"args,omitempty"`
-	Detail       string            `json:"detail,omitempty"`
-	Message      string            `json:"message,omitempty"`
-	RequestID    string            `json:"request_id,omitempty"`
+	DefinitionRevision string            `json:"definition_revision,omitempty"`
+	Type               string            `json:"type" enums:"started,log,done,error"`
+	DependencyID       string            `json:"dependency_id,omitempty"`
+	Version            string            `json:"version,omitempty"`
+	Stream             string            `json:"stream,omitempty" enums:"stdout,stderr"`
+	Data               string            `json:"data,omitempty"`
+	Entrypoints        map[string]string `json:"entrypoints,omitempty"`
+	Code               string            `json:"code,omitempty"`
+	Args               map[string]string `json:"args,omitempty"`
+	Detail             string            `json:"detail,omitempty"`
+	Message            string            `json:"message,omitempty"`
+	RequestID          string            `json:"request_id,omitempty"`
 }
 
 // The frames actually written. They are separate from the documentation
 // struct so a log line that is empty still carries its data field.
 type workspaceDependencyStartedEvent struct {
-	Type         string `json:"type"`
-	DependencyID string `json:"dependency_id"`
-	Version      string `json:"version,omitempty"`
+	DefinitionRevision string `json:"definition_revision,omitempty"`
+	Type               string `json:"type"`
+	DependencyID       string `json:"dependency_id"`
+	Version            string `json:"version,omitempty"`
 }
 
 type workspaceDependencyLogEvent struct {
@@ -256,9 +298,10 @@ type workspaceDependencyLogEvent struct {
 }
 
 type workspaceDependencyDoneEvent struct {
-	Type        string            `json:"type"`
-	Version     string            `json:"version,omitempty"`
-	Entrypoints map[string]string `json:"entrypoints,omitempty"`
+	DefinitionRevision string            `json:"definition_revision,omitempty"`
+	Type               string            `json:"type"`
+	Version            string            `json:"version,omitempty"`
+	Entrypoints        map[string]string `json:"entrypoints,omitempty"`
 }
 
 type workspaceDependencyErrorEvent struct {
@@ -278,13 +321,21 @@ type workspaceDependencyErrorEvent struct {
 // @Success 200 {object} WorkspaceDependencyCatalogResponse
 // @Failure 401 {object} ErrorResponse
 // @Failure 503 {object} apperror.Problem
+// @Param refresh query bool false "Refresh the remote catalog"
 // @Router /workspace-dependencies/catalog [get].
 func (h *ContainerdHandler) ListWorkspaceDependencyCatalog(c echo.Context) error {
 	if h.workspaceDeps == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace dependency service not configured")
 	}
-	deps := h.workspaceDeps.Catalog()
-	resp := WorkspaceDependencyCatalogResponse{Items: make([]WorkspaceDependencyCatalogItem, 0, len(deps))}
+	result, err := h.workspaceDeps.Catalog(c.Request().Context(), c.QueryParam("refresh") == "true")
+	if err != nil {
+		return workspaceDependencyError(err)
+	}
+	deps := result.Items
+	resp := WorkspaceDependencyCatalogResponse{Items: make([]WorkspaceDependencyCatalogItem, 0, len(deps)), CatalogStale: result.Stale}
+	if !result.FetchedAt.IsZero() {
+		resp.CatalogFetchedAt = &result.FetchedAt
+	}
 	for _, dep := range deps {
 		resp.Items = append(resp.Items, workspaceDependencyCatalogItem(dep))
 	}
@@ -304,6 +355,7 @@ func (h *ContainerdHandler) ListWorkspaceDependencyCatalog(c echo.Context) error
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
+// @Param refresh query bool false "Refresh definitions and workspace discovery"
 // @Router /bots/{bot_id}/dependencies [get].
 func (h *ContainerdHandler) ListWorkspaceDependencies(c echo.Context) error {
 	botID, svc, err := h.workspaceDependencyRequest(c)
@@ -314,7 +366,12 @@ func (h *ContainerdHandler) ListWorkspaceDependencies(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	result, err := svc.List(ctx, botID, targetID)
+	var result workspacedeps.ListResult
+	if c.QueryParam("refresh") == "true" {
+		result, err = svc.Refresh(ctx, botID, targetID)
+	} else {
+		result, err = svc.List(ctx, botID, targetID)
+	}
 	if err != nil {
 		return workspaceDependencyError(err)
 	}
@@ -485,6 +542,7 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
+// @Param payload body WorkspaceDependencyInstallRequest false "Prepared definition revision (optional)"
 // @Router /bots/{bot_id}/dependencies/{dep_id} [delete].
 func (h *ContainerdHandler) RemoveWorkspaceDependency(c echo.Context) error {
 	return h.streamWorkspaceDependencyOperation(c, catalog.ActionRemove, func(svc workspaceDependencyService, ctx context.Context, botID, targetID, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
@@ -514,24 +572,25 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	dep, err := workspaceDependencyParam(c, svc)
-	if err != nil {
-		return err
+	depID := strings.TrimSpace(c.Param("dep_id"))
+	if !workspaceDependencyIDPattern.MatchString(depID) {
+		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
 	ctx, targetID, err := h.workspaceDependencyTarget(c, botID, "")
 	if err != nil {
 		return err
 	}
-	result, err := svc.Rollback(ctx, botID, targetID, dep.ID)
+	result, err := svc.Rollback(ctx, botID, targetID, depID)
 	if err != nil {
 		return workspaceDependencyError(err)
 	}
 	return c.JSON(http.StatusOK, WorkspaceDependencyOperationResponse{
-		DependencyID: result.DependencyID,
-		Action:       string(result.Action),
-		Version:      result.Version,
-		Entrypoints:  result.Entrypoints,
-		Status:       string(result.Installation.Status),
+		DependencyID:       result.DependencyID,
+		DefinitionRevision: result.DefinitionRevision,
+		Action:             string(result.Action),
+		Version:            result.Version,
+		Entrypoints:        result.Entrypoints,
+		Status:             string(result.Installation.Status),
 	})
 }
 
@@ -550,13 +609,14 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
+// @Param definition_revision query string false "Keep a previously prepared definition revision"
 // @Router /bots/{bot_id}/dependencies/{dep_id}/script [get].
 func (h *ContainerdHandler) GetWorkspaceDependencyScript(c echo.Context) error {
 	botID, svc, err := h.workspaceDependencyRequest(c)
 	if err != nil {
 		return err
 	}
-	dep, err := workspaceDependencyParam(c, svc)
+	depID, err := workspaceDependencyParam(c)
 	if err != nil {
 		return err
 	}
@@ -568,7 +628,12 @@ func (h *ContainerdHandler) GetWorkspaceDependencyScript(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	preview, err := svc.ScriptPreviewDetails(ctx, botID, targetID, dep.ID, action)
+	revision := strings.TrimSpace(c.QueryParam("definition_revision"))
+	if revision != "" && !catalog.ValidRevision(revision) {
+		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
+	}
+	ctx = workspacedeps.WithDefinitionRevision(ctx, revision)
+	preview, err := svc.ScriptPreviewDetails(ctx, botID, targetID, depID, action)
 	if err != nil {
 		return workspaceDependencyError(err)
 	}
@@ -577,13 +642,14 @@ func (h *ContainerdHandler) GetWorkspaceDependencyScript(c echo.Context) error {
 		env = append(env, WorkspaceDependencyScriptEnv{Key: entry.Key, Value: entry.Value, Secret: entry.Secret})
 	}
 	return c.JSON(http.StatusOK, WorkspaceDependencyScriptResponse{
-		DependencyID:   preview.DependencyID,
-		Action:         string(preview.Action),
-		Digest:         preview.Digest,
-		Exec:           preview.Exec,
-		TimeoutSeconds: preview.TimeoutSeconds,
-		Env:            env,
-		Script:         preview.Script,
+		DependencyID:       preview.DependencyID,
+		DefinitionRevision: preview.Revision,
+		Action:             string(preview.Action),
+		Digest:             preview.Digest,
+		Exec:               preview.Exec,
+		TimeoutSeconds:     preview.TimeoutSeconds,
+		Env:                env,
+		Script:             preview.Script,
 	})
 }
 
@@ -597,21 +663,18 @@ type workspaceDependencyOperation func(svc workspaceDependencyService, ctx conte
 // Request validation happens before the stream opens so unknown dependencies,
 // unsupported actions, and malformed bodies are ordinary Problem responses;
 // everything the service reports afterwards becomes an error frame carrying
-// the same code. Closing the request cancels the operation through its
-// context.
+// the same code. Closing the request disconnects observation; the admitted
+// operation finishes under its own manifest budget and Server lifecycle.
 func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, action catalog.Action, run workspaceDependencyOperation) error {
 	botID, svc, err := h.workspaceDependencyRequest(c)
 	if err != nil {
 		return err
 	}
-	dep, err := workspaceDependencyParam(c, svc)
+	depID, err := workspaceDependencyParam(c)
 	if err != nil {
 		return err
 	}
-	if !workspacedeps.ActionSupported(dep, action) {
-		return apperror.New(apperror.CodeWorkspaceDependencyActionUnsupported, nil)
-	}
-	version, err := workspaceDependencyRequestedVersion(c, action)
+	request, err := workspaceDependencyOperationRequest(c, action)
 	if err != nil {
 		return err
 	}
@@ -619,6 +682,18 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	if err != nil {
 		return err
 	}
+	if request.DefinitionRevision != "" {
+		ctx = workspacedeps.WithDefinitionRevision(ctx, request.DefinitionRevision)
+	}
+	preview, err := svc.ScriptPreviewDetails(ctx, botID, targetID, depID, action)
+	if err != nil {
+		return workspaceDependencyError(err)
+	}
+	ctx = workspacedeps.WithDefinitionRevision(ctx, preview.Revision)
+	// A browser disconnect must not cancel a download already admitted by Manage
+	// authorization and pinned to the reviewed definition revision.
+	ctx = context.WithoutCancel(ctx)
+	version := request.Version
 	writer, flusher, err := beginSSEResponse(c)
 	if err != nil {
 		return err
@@ -626,76 +701,127 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	stream := newWorkspaceDependencyStream(writer, flusher, workspaceDependencyHeartbeatInterval)
 	defer stream.close()
 
-	stream.send(workspaceDependencyStartedEvent{Type: "started", DependencyID: dep.ID, Version: version})
+	stream.send(workspaceDependencyStartedEvent{Type: "started", DependencyID: depID, Version: version, DefinitionRevision: preview.Revision})
 	sink := workspacedeps.LogFunc(func(name, line string) {
 		stream.send(workspaceDependencyLogEvent{Type: "log", Stream: name, Data: line})
 	})
-	result, err := run(svc, ctx, botID, targetID, dep.ID, version, sink)
+	result, err := run(svc, ctx, botID, targetID, depID, version, sink)
 	if err != nil {
 		requestID := httpx.RequestID(c)
-		h.logger.Warn("workspace dependency operation failed",
+		attrs := []any{
 			slog.String("bot_id", botID),
 			slog.String("workspace_target_id", targetID),
-			slog.String("dependency_id", dep.ID),
+			slog.String("dependency_id", depID),
 			slog.String("action", string(action)),
 			slog.String("request_id", requestID),
 			slog.Any("error", err),
-		)
+		}
+		switch {
+		case errors.Is(err, workspacedeps.ErrBusy):
+			// Operations never queue: a second request for the
+			// same dependency is refused by design, not failed.
+			h.logger.Info("workspace dependency operation refused: another operation is in progress", attrs...)
+		default:
+			h.logger.Warn("workspace dependency operation failed", attrs...)
+		}
 		stream.send(newWorkspaceDependencyErrorEvent(err, requestID))
 		return nil
 	}
-	stream.send(workspaceDependencyDoneEvent{Type: "done", Version: result.Version, Entrypoints: result.Entrypoints})
+	stream.send(workspaceDependencyDoneEvent{Type: "done", Version: result.Version, Entrypoints: result.Entrypoints, DefinitionRevision: result.DefinitionRevision})
 	return nil
 }
 
-// workspaceDependencyStream serializes frames from the operation goroutine
-// and the heartbeat ticker onto one SSE response.
+// workspaceDependencyStream owns a bounded observation queue. A slow client
+// can lose intermediate log lines, but can never apply backpressure to the
+// bridge's stdout pipe or prevent the script from finishing.
 type workspaceDependencyStream struct {
-	mu      sync.Mutex
 	writer  io.Writer
 	flusher http.Flusher
+	events  chan any
 	stop    chan struct{}
 	done    chan struct{}
+	once    sync.Once
 }
 
+const (
+	workspaceDependencyLogBuffer    = 256
+	workspaceDependencyWriteTimeout = 5 * time.Second
+)
+
 func newWorkspaceDependencyStream(writer io.Writer, flusher http.Flusher, heartbeat time.Duration) *workspaceDependencyStream {
-	s := &workspaceDependencyStream{
-		writer:  writer,
-		flusher: flusher,
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
-	}
-	go s.heartbeat(heartbeat)
+	ticks := time.NewTicker(heartbeat)
+	return startWorkspaceDependencyStream(writer, flusher, ticks.C, ticks.Stop)
+}
+
+func startWorkspaceDependencyStream(writer io.Writer, flusher http.Flusher, ticks <-chan time.Time, stopTicks func()) *workspaceDependencyStream {
+	s := &workspaceDependencyStream{writer: writer, flusher: flusher, events: make(chan any, workspaceDependencyLogBuffer), stop: make(chan struct{}), done: make(chan struct{})}
+	go s.writeLoop(ticks, stopTicks)
 	return s
 }
 
 func (s *workspaceDependencyStream) send(payload any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_ = writeSSEJSON(s.writer, s.flusher, payload)
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	select {
+	case s.events <- payload:
+	default:
+		// Keep the latest progress and terminal event by evicting an old log.
+		select {
+		case <-s.events:
+		default:
+		}
+		select {
+		case s.events <- payload:
+		default:
+		}
+	}
 }
 
-// heartbeat writes an SSE comment on every tick. Comments are dropped by the
-// client parser, so they keep proxies from cutting an idle connection without
-// ever reaching the frontend as an event.
-func (s *workspaceDependencyStream) heartbeat(interval time.Duration) {
+func (s *workspaceDependencyStream) writeLoop(ticks <-chan time.Time, stopTicks func()) {
 	defer close(s.done)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	defer stopTicks()
+	if writer, ok := s.writer.(http.ResponseWriter); ok {
+		defer func() { _ = http.NewResponseController(writer).SetWriteDeadline(time.Time{}) }()
+	}
+	write := func(payload any) error {
+		if writer, ok := s.writer.(http.ResponseWriter); ok {
+			_ = http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(workspaceDependencyWriteTimeout))
+		}
+		if payload == nil {
+			return writeSSEComment(s.writer, s.flusher, "ping")
+		}
+		return writeSSEJSON(s.writer, s.flusher, payload)
+	}
 	for {
 		select {
+		case payload := <-s.events:
+			if write(payload) != nil {
+				return
+			}
+		case <-ticks:
+			if write(nil) != nil {
+				return
+			}
 		case <-s.stop:
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			_ = writeSSEComment(s.writer, s.flusher, "ping")
-			s.mu.Unlock()
+			for {
+				select {
+				case payload := <-s.events:
+					if write(payload) != nil {
+						return
+					}
+				default:
+					return
+				}
+			}
 		}
 	}
 }
 
 func (s *workspaceDependencyStream) close() {
-	close(s.stop)
+	s.once.Do(func() { close(s.stop) })
 	<-s.done
 }
 
@@ -744,29 +870,35 @@ func (h *ContainerdHandler) workspaceDependencyTarget(c echo.Context, botID, ove
 
 // workspaceDependencyRequestedVersion reads the optional install request
 // body. Remove takes none; a request without a body means latest.
-func workspaceDependencyRequestedVersion(c echo.Context, action catalog.Action) (string, error) {
-	if action == catalog.ActionRemove || c.Request().ContentLength == 0 {
-		return "", nil
-	}
+func workspaceDependencyOperationRequest(c echo.Context, action catalog.Action) (WorkspaceDependencyInstallRequest, error) {
 	var req WorkspaceDependencyInstallRequest
-	if err := c.Bind(&req); err != nil {
-		return "", apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, err, nil)
+	if c.Request().ContentLength != 0 {
+		if err := c.Bind(&req); err != nil {
+			return req, apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, err, nil)
+		}
 	}
-	return strings.TrimSpace(req.Version), nil
+	req.Version = strings.TrimSpace(req.Version)
+	req.DefinitionRevision = strings.TrimSpace(req.DefinitionRevision)
+	if !catalog.ValidRevision(req.DefinitionRevision) {
+		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
+	}
+	if action == catalog.ActionRemove {
+		req.Version = ""
+	}
+	if !workspacedeps.ValidRequestedVersion(req.Version) {
+		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
+	}
+	return req, nil
 }
 
 // workspaceDependencyParam resolves the dep_id path parameter against the
 // catalog.
-func workspaceDependencyParam(c echo.Context, svc workspaceDependencyService) (catalog.Dependency, error) {
-	depID := strings.TrimSpace(c.Param("dep_id"))
-	if depID == "" {
-		return catalog.Dependency{}, apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, errors.New("dependency id is required"), nil)
+func workspaceDependencyParam(c echo.Context) (string, error) {
+	id := strings.TrimSpace(c.Param("dep_id"))
+	if len(id) > 80 || !workspaceDependencyIDPattern.MatchString(id) {
+		return "", apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
-	dep, ok := svc.Dependency(depID)
-	if !ok {
-		return catalog.Dependency{}, apperror.Wrap(apperror.CodeWorkspaceDependencyNotFound, workspacedeps.ErrDependencyNotFound, nil)
-	}
-	return dep, nil
+	return id, nil
 }
 
 // workspaceDependencyScriptAction parses the script endpoint's action query;
@@ -791,6 +923,14 @@ func workspaceDependencyError(err error) error {
 		return nil
 	case apperror.CodeOf(err) != "":
 		return err
+	case errors.Is(err, workspacedeps.ErrInvalidVersion):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, err, nil)
+	case errors.Is(err, workspacedeps.ErrCatalogUnavailable):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyCatalogUnavailable, err, nil)
+	case errors.Is(err, workspacedeps.ErrDefinitionInvalid):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyDefinitionInvalid, err, nil)
+	case errors.Is(err, workspacedeps.ErrDefinitionUnavailable):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyDefinitionUnavailable, err, nil)
 	case errors.Is(err, workspacedeps.ErrDependencyNotFound):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyNotFound, err, nil)
 	case errors.Is(err, workspacedeps.ErrActionUnsupported):
@@ -814,12 +954,11 @@ func workspaceDependencyError(err error) error {
 	}
 }
 
-// newWorkspaceDependencyErrorEvent renders a service error as the error
-// frame, in the same Problem shape the HTTP error handler uses. A generic
-// operation failure keeps the script's own message (its exit status and
-// stderr tail) because that, not the catalog detail, tells the user what to
-// fix; every other code carries only its public detail.
+// newWorkspaceDependencyErrorEvent projects only stable public Problem fields.
 func newWorkspaceDependencyErrorEvent(err error, requestID string) workspaceDependencyErrorEvent {
+	if errors.Is(err, workspacedeps.ErrOperationUncertain) {
+		return workspaceDependencyErrorEvent{Type: "error", Code: "workspace_dependency_operation_unknown", Args: map[string]string{}, Detail: "The operation result is not yet confirmed. Refresh dependencies to check its status.", Message: "The operation result is not yet confirmed.", RequestID: requestID}
+	}
 	mapped := workspaceDependencyError(err)
 	public, ok := apperror.PublicFrom(mapped, requestID)
 	if !ok {
@@ -827,16 +966,11 @@ func newWorkspaceDependencyErrorEvent(err error, requestID string) workspaceDepe
 			Type:      "error",
 			Code:      string(apperror.CodeWorkspaceDependencyOperationFailed),
 			Args:      map[string]string{},
-			Message:   err.Error(),
+			Message:   "The dependency operation failed.",
 			RequestID: requestID,
 		}
 	}
 	message := public.Detail
-	if public.Code == apperror.CodeWorkspaceDependencyOperationFailed {
-		if cause := apperror.CauseOf(mapped); cause != nil {
-			message = cause.Error()
-		}
-	}
 	return workspaceDependencyErrorEvent{
 		Type:      "error",
 		Code:      string(public.Code),
@@ -851,6 +985,14 @@ func workspaceDependencyListResponse(result workspacedeps.ListResult) WorkspaceD
 	resp := WorkspaceDependencyListResponse{
 		WorkspaceState: string(result.Workspace),
 		Items:          make([]WorkspaceDependencyItem, 0, len(result.Entries)),
+		DiscoveryError: "",
+		CatalogStale:   result.CatalogStale,
+	}
+	if result.DiscoveryError != "" {
+		resp.DiscoveryError = string(apperror.CodeWorkspaceDependencyDiscoveryFailed)
+	}
+	if !result.CatalogFetchedAt.IsZero() {
+		resp.CatalogFetchedAt = &result.CatalogFetchedAt
 	}
 	if result.Platform.OS != "" {
 		resp.Platform = &WorkspaceDependencyPlatform{
@@ -865,16 +1007,61 @@ func workspaceDependencyListResponse(result workspacedeps.ListResult) WorkspaceD
 	return resp
 }
 
+func dependencyIconURL(dep catalog.Dependency) string {
+	if !catalog.ValidRevision(dep.IconDigest) {
+		return ""
+	}
+	return "/workspace-dependencies/icons/" + dep.IconDigest
+}
+
+// A global bucket bounds unauthenticated database work without retaining an
+// unbounded map of attacker-controlled IP addresses.
+var dependencyIconLimiter = rate.NewLimiter(50, 100)
+
+// GetWorkspaceDependencyIcon godoc
+// @Summary Read a cached verified dependency icon
+// @Tags containerd
+// @Produce image/svg+xml
+// @Param digest path string true "SHA-256 digest"
+// @Success 200 {file} binary
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Router /workspace-dependencies/icons/{digest} [get].
+func (h *ContainerdHandler) GetWorkspaceDependencyIcon(c echo.Context) error {
+	if !dependencyIconLimiter.Allow() {
+		c.Response().Header().Set("Retry-After", "1")
+		return echo.NewHTTPError(http.StatusTooManyRequests, "dependency icon request limit reached")
+	}
+	digest := c.Param("digest")
+	if !catalog.ValidRevision(digest) {
+		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
+	}
+	if h.workspaceDeps == nil {
+		return apperror.New(apperror.CodeWorkspaceDependencyCatalogUnavailable, nil)
+	}
+	content, err := h.workspaceDeps.Icon(c.Request().Context(), digest)
+	if err != nil {
+		return workspaceDependencyError(err)
+	}
+	etag := "\"" + digest + "\""
+	copySkillIconHeaders(c.Response().Header(), http.Header{"Cache-Control": []string{"public, max-age=31536000, immutable"}, "Etag": []string{etag}, "X-Content-Sha256": []string{digest}})
+	if c.Request().Header.Get("If-None-Match") == etag {
+		return c.NoContent(http.StatusNotModified)
+	}
+	return c.Blob(http.StatusOK, "image/svg+xml", content)
+}
+
 func workspaceDependencyCatalogItem(dep catalog.Dependency) WorkspaceDependencyCatalogItem {
 	item := WorkspaceDependencyCatalogItem{
-		ID:               dep.ID,
+		ID:         dep.ID,
+		RegistryID: dep.RegistryID, DefinitionRevision: dep.Revision, IconURL: dependencyIconURL(dep), Translations: dependencyTranslations(dep), Retired: dep.Retired,
 		Name:             dep.Name,
 		Description:      dep.Description,
 		Icon:             dep.Icon,
 		Category:         string(dep.Category),
 		Provides:         append([]string{}, dep.Provides...),
 		Platforms:        make([]WorkspaceDependencyCatalogPlatform, 0, len(dep.Platforms)),
-		Installable:      workspacedeps.ActionSupported(dep, catalog.ActionInstall),
+		Installable:      !dep.Retired && workspacedeps.ActionSupported(dep, catalog.ActionInstall),
 		HasImageBaseline: dep.HasImageBaseline(),
 		VersionPin:       dep.Version.Pin,
 		ActionsSupported: make([]string, 0, len(workspacedeps.UserActions)),
@@ -895,7 +1082,8 @@ func workspaceDependencyCatalogItem(dep catalog.Dependency) WorkspaceDependencyC
 func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) WorkspaceDependencyItem {
 	dep := entry.Dependency
 	item := WorkspaceDependencyItem{
-		ID:                dep.ID,
+		ID:         dep.ID,
+		RegistryID: dep.RegistryID, DefinitionRevision: dep.Revision, IconURL: dependencyIconURL(dep), Translations: dependencyTranslations(dep), Retired: dep.Retired,
 		Name:              dep.Name,
 		Description:       dep.Description,
 		Category:          string(dep.Category),
@@ -916,7 +1104,10 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 	}
 	if rec := entry.Installation; rec != nil {
 		item.LastCheckedAt = rec.LastCheckedAt
-		item.LastError = rec.LastError
+		if rec.LastError != "" {
+			item.LastErrorCode = string(apperror.CodeWorkspaceDependencyOperationFailed)
+			item.LastError = workspacedeps.SafeErrorDetail(rec.LastError)
+		}
 	}
 	if state := entry.Observed.State; state != nil {
 		item.PreviousVersion = strings.TrimSpace(state.PreviousVersion)

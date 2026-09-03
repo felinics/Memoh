@@ -142,6 +142,9 @@ func shouldSkipJWT(path string) bool {
 
 func isPublicSupermarketSkillIconPath(path string) bool {
 	digest, found := strings.CutPrefix(path, "/supermarket/artifacts/icon/")
+	if !found {
+		digest, found = strings.CutPrefix(path, "/workspace-dependencies/icons/")
+	}
 	if !found || len(digest) != 64 || strings.ToLower(digest) != digest {
 		return false
 	}

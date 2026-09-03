@@ -24,7 +24,7 @@ import (
 // arrives on stdin of `sh -s`, the environment is buildEnv's, and the result
 // file is read back afterwards. Per dependency it runs install (latest) →
 // entrypoint and layout checks → check_update → update to the very version
-// in use (the WD-FS-001 re-install case: `current` must be valid afterwards
+// in use (the re-install case: `current` must be valid afterwards
 // and no .previous-*/.staging-* residue may remain) → remove.
 //
 // It needs a Docker daemon with the workspace image (memohai/workspace:debian
@@ -46,9 +46,18 @@ func TestDockerCatalogScripts(t *testing.T) {
 	platform := dockerImagePlatform(t, image)
 	t.Logf("workspace image %s: %s/%s %s", image, platform.OS, platform.Arch, platform.Libc)
 
-	cat, err := catalog.Load()
+	source := os.Getenv("MEMOH_DEPENDENCY_CATALOG_URL")
+	if source == "" {
+		t.Skip("set MEMOH_DEPENDENCY_CATALOG_URL to a published Supermarket")
+	}
+	provider, err := NewRemoteCatalog(source, newMemoryCatalogStore(), nil, nil)
 	if err != nil {
-		t.Fatalf("catalog.Load() error = %v", err)
+		t.Fatal(err)
+	}
+	snapshot, err := provider.Snapshot(t.Context(), true)
+	cat := snapshot.Catalog
+	if err != nil {
+		t.Fatalf("remote catalog error = %v", err)
 	}
 	for _, dep := range cat.List() {
 		if !dep.Installable() {
@@ -78,7 +87,7 @@ const (
 )
 
 // dockerTestPassthroughEnv lists host variables forwarded to the scripts, the
-// same mirrors the Server may export (design §5.4).
+// same mirrors the Server may export.
 var dockerTestPassthroughEnv = []string{"NPM_MIRROR", "NODEJS_MIRROR", "NODEJS_MUSL_MIRROR", "UV_RELEASES_URL"}
 
 // dockerDep is one dependency under test together with its private volume.
@@ -156,7 +165,7 @@ func (d *dockerDep) exercise() {
 	t.Logf("%s: check_update → %s", d.dep.ID, check.Raw)
 
 	// Re-installing the version in use exercises the explicit version path and
-	// the WD-FS-001 commit sequence: versions/<ver> is set aside, the staged
+	// the staged replacement sequence: versions/<ver> is set aside, the staged
 	// tree moves in, `current` is switched, and only then is the old tree
 	// deleted. Afterwards `current` must resolve to the fresh tree and nothing
 	// may be left behind.
@@ -243,7 +252,7 @@ func (d *dockerDep) runScript(action catalog.Action, version, currentVersion str
 // verifyLayout checks the dependency home after a commit: `current` is a
 // symlink to versions/<version>, that directory holds the primary command, and
 // versions/ contains neither a staging directory nor a set-aside .previous-*
-// tree (WD-FS-001 clean-up).
+// tree.
 func (d *dockerDep) verifyLayout(version string) {
 	t := d.t
 	t.Helper()

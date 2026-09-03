@@ -1,0 +1,74 @@
+{
+  "schema_version": "1",
+  "registry_id": "memoh",
+  "dependency_id": "codex",
+  "manifest": {
+    "schema_version": "1",
+    "id": "codex",
+    "name": "Codex",
+    "description": "OpenAI Codex CLI.",
+    "icon": "icon.svg",
+    "translations": {
+      "en": {
+        "description": "OpenAI Codex command line"
+      },
+      "zh": {
+        "description": "OpenAI Codex 命令行"
+      },
+      "ja": {
+        "description": "OpenAI Codex コマンドライン"
+      }
+    },
+    "category": "agent",
+    "source": "managed",
+    "requires": [
+      "node"
+    ],
+    "provides": [
+      "codex"
+    ],
+    "platforms": [
+      {
+        "os": "linux",
+        "arch": [
+          "amd64",
+          "arm64"
+        ],
+        "libc": "glibc"
+      },
+      {
+        "os": "darwin",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "timeouts": {
+      "install": 1200,
+      "remove": 300,
+      "check_update": 120,
+      "version": 30
+    },
+    "scripts": {
+      "install": "install.sh",
+      "update": "update.sh",
+      "remove": "remove.sh",
+      "check_update": "check-update.sh"
+    }
+  },
+  "manifest_digest": "sha256:fae739876c6e7fb675cd9963d027eb4cd089d4702f73d89d9ee26169b05f2e62",
+  "artifact": {
+    "format": "memoh_dependency_v1",
+    "digest": "cdbc0492cccdd4b4a769e3c742ac4b7c58b18195807b8957f87ce764fa93a24b",
+    "size": 4012,
+    "uncompressed_size": 12501,
+    "archive_size": 18432,
+    "file_count": 6,
+    "content_type": "application/gzip"
+  },
+  "icon": {
+    "digest": "e1b70b6412ebeb2505ee9d4ebc7f6d4c49365699453b139ba40520a4039df1f3",
+    "size": 1754,
+    "content_type": "image/svg+xml"
+  }
+}

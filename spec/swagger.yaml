@@ -4490,6 +4490,8 @@ definitions:
         - runtime
         - tool
         type: string
+      definition_revision:
+        type: string
       description:
         type: string
       has_image_baseline:
@@ -4498,6 +4500,8 @@ definitions:
           dependency; removing a managed overlay returns to that copy.
         type: boolean
       icon:
+        type: string
+      icon_url:
         type: string
       id:
         type: string
@@ -4518,6 +4522,14 @@ definitions:
         items:
           type: string
         type: array
+      registry_id:
+        type: string
+      retired:
+        type: boolean
+      translations:
+        additionalProperties:
+          $ref: '#/definitions/handlers.WorkspaceDependencyTranslation'
+        type: object
       version_pin:
         description: |-
           VersionPin is the version every install produces when the manifest
@@ -4538,6 +4550,10 @@ definitions:
     type: object
   handlers.WorkspaceDependencyCatalogResponse:
     properties:
+      catalog_fetched_at:
+        type: string
+      catalog_stale:
+        type: boolean
       items:
         items:
           $ref: '#/definitions/handlers.WorkspaceDependencyCatalogItem'
@@ -4545,6 +4561,8 @@ definitions:
     type: object
   handlers.WorkspaceDependencyInstallRequest:
     properties:
+      definition_revision:
+        type: string
       version:
         description: |-
           Version to install. Empty (or no body) installs the latest version the
@@ -4573,9 +4591,13 @@ definitions:
         - runtime
         - tool
         type: string
+      definition_revision:
+        type: string
       description:
         type: string
       icon:
+        type: string
+      icon_url:
         type: string
       id:
         type: string
@@ -4600,6 +4622,8 @@ definitions:
       last_checked_at:
         type: string
       last_error:
+        type: string
+      last_error_code:
         type: string
       latest_version:
         description: |-
@@ -4630,6 +4654,10 @@ definitions:
         items:
           type: string
         type: array
+      registry_id:
+        type: string
+      retired:
+        type: boolean
       source:
         description: |-
           Source is image for dependencies shipped with the workspace image and
@@ -4650,6 +4678,10 @@ definitions:
         - missing
         - failed
         type: string
+      translations:
+        additionalProperties:
+          $ref: '#/definitions/handlers.WorkspaceDependencyTranslation'
+        type: object
       update_available:
         description: |-
           UpdateAvailable is set for installed dependencies whose last upstream
@@ -4658,6 +4690,17 @@ definitions:
     type: object
   handlers.WorkspaceDependencyListResponse:
     properties:
+      catalog_fetched_at:
+        type: string
+      catalog_stale:
+        type: boolean
+      discovery_error:
+        description: |-
+          DiscoveryError is set when the workspace is running but could not be
+          inspected (the discovery command was killed or timed out). Items then
+          reflect the installation records alone, without workspace facts or
+          actions; a refresh retries discovery.
+        type: string
       items:
         items:
           $ref: '#/definitions/handlers.WorkspaceDependencyItem'
@@ -4675,6 +4718,8 @@ definitions:
   handlers.WorkspaceDependencyOperationResponse:
     properties:
       action:
+        type: string
+      definition_revision:
         type: string
       dependency_id:
         type: string
@@ -4756,6 +4801,8 @@ definitions:
         - reinstall
         - rollback
         type: string
+      definition_revision:
+        type: string
       dependency_id:
         type: string
       digest:
@@ -4780,6 +4827,8 @@ definitions:
       code:
         type: string
       data:
+        type: string
+      definition_revision:
         type: string
       dependency_id:
         type: string
@@ -4806,6 +4855,13 @@ definitions:
         - error
         type: string
       version:
+        type: string
+    type: object
+  handlers.WorkspaceDependencyTranslation:
+    properties:
+      description:
+        type: string
+      name:
         type: string
     type: object
   handlers.acpRuntimeCreateRequest:
@@ -9682,6 +9738,10 @@ paths:
         in: query
         name: workspace_target_id
         type: string
+      - description: Refresh definitions and workspace discovery
+        in: query
+        name: refresh
+        type: boolean
       produces:
       - application/json
       responses:
@@ -9733,6 +9793,11 @@ paths:
         in: query
         name: workspace_target_id
         type: string
+      - description: Prepared definition revision (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       produces:
       - text/event-stream
       responses:
@@ -9966,6 +10031,10 @@ paths:
       - description: Workspace target ID (defaults to the bot's current target)
         in: query
         name: workspace_target_id
+        type: string
+      - description: Keep a previously prepared definition revision
+        in: query
+        name: definition_revision
         type: string
       produces:
       - application/json
@@ -17429,6 +17498,11 @@ paths:
         it: what it provides, where it installs, whether it can be installed and whether
         the workspace image ships a baseline copy. Reads no workspace and needs no
         bot; the Supermarket shows it before a bot is chosen.'
+      parameters:
+      - description: Refresh the remote catalog
+        in: query
+        name: refresh
+        type: boolean
       produces:
       - application/json
       responses:
@@ -17445,6 +17519,32 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: List the workspace dependency catalog
+      tags:
+      - containerd
+  /workspace-dependencies/icons/{digest}:
+    get:
+      parameters:
+      - description: SHA-256 digest
+        in: path
+        name: digest
+        required: true
+        type: string
+      produces:
+      - image/svg+xml
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Read a cached verified dependency icon
       tags:
       - containerd
 swagger: "2.0"

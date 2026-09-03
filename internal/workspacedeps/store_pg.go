@@ -100,7 +100,60 @@ func (s *postgresStore) Upsert(ctx context.Context, in UpsertInstallation) (Inst
 		Status:            string(in.Status),
 		InstalledVersion:  in.InstalledVersion,
 		ManifestDigest:    in.ManifestDigest,
+		SourceUrl:         in.SourceURL, RegistryID: in.RegistryID, DefinitionRevision: in.DefinitionRevision,
 	})
+	return operationResult(row, err)
+}
+
+// ClaimOperation establishes ownership in PostgreSQL before a Server runs a
+// script. Existing installation facts survive the claim for failure recovery.
+func (s *postgresStore) ClaimOperation(ctx context.Context, in UpsertInstallation, operationID string) (Installation, error) {
+	if !in.Status.InProgress() || !validReceiptID(operationID) {
+		return Installation{}, errors.New("workspace dependency store: invalid operation claim")
+	}
+	botID, err := parseBotID(in.BotID)
+	if err != nil {
+		return Installation{}, err
+	}
+	row, err := s.q.ClaimBotDependencyOperation(ctx, dbsqlc.ClaimBotDependencyOperationParams{
+		BotID: botID, WorkspaceTargetID: in.WorkspaceTargetID, DependencyID: in.DependencyID,
+		Source: in.Source, Status: string(in.Status), InstalledVersion: in.InstalledVersion,
+		ManifestDigest: in.ManifestDigest, SourceUrl: in.SourceURL, RegistryID: in.RegistryID,
+		DefinitionRevision: in.DefinitionRevision, OperationID: operationID,
+	})
+	return operationResult(row, err)
+}
+
+// FinishOperation is the only terminal write for a claimed operation. A stale
+// receipt or delayed Server cannot update or remove a newer operation's row.
+func (s *postgresStore) FinishOperation(ctx context.Context, key InstallationKey, operationID string, terminal *Installation) (Installation, error) {
+	if !validReceiptID(operationID) || (terminal != nil && terminal.Status.InProgress()) {
+		return Installation{}, errors.New("workspace dependency store: invalid operation finish")
+	}
+	botID, err := parseBotID(key.BotID)
+	if err != nil {
+		return Installation{}, err
+	}
+	if terminal == nil {
+		row, err := s.q.DeleteBotDependencyOperation(ctx, dbsqlc.DeleteBotDependencyOperationParams{
+			BotID: botID, WorkspaceTargetID: key.WorkspaceTargetID, DependencyID: key.DependencyID, OperationID: operationID,
+		})
+		return operationResult(row, err)
+	}
+	row, err := s.q.FinishBotDependencyOperation(ctx, dbsqlc.FinishBotDependencyOperationParams{
+		BotID: botID, WorkspaceTargetID: key.WorkspaceTargetID, DependencyID: key.DependencyID, OperationID: operationID,
+		Source: terminal.Source, Status: string(terminal.Status), InstalledVersion: terminal.InstalledVersion,
+		LatestVersion: terminal.LatestVersion, LastCheckedAt: nullableTimestamptz(terminal.LastCheckedAt), LastError: terminal.LastError,
+		ManifestDigest: terminal.ManifestDigest, SourceUrl: terminal.SourceURL, RegistryID: terminal.RegistryID,
+		DefinitionRevision: terminal.DefinitionRevision,
+	})
+	return operationResult(row, err)
+}
+
+func operationResult(row dbsqlc.BotDependencyInstallation, err error) (Installation, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Installation{}, ErrBusy
+	}
 	return installationResult(row, err)
 }
 
@@ -116,7 +169,7 @@ func (s *postgresStore) SetStatus(ctx context.Context, key InstallationKey, stat
 		WorkspaceTargetID: key.WorkspaceTargetID,
 		DependencyID:      key.DependencyID,
 	})
-	return installationResult(row, err)
+	return operationResult(row, err)
 }
 
 func (s *postgresStore) UpdateObserved(ctx context.Context, key InstallationKey, upd ObservedUpdate) (Installation, error) {
@@ -125,7 +178,7 @@ func (s *postgresStore) UpdateObserved(ctx context.Context, key InstallationKey,
 		return Installation{}, err
 	}
 	row, err := s.q.UpdateBotDependencyInstallationObserved(ctx, observedParams(botID, key, upd))
-	return installationResult(row, err)
+	return operationResult(row, err)
 }
 
 func (s *postgresStore) Delete(ctx context.Context, key InstallationKey) error {
@@ -142,7 +195,7 @@ func (s *postgresStore) Delete(ctx context.Context, key InstallationKey) error {
 		return fmt.Errorf("workspace dependency store: %w", err)
 	}
 	if affected == 0 {
-		return ErrInstallationNotFound
+		return ErrBusy
 	}
 	return nil
 }
@@ -152,12 +205,13 @@ func (s *postgresStore) Delete(ctx context.Context, key InstallationKey) error {
 // it is; a non-nil pointer — including a pointer to "" — writes the value.
 func observedParams(botID pgtype.UUID, key InstallationKey, upd ObservedUpdate) dbsqlc.UpdateBotDependencyInstallationObservedParams {
 	return dbsqlc.UpdateBotDependencyInstallationObservedParams{
-		Source:            nullableText(upd.Source),
-		InstalledVersion:  nullableText(upd.InstalledVersion),
-		LatestVersion:     nullableText(upd.LatestVersion),
-		LastCheckedAt:     nullableTimestamptz(upd.LastCheckedAt),
-		LastError:         nullableText(upd.LastError),
-		ManifestDigest:    nullableText(upd.ManifestDigest),
+		Source:           nullableText(upd.Source),
+		InstalledVersion: nullableText(upd.InstalledVersion),
+		LatestVersion:    nullableText(upd.LatestVersion),
+		LastCheckedAt:    nullableTimestamptz(upd.LastCheckedAt),
+		LastError:        nullableText(upd.LastError),
+		ManifestDigest:   nullableText(upd.ManifestDigest),
+		SourceUrl:        nullableText(upd.SourceURL), RegistryID: nullableText(upd.RegistryID), DefinitionRevision: nullableText(upd.DefinitionRevision),
 		BotID:             botID,
 		WorkspaceTargetID: key.WorkspaceTargetID,
 		DependencyID:      key.DependencyID,
@@ -205,6 +259,7 @@ func installationsResult(rows []dbsqlc.BotDependencyInstallation, err error) ([]
 func installationFromRow(row dbsqlc.BotDependencyInstallation) Installation {
 	inst := Installation{
 		ID:                uuidString(row.ID),
+		OperationID:       row.OperationID,
 		BotID:             uuidString(row.BotID),
 		WorkspaceTargetID: row.WorkspaceTargetID,
 		DependencyID:      row.DependencyID,
@@ -214,8 +269,9 @@ func installationFromRow(row dbsqlc.BotDependencyInstallation) Installation {
 		LatestVersion:     row.LatestVersion,
 		LastError:         row.LastError,
 		ManifestDigest:    row.ManifestDigest,
-		CreatedAt:         db.TimeFromPg(row.CreatedAt),
-		UpdatedAt:         db.TimeFromPg(row.UpdatedAt),
+		SourceURL:         row.SourceUrl, RegistryID: row.RegistryID, DefinitionRevision: row.DefinitionRevision,
+		CreatedAt: db.TimeFromPg(row.CreatedAt),
+		UpdatedAt: db.TimeFromPg(row.UpdatedAt),
 	}
 	if row.LastCheckedAt.Valid {
 		checked := row.LastCheckedAt.Time

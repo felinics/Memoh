@@ -12,6 +12,7 @@ import (
 	"os"
 	stdpath "path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -101,7 +102,6 @@ import (
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps"
-	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -704,49 +704,67 @@ func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg 
 	return h
 }
 
-// provideWorkspaceDependencyCatalog loads the dependency catalog embedded in
-// the binary. A manifest that fails validation stops the Server from
-// starting rather than surfacing as a broken install later.
-func provideWorkspaceDependencyCatalog() (*depcatalog.Catalog, error) {
-	cat, err := depcatalog.Load()
+// provideWorkspaceDependencyCatalog constructs the remote catalog without
+// blocking startup on a network request. Maintenance refreshes its durable cache.
+func provideWorkspaceDependencyCatalog(cfg config.Config, queries dbstore.Queries, log *slog.Logger) (*workspacedeps.RemoteCatalog, error) {
+	provider, err := workspacedeps.NewRemoteCatalog(cfg.Supermarket.GetBaseURL(), workspacedeps.NewPostgresCatalogStore(queries), nil, log)
 	if err != nil {
-		return nil, fmt.Errorf("load workspace dependency catalog: %w", err)
+		return nil, err
 	}
-	return cat, nil
+	provider.Configure(cfg.WorkspaceDependencies.CatalogRefreshInterval(), cfg.WorkspaceDependencies.Offline)
+	return provider, nil
 }
 
-func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, cat *depcatalog.Catalog) *workspacedeps.Service {
+func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, provider *workspacedeps.RemoteCatalog, cfg config.Config) *workspacedeps.Service {
 	return workspacedeps.NewService(workspacedeps.Options{
 		Workspace: workspacedeps.NewManagerWorkspaceAccess(manager),
 		Store:     workspacedeps.NewPostgresStore(queries),
-		Catalog:   cat,
+		Provider:  provider,
 		Logger:    log,
+		Cache:     workspacedeps.NewCache(cfg.WorkspaceDependencies.DiscoveryCacheTTL()),
+		ScriptEnv: func(context.Context) []string {
+			keys := make([]string, 0, len(cfg.WorkspaceDependencies.ScriptEnv))
+			for key := range cfg.WorkspaceDependencies.ScriptEnv {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			env := make([]string, 0, len(keys))
+			for _, key := range keys {
+				env = append(env, key+"="+cfg.WorkspaceDependencies.ScriptEnv[key])
+			}
+			return env
+		},
 	})
 }
 
-func provideWorkspaceDependencyUpdateWorker(log *slog.Logger, service *workspacedeps.Service) *workspacedeps.UpdateWorker {
-	return workspacedeps.NewUpdateWorker(service, workspacedeps.DefaultUpdateCheckInterval, log)
+func provideWorkspaceDependencyUpdateWorker(log *slog.Logger, service *workspacedeps.Service, cfg config.Config) *workspacedeps.UpdateWorker {
+	return workspacedeps.NewUpdateWorker(service, cfg.WorkspaceDependencies.UpdateCheckInterval(), log)
 }
 
-// startWorkspaceDependencyMaintenance runs the two background duties of the
-// dependency service: the stale reaper that turns interrupted operations into
-// failed records (WD-STATE-002) and the daily upstream update check for tool
-// dependencies (WD-UPD-001). Both detach from the start context and stop
-// with the app.
-func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, service *workspacedeps.Service, worker *workspacedeps.UpdateWorker) {
+// startWorkspaceDependencyMaintenance refreshes the catalog, reconciles
+// interrupted operations, and checks upstream tool versions. The configured
+// workers detach from startup and stop with the application.
+func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, service *workspacedeps.Service, worker *workspacedeps.UpdateWorker, provider *workspacedeps.RemoteCatalog, cfg config.Config) {
 	var stopReaper func()
+	var stopCatalog func()
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			stopReaper = workspacedeps.StartReaper(context.WithoutCancel(ctx), service, workspacedeps.DefaultReapInterval, log)
-			worker.Start(ctx)
+			stopCatalog = provider.Start(context.WithoutCancel(ctx))
+			stopReaper = workspacedeps.StartReaper(context.WithoutCancel(ctx), service, cfg.WorkspaceDependencies.ReapInterval(), log)
+			if !cfg.WorkspaceDependencies.Offline {
+				worker.Start(ctx)
+			}
 			return nil
 		},
-		OnStop: func(context.Context) error {
+		OnStop: func(ctx context.Context) error {
 			if stopReaper != nil {
 				stopReaper()
 			}
 			worker.Stop()
-			return nil
+			if stopCatalog != nil {
+				stopCatalog()
+			}
+			return service.Shutdown(ctx)
 		},
 	})
 }

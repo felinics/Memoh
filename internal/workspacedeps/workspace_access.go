@@ -15,7 +15,7 @@ import (
 const TargetNative = workspace.WorkspaceTargetNative
 
 // WorkspaceState says whether a workspace target can run dependency scripts
-// right now (design WD-EXT-004). List and Preflight report it instead of
+// right now. List and Preflight report it instead of
 // failing so the UI can offer "start workspace" or "create workspace".
 type WorkspaceState string
 
@@ -42,7 +42,7 @@ type WorkspaceAccess interface {
 	Client(ctx context.Context, botID, targetID string) (*bridge.Client, error)
 	// DataRoot returns the workspace data root for the target: the data mount
 	// for native containers, the default working directory for remote
-	// targets. Every managed dependency lives below it (design §6).
+	// targets. Every managed dependency lives below it.
 	DataRoot(ctx context.Context, botID, targetID string) (string, error)
 	// State reports whether the target can run scripts now.
 	State(ctx context.Context, botID, targetID string) (WorkspaceState, error)

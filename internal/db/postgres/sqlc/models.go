@@ -216,20 +216,24 @@ type BotChannelRoute struct {
 }
 
 type BotDependencyInstallation struct {
-	ID                pgtype.UUID        `json:"id"`
-	TeamID            pgtype.UUID        `json:"team_id"`
-	BotID             pgtype.UUID        `json:"bot_id"`
-	WorkspaceTargetID string             `json:"workspace_target_id"`
-	DependencyID      string             `json:"dependency_id"`
-	Source            string             `json:"source"`
-	Status            string             `json:"status"`
-	InstalledVersion  string             `json:"installed_version"`
-	LatestVersion     string             `json:"latest_version"`
-	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
-	LastError         string             `json:"last_error"`
-	ManifestDigest    string             `json:"manifest_digest"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	TeamID             pgtype.UUID        `json:"team_id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID  string             `json:"workspace_target_id"`
+	DependencyID       string             `json:"dependency_id"`
+	Source             string             `json:"source"`
+	Status             string             `json:"status"`
+	InstalledVersion   string             `json:"installed_version"`
+	LatestVersion      string             `json:"latest_version"`
+	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
+	LastError          string             `json:"last_error"`
+	ManifestDigest     string             `json:"manifest_digest"`
+	SourceUrl          string             `json:"source_url"`
+	RegistryID         string             `json:"registry_id"`
+	DefinitionRevision string             `json:"definition_revision"`
+	OperationID        string             `json:"operation_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotEmailBinding struct {
@@ -1112,4 +1116,25 @@ type UserRuntime struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	TeamID           pgtype.UUID        `json:"team_id"`
+}
+
+type WorkspaceDependencyCatalog struct {
+	TeamID       pgtype.UUID        `json:"team_id"`
+	SourceUrl    string             `json:"source_url"`
+	CatalogBytes []byte             `json:"catalog_bytes"`
+	Generation   int64              `json:"generation"`
+	FetchedAt    pgtype.Timestamptz `json:"fetched_at"`
+}
+
+type WorkspaceDependencyDefinition struct {
+	TeamID         pgtype.UUID        `json:"team_id"`
+	SourceUrl      string             `json:"source_url"`
+	RegistryID     string             `json:"registry_id"`
+	DependencyID   string             `json:"dependency_id"`
+	Revision       string             `json:"revision"`
+	ReleaseBytes   []byte             `json:"release_bytes"`
+	ArtifactBytes  []byte             `json:"artifact_bytes"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	IconDigest     string             `json:"icon_digest"`
+	LastAccessedAt pgtype.Timestamptz `json:"last_accessed_at"`
 }

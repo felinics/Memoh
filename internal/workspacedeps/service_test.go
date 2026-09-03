@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -209,11 +210,53 @@ func (f *fakeStore) ListStaleOperations(_ context.Context, olderThan time.Durati
 	}), nil
 }
 
+func (f *fakeStore) ClaimOperation(_ context.Context, in UpsertInstallation, operationID string) (Installation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rec, exists := f.records[in.InstallationKey]
+	if exists && rec.Status.InProgress() {
+		return Installation{}, ErrBusy
+	}
+	if !exists {
+		f.nextID++
+		rec = Installation{ID: "rec-" + strconv.Itoa(f.nextID), BotID: in.BotID, WorkspaceTargetID: in.WorkspaceTargetID, DependencyID: in.DependencyID, Source: in.Source, SourceURL: in.SourceURL, RegistryID: in.RegistryID, DefinitionRevision: in.DefinitionRevision, CreatedAt: f.now()}
+	}
+	rec.Status, rec.LastError, rec.OperationID = in.Status, "", operationID
+	rec.UpdatedAt = f.now()
+	f.records[in.InstallationKey] = rec
+	f.writes++
+	f.history[in.InstallationKey] = append(f.history[in.InstallationKey], in.Status)
+	return rec, nil
+}
+
+func (f *fakeStore) FinishOperation(_ context.Context, key InstallationKey, operationID string, terminal *Installation) (Installation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rec, exists := f.records[key]
+	if !exists || rec.OperationID != operationID {
+		return Installation{}, ErrBusy
+	}
+	f.writes++
+	if terminal == nil {
+		delete(f.records, key)
+		return rec, nil
+	}
+	finished := *terminal
+	finished.ID, finished.BotID, finished.WorkspaceTargetID, finished.DependencyID = rec.ID, rec.BotID, rec.WorkspaceTargetID, rec.DependencyID
+	finished.CreatedAt, finished.UpdatedAt, finished.OperationID = rec.CreatedAt, f.now(), ""
+	f.records[key] = finished
+	f.history[key] = append(f.history[key], finished.Status)
+	return finished, nil
+}
+
 func (f *fakeStore) Upsert(_ context.Context, in UpsertInstallation) (Installation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.writes++
 	rec, ok := f.records[in.InstallationKey]
+	if ok && rec.OperationID != "" {
+		return Installation{}, ErrBusy
+	}
 	if !ok {
 		f.nextID++
 		rec = Installation{ID: "rec-" + strconv.Itoa(f.nextID), BotID: in.BotID, WorkspaceTargetID: in.WorkspaceTargetID, DependencyID: in.DependencyID, CreatedAt: f.now()}
@@ -236,6 +279,9 @@ func (f *fakeStore) SetStatus(_ context.Context, key InstallationKey, status Sta
 	if !ok {
 		return Installation{}, ErrInstallationNotFound
 	}
+	if rec.OperationID != "" {
+		return Installation{}, ErrBusy
+	}
 	f.writes++
 	rec.Status = status
 	rec.LastError = lastError
@@ -251,6 +297,9 @@ func (f *fakeStore) UpdateObserved(_ context.Context, key InstallationKey, upd O
 	rec, ok := f.records[key]
 	if !ok {
 		return Installation{}, ErrInstallationNotFound
+	}
+	if rec.OperationID != "" {
+		return Installation{}, ErrBusy
 	}
 	f.writes++
 	if upd.Source != nil {
@@ -936,8 +985,8 @@ func TestInstallRequestedVersion(t *testing.T) {
 		t.Fatalf("Reinstall: %v", err)
 	}
 	specs := f.runSpecs()
-	if remove, install := specs[2], specs[3]; remove.Action != catalog.ActionRemove || remove.Version != "" || install.Version != "1.4.0" {
-		t.Errorf("reinstall specs = %+v / %+v", remove, install)
+	if len(specs) != 3 || specs[2].Action != catalog.ActionReinstall || specs[2].Version != "1.4.0" {
+		t.Errorf("reinstall specs = %+v", specs)
 	}
 
 	// A script that reports no version falls back to the request; with
@@ -1021,14 +1070,336 @@ func TestInstallBusy(t *testing.T) {
 		t.Errorf("runs = %d, want 2 (the busy calls never ran a script)", len(f.runSpecs()))
 	}
 
-	// The prelude's lock (another Server instance) is also reported as busy
-	// and leaves the record to that instance.
+	// The prelude's lock (another Server instance) is also reported as busy.
+	// That instance owns the record, so the row goes back to what it said
+	// before this call marked it: installed, by the first Install above.
 	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
 	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("locked Update error = %v, want ErrBusy", err)
 	}
-	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusUpdating {
-		t.Errorf("record after locked run = %+v, want updating left in place", rec)
+	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusInstalled || rec.LastError != "" {
+		t.Errorf("record after locked run = %+v, want the pre-operation record restored", rec)
+	}
+	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusInstalling, StatusInstalled, StatusUpdating, StatusInstalled) {
+		t.Errorf("status history = %v", got)
+	}
+}
+
+// TestBusyVerdictRestoresRecord pins what "the lock holder owns the record"
+// means for the row this instance already marked: it is put back exactly,
+// whatever it said, and removed again when this operation created it. A
+// stale in-progress row from a killed run is left for the reaper, not marked
+// failed on the strength of a lock we do not understand.
+func TestBusyVerdictRestoresRecord(t *testing.T) {
+	f := newServiceFixture(t)
+	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
+	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusFailed, InstalledVersion: "1.0.0", LastError: "boom"})
+	f.store.seed(Installation{BotID: testBot, DependencyID: "mac-only", Source: InstallationSourceManaged, Status: StatusInstalling, UpdatedAt: f.now.Add(-time.Hour)})
+	before := f.store.writeCount()
+
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Install error = %v, want ErrBusy", err)
+	}
+	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusFailed || rec.LastError != "boom" || rec.InstalledVersion != "1.0.0" {
+		t.Errorf("failed record after busy verdict = %+v, want it restored verbatim", rec)
+	}
+
+	if _, err := f.svc.Install(f.ctx(), testBot, testTarget, "agent-x", "", nil); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Install error = %v, want ErrBusy", err)
+	}
+	if rec, ok := f.store.get(f.key("agent-x")); ok {
+		t.Errorf("record created for the busy operation survived: %+v", rec)
+	}
+
+	if _, err := f.svc.Remove(f.ctx(), testBot, testTarget, "mac-only", nil); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Remove error = %v, want ErrBusy", err)
+	}
+	if rec, _ := f.store.get(f.key("mac-only")); rec.Status != StatusInstalling || rec.LastError != "" {
+		t.Errorf("stale in-progress record after busy verdict = %+v, want it left as it was", rec)
+	}
+	// Every mark was undone by exactly one write; no failed status was recorded.
+	if got := f.store.writeCount() - before; got != 4 {
+		t.Errorf("store writes = %d, want two claims/restores and no conflicting claim", got)
+	}
+	want := map[string][]Status{
+		"tool-y":   {StatusInstalling, StatusFailed},
+		"agent-x":  {StatusInstalling},
+		"mac-only": {},
+	}
+	for dep, statuses := range want {
+		if got := f.store.statuses(f.key(dep)); !statusesEqual(got, statuses...) {
+			t.Errorf("%s status history = %v, want %v", dep, got, statuses)
+		}
+	}
+}
+
+// cancelSensitiveStore fails every write whose context is already done, the
+// way a database driver does, so tests can prove that the writes recording an
+// outcome are detached from the request that started the operation.
+type cancelSensitiveStore struct {
+	Store
+}
+
+func (s cancelSensitiveStore) Upsert(ctx context.Context, in UpsertInstallation) (Installation, error) {
+	if err := ctx.Err(); err != nil {
+		return Installation{}, err
+	}
+	return s.Store.Upsert(ctx, in)
+}
+
+func (s cancelSensitiveStore) SetStatus(ctx context.Context, key InstallationKey, status Status, lastError string) (Installation, error) {
+	if err := ctx.Err(); err != nil {
+		return Installation{}, err
+	}
+	return s.Store.SetStatus(ctx, key, status, lastError)
+}
+
+func (s cancelSensitiveStore) UpdateObserved(ctx context.Context, key InstallationKey, upd ObservedUpdate) (Installation, error) {
+	if err := ctx.Err(); err != nil {
+		return Installation{}, err
+	}
+	return s.Store.UpdateObserved(ctx, key, upd)
+}
+
+func (s cancelSensitiveStore) Delete(ctx context.Context, key InstallationKey) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.Store.Delete(ctx, key)
+}
+
+// TestCancelledOperationRecordsFailure covers the user closing the dialog (or
+// the connection dropping) while the script runs: the record must end up
+// failed with a last_error that says why, not stay in progress for the reaper.
+func TestCancelledOperationRecordsFailure(t *testing.T) {
+	f := newServiceFixture(t)
+	f.svc.store = cancelSensitiveStore{f.store}
+	ctx, cancel := context.WithCancel(f.ctx())
+	defer cancel()
+	f.svc.run = func(ctx context.Context, _ *bridge.Client, spec RunSpec, _ LogSink) (Result, error) {
+		cancel()
+		<-ctx.Done()
+		return Result{}, fmt.Errorf("workspacedeps: script for %s interrupted: %w", spec.DepID, ctx.Err())
+	}
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	_, err := f.svc.Install(ctx, testBot, testTarget, "tool-y", "", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Install error = %v, want context.Canceled", err)
+	}
+	rec, ok := f.store.get(f.key("tool-y"))
+	if !ok || rec.Status != StatusFailed {
+		t.Fatalf("record after cancelled install = %+v (found %v), want failed", rec, ok)
+	}
+	if !strings.HasPrefix(rec.LastError, cancelledMessagePrefix) || !strings.Contains(rec.LastError, "context canceled") {
+		t.Errorf("last_error = %q, want %q followed by the cause", rec.LastError, cancelledMessagePrefix)
+	}
+	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusInstalling, StatusFailed) {
+		t.Errorf("status history = %v", got)
+	}
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if f.discovered() != 2 {
+		t.Errorf("discovery cache not invalidated after the failure (discover calls = %d)", f.discovered())
+	}
+}
+
+// TestCancelledRequestStillCommitsFinishedScript covers the other side of the
+// window: the script has already succeeded when the request goes away. The
+// workspace state, the shims, and the record are still written, and a remove
+// still drops its record.
+func TestCancelledRequestStillCommitsFinishedScript(t *testing.T) {
+	f := newServiceFixture(t)
+	f.svc.store = cancelSensitiveStore{f.store}
+	ctx, cancel := context.WithCancel(f.ctx())
+	defer cancel()
+	f.svc.run = func(_ context.Context, _ *bridge.Client, spec RunSpec, _ LogSink) (Result, error) {
+		cancel()
+		if spec.Action == catalog.ActionRemove {
+			return Result{}, nil
+		}
+		return f.installResult(spec.DepID, "1.0.0"), nil
+	}
+
+	result, err := f.svc.Install(ctx, testBot, testTarget, "tool-y", "", nil)
+	if err != nil {
+		t.Fatalf("Install after the request went away: %v", err)
+	}
+	if result.Version != "1.0.0" || result.Installation.Status != StatusInstalled {
+		t.Errorf("result = %+v", result)
+	}
+	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusInstalled || rec.InstalledVersion != "1.0.0" {
+		t.Errorf("record = %+v, want installed", rec)
+	}
+	if state := f.readState(t, "tool-y"); state.Version != "1.0.0" {
+		t.Errorf("state.json = %+v", state)
+	}
+	if _, err := os.Stat(f.shimPath("tool-y")); err != nil {
+		t.Errorf("shim missing after commit: %v", err)
+	}
+
+	ctx, cancel = context.WithCancel(f.ctx())
+	defer cancel()
+	if _, err := f.svc.Remove(ctx, testBot, testTarget, "tool-y", nil); err != nil {
+		t.Fatalf("Remove after the request went away: %v", err)
+	}
+	if rec, ok := f.store.get(f.key("tool-y")); ok {
+		t.Errorf("record survived remove: %+v", rec)
+	}
+	if _, err := os.Stat(f.shimPath("tool-y")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("shim survived remove (err = %v)", err)
+	}
+}
+
+// TestListReclaimsInterruptedOperations covers the read-time recovery of
+// An in-progress record is marked failed at once only when
+// nothing can still be running it.
+func TestListReclaimsInterruptedOperations(t *testing.T) {
+	cases := []struct {
+		name          string
+		age           func(dep catalog.Dependency) time.Duration
+		lockHeld      bool
+		lockAbandoned bool
+		localLock     bool
+		want          Status
+	}{
+		{name: "stale without lock", age: func(catalog.Dependency) time.Duration { return 2 * time.Minute }, want: StatusFailed},
+		{name: "fresh without lock", age: func(catalog.Dependency) time.Duration { return 30 * time.Second }, want: StatusInstalling},
+		{name: "stale with lock held", age: func(catalog.Dependency) time.Duration { return 2 * time.Minute }, lockHeld: true, want: StatusInstalling},
+		{name: "stale but running in this process", age: func(catalog.Dependency) time.Duration { return 2 * time.Minute }, localLock: true, want: StatusInstalling},
+		{name: "beyond its budget with lock held", age: func(dep catalog.Dependency) time.Duration {
+			return dep.Timeouts.Duration(catalog.ActionReinstall) + time.Hour
+		}, lockHeld: true, want: StatusInstalling},
+		{name: "dead owner recovers immediately", age: func(catalog.Dependency) time.Duration { return time.Second }, lockAbandoned: true, want: StatusFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newServiceFixture(t)
+			dep := f.cat.MustGet("tool-y")
+			f.store.seed(Installation{BotID: testBot, WorkspaceTargetID: testTarget, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalling, OperationID: strings.Repeat("a", 32), UpdatedAt: f.now.Add(-tc.age(dep))})
+			if tc.lockHeld || tc.lockAbandoned {
+				f.mu.Lock()
+				f.observed["tool-y"] = Observed{DepID: "tool-y", LockHeld: tc.lockHeld, LockAbandoned: tc.lockAbandoned, Receipt: &OperationReceipt{ID: strings.Repeat("a", 32), DependencyID: "tool-y"}}
+				f.mu.Unlock()
+			}
+			if tc.localLock {
+				key := f.key("tool-y")
+				f.svc.locks.tryLock(key)
+				defer f.svc.locks.unlock(key)
+			}
+
+			result, err := f.svc.List(f.ctx(), testBot, testTarget)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			entry := f.entry(t, result, "tool-y")
+			rec, _ := f.store.get(f.key("tool-y"))
+			if entry.Status != tc.want || rec.Status != tc.want {
+				t.Fatalf("entry status = %s, record status = %s, want %s", entry.Status, rec.Status, tc.want)
+			}
+			if tc.want == StatusFailed {
+				if rec.LastError != interruptedMessage || actionsOf(entry) != "install,remove" {
+					t.Errorf("reclaimed record = %+v, actions = %s", rec, actionsOf(entry))
+				}
+				return
+			}
+			if rec.LastError != "" || len(entry.Actions) != 0 || f.store.writeCount() != 0 {
+				t.Errorf("in-progress record was touched: %+v, actions = %v, writes = %d", rec, entry.Actions, f.store.writeCount())
+			}
+		})
+	}
+}
+
+// TestListReclaimOnlyTrustsSnapshotsTakenAfterTheOperation guards the cached
+// snapshot: one discovered before the operation started cannot vouch for the
+// lock's absence, so the record waits for a fresh discovery.
+func TestListReclaimOnlyTrustsSnapshotsTakenAfterTheOperation(t *testing.T) {
+	f := newServiceFixture(t)
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	f.store.seed(Installation{BotID: testBot, WorkspaceTargetID: testTarget, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalling, OperationID: strings.Repeat("b", 32), UpdatedAt: f.now})
+	f.now = f.now.Add(2 * time.Minute)
+
+	result, err := f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusInstalling {
+		t.Errorf("entry from the stale snapshot = %+v, want still installing", entry)
+	}
+	if f.discovered() != 1 {
+		t.Fatalf("discover calls = %d, want the cached snapshot reused", f.discovered())
+	}
+
+	result, err = f.svc.Refresh(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if entry := f.entry(t, result, "tool-y"); entry.Status != StatusFailed || entry.Installation.LastError != interruptedMessage {
+		t.Errorf("entry after a fresh discovery = %+v, want interrupted → failed", entry)
+	}
+}
+
+// TestListDegradesWhenDiscoveryFails covers a discovery exec that is killed
+// or times out: the list still answers from the records and reports the
+// problem instead of failing, nothing is cached, and the paths that need
+// facts (preflight, update checks) do not pretend to have them.
+func TestListDegradesWhenDiscoveryFails(t *testing.T) {
+	f := newServiceFixture(t)
+	f.seed("tool-y", StatusInstalled, "1.0.0")
+	f.store.seed(Installation{BotID: testBot, DependencyID: "agent-x", Source: InstallationSourceManaged, Status: StatusFailed, LastError: "boom"})
+	f.svc.discover = func(context.Context, *bridge.Client, *catalog.Catalog, string, []string, Platform) (map[string]Observed, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.discoverCalls++
+		return nil, errors.New("workspacedeps: discovery script exited 137 before finishing: ")
+	}
+
+	result, err := f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if result.Workspace != WorkspaceRunning || !strings.Contains(result.DiscoveryError, "exited 137") || len(result.Entries) != len(f.cat.List()) {
+		t.Fatalf("result = %+v", result)
+	}
+	tool := f.entry(t, result, "tool-y")
+	if tool.Status != StatusInstalled || tool.InstalledVersion != "1.0.0" || tool.Observed.Present || len(tool.Actions) != 0 {
+		t.Errorf("tool-y entry = %+v, want the record alone", tool)
+	}
+	agent := f.entry(t, result, "agent-x")
+	if agent.Status != StatusFailed || agent.Installation == nil || agent.Installation.LastError != "boom" {
+		t.Errorf("agent-x entry = %+v", agent)
+	}
+	if f.store.writeCount() != 0 {
+		t.Errorf("records were written without facts: %d writes", f.store.writeCount())
+	}
+	if _, err := f.svc.List(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if f.discovered() != 2 {
+		t.Errorf("discover calls = %d, want a failed discovery not to be cached", f.discovered())
+	}
+
+	if _, err := f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"tool-y"}); err == nil {
+		t.Error("Preflight must not answer without discovery facts")
+	}
+	checked, err := f.svc.CheckUpdates(f.ctx(), testBot, testTarget)
+	if err != nil || checked.DiscoveryError == "" || len(f.runSpecs()) != 0 {
+		t.Errorf("CheckUpdates = %+v, %v (runs = %d); want the degraded list and no checks", checked.DiscoveryError, err, len(f.runSpecs()))
+	}
+
+	// A request that went away is not a discovery failure to report.
+	ctx, cancel := context.WithCancel(f.ctx())
+	cancel()
+	f.svc.discover = func(ctx context.Context, _ *bridge.Client, _ *catalog.Catalog, _ string, _ []string, _ Platform) (map[string]Observed, error) {
+		return nil, ctx.Err()
+	}
+	if _, err := f.svc.List(ctx, testBot, testTarget); !errors.Is(err, context.Canceled) {
+		t.Errorf("List on a cancelled request = %v, want context.Canceled", err)
 	}
 }
 
@@ -1125,61 +1496,42 @@ func TestUpdateFallsBackToInstallScriptAndKeepsPrevious(t *testing.T) {
 	}
 }
 
-func TestReinstallOrchestratesRemoveThenInstall(t *testing.T) {
+func TestReinstallPreservesWorkingCopyAndRollbackChain(t *testing.T) {
 	f := newServiceFixture(t)
 	f.seed("tool-y", StatusInstalled, "1.0.0")
-	f.writeState(t, "tool-y", State{Version: "1.0.0", Entrypoints: map[string]string{"tool-y": "/x", "tool-y-extra": "/y"}})
+	f.writeState(t, "tool-y", State{Version: "1.0.0", PreviousVersion: "0.9.0", Previous: &PreviousInstallation{Version: "0.9.0", ManifestDigest: "previous-digest"}, Entrypoints: map[string]string{"tool-y": "/x", "obsolete": "/y"}})
 	f.writeShim(t, "tool-y")
-	f.writeShim(t, "tool-y-extra")
+	f.writeShim(t, "obsolete")
 	f.setRun(func(spec RunSpec) (Result, error) {
-		if spec.Action == catalog.ActionInstall {
-			return f.installResult(spec.DepID, "1.0.0"), nil
+		if spec.Action != catalog.ActionReinstall || spec.Script != svcToolInstallScript {
+			t.Errorf("unsafe reinstall script: %+v", spec)
 		}
-		return Result{}, nil
+		return f.installResult(spec.DepID, "1.0.0"), nil
 	})
-
 	result, err := f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", "", nil)
 	if err != nil {
-		t.Fatalf("Reinstall: %v", err)
+		t.Fatal(err)
 	}
-	if result.Action != catalog.ActionReinstall || result.Version != "1.0.0" {
-		t.Errorf("result = %+v", result)
+	if result.Action != catalog.ActionReinstall {
+		t.Errorf("action = %s", result.Action)
 	}
-	specs := f.runSpecs()
-	if len(specs) != 2 || specs[0].Action != catalog.ActionRemove || specs[0].Script != svcToolRemoveScript || specs[1].Action != catalog.ActionInstall || specs[1].Script != svcToolInstallScript {
-		t.Errorf("runs = %+v", specs)
+	if state := f.readState(t, "tool-y"); state.PreviousVersion != "0.9.0" || state.Previous.ManifestDigest != "previous-digest" {
+		t.Errorf("rollback chain lost: %+v", state)
 	}
-	if specs[0].CurrentVersion != "1.0.0" {
-		t.Errorf("remove step current version = %q", specs[0].CurrentVersion)
+	if _, err := os.Stat(f.shimPath("obsolete")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("obsolete shim survived: %v", err)
 	}
-	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusInstalling, StatusInstalled) {
-		t.Errorf("status history = %v", got)
+	f.setRun(func(RunSpec) (Result, error) {
+		return Result{}, &ExitError{Code: 1, StderrTail: "download unavailable"}
+	})
+	if _, err := f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", "", nil); err == nil {
+		t.Fatal("expected failed download")
 	}
-	if _, err := os.Stat(f.shimPath("tool-y-extra")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("stale shim survived reinstall (err = %v)", err)
+	if state := f.readState(t, "tool-y"); state.Version != "1.0.0" || state.PreviousVersion != "0.9.0" {
+		t.Errorf("failed reinstall removed working state: %+v", state)
 	}
 	if _, err := os.Stat(f.shimPath("tool-y")); err != nil {
-		t.Errorf("shim missing after reinstall: %v", err)
-	}
-	// The remove step deleted nothing in this fake, so the previous state
-	// must not leak into the fresh install's previous_version.
-	if state := f.readState(t, "tool-y"); state.PreviousVersion != "" {
-		t.Errorf("state.json after reinstall = %+v", state)
-	}
-
-	f.setRun(func(RunSpec) (Result, error) {
-		return Result{ExitCode: 1}, &ExitError{Code: 1, StderrTail: "cannot remove"}
-	})
-	_, err = f.svc.Reinstall(f.ctx(), testBot, testTarget, "tool-y", "", nil)
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("Reinstall error = %v, want *ExitError", err)
-	}
-	if specs := f.runSpecs(); len(specs) != 3 || specs[2].Action != catalog.ActionRemove {
-		t.Errorf("a failed remove must stop before install: %+v", specs)
-	}
-	if rec, _ := f.store.get(f.key("tool-y")); rec.Status != StatusFailed || !strings.Contains(rec.LastError, "cannot remove") {
-		t.Errorf("record = %+v", rec)
+		t.Errorf("working shim disappeared: %v", err)
 	}
 }
 
@@ -1277,39 +1629,43 @@ func TestRollback(t *testing.T) {
 	}
 }
 
-func TestReapStale(t *testing.T) {
+func TestReapStaleUsesWorkspaceLiveness(t *testing.T) {
 	f := newServiceFixture(t)
-	old := func(d time.Duration) time.Time { return f.now.Add(-d) }
-	agent := f.cat.MustGet("agent-x")
-	installingBudget := agent.Timeouts.Duration(catalog.ActionReinstall) + lockStaleGrace
-	f.store.seed(Installation{BotID: "b1", DependencyID: "agent-x", Status: StatusInstalling, UpdatedAt: old(installingBudget)})
-	f.store.seed(Installation{BotID: "b2", DependencyID: "agent-x", Status: StatusInstalling, UpdatedAt: old(installingBudget - time.Second)})
-	f.store.seed(Installation{BotID: "b3", DependencyID: "tool-y", Status: StatusUpdating, UpdatedAt: old(time.Minute)})
-	f.store.seed(Installation{BotID: "b4", DependencyID: "tool-y", Status: StatusRemoving, UpdatedAt: old(time.Hour)})
-	f.store.seed(Installation{BotID: "b5", DependencyID: "gone-from-catalog", Status: StatusInstalling, UpdatedAt: old(2 * time.Hour)})
-	f.store.seed(Installation{BotID: "b6", DependencyID: "tool-y", Status: StatusInstalled, UpdatedAt: old(48 * time.Hour)})
-	f.store.seed(Installation{BotID: "b7", DependencyID: "tool-y", Status: StatusInstalling, UpdatedAt: old(48 * time.Hour)})
-	// b7 is still running in this process.
-	lockedKey := InstallationKey{BotID: "b7", WorkspaceTargetID: TargetNative, DependencyID: "tool-y"}
-	f.svc.locks.tryLock(lockedKey)
-	defer f.svc.locks.unlock(lockedKey)
-
-	reaped, err := f.svc.ReapStale(f.ctx())
+	for _, bot := range []string{"live", "dead", "stopped", "offline", "local"} {
+		f.store.seed(Installation{BotID: bot, DependencyID: "agent-x", Status: StatusInstalling, OperationID: strings.Repeat("c", 32), UpdatedAt: f.now.Add(-48 * time.Hour)})
+	}
+	f.ws.setState("stopped", TargetNative, WorkspaceNotRunning)
+	f.ws.setState("offline", TargetNative, WorkspaceRemoteOffline)
+	local := InstallationKey{BotID: "local", WorkspaceTargetID: TargetNative, DependencyID: "agent-x"}
+	f.svc.locks.tryLock(local)
+	defer f.svc.locks.unlock(local)
+	// Every reachable workspace reports a live owner. Even a 48-hour-old row
+	// must remain in progress while its owner is alive.
+	f.mu.Lock()
+	f.observed["agent-x"] = Observed{DepID: "agent-x", LockHeld: true}
+	f.mu.Unlock()
+	recovered, err := f.svc.ReapStale(f.ctx())
 	if err != nil {
-		t.Fatalf("ReapStale: %v", err)
+		t.Fatal(err)
 	}
-	if reaped != 3 {
-		t.Errorf("reaped = %d, want 3", reaped)
+	if recovered != 0 {
+		t.Errorf("recovered = %d, want no unreachable or live workspace reclaimed", recovered)
 	}
-	want := map[string]Status{"b1": StatusFailed, "b2": StatusInstalling, "b3": StatusUpdating, "b4": StatusFailed, "b5": StatusFailed, "b6": StatusInstalled, "b7": StatusInstalling}
-	for bot, status := range want {
+	for _, bot := range []string{"live", "dead", "stopped", "offline", "local"} {
 		recs, _ := f.store.ListForBot(f.ctx(), bot)
-		if len(recs) != 1 || recs[0].Status != status {
-			t.Errorf("bot %s record = %+v, want %s", bot, recs, status)
+		if recs[0].Status != StatusInstalling {
+			t.Errorf("%s: incorrectly expired live/unknown owner", bot)
 		}
-		if status == StatusFailed && recs[0].LastError != staleReapMessage {
-			t.Errorf("bot %s last_error = %q", bot, recs[0].LastError)
-		}
+	}
+	f.mu.Lock()
+	f.observed["agent-x"] = Observed{DepID: "agent-x", LockAbandoned: true}
+	f.mu.Unlock()
+	recovered, err = f.svc.ReapStale(f.ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != 2 {
+		t.Errorf("recovered = %d, want the two dead owners", recovered)
 	}
 }
 
@@ -1321,7 +1677,11 @@ func TestActionSupportedFollowsScripts(t *testing.T) {
 		"img-z":    "",
 		"mac-only": "install,update,reinstall,remove,rollback",
 	}
-	for _, dep := range f.svc.Catalog() {
+	result, err := f.svc.Catalog(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dep := range result.Items {
 		parts := make([]string, 0, len(UserActions))
 		for _, action := range SupportedActions(dep) {
 			parts = append(parts, string(action))
@@ -1330,8 +1690,8 @@ func TestActionSupportedFollowsScripts(t *testing.T) {
 			t.Errorf("%s supported actions = %q, want %q", dep.ID, got, want[dep.ID])
 		}
 	}
-	if len(f.svc.Catalog()) != len(f.cat.List()) {
-		t.Errorf("Catalog() = %d entries, want the whole catalog", len(f.svc.Catalog()))
+	if len(result.Items) != len(f.cat.List()) {
+		t.Errorf("Catalog() = %d entries, want the whole catalog", len(result.Items))
 	}
 	if ActionSupported(catalog.Dependency{}, catalog.ActionVersion) || !ActionSupported(catalog.Dependency{Scripts: catalog.Scripts{Version: "v.sh"}}, catalog.ActionVersion) {
 		t.Error("version action must follow scripts.version")
@@ -1343,33 +1703,33 @@ func TestActionSupportedFollowsScripts(t *testing.T) {
 
 func TestScriptPreview(t *testing.T) {
 	f := newServiceFixture(t)
-	preview, err := f.svc.ScriptPreview("tool-y", catalog.ActionInstall)
+	preview, err := f.svc.ScriptPreview(t.Context(), "tool-y", catalog.ActionInstall)
 	if err != nil {
 		t.Fatalf("ScriptPreview: %v", err)
 	}
 	if preview != WrapScript(svcToolInstallScript) || !strings.HasPrefix(preview, prelude) {
 		t.Errorf("install preview = %q", preview)
 	}
-	if preview, err := f.svc.ScriptPreview("tool-y", catalog.ActionUpdate); err != nil || preview != WrapScript(svcToolInstallScript) {
+	if preview, err := f.svc.ScriptPreview(t.Context(), "tool-y", catalog.ActionUpdate); err != nil || preview != WrapScript(svcToolInstallScript) {
 		t.Errorf("update preview without script = %q, %v; want the install script", preview, err)
 	}
-	preview, err = f.svc.ScriptPreview("tool-y", catalog.ActionReinstall)
+	preview, err = f.svc.ScriptPreview(t.Context(), "tool-y", catalog.ActionReinstall)
 	if err != nil {
 		t.Fatalf("reinstall preview: %v", err)
 	}
-	if !strings.Contains(preview, svcToolRemoveScript) || !strings.Contains(preview, svcToolInstallScript) || strings.Count(preview, prelude) != 2 {
+	if preview != WrapScript(svcToolInstallScript) {
 		t.Errorf("reinstall preview = %q", preview)
 	}
-	if preview, err := f.svc.ScriptPreview("agent-x", ActionRollback); err != nil || !strings.Contains(preview, `dep_switch "$MEMOH_DEP_HOME/versions/$MEMOH_DEP_VERSION"`) {
+	if preview, err := f.svc.ScriptPreview(t.Context(), "agent-x", ActionRollback); err != nil || !strings.Contains(preview, `dep_switch "$MEMOH_DEP_HOME/versions/$MEMOH_DEP_VERSION"`) {
 		t.Errorf("rollback preview = %q, %v", preview, err)
 	}
-	if _, err := f.svc.ScriptPreview("agent-x", catalog.ActionCheckUpdate); !errors.Is(err, ErrActionUnsupported) {
+	if _, err := f.svc.ScriptPreview(t.Context(), "agent-x", catalog.ActionCheckUpdate); !errors.Is(err, ErrActionUnsupported) {
 		t.Errorf("agent check_update preview error = %v", err)
 	}
-	if _, err := f.svc.ScriptPreview("img-z", catalog.ActionInstall); !errors.Is(err, ErrActionUnsupported) {
+	if _, err := f.svc.ScriptPreview(t.Context(), "img-z", catalog.ActionInstall); !errors.Is(err, ErrActionUnsupported) {
 		t.Errorf("image preview error = %v", err)
 	}
-	if _, err := f.svc.ScriptPreview("nope", catalog.ActionInstall); !errors.Is(err, ErrDependencyNotFound) {
+	if _, err := f.svc.ScriptPreview(t.Context(), "nope", catalog.ActionInstall); !errors.Is(err, ErrDependencyNotFound) {
 		t.Errorf("unknown preview error = %v", err)
 	}
 }
@@ -1417,9 +1777,22 @@ func TestCheckUpdates(t *testing.T) {
 		t.Errorf("tool-y entry after failed check = %+v / %+v", tool, tool.Installation)
 	}
 
+	// A busy verdict (another operation holds the dependency) is not a check
+	// result: the record keeps its last check untouched.
+	before, _ := f.store.get(f.key("tool-y"))
+	f.now = f.now.Add(time.Hour)
+	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
+	if _, err := f.svc.CheckUpdates(f.ctx(), testBot, testTarget); err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	after, _ := f.store.get(f.key("tool-y"))
+	if after.LastError != before.LastError || after.LatestVersion != before.LatestVersion || !after.LastCheckedAt.Equal(*before.LastCheckedAt) {
+		t.Errorf("record after busy check = %+v, want %+v untouched", after, before)
+	}
+
 	f.ws.setState(testBot, testTarget, WorkspaceNotRunning)
 	result, err = f.svc.CheckUpdates(f.ctx(), testBot, testTarget)
-	if err != nil || result.Workspace != WorkspaceNotRunning || len(f.runSpecs()) != 2 {
+	if err != nil || result.Workspace != WorkspaceNotRunning || len(f.runSpecs()) != 3 {
 		t.Errorf("CheckUpdates on stopped workspace = %+v, %v (runs = %d)", result.Workspace, err, len(f.runSpecs()))
 	}
 }
@@ -1444,8 +1817,8 @@ scripts:
 `
 
 // e2eFooInstall builds a fake CLI that prints its version, switches
-// `current`, and reports the entrypoint. FOO_VERSION comes from ScriptEnv.
-const e2eFooInstall = `version="${FOO_VERSION:-1.0.0}"
+// `current`, and reports the entrypoint. MEMOH_DEP_VERSION carries the approved requested version.
+const e2eFooInstall = `version="${MEMOH_DEP_VERSION:-1.0.0}"
 target="$MEMOH_DEP_HOME/versions/$version"
 mkdir -p "$target/bin"
 printf '#!/bin/sh\necho "foo %s"\n' "$version" > "$target/bin/foo"
@@ -1481,10 +1854,9 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 	}
 	platform.TmpDir = t.TempDir()
 	f.platform = platform
-	f.env = []string{"FOO_VERSION=1.0.0"}
 	sink := newRecordingSink()
 
-	result, err := f.svc.Install(f.ctx(), testBot, testTarget, "foo", "", sink)
+	result, err := f.svc.Install(f.ctx(), testBot, testTarget, "foo", "1.0.0", sink)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -1516,8 +1888,7 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 		t.Errorf("discovered entry = %+v / %+v", foo, foo.Observed)
 	}
 
-	f.env = []string{"FOO_VERSION=1.1.0"}
-	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "foo", "", nil); err != nil {
+	if _, err := f.svc.Update(f.ctx(), testBot, testTarget, "foo", "1.1.0", nil); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	assertShimPrints("foo 1.1.0")

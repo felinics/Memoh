@@ -3,71 +3,93 @@ package workspacedeps
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
-
-	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func TestStartReaperRunsImmediatelyAndOnInterval(t *testing.T) {
 	f := newServiceFixture(t)
-	agent := f.cat.MustGet("agent-x")
-	budget := agent.Timeouts.Duration(catalog.ActionReinstall) + lockStaleGrace
-	f.store.seed(Installation{BotID: "b1", DependencyID: "agent-x", Status: StatusInstalling, UpdatedAt: f.now.Add(-budget)})
-
-	stop := StartReaper(context.Background(), f.svc, 10*time.Millisecond, slog.New(slog.DiscardHandler))
+	f.store.seed(Installation{BotID: "b1", DependencyID: "agent-x", Status: StatusInstalling, OperationID: strings.Repeat("a", 32), UpdatedAt: f.now.Add(-2 * time.Minute)})
+	ticks := make(chan time.Time)
+	type passResult struct {
+		count int
+		err   error
+	}
+	completed := make(chan passResult, 1)
+	reap := func(ctx context.Context) (int, error) {
+		count, err := f.svc.ReapStale(ctx)
+		completed <- passResult{count: count, err: err}
+		return count, err
+	}
+	stop := startReaper(f.ctx(), reap, ticks, func() {}, slog.New(slog.DiscardHandler))
 	defer stop()
 
-	waitFor(t, func() bool {
-		recs, _ := f.store.ListForBot(context.Background(), "b1")
-		return len(recs) == 1 && recs[0].Status == StatusFailed
-	})
+	assertPass := func(botID string) {
+		t.Helper()
+		pass := <-completed
+		if pass.err != nil || pass.count != 1 {
+			t.Fatalf("reaper pass = %d, %v; want one fenced operation", pass.count, pass.err)
+		}
+		records, err := f.store.ListForBot(f.ctx(), botID)
+		if err != nil || len(records) != 1 || records[0].Status != StatusFailed || records[0].OperationID != "" {
+			t.Fatalf("operation was not fenced and released: %+v %v", records, err)
+		}
+	}
+	assertPass("b1")
 
-	// A record that goes stale later is caught by a following tick.
-	f.store.seed(Installation{BotID: "b2", DependencyID: "agent-x", Status: StatusUpdating, UpdatedAt: f.now.Add(-budget)})
-	waitFor(t, func() bool {
-		recs, _ := f.store.ListForBot(context.Background(), "b2")
-		return len(recs) == 1 && recs[0].Status == StatusFailed
-	})
+	// This reachable workspace is added after the initial pass. Only an
+	// explicit tick can schedule the next recovery round.
+	f.store.seed(Installation{BotID: "b2", DependencyID: "agent-x", Status: StatusUpdating, OperationID: strings.Repeat("b", 32), UpdatedAt: f.now.Add(-2 * time.Minute)})
+	ticks <- f.now
+	assertPass("b2")
 }
 
 func TestStartReaperStopIsIdempotentAndWaits(t *testing.T) {
-	f := newServiceFixture(t)
-	stop := StartReaper(context.Background(), f.svc, time.Hour, nil)
+	started, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	ticks, tickerStopped := make(chan time.Time), make(chan struct{})
+	reap := func(ctx context.Context) (int, error) {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		<-release
+		return 0, ctx.Err()
+	}
+	stop := startReaper(t.Context(), reap, ticks, func() { close(tickerStopped) }, slog.New(slog.DiscardHandler))
+	<-started
+	stopped := make(chan struct{})
+	go func() { stop(); close(stopped) }()
+	<-cancelled
+	select {
+	case <-stopped:
+		t.Fatal("stop returned while a pass was still in flight")
+	default:
+	}
+	close(release)
+	<-stopped
+	<-tickerStopped
 	stop()
-	stop()
-	writesAfterStop := f.store.writes
-	time.Sleep(20 * time.Millisecond)
-	if f.store.writes != writesAfterStop {
-		t.Fatalf("reaper kept writing after stop: %d -> %d", writesAfterStop, f.store.writes)
+	select {
+	case ticks <- time.Time{}:
+		t.Fatal("stopped reaper consumed a tick")
+	default:
 	}
 }
 
 func TestStartReaperStopsWhenContextEnds(t *testing.T) {
-	f := newServiceFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	stop := StartReaper(ctx, f.svc, time.Hour, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started, tickerStopped := make(chan struct{}), make(chan struct{})
+	reap := func(ctx context.Context) (int, error) {
+		close(started)
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	stop := startReaper(ctx, reap, make(chan time.Time), func() { close(tickerStopped) }, slog.New(slog.DiscardHandler))
+	defer stop()
+	<-started
 	cancel()
-	finished := make(chan struct{})
-	go func() {
-		stop()
-		close(finished)
-	}()
-	select {
-	case <-finished:
-	case <-time.After(2 * time.Second):
-		t.Fatal("stop did not return after the context ended")
-	}
-}
-
-func waitFor(t *testing.T, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("condition not met in time")
+	// Loop cleanup proves cancellation ends the worker before Stop is called.
+	<-tickerStopped
+	stop()
 }

@@ -58,30 +58,31 @@ const (
 )
 
 type Config struct {
-	Log            LogConfig            `toml:"log"`
-	Server         ServerConfig         `toml:"server"`
-	Channel        ChannelConfig        `toml:"channel"`
-	InternalRPC    InternalRPCConfig    `toml:"internal_rpc"`
-	Admin          AdminConfig          `toml:"admin"`
-	Auth           AuthConfig           `toml:"auth"`
-	Agent          AgentConfig          `toml:"agent"`
-	Timezone       string               `toml:"timezone"`
-	Database       DatabaseConfig       `toml:"database"`
-	Container      ContainerConfig      `toml:"container"`
-	Containerd     ContainerdConfig     `toml:"containerd"`
-	Docker         DockerConfig         `toml:"docker"`
-	Apple          AppleConfig          `toml:"apple"`
-	Workspace      WorkspaceConfig      `toml:"workspace"`
-	Postgres       PostgresConfig       `toml:"postgres"`
-	PGVector       PGVectorConfig       `toml:"pgvector"`
-	Registry       RegistryConfig       `toml:"registry"`
-	Supermarket    SupermarketConfig    `toml:"supermarket"`
-	OAuthClients   OAuthClientsConfig   `toml:"oauth_clients"`
-	SessionRuntime SessionRuntimeConfig `toml:"session_runtime"`
-	InstanceID     string               `toml:"instance_id"`
-	BridgeTLS      BridgeTLSConfig      `toml:"bridge_tls"`
-	WebhookTunnel  WebhookTunnelConfig  `toml:"webhook_tunnel"`
-	ConnectIt      ConnectItConfig      `toml:"connect_it"`
+	Log                   LogConfig                   `toml:"log"`
+	Server                ServerConfig                `toml:"server"`
+	Channel               ChannelConfig               `toml:"channel"`
+	InternalRPC           InternalRPCConfig           `toml:"internal_rpc"`
+	Admin                 AdminConfig                 `toml:"admin"`
+	Auth                  AuthConfig                  `toml:"auth"`
+	Agent                 AgentConfig                 `toml:"agent"`
+	Timezone              string                      `toml:"timezone"`
+	Database              DatabaseConfig              `toml:"database"`
+	Container             ContainerConfig             `toml:"container"`
+	Containerd            ContainerdConfig            `toml:"containerd"`
+	Docker                DockerConfig                `toml:"docker"`
+	Apple                 AppleConfig                 `toml:"apple"`
+	Workspace             WorkspaceConfig             `toml:"workspace"`
+	Postgres              PostgresConfig              `toml:"postgres"`
+	PGVector              PGVectorConfig              `toml:"pgvector"`
+	Registry              RegistryConfig              `toml:"registry"`
+	Supermarket           SupermarketConfig           `toml:"supermarket"`
+	WorkspaceDependencies WorkspaceDependenciesConfig `toml:"workspace_dependencies"`
+	OAuthClients          OAuthClientsConfig          `toml:"oauth_clients"`
+	SessionRuntime        SessionRuntimeConfig        `toml:"session_runtime"`
+	InstanceID            string                      `toml:"instance_id"`
+	BridgeTLS             BridgeTLSConfig             `toml:"bridge_tls"`
+	WebhookTunnel         WebhookTunnelConfig         `toml:"webhook_tunnel"`
+	ConnectIt             ConnectItConfig             `toml:"connect_it"`
 }
 
 // ConnectItConfig is the deployment-level credential Memoh uses to call its

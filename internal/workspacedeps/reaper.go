@@ -8,14 +8,15 @@ import (
 )
 
 // DefaultReapInterval is how often the stale reaper runs after its initial
-// pass (WD-STATE-002).
-const DefaultReapInterval = time.Hour
+// pass.
+const DefaultReapInterval = time.Minute
 
 // StartReaper runs ReapStale once right away and then every interval until
 // the returned stop function is called or ctx ends. A container restart cuts
-// an exec mid-flight and leaves the record in installing/updating/removing;
-// the reaper is what turns that into failed once the script's own timeout
-// has passed (WD-STATE-002). A non-positive interval selects
+// an exec mid-flight and leaves the record in installing/updating/removing.
+// The reaper checks kernel lock ownership and durable receipts to complete a
+// confirmed result or mark an abandoned operation retryable. It never expires
+// a live owner merely because time passed. A non-positive interval selects
 // DefaultReapInterval. Stop waits for a pass in flight and is idempotent.
 func StartReaper(ctx context.Context, svc *Service, interval time.Duration, logger *slog.Logger) (stop func()) {
 	if svc == nil {
@@ -27,14 +28,21 @@ func StartReaper(ctx context.Context, svc *Service, interval time.Duration, logg
 	if logger == nil {
 		logger = slog.Default()
 	}
-	logger = logger.With(slog.String("component", "workspacedeps_reaper"))
+	ticker := time.NewTicker(interval)
+	return startReaper(ctx, svc.ReapStale, ticker.C, ticker.Stop, logger)
+}
 
+// startReaper keeps timer ownership and pass execution together. Its explicit
+// tick source lets lifecycle tests coordinate work without wall-clock races.
+func startReaper(ctx context.Context, reapPass func(context.Context) (int, error), ticks <-chan time.Time, stopTicks func(), logger *slog.Logger) func() {
+	logger = logger.With(slog.String("component", "workspacedeps_reaper"))
 	loopCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer stopTicks()
 		reap := func() {
-			reaped, err := svc.ReapStale(loopCtx)
+			reaped, err := reapPass(loopCtx)
 			switch {
 			case err != nil && loopCtx.Err() != nil:
 				// Shutting down; the interrupted pass is not a fault.
@@ -44,17 +52,15 @@ func StartReaper(ctx context.Context, svc *Service, interval time.Duration, logg
 					slog.Any("error", err),
 				)
 			case reaped > 0:
-				logger.Info("stale dependency operations marked failed", slog.Int("reaped", reaped))
+				logger.Info("interrupted dependency operations reconciled", slog.Int("reaped", reaped))
 			}
 		}
 		reap()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
+		for loopCtx.Err() == nil {
 			select {
 			case <-loopCtx.Done():
 				return
-			case <-ticker.C:
+			case <-ticks:
 				reap()
 			}
 		}

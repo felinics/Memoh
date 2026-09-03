@@ -11,7 +11,7 @@ import (
 )
 
 // ScriptEnvEntry is one environment variable the runner injects into a
-// script (design §5.4).
+// script.
 type ScriptEnvEntry struct {
 	Key string
 	// Value is the real value when it is known before the run and a
@@ -24,10 +24,12 @@ type ScriptEnvEntry struct {
 	Secret bool
 }
 
-// ScriptPreview is the complete "what will run" view of one action
-// (WD-API-001): the exact stdin text, how it is executed, its time budget,
+// ScriptPreview describes the exact stdin text, execution command, time budget,
 // and the environment it sees.
 type ScriptPreview struct {
+	SourceURL    string
+	RegistryID   string
+	Revision     string
 	DependencyID string
 	Action       catalog.Action
 	// Digest is the manifest digest over dependency.yaml and every script
@@ -60,11 +62,24 @@ var secretEnvMarkers = []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDEN
 // and the platform entries come from the last probe when there is one.
 // Nothing is executed and the workspace is never started.
 func (s *Service) ScriptPreviewDetails(ctx context.Context, botID, targetID, depID string, action catalog.Action) (ScriptPreview, error) {
-	dep, err := s.dependency(depID)
+	if action == ActionRollback {
+		offline, _, err := s.prepareCatalog(ctx, false, true)
+		if err != nil {
+			return ScriptPreview{}, err
+		}
+		ctx = offline
+	}
+	cat, err := s.operationCatalog(ctx, depID)
 	if err != nil {
 		return ScriptPreview{}, err
 	}
-	script, err := s.ScriptPreview(dep.ID, action)
+	ctx = context.WithValue(ctx, catalogContextKey{}, CatalogResult{Catalog: cat})
+
+	dep, err := s.dependency(ctx, depID)
+	if err != nil {
+		return ScriptPreview{}, err
+	}
+	script, err := s.ScriptPreview(ctx, dep.ID, action)
 	if err != nil {
 		return ScriptPreview{}, err
 	}
@@ -94,18 +109,23 @@ func (s *Service) ScriptPreviewDetails(ctx context.Context, botID, targetID, dep
 		Platform:       platform,
 		Timeout:        timeout,
 	}
+	if s.scriptEnv != nil {
+		spec.ExtraEnv = s.scriptEnv(ctx)
+	}
 	resultPath := path.Join(tmpDir, "memoh-dep-"+dep.ID+"-"+previewResultNonce+".json")
+	if action != catalog.ActionCheckUpdate && action != catalog.ActionVersion {
+		directory := path.Join(operationRoot(spec.Home, dep.ID), previewResultNonce)
+		spec.Receipt = &OperationReceipt{ID: previewResultNonce, Directory: directory}
+		resultPath = path.Join(directory, "result.json")
+	}
 	env := make([]ScriptEnvEntry, 0, 16)
 	for _, kv := range buildEnv(spec, resultPath, timeout) {
 		env = append(env, previewEnvEntry(kv, false))
 	}
-	if s.scriptEnv != nil {
-		for _, kv := range s.scriptEnv(ctx) {
-			env = append(env, previewEnvEntry(kv, true))
-		}
-	}
+
 	return ScriptPreview{
-		DependencyID:   dep.ID,
+		DependencyID: dep.ID,
+		SourceURL:    dep.SourceURL, RegistryID: dep.RegistryID, Revision: dep.Revision,
 		Action:         action,
 		Digest:         dep.ManifestDigest,
 		Exec:           scriptExecCommand,
@@ -157,7 +177,7 @@ func previewCurrentVersion(action catalog.Action) string {
 // key looks like a credential are reported without their value.
 func previewEnvEntry(kv string, operatorSupplied bool) ScriptEnvEntry {
 	key, value, _ := strings.Cut(kv, "=")
-	entry := ScriptEnvEntry{Key: key, Value: value}
+	entry := ScriptEnvEntry{Key: key, Value: SafeErrorDetail(value)}
 	if operatorSupplied && isSecretEnvKey(key) {
 		entry.Secret = true
 		entry.Value = ""
