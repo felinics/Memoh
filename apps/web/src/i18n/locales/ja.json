@@ -1050,13 +1050,11 @@
       "attachmentUnavailable": "外部Agentが添付ファイルにアクセスできません。もう一度添付してください。",
       "imageInputUnsupported": "この外部Agentは添付画像を読み取れません。",
       "invalidChatRuntime": "選択されたチャットruntimeが無効です。",
-      "dependencyMissing": "{dep_id} はこの Workspace にインストールされていません。{required_version} をバックグラウンドでインストール中です。完了後にメッセージを再送してください。",
-      "dependencyVersionMismatch": "{dep_id} は {installed_version} ですが、Server は {required_version} を必要とします。今回はインストール済みのバージョンで続行します。",
+      "dependencyMissing": "{dep_id} はこの Workspace にインストールされていません。バックグラウンドでインストール中です。完了後にメッセージを再送してください。",
       "dependencyMissingProgress": "バックグラウンドでインストール中…",
       "dependencyMissingDone": "インストール完了。再送できます。",
       "dependencyMissingFailed": "バックグラウンドのインストールに失敗しました。Bot 設定の「依存関係」から再試行してください。",
-      "dependencyOpen": "依存関係を開く",
-      "dependencyAlign": "バージョンを合わせる"
+      "dependencyOpen": "依存関係を開く"
     },
     "sessionFilterAll": "全て",
     "searchSessionPlaceholder": "検索",
@@ -2227,24 +2225,34 @@
       "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
       "modelsLoadFailed": "Agent のモデルを読み込めませんでした。Agent の設定を確認して、もう一度お試しください。",
       "openSettings": "Agent の設定を開く",
-      "dependencyRequired": "Workspace に {name} {version} が必要です",
       "dependencyChecking": "依存関係を確認中…",
-      "dependencySatisfied": "{name} {version} はインストール済みです",
       "dependencyRemoteOffline": "この Bot が接続しているコンピューターはオフラインです。オンラインになると依存関係を確認できます。"
     },
     "dependencies": {
       "title": "Workspace の依存関係",
-      "intro": "この Bot の Workspace にある Agent CLI・ランタイム・ツールを管理します。",
-      "group": {
-        "agent": "Agent CLI",
-        "runtime": "ランタイム",
-        "tool": "ツール"
+      "intro": "この Bot の Workspace にインストール済みのコマンドラインツールとランタイムです。新しい依存関係は Supermarket から追加します。",
+      "catalog": {
+        "codex": {
+          "description": "OpenAI Codex コマンドライン"
+        },
+        "claude-code": {
+          "description": "Anthropic Claude Code コマンドライン"
+        },
+        "node": {
+          "description": "JavaScript ランタイム（npm・npx 付き）"
+        },
+        "python": {
+          "description": "Python インタープリター（pip 付き）"
+        },
+        "uv": {
+          "description": "Python のパッケージ・プロジェクト管理ツール"
+        }
       },
       "checkUpdates": "更新を確認",
       "checkUpdatesDone": "更新の確認が完了しました",
       "lastChecked": "最終確認：{time}",
-      "imageProvidedDescription": "Workspace イメージが提供します。削除できません。",
-      "emptyTitle": "管理できる依存関係がありません",
+      "emptyTitle": "この Workspace にはまだ何もインストールされていません",
+      "emptyAction": "Supermarket から追加",
       "loadFailed": "依存関係を読み込めませんでした",
       "close": "閉じる",
       "status": {
@@ -2255,20 +2263,14 @@
         "installing": "インストール中",
         "updating": "更新中",
         "removing": "削除中",
-        "needsAlignment": "{version} への更新が必要",
         "updateAvailable": "{version} が利用可能",
         "unsupported": "非対応",
         "unsupportedTooltip": "この Workspace のプラットフォームでは利用できません。"
-      },
-      "source": {
-        "image": "イメージ付属",
-        "managed": "管理対象"
       },
       "action": {
         "install": "インストール",
         "reinstall": "再インストール",
         "update": "更新",
-        "align": "バージョンを合わせる",
         "rollback": "{version} にロールバック",
         "rollbackPlain": "ロールバック",
         "remove": "削除",
@@ -2288,23 +2290,19 @@
         "installTitle": "{name} をインストール",
         "reinstallTitle": "{name} を再インストール",
         "updateTitle": "{name} を更新",
-        "alignTitle": "{name} を Server が要求するバージョンに更新",
-        "alignDescription": "この Server は {name} {version} を必要とします。",
-        "updateDescription": "{from} から {to} に更新します。新しいバージョンは別ディレクトリにインストールされ、成功時のみ切り替わります。後からロールバックできます。",
-        "installDescription": "Workspace に {name} {version} をダウンロードしてインストールします。",
-        "installLatestDescription": "Workspace に最新の {name} をダウンロードしてインストールします。",
+        "updateDescription": "現在は {from} です。新しいバージョンを先にインストールし、成功した場合のみ切り替えます。失敗しても現在のバージョンには影響せず、後からロールバックできます。",
+        "installDescription": "Workspace に {name} をダウンロードしてインストールします。",
         "reinstallDescription": "現在の {name} を削除して再インストールします。完了するまで、これに依存する Agent は起動できません。",
         "dependency": "依存関係",
-        "targetVersion": "対象バージョン",
         "installPath": "インストール先",
-        "downloadSize": "ダウンロード量",
+        "version": "バージョン",
+        "versionPlaceholder": "例：0.151.0",
+        "versionHelp": "空欄のままにすると最新バージョンをインストールします。",
         "remoteWarningTitle": "お使いのコンピューター「{name}」で実行されます",
         "remoteWarningDescription": "スクリプトはそのコンピューター上でファイルをダウンロードして書き込みます。",
         "installConfirm": "インストール",
         "updateConfirm": "更新",
-        "alignConfirm": "{version} に更新",
-        "installAndEnable": "インストールして有効化",
-        "alignAndEnable": "更新して有効化"
+        "installAndEnable": "インストールして有効化"
       },
       "progress": {
         "installing": "{name} をインストール中",
@@ -2331,7 +2329,8 @@
       },
       "remove": {
         "title": "{name} を削除しますか？",
-        "description": "{path} 以下のすべてのバージョンを削除します。これに依存する Agent は再インストールまで起動できません。"
+        "description": "{path} 以下のすべてのバージョンを削除します。これに依存する Agent は再インストールまで起動できません。",
+        "overlayDescription": "{installed} を削除し、Workspace は {image_version} に戻ります。"
       },
       "rollback": {
         "title": "{name} をロールバック",
@@ -2348,13 +2347,7 @@
         "workspaceNotRunningDescription": "{name} を有効にするには、起動中の Workspace に依存関係をインストールする必要があります。",
         "workspaceMissingTitle": "まず Workspace を作成してください",
         "startAndContinue": "起動して続行",
-        "platformUnsupported": "この Workspace のプラットフォームでは {name} を利用できません",
-        "enabled": "{name} をインストールして有効化しました"
-      },
-      "notice": {
-        "title": "依存関係の更新があります",
-        "description": "自動では更新されません。一覧から個別に確認してください。",
-        "gotIt": "OK"
+        "platformUnsupported": "この Workspace のプラットフォームでは {name} を利用できません"
       },
       "done": "完了",
       "errorDetails": "エラーの詳細",
@@ -3473,13 +3466,19 @@
     "skillsSection": "スキル",
     "packagesSection": "Package",
     "connectorsSection": "コネクター",
+    "dependenciesSection": "依存関係",
     "noResults": "結果が見つかりませんでした",
     "noPackageResults": "Package が見つかりません",
     "noConnectorResults": "コネクターが見つかりません",
+    "noDependencyResults": "依存関係が見つかりません",
     "install": "インストール",
     "installToBot": "Botにインストールする",
     "selectBot": "Botを選択してください",
     "selectBotPlaceholder": "インストールするBotを選択してください...",
+    "selectWorkspaceTarget": "Workspace",
+    "dependencyInstallTitle": "{name} をインストール",
+    "dependencyInstalled": "{name} をインストールしました",
+    "viewBotDependencies": "Bot の依存関係を表示",
     "envVariables": "環境変数",
     "envDescription": "必要な環境変数を構成する",
     "installSuccess": "正常にインストールされました",

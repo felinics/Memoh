@@ -19,8 +19,8 @@ describe('dependencyMissingArgs', () => {
       type: 'error',
       code: 'agent_dependency_missing',
       content: '',
-      args: { dep_id: ' codex ', required_version: '0.151.0', install_task_id: '' },
-    })).toEqual({ dep_id: 'codex', required_version: '0.151.0' })
+      args: { dep_id: ' codex ', install_task_id: ' task-1 ', request_id: '' },
+    })).toEqual({ dep_id: 'codex', install_task_id: 'task-1' })
     expect(dependencyMissingArgs({ id: 0, type: 'error', content: 'x' })).toEqual({})
   })
 })

@@ -74,9 +74,8 @@
         </Button>
       </CalloutBanner>
 
-      <!-- One group of placeholders, not three: the real groups are unknown
-           until the catalog arrives, and three frames collapsing into a
-           different number would jump. -->
+      <!-- Placeholders in the shape of the rows they become, so the list
+           does not jump when the first answer lands. -->
       <SettingsSection v-if="loading">
         <SettingsRow
           v-for="n in 4"
@@ -110,40 +109,47 @@
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection v-else-if="items.length === 0">
+      <!-- Nothing installed yet: the same frame the populated list draws, with
+           the one move that fills it. -->
+      <SettingsSection v-else-if="rows.length === 0">
         <Empty class="py-12">
           <EmptyHeader>
             <EmptyTitle>{{ t('bots.dependencies.emptyTitle') }}</EmptyTitle>
           </EmptyHeader>
+          <EmptyContent>
+            <Button
+              variant="outline"
+              @click="goToSupermarket"
+            >
+              {{ t('bots.dependencies.emptyAction') }}
+              <ArrowRight />
+            </Button>
+          </EmptyContent>
         </Empty>
       </SettingsSection>
 
-      <template v-else>
-        <SettingsSection
-          v-for="group in groups"
-          :key="group.category"
-          :title="t(`bots.dependencies.group.${group.category}`)"
+      <!-- One flat list: an agent CLI, a runtime, and a tool are the same kind
+           of thing to the user. Rows that need a hand come first. -->
+      <SettingsSection v-else>
+        <DependencyRow
+          v-for="item in rows"
+          :key="item.id"
+          :item="item"
+          :workspace-state="workspaceState"
+          :busy="running"
+          :owns-stream="ownsStream(item.id)"
+          @primary="onPrimary(item, $event)"
+          @menu="onMenu(item, $event)"
+        />
+        <template
+          v-if="lastChecked"
+          #footer
         >
-          <DependencyRow
-            v-for="item in group.items"
-            :key="item.id"
-            :item="item"
-            :workspace-state="workspaceState"
-            :busy="running"
-            :owns-stream="ownsStream(item.id)"
-            @primary="onPrimary(item, $event)"
-            @menu="onMenu(item, $event)"
-          />
-          <template
-            v-if="group.category === 'tool' && lastChecked"
-            #footer
-          >
-            <span class="text-body text-muted-foreground">
-              {{ t('bots.dependencies.lastChecked', { time: lastChecked }) }}
-            </span>
-          </template>
-        </SettingsSection>
-      </template>
+          <span class="text-body text-muted-foreground">
+            {{ t('bots.dependencies.lastChecked', { time: lastChecked }) }}
+          </span>
+        </template>
+      </SettingsSection>
     </div>
 
     <DependencyConfirmDialog
@@ -175,7 +181,7 @@
       :script="script.data"
       :loading="script.loading"
       :error="script.error"
-      :dependency-name="script.item ? dependencyDisplayName(script.item) : ''"
+      :dependency-name="script.item ? dependencyName(script.item) : ''"
       :action="script.action"
       :actions="script.actions"
       @update:open="(value) => { script.open = value }"
@@ -184,8 +190,8 @@
 
     <ConfirmDeleteDialog
       :open="!!removeTarget"
-      :title="t('bots.dependencies.remove.title', { name: removeTarget ? dependencyDisplayName(removeTarget) : '' })"
-      :description="t('bots.dependencies.remove.description', { path: removeTarget?.install_path ?? '' })"
+      :title="t('bots.dependencies.remove.title', { name: removeTarget ? dependencyName(removeTarget) : '' })"
+      :description="removeDescription"
       :cancel-label="t('common.cancel')"
       :confirm-label="t('bots.dependencies.action.remove')"
       @update:open="(value) => { if (!value) removeTarget = null }"
@@ -212,6 +218,7 @@ import {
   CalloutBanner,
   ConfirmDeleteDialog,
   Empty,
+  EmptyContent,
   EmptyHeader,
   EmptyTitle,
   PageShell,
@@ -225,7 +232,7 @@ import {
   Skeleton,
   toast,
 } from '@felinic/ui'
-import { RefreshCw } from 'lucide-vue-next'
+import { ArrowRight, RefreshCw } from 'lucide-vue-next'
 import {
   getBotsByBotIdWorkspaceTargets,
   postBotsByBotIdContainerStart,
@@ -243,7 +250,6 @@ import {
   invalidateBotDependencies,
   rollbackDependency,
   useBotDependenciesQuery,
-  type DependencyCategory,
   type DependencyItem,
   type DependencyOperationAction,
   type DependencyWorkspaceState,
@@ -251,13 +257,15 @@ import {
   type ScriptResponse,
 } from '@/composables/api/useWorkspaceDependencies'
 import { useDialogMutation } from '@/composables/useDialogMutation'
+import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import { formatRelativeTime } from '@/utils/date-time'
 import {
   dependencyAllows,
-  dependencyDisplayName,
   dependencyInProgress,
+  dependencyIsInstalled,
   formatDependencyVersion,
+  sortDependencies,
   type DependencyConfirmMode,
   type DependencyMenuAction,
   type DependencyPrimaryAction,
@@ -277,6 +285,7 @@ const route = useRoute()
 const router = useRouter()
 const queryCache = useQueryCache()
 const { run: runMutation } = useDialogMutation()
+const { dependencyName } = useWorkspaceDependencyText()
 const botIdRef = computed(() => props.botId) as Ref<string>
 
 // ---- Workspace target -------------------------------------------------------
@@ -325,6 +334,8 @@ watch(() => props.botId, () => {
 const { data, error, isLoading, refetch } = useBotDependenciesQuery(botIdRef, selectedTargetId)
 
 const items = computed<DependencyItem[]>(() => data.value?.items ?? [])
+// The tab lists what is in the workspace; the Supermarket lists what could be.
+const rows = computed(() => sortDependencies(items.value.filter(dependencyIsInstalled), dependencyName))
 // Skeleton until the first answer lands — including the moment before the
 // bot id resolves and the query is still disabled, which is not "empty".
 const loading = computed(() => (isLoading.value || !botIdRef.value) && !data.value && !error.value)
@@ -365,14 +376,8 @@ const banner = computed(() => {
   }
 })
 
-const GROUP_ORDER: DependencyCategory[] = ['agent', 'runtime', 'tool']
-const groups = computed(() => GROUP_ORDER
-  .map(category => ({ category, items: items.value.filter(item => item.category === category) }))
-  .filter(group => group.items.length > 0))
-
 const lastChecked = computed(() => {
-  const latest = items.value
-    .filter(item => item.category === 'tool')
+  const latest = rows.value
     .map(item => item.last_checked_at ?? '')
     .filter(Boolean)
     .sort()
@@ -408,10 +413,10 @@ function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operatio
   confirm.open = true
 }
 
-function onConfirmed() {
+function onConfirmed(version: string) {
   const item = confirm.item
   confirm.open = false
-  if (item) start(item, confirm.operation)
+  if (item) start(item, confirm.operation, { version })
 }
 
 function onPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
@@ -424,7 +429,9 @@ function onPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
       start(item, action.operation ?? 'install')
       return
     case 'update':
-      openConfirm(item, 'update', 'update')
+      // Reads as an update either way; the Server decides whether that is an
+      // in-place update or an install laid over the image copy.
+      openConfirm(item, 'update', action.operation ?? 'update')
       return
     default:
       // "Install" and the missing row's "Reinstall" both run the install
@@ -437,8 +444,26 @@ const removeTarget = ref<DependencyItem | null>(null)
 const rollbackTarget = ref<DependencyItem | null>(null)
 const rollingBack = ref(false)
 
+// Removing an overlay uncovers the image copy; removing anything else leaves
+// nothing behind. The dialog states the result and nothing more.
+const removeDescription = computed(() => {
+  const item = removeTarget.value
+  if (!item) return ''
+  const imageVersion = formatDependencyVersion(item.image_version)
+  if (item.overlay && imageVersion) {
+    return t('bots.dependencies.remove.overlayDescription', {
+      installed: formatDependencyVersion(item.installed_version),
+      image_version: imageVersion,
+    })
+  }
+  return t('bots.dependencies.remove.description', { path: item.install_path ?? '' })
+})
+
 function onMenu(item: DependencyItem, action: DependencyMenuAction) {
   switch (action.kind) {
+    case 'install':
+      openConfirm(item, 'install', 'install')
+      return
     case 'reinstall':
       openConfirm(item, 'reinstall', 'reinstall')
       return
@@ -543,7 +568,7 @@ function openScriptFromConfirm() {
   void openScript(item, confirm.operation === 'update' ? 'update' : 'install')
 }
 
-// ---- Manual refresh & workspace start --------------------------------------
+// ---- Manual refresh, workspace start & navigation ---------------------------
 
 const checking = ref(false)
 async function checkUpdates() {
@@ -586,11 +611,18 @@ function goToContainer() {
   void router.replace({ query: { ...route.query, tab: 'container' } }).catch(() => {})
 }
 
+// The Supermarket's Dependencies tab lists the whole catalog; carrying the bot
+// id preselects this bot in its install dialog.
+function goToSupermarket() {
+  void router.push({ name: 'supermarket', query: { tab: 'dependencies', botId: props.botId } }).catch(() => {})
+}
+
 // ---- Polling for operations this client does not own ------------------------
 
-// An install started elsewhere (the chat's background install, another tab)
-// shows up as an in-progress row with no stream here; poll until it settles.
-// KeepAlive wraps this tab, so the poll pauses on deactivate rather than unmount.
+// An install started elsewhere (the chat's background install, another tab,
+// the Supermarket) shows up as an in-progress row with no stream here; poll
+// until it settles. KeepAlive wraps this tab, so the poll pauses on deactivate
+// rather than unmount.
 const POLL_MS = 5_000
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let tabActive = true

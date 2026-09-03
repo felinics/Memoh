@@ -9,14 +9,12 @@ import { acpAgentDisplayName } from '@/utils/acp'
 // Pure decision table of the "enable an agent" preflight (design §9.3). The
 // flow component owns the dialogs; this module only maps the agent's declared
 // dependency plus the Server's preflight answer onto the next step, so the
-// branch list can be unit-tested without mounting anything. Agent CLIs are not
+// branch list can be unit-tested without mounting anything. No dependency is
 // pinned to a version: an installed copy passes whatever its version, so the
 // only blocking states are "not installed" and "not available on this platform".
 
 export interface EnableFlowRequirement {
   dependencyId: string
-  /** Version hint the Server may still report; empty means "latest". */
-  requiredVersion: string
 }
 
 export type EnableFlowStep =
@@ -35,10 +33,7 @@ export function agentDependencyRequirement(
 ): EnableFlowRequirement | null {
   const dependencyId = agent?.dependency?.dependency_id?.trim() ?? ''
   if (!dependencyId) return null
-  return {
-    dependencyId,
-    requiredVersion: agent?.dependency?.required_version?.trim() ?? '',
-  }
+  return { dependencyId }
 }
 
 /**
@@ -55,9 +50,8 @@ export function dependencyItemFromPreflight(
     name: preflight?.name?.trim() || acpAgentDisplayName(requirement.dependencyId, requirement.dependencyId),
     category: 'agent',
     source: 'managed',
-    required_version: preflight?.required_version?.trim() || requirement.requiredVersion || undefined,
     installed_version: preflight?.installed_version?.trim() || undefined,
-    status: state === 'satisfied' || state === 'version_mismatch' ? 'installed' : undefined,
+    status: state === 'satisfied' ? 'installed' : undefined,
     platform_supported: state !== 'platform_unsupported',
   }
 }
@@ -78,8 +72,6 @@ export function resolveEnableFlowStep(
   const item = dependencyItemFromPreflight(requirement, preflight)
   switch (preflight.state) {
     case 'satisfied':
-    // No pin: any installed version is good enough to enable (WD-EXT-001).
-    case 'version_mismatch':
       return { kind: 'satisfied' }
     case 'missing':
       return { kind: 'install', item }
