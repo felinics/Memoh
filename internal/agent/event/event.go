@@ -82,6 +82,16 @@ type StepTiming struct {
 	EndedAtMS      int64 `json:"endedAtMs,omitempty"`
 }
 
+// ExecutionTimingMetadataKey carries an ExecutionTiming in tool call
+// metadata: on tool_call_end events and on the persisted tool-call part.
+const ExecutionTimingMetadataKey = "execution_timing"
+
+// ExecutionTiming is the server-observed wall clock of one tool execution.
+type ExecutionTiming struct {
+	StartedAtMS int64 `json:"started_at_ms"`
+	EndedAtMS   int64 `json:"ended_at_ms"`
+}
+
 // IsTerminal returns true for events that signal end of stream.
 func (e StreamEvent) IsTerminal() bool {
 	return e.Type == AgentEnd || e.Type == AgentAbort

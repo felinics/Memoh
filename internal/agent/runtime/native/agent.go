@@ -369,6 +369,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		})
 	})
 	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
+	sdkTools = toolExecutionMetadata.wrapExecute(sdkTools)
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -1015,6 +1016,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	toolExecutionMetadata := newToolExecutionMetadataRegistry(nil)
 	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
+	sdkTools = toolExecutionMetadata.wrapExecute(sdkTools)
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
