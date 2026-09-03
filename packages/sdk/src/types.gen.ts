@@ -1217,6 +1217,7 @@ export type ContextfragLifecycleSnapshot = {
     memory_recall?: ContextfragMemoryRecallTrace;
     model?: string;
     mutations?: Array<ContextfragMutationRecord>;
+    run_trace?: ContextfragRunTrace;
     selection?: ContextfragSelectionTrace;
     selection_decisions?: Array<ContextfragSelectionDecision>;
     stable_message_count?: number;
@@ -1271,6 +1272,23 @@ export type ContextfragMutationRecord = {
 export type ContextfragRefDurability = 'durable' | 'synthetic' | 'debug';
 
 export type ContextfragRetentionTier = '' | 'required' | 'preferred' | 'optional';
+
+export type ContextfragRunTrace = {
+    cache_write_tokens?: number;
+    cached_input_tokens?: number;
+    decode_ms?: number;
+    decode_output_tokens?: number;
+    ended_at_ms?: number;
+    input_tokens?: number;
+    llm_ms?: number;
+    output_tokens?: number;
+    reasoning_tokens?: number;
+    started_at_ms?: number;
+    steps?: number;
+    tool_calls?: number;
+    tool_ms?: number;
+    ttft_ms?: number;
+};
 
 export type ContextfragSelectionDecision = {
     cache_class?: ContextfragCacheClass;
@@ -1382,9 +1400,18 @@ export type ConversationUiBackgroundTask = {
     task_id?: string;
 };
 
+export type ConversationUiContextInjection = {
+    kind?: 'steering' | 'prepared';
+};
+
 export type ConversationUiExecutionLocation = {
     kind?: string;
     name?: string;
+};
+
+export type ConversationUiExecutionTiming = {
+    ended_at_ms?: number;
+    started_at_ms?: number;
 };
 
 export type ConversationUiForwardRef = {
@@ -1402,6 +1429,7 @@ export type ConversationUiMessage = {
     code?: string;
     content?: string;
     execution_location?: ConversationUiExecutionLocation;
+    execution_timing?: ConversationUiExecutionTiming;
     id?: number;
     input?: unknown;
     name?: string;
@@ -1427,6 +1455,16 @@ export type ConversationUiReplyRef = {
     sender?: string;
 };
 
+export type ConversationUiStepTrace = {
+    ended_at_ms?: number;
+    finish_reason?: string;
+    first_message_id?: number;
+    first_token_at_ms?: number;
+    started_at_ms?: number;
+    step_index?: number;
+    usage?: MessageStepTraceUsage;
+};
+
 export type ConversationUiToolApproval = {
     approval_id?: string;
     can_approve?: boolean;
@@ -1450,6 +1488,7 @@ export type ConversationUiToolApprovalOption = {
 export type ConversationUiTurn = {
     attachments?: Array<ConversationUiAttachment>;
     background_task?: ConversationUiBackgroundTask;
+    context_injection?: ConversationUiContextInjection;
     external_message_id?: string;
     forward?: ConversationUiForwardRef;
     id?: string;
@@ -1462,6 +1501,7 @@ export type ConversationUiTurn = {
     sender_display_name?: string;
     sender_user_id?: string;
     skill_activation?: ConversationSkillActivation;
+    step_traces?: Array<ConversationUiStepTrace>;
     text?: string;
     timestamp: Date;
     turn_id: string;
@@ -1885,6 +1925,11 @@ export type HandlersContextLifecycleResponse = {
      * Limit is the page bound the turns and aggregates were computed over.
      */
     limit?: number;
+    /**
+     * NextCursor is the opaque `before` value that continues past this page's
+     * oldest run; absent when the page is complete or served from legacy rows.
+     */
+    next_cursor?: string;
     turns?: Array<HandlersContextLifecycleTurn>;
 };
 
@@ -2904,6 +2949,14 @@ export type McpUpsertRequest = {
     name?: string;
     transport?: string;
     url?: string;
+};
+
+export type MessageStepTraceUsage = {
+    cache_write_tokens?: number;
+    cached_input_tokens?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    reasoning_tokens?: number;
 };
 
 export type ModelsAddRequest = {
@@ -9995,6 +10048,10 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleData = {
          * Maximum number of turns to return (default 50, max 200)
          */
         limit?: number;
+        /**
+         * Opaque next_cursor from a previous page; returns run-keyed turns older than it
+         */
+        before?: string;
     };
     url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle';
 };

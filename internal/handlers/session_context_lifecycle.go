@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,6 +34,9 @@ type ContextLifecycleResponse struct {
 	Limit int `json:"limit"`
 	// HasMore reports whether older lifecycle turns exist beyond this page.
 	HasMore bool `json:"has_more"`
+	// NextCursor is the opaque `before` value that continues past this page's
+	// oldest run; absent when the page is complete or served from legacy rows.
+	NextCursor string `json:"next_cursor,omitempty"`
 	// LegacySource reports that turns were recovered from pre-run-table
 	// assistant metadata instead of the run-keyed lifecycle table.
 	LegacySource bool `json:"legacy_source,omitempty"`
@@ -77,6 +81,7 @@ type ContextLifecycleAggregates struct {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Param limit query int false "Maximum number of turns to return (default 50, max 200)"
+// @Param before query string false "Opaque next_cursor from a previous page; returns run-keyed turns older than it"
 // @Success 200 {object} ContextLifecycleResponse
 // @Failure 400 {object} apperror.Problem
 // @Failure 401 {object} apperror.Problem
@@ -148,7 +153,15 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	}
 
 	limit := contextLifecycleLimit(c)
-	load, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, limit)
+	var before *contextLifecycleCursor
+	if raw := strings.TrimSpace(c.QueryParam("before")); raw != "" {
+		cursor, ok := decodeContextLifecycleCursor(raw)
+		if !ok {
+			return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+		}
+		before = &cursor
+	}
+	load, err := loadContextLifecycleTurns(ctx, h.queries, pgSessionID, limit, before)
 	if err != nil {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
@@ -157,6 +170,7 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 		Aggregates:            aggregateContextLifecycle(load.Turns),
 		Limit:                 limit,
 		HasMore:               load.HasMore,
+		NextCursor:            load.NextCursor,
 		LegacySource:          load.LegacySource,
 		LegacyHistoryMayExist: load.LegacyHistoryMayExist,
 		AggregateScope:        contextLifecycleAggregateScope,
@@ -218,10 +232,46 @@ type contextLifecycleLoad struct {
 	LegacySource bool
 	// HasMore reports that the chosen source holds older rows beyond the page.
 	HasMore bool
+	// NextCursor continues a run-keyed page past its oldest turn; empty when
+	// the page is complete or came from the legacy source.
+	NextCursor string
 	// LegacyHistoryMayExist reports that run-keyed rows were returned while
 	// older pre-run-table metadata also exists for the session, so the page
 	// does not cover the session's full history era.
 	LegacyHistoryMayExist bool
+}
+
+// contextLifecycleCursor is the keyset position of the oldest returned run:
+// the list orders by (created_at DESC, run_id DESC), so the next page is every
+// row strictly before this pair.
+type contextLifecycleCursor struct {
+	createdAt time.Time
+	runID     pgtype.UUID
+}
+
+func encodeContextLifecycleCursor(createdAt time.Time, runID pgtype.UUID) string {
+	raw := createdAt.UTC().Format(time.RFC3339Nano) + "|" + runID.String()
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeContextLifecycleCursor(cursor string) (contextLifecycleCursor, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
+	if err != nil {
+		return contextLifecycleCursor{}, false
+	}
+	at, id, ok := strings.Cut(string(raw), "|")
+	if !ok {
+		return contextLifecycleCursor{}, false
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return contextLifecycleCursor{}, false
+	}
+	runID, err := db.ParseUUID(id)
+	if err != nil {
+		return contextLifecycleCursor{}, false
+	}
+	return contextLifecycleCursor{createdAt: createdAt, runID: runID}, true
 }
 
 func loadContextLifecycleTurns(
@@ -229,12 +279,18 @@ func loadContextLifecycleTurns(
 	queries contextLifecycleQueries,
 	sessionID pgtype.UUID,
 	limit int,
+	before *contextLifecycleCursor,
 ) (contextLifecycleLoad, error) {
 	probe := limit + 1
-	rows, err := queries.ListRecentContextLifecyclesBySession(ctx, sqlc.ListRecentContextLifecyclesBySessionParams{
+	params := sqlc.ListRecentContextLifecyclesBySessionParams{
 		SessionID: sessionID,
 		MaxCount:  int32(probe), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
-	})
+	}
+	if before != nil {
+		params.BeforeCreatedAt = pgtype.Timestamptz{Time: before.createdAt, Valid: true}
+		params.BeforeRunID = before.runID
+	}
+	rows, err := queries.ListRecentContextLifecyclesBySession(ctx, params)
 	if err != nil {
 		return contextLifecycleLoad{}, fmt.Errorf("list run lifecycles: %w", err)
 	}
@@ -247,11 +303,16 @@ func loadContextLifecycleTurns(
 		if err != nil {
 			return contextLifecycleLoad{}, fmt.Errorf("probe unmaterialized legacy lifecycles: %w", err)
 		}
-		return contextLifecycleLoad{
+		load := contextLifecycleLoad{
 			Turns:                 turns,
 			HasMore:               len(rows) > limit,
 			LegacyHistoryMayExist: unmaterialized,
-		}, nil
+		}
+		if load.HasMore && len(turns) > 0 {
+			last := rows[len(turns)-1]
+			load.NextCursor = encodeContextLifecycleCursor(last.CreatedAt.Time, last.RunID)
+		}
+		return load, nil
 	}
 
 	legacyRows, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{

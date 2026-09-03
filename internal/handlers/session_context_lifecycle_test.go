@@ -225,6 +225,7 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 		queries,
 		pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
 		7,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
@@ -275,6 +276,7 @@ func TestLoadContextLifecycleTurnsPreservesRunOrderingAndLimit(t *testing.T) {
 		queries,
 		pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 		2,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
@@ -313,6 +315,7 @@ func TestLoadContextLifecycleTurnsFallsBackOnlyWhenRunRowsDoNotExist(t *testing.
 		queries,
 		pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
 		1,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
@@ -349,6 +352,7 @@ func TestLoadContextLifecycleTurnsDoesNotMaskRunQueryFailure(t *testing.T) {
 				queries,
 				pgtype.UUID{Bytes: [16]byte{7}, Valid: true},
 				1,
+				nil,
 			)
 			if err == nil {
 				t.Fatal("expected run-table failure")

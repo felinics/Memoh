@@ -157,6 +157,10 @@ SELECT
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
+  AND (
+    sqlc.narg(before_created_at)::timestamptz IS NULL
+    OR (created_at, run_id) < (sqlc.narg(before_created_at)::timestamptz, sqlc.narg(before_run_id)::uuid)
+  )
 ORDER BY created_at DESC, run_id DESC
 LIMIT sqlc.arg(max_count);
 

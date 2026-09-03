@@ -2126,6 +2126,8 @@ definitions:
         items:
           $ref: '#/definitions/contextfrag.MutationRecord'
         type: array
+      run_trace:
+        $ref: '#/definitions/contextfrag.RunTrace'
       selection:
         $ref: '#/definitions/contextfrag.SelectionTrace'
       selection_decisions:
@@ -2272,6 +2274,37 @@ definitions:
     - RetentionRequired
     - RetentionPreferred
     - RetentionOptional
+  contextfrag.RunTrace:
+    properties:
+      cache_write_tokens:
+        type: integer
+      cached_input_tokens:
+        type: integer
+      decode_ms:
+        type: integer
+      decode_output_tokens:
+        type: integer
+      ended_at_ms:
+        type: integer
+      input_tokens:
+        type: integer
+      llm_ms:
+        type: integer
+      output_tokens:
+        type: integer
+      reasoning_tokens:
+        type: integer
+      started_at_ms:
+        type: integer
+      steps:
+        type: integer
+      tool_calls:
+        type: integer
+      tool_ms:
+        type: integer
+      ttft_ms:
+        type: integer
+    type: object
   contextfrag.SelectionDecision:
     properties:
       cache_class:
@@ -2479,12 +2512,27 @@ definitions:
       task_id:
         type: string
     type: object
+  conversation.UIContextInjection:
+    properties:
+      kind:
+        enum:
+        - steering
+        - prepared
+        type: string
+    type: object
   conversation.UIExecutionLocation:
     properties:
       kind:
         type: string
       name:
         type: string
+    type: object
+  conversation.UIExecutionTiming:
+    properties:
+      ended_at_ms:
+        type: integer
+      started_at_ms:
+        type: integer
     type: object
   conversation.UIForwardRef:
     properties:
@@ -2515,6 +2563,8 @@ definitions:
         type: string
       execution_location:
         $ref: '#/definitions/conversation.UIExecutionLocation'
+      execution_timing:
+        $ref: '#/definitions/conversation.UIExecutionTiming'
       id:
         type: integer
       input: {}
@@ -2569,6 +2619,23 @@ definitions:
       sender:
         type: string
     type: object
+  conversation.UIStepTrace:
+    properties:
+      ended_at_ms:
+        type: integer
+      finish_reason:
+        type: string
+      first_message_id:
+        type: integer
+      first_token_at_ms:
+        type: integer
+      started_at_ms:
+        type: integer
+      step_index:
+        type: integer
+      usage:
+        $ref: '#/definitions/message.StepTraceUsage'
+    type: object
   conversation.UIToolApproval:
     properties:
       approval_id:
@@ -2608,6 +2675,8 @@ definitions:
         type: array
       background_task:
         $ref: '#/definitions/conversation.UIBackgroundTask'
+      context_injection:
+        $ref: '#/definitions/conversation.UIContextInjection'
       external_message_id:
         type: string
       forward:
@@ -2638,6 +2707,10 @@ definitions:
         type: string
       skill_activation:
         $ref: '#/definitions/conversation.SkillActivation'
+      step_traces:
+        items:
+          $ref: '#/definitions/conversation.UIStepTrace'
+        type: array
       text:
         type: string
       timestamp:
@@ -3312,6 +3385,11 @@ definitions:
         description: Limit is the page bound the turns and aggregates were computed
           over.
         type: integer
+      next_cursor:
+        description: |-
+          NextCursor is the opaque `before` value that continues past this page's
+          oldest run; absent when the page is complete or served from legacy rows.
+        type: string
       turns:
         items:
           $ref: '#/definitions/handlers.ContextLifecycleTurn'
@@ -5100,6 +5178,19 @@ definitions:
         type: string
       url:
         type: string
+    type: object
+  message.StepTraceUsage:
+    properties:
+      cache_write_tokens:
+        type: integer
+      cached_input_tokens:
+        type: integer
+      input_tokens:
+        type: integer
+      output_tokens:
+        type: integer
+      reasoning_tokens:
+        type: integer
     type: object
   models.AddRequest:
     properties:
@@ -11456,6 +11547,11 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Opaque next_cursor from a previous page; returns run-keyed turns
+          older than it
+        in: query
+        name: before
+        type: string
       responses:
         "200":
           description: OK

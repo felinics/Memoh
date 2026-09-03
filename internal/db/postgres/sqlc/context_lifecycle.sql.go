@@ -264,13 +264,19 @@ SELECT
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND session_id = $1
+  AND (
+    $2::timestamptz IS NULL
+    OR (created_at, run_id) < ($2::timestamptz, $3::uuid)
+  )
 ORDER BY created_at DESC, run_id DESC
-LIMIT $2
+LIMIT $4
 `
 
 type ListRecentContextLifecyclesBySessionParams struct {
-	SessionID pgtype.UUID `json:"session_id"`
-	MaxCount  int32       `json:"max_count"`
+	SessionID       pgtype.UUID        `json:"session_id"`
+	BeforeCreatedAt pgtype.Timestamptz `json:"before_created_at"`
+	BeforeRunID     pgtype.UUID        `json:"before_run_id"`
+	MaxCount        int32              `json:"max_count"`
 }
 
 type ListRecentContextLifecyclesBySessionRow struct {
@@ -282,7 +288,12 @@ type ListRecentContextLifecyclesBySessionRow struct {
 }
 
 func (q *Queries) ListRecentContextLifecyclesBySession(ctx context.Context, arg ListRecentContextLifecyclesBySessionParams) ([]ListRecentContextLifecyclesBySessionRow, error) {
-	rows, err := q.db.Query(ctx, listRecentContextLifecyclesBySession, arg.SessionID, arg.MaxCount)
+	rows, err := q.db.Query(ctx, listRecentContextLifecyclesBySession,
+		arg.SessionID,
+		arg.BeforeCreatedAt,
+		arg.BeforeRunID,
+		arg.MaxCount,
+	)
 	if err != nil {
 		return nil, err
 	}
