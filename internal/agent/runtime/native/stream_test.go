@@ -136,6 +136,9 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 			return nil
 		},
 	}) {
+		if event.Type == EventStepStart || event.Type == EventStepEnd {
+			continue
+		}
 		events = append(events, event)
 	}
 

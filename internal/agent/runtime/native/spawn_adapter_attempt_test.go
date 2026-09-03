@@ -170,10 +170,12 @@ func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpo
 	adapter.SetRunObserverFactory(func(context.Context) SpawnRunObserver {
 		return func(event StreamEvent) SpawnRunObservation {
 			observed = append(observed, event)
+			if event.Type == EventTextDelta {
+				cancel(tools.ErrWatchdogTimedOut)
+			}
 			return SpawnRunObservation{}
 		}
 	})
-	var touches atomic.Int32
 	_, err := adapter.GenerateWithWatchdog(ctx, tools.SpawnRunConfig{
 		Model:       &sdk.Model{ID: "spawn-interrupted-model", Provider: provider, Type: sdk.ModelTypeChat},
 		Query:       "preserve interrupted output",
@@ -190,11 +192,7 @@ func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpo
 			}
 			return tools.SpawnAttemptRetry
 		},
-	}, func() {
-		if touches.Add(1) == 3 {
-			cancel(tools.ErrWatchdogTimedOut)
-		}
-	})
+	}, func() {})
 	if !errors.Is(err, tools.ErrWatchdogTimedOut) {
 		t.Fatalf("GenerateWithWatchdog error = %v, want watchdog timeout", err)
 	}

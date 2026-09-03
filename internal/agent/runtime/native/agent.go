@@ -281,7 +281,9 @@ func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
-	cfg.Model = modelWithProviderStreamEventObserver(cfg.Model, cfg.OnProviderStreamEventObserved)
+	stepClock := newStepClock(time.Now)
+	stepBoundary := &stepBoundaryEmitter{clock: stepClock}
+	cfg.Model = modelWithProviderStreamObserver(cfg.Model, cfg.OnProviderStreamEventObserved, stepClock)
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
@@ -553,6 +555,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		case *sdk.StartPart:
 			_ = p // stream start already emitted
 
+		case *sdk.StartStepPart, *sdk.FinishStepPart:
+			if boundary, ok := stepBoundary.observe(part); ok && !sendEvent(ctx, ch, boundary) {
+				aborted = true
+			}
+
 		case *sdk.TextStartPart:
 			if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
 				aborted = true
@@ -744,7 +751,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, streamCtx, cancel, toolLoopAbortCallIDs,
 					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
-					committedStepMessages, onStepCommitted, &interruptedStep,
+					committedStepMessages, onStepCommitted, &interruptedStep, stepBoundary,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
 				if !aborted {
@@ -1897,6 +1904,7 @@ func (a *Agent) runMidStreamRetry(
 	_ *stepMessageCapture,
 	onStepCommitted func(context.Context, int, *sdk.StepResult) error,
 	interruptedStep *interruptedStepCapture,
+	stepBoundary *stepBoundaryEmitter,
 	stepNumber int,
 	errMsg string,
 	allText *strings.Builder,
@@ -2003,6 +2011,10 @@ func (a *Agent) runMidStreamRetry(
 			}
 			interruptedStep.observe(retryPart)
 			switch rp := retryPart.(type) {
+			case *sdk.StartStepPart, *sdk.FinishStepPart:
+				if boundary, ok := stepBoundary.observe(retryPart); ok && !sendEvent(sendCtx, ch, boundary) {
+					aborted = true
+				}
 			case *sdk.TextStartPart:
 				if !sendEvent(sendCtx, ch, StreamEvent{Type: EventTextStart}) {
 					aborted = true
