@@ -23,8 +23,8 @@
             v-for="bar in barsByLane[lane]"
             :key="bar.key"
             class="absolute inset-y-0 overflow-hidden rounded-sm"
-            :class="LANE_BAR_CLASS[lane]"
-            :style="barStyle(bar)"
+            :class="barClass(bar)"
+            :style="{ left: `${bar.leftPct}%`, width: `${bar.widthPct}%` }"
             :title="barTitle(bar)"
             :data-testid="`trajectory-bar-${bar.key}`"
           >
@@ -45,7 +45,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { TimelineLane, TurnTimeline } from '../../composables/trajectory-model'
-import { formatDurationMs, laneGeometry, LANE_BAR_CLASS, LANE_LABEL_KEY, LANE_TTFT_CLASS, type LaneBar, type TimelineMode } from '../../composables/trajectory-view'
+import { formatDurationMs, laneGeometry, LANE_BAR_CLASS, LANE_INPUT_LIGHT_CLASS, LANE_LABEL_KEY, LANE_TTFT_CLASS, type LaneBar, type TimelineMode } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 
 const props = defineProps<{
@@ -63,12 +63,10 @@ const barsByLane = computed(() => {
   return grouped
 })
 
-function barStyle(bar: LaneBar) {
-  return {
-    left: `${bar.leftPct}%`,
-    width: `${bar.widthPct}%`,
-    opacity: bar.lane === 'input' ? 0.35 + bar.intensity * 0.65 : 1,
-  }
+// A request that is small next to the turn's largest one reads on the soft
+// rung of the same hue, so relative size stays on the token ramp.
+function barClass(bar: LaneBar): string {
+  return bar.lane === 'input' && bar.intensity < 0.5 ? LANE_INPUT_LIGHT_CLASS : LANE_BAR_CLASS[bar.lane]
 }
 
 function barTitle(bar: LaneBar): string {

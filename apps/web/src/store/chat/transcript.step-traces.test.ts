@@ -48,7 +48,8 @@ describe('transcript trace facts', () => {
     const [user, assistant, injected] = transcript.messages as [ChatUserTurn, ChatAssistantTurn, ChatUserTurn]
     expect(user.contextInjection).toBeUndefined()
     expect(injected.contextInjection).toEqual({ kind: 'steering' })
-    expect(assistant.stepTraces).toEqual(turns[1]!.role === 'assistant' ? turns[1].step_traces : [])
+    const assistantTurn = turns[1]!
+    expect(assistant.stepTraces).toEqual(assistantTurn.role === 'assistant' ? assistantTurn.step_traces : [])
     const tool = assistant.messages[0] as ToolCallBlock
     expect(tool.execution_timing).toEqual({ started_at_ms: 1_500, ended_at_ms: 1_900 })
   })

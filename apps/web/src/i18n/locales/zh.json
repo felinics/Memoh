@@ -1188,7 +1188,7 @@
       "statsSteps": "{n} 步",
       "statsLlm": "模型 {s}",
       "statsTools": "工具 {s}",
-      "statsTtft": "平均首 token {s}",
+      "statsTtft": "首 token 平均 {s}",
       "statsTokPerSec": "{n} tok/s",
       "statsCacheHit": "缓存命中 {p}%",
       "statsInput": "输入 {n} tok",

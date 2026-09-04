@@ -129,7 +129,6 @@ export function statsSegments(stats: TrajectoryStats): StatsSegment[][] {
   return groups
 }
 
-// Every class is a literal so the Tailwind scanner can see it.
 export const KIND_LABEL_KEY: Record<TrajectoryRowKind, string> = {
   system: 'chat.trajectory.kindSystem',
   user: 'chat.trajectory.kindUser',
@@ -141,6 +140,7 @@ export const KIND_LABEL_KEY: Record<TrajectoryRowKind, string> = {
   notice: 'chat.trajectory.kindNotice',
 }
 
+// Every class below is a literal so the Tailwind scanner can see it.
 export const KIND_TONE_CLASS: Record<TrajectoryRowKind, string> = {
   system: 'text-accent-gray',
   user: 'text-accent-blue',
@@ -165,3 +165,5 @@ export const LANE_BAR_CLASS: Record<TimelineLane, string> = {
 }
 
 export const LANE_TTFT_CLASS = 'bg-accent-purple-soft-active'
+
+export const LANE_INPUT_LIGHT_CLASS = 'bg-accent-blue-soft-active'

@@ -1427,7 +1427,13 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 	    const resetComposerScope = latestDeleted?.botId === bid ? latestDeleted.composerScope?.trim() : ''
 	    const closingPanels: Array<{ id: string }> = []
 	    for (const panel of [...dock.panels]) {
-	      if (panelComponentOf(panel.id) !== 'chat') continue
+	      const component = panelComponentOf(panel.id)
+	      if (component === 'trajectory') {
+	        const sid = panelSessionId(panel)
+	        if (sid && deletedSessionIds.has(sid)) panel.api.close()
+	        continue
+	      }
+	      if (component !== 'chat') continue
 	      const sid = panelSessionId(panel)
 	      if (!sid || !deletedSessionIds.has(sid)) continue
 	      if (resetComposerScope && resetComposerScope === `${bid}:${panel.id}`) {

@@ -2,6 +2,8 @@
   <div
     ref="viewport"
     class="h-full overflow-y-auto"
+    role="listbox"
+    :aria-label="$t('chat.trajectory.title')"
     data-testid="trajectory-ledger"
   >
     <div
@@ -15,11 +17,12 @@
         <div
           v-for="row in mounted"
           :key="row.key"
-          role="button"
+          role="option"
           tabindex="0"
-          class="grid cursor-pointer grid-cols-[3.5rem_5.25rem_minmax(0,1fr)_4.5rem] items-center gap-2 px-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          class="grid cursor-pointer grid-cols-[3.5rem_5.25rem_minmax(0,1fr)_4.5rem] items-center gap-2 px-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           :class="row.turnStart ? 'border-t border-border' : 'border-t border-transparent'"
           :style="{ height: `${rowHeight}px` }"
+          :aria-selected="row.key === selectedKey"
           :data-ui-selected="row.key === selectedKey ? '' : undefined"
           :data-testid="`trajectory-row-${row.kind}`"
           @click="emit('select', row.key)"
@@ -61,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight } from 'lucide-vue-next'
 import { Spinner } from '@felinic/ui'
@@ -78,11 +81,19 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [key: string] }>()
 
 const { t } = useI18n()
-const rowHeight = 28
 const viewport = useTemplateRef<HTMLElement>('viewport')
 const count = computed(() => props.rows.length)
-const { range, scrollToIndex, scrollToBottom } = useVirtualRows(viewport, count, rowHeight)
+const { range, rowHeight, keepAnchored } = useVirtualRows(viewport, count)
 const mounted = computed(() => props.rows.slice(range.value.start, range.value.end))
+
+// Older history loads in above the current rows; the first key that was on
+// screen tells how many rows arrived in front of it.
+watch(() => props.rows, (rows, previous) => {
+  const firstKey = previous?.[0]?.key
+  if (!firstKey || rows === previous) return
+  const index = rows.findIndex(row => row.key === firstKey)
+  if (index > 0) keepAnchored(index)
+}, { flush: 'pre' })
 
 function rowLabel(row: TrajectoryRow): string {
   if (row.kind === 'context') {
@@ -97,6 +108,4 @@ function rowPreview(row: TrajectoryRow): string {
   const tokens = row.detail.lifecycle.snapshot?.counts?.token_estimate ?? 0
   return t('chat.trajectory.systemPreview', { tokens: formatTokenCount(tokens) })
 }
-
-defineExpose({ scrollToIndex, scrollToBottom })
 </script>

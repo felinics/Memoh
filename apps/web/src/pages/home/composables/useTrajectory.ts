@@ -1,11 +1,14 @@
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { toast } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import type { ChatAssistantTurn } from '@/store/chat/types'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatViewTarget } from './useChatViewContext'
 import { useContextLifecycle } from './useContextLifecycle'
 import {
-  buildTrajectoryRows,
   buildTurnTimeline,
+  createTrajectoryRowBuilder,
   foldTrajectoryStats,
   lifecycleByTurnId,
 } from './trajectory-model'
@@ -15,6 +18,7 @@ import type { TimelineMode } from './trajectory-view'
 // history pages and live projection the chat panel already holds, so opening
 // it moves no second copy of the conversation over the wire.
 export function useTrajectory() {
+  const { t } = useI18n()
   const chatStore = useChatStore()
   const target = useChatViewTarget()
   const lifecycle = useContextLifecycle()
@@ -24,8 +28,10 @@ export function useTrajectory() {
     return botId && sessionId ? chatStore.chatView({ botId, sessionId, viewId }).transcript : null
   })
   const messages = computed(() => transcript.value?.visibleMessages.value ?? [])
+  const loadingMessages = computed(() => transcript.value?.loadingMessages.value ?? false)
   const lifecycleByTurn = computed(() => lifecycleByTurnId(lifecycle.turns.value))
-  const rows = computed(() => buildTrajectoryRows(messages.value, lifecycleByTurn.value))
+  const buildRows = createTrajectoryRowBuilder()
+  const rows = computed(() => buildRows(messages.value, lifecycleByTurn.value))
   const stats = computed(() => foldTrajectoryStats(messages.value, lifecycleByTurn.value))
 
   const selectedKey = ref<string | null>(null)
@@ -59,7 +65,11 @@ export function useTrajectory() {
     const tasks: Promise<unknown>[] = []
     if (transcript.value?.hasMoreOlder.value) tasks.push(chatStore.loadOlderMessages(target.value))
     if (lifecycle.canLoadOlder.value) tasks.push(lifecycle.loadOlder())
-    await Promise.all(tasks)
+    try {
+      await Promise.all(tasks)
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, t('chat.lifecycle.loadFailed')))
+    }
   }
 
   function select(key: string | null) {
@@ -70,6 +80,7 @@ export function useTrajectory() {
     hasTarget: computed(() => !!target.value.sessionId),
     rows,
     stats,
+    loadingMessages,
     selectedKey,
     selectedRow,
     focusedTurn,
@@ -79,6 +90,5 @@ export function useTrajectory() {
     loadingOlder,
     loadOlder,
     select,
-    lifecycleStatus: lifecycle.status,
   }
 }

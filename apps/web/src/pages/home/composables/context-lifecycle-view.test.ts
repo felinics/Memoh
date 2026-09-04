@@ -190,11 +190,17 @@ describe('mergeLifecyclePages', () => {
         { turns: [turn('r8'), turn('r7')], has_more: true, next_cursor: 'c2', limit: 2 },
         { turns: [turn('r6')], has_more: false, limit: 2 },
       ],
+      'c1',
     )
     expect(merged.turns.map(item => item.run_id)).toEqual(['r9', 'r8', 'r7', 'r6'])
     expect(merged.hasMore).toBe(false)
     expect(merged.nextCursor).toBeNull()
     expect(mergeLifecyclePages(null, []).turns).toEqual([])
+    expect(mergeLifecyclePages(
+      { turns: [turn('r10'), turn('r9')], has_more: true, next_cursor: 'c-new', limit: 2 },
+      [{ turns: [turn('r8')], has_more: false, limit: 2 }],
+      'c1',
+    ).turns.map(item => item.run_id)).toEqual(['r10', 'r9'])
     expect(mergeLifecyclePages({ turns: [turn('r1')], has_more: true, next_cursor: 'c', limit: 1 }, []).nextCursor).toBe('c')
     expect(mergeLifecyclePages({ turns: [turn('r1')], has_more: true, limit: 1 }, []).nextCursor).toBeNull()
   })

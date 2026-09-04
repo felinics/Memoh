@@ -1,6 +1,8 @@
 <template>
   <DockPanelFrame>
-    <TrajectoryPane v-if="visible" />
+    <KeepAlive>
+      <TrajectoryPane v-if="visible" />
+    </KeepAlive>
   </DockPanelFrame>
 </template>
 

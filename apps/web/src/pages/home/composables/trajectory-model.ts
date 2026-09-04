@@ -86,23 +86,25 @@ export function previewText(value: unknown, limit: number): string {
       text = String(value)
     }
   }
-  const flat = text.replace(/\s+/g, ' ').trim()
+  // Whitespace can only shrink the text, so a bounded slice is enough input
+  // for a bounded preview; the full body is never scanned.
+  const flat = text.slice(0, limit * 4).replace(/\s+/g, ' ').trim()
   return flat.length > limit ? `${flat.slice(0, Math.max(limit - 1, 0))}…` : flat
 }
 
-// Blocks belong to the last request whose anchor is at or before them.
-export function stepIndexForBlock(traces: UIStepTrace[] | undefined, blockId: number): number | null {
+function traceForBlock(traces: UIStepTrace[] | undefined, blockId: number): UIStepTrace | null {
   if (!traces?.length) return null
-  let match: UIStepTrace | null = null
   for (const trace of traces) {
-    if (trace.first_message_id <= blockId && (!match || trace.first_message_id >= match.first_message_id)) match = trace
+    const last = trace.last_message_id ?? Number.POSITIVE_INFINITY
+    if (trace.first_message_id <= blockId && blockId <= last) return trace
   }
-  return match?.step_index ?? null
+  return null
 }
 
-function traceForBlock(traces: UIStepTrace[] | undefined, blockId: number): UIStepTrace | null {
-  const stepIndex = stepIndexForBlock(traces, blockId)
-  return stepIndex == null ? null : traces!.find(trace => trace.step_index === stepIndex) ?? null
+// A block belongs to the finished request whose anchor range contains it;
+// blocks streamed after the last finished request stay untimed.
+export function stepIndexForBlock(traces: UIStepTrace[] | undefined, blockId: number): number | null {
+  return traceForBlock(traces, blockId)?.step_index ?? null
 }
 
 function toolTiming(block: ToolCallBlock): { start: number, end: number } | null {
@@ -152,77 +154,113 @@ function blockRow(turn: ChatAssistantTurn, block: ContentBlock, turnLabel: strin
   }
 }
 
+function userRow(turn: ChatUserTurn, turnLabel: string): TrajectoryRow {
+  const injection = turn.contextInjection?.kind?.trim() ?? ''
+  return {
+    key: `${turn.id}:user`,
+    kind: injection ? 'context' : 'user',
+    turnId: turn.turnId ?? '',
+    turnLabel,
+    turnStart: false,
+    stepIndex: null,
+    label: injection,
+    preview: previewText(turn.text, PREVIEW_SOURCE_CHARACTERS),
+    output: null,
+    startedAtMs: null,
+    endedAtMs: null,
+    running: false,
+    detail: { kind: 'user', turn },
+  }
+}
+
+function assistantRows(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecycleTurn | undefined, turnLabel: string): TrajectoryRow[] {
+  const turnRows: TrajectoryRow[] = []
+  if (lifecycle) {
+    turnRows.push({
+      key: `${turn.id}:system`,
+      kind: 'system',
+      turnId: turn.turnId ?? '',
+      turnLabel,
+      turnStart: false,
+      stepIndex: null,
+      label: '',
+      preview: '',
+      output: null,
+      startedAtMs: null,
+      endedAtMs: null,
+      running: false,
+      detail: { kind: 'system', turn, lifecycle },
+    })
+  }
+  for (const block of turn.messages) {
+    const row = blockRow(turn, block, turnLabel)
+    if (row) turnRows.push(row)
+  }
+  return turnRows
+}
+
+// The signature captures everything a settled turn's rows depend on; a
+// streaming turn changes its tail block, so only that turn rebuilds.
+function assistantSignature(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecycleTurn | undefined, turnLabel: string): string {
+  const last = turn.messages[turn.messages.length - 1]
+  const tail = last
+    ? `${last.id}:${last.type}:${'content' in last ? last.content.length : ''}:${last.type === 'tool' ? `${last.running}:${last.result == null ? '' : 'r'}` : ''}`
+    : ''
+  return `${turnLabel}|${turn.turnId ?? ''}|${turn.messages.length}|${tail}|${turn.stepTraces?.length ?? 0}|${lifecycle?.run_id ?? ''}|${turn.streaming}`
+}
+
+export type TrajectoryRowBuilder = (
+  messages: ChatMessage[],
+  lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
+) => TrajectoryRow[]
+
+// Rows of unchanged assistant turns are reused across rebuilds, so a streamed
+// token costs the rows of one turn, not the whole loaded window.
+export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
+  const cache = new WeakMap<ChatAssistantTurn, { signature: string, rows: TrajectoryRow[] }>()
+  return (messages, lifecycleByTurn) => {
+    const rows: TrajectoryRow[] = []
+    let lastTurnKey: string | null = null
+    let position = 0
+    for (const turn of messages) {
+      if (turn.role === 'system') continue
+      const turnKey = turn.turnId || turn.id
+      const turnStart = turnKey !== lastTurnKey
+      if (turnStart) {
+        position = turn.turnPosition ?? position + 1
+        lastTurnKey = turnKey
+      }
+      const turnLabel = String(turn.turnPosition ?? position)
+      let turnRows: TrajectoryRow[]
+      if (turn.role === 'user') {
+        turnRows = [userRow(turn, turnLabel)]
+      } else {
+        const lifecycle = turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined
+        const signature = assistantSignature(turn, lifecycle, turnLabel)
+        const cached = cache.get(turn)
+        if (cached && cached.signature === signature) {
+          turnRows = cached.rows
+        } else {
+          turnRows = assistantRows(turn, lifecycle, turnLabel)
+          cache.set(turn, { signature, rows: turnRows })
+        }
+      }
+      if (turnRows.length === 0) continue
+      const first = turnRows[0]!
+      if (first.turnStart !== turnStart) {
+        turnRows = [{ ...first, turnStart }, ...turnRows.slice(1)]
+      }
+      rows.push(...turnRows)
+    }
+    return rows
+  }
+}
+
 export function buildTrajectoryRows(
   messages: ChatMessage[],
   lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
 ): TrajectoryRow[] {
-  const rows: TrajectoryRow[] = []
-  const ordinals = new Map<string, number>()
-  let lastTurnId: string | null = null
-  const labelFor = (turn: ChatMessage): string => {
-    const turnId = turn.turnId ?? ''
-    if (turn.turnPosition != null) return String(turn.turnPosition)
-    const key = turnId || turn.id
-    if (!ordinals.has(key)) ordinals.set(key, ordinals.size + 1)
-    return String(ordinals.get(key))
-  }
-  const markTurnStart = (turn: ChatMessage, row: TrajectoryRow) => {
-    const turnKey = turn.turnId || turn.id
-    row.turnStart = turnKey !== lastTurnId
-    lastTurnId = turnKey
-  }
-  for (const turn of messages) {
-    if (turn.role === 'system') continue
-    const turnLabel = labelFor(turn)
-    if (turn.role === 'user') {
-      const injection = turn.contextInjection?.kind?.trim() ?? ''
-      const row: TrajectoryRow = {
-        key: `${turn.id}:user`,
-        kind: injection ? 'context' : 'user',
-        turnId: turn.turnId ?? '',
-        turnLabel,
-        turnStart: false,
-        stepIndex: null,
-        label: injection,
-        preview: previewText(turn.text, PREVIEW_SOURCE_CHARACTERS),
-        output: null,
-        startedAtMs: null,
-        endedAtMs: null,
-        running: false,
-        detail: { kind: 'user', turn },
-      }
-      markTurnStart(turn, row)
-      rows.push(row)
-      continue
-    }
-    const lifecycle = turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined
-    const turnRows: TrajectoryRow[] = []
-    if (lifecycle) {
-      turnRows.push({
-        key: `${turn.id}:system`,
-        kind: 'system',
-        turnId: turn.turnId ?? '',
-        turnLabel,
-        turnStart: false,
-        stepIndex: null,
-        label: '',
-        preview: '',
-        output: null,
-        startedAtMs: null,
-        endedAtMs: null,
-        running: false,
-        detail: { kind: 'system', turn, lifecycle },
-      })
-    }
-    for (const block of turn.messages) {
-      const row = blockRow(turn, block, turnLabel)
-      if (row) turnRows.push(row)
-    }
-    if (turnRows.length === 0) continue
-    markTurnStart(turn, turnRows[0]!)
-    rows.push(...turnRows)
-  }
-  return rows
+  return createTrajectoryRowBuilder()(messages, lifecycleByTurn)
 }
 
 export function buildTurnTimeline(turn: ChatAssistantTurn): TurnTimeline | null {
@@ -301,7 +339,7 @@ export function foldTrajectoryStats(
     stats.turns += 1
     const traces = turn.stepTraces ?? []
     if (traces.length > 0) {
-      let firstTTFT: number | null = null
+      let firstSampled: UIStepTrace | null = null
       for (const trace of traces) {
         stats.steps += 1
         stats.llmMs += Math.max(trace.ended_at_ms - trace.started_at_ms, 0)
@@ -310,17 +348,17 @@ export function foldTrajectoryStats(
         stats.cachedInputTokens += usage?.cached_input_tokens ?? 0
         stats.outputTokens += usage?.output_tokens ?? 0
         if (trace.first_token_at_ms && trace.first_token_at_ms >= trace.started_at_ms) {
-          if (firstTTFT == null || trace.step_index < firstTTFT) {
-            firstTTFT = trace.step_index
-            ttftSum += trace.first_token_at_ms - trace.started_at_ms
-            ttftCount += 1
-          }
+          if (!firstSampled || trace.step_index < firstSampled.step_index) firstSampled = trace
           const decode = trace.ended_at_ms - trace.first_token_at_ms
           if (decode > 0 && (usage?.output_tokens ?? 0) > 0) {
             stats.decodeMs += decode
             stats.decodeTokens += usage!.output_tokens!
           }
         }
+      }
+      if (firstSampled) {
+        ttftSum += firstSampled.first_token_at_ms! - firstSampled.started_at_ms
+        ttftCount += 1
       }
       for (const block of turn.messages) {
         if (block.type !== 'tool') continue

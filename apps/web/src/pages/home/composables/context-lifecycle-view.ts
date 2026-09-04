@@ -213,12 +213,17 @@ export interface MergedLifecyclePages {
 }
 
 // Pages are keyset slices ordered newest first; a run can repeat only across
-// a page boundary, so the first occurrence wins.
+// a page boundary, so the first occurrence wins. Older pages were fetched
+// below `anchor`, the first page's cursor at that time; once a finished turn
+// shifts the first page, they no longer join it and are dropped rather than
+// leaving a silent hole.
 export function mergeLifecyclePages(
   first: HandlersContextLifecycleResponse | null | undefined,
   older: HandlersContextLifecycleResponse[],
+  anchor?: string | null,
 ): MergedLifecyclePages {
-  const pages = first ? [first, ...older] : []
+  const joined = older.length > 0 && first?.next_cursor === anchor ? older : []
+  const pages = first ? [first, ...joined] : []
   const seen = new Set<string>()
   const turns: HandlersContextLifecycleTurn[] = []
   for (const page of pages) {

@@ -27,7 +27,7 @@
       <div class="flex min-h-0 flex-1">
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
           <div
-            v-if="hasOlder"
+            v-if="hasOlder && !loadingMessages"
             class="flex items-center justify-center border-b border-border py-1"
           >
             <Button
@@ -40,8 +40,18 @@
               {{ $t('chat.trajectory.loadOlder') }}
             </Button>
           </div>
+          <div
+            v-if="loadingMessages && rows.length === 0"
+            class="space-y-1.5 px-3 py-2"
+          >
+            <Skeleton
+              v-for="row in 6"
+              :key="row"
+              class="h-6 w-full"
+            />
+          </div>
           <Empty
-            v-if="rows.length === 0"
+            v-else-if="rows.length === 0"
             class="min-h-40 flex-1"
           >
             <EmptyDescription>{{ $t('chat.trajectory.empty') }}</EmptyDescription>
@@ -72,7 +82,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Empty, EmptyDescription, SegmentedControl } from '@felinic/ui'
+import { Button, Empty, EmptyDescription, SegmentedControl, Skeleton } from '@felinic/ui'
 import type { SegmentedItem } from '@felinic/ui'
 import { useTrajectory } from '../../composables/useTrajectory'
 import type { TimelineMode } from '../../composables/trajectory-view'
@@ -82,7 +92,7 @@ import TrajectoryInspector from './trajectory-inspector.vue'
 import TrajectoryStats from './trajectory-stats.vue'
 
 const { t } = useI18n()
-const { hasTarget, rows, stats, selectedKey, selectedRow, timeline, mode, hasOlder, loadingOlder, loadOlder, select } = useTrajectory()
+const { hasTarget, rows, stats, loadingMessages, selectedKey, selectedRow, timeline, mode, hasOlder, loadingOlder, loadOlder, select } = useTrajectory()
 
 const modeItems = computed<SegmentedItem<TimelineMode>[]>(() => [
   { value: 'duration', label: t('chat.trajectory.modeDuration') },

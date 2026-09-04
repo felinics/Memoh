@@ -207,10 +207,11 @@ export interface UIStepTraceUsage {
   reasoning_tokens?: number
 }
 
-// One model request of an assistant turn, anchored to the first block it
-// produced; blocks up to the next trace's anchor belong to it.
+// One model request of an assistant turn, anchored to the range of blocks it
+// produced; blocks outside every finished range are still in flight.
 export interface UIStepTrace {
   first_message_id: number
+  last_message_id?: number
   step_index: number
   started_at_ms: number
   first_token_at_ms?: number

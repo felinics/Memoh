@@ -4,6 +4,7 @@ import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ToolCallBlock } from
 import {
   buildTrajectoryRows,
   buildTurnTimeline,
+  createTrajectoryRowBuilder,
   foldTrajectoryStats,
   lifecycleByTurnId,
   previewText,
@@ -46,8 +47,8 @@ function assistantTurn(): ChatAssistantTurn {
       { id: 2, type: 'text', content: 'All done.\nSecond line.' },
     ],
     stepTraces: [
-      { first_message_id: 0, step_index: 0, started_at_ms: 1_000, first_token_at_ms: 1_200, ended_at_ms: 1_500, finish_reason: 'tool-calls', usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } },
-      { first_message_id: 2, step_index: 1, started_at_ms: 2_300, first_token_at_ms: 2_400, ended_at_ms: 3_400, finish_reason: 'stop', usage: { input_tokens: 130, cached_input_tokens: 100, output_tokens: 50 } },
+      { first_message_id: 0, last_message_id: 1, step_index: 0, started_at_ms: 1_000, first_token_at_ms: 1_200, ended_at_ms: 1_500, finish_reason: 'tool-calls', usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } },
+      { first_message_id: 2, last_message_id: 2, step_index: 1, started_at_ms: 2_300, first_token_at_ms: 2_400, ended_at_ms: 3_400, finish_reason: 'stop', usage: { input_tokens: 130, cached_input_tokens: 100, output_tokens: 50 } },
     ],
   }
 }
@@ -94,13 +95,44 @@ describe('trajectory rows', () => {
     expect(rows[0]!.stepIndex).toBeNull()
   })
 
-  it('maps blocks to the step whose anchor precedes them', () => {
+  it('maps blocks to the step whose anchor range contains them', () => {
     const traces = assistantTurn().stepTraces!
     expect(stepIndexForBlock(traces, 0)).toBe(0)
     expect(stepIndexForBlock(traces, 1)).toBe(0)
     expect(stepIndexForBlock(traces, 2)).toBe(1)
-    expect(stepIndexForBlock(traces, 9)).toBe(1)
+    expect(stepIndexForBlock(traces, 9)).toBeNull()
     expect(stepIndexForBlock(undefined, 0)).toBeNull()
+  })
+
+  it('leaves blocks streamed after the last finished request untimed', () => {
+    const turn = assistantTurn()
+    turn.messages = [...turn.messages, { id: 3, type: 'text', content: 'still streaming' }]
+    const rows = buildTrajectoryRows([turn], new Map())
+    const streaming = rows[rows.length - 1]!
+    expect(streaming.preview).toBe('still streaming')
+    expect(streaming.stepIndex).toBeNull()
+    expect(streaming.startedAtMs).toBeNull()
+  })
+
+  it('continues turn numbering for live turns that carry no position yet', () => {
+    const live = assistantTurn()
+    live.id = 'runtime:turn-2:assistant'
+    live.turnId = 'turn-2'
+    live.turnPosition = undefined
+    const rows = buildTrajectoryRows([user('user-1', 'hi'), assistantTurn(), user('user-2', 'next', { turnId: 'turn-2', turnPosition: undefined }), live], new Map())
+    expect(rows.filter(row => row.turnStart).map(row => row.turnLabel)).toEqual(['7', '8'])
+  })
+
+  it('reuses rows of unchanged turns across rebuilds', () => {
+    const build = createTrajectoryRowBuilder()
+    const settled = assistantTurn()
+    const first = build([user('user-1', 'hi'), settled], new Map())
+    const second = build([user('user-1', 'hi'), settled], new Map())
+    expect(second[1]).toBe(first[1])
+    settled.messages = [...settled.messages, { id: 3, type: 'text', content: 'appended' }]
+    const third = build([user('user-1', 'hi'), settled], new Map())
+    expect(third[1]).not.toBe(first[1])
+    expect(third).toHaveLength(first.length + 1)
   })
 })
 
@@ -173,6 +205,13 @@ describe('trajectory stats', () => {
     expect(stats.decodeTokens).toBe(25)
     expect(stats.inputTokens).toBe(700)
     expect(stats.outputTokens).toBe(40)
+  })
+
+  it('takes TTFT from the lowest-indexed request even when traces arrive unordered', () => {
+    const turn = assistantTurn()
+    turn.stepTraces = [turn.stepTraces![1]!, turn.stepTraces![0]!]
+    const stats = foldTrajectoryStats([turn], new Map())
+    expect(stats.ttftAvgMs).toBe(200)
   })
 
   it('omits readings that were never sampled', () => {

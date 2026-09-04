@@ -1418,6 +1418,30 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 
+  it('closes the trajectory panel of a deleted session', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Deleted session' },
+      { id: 's2', title: 'Next session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    expect(store.openTrajectory('s1')).toBe(true)
+    expect(store.openTrajectory('s2')).toBe(true)
+
+    emitDeletedSession('s1')
+    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length, { id: 's2', title: 'Next session' })
+    selection.setSession('s2')
+    await nextTick()
+
+    expect(dock.getPanel('trajectory:s1')).toBeUndefined()
+    expect(dock.getPanel('trajectory:s2')).toBeDefined()
+  })
+
   it('resets a failed deferred-session chat panel to draft when its composer scope matches', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')
