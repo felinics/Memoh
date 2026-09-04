@@ -7,13 +7,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import { useChatStore } from '@/store/chat-list'
 import { provideChatViewTarget } from '../../composables/useChatViewContext'
-import TrajectoryPane from '../trajectory/trajectory-pane.vue'
 import { usePanelVisible } from './use-panel-visible'
 import DockPanelFrame from './panel-frame.vue'
 
@@ -27,6 +26,8 @@ const props = defineProps<{
     containerApi: DockviewApi
   }
 }>()
+
+const TrajectoryPane = defineAsyncComponent(() => import('../trajectory/trajectory-pane.vue'))
 
 const { t } = useI18n()
 const chatStore = useChatStore()
