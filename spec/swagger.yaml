@@ -3359,6 +3359,15 @@ definitions:
       turns:
         type: integer
     type: object
+  handlers.ContextLifecycleDecisionsResponse:
+    properties:
+      decisions:
+        items:
+          $ref: '#/definitions/contextfrag.SelectionDecision'
+        type: array
+      run_id:
+        type: string
+    type: object
   handlers.ContextLifecycleResponse:
     properties:
       aggregate_scope:
@@ -11585,6 +11594,56 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Get session context lifecycle
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions:
+    get:
+      description: 'Return the content-light selection audit persisted for one run
+        of a chat session: each fragment the context selector considered with its
+        slot, source, token cost and decision. The list is read on demand because
+        it grows with the history the run considered'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextLifecycleDecisionsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get per-fragment selection decisions of a run
       tags:
       - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:

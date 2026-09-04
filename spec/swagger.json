@@ -7783,6 +7783,76 @@
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions": {
+            "get": {
+                "description": "Return the content-light selection audit persisted for one run of a chat session: each fragment the context selector considered with its slot, source, token cost and decision. The list is read on demand because it grows with the history the run considered",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get per-fragment selection decisions of a run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextLifecycleDecisionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/fork": {
             "post": {
                 "tags": [
@@ -20107,6 +20177,20 @@
                 },
                 "turns": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.ContextLifecycleDecisionsResponse": {
+            "type": "object",
+            "properties": {
+                "decisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.SelectionDecision"
+                    }
+                },
+                "run_id": {
+                    "type": "string"
                 }
             }
         },

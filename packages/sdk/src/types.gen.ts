@@ -1900,6 +1900,11 @@ export type HandlersContextLifecycleAggregates = {
     turns?: number;
 };
 
+export type HandlersContextLifecycleDecisionsResponse = {
+    decisions?: Array<ContextfragSelectionDecision>;
+    run_id?: string;
+};
+
 export type HandlersContextLifecycleResponse = {
     /**
      * AggregateScope is always "returned_page": aggregates cover the returned
@@ -10095,6 +10100,60 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses = {
 };
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsError = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersContextLifecycleDecisionsResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses];
 
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**

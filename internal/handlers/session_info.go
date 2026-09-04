@@ -44,6 +44,7 @@ func NewSessionInfoHandler(log *slog.Logger, queries dbstore.Queries, botService
 func (h *SessionInfoHandler) Register(e *echo.Echo) {
 	e.GET("/bots/:bot_id/sessions/:session_id/status", h.GetSessionInfo)
 	e.GET("/bots/:bot_id/sessions/:session_id/context-lifecycle", h.GetSessionContextLifecycle)
+	e.GET("/bots/:bot_id/sessions/:session_id/context-lifecycle/:run_id/decisions", h.GetSessionContextLifecycleDecisions)
 }
 
 type SessionInfoResponse struct {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -93,67 +94,11 @@ type ContextLifecycleAggregates struct {
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle [get].
 func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
-	userID, err := RequireChannelIdentityID(c)
+	pgSessionID, err := h.authorizeContextLifecycleSession(c)
 	if err != nil {
-		return mapContextLifecycleError(err)
+		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
-	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
-	}
-	pgSessionID, err := db.ParseUUID(sessionID)
-	if err != nil {
-		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
-	}
-
 	ctx := c.Request().Context()
-	sessionRow, err := h.queries.GetSessionByID(ctx, pgSessionID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
-		}
-		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
-	}
-	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
-		Type:        sessionRow.Type,
-		SessionMode: sessionRow.SessionMode,
-		RuntimeType: sessionRow.RuntimeType,
-	})
-	bot, err := AuthorizeBotAccessWithPermission(
-		ctx,
-		h.botService,
-		h.accountService,
-		userID,
-		botID,
-		requiredReadPermissionForSessionRuntime(sessionMode, runtimeType),
-	)
-	if err != nil {
-		return mapContextLifecycleError(err)
-	}
-	if sessionRow.BotID.String() != bot.ID {
-		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
-	}
-	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
-	if err != nil {
-		return mapContextLifecycleError(err)
-	}
-	sess := session.Thread{
-		ID:          sessionRow.ID.String(),
-		BotID:       sessionRow.BotID.String(),
-		Type:        sessionRow.Type,
-		SessionMode: sessionMode,
-		RuntimeType: runtimeType,
-	}
-	if sessionRow.CreatedByUserID.Valid {
-		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()
-	}
-	if !canAccessSession(sess, userID, perms) {
-		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
-	}
 
 	limit := contextLifecycleLimit(c)
 	var before *contextLifecycleCursor
@@ -178,6 +123,155 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 		LegacyHistoryMayExist: load.LegacyHistoryMayExist,
 		AggregateScope:        contextLifecycleAggregateScope,
 	})
+}
+
+// authorizeContextLifecycleSession resolves the session a lifecycle request
+// names and enforces the same visibility the chat itself has.
+func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (pgtype.UUID, error) {
+	userID, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return pgtype.UUID{}, mapContextLifecycleError(err)
+	}
+	botID := strings.TrimSpace(c.Param("bot_id"))
+	if botID == "" {
+		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+	}
+	sessionID := strings.TrimSpace(c.Param("session_id"))
+	if sessionID == "" {
+		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+	}
+	pgSessionID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+	}
+
+	ctx := c.Request().Context()
+	sessionRow, err := h.queries.GetSessionByID(ctx, pgSessionID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+		}
+		return pgtype.UUID{}, apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+	}
+	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
+		Type:        sessionRow.Type,
+		SessionMode: sessionRow.SessionMode,
+		RuntimeType: sessionRow.RuntimeType,
+	})
+	bot, err := AuthorizeBotAccessWithPermission(
+		ctx,
+		h.botService,
+		h.accountService,
+		userID,
+		botID,
+		requiredReadPermissionForSessionRuntime(sessionMode, runtimeType),
+	)
+	if err != nil {
+		return pgtype.UUID{}, mapContextLifecycleError(err)
+	}
+	if sessionRow.BotID.String() != bot.ID {
+		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+	}
+	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
+	if err != nil {
+		return pgtype.UUID{}, mapContextLifecycleError(err)
+	}
+	sess := session.Thread{
+		ID:          sessionRow.ID.String(),
+		BotID:       sessionRow.BotID.String(),
+		Type:        sessionRow.Type,
+		SessionMode: sessionMode,
+		RuntimeType: runtimeType,
+	}
+	if sessionRow.CreatedByUserID.Valid {
+		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()
+	}
+	if !canAccessSession(sess, userID, perms) {
+		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+	}
+	return pgSessionID, nil
+}
+
+// ContextLifecycleDecisionsResponse is the per-fragment selection audit of one
+// run: every fragment the selector considered, with its slot, source, cost,
+// and why it was kept, trimmed, or dropped. Prompt text is never part of it.
+type ContextLifecycleDecisionsResponse struct {
+	RunID     string                          `json:"run_id"`
+	Decisions []contextfrag.SelectionDecision `json:"decisions"`
+}
+
+// GetSessionContextLifecycleDecisions godoc
+// @Summary Get per-fragment selection decisions of a run
+// @Description Return the content-light selection audit persisted for one run of a chat session: each fragment the context selector considered with its slot, source, token cost and decision. The list is read on demand because it grows with the history the run considered
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Session ID"
+// @Param run_id path string true "Run ID"
+// @Success 200 {object} ContextLifecycleDecisionsResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 401 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions [get].
+func (h *SessionInfoHandler) GetSessionContextLifecycleDecisions(c echo.Context) error {
+	pgSessionID, err := h.authorizeContextLifecycleSession(c)
+	if err != nil {
+		return err
+	}
+	runID, err := db.ParseUUID(strings.TrimSpace(c.Param("run_id")))
+	if err != nil {
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+	}
+	decisions, err := loadContextLifecycleDecisions(c.Request().Context(), h.queries, pgSessionID, runID)
+	if errors.Is(err, errContextLifecycleRunNotFound) {
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+	}
+	if err != nil {
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, ContextLifecycleDecisionsResponse{RunID: runID.String(), Decisions: decisions})
+}
+
+var errContextLifecycleRunNotFound = errors.New("context lifecycle run not found")
+
+type contextLifecycleDecisionQueries interface {
+	GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (sqlc.GetContextLifecycleByRunIDRow, error)
+	GetContextLifecycleSelectionDecisionsByRunID(ctx context.Context, runID pgtype.UUID) ([]byte, error)
+}
+
+// loadContextLifecycleDecisions reads a run's audit only after the run is
+// confirmed to belong to the session the caller was authorized for.
+func loadContextLifecycleDecisions(
+	ctx context.Context,
+	queries contextLifecycleDecisionQueries,
+	sessionID pgtype.UUID,
+	runID pgtype.UUID,
+) ([]contextfrag.SelectionDecision, error) {
+	run, err := queries.GetContextLifecycleByRunID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errContextLifecycleRunNotFound
+		}
+		return nil, fmt.Errorf("get run lifecycle: %w", err)
+	}
+	if run.SessionID != sessionID {
+		return nil, errContextLifecycleRunNotFound
+	}
+	raw, err := queries.GetContextLifecycleSelectionDecisionsByRunID(ctx, runID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("get selection decisions: %w", err)
+	}
+	decisions := []contextfrag.SelectionDecision{}
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &decisions); err != nil {
+			return nil, fmt.Errorf("decode selection decisions for run %s: %w", runID.String(), err)
+		}
+	}
+	if decisions == nil {
+		decisions = []contextfrag.SelectionDecision{}
+	}
+	return decisions, nil
 }
 
 func mapContextLifecycleError(err error) error {
