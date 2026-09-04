@@ -1,4 +1,12 @@
-import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
+import type {
+  ContextfragKind,
+  ContextfragLifecycleSnapshot,
+  ContextfragMemoryRecallTrace,
+  ContextfragMutationRecord,
+  ContextfragSelectionTrace,
+  ContextfragStepSnapshot,
+  HandlersContextLifecycleTurn,
+} from '@memohai/sdk'
 import type { UIStepTrace } from '@/composables/api/useChat.types'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ContentBlock, ToolCallBlock } from '@/store/chat/types'
 
@@ -7,9 +15,32 @@ export const PREVIEW_OUTPUT_CHARACTERS = 512
 
 export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'notice'
 
+// What the turn's context was assembled from, read off the persisted
+// lifecycle manifest: counts and token estimates per fragment kind, never
+// prompt text.
+export type ContextEntry =
+  | { kind: 'fragments', fragmentKind: ContextfragKind, fragments: number, tokens: number, textBytes: number, images: number, memory?: ContextfragMemoryRecallTrace, selection?: ContextfragSelectionTrace }
+  | { kind: 'memory_recall', memory: ContextfragMemoryRecallTrace }
+  | { kind: 'tool_defs', tools: number, tokens: number, providers: string[] }
+  | { kind: 'selection', selection: ContextfragSelectionTrace }
+  | { kind: 'mutation', mutation: ContextfragMutationRecord }
+  | { kind: 'step', step: ContextfragStepSnapshot }
+
+export interface SystemEntry {
+  fragments: number
+  tokens: number
+}
+
+export interface ContextEntries {
+  system: SystemEntry | null
+  before: ContextEntry[]
+  perStep: Map<number, ContextEntry[]>
+}
+
 export type TrajectoryDetail =
   | { kind: 'user', turn: ChatUserTurn }
-  | { kind: 'system', turn: ChatAssistantTurn, lifecycle: HandlersContextLifecycleTurn }
+  | { kind: 'system', lifecycle: HandlersContextLifecycleTurn, entry: SystemEntry }
+  | { kind: 'context', lifecycle: HandlersContextLifecycleTurn, entry: ContextEntry }
   | { kind: 'block', turn: ChatAssistantTurn, block: ContentBlock, trace: UIStepTrace | null }
 
 export interface TrajectoryRow {
@@ -32,23 +63,20 @@ export interface TrajectoryRow {
 
 export type TimelineLane = 'input' | 'model' | 'tools'
 
-export interface TimelineSpan {
-  lane: TimelineLane
+// One segment of the strip above the ledger: a ledger row on its lane, or one
+// model request folded from the reasoning and text rows it produced.
+export interface RowMapSegment {
   key: string
-  start: number
-  end: number
-  ttftEnd: number | null
+  rowKey: string
+  lane: TimelineLane
+  kind: TrajectoryRowKind
+  turnId: string
+  turnStart: boolean
+  durationMs: number
+  splitMs: number | null
   label: string
-  tokens: number
-  cachedTokens: number
+  running: boolean
   stepIndex: number | null
-}
-
-export interface TurnTimeline {
-  spans: TimelineSpan[]
-  start: number
-  end: number
-  steps: number
 }
 
 export interface TrajectoryStats {
@@ -92,6 +120,59 @@ export function previewText(value: unknown, limit: number): string {
   return flat.length > limit ? `${flat.slice(0, Math.max(limit - 1, 0))}…` : flat
 }
 
+const SYSTEM_KINDS = new Set<ContextfragKind>(['system_prompt', 'system_policy', 'bot_identity', 'platform_identity'])
+
+function stepChangedContext(step: ContextfragStepSnapshot): boolean {
+  return (step.dropped ?? 0) > 0 || (step.truncated ?? 0) > 0 || step.reselection_applied === true
+}
+
+export function contextEntries(snapshot: ContextfragLifecycleSnapshot | null | undefined): ContextEntries {
+  const before: ContextEntry[] = []
+  const perStep = new Map<number, ContextEntry[]>()
+  if (!snapshot) return { system: null, before, perStep }
+  let system: SystemEntry | null = null
+  let memoryInjected = false
+  for (const entry of snapshot.breakdown ?? []) {
+    const kind = entry.kind
+    if (!kind || kind === 'current_user_message') continue
+    const fragments = entry.fragments ?? 0
+    const tokens = entry.token_estimate ?? 0
+    if (SYSTEM_KINDS.has(kind)) {
+      system = system ? { fragments: system.fragments + fragments, tokens: system.tokens + tokens } : { fragments, tokens }
+      continue
+    }
+    const row: ContextEntry = { kind: 'fragments', fragmentKind: kind, fragments, tokens, textBytes: entry.text_bytes ?? 0, images: entry.images ?? 0 }
+    if (kind === 'memory_recall' && snapshot.memory_recall) {
+      row.memory = snapshot.memory_recall
+      memoryInjected = true
+    }
+    if (kind === 'conversation_event' && snapshot.selection) row.selection = snapshot.selection
+    before.push(row)
+  }
+  if (snapshot.memory_recall && !memoryInjected) before.push({ kind: 'memory_recall', memory: snapshot.memory_recall })
+  const toolDefs = snapshot.tool_defs ?? []
+  if (toolDefs.length > 0) {
+    before.push({
+      kind: 'tool_defs',
+      tools: toolDefs.length,
+      tokens: toolDefs.reduce((sum, def) => sum + (def.token_estimate ?? 0), 0),
+      providers: [...new Set(toolDefs.map(def => def.provider ?? '').filter(Boolean))].sort(),
+    })
+  }
+  const selection = snapshot.selection
+  if (selection && (selection.dropped ?? 0) + (selection.trimmed ?? 0) > 0) before.push({ kind: 'selection', selection })
+  for (const mutation of snapshot.mutations ?? []) {
+    if (mutation.kind) before.push({ kind: 'mutation', mutation })
+  }
+  for (const step of snapshot.steps ?? []) {
+    if (step.step_index == null || !stepChangedContext(step)) continue
+    const rows = perStep.get(step.step_index) ?? []
+    rows.push({ kind: 'step', step })
+    perStep.set(step.step_index, rows)
+  }
+  return { system, before, perStep }
+}
+
 function traceForBlock(traces: UIStepTrace[] | undefined, blockId: number): UIStepTrace | null {
   if (!traces?.length) return null
   for (const trace of traces) {
@@ -111,6 +192,60 @@ function toolTiming(block: ToolCallBlock): { start: number, end: number } | null
   const timing = block.execution_timing
   if (!timing || timing.started_at_ms <= 0 || timing.ended_at_ms < timing.started_at_ms) return null
   return { start: timing.started_at_ms, end: timing.ended_at_ms }
+}
+
+function contextLabel(entry: ContextEntry): string {
+  switch (entry.kind) {
+    case 'fragments':
+      return entry.fragmentKind
+    case 'mutation':
+      return entry.mutation.kind ?? ''
+    default:
+      return entry.kind
+  }
+}
+
+function contextRow(lifecycle: HandlersContextLifecycleTurn, entry: ContextEntry, key: string, turnId: string, turnLabel: string, stepIndex: number | null): TrajectoryRow {
+  return {
+    key,
+    kind: 'context',
+    turnId,
+    turnLabel,
+    turnStart: false,
+    stepIndex,
+    label: contextLabel(entry),
+    preview: '',
+    output: null,
+    startedAtMs: null,
+    endedAtMs: null,
+    running: false,
+    detail: { kind: 'context', lifecycle, entry },
+  }
+}
+
+// The rows a turn's context assembly contributes ahead of its first request:
+// the system prompt, then everything else the manifest injected.
+function turnContextRows(lifecycle: HandlersContextLifecycleTurn, entries: ContextEntries, turnId: string, turnLabel: string): { system: TrajectoryRow | null, before: TrajectoryRow[] } {
+  const runId = lifecycle.run_id ?? turnId
+  const system: TrajectoryRow | null = entries.system
+    ? {
+        key: `${runId}:system`,
+        kind: 'system',
+        turnId,
+        turnLabel,
+        turnStart: false,
+        stepIndex: null,
+        label: '',
+        preview: '',
+        output: null,
+        startedAtMs: null,
+        endedAtMs: null,
+        running: false,
+        detail: { kind: 'system', lifecycle, entry: entries.system },
+      }
+    : null
+  const before = entries.before.map((entry, index) => contextRow(lifecycle, entry, `${runId}:context:${index}`, turnId, turnLabel, null))
+  return { system, before }
 }
 
 function blockRow(turn: ChatAssistantTurn, block: ContentBlock, turnLabel: string): TrajectoryRow | null {
@@ -173,28 +308,24 @@ function userRow(turn: ChatUserTurn, turnLabel: string): TrajectoryRow {
   }
 }
 
-function assistantRows(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecycleTurn | undefined, turnLabel: string): TrajectoryRow[] {
+// Block rows of one assistant turn; a step that re-selected its context gets
+// that change listed before the first block the step produced.
+function assistantRows(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecycleTurn | undefined, perStep: ReadonlyMap<number, ContextEntry[]>, turnLabel: string): TrajectoryRow[] {
   const turnRows: TrajectoryRow[] = []
-  if (lifecycle) {
-    turnRows.push({
-      key: `${turn.id}:system`,
-      kind: 'system',
-      turnId: turn.turnId ?? '',
-      turnLabel,
-      turnStart: false,
-      stepIndex: null,
-      label: '',
-      preview: '',
-      output: null,
-      startedAtMs: null,
-      endedAtMs: null,
-      running: false,
-      detail: { kind: 'system', turn, lifecycle },
-    })
-  }
+  const turnId = turn.turnId ?? ''
+  const runId = lifecycle?.run_id ?? turnId
+  let openStep: number | null = null
   for (const block of turn.messages) {
     const row = blockRow(turn, block, turnLabel)
-    if (row) turnRows.push(row)
+    if (!row) continue
+    if (row.stepIndex != null && row.stepIndex !== openStep) {
+      openStep = row.stepIndex
+      const entries = lifecycle ? perStep.get(row.stepIndex) ?? [] : []
+      entries.forEach((entry, index) => {
+        turnRows.push(contextRow(lifecycle!, entry, `${runId}:step:${row.stepIndex}:${index}`, turnId, turnLabel, row.stepIndex))
+      })
+    }
+    turnRows.push(row)
   }
   return turnRows
 }
@@ -215,9 +346,20 @@ export type TrajectoryRowBuilder = (
 ) => TrajectoryRow[]
 
 // Rows of unchanged assistant turns are reused across rebuilds, so a streamed
-// token costs the rows of one turn, not the whole loaded window.
+// token costs the rows of one turn, not the whole loaded window. A turn's
+// context rows are built once per persisted lifecycle and lead the turn
+// whether its user message or only its assistant output is loaded.
 export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
-  const cache = new WeakMap<ChatAssistantTurn, { signature: string, rows: TrajectoryRow[] }>()
+  const assistantCache = new WeakMap<ChatAssistantTurn, { signature: string, rows: TrajectoryRow[] }>()
+  const contextCache = new WeakMap<HandlersContextLifecycleTurn, { turnLabel: string, entries: ContextEntries, system: TrajectoryRow | null, before: TrajectoryRow[] }>()
+  const contextOf = (lifecycle: HandlersContextLifecycleTurn, turnId: string, turnLabel: string) => {
+    const cached = contextCache.get(lifecycle)
+    if (cached && cached.turnLabel === turnLabel) return cached
+    const entries = contextEntries(lifecycle.snapshot)
+    const built = { turnLabel, entries, ...turnContextRows(lifecycle, entries, turnId, turnLabel) }
+    contextCache.set(lifecycle, built)
+    return built
+  }
   return (messages, lifecycleByTurn) => {
     const rows: TrajectoryRow[] = []
     let lastTurnKey: string | null = null
@@ -231,19 +373,23 @@ export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
         lastTurnKey = turnKey
       }
       const turnLabel = String(turn.turnPosition ?? position)
+      const lifecycle = turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined
+      const context = lifecycle && turnStart ? contextOf(lifecycle, turn.turnId ?? '', turnLabel) : null
       let turnRows: TrajectoryRow[]
       if (turn.role === 'user') {
-        turnRows = [userRow(turn, turnLabel)]
+        turnRows = context ? [...(context.system ? [context.system] : []), userRow(turn, turnLabel), ...context.before] : [userRow(turn, turnLabel)]
       } else {
-        const lifecycle = turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined
+        const perStep = lifecycle ? contextOf(lifecycle, turn.turnId ?? '', turnLabel).entries.perStep : new Map<number, ContextEntry[]>()
         const signature = assistantSignature(turn, lifecycle, turnLabel)
-        const cached = cache.get(turn)
+        const cached = assistantCache.get(turn)
+        let blocks: TrajectoryRow[]
         if (cached && cached.signature === signature) {
-          turnRows = cached.rows
+          blocks = cached.rows
         } else {
-          turnRows = assistantRows(turn, lifecycle, turnLabel)
-          cache.set(turn, { signature, rows: turnRows })
+          blocks = assistantRows(turn, lifecycle, perStep, turnLabel)
+          assistantCache.set(turn, { signature, rows: blocks })
         }
+        turnRows = context ? [...(context.system ? [context.system] : []), ...context.before, ...blocks] : blocks
       }
       if (turnRows.length === 0) continue
       const first = turnRows[0]!
@@ -263,59 +409,53 @@ export function buildTrajectoryRows(
   return createTrajectoryRowBuilder()(messages, lifecycleByTurn)
 }
 
-export function buildTurnTimeline(turn: ChatAssistantTurn): TurnTimeline | null {
-  const spans: TimelineSpan[] = []
-  for (const trace of turn.stepTraces ?? []) {
-    if (trace.started_at_ms <= 0 || trace.ended_at_ms < trace.started_at_ms) continue
-    const ttft = trace.first_token_at_ms && trace.first_token_at_ms >= trace.started_at_ms && trace.first_token_at_ms <= trace.ended_at_ms
-      ? trace.first_token_at_ms
-      : null
-    spans.push({
-      lane: 'model',
-      key: `model:${trace.step_index}`,
-      start: trace.started_at_ms,
-      end: trace.ended_at_ms,
-      ttftEnd: ttft,
-      label: trace.finish_reason ?? '',
-      tokens: trace.usage?.output_tokens ?? 0,
-      cachedTokens: 0,
-      stepIndex: trace.step_index,
-    })
-    spans.push({
-      lane: 'input',
-      key: `input:${trace.step_index}`,
-      start: trace.started_at_ms,
-      end: trace.ended_at_ms,
-      ttftEnd: null,
-      label: '',
-      tokens: trace.usage?.input_tokens ?? 0,
-      cachedTokens: trace.usage?.cached_input_tokens ?? 0,
-      stepIndex: trace.step_index,
+// DSH's lane rule: tools on their own lane, model output on the model lane
+// split at the first token, everything else the context received on the
+// input lane. The reasoning and text a single request streamed fold into one
+// model segment; blocks still streaming after the last finished request stay
+// their own untimed segment.
+export function buildRowMap(rows: TrajectoryRow[]): RowMapSegment[] {
+  const segments: RowMapSegment[] = []
+  let open: RowMapSegment | null = null
+  for (const row of rows) {
+    if ((row.kind === 'reasoning' || row.kind === 'assistant') && row.detail.kind === 'block') {
+      const trace = row.detail.trace
+      if (trace && open && open.turnId === row.turnId && open.stepIndex === trace.step_index) continue
+      const duration = trace ? Math.max(trace.ended_at_ms - trace.started_at_ms, 0) : 0
+      const sampled = trace?.first_token_at_ms != null && trace.first_token_at_ms >= trace.started_at_ms && trace.first_token_at_ms <= trace.ended_at_ms
+      const segment: RowMapSegment = {
+        key: `map:${row.key}`,
+        rowKey: row.key,
+        lane: 'model',
+        kind: row.kind,
+        turnId: row.turnId,
+        turnStart: row.turnStart,
+        durationMs: duration,
+        splitMs: trace && sampled ? trace.first_token_at_ms! - trace.started_at_ms : null,
+        label: trace?.finish_reason ?? '',
+        running: !trace && row.detail.turn.streaming,
+        stepIndex: trace?.step_index ?? null,
+      }
+      segments.push(segment)
+      open = trace ? segment : null
+      continue
+    }
+    open = null
+    segments.push({
+      key: `map:${row.key}`,
+      rowKey: row.key,
+      lane: row.kind === 'tool' ? 'tools' : 'input',
+      kind: row.kind,
+      turnId: row.turnId,
+      turnStart: row.turnStart,
+      durationMs: row.startedAtMs != null && row.endedAtMs != null ? Math.max(row.endedAtMs - row.startedAtMs, 0) : 0,
+      splitMs: null,
+      label: row.label,
+      running: row.running,
+      stepIndex: row.stepIndex,
     })
   }
-  for (const block of turn.messages) {
-    if (block.type !== 'tool') continue
-    const timing = toolTiming(block)
-    if (!timing) continue
-    spans.push({
-      lane: 'tools',
-      key: `tool:${block.id}`,
-      start: timing.start,
-      end: timing.end,
-      ttftEnd: null,
-      label: block.toolName || block.name,
-      tokens: 0,
-      cachedTokens: 0,
-      stepIndex: stepIndexForBlock(turn.stepTraces, block.id),
-    })
-  }
-  if (spans.length === 0) return null
-  return {
-    spans,
-    start: Math.min(...spans.map(span => span.start)),
-    end: Math.max(...spans.map(span => span.end)),
-    steps: turn.stepTraces?.length ?? 0,
-  }
+  return segments
 }
 
 function emptyStats(): TrajectoryStats {

@@ -4,8 +4,10 @@
 import { createApp, defineComponent, h, nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
 import type { ChatAssistantTurn, ChatUserTurn } from '@/store/chat/types'
-import { buildTrajectoryRows } from '../../composables/trajectory-model'
+import { buildRowMap, buildTrajectoryRows, lifecycleByTurnId } from '../../composables/trajectory-model'
+import { rowMapGeometry } from '../../composables/trajectory-view'
 import TrajectoryLedger from './trajectory-ledger.vue'
 import TrajectoryStats from './trajectory-stats.vue'
 import TrajectoryOverview from './trajectory-overview.vue'
@@ -26,9 +28,12 @@ function mount(component: unknown, props: Record<string, unknown>) {
       en: {
         chat: {
           trajectory: {
-            turn: 'Turn {n}', step: 'Step {n}', steering: 'steering', prepared: 'prepared', systemPreview: '{tokens} tokens in context',
+            turn: 'Turn {n}', step: 'Step {n}', steering: 'steering', prepared: 'prepared', systemPreview: '{fragments} fragments · {tokens} tok',
+            contextFragments: '{fragments} fragments · {tokens} tok', contextHistory: '{messages} messages · {tokens} tok', contextHistoryCut: '{messages} messages · {tokens} tok · {dropped} dropped', contextToolDefs: '{n} tools · {tokens} tok',
+            contextMemory: '{count} results · {state}', contextSelection: '{selected} selected · {dropped} dropped · {trimmed} trimmed', contextStep: 'dropped {dropped} · truncated {truncated} · {outcome}',
+            contextKind: { workspace_instruction: 'workspace rules', tool_defs: 'tool definitions', conversation_event: 'history', selection: 'selection', step: 'reselection' },
             kindSystem: 'SYSTEM', kindUser: 'USER', kindContext: 'CONTEXT', kindAssistant: 'ASSISTANT', kindReasoning: 'REASONING', kindTool: 'TOOL', kindError: 'ERROR', kindNotice: 'NOTICE',
-            laneInput: 'Input', laneModel: 'Model', laneTools: 'Tools', timelineEmpty: 'No timing',
+            laneInput: 'Input', laneModel: 'Model', laneTools: 'Tools', timelineEmpty: 'Nothing to map',
             statsTurns: '{n} turns', statsSteps: '{n} steps', statsLlm: 'LLM {s}', statsTools: 'Tools {s}', statsTtft: 'TTFT avg {s}', statsTokPerSec: '{n} tok/s', statsCacheHit: 'Cache hit {p}%', statsInput: 'Input {n} tok', statsOutput: 'Output {n} tok', statsScope: 'loaded turns only',
           },
         },
@@ -66,6 +71,23 @@ function assistant(id: string, turnId: string, blocks: number): ChatAssistantTur
   }
 }
 
+const lifecycle: HandlersContextLifecycleTurn = {
+  run_id: 'run-1',
+  turn_id: 'turn-1',
+  created_at: '2026-09-03T00:00:01.000Z',
+  snapshot: {
+    version: 2,
+    counts: { fragments: 4, token_estimate: 2_000 },
+    breakdown: [
+      { kind: 'system_prompt', fragments: 1, token_estimate: 1_300 },
+      { kind: 'workspace_instruction', fragments: 1, token_estimate: 500 },
+      { kind: 'conversation_event', fragments: 6, token_estimate: 84 },
+    ],
+    tool_defs: [{ provider: 'workspace', name: 'exec', bytes: 800, token_estimate: 200 }],
+    selection: { selected: 6, dropped: 2, drop_reasons: { budget: 2 } },
+  },
+}
+
 describe('trajectory ledger', () => {
   it('mounts only the rows inside the viewport window and emits the selected row', async () => {
     const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 400)], new Map())
@@ -80,6 +102,22 @@ describe('trajectory ledger', () => {
     expect(root.querySelector('[data-ui-selected]')?.textContent).toContain('block 0')
     ;(root.querySelector('[data-testid="trajectory-row-user"]') as HTMLElement).click()
     expect(onSelect).toHaveBeenCalledWith(rows[0]!.key)
+  })
+
+  it('describes the system prompt and each context entry from the manifest', async () => {
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 1)], lifecycleByTurnId([lifecycle]))
+    const root = mount(TrajectoryLedger, { rows, selectedKey: null })
+    await nextTick()
+    expect(root.querySelector('[data-testid="trajectory-row-system"]')?.textContent).toContain('1 fragments · 1.3K tok')
+    const contexts = [...root.querySelectorAll('[data-testid="trajectory-row-context"]')].map(node => node.textContent ?? '')
+    expect(contexts[0]).toContain('workspace rules')
+    expect(contexts[0]).toContain('1 fragments · 500 tok')
+    expect(contexts[1]).toContain('history')
+    expect(contexts[1]).toContain('6 messages · 84 tok · 2 dropped')
+    expect(contexts[2]).toContain('tool definitions')
+    expect(contexts[2]).toContain('1 tools · 200 tok')
+    expect(contexts[3]).toContain('selection')
+    expect(contexts[3]).toContain('6 selected · 2 dropped · 0 trimmed')
   })
 
   it('labels injected context rows and tool rows with their arguments and result', async () => {
@@ -116,31 +154,33 @@ describe('trajectory stats', () => {
 })
 
 describe('trajectory overview', () => {
-  it('draws one bar per span with proportional geometry', () => {
-    const root = mount(TrajectoryOverview, {
-      mode: 'duration',
-      timeline: {
-        start: 0,
-        end: 4_000,
-        steps: 1,
-        spans: [
-          { lane: 'model', key: 'model:0', start: 0, end: 2_000, ttftEnd: 500, label: 'stop', tokens: 5, cachedTokens: 0, stepIndex: 0 },
-          { lane: 'input', key: 'input:0', start: 0, end: 2_000, ttftEnd: null, label: '', tokens: 100, cachedTokens: 0, stepIndex: 0 },
-          { lane: 'tools', key: 'tool:1', start: 2_000, end: 4_000, ttftEnd: null, label: 'exec', tokens: 0, cachedTokens: 0, stepIndex: 0 },
-        ],
-      },
-    })
-    const model = root.querySelector('[data-testid="trajectory-bar-model:0"]') as HTMLElement
-    expect(model.style.width).toBe('50%')
-    expect(model.style.left).toBe('0%')
-    const tool = root.querySelector('[data-testid="trajectory-bar-tool:1"]') as HTMLElement
-    expect(tool.style.left).toBe('50%')
-    expect(tool.title).toContain('exec')
-    expect(root.querySelectorAll('[data-testid^="trajectory-bar-"]')).toHaveLength(3)
+  it('draws one bar per ledger record on its lane and focuses the row it maps', () => {
+    const turn = assistant('a1', 'turn-1', 1)
+    turn.messages = [
+      { id: 0, type: 'text', content: 'answer' },
+      { id: 1, type: 'tool', name: 'exec', toolName: 'exec', tool_call_id: 'c', toolCallId: 'c', input: {}, output: 'ok', result: 'ok', running: false, done: true, execution_timing: { started_at_ms: 1_700, ended_at_ms: 2_300 } },
+    ]
+    turn.stepTraces = [{ first_message_id: 0, last_message_id: 1, step_index: 0, started_at_ms: 1_000, first_token_at_ms: 1_150, ended_at_ms: 1_600, finish_reason: 'tool-calls' }]
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), turn], new Map())
+    const bars = rowMapGeometry(buildRowMap(rows), 'duration')
+    const onSelect = vi.fn()
+    const root = mount(TrajectoryOverview, { bars, selectedKey: rows[0]!.key, onSelect })
+    const drawn = root.querySelectorAll('[data-testid^="trajectory-bar-"]')
+    expect(drawn).toHaveLength(3)
+    const model = root.querySelector(`[data-testid="trajectory-bar-map:${rows[1]!.key}"]`) as HTMLElement
+    expect(model.title).toContain('ASSISTANT')
+    expect(model.title).toContain('tool-calls')
+    expect(model.title).toContain('600ms')
+    expect(model.querySelector('span')).not.toBeNull()
+    const tool = root.querySelector(`[data-testid="trajectory-bar-map:${rows[2]!.key}"]`) as HTMLElement
+    expect(parseFloat(tool.style.left)).toBeGreaterThan(parseFloat(model.style.left))
+    expect(root.querySelector('[data-ui-selected]')?.getAttribute('data-testid')).toBe(`trajectory-bar-map:${rows[0]!.key}`)
+    tool.click()
+    expect(onSelect).toHaveBeenCalledWith(rows[2]!.key)
   })
 
-  it('states when a turn carries no timing', () => {
-    const root = mount(TrajectoryOverview, { mode: 'duration', timeline: null })
-    expect(root.textContent).toContain('No timing')
+  it('states when nothing has been mapped yet', () => {
+    const root = mount(TrajectoryOverview, { bars: [], selectedKey: null })
+    expect(root.textContent).toContain('Nothing to map')
   })
 })

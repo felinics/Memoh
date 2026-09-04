@@ -21,8 +21,9 @@
 
     <template v-else>
       <TrajectoryOverview
-        :timeline="timeline"
-        :mode="mode"
+        :bars="bars"
+        :selected-key="selectedKey"
+        @select="focus"
       />
       <div class="flex min-h-0 flex-1">
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -92,7 +93,7 @@ import TrajectoryInspector from './trajectory-inspector.vue'
 import TrajectoryStats from './trajectory-stats.vue'
 
 const { t } = useI18n()
-const { hasTarget, rows, stats, loadingMessages, selectedKey, selectedRow, timeline, mode, hasOlder, loadingOlder, loadOlder, select } = useTrajectory()
+const { hasTarget, rows, stats, loadingMessages, selectedKey, selectedRow, bars, mode, hasOlder, loadingOlder, loadOlder, select, focus } = useTrajectory()
 
 const modeItems = computed<SegmentedItem<TimelineMode>[]>(() => [
   { value: 'duration', label: t('chat.trajectory.modeDuration') },

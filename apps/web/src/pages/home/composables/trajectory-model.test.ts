@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ToolCallBlock } from '@/store/chat/types'
 import {
+  buildRowMap,
   buildTrajectoryRows,
-  buildTurnTimeline,
+  contextEntries,
   createTrajectoryRowBuilder,
   foldTrajectoryStats,
   lifecycleByTurnId,
@@ -57,30 +58,109 @@ const lifecycleTurn: HandlersContextLifecycleTurn = {
   run_id: 'run-1',
   turn_id: 'turn-1',
   created_at: '2026-09-03T00:00:01.000Z',
-  snapshot: { version: 2, counts: { fragments: 3, token_estimate: 4_200 }, run_trace: { steps: 2, tool_calls: 1, llm_ms: 1_600, tool_ms: 600 } },
+  snapshot: {
+    version: 2,
+    counts: { fragments: 9, token_estimate: 4_200 },
+    breakdown: [
+      { kind: 'system_prompt', fragments: 1, token_estimate: 1_300 },
+      { kind: 'bot_identity', fragments: 1, token_estimate: 200 },
+      { kind: 'workspace_instruction', fragments: 1, token_estimate: 500 },
+      { kind: 'tool_usage', fragments: 2, token_estimate: 180 },
+      { kind: 'skills_catalog', fragments: 1, token_estimate: 220 },
+      { kind: 'memory_recall', fragments: 1, token_estimate: 90 },
+      { kind: 'conversation_event', fragments: 22, token_estimate: 84 },
+      { kind: 'current_user_message', fragments: 1, token_estimate: 20 },
+    ],
+    tool_defs: [
+      { provider: 'workspace', name: 'exec', bytes: 800, token_estimate: 200 },
+      { provider: 'workspace', name: 'write', bytes: 600, token_estimate: 150 },
+      { provider: 'memory', name: 'search_memory', bytes: 400, token_estimate: 100 },
+    ],
+    memory_recall: { provider_id: 'mem-1', cache_state: 'miss', query: { source: 'recent', recent_messages: 4 }, result: { count: 3, refs: ['m1', 'm2', 'm3'], context_bytes: 360 } },
+    selection: { selected: 22, dropped: 3, drop_reasons: { budget: 3 }, drop_reason_tokens: { budget: 1_200 } },
+    mutations: [{ kind: 'mid_task_prune', detail: 'pruned=2' }],
+    steps: [
+      { step_index: 0 },
+      { step_index: 1, dropped: 2, reselection_applied: true, reselection_outcome: 'applied', drop_reasons: { budget: 2 } },
+    ],
+    run_trace: { steps: 2, tool_calls: 1, llm_ms: 1_600, tool_ms: 600 },
+  },
 }
 
+describe('context entries', () => {
+  it('splits the manifest into the system prompt and one entry per injected kind', () => {
+    const entries = contextEntries(lifecycleTurn.snapshot!)
+    expect(entries.system).toEqual({ fragments: 2, tokens: 1_500 })
+    expect(entries.before.map(entry => entry.kind === 'fragments' ? entry.fragmentKind : entry.kind)).toEqual([
+      'workspace_instruction', 'tool_usage', 'skills_catalog', 'memory_recall', 'conversation_event', 'tool_defs', 'selection', 'mutation',
+    ])
+    const memory = entries.before[3]!
+    expect(memory.kind === 'fragments' && memory.memory?.result?.count).toBe(3)
+    const history = entries.before[4]!
+    expect(history.kind === 'fragments' && history.selection?.dropped).toBe(3)
+    const tools = entries.before[5]!
+    expect(tools.kind === 'tool_defs' && tools.tools).toBe(3)
+    expect(tools.kind === 'tool_defs' && tools.tokens).toBe(450)
+    expect(tools.kind === 'tool_defs' && tools.providers).toEqual(['memory', 'workspace'])
+    expect([...entries.perStep.keys()]).toEqual([1])
+    const step = entries.perStep.get(1)![0]!
+    expect(step.kind === 'step' && step.step.dropped).toBe(2)
+  })
+
+  it('reports a recall that injected nothing and skips a clean selection', () => {
+    const entries = contextEntries({
+      breakdown: [{ kind: 'system_prompt', fragments: 1, token_estimate: 100 }, { kind: 'current_user_message', fragments: 1, token_estimate: 5 }],
+      memory_recall: { provider_id: 'mem-1', cache_state: 'hit', result: { count: 0 } },
+      selection: { selected: 4, dropped: 0 },
+      steps: [{ step_index: 0 }],
+    })
+    expect(entries.before.map(entry => entry.kind)).toEqual(['memory_recall'])
+    expect(entries.perStep.size).toBe(0)
+    expect(contextEntries(undefined).system).toBeNull()
+  })
+})
+
 describe('trajectory rows', () => {
-  it('lays out user, system, reasoning, tool and assistant rows in transcript order', () => {
+  it('lays out system, user, context, step context, reasoning, tool and assistant rows in transcript order', () => {
     const messages: ChatMessage[] = [user('user-1', 'list the temp dir'), assistantTurn(), user('user-2', '<message>hurry</message>', { contextInjection: { kind: 'steering' }, turnPosition: undefined })]
     const rows = buildTrajectoryRows(messages, lifecycleByTurnId([lifecycleTurn]))
 
-    expect(rows.map(row => row.kind)).toEqual(['user', 'system', 'reasoning', 'tool', 'assistant', 'context'])
-    expect(rows.map(row => row.turnStart)).toEqual([true, false, false, false, false, false])
+    expect(rows.map(row => row.kind)).toEqual([
+      'system', 'user',
+      'context', 'context', 'context', 'context', 'context', 'context', 'context', 'context',
+      'reasoning', 'tool',
+      'context',
+      'assistant',
+      'context',
+    ])
+    expect(rows.map(row => row.turnStart)).toEqual([true, ...Array.from({ length: rows.length - 1 }, () => false)])
     expect(rows[0]!.turnLabel).toBe('7')
-    expect(rows[1]!.detail.kind).toBe('system')
-    expect(rows[2]!.stepIndex).toBe(0)
-    expect(rows[3]!.stepIndex).toBe(0)
-    expect(rows[3]!.label).toBe('exec')
-    expect(rows[3]!.preview).toBe('{"command":"ls -la /tmp"}')
-    expect(rows[3]!.output).toBe('total 0')
-    expect(rows[3]!.startedAtMs).toBe(1_600)
-    expect(rows[3]!.endedAtMs).toBe(2_200)
-    expect(rows[4]!.stepIndex).toBe(1)
-    expect(rows[4]!.preview).toBe('All done. Second line.')
-    expect(rows[4]!.startedAtMs).toBe(2_300)
-    expect(rows[5]!.label).toBe('steering')
+    expect(rows[0]!.detail.kind).toBe('system')
+    expect(rows[0]!.detail.kind === 'system' && rows[0]!.detail.entry.tokens).toBe(1_500)
+    expect(rows[2]!.label).toBe('workspace_instruction')
+    expect(rows[2]!.detail.kind === 'context' && rows[2]!.detail.entry.kind).toBe('fragments')
+    expect(rows[10]!.stepIndex).toBe(0)
+    expect(rows[11]!.stepIndex).toBe(0)
+    expect(rows[11]!.label).toBe('exec')
+    expect(rows[11]!.preview).toBe('{"command":"ls -la /tmp"}')
+    expect(rows[11]!.output).toBe('total 0')
+    expect(rows[11]!.startedAtMs).toBe(1_600)
+    expect(rows[11]!.endedAtMs).toBe(2_200)
+    expect(rows[12]!.stepIndex).toBe(1)
+    expect(rows[12]!.label).toBe('step')
+    expect(rows[13]!.stepIndex).toBe(1)
+    expect(rows[13]!.preview).toBe('All done. Second line.')
+    expect(rows[13]!.startedAtMs).toBe(2_300)
+    expect(rows[14]!.label).toBe('steering')
     expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
+  })
+
+  it('emits the system and context rows once when only the assistant turn is loaded', () => {
+    const rows = buildTrajectoryRows([assistantTurn()], lifecycleByTurnId([lifecycleTurn]))
+    expect(rows[0]!.kind).toBe('system')
+    expect(rows[0]!.turnStart).toBe(true)
+    expect(rows.filter(row => row.kind === 'system')).toHaveLength(1)
+    expect(rows.filter(row => row.kind === 'context')).toHaveLength(9)
   })
 
   it('keeps running tools without fabricated timing', () => {
@@ -145,33 +225,47 @@ describe('trajectory previews', () => {
   })
 })
 
-describe('turn timeline', () => {
-  it('projects steps onto model and input lanes and tools onto their own lane', () => {
-    const timeline = buildTurnTimeline(assistantTurn())!
-    expect(timeline.start).toBe(1_000)
-    expect(timeline.end).toBe(3_400)
-    expect(timeline.steps).toBe(2)
-    const lanes = timeline.spans.map(span => span.lane)
-    expect(lanes.filter(lane => lane === 'model')).toHaveLength(2)
-    expect(lanes.filter(lane => lane === 'input')).toHaveLength(2)
-    expect(lanes.filter(lane => lane === 'tools')).toHaveLength(1)
-    const model = timeline.spans.find(span => span.lane === 'model')!
-    expect(model.start).toBe(1_000)
-    expect(model.ttftEnd).toBe(1_200)
-    expect(model.end).toBe(1_500)
-    const input = timeline.spans.find(span => span.lane === 'input')!
-    expect(input.tokens).toBe(100)
-    expect(input.cachedTokens).toBe(80)
-    const tools = timeline.spans.find(span => span.lane === 'tools')!
-    expect(tools.label).toBe('exec')
-    expect(tools.stepIndex).toBe(0)
+describe('row map', () => {
+  it('projects every ledger row onto its lane and merges a step into one model segment', () => {
+    const rows = buildTrajectoryRows([user('user-1', 'hi'), assistantTurn()], lifecycleByTurnId([lifecycleTurn]))
+    const segments = buildRowMap(rows)
+    expect(segments.map(segment => segment.lane)).toEqual([
+      'input', 'input',
+      'input', 'input', 'input', 'input', 'input', 'input', 'input', 'input',
+      'model', 'tools',
+      'input',
+      'model',
+    ])
+    expect(segments[0]!.kind).toBe('system')
+    expect(segments[0]!.turnStart).toBe(true)
+    expect(segments[0]!.durationMs).toBe(0)
+    const step0 = segments[10]!
+    expect(step0.kind).toBe('reasoning')
+    expect(step0.rowKey).toBe(rows[10]!.key)
+    expect(step0.durationMs).toBe(500)
+    expect(step0.splitMs).toBe(200)
+    expect(step0.stepIndex).toBe(0)
+    expect(segments[11]!.durationMs).toBe(600)
+    expect(segments[11]!.label).toBe('exec')
+    expect(segments[13]!.durationMs).toBe(1_100)
+    expect(segments[13]!.label).toBe('stop')
   })
 
-  it('returns null when nothing in the turn was timed', () => {
+  it('merges reasoning and text of the same step and keeps untimed tail blocks apart', () => {
     const turn = assistantTurn()
-    turn.stepTraces = undefined
-    turn.messages = [tool(1, 'exec')]
-    expect(buildTurnTimeline(turn)).toBeNull()
+    turn.streaming = true
+    turn.messages = [
+      { id: 0, type: 'reasoning', content: 'think' },
+      { id: 1, type: 'text', content: 'partial' },
+      { id: 2, type: 'text', content: 'tail' },
+    ]
+    turn.stepTraces = [{ first_message_id: 0, last_message_id: 1, step_index: 0, started_at_ms: 1_000, first_token_at_ms: 1_100, ended_at_ms: 1_500, finish_reason: 'stop' }]
+    const segments = buildRowMap(buildTrajectoryRows([turn], new Map()))
+    expect(segments).toHaveLength(2)
+    expect(segments[0]!.durationMs).toBe(500)
+    expect(segments[0]!.running).toBe(false)
+    expect(segments[1]!.durationMs).toBe(0)
+    expect(segments[1]!.running).toBe(true)
   })
 })
 

@@ -38,7 +38,7 @@
           >{{ $t(KIND_LABEL_KEY[row.kind]) }}</span>
           <span class="flex min-w-0 items-center gap-1.5 truncate">
             <span
-              v-if="row.kind === 'tool' || row.kind === 'context' || row.kind === 'error'"
+              v-if="rowLabel(row)"
               class="shrink-0 font-mono text-foreground"
             >{{ rowLabel(row) }}</span>
             <span
@@ -69,7 +69,7 @@ import { useI18n } from 'vue-i18n'
 import { ArrowRight } from 'lucide-vue-next'
 import { Spinner } from '@felinic/ui'
 import type { TrajectoryRow } from '../../composables/trajectory-model'
-import { formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS } from '../../composables/trajectory-view'
+import { contextLabelKey, contextPreview, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 import { useVirtualRows } from '../../composables/useVirtualRows'
 
@@ -95,17 +95,36 @@ watch(() => props.rows, (rows, previous) => {
   if (index > 0) keepAnchored(index)
 }, { flush: 'pre' })
 
+// A selection made on the strip may point at a row outside the window;
+// bring it into view without disturbing selections made in the list itself.
+watch(() => props.selectedKey, (key) => {
+  const element = viewport.value
+  if (!key || !element) return
+  const index = props.rows.findIndex(row => row.key === key)
+  if (index < 0 || (index >= range.value.start && index < range.value.end)) return
+  element.scrollTop = Math.max(index * rowHeight.value - element.clientHeight / 2, 0)
+})
+
 function rowLabel(row: TrajectoryRow): string {
+  if (row.detail.kind === 'context') {
+    const key = contextLabelKey(row.detail.entry)
+    return key ? t(key) : row.label
+  }
   if (row.kind === 'context') {
     const key = row.label === 'steering' || row.label === 'prepared' ? `chat.trajectory.${row.label}` : ''
     return key ? t(key) : row.label
   }
-  return row.label
+  return row.kind === 'tool' || row.kind === 'error' ? row.label : ''
 }
 
 function rowPreview(row: TrajectoryRow): string {
-  if (row.kind !== 'system' || row.detail.kind !== 'system') return row.preview
-  const tokens = row.detail.lifecycle.snapshot?.counts?.token_estimate ?? 0
-  return t('chat.trajectory.systemPreview', { tokens: formatTokenCount(tokens) })
+  switch (row.detail.kind) {
+    case 'system':
+      return t('chat.trajectory.systemPreview', { fragments: row.detail.entry.fragments, tokens: formatTokenCount(row.detail.entry.tokens) })
+    case 'context':
+      return contextPreview(row.detail.entry, t)
+    default:
+      return row.preview
+  }
 }
 </script>

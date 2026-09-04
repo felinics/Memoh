@@ -2,17 +2,16 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
-import type { ChatAssistantTurn } from '@/store/chat/types'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatViewTarget } from './useChatViewContext'
 import { useContextLifecycle } from './useContextLifecycle'
 import {
-  buildTurnTimeline,
+  buildRowMap,
   createTrajectoryRowBuilder,
   foldTrajectoryStats,
   lifecycleByTurnId,
 } from './trajectory-model'
-import type { TimelineMode } from './trajectory-view'
+import { rowMapGeometry, type TimelineMode } from './trajectory-view'
 
 // The trajectory reads the session's shared transcript window: the same
 // history pages and live projection the chat panel already holds, so opening
@@ -40,23 +39,9 @@ export function useTrajectory() {
     selectedKey.value = null
   })
 
-  const latestAssistantTurn = computed<ChatAssistantTurn | null>(() => {
-    for (let index = messages.value.length - 1; index >= 0; index -= 1) {
-      const turn = messages.value[index]!
-      if (turn.role === 'assistant') return turn
-    }
-    return null
-  })
-  const focusedTurn = computed<ChatAssistantTurn | null>(() => {
-    const turnId = selectedRow.value?.turnId
-    if (turnId) {
-      const turn = messages.value.find(message => message.role === 'assistant' && message.turnId === turnId)
-      if (turn && turn.role === 'assistant') return turn
-    }
-    return latestAssistantTurn.value
-  })
-  const timeline = computed(() => (focusedTurn.value ? buildTurnTimeline(focusedTurn.value) : null))
   const mode = ref<TimelineMode>('duration')
+  const segments = computed(() => buildRowMap(rows.value))
+  const bars = computed(() => rowMapGeometry(segments.value, mode.value))
 
   const hasOlder = computed(() => (transcript.value?.hasMoreOlder.value ?? false) || lifecycle.canLoadOlder.value)
   const loadingOlder = computed(() => (transcript.value?.loadingOlder.value ?? false) || lifecycle.loadingOlder.value)
@@ -76,6 +61,12 @@ export function useTrajectory() {
     selectedKey.value = selectedKey.value === key ? null : key
   }
 
+  // The strip focuses without toggling: clicking the selected bar again keeps
+  // the inspector open on it.
+  function focus(key: string) {
+    selectedKey.value = key
+  }
+
   return {
     hasTarget: computed(() => !!target.value.sessionId),
     rows,
@@ -83,12 +74,12 @@ export function useTrajectory() {
     loadingMessages,
     selectedKey,
     selectedRow,
-    focusedTurn,
-    timeline,
+    bars,
     mode,
     hasOlder,
     loadingOlder,
     loadOlder,
     select,
+    focus,
   }
 }

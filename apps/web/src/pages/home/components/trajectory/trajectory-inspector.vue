@@ -26,6 +26,43 @@
         />
       </template>
 
+      <template v-else-if="row.detail.kind === 'context'">
+        <div
+          v-if="detailRows.length"
+          class="divide-y divide-border"
+        >
+          <div
+            v-for="entry in detailRows"
+            :key="entry.key"
+            class="flex items-center justify-between gap-3 py-1"
+          >
+            <span class="text-muted-foreground">{{ entry.label }}</span>
+            <span
+              class="min-w-0 truncate text-right font-medium tabular-nums text-foreground"
+              :class="entry.mono ? 'font-mono' : ''"
+            >{{ entry.value }}</span>
+          </div>
+        </div>
+        <template v-if="listRows.length">
+          <p class="text-caption text-muted-foreground">
+            {{ $t(listTitleKey) }}
+          </p>
+          <div
+            class="divide-y divide-border"
+            data-testid="trajectory-inspector-list"
+          >
+            <div
+              v-for="entry in listRows"
+              :key="entry.key"
+              class="flex items-center justify-between gap-3 py-0.5"
+            >
+              <span class="min-w-0 flex-1 truncate font-mono text-caption text-foreground">{{ entry.label }}</span>
+              <span class="shrink-0 text-right text-caption tabular-nums text-muted-foreground">{{ entry.value }}</span>
+            </div>
+          </div>
+        </template>
+      </template>
+
       <template v-else-if="row.detail.kind === 'user'">
         <pre
           class="whitespace-pre-wrap break-words font-mono text-body text-foreground"
@@ -76,6 +113,59 @@
           data-testid="trajectory-inspector-text"
         >{{ row.detail.block.content }}</pre>
       </template>
+
+      <template v-if="decisionScope">
+        <p class="text-caption text-muted-foreground">
+          {{ $t('chat.trajectory.inspectorDecisions') }}
+        </p>
+        <div
+          v-if="decisionStatus === 'pending'"
+          class="space-y-1"
+        >
+          <Skeleton
+            v-for="line in 3"
+            :key="line"
+            class="h-4 w-full"
+          />
+        </div>
+        <p
+          v-else-if="decisionStatus === 'error'"
+          class="text-caption text-destructive"
+        >
+          {{ $t('chat.trajectory.inspectorDecisionsFailed') }}
+        </p>
+        <p
+          v-else-if="decisionRows.length === 0"
+          class="text-caption text-muted-foreground"
+        >
+          {{ $t('chat.trajectory.inspectorDecisionsEmpty') }}
+        </p>
+        <div
+          v-else
+          class="divide-y divide-border"
+          data-testid="trajectory-inspector-decisions"
+        >
+          <div
+            v-for="entry in decisionRows"
+            :key="entry.key"
+            class="flex items-center gap-2 py-0.5 text-caption"
+          >
+            <span
+              class="w-14 shrink-0 font-medium"
+              :class="entry.tone"
+            >{{ entry.decision }}</span>
+            <span class="min-w-0 flex-1 truncate font-mono text-foreground">{{ entry.label }}</span>
+            <span class="shrink-0 truncate text-muted-foreground">{{ entry.reason }}</span>
+            <span class="shrink-0 tabular-nums text-muted-foreground">{{ entry.tokens }}</span>
+          </div>
+          <p
+            v-if="hiddenDecisions > 0"
+            class="py-0.5 text-caption text-muted-foreground"
+          >
+            {{ $t('chat.trajectory.inspectorDecisionsMore', { n: hiddenDecisions }) }}
+          </p>
+        </div>
+      </template>
     </div>
   </ScrollArea>
 </template>
@@ -84,11 +174,15 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
-import { Button, ScrollArea } from '@felinic/ui'
+import { Button, ScrollArea, Skeleton } from '@felinic/ui'
+import type { ContextfragSelectionDecision } from '@memohai/sdk'
 import type { TrajectoryRow } from '../../composables/trajectory-model'
-import { formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS } from '../../composables/trajectory-view'
+import { contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS, type DecisionScope } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
+import { useContextLifecycleDecisions } from '../../composables/useContextLifecycleDecisions'
 import ContextLifecycleTurns from '../context-lifecycle-turns.vue'
+
+const DECISION_ROW_LIMIT = 200
 
 const props = defineProps<{ row: TrajectoryRow }>()
 const emit = defineEmits<{ close: [] }>()
@@ -107,6 +201,71 @@ function pretty(value: unknown): string {
     return String(value)
   }
 }
+
+const detailRows = computed(() => (props.row.detail.kind === 'context' ? contextDetailRows(props.row.detail.entry, t) : []))
+const listRows = computed(() => (props.row.detail.kind === 'context' ? contextListRows(props.row.detail.entry, props.row.detail.lifecycle.snapshot, t) : []))
+const listTitleKey = computed(() => {
+  const detail = props.row.detail
+  if (detail.kind !== 'context') return ''
+  switch (detail.entry.kind) {
+    case 'tool_defs':
+      return 'chat.trajectory.inspectorTools'
+    case 'fragments':
+    case 'memory_recall':
+      return 'chat.trajectory.inspectorRefs'
+    default:
+      return 'chat.trajectory.inspectorDropReasons'
+  }
+})
+
+// The per-fragment audit is read only for the rows it can explain: what the
+// system slot holds, and which history rows were kept, trimmed or dropped.
+const decisionScope = computed<DecisionScope | null>(() => decisionScopeOf(props.row))
+const decisionRunId = computed(() => {
+  const detail = props.row.detail
+  if (!decisionScope.value || (detail.kind !== 'system' && detail.kind !== 'context')) return null
+  return detail.lifecycle.run_id ?? null
+})
+const { decisions, status: decisionStatus } = useContextLifecycleDecisions(decisionRunId)
+
+const DECISION_TONE: Record<string, string> = {
+  selected: 'text-muted-foreground',
+  trimmed: 'text-warning',
+  dropped: 'text-destructive',
+}
+
+// Decision ids read as the selector named them (system.prompt.body,
+// message.004); the source id adds the tool or file the fragment came from.
+function decisionLabel(decision: ContextfragSelectionDecision): string {
+  const named = [decision.id, decision.source_id].filter(Boolean).join(' · ')
+  if (named) return named
+  const ref = decision.ref
+  return ref?.namespace && ref.id ? `${ref.namespace}/${ref.id}` : decision.source ?? ''
+}
+
+const scopedDecisions = computed(() => {
+  const scope = decisionScope.value
+  if (!scope) return []
+  return decisions.value.filter((decision) => {
+    switch (scope) {
+      case 'system':
+        return decision.slot === 'system'
+      case 'history':
+        return decision.slot === 'history'
+      case 'cut':
+        return decision.decision != null && decision.decision !== 'selected'
+    }
+  })
+})
+const decisionRows = computed(() => scopedDecisions.value.slice(0, DECISION_ROW_LIMIT).map((decision, index) => ({
+  key: decision.id || `${index}`,
+  decision: t(`chat.trajectory.decision.${decision.decision ?? 'selected'}`),
+  tone: DECISION_TONE[decision.decision ?? 'selected'] ?? 'text-muted-foreground',
+  label: decisionLabel(decision),
+  reason: decision.reason ?? '',
+  tokens: decision.token_estimate ? formatTokenCount(decision.token_estimate) : '',
+})))
+const hiddenDecisions = computed(() => Math.max(scopedDecisions.value.length - DECISION_ROW_LIMIT, 0))
 
 const timingRows = computed(() => {
   const detail = props.row.detail

@@ -1,52 +1,82 @@
 import { describe, expect, it } from 'vitest'
-import type { TrajectoryStats, TurnTimeline } from './trajectory-model'
-import { formatDurationMs, laneGeometry, statsSegments } from './trajectory-view'
+import type { RowMapSegment, TrajectoryStats } from './trajectory-model'
+import { contextPreview, formatDurationMs, rowMapGeometry, statsSegments } from './trajectory-view'
 
-const timeline: TurnTimeline = {
-  start: 1_000,
-  end: 5_000,
-  steps: 2,
-  spans: [
-    { lane: 'model', key: 'model:0', start: 1_000, end: 2_000, ttftEnd: 1_250, label: 'tool-calls', tokens: 10, cachedTokens: 0, stepIndex: 0 },
-    { lane: 'input', key: 'input:0', start: 1_000, end: 2_000, ttftEnd: null, label: '', tokens: 100, cachedTokens: 50, stepIndex: 0 },
-    { lane: 'tools', key: 'tool:1', start: 2_100, end: 2_900, ttftEnd: null, label: 'exec', tokens: 0, cachedTokens: 0, stepIndex: 0 },
-    { lane: 'model', key: 'model:1', start: 3_000, end: 5_000, ttftEnd: null, label: 'stop', tokens: 40, cachedTokens: 0, stepIndex: 1 },
-    { lane: 'input', key: 'input:1', start: 3_000, end: 5_000, ttftEnd: null, label: '', tokens: 200, cachedTokens: 150, stepIndex: 1 },
-  ],
+function segment(overrides: Partial<RowMapSegment>): RowMapSegment {
+  return {
+    key: 'k', rowKey: 'k', lane: 'input', kind: 'user', turnId: 'turn-1', turnStart: false,
+    durationMs: 0, splitMs: null, label: '', running: false, stepIndex: null,
+    ...overrides,
+  }
 }
 
-describe('laneGeometry', () => {
-  it('scales bars by wall clock in duration mode', () => {
-    const bars = laneGeometry(timeline, 'duration')
-    const first = bars.find(bar => bar.key === 'model:0')!
-    expect(first.leftPct).toBe(0)
-    expect(first.widthPct).toBe(25)
-    expect(first.splitPct).toBe(25)
-    const tool = bars.find(bar => bar.key === 'tool:1')!
-    expect(tool.leftPct).toBeCloseTo(27.5)
-    expect(tool.widthPct).toBeCloseTo(20)
-    const secondInput = bars.find(bar => bar.key === 'input:1')!
-    expect(secondInput.intensity).toBe(1)
-    expect(bars.find(bar => bar.key === 'input:0')!.intensity).toBe(0.5)
+const segments: RowMapSegment[] = [
+  segment({ key: 'system', rowKey: 'system', kind: 'system', turnStart: true }),
+  segment({ key: 'user', rowKey: 'user', kind: 'user' }),
+  segment({ key: 'model:0', rowKey: 'r0', lane: 'model', kind: 'reasoning', durationMs: 1_000, splitMs: 250, stepIndex: 0, label: 'tool-calls' }),
+  segment({ key: 'tool:1', rowKey: 't1', lane: 'tools', kind: 'tool', durationMs: 800, stepIndex: 0, label: 'exec' }),
+  segment({ key: 'model:1', rowKey: 'a1', lane: 'model', kind: 'assistant', durationMs: 2_000, stepIndex: 1, label: 'stop' }),
+  segment({ key: 'user2', rowKey: 'user2', kind: 'user', turnId: 'turn-2', turnStart: true }),
+  segment({ key: 'model:2', rowKey: 'a2', lane: 'model', kind: 'assistant', durationMs: 1_000, stepIndex: 0, turnId: 'turn-2' }),
+]
+
+describe('rowMapGeometry', () => {
+  it('scales bars by duration with a floor for timeless rows and keeps them in ledger order', () => {
+    const bars = rowMapGeometry(segments, 'duration')
+    expect(bars.map(bar => bar.key)).toEqual(segments.map(s => s.key))
+    let cursor = 0
+    for (const bar of bars) {
+      expect(bar.leftPct).toBeGreaterThanOrEqual(cursor - 1e-9)
+      cursor = bar.leftPct + bar.widthPct
+    }
+    expect(cursor).toBeCloseTo(100, 6)
+    const model0 = bars.find(bar => bar.key === 'model:0')!
+    const model1 = bars.find(bar => bar.key === 'model:1')!
+    expect(model1.widthPct / model0.widthPct).toBeCloseTo(2, 6)
+    expect(model0.splitPct).toBe(25)
+    const system = bars.find(bar => bar.key === 'system')!
+    expect(system.widthPct).toBeGreaterThan(0)
+    expect(system.widthPct).toBeLessThan(model0.widthPct)
+    const turn2 = bars.find(bar => bar.key === 'user2')!
+    const turn1End = model1.leftPct + model1.widthPct
+    expect(turn2.leftPct).toBeGreaterThan(turn1End)
   })
 
-  it('gives every step an equal slot in sequence mode and parks tools in their step', () => {
-    const bars = laneGeometry(timeline, 'sequence')
-    const first = bars.find(bar => bar.key === 'model:0')!
-    const second = bars.find(bar => bar.key === 'model:1')!
-    expect(first.leftPct).toBe(0)
-    expect(first.widthPct).toBe(50)
-    expect(second.leftPct).toBe(50)
-    expect(second.widthPct).toBe(50)
-    const tool = bars.find(bar => bar.key === 'tool:1')!
-    expect(tool.leftPct).toBeGreaterThanOrEqual(0)
-    expect(tool.leftPct + tool.widthPct).toBeLessThanOrEqual(50)
+  it('gives every segment the same width in sequence mode', () => {
+    const bars = rowMapGeometry(segments, 'sequence')
+    const widths = new Set(bars.map(bar => bar.widthPct.toFixed(6)))
+    expect(widths.size).toBe(1)
+    expect(bars[bars.length - 1]!.leftPct + bars[bars.length - 1]!.widthPct).toBeCloseTo(100, 6)
+    expect(bars.find(bar => bar.key === 'model:0')!.splitPct).toBe(25)
   })
 
-  it('never divides by a zero domain', () => {
-    const bars = laneGeometry({ ...timeline, start: 1_000, end: 1_000, spans: [{ ...timeline.spans[0]!, end: 1_000, ttftEnd: null }] }, 'duration')
-    expect(bars[0]!.widthPct).toBeGreaterThan(0)
-    expect(Number.isFinite(bars[0]!.leftPct)).toBe(true)
+  it('handles an empty map and a map without any timing', () => {
+    expect(rowMapGeometry([], 'duration')).toEqual([])
+    const bars = rowMapGeometry(segments.slice(0, 2), 'duration')
+    expect(bars).toHaveLength(2)
+    expect(bars[0]!.widthPct + bars[1]!.widthPct).toBeCloseTo(100, 6)
+  })
+})
+
+describe('contextPreview', () => {
+  const t = (key: string, params?: Record<string, unknown>) => `${key}${params ? JSON.stringify(params) : ''}`
+
+  it('describes each entry kind from its own numbers', () => {
+    expect(contextPreview({ kind: 'fragments', fragmentKind: 'workspace_instruction', fragments: 1, tokens: 500, textBytes: 0, images: 0 }, t))
+      .toBe('chat.trajectory.contextFragments{"fragments":1,"tokens":"500"}')
+    expect(contextPreview({ kind: 'fragments', fragmentKind: 'conversation_event', fragments: 22, tokens: 84, textBytes: 0, images: 0, selection: { selected: 22, dropped: 3 } }, t))
+      .toBe('chat.trajectory.contextHistoryCut{"messages":22,"tokens":"84","dropped":3}')
+    expect(contextPreview({ kind: 'fragments', fragmentKind: 'conversation_event', fragments: 6, tokens: 84, textBytes: 0, images: 0, selection: { selected: 28, dropped: 0 } }, t))
+      .toBe('chat.trajectory.contextHistory{"messages":6,"tokens":"84"}')
+    expect(contextPreview({ kind: 'tool_defs', tools: 3, tokens: 450, providers: ['memory', 'workspace'] }, t))
+      .toBe('chat.trajectory.contextToolDefs{"n":3,"tokens":"450"}')
+    expect(contextPreview({ kind: 'memory_recall', memory: { cache_state: 'miss', result: { count: 0 } } }, t))
+      .toBe('chat.trajectory.contextMemory{"count":0,"state":"miss"}')
+    expect(contextPreview({ kind: 'selection', selection: { selected: 4, dropped: 2, trimmed: 1 } }, t))
+      .toBe('chat.trajectory.contextSelection{"selected":4,"dropped":2,"trimmed":1}')
+    expect(contextPreview({ kind: 'mutation', mutation: { kind: 'mid_task_prune', detail: 'pruned=2' } }, t)).toBe('pruned=2')
+    expect(contextPreview({ kind: 'step', step: { step_index: 1, dropped: 2, truncated: 0, reselection_outcome: 'applied' } }, t))
+      .toBe('chat.trajectory.contextStep{"dropped":2,"truncated":0,"outcome":"applied"}')
   })
 })
 

@@ -4,7 +4,7 @@
     data-testid="trajectory-overview"
   >
     <div
-      v-if="!timeline"
+      v-if="bars.length === 0"
       class="text-caption text-muted-foreground"
     >
       {{ $t('chat.trajectory.timelineEmpty') }}
@@ -19,22 +19,26 @@
       >
         <span class="text-caption leading-4 text-muted-foreground">{{ $t(LANE_LABEL_KEY[lane]) }}</span>
         <div class="relative h-4 overflow-hidden rounded-sm bg-accent">
-          <div
+          <button
             v-for="bar in barsByLane[lane]"
             :key="bar.key"
-            class="absolute inset-y-0 overflow-hidden rounded-sm"
-            :class="barClass(bar)"
+            type="button"
+            class="absolute inset-y-0 cursor-pointer overflow-hidden rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            :class="[KIND_BAR_CLASS[bar.kind], bar.rowKey === selectedKey ? 'ring-2 ring-ring' : '', bar.running ? 'animate-pulse' : '']"
             :style="{ left: `${bar.leftPct}%`, width: `${bar.widthPct}%` }"
             :title="barTitle(bar)"
+            :aria-label="barTitle(bar)"
+            :data-ui-selected="bar.rowKey === selectedKey ? '' : undefined"
             :data-testid="`trajectory-bar-${bar.key}`"
+            @click="emit('select', bar.rowKey)"
           >
-            <div
+            <span
               v-if="bar.splitPct != null"
               class="absolute inset-y-0 left-0"
               :class="LANE_TTFT_CLASS"
               :style="{ width: `${bar.splitPct}%` }"
             />
-          </div>
+          </button>
         </div>
       </template>
     </div>
@@ -44,37 +48,29 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { TimelineLane, TurnTimeline } from '../../composables/trajectory-model'
-import { formatDurationMs, laneGeometry, LANE_BAR_CLASS, LANE_INPUT_LIGHT_CLASS, LANE_LABEL_KEY, LANE_TTFT_CLASS, type LaneBar, type TimelineMode } from '../../composables/trajectory-view'
-import { formatTokenCount } from '../../composables/context-categories'
+import type { TimelineLane } from '../../composables/trajectory-model'
+import { formatDurationMs, KIND_BAR_CLASS, KIND_LABEL_KEY, LANE_LABEL_KEY, LANE_TTFT_CLASS, type RowMapBar } from '../../composables/trajectory-view'
 
 const props = defineProps<{
-  timeline: TurnTimeline | null
-  mode: TimelineMode
+  bars: RowMapBar[]
+  selectedKey: string | null
 }>()
+
+const emit = defineEmits<{ select: [key: string] }>()
 
 const { t } = useI18n()
 const lanes: TimelineLane[] = ['input', 'model', 'tools']
 
-const bars = computed(() => (props.timeline ? laneGeometry(props.timeline, props.mode) : []))
 const barsByLane = computed(() => {
-  const grouped: Record<TimelineLane, LaneBar[]> = { input: [], model: [], tools: [] }
-  for (const bar of bars.value) grouped[bar.lane].push(bar)
+  const grouped: Record<TimelineLane, RowMapBar[]> = { input: [], model: [], tools: [] }
+  for (const bar of props.bars) grouped[bar.lane].push(bar)
   return grouped
 })
 
-// A request that is small next to the turn's largest one reads on the soft
-// rung of the same hue, so relative size stays on the token ramp.
-function barClass(bar: LaneBar): string {
-  return bar.lane === 'input' && bar.intensity < 0.5 ? LANE_INPUT_LIGHT_CLASS : LANE_BAR_CLASS[bar.lane]
-}
-
-function barTitle(bar: LaneBar): string {
-  const duration = formatDurationMs(bar.end - bar.start)
-  if (bar.lane === 'input') {
-    return `${t('chat.trajectory.step', { n: bar.stepIndex ?? 0 })} · ${formatTokenCount(bar.tokens)} · ${duration}`
-  }
-  const label = bar.label ? `${bar.label} · ` : ''
-  return `${label}${duration}`
+function barTitle(bar: RowMapBar): string {
+  const parts = [t(KIND_LABEL_KEY[bar.kind])]
+  if (bar.label) parts.push(bar.label)
+  if (bar.durationMs > 0) parts.push(formatDurationMs(bar.durationMs))
+  return parts.join(' · ')
 }
 </script>
