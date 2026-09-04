@@ -1460,6 +1460,7 @@ export type ConversationUiStepTrace = {
     finish_reason?: string;
     first_message_id?: number;
     first_token_at_ms?: number;
+    last_message_id?: number;
     started_at_ms?: number;
     step_index?: number;
     usage?: MessageStepTraceUsage;

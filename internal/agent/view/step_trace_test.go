@@ -45,13 +45,13 @@ func TestConvertMessagesToUITurnsProjectsStepTracesAndExecutionTiming(t *testing
 	if len(traces) != 2 {
 		t.Fatalf("step traces = %#v, want two", traces)
 	}
-	if traces[0].FirstMessageID != tool.ID || traces[0].StepIndex != 0 || traces[0].StartedAtMS != 1000 || traces[0].FirstTokenAtMS != 1200 || traces[0].EndedAtMS != 1900 || traces[0].FinishReason != "tool-calls" {
+	if traces[0].FirstMessageID != tool.ID || traces[0].LastMessageID != tool.ID || traces[0].StepIndex != 0 || traces[0].StartedAtMS != 1000 || traces[0].FirstTokenAtMS != 1200 || traces[0].EndedAtMS != 1900 || traces[0].FinishReason != "tool-calls" {
 		t.Fatalf("first trace = %#v", traces[0])
 	}
 	if traces[0].Usage == nil || traces[0].Usage.InputTokens != 100 || traces[0].Usage.CachedInputTokens != 60 || traces[0].Usage.OutputTokens != 12 {
 		t.Fatalf("first trace usage = %#v", traces[0].Usage)
 	}
-	if traces[1].FirstMessageID != turns[0].Messages[1].ID || traces[1].StepIndex != 1 || traces[1].FinishReason != "stop" {
+	if traces[1].FirstMessageID != turns[0].Messages[1].ID || traces[1].LastMessageID != turns[0].Messages[1].ID || traces[1].StepIndex != 1 || traces[1].FinishReason != "stop" {
 		t.Fatalf("second trace = %#v", traces[1])
 	}
 }
@@ -71,7 +71,7 @@ func TestUIMessageStreamConverterAnchorsStepTracesToFirstBlock(t *testing.T) {
 		Usage:        usage,
 		Timing:       &event.StepTiming{StartedAtMS: 1000, FirstTokenAtMS: 1100, EndedAtMS: 1800},
 	})
-	if first == nil || first.FirstMessageID != 0 || first.StepIndex != 0 || first.StartedAtMS != 1000 || first.EndedAtMS != 1800 || first.FinishReason != "tool-calls" {
+	if first == nil || first.FirstMessageID != 0 || first.LastMessageID != 1 || first.StepIndex != 0 || first.StartedAtMS != 1000 || first.EndedAtMS != 1800 || first.FinishReason != "tool-calls" {
 		t.Fatalf("first trace = %#v", first)
 	}
 	if first.Usage == nil || first.Usage.InputTokens != 50 || first.Usage.CachedInputTokens != 20 || first.Usage.OutputTokens != 3 {
@@ -88,7 +88,7 @@ func TestUIMessageStreamConverterAnchorsStepTracesToFirstBlock(t *testing.T) {
 		t.Fatalf("tool end = %#v", ended)
 	}
 	second := converter.HandleStepEnd(UIMessageStreamEvent{Type: "step_end", StepIndex: 1, Timing: &event.StepTiming{StartedAtMS: 1850, EndedAtMS: 1890}})
-	if second == nil || second.FirstMessageID != toolMessages[0].ID || second.StepIndex != 1 {
+	if second == nil || second.FirstMessageID != toolMessages[0].ID || second.LastMessageID != toolMessages[0].ID || second.StepIndex != 1 {
 		t.Fatalf("second trace = %#v", second)
 	}
 

@@ -28,7 +28,7 @@ type stepTraceToolSpan struct {
 type stepTraceTracker struct {
 	mu        sync.Mutex
 	now       func() time.Time
-	nextIndex int
+	taken     int
 	steps     []messagepkg.StepTraceMetadata
 	committed []messagepkg.StepTraceMetadata
 	rollup    contextfrag.RunTrace
@@ -45,46 +45,45 @@ func newStepTraceTracker(now func() time.Time) *stepTraceTracker {
 }
 
 // observeProvider consumes the provider seam: only a finished request yields a
-// step, so retried or errored attempts never leave a trace.
+// step, and a new attempt discards finished steps that no commit has taken
+// yet, because the retry regenerates them.
 func (t *stepTraceTracker) observeProvider(ev native.StreamEvent) {
-	if t == nil || ev.Type != native.EventStepEnd || ev.Timing == nil {
+	if t == nil {
 		return
 	}
-	trace := messagepkg.StepTraceMetadata{
-		Version:        messagepkg.StepTraceVersion,
-		StartedAtMS:    ev.Timing.StartedAtMS,
-		FirstTokenAtMS: ev.Timing.FirstTokenAtMS,
-		EndedAtMS:      ev.Timing.EndedAtMS,
-		FinishReason:   strings.TrimSpace(ev.FinishReason),
-		Usage:          stepTraceUsageFromRaw(ev.Usage),
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.observed = true
-	trace.StepIndex = t.nextIndex
-	t.nextIndex++
-	t.steps = append(t.steps, trace)
-	t.rollup.Steps++
-	if span := trace.EndedAtMS - trace.StartedAtMS; span > 0 {
-		t.rollup.LLMMs += span
-	}
-	if trace.FirstTokenAtMS > 0 {
-		if t.rollup.Steps == 1 {
-			t.rollup.TTFTMs = max(trace.FirstTokenAtMS-trace.StartedAtMS, 0)
+	switch ev.Type {
+	case native.EventRetry:
+		t.mu.Lock()
+		t.steps = nil
+		t.mu.Unlock()
+	case native.EventStepEnd:
+		if ev.Timing == nil {
+			return
 		}
-		if decode := trace.EndedAtMS - trace.FirstTokenAtMS; decode > 0 && trace.Usage != nil && trace.Usage.OutputTokens > 0 {
-			t.rollup.DecodeMs += decode
-			t.rollup.DecodeOutputTokens += trace.Usage.OutputTokens
+		trace := messagepkg.StepTraceMetadata{
+			Version:        messagepkg.StepTraceVersion,
+			StartedAtMS:    ev.Timing.StartedAtMS,
+			FirstTokenAtMS: ev.Timing.FirstTokenAtMS,
+			EndedAtMS:      ev.Timing.EndedAtMS,
+			FinishReason:   strings.TrimSpace(ev.FinishReason),
+			Usage:          stepTraceUsageFromRaw(ev.Usage),
 		}
-	}
-	if trace.Usage != nil {
-		addStepTraceUsage(&t.rollup, *trace.Usage)
+		t.mu.Lock()
+		t.observed = true
+		trace.StepIndex = t.taken + len(t.committed) + len(t.steps)
+		t.steps = append(t.steps, trace)
+		t.mu.Unlock()
 	}
 }
 
 // observe consumes the public event stream shared by every runtime.
 func (t *stepTraceTracker) observe(ev native.StreamEvent) {
 	if t == nil {
+		return
+	}
+	switch ev.Type {
+	case native.EventAgentStart, native.EventToolCallStart, native.EventToolCallEnd, native.EventAgentEnd, native.EventAgentAbort:
+	default:
 		return
 	}
 	now := t.now()
@@ -136,11 +135,14 @@ func (t *stepTraceTracker) observe(ev native.StreamEvent) {
 	}
 }
 
+// checkpoint folds the finished steps into the durable unit so a later retry
+// cannot discard them.
 func (t *stepTraceTracker) checkpoint() {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
+	t.foldPending()
 	t.committed = append(t.committed, t.steps...)
 	t.steps = nil
 	t.mu.Unlock()
@@ -154,16 +156,25 @@ func (t *stepTraceTracker) take() []messagepkg.StepTraceMetadata {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.foldPending()
 	traces := make([]messagepkg.StepTraceMetadata, 0, len(t.committed)+len(t.steps))
 	traces = append(traces, t.committed...)
 	traces = append(traces, t.steps...)
+	t.taken += len(traces)
 	t.committed = nil
 	t.steps = nil
 	return traces
 }
 
-// runTrace returns the bounded rollup, or nil when nothing was observed. A
-// run without provider steps takes its usage from the terminal event.
+func (t *stepTraceTracker) foldPending() {
+	for _, trace := range t.steps {
+		foldStepTrace(&t.rollup, trace)
+	}
+}
+
+// runTrace returns the bounded rollup, or nil when nothing was observed. Steps
+// no commit has taken yet count provisionally; a run without provider steps
+// takes its usage from the terminal event.
 func (t *stepTraceTracker) runTrace() *contextfrag.RunTrace {
 	if t == nil {
 		return nil
@@ -174,10 +185,32 @@ func (t *stepTraceTracker) runTrace() *contextfrag.RunTrace {
 		return nil
 	}
 	rollup := t.rollup
+	for _, trace := range t.steps {
+		foldStepTrace(&rollup, trace)
+	}
 	if rollup.Steps == 0 && t.terminal != nil {
 		addStepTraceUsage(&rollup, *t.terminal)
 	}
 	return &rollup
+}
+
+func foldStepTrace(rollup *contextfrag.RunTrace, trace messagepkg.StepTraceMetadata) {
+	rollup.Steps++
+	if span := trace.EndedAtMS - trace.StartedAtMS; span > 0 {
+		rollup.LLMMs += span
+	}
+	if trace.FirstTokenAtMS > 0 {
+		if rollup.Steps == 1 {
+			rollup.TTFTMs = max(trace.FirstTokenAtMS-trace.StartedAtMS, 0)
+		}
+		if decode := trace.EndedAtMS - trace.FirstTokenAtMS; decode > 0 && trace.Usage != nil && trace.Usage.OutputTokens > 0 {
+			rollup.DecodeMs += decode
+			rollup.DecodeOutputTokens += trace.Usage.OutputTokens
+		}
+	}
+	if trace.Usage != nil {
+		addStepTraceUsage(rollup, *trace.Usage)
+	}
 }
 
 func addStepTraceUsage(rollup *contextfrag.RunTrace, usage messagepkg.StepTraceUsage) {
@@ -284,7 +317,12 @@ func (opts storeRoundOptions) withStepTraceMetadata(messages []ModelMessage) sto
 		if traceIndex >= len(opts.StepTraces) {
 			break
 		}
-		if !strings.EqualFold(strings.TrimSpace(message.Role), "assistant") || isEmptyAssistantMessage(message) {
+		if !strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
+			continue
+		}
+		trace := opts.StepTraces[traceIndex]
+		traceIndex++
+		if isEmptyAssistantMessage(message) {
 			continue
 		}
 		if opts.MessageMetadataByIndex == nil {
@@ -294,9 +332,8 @@ func (opts storeRoundOptions) withStepTraceMetadata(messages []ModelMessage) sto
 		if existing == nil {
 			existing = map[string]any{}
 		}
-		existing[messagepkg.StepTraceMetadataKey] = opts.StepTraces[traceIndex]
+		existing[messagepkg.StepTraceMetadataKey] = trace
 		opts.MessageMetadataByIndex[messageIndex] = existing
-		traceIndex++
 	}
 	return opts
 }

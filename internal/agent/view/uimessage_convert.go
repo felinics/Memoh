@@ -362,7 +362,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 					Attachments: attachments,
 				})
 			}
-			if trace := uiStepTraceFromMetadata(raw.Metadata, firstBlockID); trace != nil && pending.NextID > firstBlockID {
+			if trace := uiStepTraceFromMetadata(raw.Metadata, firstBlockID, pending.NextID-1); trace != nil && pending.NextID > firstBlockID {
 				pending.Turn.StepTraces = append(pending.Turn.StepTraces, *trace)
 			}
 
@@ -922,13 +922,14 @@ func extractExecutionTimingMetadata(metadata map[string]any) *UIExecutionTiming 
 	return &UIExecutionTiming{StartedAtMS: timing.StartedAtMS, EndedAtMS: timing.EndedAtMS}
 }
 
-func uiStepTraceFromMetadata(metadata map[string]any, firstMessageID int) *UIStepTrace {
+func uiStepTraceFromMetadata(metadata map[string]any, firstMessageID, lastMessageID int) *UIStepTrace {
 	trace := messagepkg.StepTraceFromMetadata(metadata)
 	if trace == nil {
 		return nil
 	}
 	return &UIStepTrace{
 		FirstMessageID: firstMessageID,
+		LastMessageID:  lastMessageID,
 		StepIndex:      trace.StepIndex,
 		StartedAtMS:    trace.StartedAtMS,
 		FirstTokenAtMS: trace.FirstTokenAtMS,

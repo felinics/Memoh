@@ -17,6 +17,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/hooks"
@@ -227,12 +228,40 @@ func (a *Agent) Stream(ctx context.Context, cfg RunConfig) <-chan StreamEvent {
 	observed := make(chan StreamEvent)
 	go func() {
 		defer close(observed)
-		for event := range ch {
-			cfg.OnAgentEventObserved(event)
-			observed <- event
+		for ev := range ch {
+			cfg.OnAgentEventObserved(ev)
+			if deliverObservedEvent(ctx, observed, ev) {
+				continue
+			}
+			// The consumer left: keep observing so the terminal facts still
+			// land, and let the run unwind on its own cancellation.
+			for ev := range ch {
+				cfg.OnAgentEventObserved(ev)
+			}
+			return
 		}
 	}()
 	return observed
+}
+
+// streamObserverDeliveryGrace bounds how long an observed event waits for a
+// consumer after the run context is cancelled.
+var streamObserverDeliveryGrace = 5 * time.Second
+
+func deliverObservedEvent(ctx context.Context, observed chan<- StreamEvent, ev StreamEvent) bool {
+	select {
+	case observed <- ev:
+		return true
+	case <-ctx.Done():
+	}
+	timer := time.NewTimer(streamObserverDeliveryGrace)
+	defer timer.Stop()
+	select {
+	case observed <- ev:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // Generate runs the agent in non-streaming mode, returning the complete result.
@@ -438,7 +467,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 							}
 						}
 						messageIndex := len(p.Messages)
-						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
+						p.Messages = append(p.Messages, StampContextInjection(sdk.UserMessage(text, extra...), event.ContextInjectionSteering))
 						cfg.ContextMutations.Record(contextfrag.MutationInjectedMessage, fmt.Sprintf("bytes=%d", len(text)))
 						injectedMessages.record(step, messageIndex, text)
 						a.logger.Info("injected user message into agent stream",
@@ -1934,6 +1963,7 @@ func (a *Agent) runMidStreamRetry(
 	// committed boundary, so it must not survive as a checkpoint. Retried
 	// steps are numbered from the offset the commit barrier already uses.
 	interruptedStep.rebase(stepOffset)
+	stepBoundary.reset(stepOffset)
 	// lastAttempt stays the latest failed attempt's own (unmerged) result:
 	// providerAttemptState.retryInput indexes Steps by the call-local step
 	// index, so handing it a merged result would append the wrong step's tail.

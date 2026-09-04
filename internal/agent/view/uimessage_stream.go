@@ -67,6 +67,7 @@ func (c *UIMessageStreamConverter) HandleStepEnd(event UIMessageStreamEvent) *UI
 	}
 	return &UIStepTrace{
 		FirstMessageID: anchor,
+		LastMessageID:  c.nextID - 1,
 		StepIndex:      event.StepIndex,
 		StartedAtMS:    event.Timing.StartedAtMS,
 		FirstTokenAtMS: event.Timing.FirstTokenAtMS,

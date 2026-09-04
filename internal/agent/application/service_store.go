@@ -63,15 +63,25 @@ func (s *Service) storeRoundWithOptionsResult(ctx context.Context, req ChatReque
 	// no value and pollute the conversation history, causing subsequent turns
 	// to also produce empty responses.
 	filtered := make([]ModelMessage, 0, len(fullRound))
+	keptTraces := make([]messagepkg.StepTraceMetadata, 0, len(opts.StepTraces))
+	assistantOrdinal := 0
 	for _, m := range fullRound {
-		if m.Role == "assistant" && isEmptyAssistantMessage(m) && !opts.AllowEmptyAssistantText {
-			s.logger.Warn("skipping empty assistant message in storeRound",
-				slog.String("bot_id", req.BotID),
-			)
-			continue
+		if m.Role == "assistant" {
+			ordinal := assistantOrdinal
+			assistantOrdinal++
+			if isEmptyAssistantMessage(m) && !opts.AllowEmptyAssistantText {
+				s.logger.Warn("skipping empty assistant message in storeRound",
+					slog.String("bot_id", req.BotID),
+				)
+				continue
+			}
+			if ordinal < len(opts.StepTraces) {
+				keptTraces = append(keptTraces, opts.StepTraces[ordinal])
+			}
 		}
 		filtered = append(filtered, m)
 	}
+	opts.StepTraces = keptTraces
 
 	if len(filtered) == 0 {
 		return nil, nil
@@ -123,7 +133,9 @@ func (opts storeRoundOptions) withContextLifecycleMetadata(logger *slog.Logger, 
 	if existing == nil {
 		existing = map[string]any{}
 	}
-	existing[contextfrag.MetadataContextLifecycleKey] = snapshot.Summary()
+	summary := snapshot.Summary()
+	summary.RunTrace = nil
+	existing[contextfrag.MetadataContextLifecycleKey] = summary
 	opts.MessageMetadataByIndex[idx] = existing
 	return opts
 }
@@ -365,6 +377,9 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 				// DisplayContent stays empty and ConvertMessagesToUITurns
 				// drops the turn entirely (no text + no assets).
 				displayText = ownText
+			}
+			if kind := contextInjectionKindOf(msg); kind != "" {
+				persistMeta = mergeMetadata(persistMeta, contextInjectionMetadata(kind))
 			}
 		} else if strings.TrimSpace(req.ExternalMessageID) != "" {
 			sourceReplyToMessageID = req.ExternalMessageID

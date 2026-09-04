@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 )
@@ -63,13 +62,9 @@ func (p providerStreamEventObserver) DoStream(ctx context.Context, params sdk.Ge
 func (p providerStreamEventObserver) partEvent(part sdk.StreamPart) (StreamEvent, bool) {
 	switch v := part.(type) {
 	case *sdk.TextDeltaPart:
-		if strings.TrimSpace(v.Text) != "" {
-			p.clock.firstToken()
-		}
+		p.clock.firstTokenText(v.Text)
 	case *sdk.ReasoningDeltaPart:
-		if strings.TrimSpace(v.Text) != "" {
-			p.clock.firstToken()
-		}
+		p.clock.firstTokenText(v.Text)
 	case *sdk.ToolInputStartPart, *sdk.StreamToolCallPart:
 		p.clock.firstToken()
 	case *sdk.FinishStepPart:

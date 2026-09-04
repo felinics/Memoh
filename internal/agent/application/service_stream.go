@@ -888,9 +888,8 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 	}
 	roundMessages := prependTurnUserMessage(storeReq, outputMessages)
 
-	var injectionMetadata map[int]map[string]any
 	if rc.injectedRecords != nil && len(*rc.injectedRecords) > 0 {
-		roundMessages, injectionMetadata = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
+		roundMessages = interleaveInjectedMessages(roundMessages, *rc.injectedRecords)
 	}
 
 	persisted, err := s.storeRoundWithOptionsResult(ctx, storeReq, roundMessages, rc.model.ID, storeRoundOptions{
@@ -899,7 +898,6 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 		ContextLifecycle:       rc.runConfig.ContextLifecycle,
 		ReasoningTiming:        snap.reasoningTiming,
 		StepTraces:             snap.stepTraces,
-		MessageMetadataByIndex: injectionMetadata,
 	})
 	if err != nil {
 		return nil, err
@@ -1051,43 +1049,6 @@ func (s *Service) persistTurnFailure(ctx context.Context, req ChatRequest, rc re
 		slog.String("code", string(code)),
 	)
 	return persisted, nil
-}
-
-// interleaveInjectedMessages inserts injected user messages at their correct
-// positions within the round. Each record's InsertAfter value indicates how
-// many output messages preceded the injection.
-//
-// round layout: [user_A, output_0, output_1, ..., output_N]
-// InsertAfter=K → insert after round[K] (i.e. after the K-th output message).
-func interleaveInjectedMessages(round []ModelMessage, injections []InjectedMessageRecord) ([]ModelMessage, map[int]map[string]any) {
-	if len(injections) == 0 {
-		return round, nil
-	}
-	result := make([]ModelMessage, 0, len(round)+len(injections))
-	metadata := make(map[int]map[string]any, len(injections))
-	appendInjection := func(record InjectedMessageRecord) {
-		metadata[len(result)] = contextInjectionMetadata(messagepkg.ContextInjectionSteering)
-		result = append(result, ModelMessage{
-			Role:    "user",
-			Content: newTextContent(record.HeaderifiedText),
-		})
-	}
-	injIdx := 0
-	for i, msg := range round {
-		result = append(result, msg)
-		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
-			appendInjection(injections[injIdx])
-			injIdx++
-		}
-	}
-	for ; injIdx < len(injections); injIdx++ {
-		appendInjection(injections[injIdx])
-	}
-	return result, metadata
-}
-
-func contextInjectionMetadata(kind string) map[string]any {
-	return map[string]any{messagepkg.ContextInjectionMetadataKey: messagepkg.ContextInjectionMetadata{Kind: kind}}
 }
 
 func extractInputTokensFromUsage(raw json.RawMessage) int {

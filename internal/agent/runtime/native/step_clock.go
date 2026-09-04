@@ -2,6 +2,7 @@ package native
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,12 +58,26 @@ func (c *stepClock) firstToken() {
 	if c == nil {
 		return
 	}
-	now := c.now().UnixMilli()
 	c.mu.Lock()
-	if c.active != nil && c.active.FirstTokenAtMS == 0 {
-		c.active.FirstTokenAtMS = now
+	defer c.mu.Unlock()
+	if c.active == nil || c.active.FirstTokenAtMS != 0 {
+		return
 	}
-	c.mu.Unlock()
+	c.active.FirstTokenAtMS = c.now().UnixMilli()
+}
+
+// firstTokenText samples the first non-blank delta; the blank check runs only
+// while the sample is still pending so streaming stays cheap.
+func (c *stepClock) firstTokenText(text string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.active == nil || c.active.FirstTokenAtMS != 0 || strings.TrimSpace(text) == "" {
+		return
+	}
+	c.active.FirstTokenAtMS = c.now().UnixMilli()
 }
 
 func (c *stepClock) finish(usage sdk.Usage, reason sdk.FinishReason) (completedStep, bool) {
@@ -101,6 +116,17 @@ type stepBoundaryEmitter struct {
 	clock *stepClock
 	index int
 	open  bool
+}
+
+// reset rewinds the emitter to the last committed request after a retry: the
+// failed attempt never finished, so its index is reused and its open start is
+// forgotten.
+func (e *stepBoundaryEmitter) reset(index int) {
+	if e == nil {
+		return
+	}
+	e.open = false
+	e.index = index
 }
 
 func (e *stepBoundaryEmitter) observe(part sdk.StreamPart) (StreamEvent, bool) {

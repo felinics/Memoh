@@ -103,3 +103,20 @@ func TestAgentStreamEmitsStepBoundariesPerModelRequest(t *testing.T) {
 		t.Fatalf("last event = %#v", last)
 	}
 }
+
+func TestStepBoundaryEmitterResetReopensTheRetriedRequest(t *testing.T) {
+	t.Parallel()
+
+	emitter := &stepBoundaryEmitter{clock: newStepClock(nil), index: 2}
+	if _, ok := emitter.observe(&sdk.StartStepPart{}); !ok {
+		t.Fatal("first start not emitted")
+	}
+	if _, ok := emitter.observe(&sdk.StartStepPart{}); ok {
+		t.Fatal("duplicate start emitted while the request is open")
+	}
+	emitter.reset(2)
+	ev, ok := emitter.observe(&sdk.StartStepPart{})
+	if !ok || ev.Type != EventStepStart || ev.StepIndex != 2 {
+		t.Fatalf("retried start = %#v (ok=%v), want step_start at index 2", ev, ok)
+	}
+}

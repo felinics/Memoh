@@ -128,6 +128,9 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 			if !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 				break
 			}
+			if contextInjectionKindOf(message) != "" {
+				continue
+			}
 			if opts.MessageMetadataByIndex == nil {
 				opts.MessageMetadataByIndex = make(map[int]map[string]any, 1)
 			}

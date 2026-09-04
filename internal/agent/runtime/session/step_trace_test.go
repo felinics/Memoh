@@ -84,3 +84,25 @@ func TestHandleAgentEventPublishesStepTracesAnchoredToBlocks(t *testing.T) {
 		t.Fatalf("appended = %#v", appended)
 	}
 }
+
+func TestCloneSnapshotKeepsStepTraces(t *testing.T) {
+	t.Parallel()
+
+	snapshot := Snapshot{CurrentRunView: &CurrentRunView{
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		Messages:   []chatview.UIMessage{{ID: 0, Type: chatview.UIMessageText, Content: "hi"}},
+		StepTraces: []chatview.UIStepTrace{{FirstMessageID: 0, LastMessageID: 0, StepIndex: 0, StartedAtMS: 1, EndedAtMS: 2}},
+	}}
+	cloned, err := cloneSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if len(cloned.CurrentRunView.StepTraces) != 1 || cloned.CurrentRunView.StepTraces[0].EndedAtMS != 2 {
+		t.Fatalf("cloned step traces = %#v", cloned.CurrentRunView.StepTraces)
+	}
+	cloned.CurrentRunView.StepTraces[0].EndedAtMS = 9
+	if snapshot.CurrentRunView.StepTraces[0].EndedAtMS != 2 {
+		t.Fatalf("clone shares the step trace backing array")
+	}
+}

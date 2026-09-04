@@ -1,8 +1,10 @@
 package external
 
 import (
+	"maps"
 	"strings"
 	"sync"
+	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -16,17 +18,19 @@ import (
 // It is not capped by the UI event buffer.
 type TranscriptRecorder struct {
 	mu             sync.Mutex
+	now            func() time.Time
 	output         []sdk.Message
 	assistantParts []sdk.MessagePart
 	reasoning      strings.Builder
 	text           strings.Builder
 	sawTextDelta   bool
 	limit          contextlimit.ToolOutputLimit
+	toolStarted    map[string]int64
 }
 
 // NewTranscriptRecorder creates an empty transcript recorder.
 func NewTranscriptRecorder(limits ...contextlimit.ToolOutputLimit) *TranscriptRecorder {
-	recorder := &TranscriptRecorder{}
+	recorder := &TranscriptRecorder{now: time.Now, toolStarted: make(map[string]int64)}
 	if len(limits) > 0 {
 		recorder.limit = limits[0]
 	}
@@ -48,7 +52,9 @@ func (b *TranscriptRecorder) Add(ev event.StreamEvent) {
 		b.appendText(ev.Delta)
 	case event.ToolCallStart:
 		b.upsertToolCallStart(ev)
+		b.markToolStart(ev)
 	case event.ToolCallEnd:
+		b.stampToolTiming(ev)
 		b.flushAssistant()
 		b.appendToolResult(ev)
 	case event.ToolApprovalRequest:
@@ -218,6 +224,59 @@ func (b *TranscriptRecorder) attachToolMetadata(ev event.StreamEvent, key string
 			key: value,
 		},
 	})
+}
+
+func (b *TranscriptRecorder) markToolStart(ev event.StreamEvent) {
+	toolCallID := strings.TrimSpace(ev.ToolCallID)
+	if toolCallID == "" {
+		return
+	}
+	if _, seen := b.toolStarted[toolCallID]; !seen {
+		b.toolStarted[toolCallID] = b.now().UnixMilli()
+	}
+}
+
+// stampToolTiming records when the runtime reported the call and its result.
+// A runtime that measures its own execution wins; otherwise arrival order at
+// this boundary is the only clock the transcript has.
+func (b *TranscriptRecorder) stampToolTiming(ev event.StreamEvent) {
+	toolCallID := strings.TrimSpace(ev.ToolCallID)
+	if toolCallID == "" {
+		return
+	}
+	timing, provided := ev.Metadata[event.ExecutionTimingMetadataKey]
+	if !provided || timing == nil {
+		endedAt := b.now().UnixMilli()
+		startedAt, seen := b.toolStarted[toolCallID]
+		if !seen {
+			startedAt = endedAt
+		}
+		timing = event.ExecutionTiming{StartedAtMS: startedAt, EndedAtMS: endedAt}
+	}
+	delete(b.toolStarted, toolCallID)
+	stamp := func(part sdk.ToolCallPart) sdk.ToolCallPart {
+		metadata := make(map[string]any, len(part.ProviderMetadata)+1)
+		maps.Copy(metadata, part.ProviderMetadata)
+		metadata[event.ExecutionTimingMetadataKey] = timing
+		part.ProviderMetadata = metadata
+		return part
+	}
+	if idx := b.findToolCallPart(toolCallID, ""); idx >= 0 {
+		b.assistantParts[idx] = stamp(b.assistantParts[idx].(sdk.ToolCallPart))
+		return
+	}
+	for m := len(b.output) - 1; m >= 0; m-- {
+		for i, part := range b.output[m].Content {
+			call, ok := part.(sdk.ToolCallPart)
+			if !ok || strings.TrimSpace(call.ToolCallID) != toolCallID {
+				continue
+			}
+			content := append([]sdk.MessagePart(nil), b.output[m].Content...)
+			content[i] = stamp(call)
+			b.output[m].Content = content
+			return
+		}
+	}
 }
 
 func (b *TranscriptRecorder) upsertToolCallStart(ev event.StreamEvent) {

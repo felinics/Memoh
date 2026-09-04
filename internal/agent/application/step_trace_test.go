@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -205,5 +206,109 @@ func runTraceFieldsOf(trace *contextfrag.RunTrace) *runTraceFields {
 		DecodeMs: trace.DecodeMs, DecodeOutputTokens: trace.DecodeOutputTokens, InputTokens: trace.InputTokens,
 		CachedInputTokens: trace.CachedInputTokens, CacheWriteTokens: trace.CacheWriteTokens,
 		OutputTokens: trace.OutputTokens, ReasoningTokens: trace.ReasoningTokens,
+	}
+}
+
+func TestStepTraceTrackerDiscardsFinishedStepOnRetryBeforeCommit(t *testing.T) {
+	t.Parallel()
+
+	tracker := newStepTraceTracker(nil)
+	tracker.observeProvider(providerStepEnd(1_000, 1_100, 2_000, sdk.Usage{OutputTokens: 3}, "tool-calls"))
+	tracker.observeProvider(native.StreamEvent{Type: native.EventRetry})
+	tracker.observeProvider(providerStepEnd(3_000, 3_100, 4_000, sdk.Usage{OutputTokens: 4}, "stop"))
+
+	traces := tracker.take()
+	if len(traces) != 1 || traces[0].StepIndex != 0 || traces[0].StartedAtMS != 3_000 {
+		t.Fatalf("traces = %#v, want only the surviving attempt at index 0", traces)
+	}
+	got := tracker.runTrace()
+	if got == nil || got.Steps != 1 || got.LLMMs != 1_000 || got.OutputTokens != 4 {
+		t.Fatalf("run trace = %#v, want the surviving attempt only", got)
+	}
+}
+
+func TestStepTraceTrackerCheckpointSurvivesLaterRetry(t *testing.T) {
+	t.Parallel()
+
+	tracker := newStepTraceTracker(nil)
+	tracker.observeProvider(providerStepEnd(1_000, 1_100, 2_000, sdk.Usage{OutputTokens: 3}, "tool-calls"))
+	tracker.checkpoint()
+	tracker.observeProvider(native.StreamEvent{Type: native.EventRetry})
+	tracker.observeProvider(providerStepEnd(3_000, 3_100, 4_000, sdk.Usage{OutputTokens: 4}, "stop"))
+
+	traces := tracker.take()
+	if len(traces) != 2 || traces[0].StepIndex != 0 || traces[1].StepIndex != 1 {
+		t.Fatalf("traces = %#v, want both steps", traces)
+	}
+	if got := tracker.runTrace(); got == nil || got.Steps != 2 {
+		t.Fatalf("run trace = %#v", got)
+	}
+}
+
+func TestWithStepTraceMetadataSkipsEmptyAssistantRowsWithoutShiftingTraces(t *testing.T) {
+	t.Parallel()
+
+	empty := sdkMessagesToModelMessages([]sdk.Message{{Role: sdk.MessageRoleAssistant}})
+	text := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("answer")})
+	messages := slices.Concat(empty, text)
+	opts := storeRoundOptions{StepTraces: []messagepkg.StepTraceMetadata{
+		{Version: messagepkg.StepTraceVersion, StepIndex: 0, StartedAtMS: 1, EndedAtMS: 2},
+		{Version: messagepkg.StepTraceVersion, StepIndex: 1, StartedAtMS: 3, EndedAtMS: 4},
+	}}.withStepTraceMetadata(messages)
+	if _, ok := opts.MessageMetadataByIndex[0]; ok {
+		t.Fatalf("empty assistant row received a trace: %#v", opts.MessageMetadataByIndex)
+	}
+	trace := messagepkg.StepTraceFromMetadata(opts.MessageMetadataByIndex[1])
+	if trace == nil || trace.StepIndex != 1 {
+		t.Fatalf("text row trace = %#v, want step 1", trace)
+	}
+}
+
+func TestContextLifecycleRowCopyOmitsRunTrace(t *testing.T) {
+	t.Parallel()
+
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetManifest(contextfrag.BuildManifest(nil))
+	holder.SetRunTraceSource(func() *contextfrag.RunTrace { return &contextfrag.RunTrace{Steps: 1} })
+	messages := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("answer")})
+	opts := storeRoundOptions{ContextLifecycle: holder}.withContextLifecycleMetadata(slog.New(slog.DiscardHandler), ChatRequest{}, messages)
+	rowCopy, ok := opts.MessageMetadataByIndex[0][contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot)
+	if !ok || rowCopy.RunTrace != nil {
+		t.Fatalf("row lifecycle copy = %#v, want no run trace", opts.MessageMetadataByIndex[0])
+	}
+	if snapshot, _ := holder.Snapshot(); snapshot.RunTrace == nil {
+		t.Fatalf("terminal snapshot lost its run trace")
+	}
+}
+
+func TestStoreRoundDropsTracesOfFilteredAssistantRows(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	service := &Service{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+	round := append([]ModelMessage{{Role: "user", Content: newTextContent("hello")}},
+		sdkMessagesToModelMessages([]sdk.Message{{Role: sdk.MessageRoleAssistant}, sdk.AssistantMessage("answer")})...)
+	traces := []messagepkg.StepTraceMetadata{
+		{Version: messagepkg.StepTraceVersion, StepIndex: 0, StartedAtMS: 1, EndedAtMS: 2},
+		{Version: messagepkg.StepTraceVersion, StepIndex: 1, StartedAtMS: 3, EndedAtMS: 4},
+	}
+	_, err := service.storeRoundWithOptionsResult(t.Context(), ChatRequest{
+		BotID: "bot-1", ThreadID: "session-1", Query: "hello", UserMessagePersisted: true,
+	}, round, "model-1", storeRoundOptions{StepTraces: traces})
+	if err != nil {
+		t.Fatalf("storeRoundWithOptionsResult() error = %v", err)
+	}
+	var assistant []messagepkg.PersistInput
+	for _, persisted := range messages.persisted {
+		if persisted.Role == "assistant" {
+			assistant = append(assistant, persisted)
+		}
+	}
+	if len(assistant) != 1 {
+		t.Fatalf("assistant rows = %#v, want the non-empty one", assistant)
+	}
+	trace := messagepkg.StepTraceFromMetadata(assistant[0].Metadata)
+	if trace == nil || trace.StepIndex != 1 {
+		t.Fatalf("trace = %#v, want the second step on the surviving row", trace)
 	}
 }

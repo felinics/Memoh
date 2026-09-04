@@ -100,9 +100,10 @@ type UIContextInjection struct {
 
 // UIStepTrace is one model request of an assistant turn: its server-observed
 // wall clock, finish reason, and provider usage, anchored to the first block
-// the request produced. Blocks up to the next trace's anchor belong to it.
+// the request produced and bounded by the last one.
 type UIStepTrace struct {
 	FirstMessageID int                        `json:"first_message_id"`
+	LastMessageID  int                        `json:"last_message_id"`
 	StepIndex      int                        `json:"step_index"`
 	StartedAtMS    int64                      `json:"started_at_ms"`
 	FirstTokenAtMS int64                      `json:"first_token_at_ms,omitempty"`
