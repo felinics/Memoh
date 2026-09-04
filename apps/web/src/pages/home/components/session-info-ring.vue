@@ -59,6 +59,7 @@
         :override-model-id="overrideModelId"
         :fallback-context-window="fallbackContextWindow"
         @open-lifecycle="openLifecycle"
+        @open-trajectory="openTrajectory"
       />
     </PopoverContent>
   </Popover>
@@ -76,6 +77,7 @@
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Popover, PopoverContent, PopoverTrigger } from '@felinic/ui'
+import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import SessionInfoPanel from './session-info-panel.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass } from '../composables/context-categories'
@@ -91,10 +93,17 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const workspaceTabs = useWorkspaceTabsStore()
 const open = ref(false)
 const lifecycleOpen = ref(false)
 const lifecycleEverOpened = ref(false)
 const triggerRef = ref<{ $el?: HTMLElement } | null>(null)
+
+function openTrajectory() {
+  clearTimers()
+  open.value = false
+  if (sessionId.value) workspaceTabs.openTrajectory(sessionId.value)
+}
 
 function openLifecycle() {
   clearTimers()

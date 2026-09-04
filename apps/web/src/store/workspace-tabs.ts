@@ -50,7 +50,7 @@ const LEGACY_TERMINAL_TITLE = 'zsh'
 // (≈554:269) — enough room to work in without burying the conversation.
 const TERMINAL_PANEL_HEIGHT_RATIO = 1 / 3
 
-export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule'
+export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 'terminal' | 'browser' | 'display' | 'schedule' | 'trajectory'
 
 interface BotLayoutState {
   layout: SerializedDockview | null
@@ -97,6 +97,7 @@ function panelComponentOf(id: string): WorkspacePanelComponent | null {
   if (id.startsWith('browser:')) return 'browser'
   if (id.startsWith('display:')) return 'display'
   if (id.startsWith('schedule:')) return 'schedule'
+  if (id.startsWith('trajectory:')) return 'trajectory'
   return null
 }
 
@@ -380,6 +381,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return numberedFallbackTitle('Desktop', panel.id)
       case 'schedule':
         return 'Schedule'
+      case 'trajectory':
+        return 'Trajectory'
       default:
         return panel.id
     }
@@ -2044,6 +2047,20 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
+  // One trajectory per session: it reads the session's shared transcript, so
+  // a second panel would only duplicate the same view.
+  function openTrajectory(sessionId: string, groupId?: string): boolean {
+    const id = sessionId.trim()
+    if (!id) return false
+    return focusOrAdd({
+      id: `trajectory:${id}`,
+      component: 'trajectory',
+      title: 'Trajectory',
+      params: { sessionId: id },
+      groupId,
+    })
+  }
+
   // Don't let the sole remaining tab close if it's an empty draft chat — there is
   // nothing to gain by closing then respawning a draft. A real-session chat tab
   // CAN close (the dock then respawns a draft via ensureDraftChatPanel).
@@ -2574,6 +2591,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openDisplay,
     splitGroup,
     openSchedule,
+    openTrajectory,
     closeTab,
     requestCloseTab,
     requestCloseTabs,

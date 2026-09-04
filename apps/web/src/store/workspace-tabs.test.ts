@@ -2433,4 +2433,19 @@ describe('workspace layout store', () => {
       expect(dock.activePanel?.id).toBe(chatPanelId)
     })
   })
+  it('opens one trajectory panel per session and focuses it again', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    expect(store.openTrajectory('session-9')).toBe(true)
+    const panel = dock.getPanel('trajectory:session-9')
+    expect(panel?.component).toBe('trajectory')
+    expect(panel?.params.sessionId).toBe('session-9')
+    expect(panel?.title).toBe('Trajectory')
+
+    expect(store.openTrajectory('session-9')).toBe(true)
+    expect(dock.panels.filter(item => item.id.startsWith('trajectory:'))).toHaveLength(1)
+    expect(store.openTrajectory('')).toBe(false)
+  })
 })
