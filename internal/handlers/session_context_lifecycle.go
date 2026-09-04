@@ -48,7 +48,21 @@ type ContextLifecycleResponse struct {
 	// AggregateScope is always "returned_page": aggregates cover the returned
 	// turns, never the whole session.
 	AggregateScope string `json:"aggregate_scope"`
+	// FragmentPreviews maps a content hash referenced by the page's fragment
+	// refs and tool definitions to the head of its stored text.
+	FragmentPreviews map[string]ContextFragmentPreview `json:"fragment_previews,omitempty"`
 }
+
+// ContextFragmentPreview is the head of one stored fragment text.
+type ContextFragmentPreview struct {
+	Kind      contextfrag.Kind `json:"kind"`
+	Label     string           `json:"label,omitempty"`
+	Preview   string           `json:"preview"`
+	TextBytes int              `json:"text_bytes"`
+	Truncated bool             `json:"truncated,omitempty"`
+}
+
+const contextFragmentPreviewChars = 240
 
 const contextLifecycleAggregateScope = "returned_page"
 
@@ -113,6 +127,10 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	if err != nil {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
+	previews, err := contextFragmentPreviews(ctx, h.queries, load.Turns)
+	if err != nil {
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+	}
 	return c.JSON(http.StatusOK, ContextLifecycleResponse{
 		Turns:                 load.Turns,
 		Aggregates:            aggregateContextLifecycle(load.Turns),
@@ -122,7 +140,177 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 		LegacySource:          load.LegacySource,
 		LegacyHistoryMayExist: load.LegacyHistoryMayExist,
 		AggregateScope:        contextLifecycleAggregateScope,
+		FragmentPreviews:      previews,
 	})
+}
+
+// contextFragmentHashes collects every stored-text hash a page of turns
+// references, deduplicated, in first-seen order.
+func contextFragmentHashes(turns []ContextLifecycleTurn) []string {
+	seen := make(map[string]struct{})
+	var hashes []string
+	add := func(hash string) {
+		hash = strings.TrimSpace(hash)
+		if hash == "" {
+			return
+		}
+		if _, ok := seen[hash]; ok {
+			return
+		}
+		seen[hash] = struct{}{}
+		hashes = append(hashes, hash)
+	}
+	for _, turn := range turns {
+		for _, ref := range turn.Snapshot.Fragments {
+			add(ref.ContentHash)
+		}
+		for _, def := range turn.Snapshot.ToolDefs {
+			add(def.ContentHash)
+		}
+	}
+	return hashes
+}
+
+func contextFragmentPreviews(ctx context.Context, queries contextLifecycleQueries, turns []ContextLifecycleTurn) (map[string]ContextFragmentPreview, error) {
+	hashes := contextFragmentHashes(turns)
+	if len(hashes) == 0 {
+		return nil, nil
+	}
+	rows, err := queries.ListContextFragmentPreviews(ctx, sqlc.ListContextFragmentPreviewsParams{
+		PreviewChars:  contextFragmentPreviewChars,
+		ContentHashes: hashes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list context fragment previews: %w", err)
+	}
+	previews := make(map[string]ContextFragmentPreview, len(rows))
+	for _, row := range rows {
+		previews[row.ContentHash] = ContextFragmentPreview{
+			Kind:      contextfrag.Kind(row.Kind),
+			Label:     row.Label,
+			Preview:   row.Preview,
+			TextBytes: int(row.TextBytes),
+			Truncated: row.Truncated,
+		}
+	}
+	return previews, nil
+}
+
+// ContextFragmentText is one injected fragment of a run with its stored text.
+type ContextFragmentText struct {
+	// Label names the fragment as the assembler did; empty when no text was
+	// stored, because the snapshot itself never carries names.
+	Label         string           `json:"label,omitempty"`
+	Kind          contextfrag.Kind `json:"kind"`
+	Slot          contextfrag.Slot `json:"slot,omitempty"`
+	ContentHash   string           `json:"content_hash,omitempty"`
+	TokenEstimate int              `json:"token_estimate,omitempty"`
+	TextBytes     int              `json:"text_bytes,omitempty"`
+	Text          string           `json:"text"`
+	Truncated     bool             `json:"truncated,omitempty"`
+	// Available is false when the text was never stored for this fragment,
+	// such as runs older than the text store.
+	Available bool `json:"available"`
+}
+
+type ContextLifecycleFragmentsResponse struct {
+	RunID     string                `json:"run_id"`
+	Fragments []ContextFragmentText `json:"fragments"`
+}
+
+// GetSessionContextLifecycleFragments godoc
+// @Summary Get the injected context texts of a run
+// @Description Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, memory recall, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them
+// @Tags sessions
+// @Param bot_id path string true "Bot ID"
+// @Param session_id path string true "Session ID"
+// @Param run_id path string true "Run ID"
+// @Success 200 {object} ContextLifecycleFragmentsResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 401 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments [get].
+func (h *SessionInfoHandler) GetSessionContextLifecycleFragments(c echo.Context) error {
+	pgSessionID, err := h.authorizeContextLifecycleSession(c)
+	if err != nil {
+		return err
+	}
+	runID, err := db.ParseUUID(strings.TrimSpace(c.Param("run_id")))
+	if err != nil {
+		return apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+	}
+	fragments, err := loadContextLifecycleFragments(c.Request().Context(), h.queries, pgSessionID, runID)
+	if errors.Is(err, errContextLifecycleRunNotFound) {
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+	}
+	if err != nil {
+		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+	}
+	return c.JSON(http.StatusOK, ContextLifecycleFragmentsResponse{RunID: runID.String(), Fragments: fragments})
+}
+
+type contextLifecycleFragmentQueries interface {
+	GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (sqlc.GetContextLifecycleByRunIDRow, error)
+	ListContextFragmentTexts(ctx context.Context, contentHashes []string) ([]sqlc.ListContextFragmentTextsRow, error)
+}
+
+func loadContextLifecycleFragments(
+	ctx context.Context,
+	queries contextLifecycleFragmentQueries,
+	sessionID pgtype.UUID,
+	runID pgtype.UUID,
+) ([]ContextFragmentText, error) {
+	run, err := queries.GetContextLifecycleByRunID(ctx, runID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errContextLifecycleRunNotFound
+		}
+		return nil, fmt.Errorf("get run lifecycle: %w", err)
+	}
+	if run.SessionID != sessionID {
+		return nil, errContextLifecycleRunNotFound
+	}
+	snapshot, err := contextfrag.DecodeLifecycleSnapshot(run.Snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("decode lifecycle snapshot for run %s: %w", runID.String(), err)
+	}
+	fragments := make([]ContextFragmentText, 0, len(snapshot.Fragments)+len(snapshot.ToolDefs))
+	for _, ref := range snapshot.Fragments {
+		fragments = append(fragments, ContextFragmentText{Kind: ref.Kind, Slot: ref.Slot, ContentHash: ref.ContentHash, TokenEstimate: ref.TokenEstimate, TextBytes: ref.TextBytes})
+	}
+	for _, def := range snapshot.ToolDefs {
+		fragments = append(fragments, ContextFragmentText{Label: def.Provider + "/" + def.Name, Kind: contextfrag.KindToolDefinition, ContentHash: def.ContentHash, TokenEstimate: def.TokenEstimate, TextBytes: def.Bytes})
+	}
+	hashes := contextFragmentHashes([]ContextLifecycleTurn{{Snapshot: snapshot}})
+	if len(hashes) == 0 {
+		return fragments, nil
+	}
+	rows, err := queries.ListContextFragmentTexts(ctx, hashes)
+	if err != nil {
+		return nil, fmt.Errorf("list context fragment texts: %w", err)
+	}
+	texts := make(map[string]sqlc.ListContextFragmentTextsRow, len(rows))
+	for _, row := range rows {
+		texts[row.ContentHash] = row
+	}
+	for i := range fragments {
+		row, ok := texts[fragments[i].ContentHash]
+		if !ok {
+			continue
+		}
+		fragments[i].Text = row.Text
+		fragments[i].Truncated = row.Truncated
+		fragments[i].Available = true
+		if fragments[i].Label == "" {
+			fragments[i].Label = row.Label
+		}
+		if fragments[i].TextBytes == 0 {
+			fragments[i].TextBytes = int(row.TextBytes)
+		}
+	}
+	return fragments, nil
 }
 
 // authorizeContextLifecycleSession resolves the session a lifecycle request
@@ -322,6 +510,7 @@ type contextLifecycleQueries interface {
 		context.Context,
 		sqlc.ListRecentAssistantMessagesBySessionParams,
 	) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error)
+	ListContextFragmentPreviews(context.Context, sqlc.ListContextFragmentPreviewsParams) ([]sqlc.ListContextFragmentPreviewsRow, error)
 	HasUnmaterializedContextLifecycleMetadataBySession(ctx context.Context, sessionID pgtype.UUID) (bool, error)
 	GetLatestContextLifecycleBySession(ctx context.Context, sessionID pgtype.UUID) ([]byte, error)
 }

@@ -1192,7 +1192,15 @@ export type ContextfragContextRef = {
     version?: number;
 };
 
-export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
+export type ContextfragFragmentRef = {
+    content_hash?: string;
+    kind?: ContextfragKind;
+    slot?: ContextfragSlot;
+    text_bytes?: number;
+    token_estimate?: number;
+};
+
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary' | 'tool_definition';
 
 export type ContextfragKindBreakdown = {
     fragments?: number;
@@ -1213,6 +1221,11 @@ export type ContextfragLifecycleSnapshot = {
     client_type?: string;
     counts?: ContextfragManifestCounts;
     final_input_hash?: string;
+    /**
+     * Fragments lists the injected fragments of the run, bounded by the prompt
+     * rather than the conversation; their texts live in the content store.
+     */
+    fragments?: Array<ContextfragFragmentRef>;
     loop_selection_mode?: string;
     memory_recall?: ContextfragMemoryRecallTrace;
     model?: string;
@@ -1340,6 +1353,7 @@ export type ContextfragStepSnapshot = {
 
 export type ContextfragToolDefAccounting = {
     bytes?: number;
+    content_hash?: string;
     name?: string;
     provider?: string;
     token_estimate?: number;
@@ -1888,6 +1902,34 @@ export type HandlersContainerStorageMetricsResponse = {
     used_bytes?: number;
 };
 
+export type HandlersContextFragmentPreview = {
+    kind?: ContextfragKind;
+    label?: string;
+    preview?: string;
+    text_bytes?: number;
+    truncated?: boolean;
+};
+
+export type HandlersContextFragmentText = {
+    /**
+     * Available is false when the text was never stored for this fragment,
+     * such as runs older than the text store.
+     */
+    available?: boolean;
+    content_hash?: string;
+    kind?: ContextfragKind;
+    /**
+     * Label names the fragment as the assembler did; empty when no text was
+     * stored, because the snapshot itself never carries names.
+     */
+    label?: string;
+    slot?: ContextfragSlot;
+    text?: string;
+    text_bytes?: number;
+    token_estimate?: number;
+    truncated?: boolean;
+};
+
 export type HandlersContextLifecycleAggregates = {
     drop_reasons?: {
         [key: string]: number;
@@ -1905,6 +1947,11 @@ export type HandlersContextLifecycleDecisionsResponse = {
     run_id?: string;
 };
 
+export type HandlersContextLifecycleFragmentsResponse = {
+    fragments?: Array<HandlersContextFragmentText>;
+    run_id?: string;
+};
+
 export type HandlersContextLifecycleResponse = {
     /**
      * AggregateScope is always "returned_page": aggregates cover the returned
@@ -1912,6 +1959,13 @@ export type HandlersContextLifecycleResponse = {
      */
     aggregate_scope?: string;
     aggregates?: HandlersContextLifecycleAggregates;
+    /**
+     * FragmentPreviews maps a content hash referenced by the page's fragment
+     * refs and tool definitions to the head of its stored text.
+     */
+    fragment_previews?: {
+        [key: string]: HandlersContextFragmentPreview;
+    };
     /**
      * HasMore reports whether older lifecycle turns exist beyond this page.
      */
@@ -10154,6 +10208,60 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsRes
 };
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsError = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersContextLifecycleFragmentsResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses];
 
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**

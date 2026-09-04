@@ -2039,6 +2039,19 @@ definitions:
       version:
         type: integer
     type: object
+  contextfrag.FragmentRef:
+    properties:
+      content_hash:
+        type: string
+      kind:
+        $ref: '#/definitions/contextfrag.Kind'
+      slot:
+        $ref: '#/definitions/contextfrag.Slot'
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+    type: object
   contextfrag.Kind:
     enum:
     - system_prompt
@@ -2058,6 +2071,7 @@ definitions:
     - runtime_context
     - memory_recall
     - conversation_summary
+    - tool_definition
     type: string
     x-enum-varnames:
     - KindSystemPrompt
@@ -2077,6 +2091,7 @@ definitions:
     - KindRuntimeContext
     - KindMemoryRecall
     - KindConversationSummary
+    - KindToolDefinition
   contextfrag.KindBreakdown:
     properties:
       fragments:
@@ -2116,6 +2131,13 @@ definitions:
         $ref: '#/definitions/contextfrag.ManifestCounts'
       final_input_hash:
         type: string
+      fragments:
+        description: |-
+          Fragments lists the injected fragments of the run, bounded by the prompt
+          rather than the conversation; their texts live in the content store.
+        items:
+          $ref: '#/definitions/contextfrag.FragmentRef'
+        type: array
       loop_selection_mode:
         type: string
       memory_recall:
@@ -2403,6 +2425,8 @@ definitions:
     properties:
       bytes:
         type: integer
+      content_hash:
+        type: string
       name:
         type: string
       provider:
@@ -3342,6 +3366,46 @@ definitions:
       used_bytes:
         type: integer
     type: object
+  handlers.ContextFragmentPreview:
+    properties:
+      kind:
+        $ref: '#/definitions/contextfrag.Kind'
+      label:
+        type: string
+      preview:
+        type: string
+      text_bytes:
+        type: integer
+      truncated:
+        type: boolean
+    type: object
+  handlers.ContextFragmentText:
+    properties:
+      available:
+        description: |-
+          Available is false when the text was never stored for this fragment,
+          such as runs older than the text store.
+        type: boolean
+      content_hash:
+        type: string
+      kind:
+        $ref: '#/definitions/contextfrag.Kind'
+      label:
+        description: |-
+          Label names the fragment as the assembler did; empty when no text was
+          stored, because the snapshot itself never carries names.
+        type: string
+      slot:
+        $ref: '#/definitions/contextfrag.Slot'
+      text:
+        type: string
+      text_bytes:
+        type: integer
+      token_estimate:
+        type: integer
+      truncated:
+        type: boolean
+    type: object
   handlers.ContextLifecycleAggregates:
     properties:
       drop_reasons:
@@ -3368,6 +3432,15 @@ definitions:
       run_id:
         type: string
     type: object
+  handlers.ContextLifecycleFragmentsResponse:
+    properties:
+      fragments:
+        items:
+          $ref: '#/definitions/handlers.ContextFragmentText'
+        type: array
+      run_id:
+        type: string
+    type: object
   handlers.ContextLifecycleResponse:
     properties:
       aggregate_scope:
@@ -3377,6 +3450,13 @@ definitions:
         type: string
       aggregates:
         $ref: '#/definitions/handlers.ContextLifecycleAggregates'
+      fragment_previews:
+        additionalProperties:
+          $ref: '#/definitions/handlers.ContextFragmentPreview'
+        description: |-
+          FragmentPreviews maps a content hash referenced by the page's fragment
+          refs and tool definitions to the head of its stored text.
+        type: object
       has_more:
         description: HasMore reports whether older lifecycle turns exist beyond this
           page.
@@ -11644,6 +11724,56 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Get per-fragment selection decisions of a run
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments:
+    get:
+      description: Return every fragment the run put in front of the model outside
+        the conversation (system prompt pieces, workspace rules, tool usage, skills,
+        memory recall, tool definitions) with the text that was stored for it. Conversation
+        messages are not included; the history holds them
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextLifecycleFragmentsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get the injected context texts of a run
       tags:
       - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:

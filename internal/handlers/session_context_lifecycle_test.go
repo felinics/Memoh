@@ -40,6 +40,8 @@ type contextLifecycleQueryStub struct {
 	probeCalls            int
 	legacyParams          []sqlc.ListRecentAssistantMessagesBySessionParams
 	lifecycleBeforeParams []sqlc.ListRecentContextLifecyclesBySessionBeforeParams
+	previewRows           []sqlc.ListContextFragmentPreviewsRow
+	previewParams         []sqlc.ListContextFragmentPreviewsParams
 }
 
 func (q *contextLifecycleQueryStub) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -68,6 +70,14 @@ func (q *contextLifecycleQueryStub) ListRecentContextLifecyclesBySessionBefore(
 		rows[i] = sqlc.ListRecentContextLifecyclesBySessionBeforeRow(row)
 	}
 	return rows, q.lifecycleErr
+}
+
+func (q *contextLifecycleQueryStub) ListContextFragmentPreviews(
+	_ context.Context,
+	arg sqlc.ListContextFragmentPreviewsParams,
+) ([]sqlc.ListContextFragmentPreviewsRow, error) {
+	q.previewParams = append(q.previewParams, arg)
+	return q.previewRows, nil
 }
 
 func (q *contextLifecycleQueryStub) ListRecentAssistantMessagesBySession(
