@@ -422,6 +422,7 @@ type ToolDefAccounting struct {
 	Name          string `json:"name"`
 	Bytes         int    `json:"bytes"`
 	TokenEstimate int    `json:"token_estimate"`
+	ContentHash   string `json:"content_hash,omitempty"`
 }
 
 // ContextBudgetPlan records the numeric input-envelope allocation used for one

@@ -245,7 +245,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			slog.Int("budget_tokens", admission.BudgetTokens))
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
 		if runConfig.ContextLifecycle == nil {
-			runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+			runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx)
 		}
 		runConfig.ContextLifecycle.SetManifest(contextfrag.BuildManifest(nil))
 		s.contextLifecycleTerminal(ctx, runConfig)(cause)
@@ -268,7 +268,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.ContextCurrentUserMessageIndex = nil
 	runConfig.ContextMemoryMessageIndex = nil
 	if runConfig.ContextLifecycle == nil {
-		runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+		runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx)
 	}
 	runConfig.ContextBudgetMaxTokens = resolved.ContextBudgetMaxTokens
 	if runConfig.ContextToolExchangePolicy == nil {
@@ -603,7 +603,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 			slog.Int("estimated_tokens", admission.EstimatedTokens),
 			slog.Int("budget_tokens", admission.BudgetTokens))
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
-		lifecycle := contextfrag.NewLifecycleHolder()
+		lifecycle := s.newContextLifecycleHolder(ctx)
 		lifecycle.SetManifest(contextfrag.BuildManifest(nil))
 		s.contextLifecycleTerminal(ctx, native.RunConfig{
 			RunID: h.id,

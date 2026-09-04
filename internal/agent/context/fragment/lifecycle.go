@@ -102,6 +102,9 @@ type LifecycleSnapshot struct {
 	Steps                     []StepSnapshot      `json:"steps,omitempty"`
 	MemoryRecall              *MemoryRecallTrace  `json:"memory_recall,omitempty"`
 	RunTrace                  *RunTrace           `json:"run_trace,omitempty"`
+	// Fragments lists the injected fragments of the run, bounded by the prompt
+	// rather than the conversation; their texts live in the content store.
+	Fragments []FragmentRef `json:"fragments,omitempty"`
 }
 
 // RunTrace is the fixed-size timing and usage rollup of one run: request
@@ -149,11 +152,13 @@ type MemoryRecallResultTrace struct {
 
 // LifecycleHolder shares the latest audit across copied RunConfig values.
 type LifecycleHolder struct {
-	mu       sync.RWMutex
-	snapshot LifecycleSnapshot
-	ledger   *MutationLedger
-	runTrace func() *RunTrace
-	set      bool
+	mu            sync.RWMutex
+	snapshot      LifecycleSnapshot
+	ledger        *MutationLedger
+	runTrace      func() *RunTrace
+	set           bool
+	textSink      FragmentTextSink
+	recordedTexts map[string]struct{}
 }
 
 func NewLifecycleHolder() *LifecycleHolder {
@@ -250,6 +255,7 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 		TrustBreakdown:     append([]TrustBreakdown(nil), manifest.TrustBreakdown...),
 		ToolDefs:           append([]ToolDefAccounting(nil), manifest.ToolDefs...),
 		SelectionDecisions: append([]SelectionDecision(nil), manifest.SelectionDecisions...),
+		Fragments:          fragmentRefs(manifest.Items),
 	}
 	if manifest.Selection != nil {
 		snapshot.Selection = cloneSelectionTrace(*manifest.Selection)
@@ -349,6 +355,7 @@ func cloneLifecycleSnapshot(snapshot LifecycleSnapshot) LifecycleSnapshot {
 	snapshot.TrustBreakdown = append([]TrustBreakdown(nil), snapshot.TrustBreakdown...)
 	snapshot.ToolDefs = append([]ToolDefAccounting(nil), snapshot.ToolDefs...)
 	snapshot.SelectionDecisions = append([]SelectionDecision(nil), snapshot.SelectionDecisions...)
+	snapshot.Fragments = append([]FragmentRef(nil), snapshot.Fragments...)
 	snapshot.Selection = cloneSelectionTrace(snapshot.Selection)
 	snapshot.Mutations = append([]MutationRecord(nil), snapshot.Mutations...)
 	snapshot.CacheUsage = append([]CacheUsageRecord(nil), snapshot.CacheUsage...)

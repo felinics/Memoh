@@ -366,6 +366,9 @@ type Queries interface {
 	HasUnmaterializedContextLifecycleMetadataBySession(ctx context.Context, sessionID pgtype.UUID) (bool, error)
 	ListRecentContextLifecyclesBySession(ctx context.Context, arg dbsqlc.ListRecentContextLifecyclesBySessionParams) ([]dbsqlc.ListRecentContextLifecyclesBySessionRow, error)
 	ListRecentContextLifecyclesBySessionBefore(ctx context.Context, arg dbsqlc.ListRecentContextLifecyclesBySessionBeforeParams) ([]dbsqlc.ListRecentContextLifecyclesBySessionBeforeRow, error)
+	UpsertContextFragmentTexts(ctx context.Context, arg dbsqlc.UpsertContextFragmentTextsParams) error
+	ListContextFragmentPreviews(ctx context.Context, arg dbsqlc.ListContextFragmentPreviewsParams) ([]dbsqlc.ListContextFragmentPreviewsRow, error)
+	ListContextFragmentTexts(ctx context.Context, contentHashes []string) ([]dbsqlc.ListContextFragmentTextsRow, error)
 	ListScheduleLogsByBot(ctx context.Context, arg dbsqlc.ListScheduleLogsByBotParams) ([]dbsqlc.ListScheduleLogsByBotRow, error)
 	ListScheduleLogsBySchedule(ctx context.Context, arg dbsqlc.ListScheduleLogsByScheduleParams) ([]dbsqlc.ListScheduleLogsByScheduleRow, error)
 	ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Schedule, error)

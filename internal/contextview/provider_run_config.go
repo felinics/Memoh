@@ -431,6 +431,7 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
+		cfg.ContextLifecycle.RecordFragmentTexts(view.Selected)
 	}
 	return cfg, nil
 }
@@ -495,6 +496,7 @@ func providerBudgetAuditConfig(
 	cfg.ContextMutations = ledger
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
+		cfg.ContextLifecycle.RecordFragmentTexts(view.Selected)
 	}
 	return cfg
 }
@@ -537,6 +539,7 @@ func providerViewFallback(
 	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
+		cfg.ContextLifecycle.RecordFragmentTexts(cfg.ContextFrags)
 	}
 	return cfg
 }

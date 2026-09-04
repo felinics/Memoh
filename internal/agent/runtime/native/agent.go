@@ -1609,6 +1609,7 @@ func (a *Agent) assembleTools(
 
 	var allTools []sdk.Tool
 	var toolDefs []contextfrag.ToolDefAccounting
+	var toolTexts []contextfrag.FragmentText
 	type usageRegistration struct {
 		provider   tools.ToolUsage
 		capability string
@@ -1649,7 +1650,9 @@ func (a *Agent) assembleTools(
 			}
 		}
 		for _, tool := range providerTools {
-			toolDefs = append(toolDefs, contextfrag.ToolDefAccountingFor(label, tool))
+			accounting, text := contextfrag.ToolDefinitionText(label, tool)
+			toolDefs = append(toolDefs, accounting)
+			toolTexts = append(toolTexts, text)
 		}
 		allTools = append(allTools, providerTools...)
 		// Collect group-level usage guidance only from providers that actually
@@ -1683,6 +1686,7 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
+	cfg.ContextLifecycle.RecordToolDefinitions(toolTexts)
 	return allTools, usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }
 
