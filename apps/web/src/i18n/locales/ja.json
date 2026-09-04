@@ -662,13 +662,14 @@
         "other": { "ing": "作業中", "done": "作業しました" }
       },
       "frag": {
-        "files": "{count} ファイル",
+        "fileOperations": "ファイル操作 {count} 件",
         "searches": "{count} 件の検索",
         "commands": "{count} コマンド",
         "messages": "{count} 件のメッセージ",
         "schedules": "{count} 件のスケジュール",
         "media": "{count} 個のメディアファイル",
         "agents": "{count} のAgent",
+        "steps": "{count} ステップ",
         "sites": "{count} 件のサイト"
       },
       "fragmentSeparator": "、"

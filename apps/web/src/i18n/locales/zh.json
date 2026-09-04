@@ -678,13 +678,14 @@
         "other": { "ing": "处理中", "done": "已处理" }
       },
       "frag": {
-        "files": "{count} 个文件",
+        "fileOperations": "{count} 次文件操作",
         "searches": "{count} 次搜索",
         "commands": "{count} 条命令",
         "messages": "{count} 条消息",
         "schedules": "{count} 个定时任务",
         "media": "{count} 个媒体文件",
         "agents": "{count} 个 Agent",
+        "steps": "{count} 步",
         "sites": "{count} 个网站"
       },
       "fragmentSeparator": "、",

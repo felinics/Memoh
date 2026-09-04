@@ -24,7 +24,7 @@ import ToolCallGroup from './tool-call-group.vue'
 //
 // 2. The two-layer adaptive header: while a segment streams, a muted phase
 //    verb ("Exploring") leads the header with live bare-count details
-//    ("2 files, ran 1 command"), and a "now" line below rolls the current
+//    ("2 file operations, 1 command"), and a "now" line below rolls the current
 //    call; once the segment settles, the verb turns past tense ("Explored")
 //    and diff totals appear. This guards against regressing to a bare ticker
 //    of the latest call (which hid the aggregate view until settle).
@@ -77,13 +77,14 @@ function mountGroup(items: ContentBlock[], active: boolean | undefined): HTMLDiv
               other: { ing: 'Working', done: 'Worked' },
             },
             frag: {
-              files: '{count} files',
+              fileOperations: '{count} file operation | {count} file operations',
               searches: '{count} searches',
               commands: '{count} commands',
               messages: '{count} messages',
               schedules: '{count} schedules',
               media: '{count} media files',
               agents: '{count} agents',
+              steps: '{count} step | {count} steps',
               sites: '{count} sites',
             },
           },
@@ -92,6 +93,7 @@ function mountGroup(items: ContentBlock[], active: boolean | undefined): HTMLDiv
             read: 'Read',
             exec: 'Run',
             edit: 'Edit',
+            ask_user: 'Ask user',
             pending: { generic: 'Working…' },
           },
         },
@@ -182,7 +184,7 @@ describe('ToolCallGroup adaptive header layers', () => {
 
     const header = headerText(root)
     expect(header).toContain('Exploring')
-    expect(header).toContain('2 files')
+    expect(header).toContain('2 file operations')
     expect(header).toContain('1 command')
     expect(nowLine(root)?.textContent).toContain('pnpm test')
   })
@@ -195,7 +197,7 @@ describe('ToolCallGroup adaptive header layers', () => {
 
     const header = headerText(root)
     expect(header).toContain('Edited')
-    expect(header).toContain('2 files')
+    expect(header).toContain('2 file operations')
     expect(header).toContain('+9')
     expect(header).toContain('-5')
     expect(header).not.toContain('Editing')
@@ -211,6 +213,31 @@ describe('ToolCallGroup adaptive header layers', () => {
     const header = headerText(root)
     expect(header).toContain('Editing')
     expect(header).not.toContain('+4')
+  })
+
+  it('describes file tool calls as operations rather than unique files', () => {
+    const root = mountGroup([
+      toolBlock('edit', { path: 'same.ts', old_text: 'a', new_text: 'b' }),
+      toolBlock('edit', { path: 'same.ts', old_text: 'b', new_text: 'c' }),
+    ], false)
+
+    const header = headerText(root)
+    expect(header).toContain('2 file operations')
+    expect(header).not.toContain('2 files')
+  })
+
+  it('localizes the fallback count for unclassified tools', () => {
+    const root = mountGroup([
+      toolBlock('write', { path: 'a.ts', content: 'a' }),
+      toolBlock('ask_user', { question: 'Continue?' }, true),
+    ], true)
+
+    const header = headerText(root)
+    expect(header).toContain('1 file operation')
+    expect(header).not.toContain('1 file operations')
+    expect(header).toContain('1 step')
+    expect(header).not.toContain('1 steps')
+    expect(header).not.toContain('chat.process.frag.steps')
   })
 
   it('keeps a lone live tool on its own specific label, no phase verb', () => {
