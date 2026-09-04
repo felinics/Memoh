@@ -19,18 +19,20 @@ import (
 type TranscriptRecorder struct {
 	mu             sync.Mutex
 	now            func() time.Time
+	since          func(time.Time) time.Duration
 	output         []sdk.Message
 	assistantParts []sdk.MessagePart
 	reasoning      strings.Builder
 	text           strings.Builder
 	sawTextDelta   bool
 	limit          contextlimit.ToolOutputLimit
-	toolStarted    map[string]int64
+	toolStarted    map[string]time.Time
 }
 
 // NewTranscriptRecorder creates an empty transcript recorder.
 func NewTranscriptRecorder(limits ...contextlimit.ToolOutputLimit) *TranscriptRecorder {
-	recorder := &TranscriptRecorder{now: time.Now, toolStarted: make(map[string]int64)}
+	recorder := &TranscriptRecorder{now: time.Now, toolStarted: make(map[string]time.Time)}
+	recorder.since = func(startedAt time.Time) time.Duration { return recorder.now().Sub(startedAt) }
 	if len(limits) > 0 {
 		recorder.limit = limits[0]
 	}
@@ -232,7 +234,7 @@ func (b *TranscriptRecorder) markToolStart(ev event.StreamEvent) {
 		return
 	}
 	if _, seen := b.toolStarted[toolCallID]; !seen {
-		b.toolStarted[toolCallID] = b.now().UnixMilli()
+		b.toolStarted[toolCallID] = b.now()
 	}
 }
 
@@ -246,12 +248,12 @@ func (b *TranscriptRecorder) stampToolTiming(ev event.StreamEvent) {
 	}
 	timing, provided := ev.Metadata[event.ExecutionTimingMetadataKey]
 	if !provided || timing == nil {
-		endedAt := b.now().UnixMilli()
 		startedAt, seen := b.toolStarted[toolCallID]
 		if !seen {
-			startedAt = endedAt
+			startedAt = b.now()
 		}
-		timing = event.ExecutionTiming{StartedAtMS: startedAt, EndedAtMS: endedAt}
+		started := startedAt.UnixMilli()
+		timing = event.ExecutionTiming{StartedAtMS: started, EndedAtMS: started + b.since(startedAt).Milliseconds()}
 	}
 	delete(b.toolStarted, toolCallID)
 	stamp := func(part sdk.ToolCallPart) sdk.ToolCallPart {

@@ -29,6 +29,7 @@ type stepTraceTracker struct {
 	mu        sync.Mutex
 	now       func() time.Time
 	taken     int
+	startedAt time.Time
 	steps     []messagepkg.StepTraceMetadata
 	committed []messagepkg.StepTraceMetadata
 	rollup    contextfrag.RunTrace
@@ -93,6 +94,7 @@ func (t *stepTraceTracker) observe(ev native.StreamEvent) {
 	case native.EventAgentStart:
 		t.observed = true
 		if t.rollup.StartedAtMS == 0 {
+			t.startedAt = now
 			t.rollup.StartedAtMS = now.UnixMilli()
 		}
 	case native.EventToolCallStart:
@@ -129,6 +131,9 @@ func (t *stepTraceTracker) observe(ev native.StreamEvent) {
 	case native.EventAgentEnd, native.EventAgentAbort:
 		t.observed = true
 		t.rollup.EndedAtMS = now.UnixMilli()
+		if t.rollup.StartedAtMS != 0 {
+			t.rollup.EndedAtMS = t.rollup.StartedAtMS + now.Sub(t.startedAt).Milliseconds()
+		}
 		if usage := stepTraceUsageFromRaw(ev.Usage); usage != nil {
 			t.terminal = usage
 		}

@@ -20,18 +20,21 @@ import (
 type toolExecutionMetadataRegistry struct {
 	mu        sync.RWMutex
 	now       func() time.Time
+	since     func(time.Time) time.Duration
 	locations map[string]any
 	timings   map[string]event.ExecutionTiming
 	onUpdate  func(sdk.ToolCall, map[string]any)
 }
 
 func newToolExecutionMetadataRegistry(onUpdate func(sdk.ToolCall, map[string]any)) *toolExecutionMetadataRegistry {
-	return &toolExecutionMetadataRegistry{
+	registry := &toolExecutionMetadataRegistry{
 		now:       time.Now,
 		locations: make(map[string]any),
 		timings:   make(map[string]event.ExecutionTiming),
 		onUpdate:  onUpdate,
 	}
+	registry.since = func(startedAt time.Time) time.Duration { return registry.now().Sub(startedAt) }
+	return registry
 }
 
 // wrapExecute clocks each tool execution under its call ID. The timing is
@@ -53,11 +56,12 @@ func (r *toolExecutionMetadataRegistry) wrapExecute(tools []sdk.Tool) []sdk.Tool
 			if ctx != nil {
 				callID = strings.TrimSpace(ctx.ToolCallID)
 			}
-			startedAt := r.now().UnixMilli()
+			startedAt := r.now()
 			out, err := execute(ctx, input)
 			if callID != "" {
+				started := startedAt.UnixMilli()
 				r.mu.Lock()
-				r.timings[callID] = event.ExecutionTiming{StartedAtMS: startedAt, EndedAtMS: r.now().UnixMilli()}
+				r.timings[callID] = event.ExecutionTiming{StartedAtMS: started, EndedAtMS: started + r.since(startedAt).Milliseconds()}
 				r.mu.Unlock()
 			}
 			return out, err

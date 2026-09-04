@@ -15,8 +15,11 @@ func TestTranscriptRecorderStampsToolExecutionTimingFromArrival(t *testing.T) {
 	now := time.UnixMilli(10_000)
 	recorder := NewTranscriptRecorder()
 	recorder.now = func() time.Time { return now }
+	recorder.since = func(time.Time) time.Duration { return 700 * time.Millisecond }
 	recorder.Add(event.StreamEvent{Type: event.ToolCallStart, ToolCallID: "call-1", ToolName: "exec", Input: map[string]any{}})
-	now = now.Add(700 * time.Millisecond)
+	// The wall clock steps backwards mid-call; the end mark must still be
+	// start plus elapsed.
+	now = time.UnixMilli(9_000)
 	recorder.Add(event.StreamEvent{Type: event.ToolCallEnd, ToolCallID: "call-1", ToolName: "exec", Result: "ok"})
 
 	messages := recorder.Messages("")

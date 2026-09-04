@@ -13,12 +13,20 @@ import (
 
 // stepClock measures every provider attempt at the provider seam: dispatch,
 // first content part, and finish-step. Only attempts that reach finish-step
-// complete; an errored or retried attempt leaves no completed record.
+// complete; an errored or retried attempt leaves no completed record. The
+// dispatch reading anchors the wall clock; later marks add monotonic elapsed
+// time so a wall-clock step never reorders them.
 type stepClock struct {
 	mu     sync.Mutex
 	now    func() time.Time
-	active *event.StepTiming
+	since  func(time.Time) time.Duration
+	active *activeStep
 	last   *completedStep
+}
+
+type activeStep struct {
+	startedAt time.Time
+	timing    event.StepTiming
 }
 
 type completedStep struct {
@@ -31,18 +39,20 @@ func newStepClock(now func() time.Time) *stepClock {
 	if now == nil {
 		now = time.Now
 	}
-	return &stepClock{now: now}
+	clock := &stepClock{now: now}
+	clock.since = func(startedAt time.Time) time.Duration { return clock.now().Sub(startedAt) }
+	return clock
 }
 
 func (c *stepClock) begin() int64 {
 	if c == nil {
 		return 0
 	}
-	startedAt := c.now().UnixMilli()
+	startedAt := c.now()
 	c.mu.Lock()
-	c.active = &event.StepTiming{StartedAtMS: startedAt}
+	c.active = &activeStep{startedAt: startedAt, timing: event.StepTiming{StartedAtMS: startedAt.UnixMilli()}}
 	c.mu.Unlock()
-	return startedAt
+	return startedAt.UnixMilli()
 }
 
 func (c *stepClock) abandon() {
@@ -54,16 +64,20 @@ func (c *stepClock) abandon() {
 	c.mu.Unlock()
 }
 
+func (c *stepClock) mark() int64 {
+	return c.active.timing.StartedAtMS + c.since(c.active.startedAt).Milliseconds()
+}
+
 func (c *stepClock) firstToken() {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.active == nil || c.active.FirstTokenAtMS != 0 {
+	if c.active == nil || c.active.timing.FirstTokenAtMS != 0 {
 		return
 	}
-	c.active.FirstTokenAtMS = c.now().UnixMilli()
+	c.active.timing.FirstTokenAtMS = c.mark()
 }
 
 // firstTokenText samples the first non-blank delta; the blank check runs only
@@ -74,24 +88,23 @@ func (c *stepClock) firstTokenText(text string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.active == nil || c.active.FirstTokenAtMS != 0 || strings.TrimSpace(text) == "" {
+	if c.active == nil || c.active.timing.FirstTokenAtMS != 0 || strings.TrimSpace(text) == "" {
 		return
 	}
-	c.active.FirstTokenAtMS = c.now().UnixMilli()
+	c.active.timing.FirstTokenAtMS = c.mark()
 }
 
 func (c *stepClock) finish(usage sdk.Usage, reason sdk.FinishReason) (completedStep, bool) {
 	if c == nil {
 		return completedStep{}, false
 	}
-	now := c.now().UnixMilli()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.active == nil {
 		return completedStep{}, false
 	}
-	timing := *c.active
-	timing.EndedAtMS = now
+	timing := c.active.timing
+	timing.EndedAtMS = c.mark()
 	c.active = nil
 	c.last = &completedStep{Timing: timing, Usage: usage, FinishReason: reason}
 	return *c.last, true
