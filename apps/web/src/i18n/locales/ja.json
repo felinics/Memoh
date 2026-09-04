@@ -1197,7 +1197,8 @@
         "runtime_context": "ランタイムコンテキスト",
         "tool_defs": "ツール定義",
         "selection": "選択",
-        "step": "再選択"
+        "step": "再選択",
+        "tool_definition": "ツール定義"
       },
       "contextFragments": "{fragments} フラグメント · {tokens} tok",
       "contextHistory": "{messages} 件 · {tokens} tok",
@@ -1236,7 +1237,10 @@
         "trimmed": "切り詰め",
         "dropped": "除外"
       },
-      "contextHistoryCut": "{messages} 件 · {tokens} tok · 除外 {dropped}"
+      "contextHistoryCut": "{messages} 件 · {tokens} tok · 除外 {dropped}",
+      "inspectorTexts": "本文",
+      "inspectorTextsFailed": "フラグメント本文を読み込めませんでした",
+      "inspectorTextUnavailable": "このフラグメントの本文は保存されていません"
     },
     "infoCacheHitRate": "キャッシュヒット率",
     "infoCacheRead": "キャッシュ読み取り",

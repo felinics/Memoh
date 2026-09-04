@@ -52,6 +52,7 @@ export function useContextLifecycle() {
   const hasTarget = computed(() => !!botId.value && !!sessionId.value)
   const merged = computed(() => mergeLifecyclePages(data.value, olderPages.value, olderAnchor.value))
   const turns = computed(() => merged.value.turns)
+  const fragmentPreviews = computed(() => merged.value.fragmentPreviews)
   const hasOlder = computed(() => merged.value.hasMore || data.value?.legacy_history_may_exist === true)
   const canLoadOlder = computed(() => merged.value.nextCursor != null && !loadingOlder.value)
 
@@ -77,5 +78,5 @@ export function useContextLifecycle() {
     }
   }
 
-  return { data, status, hasTarget, turns, hasOlder, canLoadOlder, loadingOlder, loadOlder }
+  return { data, status, hasTarget, turns, fragmentPreviews, hasOlder, canLoadOlder, loadingOlder, loadOlder }
 }

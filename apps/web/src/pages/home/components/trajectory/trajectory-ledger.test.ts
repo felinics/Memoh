@@ -83,6 +83,10 @@ const lifecycle: HandlersContextLifecycleTurn = {
       { kind: 'workspace_instruction', fragments: 1, token_estimate: 500 },
       { kind: 'conversation_event', fragments: 6, token_estimate: 84 },
     ],
+    fragments: [
+      { kind: 'system_prompt', slot: 'system', content_hash: 'h-sys', token_estimate: 1_300 },
+      { kind: 'workspace_instruction', slot: 'system', content_hash: 'h-rules', token_estimate: 500 },
+    ],
     tool_defs: [{ provider: 'workspace', name: 'exec', bytes: 800, token_estimate: 200 }],
     selection: { selected: 6, dropped: 2, drop_reasons: { budget: 2 } },
   },
@@ -118,6 +122,17 @@ describe('trajectory ledger', () => {
     expect(contexts[2]).toContain('1 tools · 200 tok')
     expect(contexts[3]).toContain('selection')
     expect(contexts[3]).toContain('6 selected · 2 dropped · 0 trimmed')
+  })
+
+  it('prefers the stored text of a fragment over its numbers', async () => {
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 1)], lifecycleByTurnId([lifecycle]))
+    const previews = { 'h-sys': { preview: 'You are Memoh, a careful agent.' }, 'h-rules': { preview: '# AGENTS.md\nRead this first.' } }
+    const root = mount(TrajectoryLedger, { rows, selectedKey: null, previews })
+    await nextTick()
+    expect(root.querySelector('[data-testid="trajectory-row-system"]')?.textContent).toContain('You are Memoh, a careful agent.')
+    const contexts = [...root.querySelectorAll('[data-testid="trajectory-row-context"]')].map(node => node.textContent ?? '')
+    expect(contexts[0]).toContain('# AGENTS.md Read this first.')
+    expect(contexts[1]).toContain('6 messages · 84 tok · 2 dropped')
   })
 
   it('labels injected context rows and tool rows with their arguments and result', async () => {

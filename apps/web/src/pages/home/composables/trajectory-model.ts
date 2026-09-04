@@ -18,10 +18,21 @@ export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'assistant' | 'r
 // What the turn's context was assembled from, read off the persisted
 // lifecycle manifest: counts and token estimates per fragment kind, never
 // prompt text.
+// One injected fragment as the run recorded it; its text and name live in the
+// content-addressed store under contentHash. Only tool definitions carry a
+// name of their own, from the accounting the snapshot keeps.
+export interface FragmentRef {
+  id: string
+  kind: string
+  contentHash: string
+  tokens: number
+  bytes: number
+}
+
 export type ContextEntry =
-  | { kind: 'fragments', fragmentKind: ContextfragKind, fragments: number, tokens: number, textBytes: number, images: number, memory?: ContextfragMemoryRecallTrace, selection?: ContextfragSelectionTrace }
+  | { kind: 'fragments', fragmentKind: ContextfragKind, fragments: number, tokens: number, textBytes: number, images: number, refs: FragmentRef[], memory?: ContextfragMemoryRecallTrace, selection?: ContextfragSelectionTrace }
   | { kind: 'memory_recall', memory: ContextfragMemoryRecallTrace }
-  | { kind: 'tool_defs', tools: number, tokens: number, providers: string[] }
+  | { kind: 'tool_defs', tools: number, tokens: number, providers: string[], refs: FragmentRef[] }
   | { kind: 'selection', selection: ContextfragSelectionTrace }
   | { kind: 'mutation', mutation: ContextfragMutationRecord }
   | { kind: 'step', step: ContextfragStepSnapshot }
@@ -29,6 +40,12 @@ export type ContextEntry =
 export interface SystemEntry {
   fragments: number
   tokens: number
+  refs: FragmentRef[]
+}
+
+export function entryRefs(entry: SystemEntry | ContextEntry): FragmentRef[] {
+  if ('refs' in entry) return entry.refs
+  return []
 }
 
 export interface ContextEntries {
@@ -130,6 +147,14 @@ export function contextEntries(snapshot: ContextfragLifecycleSnapshot | null | u
   const before: ContextEntry[] = []
   const perStep = new Map<number, ContextEntry[]>()
   if (!snapshot) return { system: null, before, perStep }
+  const refsByKind = new Map<string, FragmentRef[]>()
+  for (const ref of snapshot.fragments ?? []) {
+    const kind = ref.kind ?? ''
+    if (!kind) continue
+    const list = refsByKind.get(kind) ?? []
+    list.push({ id: '', kind, contentHash: ref.content_hash ?? '', tokens: ref.token_estimate ?? 0, bytes: ref.text_bytes ?? 0 })
+    refsByKind.set(kind, list)
+  }
   let system: SystemEntry | null = null
   let memoryInjected = false
   for (const entry of snapshot.breakdown ?? []) {
@@ -137,11 +162,14 @@ export function contextEntries(snapshot: ContextfragLifecycleSnapshot | null | u
     if (!kind || kind === 'current_user_message') continue
     const fragments = entry.fragments ?? 0
     const tokens = entry.token_estimate ?? 0
+    const refs = refsByKind.get(kind) ?? []
     if (SYSTEM_KINDS.has(kind)) {
-      system = system ? { fragments: system.fragments + fragments, tokens: system.tokens + tokens } : { fragments, tokens }
+      system = system
+        ? { fragments: system.fragments + fragments, tokens: system.tokens + tokens, refs: [...system.refs, ...refs] }
+        : { fragments, tokens, refs }
       continue
     }
-    const row: ContextEntry = { kind: 'fragments', fragmentKind: kind, fragments, tokens, textBytes: entry.text_bytes ?? 0, images: entry.images ?? 0 }
+    const row: ContextEntry = { kind: 'fragments', fragmentKind: kind, fragments, tokens, textBytes: entry.text_bytes ?? 0, images: entry.images ?? 0, refs }
     if (kind === 'memory_recall' && snapshot.memory_recall) {
       row.memory = snapshot.memory_recall
       memoryInjected = true
@@ -157,6 +185,7 @@ export function contextEntries(snapshot: ContextfragLifecycleSnapshot | null | u
       tools: toolDefs.length,
       tokens: toolDefs.reduce((sum, def) => sum + (def.token_estimate ?? 0), 0),
       providers: [...new Set(toolDefs.map(def => def.provider ?? '').filter(Boolean))].sort(),
+      refs: toolDefs.map(def => ({ id: `${def.provider ?? ''}/${def.name ?? ''}`, kind: 'tool_definition', contentHash: def.content_hash ?? '', tokens: def.token_estimate ?? 0, bytes: def.bytes ?? 0 })),
     })
   }
   const selection = snapshot.selection

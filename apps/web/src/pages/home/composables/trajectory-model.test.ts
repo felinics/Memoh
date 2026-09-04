@@ -71,8 +71,13 @@ const lifecycleTurn: HandlersContextLifecycleTurn = {
       { kind: 'conversation_event', fragments: 22, token_estimate: 84 },
       { kind: 'current_user_message', fragments: 1, token_estimate: 20 },
     ],
+    fragments: [
+      { kind: 'system_prompt', slot: 'system', content_hash: 'h-sys', token_estimate: 1_300, text_bytes: 5_200 },
+      { kind: 'bot_identity', slot: 'system', content_hash: 'h-bot', token_estimate: 200, text_bytes: 800 },
+      { kind: 'workspace_instruction', slot: 'system', content_hash: 'h-rules', token_estimate: 500, text_bytes: 2_000 },
+    ],
     tool_defs: [
-      { provider: 'workspace', name: 'exec', bytes: 800, token_estimate: 200 },
+      { provider: 'workspace', name: 'exec', bytes: 800, token_estimate: 200, content_hash: 'h-exec' },
       { provider: 'workspace', name: 'write', bytes: 600, token_estimate: 150 },
       { provider: 'memory', name: 'search_memory', bytes: 400, token_estimate: 100 },
     ],
@@ -90,7 +95,12 @@ const lifecycleTurn: HandlersContextLifecycleTurn = {
 describe('context entries', () => {
   it('splits the manifest into the system prompt and one entry per injected kind', () => {
     const entries = contextEntries(lifecycleTurn.snapshot!)
-    expect(entries.system).toEqual({ fragments: 2, tokens: 1_500 })
+    expect(entries.system).toEqual({ fragments: 2, tokens: 1_500, refs: [
+      { id: '', kind: 'system_prompt', contentHash: 'h-sys', tokens: 1_300, bytes: 5_200 },
+      { id: '', kind: 'bot_identity', contentHash: 'h-bot', tokens: 200, bytes: 800 },
+    ] })
+    const rules = entries.before[0]!
+    expect(rules.kind === 'fragments' && rules.refs.map(ref => ref.contentHash)).toEqual(['h-rules'])
     expect(entries.before.map(entry => entry.kind === 'fragments' ? entry.fragmentKind : entry.kind)).toEqual([
       'workspace_instruction', 'tool_usage', 'skills_catalog', 'memory_recall', 'conversation_event', 'tool_defs', 'selection', 'mutation',
     ])
@@ -102,6 +112,7 @@ describe('context entries', () => {
     expect(tools.kind === 'tool_defs' && tools.tools).toBe(3)
     expect(tools.kind === 'tool_defs' && tools.tokens).toBe(450)
     expect(tools.kind === 'tool_defs' && tools.providers).toEqual(['memory', 'workspace'])
+    expect(tools.kind === 'tool_defs' && tools.refs.map(ref => `${ref.id}:${ref.contentHash}`)).toEqual(['workspace/exec:h-exec', 'workspace/write:', 'memory/search_memory:'])
     expect([...entries.perStep.keys()]).toEqual([1])
     const step = entries.perStep.get(1)![0]!
     expect(step.kind === 'step' && step.step.dropped).toBe(2)

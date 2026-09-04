@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RowMapSegment, TrajectoryStats } from './trajectory-model'
-import { contextPreview, formatDurationMs, rowMapGeometry, statsSegments } from './trajectory-view'
+import { contextPreview, formatDurationMs, fragmentRowPreview, rowMapGeometry, statsSegments } from './trajectory-view'
 
 function segment(overrides: Partial<RowMapSegment>): RowMapSegment {
   return {
@@ -62,13 +62,13 @@ describe('contextPreview', () => {
   const t = (key: string, params?: Record<string, unknown>) => `${key}${params ? JSON.stringify(params) : ''}`
 
   it('describes each entry kind from its own numbers', () => {
-    expect(contextPreview({ kind: 'fragments', fragmentKind: 'workspace_instruction', fragments: 1, tokens: 500, textBytes: 0, images: 0 }, t))
+    expect(contextPreview({ kind: 'fragments', fragmentKind: 'workspace_instruction', fragments: 1, tokens: 500, textBytes: 0, images: 0, refs: [] }, t))
       .toBe('chat.trajectory.contextFragments{"fragments":1,"tokens":"500"}')
-    expect(contextPreview({ kind: 'fragments', fragmentKind: 'conversation_event', fragments: 22, tokens: 84, textBytes: 0, images: 0, selection: { selected: 22, dropped: 3 } }, t))
+    expect(contextPreview({ kind: 'fragments', fragmentKind: 'conversation_event', fragments: 22, tokens: 84, textBytes: 0, images: 0, refs: [], selection: { selected: 22, dropped: 3 } }, t))
       .toBe('chat.trajectory.contextHistoryCut{"messages":22,"tokens":"84","dropped":3}')
-    expect(contextPreview({ kind: 'fragments', fragmentKind: 'conversation_event', fragments: 6, tokens: 84, textBytes: 0, images: 0, selection: { selected: 28, dropped: 0 } }, t))
+    expect(contextPreview({ kind: 'fragments', fragmentKind: 'conversation_event', fragments: 6, tokens: 84, textBytes: 0, images: 0, refs: [], selection: { selected: 28, dropped: 0 } }, t))
       .toBe('chat.trajectory.contextHistory{"messages":6,"tokens":"84"}')
-    expect(contextPreview({ kind: 'tool_defs', tools: 3, tokens: 450, providers: ['memory', 'workspace'] }, t))
+    expect(contextPreview({ kind: 'tool_defs', tools: 3, tokens: 450, providers: ['memory', 'workspace'], refs: [] }, t))
       .toBe('chat.trajectory.contextToolDefs{"n":3,"tokens":"450"}')
     expect(contextPreview({ kind: 'memory_recall', memory: { cache_state: 'miss', result: { count: 0 } } }, t))
       .toBe('chat.trajectory.contextMemory{"count":0,"state":"miss"}')
@@ -77,6 +77,24 @@ describe('contextPreview', () => {
     expect(contextPreview({ kind: 'mutation', mutation: { kind: 'mid_task_prune', detail: 'pruned=2' } }, t)).toBe('pruned=2')
     expect(contextPreview({ kind: 'step', step: { step_index: 1, dropped: 2, truncated: 0, reselection_outcome: 'applied' } }, t))
       .toBe('chat.trajectory.contextStep{"dropped":2,"truncated":0,"outcome":"applied"}')
+  })
+})
+
+describe('fragmentRowPreview', () => {
+  const refs = [
+    { id: 'system.prompt.intro', kind: 'system_prompt', contentHash: 'h1', tokens: 50, bytes: 200 },
+    { id: 'system.prompt.body', kind: 'system_prompt', contentHash: 'h2', tokens: 100, bytes: 400 },
+  ]
+
+  it('reads like the injected text and counts the fragments after it', () => {
+    expect(fragmentRowPreview(refs, { h1: { preview: 'You are Memoh,\nan agent.' }, h2: { preview: 'Rules follow.' } })).toBe('You are Memoh, an agent. (+1)')
+    expect(fragmentRowPreview(refs, { h2: { preview: 'Rules follow.' } })).toBe('Rules follow.')
+  })
+
+  it('yields nothing when no text was stored so the caller keeps its numbers', () => {
+    expect(fragmentRowPreview(refs, {})).toBeNull()
+    expect(fragmentRowPreview(refs, null)).toBeNull()
+    expect(fragmentRowPreview([], { h1: { preview: 'x' } })).toBeNull()
   })
 })
 

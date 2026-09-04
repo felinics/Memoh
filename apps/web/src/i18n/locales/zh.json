@@ -1219,7 +1219,8 @@
         "runtime_context": "运行时上下文",
         "tool_defs": "工具定义",
         "selection": "筛选",
-        "step": "重选"
+        "step": "重选",
+        "tool_definition": "工具定义"
       },
       "contextFragments": "{fragments} 个片段 · {tokens} tok",
       "contextHistory": "{messages} 条消息 · {tokens} tok",
@@ -1243,7 +1244,7 @@
       "inspectorSelected": "保留",
       "inspectorDropped": "丢弃",
       "inspectorTrimmed": "截断",
-      "inspectorTruncated": "截断",
+      "inspectorTruncated": "已截断",
       "inspectorDropReasons": "丢弃原因",
       "inspectorMutation": "变更",
       "inspectorDetail": "详情",
@@ -1258,7 +1259,10 @@
         "trimmed": "截断",
         "dropped": "丢弃"
       },
-      "contextHistoryCut": "{messages} 条消息 · {tokens} tok · 丢弃 {dropped}"
+      "contextHistoryCut": "{messages} 条消息 · {tokens} tok · 丢弃 {dropped}",
+      "inspectorTexts": "正文",
+      "inspectorTextsFailed": "无法加载片段正文",
+      "inspectorTextUnavailable": "该片段没有存储正文"
     },
     "infoCacheHitRate": "Cache 命中率",
     "infoCacheRead": "Cache 读取",

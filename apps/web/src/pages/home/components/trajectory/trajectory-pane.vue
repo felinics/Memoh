@@ -62,6 +62,7 @@
             class="min-h-0 flex-1"
             :rows="rows"
             :selected-key="selectedKey"
+            :previews="fragmentPreviews"
             @select="select"
           />
         </div>
@@ -93,7 +94,7 @@ import TrajectoryInspector from './trajectory-inspector.vue'
 import TrajectoryStats from './trajectory-stats.vue'
 
 const { t } = useI18n()
-const { hasTarget, rows, stats, loadingMessages, selectedKey, selectedRow, bars, mode, hasOlder, loadingOlder, loadOlder, select, focus } = useTrajectory()
+const { hasTarget, rows, stats, fragmentPreviews, loadingMessages, selectedKey, selectedRow, bars, mode, hasOlder, loadingOlder, loadOlder, select, focus } = useTrajectory()
 
 const modeItems = computed<SegmentedItem<TimelineMode>[]>(() => [
   { value: 'duration', label: t('chat.trajectory.modeDuration') },

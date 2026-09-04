@@ -1,7 +1,8 @@
-import type { ContextfragLifecycleSnapshot } from '@memohai/sdk'
+import type { ContextfragLifecycleSnapshot, HandlersContextFragmentPreview } from '@memohai/sdk'
 import { formatTokenCount } from './context-categories'
 import { dropReasonRows } from './context-lifecycle-view'
-import type { ContextEntry, RowMapSegment, TimelineLane, TrajectoryRow, TrajectoryRowKind, TrajectoryStats } from './trajectory-model'
+import type { ContextEntry, FragmentRef, RowMapSegment, TimelineLane, TrajectoryRow, TrajectoryRowKind, TrajectoryStats } from './trajectory-model'
+import { PREVIEW_SOURCE_CHARACTERS, previewText } from './trajectory-model'
 
 export type TimelineMode = 'duration' | 'sequence'
 
@@ -221,6 +222,22 @@ export function decisionScopeOf(row: TrajectoryRow): DecisionScope | null {
   if (detail.kind !== 'context') return null
   if (detail.entry.kind === 'selection') return 'cut'
   if (detail.entry.kind === 'fragments' && detail.entry.fragmentKind === 'conversation_event') return 'history'
+  return null
+}
+
+export type FragmentPreviews = Readonly<Record<string, HandlersContextFragmentPreview>>
+
+// The row reads like DSH's CONTEXT rows: the head of the first fragment whose
+// text the store kept, followed by how many more fragments the row covers.
+export function fragmentRowPreview(refs: FragmentRef[], previews: FragmentPreviews | null | undefined): string | null {
+  if (!previews) return null
+  for (let index = 0; index < refs.length; index += 1) {
+    const stored = previews[refs[index]!.contentHash]
+    if (!stored?.preview) continue
+    const head = previewText(stored.preview, PREVIEW_SOURCE_CHARACTERS)
+    const rest = refs.length - index - 1
+    return rest > 0 ? `${head} (+${rest})` : head
+  }
   return null
 }
 

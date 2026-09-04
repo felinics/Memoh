@@ -71,6 +71,7 @@ export function useTrajectory() {
     hasTarget: computed(() => !!target.value.sessionId),
     rows,
     stats,
+    fragmentPreviews: lifecycle.fragmentPreviews,
     loadingMessages,
     selectedKey,
     selectedRow,

@@ -181,6 +181,17 @@ describe('buildTurnRow', () => {
   })
 })
 
+describe('mergeLifecyclePages fragment previews', () => {
+  it('unions the previews of every joined page', () => {
+    const first = { turns: [{ run_id: 'run-2' }], has_more: true, next_cursor: 'c1', fragment_previews: { h1: { preview: 'one' } } }
+    const older = { turns: [{ run_id: 'run-1' }], has_more: false, fragment_previews: { h2: { preview: 'two' } } }
+    const merged = mergeLifecyclePages(first, [older], 'c1')
+    expect(Object.keys(merged.fragmentPreviews).sort()).toEqual(['h1', 'h2'])
+    expect(mergeLifecyclePages(first, [older], 'stale').fragmentPreviews).toEqual({ h1: { preview: 'one' } })
+    expect(mergeLifecyclePages(null, []).fragmentPreviews).toEqual({})
+  })
+})
+
 describe('mergeLifecyclePages', () => {
   it('concatenates newest-first pages and drops runs repeated across page boundaries', () => {
     const turn = (runId: string): HandlersContextLifecycleTurn => ({ run_id: runId, created_at: '2026-09-03T00:00:00.000Z', snapshot: {} })

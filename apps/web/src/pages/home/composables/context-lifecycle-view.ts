@@ -2,6 +2,7 @@ import type {
   ContextfragLifecycleSnapshot,
   ContextfragSelectionTrace,
   ContextfragToolDefAccounting,
+  HandlersContextFragmentPreview,
   HandlersContextLifecycleResponse,
   HandlersContextLifecycleTurn,
 } from '@memohai/sdk'
@@ -210,6 +211,7 @@ export interface MergedLifecyclePages {
   turns: HandlersContextLifecycleTurn[]
   hasMore: boolean
   nextCursor: string | null
+  fragmentPreviews: Record<string, HandlersContextFragmentPreview>
 }
 
 // Pages are keyset slices ordered newest first; a run can repeat only across
@@ -226,7 +228,9 @@ export function mergeLifecyclePages(
   const pages = first ? [first, ...joined] : []
   const seen = new Set<string>()
   const turns: HandlersContextLifecycleTurn[] = []
+  const fragmentPreviews: Record<string, HandlersContextFragmentPreview> = {}
   for (const page of pages) {
+    Object.assign(fragmentPreviews, page.fragment_previews ?? {})
     for (const turn of page.turns ?? []) {
       const key = turn.run_id || turn.assistant_message_id || ''
       if (key && seen.has(key)) continue
@@ -236,5 +240,5 @@ export function mergeLifecyclePages(
   }
   const last = pages[pages.length - 1]
   const hasMore = last?.has_more === true
-  return { turns, hasMore, nextCursor: hasMore && last?.next_cursor ? last.next_cursor : null }
+  return { turns, hasMore, nextCursor: hasMore && last?.next_cursor ? last.next_cursor : null, fragmentPreviews }
 }

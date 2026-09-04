@@ -114,6 +114,56 @@
         >{{ row.detail.block.content }}</pre>
       </template>
 
+      <template v-if="textRefs.length">
+        <p class="text-caption text-muted-foreground">
+          {{ $t('chat.trajectory.inspectorTexts') }}
+        </p>
+        <div
+          v-if="fragmentStatus === 'pending'"
+          class="space-y-1"
+        >
+          <Skeleton
+            v-for="line in 3"
+            :key="line"
+            class="h-4 w-full"
+          />
+        </div>
+        <p
+          v-else-if="fragmentStatus === 'error'"
+          class="text-caption text-destructive"
+        >
+          {{ $t('chat.trajectory.inspectorTextsFailed') }}
+        </p>
+        <div
+          v-else
+          class="space-y-2"
+          data-testid="trajectory-inspector-texts"
+        >
+          <div
+            v-for="entry in textRows"
+            :key="entry.key"
+            class="space-y-1"
+          >
+            <div class="flex items-center justify-between gap-2 text-caption">
+              <span class="min-w-0 truncate font-mono text-foreground">{{ entry.id }}</span>
+              <span class="shrink-0 tabular-nums text-muted-foreground">
+                {{ entry.tokens }}<template v-if="entry.truncated"> · {{ $t('chat.trajectory.inspectorTruncated') }}</template>
+              </span>
+            </div>
+            <pre
+              v-if="entry.available"
+              class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-accent p-2 font-mono text-body"
+            >{{ entry.text }}</pre>
+            <p
+              v-else
+              class="text-caption text-muted-foreground"
+            >
+              {{ $t('chat.trajectory.inspectorTextUnavailable') }}
+            </p>
+          </div>
+        </div>
+      </template>
+
       <template v-if="decisionScope">
         <p class="text-caption text-muted-foreground">
           {{ $t('chat.trajectory.inspectorDecisions') }}
@@ -176,10 +226,11 @@ import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
 import { Button, ScrollArea, Skeleton } from '@felinic/ui'
 import type { ContextfragSelectionDecision } from '@memohai/sdk'
-import type { TrajectoryRow } from '../../composables/trajectory-model'
+import { entryRefs, type TrajectoryRow } from '../../composables/trajectory-model'
 import { contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS, type DecisionScope } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 import { useContextLifecycleDecisions } from '../../composables/useContextLifecycleDecisions'
+import { useContextLifecycleFragments } from '../../composables/useContextLifecycleFragments'
 import ContextLifecycleTurns from '../context-lifecycle-turns.vue'
 
 const DECISION_ROW_LIMIT = 200
@@ -216,6 +267,33 @@ const listTitleKey = computed(() => {
     default:
       return 'chat.trajectory.inspectorDropReasons'
   }
+})
+
+// Rows that stand for injected fragments show the texts the store kept for
+// them, in the run's own order.
+const textRefs = computed(() => {
+  const detail = props.row.detail
+  return detail.kind === 'system' || detail.kind === 'context' ? entryRefs(detail.entry) : []
+})
+const textRunId = computed(() => {
+  const detail = props.row.detail
+  if (textRefs.value.length === 0 || (detail.kind !== 'system' && detail.kind !== 'context')) return null
+  return detail.lifecycle.run_id ?? null
+})
+const { fragments, status: fragmentStatus } = useContextLifecycleFragments(textRunId)
+const textRows = computed(() => {
+  const byHash = new Map(fragments.value.map(fragment => [fragment.content_hash ?? '', fragment]))
+  return textRefs.value.map((ref, index) => {
+    const stored = byHash.get(ref.contentHash)
+    return {
+      key: `${ref.contentHash || ref.id}/${index}`,
+      id: stored?.label || ref.id || t(`chat.trajectory.contextKind.${ref.kind}`),
+      tokens: ref.tokens ? formatTokenCount(ref.tokens) : '',
+      text: stored?.text ?? '',
+      truncated: stored?.truncated === true,
+      available: stored?.available === true,
+    }
+  })
 })
 
 // The per-fragment audit is read only for the rows it can explain: what the

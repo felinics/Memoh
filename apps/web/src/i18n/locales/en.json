@@ -1219,7 +1219,8 @@
         "runtime_context": "runtime context",
         "tool_defs": "tool definitions",
         "selection": "selection",
-        "step": "reselection"
+        "step": "reselection",
+        "tool_definition": "tool definition"
       },
       "contextFragments": "{fragments} fragments · {tokens} tok",
       "contextHistory": "{messages} messages · {tokens} tok",
@@ -1243,7 +1244,7 @@
       "inspectorSelected": "Selected",
       "inspectorDropped": "Dropped",
       "inspectorTrimmed": "Trimmed",
-      "inspectorTruncated": "Truncated",
+      "inspectorTruncated": "truncated",
       "inspectorDropReasons": "Drop reasons",
       "inspectorMutation": "Mutation",
       "inspectorDetail": "Detail",
@@ -1258,7 +1259,10 @@
         "trimmed": "trimmed",
         "dropped": "dropped"
       },
-      "contextHistoryCut": "{messages} messages · {tokens} tok · {dropped} dropped"
+      "contextHistoryCut": "{messages} messages · {tokens} tok · {dropped} dropped",
+      "inspectorTexts": "Text",
+      "inspectorTextsFailed": "Could not load the fragment texts",
+      "inspectorTextUnavailable": "Text was not stored for this fragment"
     },
     "infoCacheHitRate": "Cache Hit Rate",
     "infoCacheRead": "Cache Read",

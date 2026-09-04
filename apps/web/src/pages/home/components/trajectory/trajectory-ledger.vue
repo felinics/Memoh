@@ -68,14 +68,15 @@ import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight } from 'lucide-vue-next'
 import { Spinner } from '@felinic/ui'
-import type { TrajectoryRow } from '../../composables/trajectory-model'
-import { contextLabelKey, contextPreview, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS } from '../../composables/trajectory-view'
+import { entryRefs, type TrajectoryRow } from '../../composables/trajectory-model'
+import { contextLabelKey, contextPreview, formatDurationMs, fragmentRowPreview, KIND_LABEL_KEY, KIND_TONE_CLASS, type FragmentPreviews } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 import { useVirtualRows } from '../../composables/useVirtualRows'
 
 const props = defineProps<{
   rows: TrajectoryRow[]
   selectedKey: string | null
+  previews?: FragmentPreviews | null
 }>()
 
 const emit = defineEmits<{ select: [key: string] }>()
@@ -120,9 +121,11 @@ function rowLabel(row: TrajectoryRow): string {
 function rowPreview(row: TrajectoryRow): string {
   switch (row.detail.kind) {
     case 'system':
-      return t('chat.trajectory.systemPreview', { fragments: row.detail.entry.fragments, tokens: formatTokenCount(row.detail.entry.tokens) })
+      return fragmentRowPreview(row.detail.entry.refs, props.previews)
+        ?? t('chat.trajectory.systemPreview', { fragments: row.detail.entry.fragments, tokens: formatTokenCount(row.detail.entry.tokens) })
     case 'context':
-      return contextPreview(row.detail.entry, t)
+      if (row.detail.entry.kind === 'tool_defs') return contextPreview(row.detail.entry, t)
+      return fragmentRowPreview(entryRefs(row.detail.entry), props.previews) ?? contextPreview(row.detail.entry, t)
     default:
       return row.preview
   }
