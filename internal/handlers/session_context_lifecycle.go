@@ -220,6 +220,10 @@ type contextLifecycleQueries interface {
 		context.Context,
 		sqlc.ListRecentContextLifecyclesBySessionParams,
 	) ([]sqlc.ListRecentContextLifecyclesBySessionRow, error)
+	ListRecentContextLifecyclesBySessionBefore(
+		context.Context,
+		sqlc.ListRecentContextLifecyclesBySessionBeforeParams,
+	) ([]sqlc.ListRecentContextLifecyclesBySessionBeforeRow, error)
 	ListRecentAssistantMessagesBySession(
 		context.Context,
 		sqlc.ListRecentAssistantMessagesBySessionParams,
@@ -284,16 +288,8 @@ func loadContextLifecycleTurns(
 	limit int,
 	before *contextLifecycleCursor,
 ) (contextLifecycleLoad, error) {
-	probe := limit + 1
-	params := sqlc.ListRecentContextLifecyclesBySessionParams{
-		SessionID: sessionID,
-		MaxCount:  int32(probe), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
-	}
-	if before != nil {
-		params.BeforeCreatedAt = pgtype.Timestamptz{Time: before.createdAt, Valid: true}
-		params.BeforeRunID = before.runID
-	}
-	rows, err := queries.ListRecentContextLifecyclesBySession(ctx, params)
+	probe := int32(limit + 1) //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
+	rows, err := listContextLifecycleRows(ctx, queries, sessionID, probe, before)
 	if err != nil {
 		return contextLifecycleLoad{}, fmt.Errorf("list run lifecycles: %w", err)
 	}
@@ -320,7 +316,7 @@ func loadContextLifecycleTurns(
 
 	legacyRows, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
 		SessionID: sessionID,
-		MaxCount:  int32(probe), //nolint:gosec // G115: limit is bounded to contextLifecycleMaxLimit
+		MaxCount:  probe,
 	})
 	if err != nil {
 		return contextLifecycleLoad{}, fmt.Errorf("list legacy assistant lifecycles: %w", err)
@@ -331,6 +327,37 @@ func loadContextLifecycleTurns(
 		LegacySource: len(turns) > 0,
 		HasMore:      len(legacyRows) > limit,
 	}, nil
+}
+
+// listContextLifecycleRows keeps the first page on the plain session index
+// scan and only the continuation on the keyset predicate.
+func listContextLifecycleRows(
+	ctx context.Context,
+	queries contextLifecycleQueries,
+	sessionID pgtype.UUID,
+	maxCount int32,
+	before *contextLifecycleCursor,
+) ([]sqlc.ListRecentContextLifecyclesBySessionRow, error) {
+	if before == nil {
+		return queries.ListRecentContextLifecyclesBySession(ctx, sqlc.ListRecentContextLifecyclesBySessionParams{
+			SessionID: sessionID,
+			MaxCount:  maxCount,
+		})
+	}
+	older, err := queries.ListRecentContextLifecyclesBySessionBefore(ctx, sqlc.ListRecentContextLifecyclesBySessionBeforeParams{
+		SessionID:       sessionID,
+		BeforeCreatedAt: pgtype.Timestamptz{Time: before.createdAt, Valid: true},
+		BeforeRunID:     before.runID,
+		MaxCount:        maxCount,
+	})
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]sqlc.ListRecentContextLifecyclesBySessionRow, len(older))
+	for i, row := range older {
+		rows[i] = sqlc.ListRecentContextLifecyclesBySessionRow(row)
+	}
+	return rows, nil
 }
 
 func lifecycleTurnsFromRunRows(

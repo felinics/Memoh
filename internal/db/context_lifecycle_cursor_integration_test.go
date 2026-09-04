@@ -93,7 +93,7 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle cursor', '{}' FROM bot
 		t.Fatalf("first page = %#v, want newest two by (created_at, run_id) desc", first)
 	}
 
-	second, err := queries.ListRecentContextLifecyclesBySession(ctx, sqlc.ListRecentContextLifecyclesBySessionParams{
+	second, err := queries.ListRecentContextLifecyclesBySessionBefore(ctx, sqlc.ListRecentContextLifecyclesBySessionBeforeParams{
 		SessionID:       parsedSessionID,
 		MaxCount:        2,
 		BeforeCreatedAt: first[1].CreatedAt,
@@ -106,7 +106,7 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle cursor', '{}' FROM bot
 		t.Fatalf("second page = %#v, want the two older runs", second)
 	}
 
-	third, err := queries.ListRecentContextLifecyclesBySession(ctx, sqlc.ListRecentContextLifecyclesBySessionParams{
+	third, err := queries.ListRecentContextLifecyclesBySessionBefore(ctx, sqlc.ListRecentContextLifecyclesBySessionBeforeParams{
 		SessionID:       parsedSessionID,
 		MaxCount:        2,
 		BeforeCreatedAt: second[1].CreatedAt,

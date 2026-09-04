@@ -29,16 +29,17 @@ const (
 
 type contextLifecycleQueryStub struct {
 	dbstore.Queries
-	bot             sqlc.GetBotByIDRow
-	session         sqlc.BotSession
-	lifecycleRows   []sqlc.ListRecentContextLifecyclesBySessionRow
-	lifecycleErr    error
-	lifecycleParams []sqlc.ListRecentContextLifecyclesBySessionParams
-	legacyRows      []sqlc.ListRecentAssistantMessagesBySessionRow
-	legacyErr       error
-	unmaterialized  bool
-	probeCalls      int
-	legacyParams    []sqlc.ListRecentAssistantMessagesBySessionParams
+	bot                   sqlc.GetBotByIDRow
+	session               sqlc.BotSession
+	lifecycleRows         []sqlc.ListRecentContextLifecyclesBySessionRow
+	lifecycleErr          error
+	lifecycleParams       []sqlc.ListRecentContextLifecyclesBySessionParams
+	legacyRows            []sqlc.ListRecentAssistantMessagesBySessionRow
+	legacyErr             error
+	unmaterialized        bool
+	probeCalls            int
+	legacyParams          []sqlc.ListRecentAssistantMessagesBySessionParams
+	lifecycleBeforeParams []sqlc.ListRecentContextLifecyclesBySessionBeforeParams
 }
 
 func (q *contextLifecycleQueryStub) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -55,6 +56,18 @@ func (q *contextLifecycleQueryStub) ListRecentContextLifecyclesBySession(
 ) ([]sqlc.ListRecentContextLifecyclesBySessionRow, error) {
 	q.lifecycleParams = append(q.lifecycleParams, arg)
 	return q.lifecycleRows, q.lifecycleErr
+}
+
+func (q *contextLifecycleQueryStub) ListRecentContextLifecyclesBySessionBefore(
+	_ context.Context,
+	arg sqlc.ListRecentContextLifecyclesBySessionBeforeParams,
+) ([]sqlc.ListRecentContextLifecyclesBySessionBeforeRow, error) {
+	q.lifecycleBeforeParams = append(q.lifecycleBeforeParams, arg)
+	rows := make([]sqlc.ListRecentContextLifecyclesBySessionBeforeRow, len(q.lifecycleRows))
+	for i, row := range q.lifecycleRows {
+		rows[i] = sqlc.ListRecentContextLifecyclesBySessionBeforeRow(row)
+	}
+	return rows, q.lifecycleErr
 }
 
 func (q *contextLifecycleQueryStub) ListRecentAssistantMessagesBySession(
