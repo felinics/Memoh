@@ -1,7 +1,7 @@
 <template>
   <div
     ref="viewport"
-    class="h-full overflow-y-auto"
+    class="h-full overflow-x-hidden overflow-y-auto"
     role="listbox"
     :aria-label="$t('chat.trajectory.title')"
     data-testid="trajectory-ledger"
