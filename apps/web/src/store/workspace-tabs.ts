@@ -2193,6 +2193,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function isPanelAllowed(id: string): boolean {
     switch (panelComponentOf(id)) {
       case 'chat':
+      case 'trajectory':
         return true
       case 'file':
       case 'preview':

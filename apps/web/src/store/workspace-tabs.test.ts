@@ -2074,6 +2074,58 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.focusChatView).toHaveBeenLastCalledWith('chat:1')
   })
 
+  it('restores a trajectory panel alongside its session chat', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          grid: {
+            root: {
+              type: 'branch',
+              data: [
+                {
+                  type: 'leaf',
+                  size: 1200,
+                  data: { id: 'main', views: ['chat:1', 'trajectory:session-a'], activeView: 'trajectory:session-a' },
+                },
+              ],
+            },
+            width: 1200,
+            height: 800,
+            orientation: 'HORIZONTAL',
+          },
+          panels: {
+            'chat:1': {
+              id: 'chat:1',
+              contentComponent: 'chat',
+              title: 'A',
+              params: { sessionId: 'session-a', explicitSelection: true },
+            },
+            'trajectory:session-a': {
+              id: 'trajectory:session-a',
+              contentComponent: 'trajectory',
+              title: 'Trajectory',
+              params: { sessionId: 'session-a' },
+            },
+          },
+          activeGroup: 'main',
+        },
+        chatCounter: 1,
+        ephemeralIds: [],
+      },
+    }))
+    chatStoreMock.sessionId = 'session-a'
+    chatStoreMock.hasExplicitSessionSelection = true
+    useChatSelectionStore().setSession('session-a')
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.getPanel('chat:1')?.params.sessionId).toBe('session-a')
+    expect(dock.getPanel('trajectory:session-a')?.params.sessionId).toBe('session-a')
+  })
+
   it('opens multiple schedule panels and focuses an existing schedule', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
