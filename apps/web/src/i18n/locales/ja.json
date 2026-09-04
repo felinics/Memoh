@@ -1133,7 +1133,7 @@
       "diffHistory": "履歴のみ",
       "aggScope": "このページ内",
       "moreTurns": "このページより古いターンがあります",
-      "loadOlder": "最大 {n} ターンを読み込む",
+      "loadOlder": "古いターンを読み込む",
       "legacySource": "旧メッセージメタデータから復元"
     },
     "infoCacheHitRate": "キャッシュヒット率",

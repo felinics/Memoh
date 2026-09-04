@@ -1155,7 +1155,7 @@
       "diffHistory": "History only",
       "aggScope": "on this page",
       "moreTurns": "Older turns exist beyond this page",
-      "loadOlder": "Load up to {n} turns",
+      "loadOlder": "Load older turns",
       "legacySource": "Recovered from legacy message metadata"
     },
     "infoCacheHitRate": "Cache Hit Rate",

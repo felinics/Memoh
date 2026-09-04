@@ -2,6 +2,7 @@ import type {
   ContextfragLifecycleSnapshot,
   ContextfragSelectionTrace,
   ContextfragToolDefAccounting,
+  HandlersContextLifecycleResponse,
   HandlersContextLifecycleTurn,
 } from '@memohai/sdk'
 import { computeContextComposition, formatTokenCount, positive, type ContextComposition } from './context-categories'
@@ -203,4 +204,32 @@ export function buildTurnRow(turn: HandlersContextLifecycleTurn, options: BuildT
       ...section('steps', 'step', 'chat.lifecycle.steps', stepRows(snapshot, t)),
     ],
   }
+}
+
+export interface MergedLifecyclePages {
+  turns: HandlersContextLifecycleTurn[]
+  hasMore: boolean
+  nextCursor: string | null
+}
+
+// Pages are keyset slices ordered newest first; a run can repeat only across
+// a page boundary, so the first occurrence wins.
+export function mergeLifecyclePages(
+  first: HandlersContextLifecycleResponse | null | undefined,
+  older: HandlersContextLifecycleResponse[],
+): MergedLifecyclePages {
+  const pages = first ? [first, ...older] : []
+  const seen = new Set<string>()
+  const turns: HandlersContextLifecycleTurn[] = []
+  for (const page of pages) {
+    for (const turn of page.turns ?? []) {
+      const key = turn.run_id || turn.assistant_message_id || ''
+      if (key && seen.has(key)) continue
+      if (key) seen.add(key)
+      turns.push(turn)
+    }
+  }
+  const last = pages[pages.length - 1]
+  const hasMore = last?.has_more === true
+  return { turns, hasMore, nextCursor: hasMore && last?.next_cursor ? last.next_cursor : null }
 }

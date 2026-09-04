@@ -44,20 +44,22 @@
         </p>
         <ContextLifecycleTurns
           :turns="turns"
-          :has-older="data?.has_more === true || data?.legacy_history_may_exist === true"
+          :has-older="hasOlder"
         />
         <div
-          v-if="data?.has_more || data?.legacy_history_may_exist"
+          v-if="hasOlder"
           class="flex items-center justify-between gap-2 text-caption text-muted-foreground"
         >
           <span>{{ $t('chat.lifecycle.moreTurns') }}</span>
           <Button
-            v-if="canLoadOlder"
+            v-if="canLoadOlder || loadingOlder"
             variant="ghost"
             size="sm"
+            :loading="loadingOlder"
+            loading-mode="icon"
             @click="loadOlder"
           >
-            {{ $t('chat.lifecycle.loadOlder', { n: maxLimit }) }}
+            {{ $t('chat.lifecycle.loadOlder') }}
           </Button>
         </div>
       </template>
@@ -74,13 +76,12 @@ import { formatTokenCount } from '../composables/context-categories'
 import ContextLifecycleTurns from './context-lifecycle-turns.vue'
 
 const { t } = useI18n()
-const { data, status, hasTarget, canLoadOlder, loadOlder, maxLimit } = useContextLifecycle()
+const { data, status, hasTarget, turns, hasOlder, canLoadOlder, loadingOlder, loadOlder } = useContextLifecycle()
 
 // A pane without a session never fetches; showing its empty state beats a
 // skeleton that would spin forever.
 const isLoading = computed(() => hasTarget.value && status.value === 'pending')
 const isError = computed(() => status.value === 'error')
-const turns = computed(() => data.value?.turns ?? [])
 
 // Cache totals are facts observed at Memoh's boundary; an unobserved zero
 // (ACP) is not a measurement, so only positive totals earn a row.

@@ -6,6 +6,7 @@ import {
   dropReasonRows,
   lifecycleStatusLabelKey,
   lifecycleStatusToneClass,
+  mergeLifecyclePages,
 } from './context-lifecycle-view'
 import type { ContextfragLifecycleSnapshot, ContextfragSelectionTrace, HandlersContextLifecycleTurn } from '@memohai/sdk'
 
@@ -177,5 +178,24 @@ describe('buildTurnRow', () => {
   it('carries the prompt-diff label key, or none at an unknown boundary', () => {
     expect(buildTurnRow(turn, { previous: null, t, formatTime: () => '' }).diffKey).toBe('chat.lifecycle.diffInitial')
     expect(buildTurnRow(turn, { t, formatTime: () => '' }).diffKey).toBeNull()
+  })
+})
+
+describe('mergeLifecyclePages', () => {
+  it('concatenates newest-first pages and drops runs repeated across page boundaries', () => {
+    const turn = (runId: string): HandlersContextLifecycleTurn => ({ run_id: runId, created_at: '2026-09-03T00:00:00.000Z', snapshot: {} })
+    const merged = mergeLifecyclePages(
+      { turns: [turn('r9'), turn('r8')], has_more: true, next_cursor: 'c1', limit: 2 },
+      [
+        { turns: [turn('r8'), turn('r7')], has_more: true, next_cursor: 'c2', limit: 2 },
+        { turns: [turn('r6')], has_more: false, limit: 2 },
+      ],
+    )
+    expect(merged.turns.map(item => item.run_id)).toEqual(['r9', 'r8', 'r7', 'r6'])
+    expect(merged.hasMore).toBe(false)
+    expect(merged.nextCursor).toBeNull()
+    expect(mergeLifecyclePages(null, []).turns).toEqual([])
+    expect(mergeLifecyclePages({ turns: [turn('r1')], has_more: true, next_cursor: 'c', limit: 1 }, []).nextCursor).toBe('c')
+    expect(mergeLifecyclePages({ turns: [turn('r1')], has_more: true, limit: 1 }, []).nextCursor).toBeNull()
   })
 })

@@ -1155,7 +1155,7 @@
       "diffHistory": "仅历史变化",
       "aggScope": "本页范围",
       "moreTurns": "本页之外还有更早的轮次",
-      "loadOlder": "加载至多 {n} 轮",
+      "loadOlder": "加载更早的轮次",
       "legacySource": "来自旧版消息元数据"
     },
     "infoCacheHitRate": "Cache 命中率",
