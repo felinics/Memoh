@@ -1940,6 +1940,11 @@ export type HandlersContextLifecycleTurn = {
     run_id?: string;
     snapshot?: ContextfragLifecycleSnapshot;
     status?: string;
+    /**
+     * TurnID is the durable turn the run wrote into, joined from the run
+     * ledger; absent for runs the ledger never recorded.
+     */
+    turn_id?: string;
 };
 
 export type HandlersContextUsage = {

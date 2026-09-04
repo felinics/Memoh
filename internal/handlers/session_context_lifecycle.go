@@ -53,7 +53,10 @@ const contextLifecycleAggregateScope = "returned_page"
 
 // ContextLifecycleTurn is one persisted lifecycle snapshot, newest first.
 type ContextLifecycleTurn struct {
-	RunID              string                        `json:"run_id"`
+	RunID string `json:"run_id"`
+	// TurnID is the durable turn the run wrote into, joined from the run
+	// ledger; absent for runs the ledger never recorded.
+	TurnID             string                        `json:"turn_id,omitempty"`
 	Status             string                        `json:"status,omitempty"`
 	ErrorCode          string                        `json:"error_code,omitempty"`
 	AssistantMessageID string                        `json:"assistant_message_id,omitempty"`
@@ -347,8 +350,13 @@ func lifecycleTurnsFromRunRows(
 		if row.ErrorCode.Valid {
 			errorCode = row.ErrorCode.String
 		}
+		turnID := ""
+		if row.TurnID.Valid {
+			turnID = row.TurnID.String()
+		}
 		turns = append(turns, ContextLifecycleTurn{
 			RunID:              row.RunID.String(),
+			TurnID:             turnID,
 			Status:             row.Status,
 			ErrorCode:          errorCode,
 			AssistantMessageID: snapshot.AssistantMessageID,

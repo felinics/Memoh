@@ -3409,6 +3409,11 @@ definitions:
         $ref: '#/definitions/contextfrag.LifecycleSnapshot'
       status:
         type: string
+      turn_id:
+        description: |-
+          TurnID is the durable turn the run wrote into, joined from the run
+          ledger; absent for runs the ledger never recorded.
+        type: string
     type: object
   handlers.ContextUsage:
     properties:

@@ -20174,6 +20174,10 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
+                },
+                "turn_id": {
+                    "description": "TurnID is the durable turn the run wrote into, joined from the run\nledger; absent for runs the ledger never recorded.",
+                    "type": "string"
                 }
             }
         },

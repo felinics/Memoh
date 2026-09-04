@@ -256,19 +256,23 @@ func (q *Queries) ListRecentAssistantMessagesBySession(ctx context.Context, arg 
 
 const listRecentContextLifecyclesBySession = `-- name: ListRecentContextLifecyclesBySession :many
 SELECT
-  run_id,
-  status,
-  error_code,
-  created_at,
-  (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
+  context_lifecycles.run_id,
+  context_lifecycles.status,
+  context_lifecycles.error_code,
+  context_lifecycles.created_at,
+  session_runs.turn_id,
+  (context_lifecycles.snapshot - 'selection_decisions'::text)::jsonb AS snapshot
 FROM context_lifecycles
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = $1
+LEFT JOIN session_runs
+  ON session_runs.team_id = context_lifecycles.team_id
+ AND session_runs.run_id = context_lifecycles.run_id
+WHERE context_lifecycles.team_id = public.memoh_current_team_id()
+  AND context_lifecycles.session_id = $1
   AND (
     $2::timestamptz IS NULL
-    OR (created_at, run_id) < ($2::timestamptz, $3::uuid)
+    OR (context_lifecycles.created_at, context_lifecycles.run_id) < ($2::timestamptz, $3::uuid)
   )
-ORDER BY created_at DESC, run_id DESC
+ORDER BY context_lifecycles.created_at DESC, context_lifecycles.run_id DESC
 LIMIT $4
 `
 
@@ -284,6 +288,7 @@ type ListRecentContextLifecyclesBySessionRow struct {
 	Status    string             `json:"status"`
 	ErrorCode pgtype.Text        `json:"error_code"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	TurnID    pgtype.UUID        `json:"turn_id"`
 	Snapshot  []byte             `json:"snapshot"`
 }
 
@@ -306,6 +311,7 @@ func (q *Queries) ListRecentContextLifecyclesBySession(ctx context.Context, arg 
 			&i.Status,
 			&i.ErrorCode,
 			&i.CreatedAt,
+			&i.TurnID,
 			&i.Snapshot,
 		); err != nil {
 			return nil, err
