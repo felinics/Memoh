@@ -9,9 +9,9 @@ import (
 )
 
 func TestAgentStreamObserverReleasesWhenConsumerLeaves(t *testing.T) {
-	restore := streamObserverDeliveryGrace
-	streamObserverDeliveryGrace = 50 * time.Millisecond
-	t.Cleanup(func() { streamObserverDeliveryGrace = restore })
+	restore := streamTerminalDeliveryGrace
+	streamTerminalDeliveryGrace = 50 * time.Millisecond
+	t.Cleanup(func() { streamTerminalDeliveryGrace = restore })
 
 	release := make(chan struct{})
 	provider := agentStreamTestProvider(func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
@@ -65,5 +65,43 @@ func TestAgentStreamObserverReleasesWhenConsumerLeaves(t *testing.T) {
 		case <-deadline:
 			t.Fatal("observed stream did not close after the consumer left")
 		}
+	}
+}
+
+func TestAgentStreamObserverKeepsTheTerminalForAStalledConsumer(t *testing.T) {
+	restore := streamTerminalDeliveryGrace
+	streamTerminalDeliveryGrace = 50 * time.Millisecond
+	t.Cleanup(func() { streamTerminalDeliveryGrace = restore })
+
+	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		return closedAgentTestStream(
+			&sdk.StartStepPart{},
+			&sdk.TextDeltaPart{ID: "text", Text: "hello"},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop, Usage: sdk.Usage{InputTokens: 3, OutputTokens: 1}},
+		), nil
+	})
+	var observed []StreamEventType
+	events := New(Deps{}).Stream(context.Background(), RunConfig{
+		Model:                &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages:             []sdk.Message{sdk.UserMessage("task")},
+		Identity:             SessionContext{BotID: "bot-1"},
+		OnAgentEventObserved: func(ev StreamEvent) { observed = append(observed, ev.Type) },
+	})
+	var got []StreamEventType
+	for ev := range events {
+		got = append(got, ev.Type)
+		if ev.Type == EventTextDelta {
+			// A consumer slower than the terminal window while the relay
+			// already holds the next event: without the relay the run would
+			// wait on this event itself and the terminal would get a fresh
+			// window afterwards.
+			time.Sleep(2 * streamTerminalDeliveryGrace)
+		}
+	}
+	if len(got) == 0 || got[len(got)-1] != EventAgentEnd {
+		t.Fatalf("consumer events = %v, want the terminal event last", got)
+	}
+	if len(observed) == 0 || observed[len(observed)-1] != EventAgentEnd {
+		t.Fatalf("observed events = %v, want the terminal event last", observed)
 	}
 }

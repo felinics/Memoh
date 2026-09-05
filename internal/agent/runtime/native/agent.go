@@ -225,36 +225,39 @@ func (a *Agent) Stream(ctx context.Context, cfg RunConfig) <-chan StreamEvent {
 	if cfg.OnAgentEventObserved == nil {
 		return ch
 	}
+	// The relay reads ch to the end whatever the consumer does, so the run
+	// never waits on the consumer directly: ordinary events go out while the
+	// run context lives and are dropped once it is cancelled, exactly as the
+	// direct channel behaved, and the terminal event gets the same bounded
+	// window it had on the direct channel.
 	observed := make(chan StreamEvent)
 	go func() {
 		defer close(observed)
+		delivering := true
 		for ev := range ch {
 			cfg.OnAgentEventObserved(ev)
-			if deliverObservedEvent(ctx, observed, ev) {
+			if !delivering {
 				continue
 			}
-			// The consumer left: keep observing so the terminal facts still
-			// land, and let the run unwind on its own cancellation.
-			for ev := range ch {
-				cfg.OnAgentEventObserved(ev)
+			if ev.IsTerminal() {
+				delivering = deliverTerminalObservedEvent(observed, ev)
+				continue
 			}
-			return
+			select {
+			case observed <- ev:
+			case <-ctx.Done():
+			}
 		}
 	}()
 	return observed
 }
 
-// streamObserverDeliveryGrace bounds how long an observed event waits for a
-// consumer after the run context is cancelled.
-var streamObserverDeliveryGrace = 5 * time.Second
+// streamTerminalDeliveryGrace bounds how long the terminal event waits for a
+// consumer, so a disconnected consumer cannot hang the run's goroutines.
+var streamTerminalDeliveryGrace = 5 * time.Second
 
-func deliverObservedEvent(ctx context.Context, observed chan<- StreamEvent, ev StreamEvent) bool {
-	select {
-	case observed <- ev:
-		return true
-	case <-ctx.Done():
-	}
-	timer := time.NewTimer(streamObserverDeliveryGrace)
+func deliverTerminalObservedEvent(observed chan<- StreamEvent, ev StreamEvent) bool {
+	timer := time.NewTimer(streamTerminalDeliveryGrace)
 	defer timer.Stop()
 	select {
 	case observed <- ev:
@@ -932,10 +935,17 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	// the parent ctx is cancelled (user abort / idle timeout / loop-detect).
 	// Otherwise sendEvent would short-circuit on <-ctx.Done() and the consumer
 	// would never receive the partial messages accumulated so far, forcing it
-	// to fall back to a synthetic placeholder. A 5s deadline guards against
-	// a fully-disconnected consumer hanging this goroutine forever.
-	deliveryCtx, deliveryCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer deliveryCancel()
+	// to fall back to a synthetic placeholder. A deadline guards against a
+	// fully-disconnected consumer hanging this goroutine forever; with an
+	// observer relay the relay always drains ch and applies that deadline on
+	// the consumer's side, so the send here must not time out while the relay
+	// still holds the previous event.
+	deliveryCtx := context.WithoutCancel(ctx)
+	if cfg.OnAgentEventObserved == nil {
+		var deliveryCancel context.CancelFunc
+		deliveryCtx, deliveryCancel = context.WithTimeout(deliveryCtx, streamTerminalDeliveryGrace)
+		defer deliveryCancel()
+	}
 	sendEvent(deliveryCtx, ch, termEvent)
 }
 
