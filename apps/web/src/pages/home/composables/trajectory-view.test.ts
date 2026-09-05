@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import type { ContextfragKind } from '@memohai/sdk'
+import en from '@/i18n/locales/en.json'
+import ja from '@/i18n/locales/ja.json'
+import zh from '@/i18n/locales/zh.json'
 import type { RowMapSegment, TrajectoryStats } from './trajectory-model'
 import { contextPreview, formatDurationMs, fragmentRowPreview, MAX_STRIP_BARS, rowMapGeometry, statsSegments } from './trajectory-view'
 
@@ -180,5 +184,20 @@ describe('statsSegments', () => {
       [{ key: 'statsTurns', params: { n: '1' } }, { key: 'statsSteps', params: { n: '3' } }],
       [{ key: 'statsLlm', params: { s: '33.5s' } }],
     ])
+  })
+})
+
+const EVERY_KIND: ContextfragKind[] = [
+  'system_prompt', 'system_policy', 'bot_identity', 'workspace_instruction', 'platform_identity', 'tool_usage',
+  'conversation_event', 'current_user_message', 'attachment_ref', 'native_image', 'skills_catalog', 'hook_context',
+  'injected_message', 'background_summary', 'runtime_context', 'memory_recall', 'conversation_summary', 'tool_definition',
+]
+
+describe('context kind labels', () => {
+  it('names every fragment kind in every locale', () => {
+    for (const locale of [en, zh, ja]) {
+      const labels = (locale as { chat: { trajectory: { contextKind: Record<string, string> } } }).chat.trajectory.contextKind
+      for (const kind of EVERY_KIND) expect(labels[kind], kind).toBeTruthy()
+    }
   })
 })
