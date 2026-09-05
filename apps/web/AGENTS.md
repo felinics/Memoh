@@ -99,6 +99,8 @@ src/
 │   │   ├── useChat.ws.test.ts #     WebSocket tests
 │   │   ├── useChat.content.ts #     Message content parsing (tool calls, text, reasoning)
 │   │   ├── useContainerStream.ts  # Container creation SSE stream
+│   │   ├── useWorkspaceDependencies.ts  # Workspace dependency list query, preflight / rollback / check-updates / script calls
+│   │   ├── useWorkspaceDependencyStream.ts  # Dependency install / update / reinstall / remove SSE stream
 │   │   └── usePlatform.ts     #     Platform list query + create mutation
 │   ├── useDialogMutation.ts   #   Mutation wrapper with toast error handling
 │   ├── useRetryingStream.ts   #   SSE retry with exponential backoff
@@ -162,6 +164,8 @@ src/
 │   │   ├── index.vue          #     Bot grid
 │   │   ├── new.vue            #     Create bot flow
 │   │   ├── detail.vue         #     Bot detail with tabbed interface
+│   │   ├── composables/       #     Page-specific composables
+│   │   │   └── useDependencyOperation.ts  # One streamed dependency operation: log, outcome, progress dialog state
 │   │   └── components/        #     Bot sub-components
 │   │       ├── bot-overview.vue       # Bot overview tab
 │   │       ├── bot-settings.vue       # Bot settings tab
@@ -187,6 +191,13 @@ src/
 │   │       ├── tts-model-select.vue         # TTS model selector
 │   │       ├── channel-settings-panel.vue   # Channel settings panel
 │   │       ├── container-create-progress.vue # Container creation progress
+│   │       ├── bot-dependencies.vue         # Workspace dependencies tab (target select, check updates, grouped rows, dialogs)
+│   │       ├── dependency-row.vue           # One dependency row: icon, version/status badges, primary action + menu
+│   │       ├── dependency-kv-list.vue       # Read-only key/value block shared by the dependency dialogs
+│   │       ├── dependency-confirm-dialog.vue # Confirm install / update / align / reinstall of a workspace dependency
+│   │       ├── dependency-progress-dialog.vue # Live SSE log of a dependency operation (copy log, retry, no auto-close)
+│   │       ├── dependency-script-dialog.vue # Preview of the exact script a dependency action runs
+│   │       ├── dependency-rollback-dialog.vue # Confirm rolling a dependency back to its previous version
 │   │       └── weixin-qr-login.vue          # WeChat QR login
 │   ├── providers/             #   LLM provider & model management
 │   ├── web-search/            #   Web search provider management
@@ -231,6 +242,8 @@ src/
     ├── image-ref.ts           #   Image reference URL resolution
     ├── image-ref.test.ts      #   Image ref tests
     ├── timezones.ts           #   Timezone list and utilities
+    ├── workspace-dependency.ts #  Dependency row rules: status badge, primary / menu actions, icon, version format
+    ├── workspace-dependency.test.ts # Dependency rule tests
     └── useControlVisibleStatus.ts  # Visibility control utility
 ```
 

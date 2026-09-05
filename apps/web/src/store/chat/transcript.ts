@@ -10,6 +10,7 @@ import {
   messageIdentityId,
   mergeApprovalState,
   nextId,
+  stringRecord,
 } from '../chat-list.normalize'
 import { upsertById } from '../chat-list.utils'
 import type {
@@ -589,22 +590,20 @@ export function createTranscriptController({
     turn.streaming = false
   }
 
-  function appendAssistantError(assistantTurn: ChatAssistantTurn, errorMessage: string, code?: string) {
+  // `args` are the feedback's machine-readable parameters (parseMemohError);
+  // the block keeps the string-valued ones for the renderer's i18n and links.
+  function appendAssistantError(assistantTurn: ChatAssistantTurn, errorMessage: string, code?: string, args?: Record<string, unknown>) {
     const text = errorMessage.trim()
     if (!text && !code) return
-    assistantTurn.messages.push({
-      id: nextAssistantMessageId(assistantTurn),
-      type: 'error',
-      code,
-      content: text,
-    })
+    const id = nextAssistantMessageId(assistantTurn)
+    assistantTurn.messages.push({ id, type: 'error', code, content: text, args: stringRecord(args) })
   }
 
   function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
     const parsed = parseMemohError(error)
     if (!hasVisibleAssistantBlocks(assistantTurn)) {
       if (parsed?.code) {
-        appendAssistantError(assistantTurn, error.message, parsed.code)
+        appendAssistantError(assistantTurn, error.message, parsed.code, parsed.args)
         return
       }
       const turnId = assistantTurn.turnId?.trim()
@@ -617,7 +616,7 @@ export function createTranscriptController({
     }
     if (error.name === 'AbortError') return
     if (assistantTurn.messages.some(block => block.type === 'error')) return
-    appendAssistantError(assistantTurn, error.message, parsed?.code)
+    appendAssistantError(assistantTurn, error.message, parsed?.code, parsed?.args)
   }
 
   function removeRuntimeTurn(turnId: string) {

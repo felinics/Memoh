@@ -1104,7 +1104,12 @@
       "attachmentInvalid": "附件无效，请重新添加。",
       "attachmentUnavailable": "无法让外部 Agent 访问该附件，请重新添加。",
       "imageInputUnsupported": "这个外部 Agent 无法读取所附图片。",
-      "invalidChatRuntime": "选择的对话运行时无效。"
+      "invalidChatRuntime": "选择的对话运行时无效。",
+      "dependencyMissing": "{dep_id} 尚未安装在此工作区，正在后台安装。完成后请重发这条消息。",
+      "dependencyMissingProgress": "正在后台安装…",
+      "dependencyMissingDone": "安装完成，可以重发消息了。",
+      "dependencyMissingFailed": "后台安装失败，请到 Bot 设置的「依赖」中重试。",
+      "dependencyOpen": "查看依赖"
     },
     "sessionFilterAll": "全部",
     "searchSessionPlaceholder": "搜索",
@@ -2197,6 +2202,7 @@
       "channels": "平台",
       "remoteRuntime": "电脑",
       "container": "工作区",
+      "dependencies": "依赖",
       "mcp": "MCP",
       "compaction": "上下文压缩",
       "schedule": "定时任务",
@@ -2253,7 +2259,144 @@
       "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
       "codexLoginFailed": "Codex 账号授权失败，请重试",
       "modelsLoadFailed": "无法加载 Agent 模型。请检查 Agent 配置后重试。",
-      "openSettings": "打开 Agent 设置"
+      "openSettings": "打开 Agent 设置",
+      "dependencyChecking": "正在检查依赖…",
+      "dependencyRemoteOffline": "该 Bot 连接的电脑已离线，上线后才能检查依赖。",
+      "dependencyInstalledEnableHint": "已安装 {name}，现在可以启用该 Agent。"
+    },
+    "dependencies": {
+      "title": "工作区依赖",
+      "intro": "这个 Bot 工作区里已安装的命令行工具与运行时。新的依赖从 Supermarket 添加。",
+      "catalog": {
+        "codex": {
+          "description": "OpenAI Codex 命令行"
+        },
+        "claude-code": {
+          "description": "Anthropic Claude Code 命令行"
+        },
+        "node": {
+          "description": "JavaScript 运行时，含 npm 与 npx"
+        },
+        "python": {
+          "description": "Python 解释器，含 pip"
+        },
+        "uv": {
+          "description": "Python 包与项目管理器"
+        }
+      },
+      "checkUpdates": "检查更新",
+      "checkUpdatesDone": "已检查更新",
+      "lastChecked": "上次检查：{time}",
+      "emptyTitle": "这个工作区还没有安装依赖",
+      "emptyAction": "去 Supermarket 添加",
+      "loadFailed": "无法加载依赖",
+      "close": "关闭",
+      "status": {
+        "installed": "已安装",
+        "notInstalled": "未安装",
+        "missing": "待重装",
+        "failed": "失败",
+        "installing": "安装中",
+        "updating": "更新中",
+        "removing": "卸载中",
+        "updateAvailable": "有更新 {version}",
+        "unsupported": "不支持",
+        "unsupportedTooltip": "当前工作区平台不支持该依赖。"
+      },
+      "action": {
+        "install": "安装",
+        "reinstall": "重新安装",
+        "update": "更新",
+        "rollback": "回滚到 {version}",
+        "rollbackPlain": "回滚",
+        "remove": "卸载",
+        "viewScript": "查看脚本",
+        "viewProgress": "查看进度"
+      },
+      "workspace": {
+        "notRunningTitle": "工作区未运行",
+        "notRunningDescription": "安装、更新与状态探测需要工作区运行中。下方显示的是上次记录的状态。",
+        "start": "启动工作区",
+        "missingTitle": "尚未创建工作区",
+        "goToContainer": "去工作区",
+        "remoteOfflineTitle": "电脑「{name}」离线",
+        "remoteOfflineDescription": "该电脑上线后才能管理依赖。",
+        "discoveryErrorTitle": "暂时无法探测工作区里的依赖",
+        "discoveryErrorRetry": "重试"
+      },
+      "confirm": {
+        "installTitle": "安装 {name}",
+        "reinstallTitle": "重新安装 {name}",
+        "updateTitle": "更新 {name}",
+        "updateDescription": "当前 {from}。新版本安装完成后才切换；失败不影响当前版本，成功后可回滚。",
+        "installDescription": "将在工作区中下载并安装 {name}。",
+        "reinstallDescription": "将删除当前安装并重新安装 {name}。完成前依赖它的 Agent 无法启动。",
+        "dependency": "依赖",
+        "installPath": "安装位置",
+        "version": "版本",
+        "versionPlaceholder": "最新版本",
+        "versionHelp": "留空则安装最新版。",
+        "remoteWarningTitle": "将在你的电脑「{name}」上执行",
+        "remoteWarningDescription": "脚本会在这台电脑上下载并写入文件。",
+        "installConfirm": "安装",
+        "updateConfirm": "更新",
+        "installAndEnable": "安装并启用"
+      },
+      "progress": {
+        "installing": "正在安装 {name}",
+        "updating": "正在更新 {name}",
+        "reinstalling": "正在重新安装 {name}",
+        "removing": "正在卸载 {name}",
+        "preparing": "准备中…",
+        "doneTitle": "已完成",
+        "failedTitle": "操作失败",
+        "failedHint": "状态已记为失败，可在依赖列表中重试。完整日志可复制。",
+        "runInBackground": "后台运行",
+        "version": "版本",
+        "entrypoint": "入口"
+      },
+      "script": {
+        "title": "将在工作区执行的脚本",
+        "description": "{name} · {action} · 与实际执行的内容一致",
+        "digest": "摘要",
+        "exec": "执行方式",
+        "timeout": "超时",
+        "timeoutValue": "{seconds} 秒",
+        "env": "环境变量（{count}）"
+      },
+      "remove": {
+        "title": "卸载 {name}？",
+        "description": "将删除 {path} 下的全部版本。依赖它的 Agent 在重新安装前无法启动。",
+        "overlayDescription": "将移除 {installed}，工作区回到 {image_version}。"
+      },
+      "rollback": {
+        "title": "回滚 {name}",
+        "description": "从 {from} 回到 {to}。回滚只切换本地已保留的版本，不联网。",
+        "current": "当前版本",
+        "target": "回到",
+        "confirm": "回滚到 {to}",
+        "success": "已回滚到 {to}",
+        "failed": "回滚失败"
+      },
+      "preflight": {
+        "failed": "无法检查依赖",
+        "workspaceNotRunningTitle": "先启动工作区",
+        "workspaceNotRunningDescription": "启用 {name} 前需要在运行中的工作区安装依赖。",
+        "workspaceMissingTitle": "先创建工作区",
+        "startAndContinue": "启动并继续",
+        "platformUnsupported": "当前工作区平台不支持 {name}"
+      },
+      "done": "完成",
+      "errorDetails": "错误详情",
+      "checkUpdatesFailed": "检查更新失败",
+      "background": {
+        "installed": "已安装 {name}",
+        "updated": "已更新 {name}",
+        "reinstalled": "已重新安装 {name}",
+        "removed": "已卸载 {name}",
+        "failed": "{name} 操作失败"
+      },
+      "busy": "此工作区还有其他依赖操作在进行中。"
     },
     "folders": {
       "create": "新建文件夹",
@@ -3371,13 +3514,18 @@
     "skillsSection": "Skills",
     "packagesSection": "Packages",
     "connectorsSection": "连接器",
+    "dependenciesSection": "依赖",
     "noResults": "未找到结果",
     "noPackageResults": "未找到 Package",
     "noConnectorResults": "未找到连接器",
+    "noDependencyResults": "未找到依赖",
     "install": "安装",
     "installToBot": "安装到 Bot",
     "selectBot": "选择 Bot",
     "selectBotPlaceholder": "选择要安装到的 Bot...",
+    "selectWorkspaceTarget": "工作区",
+    "dependencyInstallTitle": "安装 {name}",
+    "viewBotDependencies": "查看 Bot 依赖",
     "envVariables": "环境变量",
     "envDescription": "配置所需的环境变量",
     "installSuccess": "安装成功",

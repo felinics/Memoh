@@ -200,6 +200,14 @@
                           class="size-4 shrink-0"
                         />
                         <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
+                        <!-- NavItem's root is already a flex row, so the count
+                             pushes itself to the trailing edge without a slot. -->
+                        <BadgeCount
+                          v-if="tab.value === 'dependencies' && dependencyAttentionCount > 0"
+                          :count="dependencyAttentionCount"
+                          variant="destructive"
+                          class="ml-auto"
+                        />
                       </NavItem>
                     </SidebarMenuItem>
                   </SidebarMenu>
@@ -266,11 +274,11 @@ import {
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, ChevronLeft, Workflow, Laptop, Plug
+  Monitor, Globe, Bot as BotIcon, ChevronLeft, Workflow, Laptop, Plug, Package
 } from 'lucide-vue-next'
-import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
+import { computed, ref, watch, onMounted, toValue, nextTick, inject, type Ref } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { NavItem, toast } from '@felinic/ui'
+import { BadgeCount, NavItem, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
@@ -304,6 +312,7 @@ import BotContainer from './components/bot-container.vue'
 import BotRemoteRuntime from './components/bot-remote-runtime.vue'
 import BotAccess from './components/bot-access.vue'
 import BotAgents from './components/bot-agents.vue'
+import BotDependencies from './components/bot-dependencies.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -316,6 +325,8 @@ import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
+import { useBotDependenciesQuery } from '@/composables/api/useWorkspaceDependencies'
+import { dependencyNeedsAttention } from '@/utils/workspace-dependency'
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
@@ -392,6 +403,14 @@ const canManageBot = computed(() => {
 
 const capabilitiesStore = useCapabilitiesStore()
 
+// Sidebar count for the Dependencies tab: rows that need a hand (missing,
+// failed, version to align, update available). Same query key as the tab
+// itself (bot + the Server-resolved primary target), so opening the tab reuses
+// this fetch; chat-only members never see the tab, so they never fetch.
+const dependencyBadgeBotId = computed(() => (canManageBot.value ? botId.value : '')) as Ref<string>
+const { data: dependencyList } = useBotDependenciesQuery(dependencyBadgeBotId, ref(''))
+const dependencyAttentionCount = computed(() => (dependencyList.value?.items ?? []).filter(dependencyNeedsAttention).length)
+
 const tabList = computed(() => {
   const bot_id = toValue(botId)
   const tabs = [
@@ -412,6 +431,7 @@ const tabList = computed(() => {
       ? [{ value: 'connectors', label: 'bots.tabs.connectors', icon: Plug, component: BotConnectors, params: { 'bot-id': bot_id } }]
       : []),
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
+    { value: 'dependencies', label: 'bots.tabs.dependencies', icon: Package, component: BotDependencies, params: { 'bot-id': bot_id } },
     { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
@@ -438,6 +458,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
+    { tab: 'dependencies', key: 'bots.tabs.dependencies', keywords: ['codex', 'claude code', 'node', 'python', 'uv', 'install', 'version', '依赖', '安装', '版本', '依存', 'インストール'] },
     { tab: 'remote-runtime', key: 'bots.remoteRuntime.title', keywords: ['files', 'commands', 'computer', 'server', '文件', '命令', '电脑', '服务器', 'ファイル', 'コマンド'] },
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
@@ -522,7 +543,7 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'memory']
+  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'dependencies', 'memory']
   const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
   const securityKeys = ['access', 'email']
 

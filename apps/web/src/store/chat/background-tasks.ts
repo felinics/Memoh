@@ -1,3 +1,4 @@
+import { reactive } from 'vue'
 import type { UIBackgroundTask } from '@/composables/api/useChat'
 import { asRecord, pickRawString, pickString, taskIdFromToolBlock } from '../chat-list.normalize'
 import type { BackgroundTask, ChatMessage, ToolCallBlock } from './types'
@@ -135,7 +136,9 @@ export function reconcileBackgroundTasksInMessages(items: ChatMessage[]) {
 }
 
 export function createBackgroundTaskTracker() {
-  const latestBackgroundTasks = new Map<string, BackgroundTask>()
+  // Reactive so a renderer that looks a task up by id (the dependency-missing
+  // feedback block) re-renders as later events arrive for it.
+  const latestBackgroundTasks = reactive(new Map<string, BackgroundTask>())
 
   function rememberBackgroundTask(task: BackgroundTask): BackgroundTask {
     const latest = mergeBackgroundTask(latestBackgroundTasks.get(task.taskId), task)
@@ -170,10 +173,17 @@ export function createBackgroundTaskTracker() {
     latestBackgroundTasks.clear()
   }
 
+  /** Latest known state of one task, or undefined when no event named it yet. */
+  function backgroundTaskFor(taskId: string): BackgroundTask | undefined {
+    const id = taskId.trim()
+    return id ? latestBackgroundTasks.get(id) : undefined
+  }
+
   return {
     rememberBackgroundTask,
     applyPendingBackgroundEventsToTool,
     mergeBackgroundTaskIntoMatchingTools,
     clearBackgroundTasks,
+    backgroundTaskFor,
   }
 }
