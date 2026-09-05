@@ -194,7 +194,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
 	} else if ok {
 		breakdown, toolDefs, budgetPlan = contextComposition(snapshot)
-		if !budgetPlanApplies(snapshot, resolvedModel) {
+		if !budgetPlanApplies(snapshot, resolvedModel, contextWindow) {
 			budgetPlan = nil
 		}
 	}
@@ -269,7 +269,14 @@ func contextCompactionInfo(enabled bool, threshold int, plan *contextfrag.Contex
 // budgetPlanApplies reports whether the newest persisted plan was made for the
 // model the next turn will use; a pane override budgets against another model,
 // so its window, reserve, and marks would describe a turn that will not run.
-func budgetPlanApplies(snapshot contextfrag.LifecycleSnapshot, resolvedModel string) bool {
+// The snapshot names its model by provider model name only, and two providers
+// can serve the same name with different windows; a plan's window never
+// exceeds the window of the model it was made for, so a plan wider than the
+// resolved model's window came from another model.
+func budgetPlanApplies(snapshot contextfrag.LifecycleSnapshot, resolvedModel string, resolvedWindow *int64) bool {
+	if resolvedWindow != nil && snapshot.BudgetPlan != nil && int64(snapshot.BudgetPlan.Window) > *resolvedWindow {
+		return false
+	}
 	if resolvedModel == "" || snapshot.Model == "" {
 		return true
 	}

@@ -117,22 +117,32 @@ func TestContextCompactionInfoDerivation(t *testing.T) {
 func TestBudgetPlanApplies(t *testing.T) {
 	t.Parallel()
 
+	window := func(n int64) *int64 { return &n }
 	cases := []struct {
-		name          string
-		model         string
-		resolvedModel string
-		want          bool
+		name           string
+		model          string
+		planWindow     int
+		resolvedModel  string
+		resolvedWindow *int64
+		want           bool
 	}{
 		{name: "unknown resolved model keeps the plan", model: "gpt-5", want: true},
 		{name: "legacy snapshot without a model keeps the plan", resolvedModel: "gpt-5", want: true},
 		{name: "same model, any case, applies", model: "GPT-5", resolvedModel: "gpt-5", want: true},
 		{name: "a pane override to another model drops the plan", model: "gpt-5", resolvedModel: "claude-opus-4", want: false},
+		{name: "same name on a provider with a smaller window drops the plan", model: "gpt-4o", planWindow: 128_000, resolvedModel: "gpt-4o", resolvedWindow: window(32_000), want: false},
+		{name: "a plan within the resolved window applies", model: "gpt-4o", planWindow: 120_000, resolvedModel: "gpt-4o", resolvedWindow: window(128_000), want: true},
+		{name: "an unknown window falls back to the name", model: "gpt-4o", planWindow: 128_000, resolvedModel: "gpt-4o", want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := budgetPlanApplies(contextfrag.LifecycleSnapshot{Model: tc.model}, tc.resolvedModel); got != tc.want {
+			snapshot := contextfrag.LifecycleSnapshot{Model: tc.model}
+			if tc.planWindow > 0 {
+				snapshot.BudgetPlan = &contextfrag.ContextBudgetPlan{Window: tc.planWindow}
+			}
+			if got := budgetPlanApplies(snapshot, tc.resolvedModel, tc.resolvedWindow); got != tc.want {
 				t.Fatalf("budgetPlanApplies() = %v, want %v", got, tc.want)
 			}
 		})
