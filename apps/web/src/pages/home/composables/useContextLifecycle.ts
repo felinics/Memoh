@@ -8,12 +8,14 @@ import type { HandlersContextLifecycleResponse } from '@memohai/sdk'
 import { useChatStore } from '@/store/chat-list'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatViewTarget } from './useChatViewContext'
-import { compactLifecyclePages, lifecycleGapBefore, mergeLifecyclePages } from './context-lifecycle-view'
+import { compactLifecyclePages, lifecycleGapBefore, lifecycleGapJoins, mergeLifecyclePages } from './context-lifecycle-view'
 
 const PAGE_LIMIT = 50
 // A finished turn moves the first page on by one run; the fill covers a few
-// turns finishing between refetches.
+// turns finishing between refetches, and follows its cursor while it has
+// not reached the loaded older window, up to a bound.
 const GAP_LIMIT = 8
+const MAX_GAP_PAGES = 6
 
 // The first page is a query so a finished turn refreshes it; older pages
 // follow keyset cursors below the first page's cursor at the time they were
@@ -60,9 +62,24 @@ export function useContextLifecycle() {
     fillingGap.value = true
     const target = sessionId.value
     try {
-      const gap = await fetchPage(before, GAP_LIMIT)
-      if (sessionId.value !== target) return
-      olderPages.value = [compactLifecyclePages([gap, ...olderPages.value])]
+      const pages: HandlersContextLifecycleResponse[] = []
+      let cursor: string | undefined = before
+      for (let count = 0; cursor && count < MAX_GAP_PAGES; count += 1) {
+        const page: HandlersContextLifecycleResponse = await fetchPage(cursor, GAP_LIMIT)
+        if (sessionId.value !== target) return
+        pages.push(page)
+        if (lifecycleGapJoins(page, olderPages.value)) break
+        cursor = page.next_cursor
+      }
+      const last = pages[pages.length - 1]
+      if (last && !lifecycleGapJoins(last, olderPages.value)) {
+        // Too many runs finished to bridge: the older window no longer
+        // joins, so it is released rather than shown with a hole.
+        olderPages.value = []
+        olderAnchor.value = null
+        return
+      }
+      olderPages.value = [compactLifecyclePages([...pages, ...olderPages.value])]
       olderAnchor.value = before
     } catch {
       // The hole stays until the next finished turn tries again.

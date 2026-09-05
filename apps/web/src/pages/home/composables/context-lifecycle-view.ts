@@ -264,3 +264,13 @@ export function lifecycleGapBefore(firstCursor: string | undefined, olderAnchor:
   if (!hasOlder || !firstCursor || !olderAnchor || firstCursor === olderAnchor) return null
   return firstCursor
 }
+
+// Whether a gap page reached the loaded older window: it repeats a run the
+// window already holds, or nothing older exists. A page that does neither
+// leaves runs between itself and the window, so the fill continues from its
+// cursor.
+export function lifecycleGapJoins(page: HandlersContextLifecycleResponse, older: HandlersContextLifecycleResponse[]): boolean {
+  if (!page.has_more || !page.next_cursor) return true
+  const known = new Set(older.flatMap(item => (item.turns ?? []).map(turn => turn.run_id ?? '')).filter(Boolean))
+  return (page.turns ?? []).some(turn => turn.run_id && known.has(turn.run_id))
+}

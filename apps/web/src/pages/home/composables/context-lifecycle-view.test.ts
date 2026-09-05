@@ -8,6 +8,7 @@ import {
   lifecycleStatusToneClass,
   compactLifecyclePages,
   lifecycleGapBefore,
+  lifecycleGapJoins,
   mergeLifecyclePages,
 } from './context-lifecycle-view'
 import type { ContextfragLifecycleSnapshot, ContextfragSelectionTrace, HandlersContextLifecycleTurn } from '@memohai/sdk'
@@ -241,5 +242,23 @@ describe('lifecycleGapBefore', () => {
     expect(lifecycleGapBefore('c-new', 'c-old', false)).toBeNull()
     expect(lifecycleGapBefore(undefined, 'c-old', true)).toBeNull()
     expect(lifecycleGapBefore('c-new', null, true)).toBeNull()
+  })
+})
+
+describe('lifecycleGapJoins', () => {
+  const seq = (hi: number, lo: number): HandlersContextLifecycleTurn[] => Array.from({ length: hi - lo + 1 }, (_, i) => ({ run_id: `r${hi - i}`, created_at: '', snapshot: {} }))
+
+  it('continues past a gap page that reaches neither the window nor the end, and stops once it does', () => {
+    const older = [{ turns: seq(50, 1), has_more: false, limit: 50, aggregate_scope: '', aggregates: { turns: 50, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }]
+    const first = { turns: seq(62, 55), has_more: true, next_cursor: 'c55', limit: 8, aggregate_scope: '', aggregates: { turns: 8, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }
+    const second = { turns: seq(54, 47), has_more: true, next_cursor: 'c47', limit: 8, aggregate_scope: '', aggregates: { turns: 8, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }
+    expect(lifecycleGapJoins(first, older)).toBe(false)
+    expect(lifecycleGapJoins(second, older)).toBe(true)
+    expect(lifecycleGapJoins({ ...first, has_more: false }, older)).toBe(true)
+    // Twelve runs finished between refetches: two gap pages bridge them all.
+    const fresh = { turns: seq(112, 63), has_more: true, next_cursor: 'c63', limit: 50, aggregate_scope: '', aggregates: { turns: 50, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }
+    const merged = mergeLifecyclePages(fresh, [compactLifecyclePages([first, second, ...older])])
+    expect(merged.turns.length).toBe(112)
+    expect(merged.hasMore).toBe(false)
   })
 })
