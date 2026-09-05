@@ -91,6 +91,7 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	handler.SetWorkdirService(workdirService)
 	handler.SetBotAgents(botAgentsService)
 	handler.SetAgentRuntimeService(agentService)
+	handler.SetModelPreferenceService(agentService)
 	handler.SetProjectionCache(pipeline)
 	return handler
 }

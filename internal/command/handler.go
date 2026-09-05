@@ -11,6 +11,8 @@ import (
 	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/i18n"
@@ -157,6 +159,26 @@ func NewHandler(
 func (h *Handler) SetCompactionService(s *compaction.Service, q dbstore.Queries) {
 	h.compactionService = s
 	h.sqlcQueries = q
+}
+
+// clearSessionModelPreference re-takes the current session from a web picker
+// pin (issue #879, spec P11′): /model and /reasoning move the bot default,
+// and a session remembering a web-picked pair would otherwise silently keep
+// the old model after the user just saw "switched". Clearing the pair returns
+// the session to the bot-default chain. NULL over NULL is harmless
+// (preference writes never bump updated_at), so there is no pre-read.
+// Best-effort: a failure is logged, never fails the command.
+func (h *Handler) clearSessionModelPreference(cc CommandContext) {
+	sessionID, err := db.ParseUUID(strings.TrimSpace(cc.SessionID))
+	if err != nil || h.queries == nil {
+		return
+	}
+	if err := h.queries.UpdateSessionModelPreference(cc.Ctx, dbsqlc.UpdateSessionModelPreferenceParams{ID: sessionID}); err != nil {
+		h.logger.Warn("clear session model preference after channel command",
+			slog.String("session_id", cc.SessionID),
+			slog.Any("error", err),
+		)
+	}
 }
 
 // CurrentContext resolves the bot's current model/reasoning state for

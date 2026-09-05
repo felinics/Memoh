@@ -73,6 +73,9 @@ func (h *Handler) buildModelGroup() *CommandGroup {
 			}); err != nil {
 				return "", err
 			}
+			// A web-pinned session pair would keep the old model despite the
+			// "switched" confirmation; return the session to the default chain.
+			h.clearSessionModelPreference(cc)
 			return formatChangedValueT(cc, cc.T("cmd.settings.fieldChatModel"), h.resolveModelName(cc, before.ChatModelID), h.resolveModelName(cc, selectedID)), nil
 		},
 	})

@@ -159,6 +159,8 @@ export type SendMessageStage = 'startup' | 'stream'
 
 export interface SendMessageResult {
   ok: boolean
+  /** A real chat message completed, rather than a locally handled command. */
+  messageSent?: boolean
   stage?: SendMessageStage
   error?: string
   errorCode?: string
@@ -175,6 +177,8 @@ export interface SendMessageOptions {
   workspaceTargetId?: string
   requestedSkills?: RequestedSkillSelection[]
   composerScope?: string
+  /** Called after command handling, before creating a session or sending a message. */
+  onBeforeMessageSend?: () => void
   /** Called immediately before a real chat turn is appended or dispatched. */
   onBeforeTurnAppend?: () => void
   /** Called when that turn is rolled back after a startup-stage failure. */

@@ -13,6 +13,7 @@ import {
   patchBotsByBotIdAcpRuntimesByRuntimeIdMode,
   patchBotsByBotIdAcpRuntimesByRuntimeIdReasoning,
   patchBotsByBotIdSessionsBySessionId,
+  getBotsByBotIdSessionsModelPreferenceSeed,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeMode,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoning,
@@ -35,6 +36,14 @@ export interface CreateSessionOptions {
    * workdir pins the session's workspace target and working directory.
    */
   workdirId?: string
+  /**
+   * First-send picker pair (issue #879). Carried only when the pair has an
+   * explicit source (user pick / remembered session); when omitted the
+   * session is born with NULL preference columns and follows the bot default.
+   * The server reconciles both before the INSERT.
+   */
+  preferredChatModelId?: string
+  preferredReasoningEffort?: string
 }
 
 export interface CreateACPRuntimeOptions {
@@ -117,6 +126,8 @@ export async function createSession(botId: string, options?: string | CreateSess
         runtime_metadata: options?.runtimeMetadata,
         acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
         workdir_id: options?.workdirId?.trim() || undefined,
+        preferred_chat_model_id: options?.preferredChatModelId?.trim() || undefined,
+        preferred_reasoning_effort: options?.preferredReasoningEffort?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },
@@ -156,6 +167,38 @@ export async function updateSessionTitle(botId: string, sessionId: string, title
     throwOnError: true,
   })
   return data as SessionSummary
+}
+
+// Picker pair persistence (issue #879): best-effort PATCH from the composer.
+// The caller treats failures as silent — the next sent message writes the
+// resolved pair back server-side, so a dropped PATCH only loses the
+// pick-until-send window.
+export async function updateSessionModelPreference(botId: string, sessionId: string, modelId: string, reasoningEffort: string, expectedRevision: string): Promise<SessionSummary> {
+  const { data } = await patchBotsByBotIdSessionsBySessionId({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    body: {
+      expected_model_preference_revision: expectedRevision,
+      preferred_chat_model_id: modelId,
+      preferred_reasoning_effort: reasoningEffort,
+    },
+    throwOnError: true,
+  })
+  return data as SessionSummary
+}
+
+export interface ModelPreferenceSeed {
+  model_id?: string
+  reasoning_effort?: string
+}
+
+// Welcome composer seed (issue #879): the pair of the bot's most recent
+// native session. Empty fields mean "no seed" — fall back to the bot default.
+export async function fetchModelPreferenceSeed(botId: string): Promise<ModelPreferenceSeed> {
+  const { data } = await getBotsByBotIdSessionsModelPreferenceSeed({
+    path: { bot_id: botId.trim() },
+    throwOnError: true,
+  })
+  return data as ModelPreferenceSeed
 }
 
 export interface UpdateSessionAgentOptions {

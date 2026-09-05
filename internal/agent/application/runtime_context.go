@@ -108,7 +108,7 @@ func (s *Service) runtimeContextBudgetDefault(ctx context.Context, botID string)
 	if err != nil {
 		return 0
 	}
-	chatModel, _, err := s.selectChatModel(ctx, ChatRequest{BotID: botID}, botSettings)
+	chatModel, _, err := s.selectChatModel(ctx, ChatRequest{BotID: botID}, botSettings, "")
 	if err != nil {
 		return 0
 	}

@@ -41,7 +41,7 @@ func TestApplySubagentThreadDefaults(t *testing.T) {
 	}
 	s := &Service{sessionService: svc}
 
-	got := s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1"})
+	got := s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1"}, false)
 	if got.SessionType != session.TypeSubagent {
 		t.Fatalf("session type = %q, want subagent", got.SessionType)
 	}
@@ -53,21 +53,32 @@ func TestApplySubagentThreadDefaults(t *testing.T) {
 	}
 
 	// An explicit model choice from the request wins over the pinned config.
-	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1", Model: "user-choice"})
+	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1", Model: "user-choice"}, false)
 	if got.Model != "user-choice" {
 		t.Fatalf("model = %q, want the request's own choice", got.Model)
 	}
 
 	// Non-subagent threads pass through untouched.
-	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "chat-1"})
+	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "chat-1"}, false)
 	if got.SessionType != "" || got.Model != "" || got.SkipMemoryExtraction {
 		t.Fatalf("chat thread was rewritten: %+v", got)
 	}
 
 	// A turn that already carries a session type is never rewritten.
-	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1", SessionType: "schedule"})
+	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1", SessionType: "schedule"}, false)
 	if got.SessionType != "schedule" {
 		t.Fatalf("session type = %q, want schedule preserved", got.SessionType)
+	}
+
+	// A session with a remembered pair keeps it: the pin is only the initial
+	// default (issue #879), so hasMemory suppresses the pin fill — but the
+	// subagent execution surface still applies.
+	got = s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1"}, true)
+	if got.SessionType != session.TypeSubagent || !got.SkipMemoryExtraction || !got.SkipTitleGeneration {
+		t.Fatalf("subagent surface lost with memory: %+v", got)
+	}
+	if got.Model != "" {
+		t.Fatalf("model = %q, want pin suppressed by session memory", got.Model)
 	}
 }
 
@@ -114,7 +125,7 @@ func TestApplySubagentThreadDefaultsSurvivesLookupFailure(t *testing.T) {
 		},
 	}
 	s := &Service{sessionService: svc}
-	got := s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1"})
+	got := s.applySubagentThreadDefaults(context.Background(), ChatRequest{ThreadID: "sub-1"}, false)
 	if got.SessionType != "" {
 		t.Fatalf("lookup failure must leave the request untouched, got type %q", got.SessionType)
 	}

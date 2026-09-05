@@ -4,26 +4,32 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
 )
 
-func (s *Service) selectChatModel(ctx context.Context, req ChatRequest, botSettings settings.Settings) (models.GetResponse, sqlc.Provider, error) {
+func (s *Service) selectChatModel(ctx context.Context, req ChatRequest, botSettings settings.Settings, sessionPrefModelID string) (models.GetResponse, sqlc.Provider, error) {
 	if s.modelsService == nil {
 		return models.GetResponse{}, sqlc.Provider{}, errors.New("models service not configured")
 	}
 	modelID := strings.TrimSpace(req.Model)
 	providerFilter := strings.TrimSpace(req.Provider)
 
-	// Priority: request model > bot settings > session history.
+	// Priority: request model > session preference (issue #879) > bot settings
+	// > session history.
 	if modelID == "" && providerFilter == "" {
-		if value := strings.TrimSpace(botSettings.ChatModelID); value != "" {
+		if value := strings.TrimSpace(sessionPrefModelID); value != "" {
+			modelID = value
+		} else if value := strings.TrimSpace(botSettings.ChatModelID); value != "" {
 			modelID = value
 		} else {
 			// Resumed turns (ask_user answers, tool approval decisions) carry no
@@ -69,6 +75,192 @@ func (s *Service) selectChatModel(ctx context.Context, req ChatRequest, botSetti
 // model-bearing history yet.
 func (s *Service) latestSessionModelID(ctx context.Context, sessionID string) string {
 	return models.LatestSessionModelID(ctx, s.queries, sessionID)
+}
+
+// sessionModelPreference loads the session's persisted (model, effort) pair
+// (issue #879). Both components come back trimmed; empty means "no memory"
+// and lets resolution fall through the chain. Missing session / unreadable
+// id are treated as no memory, never as an error: the preference must not be
+// able to break a turn.
+func (s *Service) sessionModelPreference(ctx context.Context, sessionID string) (string, string) {
+	id, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return "", ""
+	}
+	row, err := s.queries.GetSessionByID(ctx, id)
+	if err != nil {
+		return "", ""
+	}
+	modelID := ""
+	if row.PreferredChatModelID.Valid {
+		modelID = row.PreferredChatModelID.String()
+	}
+	effort := ""
+	if row.PreferredReasoningEffort.Valid {
+		effort = strings.TrimSpace(row.PreferredReasoningEffort.String)
+	}
+	// The pair is one value: a half pair (NULL model, surviving effort) arises
+	// when ON DELETE SET NULL clears only the model column, and honoring the
+	// effort alone would pin it onto whatever model the chain falls back to —
+	// the cross-model effort memory the spec rules out (§3.7). The frontend
+	// already treats a NULL model as no memory; match it here.
+	if modelID == "" {
+		effort = ""
+	}
+	return modelID, effort
+}
+
+// writeBackSessionModelPreference persists the resolved pair only when the
+// request carries one. Every carried send advances the revision, even when
+// its value matches, so an older picker PATCH cannot overwrite that send.
+// Writes remain best-effort: failures are logged and the next send retries.
+func (s *Service) writeBackSessionModelPreference(ctx context.Context, sessionIDRaw string, carriesPair bool, chatModel models.GetResponse, reasoning *models.ReasoningConfig) {
+	if !carriesPair {
+		return
+	}
+	sessionID, err := db.ParseUUID(sessionIDRaw)
+	if err != nil {
+		return
+	}
+	modelID, err := db.ParseUUID(chatModel.ID)
+	if err != nil {
+		return
+	}
+	effort := ""
+	if reasoning != nil {
+		switch {
+		case reasoning.Active:
+			effort = strings.TrimSpace(reasoning.Effort)
+		case reasoning.Disabled:
+			// Same vocabulary as bot settings ("disable" = thinking off) so a
+			// seeded picker round-trips the user's choice instead of falling
+			// back to the model's default-on tier.
+			effort = "disable"
+		}
+	}
+	// Every carried send advances the revision, including an unchanged pair.
+	// Otherwise a picker still comparing against this revision could overwrite it.
+	if err := s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
+		ID:                       sessionID,
+		PreferredChatModelID:     modelID,
+		PreferredReasoningEffort: pgtype.Text{String: effort, Valid: effort != ""},
+	}); err != nil {
+		s.logger.Warn("write-back session model preference",
+			slog.String("session_id", sessionIDRaw),
+			slog.Any("error", err),
+		)
+	}
+}
+
+// ReconcileSessionModelPreference validates and normalizes a candidate pair
+// (issue #879, spec v2 §3.3): the model must exist on an enabled provider
+// (empty ref falls back to the bot default); an illegal or empty effort
+// silently resolves to the model's default tier, so the DB never stores an
+// illegal pair (S6). Returns the model's UUID and the normalized effort.
+// Shared by the picker PATCH and the first-send INSERT so both write points
+// reconcile identically.
+func (s *Service) ReconcileSessionModelPreference(ctx context.Context, botID, modelRef, effort string) (string, string, error) {
+	modelID := strings.TrimSpace(modelRef)
+	if modelID == "" {
+		botSettings, err := s.loadBotSettings(ctx, botID)
+		if err != nil {
+			return "", "", err
+		}
+		modelID = strings.TrimSpace(botSettings.ChatModelID)
+	}
+	if modelID == "" {
+		return "", "", errors.New("chat model is required to set session model preference")
+	}
+	chatModel, provider, err := s.fetchChatModel(ctx, modelID)
+	if err != nil {
+		return "", "", err
+	}
+	reconciled := ""
+	if rc := resolveReasoningConfig(chatModel, settings.Settings{}, effort, "", provider.ClientType); rc != nil {
+		switch {
+		case rc.Active:
+			reconciled = strings.TrimSpace(rc.Effort)
+		case rc.Disabled:
+			reconciled = "disable"
+		}
+	}
+	return chatModel.ID, reconciled, nil
+}
+
+// PatchSessionModelPreference handles the picker PATCH (issue #879, spec
+// §3.3 / §5-2): reconcile the pair and write it. Reconcile = the effort must
+// be legal for the target model; an illegal or empty tier silently resolves
+// to the model default, so the DB never stores an illegal pair.
+//
+// Target model resolution when the request omits it: existing session
+// preference, then bot default. Effort-only patches therefore reconcile
+// against the model the session would actually use. An explicit but
+// unresolvable/empty model reference is an error (the FK would reject it
+// anyway; fail loudly instead of degrading).
+func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort, expectedRevision *string) error {
+	sessionUUID, err := db.ParseUUID(sessionID)
+	if err != nil {
+		return fmt.Errorf("invalid session id: %w", err)
+	}
+	sess, err := s.queries.GetSessionByID(ctx, sessionUUID)
+	if err != nil {
+		return err
+	}
+
+	modelID := ""
+	if modelRef != nil {
+		modelID = strings.TrimSpace(*modelRef)
+	}
+	if modelID == "" && sess.PreferredChatModelID.Valid {
+		modelID = sess.PreferredChatModelID.String()
+	}
+	targetEffort := ""
+	if effort != nil {
+		targetEffort = strings.TrimSpace(*effort)
+	} else if (modelRef == nil || strings.TrimSpace(*modelRef) == "") && sess.PreferredReasoningEffort.Valid {
+		targetEffort = strings.TrimSpace(sess.PreferredReasoningEffort.String)
+	}
+
+	var nativeID pgtype.UUID
+	var externalID pgtype.Text
+	var reconciledEffort string
+	switch {
+	case sessionpkg.IsDirectRuntimeType(sess.RuntimeType):
+		if modelRef == nil || strings.TrimSpace(*modelRef) == "" {
+			modelID = db.TextToString(sess.PreferredExternalModelID)
+		}
+		modelID, reconciledEffort, err = s.reconcileDirectModelPreference(ctx, sess.BotID.String(), sess.BotAgentID.String(), sess.RuntimeType, modelID, targetEffort)
+		externalID = pgtype.Text{String: modelID, Valid: modelID != ""}
+	case sess.RuntimeType == sessionpkg.RuntimeACPAgent:
+		return errors.New("ACP preferences must be changed through the ACP runtime")
+	default:
+		modelID, reconciledEffort, err = s.ReconcileSessionModelPreference(ctx, botID, modelID, targetEffort)
+		nativeID = db.ParseUUIDOrEmpty(modelID)
+	}
+	if err != nil {
+		return err
+	}
+	value := pgtype.Text{String: reconciledEffort, Valid: reconciledEffort != ""}
+	if expectedRevision != nil {
+		revision, parseErr := parsePreferenceRevision(*expectedRevision)
+		if parseErr != nil {
+			return parseErr
+		}
+		n, writeErr := s.queries.CompareAndSetSessionModelPreference(ctx, sqlc.CompareAndSetSessionModelPreferenceParams{
+			ID: sessionUUID, RuntimeType: sess.RuntimeType, ExpectedRevision: revision,
+			PreferredChatModelID: nativeID, PreferredExternalModelID: externalID, PreferredReasoningEffort: value,
+		})
+		if writeErr != nil {
+			return writeErr
+		}
+		if n == 0 {
+			return ErrModelPreferenceConflict
+		}
+		return nil
+	}
+	return s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
+		ID: sessionUUID, PreferredChatModelID: nativeID, PreferredExternalModelID: externalID, PreferredReasoningEffort: value,
+	})
 }
 
 func (s *Service) fetchChatModel(ctx context.Context, modelID string) (models.GetResponse, sqlc.Provider, error) {
@@ -152,4 +344,14 @@ func (s *Service) listCandidates(ctx context.Context, providerFilter string) ([]
 		}
 	}
 	return filtered, nil
+}
+
+// ErrModelPreferenceConflict means a picker read predates a newer write.
+var ErrModelPreferenceConflict = errors.New("session model preference changed")
+
+func parsePreferenceRevision(value string) (pgtype.UUID, error) {
+	if strings.TrimSpace(value) == "" {
+		return pgtype.UUID{}, nil
+	}
+	return db.ParseUUID(value)
 }

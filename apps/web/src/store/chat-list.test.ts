@@ -15,6 +15,8 @@ import { REASONING_EFFORT_DISABLE } from '@/pages/bots/components/reasoning-effo
 import { AUTH_SESSION_CLEARED_EVENT } from '@/lib/auth-session'
 import { useChatSelectionStore } from './chat-selection'
 import { useChatStore } from './chat-list'
+import { createComposerPairSync } from './chat/composer-pair-sync'
+import { welcomeSendConsumedDraft } from '@/pages/home/components/chat-pane-send'
 
 const api = vi.hoisted(() => ({
   createSession: vi.fn(),
@@ -713,17 +715,19 @@ describe('chat-list store', () => {
       })
 
       emitRuntime(runtime.completed, 'session-1', h.lastRunId)
-      await expect(sending).resolves.toMatchObject({ ok: true })
+      await expect(sending).resolves.toMatchObject({ ok: true, messageSent: true })
     })
 
   it('projects startup failures identically while returning them to the composer', async () => {
       const store = useChatStore()
       const onBeforeTurnAppend = vi.fn()
+      const onBeforeMessageSend = vi.fn()
       const onTurnAppendAborted = vi.fn()
 
       await store.selectBot('bot-1')
       const result = await store.sendMessage('hello', undefined, {
         onBeforeTurnAppend,
+        onBeforeMessageSend,
         onTurnAppendAborted,
         workspaceTargetId: 'computer-b',
       })
@@ -747,6 +751,7 @@ describe('chat-list store', () => {
         restoreInput: 'hello',
       })
       expect(onBeforeTurnAppend).toHaveBeenCalledOnce()
+      expect(onBeforeMessageSend).toHaveBeenCalledOnce()
       expect(onTurnAppendAborted).toHaveBeenCalledOnce()
       expect(h.sentWSMessages.at(-1)).toMatchObject({
         type: 'message',
@@ -874,7 +879,10 @@ describe('chat-list store', () => {
 
       await store.selectBot('bot-1')
       store.stageDefaultExternalAgentSession({ agentId: 'codex', projectPath: '/data', projectMode: 'project' })
-      const result = await store.sendMessage('/new')
+      const onBeforeMessageSend = vi.fn()
+      const result = await store.sendMessage('/new', undefined, { onBeforeMessageSend })
+      expect(onBeforeMessageSend).not.toHaveBeenCalled()
+      expect(welcomeSendConsumedDraft({}, result)).toBe(false)
       applyLatestDraftRequest(store)
 
       expect(result.ok).toBe(true)
@@ -2983,8 +2991,9 @@ describe('chat-list store', () => {
       const store = useChatStore()
 
       await store.selectBot('bot-1')
-      store.overrideReasoningEffort = REASONING_EFFORT_DISABLE
-      const result = await store.sendMessage('hello')
+      // The pair travels via send options (spec v2 §3.4): the composer passes
+      // it when it has an explicit source; the store has no pair of its own.
+      const result = await store.sendMessage('hello', undefined, { reasoningEffort: REASONING_EFFORT_DISABLE })
 
       expect(result).toMatchObject({ ok: true })
       expect(h.sentWSMessages).toHaveLength(1)
@@ -3044,6 +3053,7 @@ describe('chat-list store', () => {
       })
       const store = useChatStore()
       const onBeforeTurnAppend = vi.fn()
+      const onBeforeMessageSend = vi.fn()
       const onTurnAppendAborted = vi.fn()
 
       await store.selectBot('bot-1')
@@ -3051,6 +3061,7 @@ describe('chat-list store', () => {
       const result = await store.sendMessage('/help', undefined, {
         composerScope: 'bot-1:panel-a',
         onBeforeTurnAppend,
+        onBeforeMessageSend,
         onTurnAppendAborted,
       })
 
@@ -3061,6 +3072,7 @@ describe('chat-list store', () => {
         skillActivationAllowed: true,
       }))
       expect(onBeforeTurnAppend).not.toHaveBeenCalled()
+      expect(onBeforeMessageSend).not.toHaveBeenCalled()
       expect(onTurnAppendAborted).not.toHaveBeenCalled()
     })
 
@@ -5123,3 +5135,25 @@ describe('chat-list store', () => {
       emitRuntime(runtime.completed, 'session-1', 'run-old')
     })
 })
+
+ it('does not cancel an outstanding preference write when help succeeds', async () => {
+   api.executeQuickAction.mockResolvedValueOnce({ result: { kind: 'text', text: 'Help' } })
+   const store = useChatStore()
+   await store.selectBot('bot-1')
+   const sync = createComposerPairSync()
+   let resolveRevision!: (value: string) => void
+   const revision = new Promise<string>(resolve => { resolveRevision = resolve })
+   const save = vi.fn(async () => 'B')
+   const write = sync.write(() => revision, save, () => {})
+   await flushPromises()
+   const releaseReads = sync.holdReads()
+   const beforeSend = vi.fn(() => { sync.beginSend()(true) })
+   const result = await store.sendMessage('/help', undefined, { onBeforeMessageSend: beforeSend })
+   releaseReads()
+   expect(result.ok).toBe(true)
+   expect(welcomeSendConsumedDraft({}, result)).toBe(false)
+   expect(beforeSend).not.toHaveBeenCalled()
+   resolveRevision('revision')
+   await write
+   expect(save).toHaveBeenCalledOnce()
+ })

@@ -24,7 +24,12 @@ type subagentThreadService interface {
 // system prompt, the pinned model, and no memory extraction or title rewrite.
 // Turns that already carry a session type (schedules, the spawn
 // path itself) and turns on non-subagent threads pass through untouched.
-func (s *Service) applySubagentThreadDefaults(ctx context.Context, req ChatRequest) ChatRequest {
+//
+// hasMemory reports whether the session already persists a (model, effort)
+// pair (issue #879): the pin is only the session's INITIAL pair and the user
+// may override it, so once a remembered pair exists the pin must not refill
+// the request over it (the resolution chain reads the memory level itself).
+func (s *Service) applySubagentThreadDefaults(ctx context.Context, req ChatRequest, hasMemory bool) ChatRequest {
 	if strings.TrimSpace(req.SessionType) != "" || strings.TrimSpace(req.ThreadID) == "" {
 		return req
 	}
@@ -40,7 +45,7 @@ func (s *Service) applySubagentThreadDefaults(ctx context.Context, req ChatReque
 	// bot's long-term memory, and the session already carries its task title.
 	req.SkipMemoryExtraction = true
 	req.SkipTitleGeneration = true
-	if strings.TrimSpace(req.Model) == "" && strings.TrimSpace(req.Provider) == "" {
+	if !hasMemory && strings.TrimSpace(req.Model) == "" && strings.TrimSpace(req.Provider) == "" {
 		if svc, ok := s.sessionService.(subagentThreadService); ok {
 			if config, cfgErr := svc.GetSubagentConfig(ctx, req.ThreadID); cfgErr == nil {
 				switch {

@@ -230,6 +230,9 @@
       "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
       "materialization_failed": "Agent 账号准备失败，请重试。"
     },
+    "session": {
+      "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。"
+    },
     "session_runtime": {
       "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
       "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",

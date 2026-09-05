@@ -230,6 +230,9 @@
       "runtime_busy": "Wait for the current response to finish before switching Agent accounts.",
       "materialization_failed": "The Agent account could not be prepared. Please retry."
     },
+    "session": {
+      "model_preference_conflict": "The model selection changed elsewhere. Refresh or send your message to apply your selection."
+    },
     "session_runtime": {
       "session_busy": "This conversation is still working on your previous message. Please try again in a moment.",
       "invocation_conflict": "This message was already sent with different content. Reload the conversation to see what was saved.",

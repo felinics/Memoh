@@ -183,8 +183,6 @@ export const useChatStore = defineStore('chat', () => {
     currentBotId,
     userScopeGeneration: () => userScopeGeneration,
   })
-  const overrideModelId = ref<string>('')
-  const overrideReasoningEffort = ref<string>('')
   const {
     activeFailure: startupSendFailure,
     failureFor: startupSendFailureFor,
@@ -382,8 +380,6 @@ export const useChatStore = defineStore('chat', () => {
     resetTranscriptUserScope()
     resetExternalAgent()
     resetBootstrap()
-    overrideModelId.value = ''
-    overrideReasoningEffort.value = ''
     resetStartupSendFailures()
     resetSessionActions()
     resetSessionActivity()
@@ -534,8 +530,6 @@ export const useChatStore = defineStore('chat', () => {
     currentBotId,
     sessionId,
     focusedChatViewId,
-    overrideModelId,
-    overrideReasoningEffort,
     normalizeTarget: normalizedChatViewTarget,
     chatView,
     transcriptForTarget,
@@ -602,7 +596,7 @@ export const useChatStore = defineStore('chat', () => {
     // Exposed for tests only — do not branch on this in components. The
     // leading underscore reflects the test-only contract at the call site.
     _hasLoadedOlder: hasLoadedOlder,
-    overrideModelId, overrideReasoningEffort,
+
     startupSendFailure, startupSendFailureFor,
     commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,

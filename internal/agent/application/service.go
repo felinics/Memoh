@@ -464,24 +464,43 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, req); err != nil {
 		return resolvedContext{}, req, err
 	}
-	req = s.applySubagentThreadDefaults(ctx, req)
+	// Session model preference (issue #879 spec v2): loaded once per turn,
+	// BEFORE the subagent pin below — the pin is only a session's initial
+	// default and must not refill the request over a remembered pair.
+	// requestCarriesPair is captured before that mutation so the write-back
+	// gate sees the request as it actually arrived: the web composer omits
+	// model/effort when the pair is default-sourced, and channel requests
+	// structurally never carry them (only the local REST handler ever fills
+	// the metadata keys), so "carries" == "explicitly chosen or remembered".
+	// Schedule-triggered turns skip the memory level entirely: their model
+	// comes from the schedule payload or the bot default, and a pair
+	// remembered from a web continuation must not hijack them.
+	requestCarriesPair := strings.TrimSpace(req.Model) != "" || strings.TrimSpace(req.ReasoningEffort) != ""
+	sessionPrefModelID, sessionPrefEffort := "", ""
+	pairMemoryApplies := !strings.EqualFold(strings.TrimSpace(req.SessionType), sessionmode.Schedule)
+	if pairMemoryApplies {
+		sessionPrefModelID, sessionPrefEffort = s.sessionModelPreference(ctx, req.ThreadID)
+	}
+	req = s.applySubagentThreadDefaults(ctx, req, sessionPrefModelID != "")
 
 	runCfg, chatModel, provider, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
-		BotID:             req.BotID,
-		ChatID:            req.ChatID,
-		SessionID:         req.ThreadID,
-		RouteID:           req.RouteID,
-		UserID:            req.UserID,
-		ChannelIdentityID: req.SourceChannelIdentityID,
-		CurrentPlatform:   req.CurrentChannel,
-		ReplyTarget:       req.ReplyTarget,
-		ConversationType:  req.ConversationType,
-		SessionToken:      req.ChatToken,
-		SessionType:       req.SessionType,
-		Model:             req.Model,
-		Provider:          req.Provider,
-		ReasoningEffort:   req.ReasoningEffort,
-		HTTPClient:        modelHTTPClient,
+		BotID:              req.BotID,
+		ChatID:             req.ChatID,
+		SessionID:          req.ThreadID,
+		RouteID:            req.RouteID,
+		UserID:             req.UserID,
+		ChannelIdentityID:  req.SourceChannelIdentityID,
+		CurrentPlatform:    req.CurrentChannel,
+		ReplyTarget:        req.ReplyTarget,
+		ConversationType:   req.ConversationType,
+		SessionToken:       req.ChatToken,
+		SessionType:        req.SessionType,
+		SessionPrefModelID: sessionPrefModelID,
+		SessionPrefEffort:  sessionPrefEffort,
+		Model:              req.Model,
+		Provider:           req.Provider,
+		ReasoningEffort:    req.ReasoningEffort,
+		HTTPClient:         modelHTTPClient,
 	})
 	if err != nil {
 		s.logger.Error("resolve: buildBaseRunConfig failed",
@@ -490,6 +509,11 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		)
 		return resolvedContext{}, req, err
 	}
+
+	// Persist explicit selections before generation and advance the revision
+	// even for matching values. Schedule payloads describe the scheduled turn,
+	// not a session preference, and must never enter this write path.
+	s.writeBackSessionModelPreference(ctx, req.ThreadID, requestCarriesPair && pairMemoryApplies, chatModel, runCfg.ReasoningConfig)
 	if strings.EqualFold(strings.TrimSpace(req.SessionType), sessionpkg.TypeSubagent) {
 		// A direct turn on a subagent thread runs as the subagent, not as a
 		// chat turn that happens to share its history: same restricted tool
@@ -863,10 +887,15 @@ type baseRunConfigParams struct {
 	ConversationType  string
 	SessionToken      string //nolint:gosec // session credential material, not a hardcoded secret
 	SessionType       string
-	Model             string
-	Provider          string
-	ReasoningEffort   string // caller-provided override (empty = use bot default)
-	HTTPClient        *http.Client
+	// SessionPrefModelID/SessionPrefEffort carry the session's persisted
+	// (model, effort) pair (issue #879), loaded by the caller before the
+	// subagent pin may fill the request. Empty = no memory.
+	SessionPrefModelID string
+	SessionPrefEffort  string
+	Model              string
+	Provider           string
+	ReasoningEffort    string // caller-provided override (empty = use bot default)
+	HTTPClient         *http.Client
 }
 
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
@@ -887,7 +916,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 
 	req := buildModelSelectionRequest(p, chatID)
 
-	chatModel, provider, err := s.selectChatModel(ctx, req, botSettings)
+	chatModel, provider, err := s.selectChatModel(ctx, req, botSettings, p.SessionPrefModelID)
 	if err != nil {
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
@@ -905,7 +934,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
 
-	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, provider.ClientType)
+	reasoningConfig := resolveRunReasoningConfig(chatModel, botSettings, p, provider.ClientType)
 
 	modelHTTPClient := p.HTTPClient
 	if modelHTTPClient == nil {
@@ -1027,16 +1056,45 @@ func supportsFileInputForModel(m models.GetResponse) bool {
 	return m.HasCompatibility(models.CompatFileInput)
 }
 
+// resolveRunReasoningConfig keeps remembered effort attached to its model UUID.
+// An explicit switch starts from the new model default; a slug resolving to
+// the same UUID is not a switch and may retain the remembered effort.
+func resolveRunReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, p baseRunConfigParams, clientType string) *models.ReasoningConfig {
+	sessionEffort := p.SessionPrefEffort
+	if !strings.EqualFold(strings.TrimSpace(chatModel.ID), strings.TrimSpace(p.SessionPrefModelID)) {
+		sessionEffort = ""
+		previousModel := p.SessionPrefModelID
+		if previousModel == "" {
+			previousModel = botSettings.ChatModelID
+		}
+		if strings.TrimSpace(p.Model) != "" && !strings.EqualFold(strings.TrimSpace(chatModel.ID), strings.TrimSpace(previousModel)) {
+			botSettings.ReasoningEffort = ""
+		}
+	}
+	return resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, sessionEffort, clientType)
+}
+
 // resolveReasoningConfig makes the single reasoning decision for a call. The
 // decision itself lives in internal/reasoning, which also answers what a picker
 // may offer — the two share internals so the options a user sees and the value a
 // call sends cannot disagree.
-func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort, clientType string) *models.ReasoningConfig {
+//
+// sessionEffort is the session's remembered tier (issue #879). It sits between
+// the per-message request and the bot's stored value, implemented by shadowing
+// `stored`: identical semantics to a dedicated level, and — critically — it is
+// NOT passed as `requested`, because RunConfig.ReasoningRequestedEffort travels
+// to spawned subagents as "the user's explicit pick this turn" and memory must
+// not leak into that channel.
+func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort, sessionEffort, clientType string) *models.ReasoningConfig {
+	stored := botSettings.ReasoningEffort
+	if e := strings.TrimSpace(sessionEffort); e != "" {
+		stored = e
+	}
 	return reasoning.ResolveConfig(
 		chatModel.ResolveThinkingMode(),
 		chatModel.Config.ReasoningEfforts,
 		chatModel.ReasoningOptions(clientType),
-		botSettings.ReasoningEffort,
+		stored,
 		requestedEffort,
 		clientType,
 	)
@@ -1299,15 +1357,24 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 			RuntimeType: runtimeType,
 		}, nil
 	}
+	// Resumed turns (ask_user answers, tool approvals, discuss) carry no
+	// request model — the session's remembered pair is their model source
+	// (issue #879), with the same schedule exclusion as resolve().
+	sessionPrefModelID, sessionPrefEffort := "", ""
+	if !strings.EqualFold(strings.TrimSpace(sessionType), sessionmode.Schedule) {
+		sessionPrefModelID, sessionPrefEffort = s.sessionModelPreference(ctx, sessionID)
+	}
 	cfg, chatModel, _, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
-		BotID:             botID,
-		SessionID:         sessionID,
-		ChannelIdentityID: channelIdentityID,
-		CurrentPlatform:   currentPlatform,
-		ReplyTarget:       replyTarget,
-		ConversationType:  conversationType,
-		SessionToken:      chatToken,
-		SessionType:       sessionType,
+		BotID:              botID,
+		SessionID:          sessionID,
+		ChannelIdentityID:  channelIdentityID,
+		CurrentPlatform:    currentPlatform,
+		ReplyTarget:        replyTarget,
+		ConversationType:   conversationType,
+		SessionToken:       chatToken,
+		SessionType:        sessionType,
+		SessionPrefModelID: sessionPrefModelID,
+		SessionPrefEffort:  sessionPrefEffort,
 	})
 	if err != nil {
 		return ResolveRunConfigResult{}, err

@@ -371,7 +371,7 @@ func TestResolveReasoningConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := resolveReasoningConfig(tt.model, tt.botSettings, tt.requestEffort, tt.clientType)
+			got := resolveReasoningConfig(tt.model, tt.botSettings, tt.requestEffort, "", tt.clientType)
 			if got == nil || tt.want == nil {
 				if got != tt.want {
 					t.Fatalf("expected %#v, got %#v", tt.want, got)
@@ -395,6 +395,27 @@ type modelSelectionFakeQueries struct {
 	models         map[string]sqlc.Model
 	provider       sqlc.Provider
 	sessionModelID pgtype.UUID
+	updatedPrefs   []sqlc.UpdateSessionModelPreferenceParams
+	// session is the row GetSessionByID serves; the zero value is the "no
+	// memory" default every derived fake wants (issue #879). Half-pair tests
+	// set it explicitly.
+	session sqlc.BotSession
+}
+
+// GetSessionByID returns the configured row (zero row by default: no
+// persisted model preference). Kept out of the embedded store so a
+// preference read can never panic on the nil interface.
+func (f *modelSelectionFakeQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+	if f.session.ID.Valid {
+		return f.session, nil
+	}
+	return sqlc.BotSession{ID: id}, nil
+}
+
+// updatedPrefs records preference writes for the write-back gate tests (#879).
+func (f *modelSelectionFakeQueries) UpdateSessionModelPreference(_ context.Context, arg sqlc.UpdateSessionModelPreferenceParams) error {
+	f.updatedPrefs = append(f.updatedPrefs, arg)
+	return nil
 }
 
 func (f *modelSelectionFakeQueries) ListModelsByModelID(_ context.Context, modelID string) ([]sqlc.Model, error) {
@@ -487,7 +508,7 @@ func TestSelectChatModelFallsBackToSessionLastModel(t *testing.T) {
 		BotID:    "00000000-0000-0000-0000-000000000600",
 		ThreadID: "00000000-0000-0000-0000-000000000603",
 	}
-	got, prov, err := resolver.selectChatModel(ctx, req, settings.Settings{})
+	got, prov, err := resolver.selectChatModel(ctx, req, settings.Settings{}, "")
 	if err != nil {
 		t.Fatalf("selectChatModel session fallback error = %v, want nil", err)
 	}
@@ -508,7 +529,7 @@ func TestSelectChatModelWithoutAnyModelStillErrors(t *testing.T) {
 		BotID:    "00000000-0000-0000-0000-000000000700",
 		ThreadID: "00000000-0000-0000-0000-000000000701",
 	}
-	_, _, err := resolver.selectChatModel(ctx, req, settings.Settings{})
+	_, _, err := resolver.selectChatModel(ctx, req, settings.Settings{}, "")
 	if err == nil || !strings.Contains(err.Error(), "chat model not configured") {
 		t.Fatalf("selectChatModel without any model error = %v, want chat model not configured", err)
 	}

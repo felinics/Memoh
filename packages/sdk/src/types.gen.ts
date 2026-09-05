@@ -2537,6 +2537,14 @@ export type HandlersCreateSessionRequest = {
     metadata?: {
         [key: string]: unknown;
     };
+    /**
+     * PreferredChatModelID / PreferredReasoningEffort carry the first-send
+     * picker pair (issue #879 spec v2). The composer sends them only when the
+     * pair has an explicit source (user pick or remembered session); omitted
+     * fields leave the columns NULL so the session follows the bot default.
+     */
+    preferred_chat_model_id?: string;
+    preferred_reasoning_effort?: string;
     runtime_metadata?: {
         [key: string]: unknown;
     };
@@ -2684,6 +2692,11 @@ export type HandlersMemoryUpdatePayload = {
     memory?: string;
 };
 
+export type HandlersModelPreferenceSeedResponse = {
+    model_id?: string;
+    reasoning_effort?: string;
+};
+
 export type HandlersOauthAuthorizeRequest = {
     callback_url?: string;
     client_id?: string;
@@ -2720,9 +2733,17 @@ export type HandlersTerminalInfoResponse = {
 
 export type HandlersUpdateSessionRequest = {
     bot_agent_id?: string;
+    expected_model_preference_revision?: string;
     metadata?: {
         [key: string]: unknown;
     };
+    /**
+     * PreferredChatModelID / PreferredReasoningEffort are the picker pair
+     * (issue #879). The composer always patches the pair together; either one
+     * alone is reconciled against the model the session would actually use.
+     */
+    preferred_chat_model_id?: string;
+    preferred_reasoning_effort?: string;
     runtime_metadata?: {
         [key: string]: unknown;
     };
@@ -3400,7 +3421,15 @@ export type SessionSession = {
     metadata?: {
         [key: string]: unknown;
     };
+    model_preference_revision?: string;
     parent_session_id?: string;
+    preferred_chat_model_id?: string;
+    /**
+     * Preferred* is the session's persisted (model, effort) pair (issue #879).
+     * Empty means "no memory"; the composer reseeds from it on open/repoint.
+     */
+    preferred_external_model_id?: string;
+    preferred_reasoning_effort?: string;
     route_conversation_type?: string;
     route_id?: string;
     route_metadata?: {
@@ -9460,6 +9489,40 @@ export type GetBotsByBotIdSessionsEventsResponses = {
 
 export type GetBotsByBotIdSessionsEventsResponse = GetBotsByBotIdSessionsEventsResponses[keyof GetBotsByBotIdSessionsEventsResponses];
 
+export type GetBotsByBotIdSessionsModelPreferenceSeedData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/model-preference-seed';
+};
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedError = GetBotsByBotIdSessionsModelPreferenceSeedErrors[keyof GetBotsByBotIdSessionsModelPreferenceSeedErrors];
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedResponses = {
+    /**
+     * OK
+     */
+    200: HandlersModelPreferenceSeedResponse;
+};
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedResponse = GetBotsByBotIdSessionsModelPreferenceSeedResponses[keyof GetBotsByBotIdSessionsModelPreferenceSeedResponses];
+
 export type DeleteBotsByBotIdSessionsBySessionIdData = {
     body?: never;
     path: {
@@ -9570,6 +9633,10 @@ export type PatchBotsByBotIdSessionsBySessionIdErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdError = PatchBotsByBotIdSessionsBySessionIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdErrors];

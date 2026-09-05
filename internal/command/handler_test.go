@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/mcp"
@@ -50,6 +51,9 @@ type fakeCommandQueries struct {
 	cacheRow         dbsqlc.GetSessionCacheStatsRow
 	cacheErr         error
 	skills           []string
+	// preferenceClears records UpdateSessionModelPreference calls so tests can
+	// assert the /model and /reasoning clear path (issue #879, P11′).
+	preferenceClears []pgtype.UUID
 }
 
 func (f *fakeCommandQueries) GetLatestSessionIDByBot(_ context.Context, _ pgtype.UUID) (pgtype.UUID, error) {
@@ -86,6 +90,11 @@ func (*fakeCommandQueries) GetTokenUsageByModel(_ context.Context, _ dbsqlc.GetT
 	return nil, nil
 }
 
+func (f *fakeCommandQueries) UpdateSessionModelPreference(_ context.Context, arg dbsqlc.UpdateSessionModelPreferenceParams) error {
+	f.preferenceClears = append(f.preferenceClears, arg.ID)
+	return nil
+}
+
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
 	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -93,6 +102,31 @@ func newTestHandler(roleResolver MemberRoleResolver) *Handler {
 
 func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
 	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+}
+
+// The /model and /reasoning clear path (issue #879, P11′): a session-bound
+// command clears the session's remembered pair so it returns to the bot
+// default chain; a command without a session clears nothing.
+func TestClearSessionModelPreference(t *testing.T) {
+	sessionID := "00000000-0000-0000-0000-000000000901"
+	parsed, err := db.ParseUUID(sessionID)
+	if err != nil {
+		t.Fatalf("parse session uuid: %v", err)
+	}
+
+	queries := &fakeCommandQueries{}
+	h := newTestHandlerWithQueries(&fakeRoleResolver{role: "owner"}, queries)
+	h.clearSessionModelPreference(CommandContext{Ctx: context.Background(), SessionID: sessionID})
+	if len(queries.preferenceClears) != 1 || queries.preferenceClears[0] != parsed {
+		t.Fatalf("clears = %v, want one clear for %s", queries.preferenceClears, sessionID)
+	}
+
+	queries = &fakeCommandQueries{}
+	h = newTestHandlerWithQueries(&fakeRoleResolver{role: "owner"}, queries)
+	h.clearSessionModelPreference(CommandContext{Ctx: context.Background()})
+	if len(queries.preferenceClears) != 0 {
+		t.Fatalf("clears without session = %v, want none", queries.preferenceClears)
+	}
 }
 
 func newTestHandlerWithACL(roleResolver MemberRoleResolver, evaluator AccessEvaluator) *Handler {

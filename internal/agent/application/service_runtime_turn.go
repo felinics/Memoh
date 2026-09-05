@@ -175,6 +175,10 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	if err := s.requireRuntimeOwnerWorkspaceExec(ctx, req.BotID, runtimeOwnerAccountID); err != nil {
 		return err
 	}
+	req, err = s.applyDirectModelPreference(ctx, req, sess)
+	if err != nil {
+		return err
+	}
 	// A concurrent turn never reaches here: admission holds the session's
 	// single active slot upstream.
 	preparedAttachments, err := s.prepareRuntimeAttachments(ctx, req)

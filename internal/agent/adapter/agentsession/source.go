@@ -15,6 +15,7 @@ type Source struct {
 
 type threadGetter interface {
 	Get(ctx context.Context, sessionID string) (thread.Thread, error)
+	MergeRuntimeMetadata(ctx context.Context, sessionID, runtimeType string, delta map[string]any) (thread.Thread, error)
 }
 
 func NewSource(threads *thread.Service) *Source {
@@ -33,4 +34,18 @@ func (s *Source) Get(ctx context.Context, sessionID string) (acp.SessionDescript
 		RuntimeMetadata: item.RuntimeMetadata,
 		IsACP:           thread.IsACPRuntime(item),
 	}, nil
+}
+
+// SaveModelPreference is called under the ACP runtime operation lock, so
+// an earlier setter cannot persist its state after a later setter or prompt.
+func (s *Source) SaveModelPreference(ctx context.Context, sessionID, modelID, effort string) error {
+	var model, reasoning any
+	if modelID != "" {
+		model = modelID
+	}
+	if effort != "" {
+		reasoning = effort
+	}
+	_, err := s.threads.MergeRuntimeMetadata(ctx, sessionID, thread.RuntimeACPAgent, map[string]any{"acp_model_id": model, "acp_reasoning_effort": reasoning})
+	return err
 }
