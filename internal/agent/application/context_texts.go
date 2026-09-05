@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -91,12 +93,7 @@ func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, botID pgtyp
 		}
 		s.inflight[key] = struct{}{}
 		keys = append(keys, key)
-		body := text.Text
-		truncated := false
-		if len(body) > maxFragmentTextBytes {
-			body = body[:maxFragmentTextBytes]
-			truncated = true
-		}
+		body, truncated := storableText(text.Text)
 		params.ContentHashes = append(params.ContentHashes, text.TextHash)
 		params.Kinds = append(params.Kinds, string(text.Kind))
 		params.Labels = append(params.Labels, text.Label)
@@ -127,6 +124,22 @@ func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, botID pgtyp
 			s.logger.Warn("context fragment texts not persisted", slog.Int("count", len(params.ContentHashes)), slog.Any("error", err))
 		}
 	}(context.WithoutCancel(ctx))
+}
+
+// storableText makes a rendered text safe for a UTF-8 text column: invalid
+// bytes become U+FFFD, and an oversized text keeps its head cut at a rune
+// boundary, because a byte cut inside a multi-byte character would make
+// Postgres reject the whole batch.
+func storableText(text string) (body string, truncated bool) {
+	body = strings.ToValidUTF8(text, "\uFFFD")
+	if len(body) <= maxFragmentTextBytes {
+		return body, false
+	}
+	cut := maxFragmentTextBytes
+	for cut > 0 && !utf8.RuneStart(body[cut]) {
+		cut--
+	}
+	return body[:cut], true
 }
 
 // release clears the in-flight marks of a batch and, when it was written,

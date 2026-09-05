@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -165,4 +166,26 @@ func TestContextTextStoreTimesOutAStuckWrite(t *testing.T) {
 	}
 	close(queries.release)
 	store.wait()
+}
+
+func TestContextTextStoreTruncatesAtARuneBoundaryAndRepairsInvalidBytes(t *testing.T) {
+	t.Parallel()
+
+	queries := &recordingFragmentTextQueries{}
+	store := newContextTextStore(queries, slog.New(slog.DiscardHandler))
+	store.PersistFragmentTexts(context.Background(), textStoreBotA, []contextfrag.FragmentText{
+		{TextHash: "cjk", Kind: contextfrag.KindSkillsCatalog, Text: strings.Repeat("x", maxFragmentTextBytes-1) + "中文"},
+		{TextHash: "broken", Kind: contextfrag.KindWorkspaceInstruction, Text: "ok\xffbroken"},
+	})
+	store.wait()
+	if len(queries.params) != 1 || len(queries.params[0].Texts) != 2 {
+		t.Fatalf("batches = %#v, want one batch with both texts", queries.params)
+	}
+	batch := queries.params[0]
+	if !utf8.ValidString(batch.Texts[0]) || len(batch.Texts[0]) > maxFragmentTextBytes || !batch.Truncated[0] || !strings.HasSuffix(batch.Texts[0], "x") {
+		t.Fatalf("oversized text must be cut before the character it cannot hold: len=%d truncated=%v", len(batch.Texts[0]), batch.Truncated[0])
+	}
+	if batch.Texts[1] != "ok\uFFFDbroken" || batch.Truncated[1] {
+		t.Fatalf("invalid bytes must be repaired, not rejected: %q", batch.Texts[1])
+	}
 }
