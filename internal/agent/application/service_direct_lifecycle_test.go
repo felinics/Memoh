@@ -82,11 +82,11 @@ type synchronizedLifecycleStore struct {
 func (s *synchronizedLifecycleStore) CreateContextLifecycle(
 	ctx context.Context,
 	arg sqlc.CreateContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.CreateContextLifecycleRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.store.existing != nil {
-		return sqlc.ContextLifecycle{}, &pgconn.PgError{Code: "23505"}
+		return sqlc.CreateContextLifecycleRow{}, &pgconn.PgError{Code: "23505"}
 	}
 	return s.store.CreateContextLifecycle(ctx, arg)
 }
@@ -94,7 +94,7 @@ func (s *synchronizedLifecycleStore) CreateContextLifecycle(
 func (s *synchronizedLifecycleStore) GetContextLifecycleByRunID(
 	ctx context.Context,
 	runID pgtype.UUID,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.GetContextLifecycleByRunIDRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.store.GetContextLifecycleByRunID(ctx, runID)
@@ -112,7 +112,7 @@ func (s *synchronizedLifecycleStore) GetLatestAssistantContextLifecycleMetadataB
 func (s *synchronizedLifecycleStore) UpdateAbortedContextLifecycleSnapshot(
 	ctx context.Context,
 	arg sqlc.UpdateAbortedContextLifecycleSnapshotParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpdateAbortedContextLifecycleSnapshotRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row, err := s.store.UpdateAbortedContextLifecycleSnapshot(ctx, arg)
@@ -130,7 +130,7 @@ func (s *synchronizedLifecycleStore) UpdateAbortedContextLifecycleSnapshot(
 func (s *synchronizedLifecycleStore) UpsertAbortedContextLifecycle(
 	ctx context.Context,
 	arg sqlc.UpsertAbortedContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertAbortedContextLifecycleRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.store.UpsertAbortedContextLifecycle(ctx, arg)
@@ -139,7 +139,7 @@ func (s *synchronizedLifecycleStore) UpsertAbortedContextLifecycle(
 func (s *synchronizedLifecycleStore) UpsertTerminalContextLifecycle(
 	ctx context.Context,
 	arg sqlc.UpsertTerminalContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertTerminalContextLifecycleRow, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.store.UpsertTerminalContextLifecycle(ctx, arg)

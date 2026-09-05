@@ -22,7 +22,7 @@ import (
 type abortLifecycleQueries struct {
 	dbstore.Queries
 	mu            sync.Mutex
-	existing      *sqlc.ContextLifecycle
+	existing      *sqlc.GetContextLifecycleByRunIDRow
 	existingAfter int
 	getCalls      int
 	assistantID   pgtype.UUID
@@ -41,19 +41,19 @@ type abortLifecycleQueries struct {
 func (*abortLifecycleQueries) CreateContextLifecycle(
 	context.Context,
 	sqlc.CreateContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
-	return sqlc.ContextLifecycle{}, errors.New("unexpected lifecycle create")
+) (sqlc.CreateContextLifecycleRow, error) {
+	return sqlc.CreateContextLifecycleRow{}, errors.New("unexpected lifecycle create")
 }
 
 func (q *abortLifecycleQueries) GetContextLifecycleByRunID(
 	context.Context,
 	pgtype.UUID,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.GetContextLifecycleByRunIDRow, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.getCalls++
 	if q.existing == nil || q.existingAfter > 0 && q.getCalls < q.existingAfter {
-		return sqlc.ContextLifecycle{}, pgx.ErrNoRows
+		return sqlc.GetContextLifecycleByRunIDRow{}, pgx.ErrNoRows
 	}
 	return *q.existing, nil
 }
@@ -94,14 +94,14 @@ func (q *abortLifecycleQueries) GetLatestAssistantContextLifecycleByRunID(
 func (*abortLifecycleQueries) UpdateAbortedContextLifecycleSnapshot(
 	context.Context,
 	sqlc.UpdateAbortedContextLifecycleSnapshotParams,
-) (sqlc.ContextLifecycle, error) {
-	return sqlc.ContextLifecycle{}, errors.New("unexpected lifecycle update")
+) (sqlc.UpdateAbortedContextLifecycleSnapshotRow, error) {
+	return sqlc.UpdateAbortedContextLifecycleSnapshotRow{}, errors.New("unexpected lifecycle update")
 }
 
 func (q *abortLifecycleQueries) UpsertAbortedContextLifecycle(
 	_ context.Context,
 	arg sqlc.UpsertAbortedContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertAbortedContextLifecycleRow, error) {
 	q.mu.Lock()
 	q.upserts = append(q.upserts, arg)
 	q.mu.Unlock()
@@ -111,7 +111,7 @@ func (q *abortLifecycleQueries) UpsertAbortedContextLifecycle(
 		default:
 		}
 	}
-	return sqlc.ContextLifecycle{}, q.upsertErr
+	return sqlc.UpsertAbortedContextLifecycleRow{}, q.upsertErr
 }
 
 func (q *abortLifecycleQueries) GetSessionRun(context.Context, pgtype.UUID) (sqlc.SessionRun, error) {
@@ -315,7 +315,7 @@ func TestAbortRuntimeRunFallsBackToMinimalAfterPendingDecisionGrace(t *testing.T
 
 func TestAbortRuntimeRunPrefersExistingAuthoritativeSnapshot(t *testing.T) {
 	queries := newAbortedLifecycleQueries(t)
-	queries.existing = &sqlc.ContextLifecycle{Snapshot: []byte(`{"version":7}`)}
+	queries.existing = &sqlc.GetContextLifecycleByRunIDRow{Snapshot: []byte(`{"version":7}`)}
 	service := &Service{
 		queries:           queries,
 		contextLifecycles: queries,

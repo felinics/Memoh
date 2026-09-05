@@ -442,7 +442,11 @@ type ContextBudgetPlan struct {
 type SelectionTrace struct {
 	Selected    int            `json:"selected"`
 	Dropped     int            `json:"dropped"`
+	Trimmed     int            `json:"trimmed,omitempty"`
 	DropReasons map[string]int `json:"drop_reasons,omitempty"`
+	// DropReasonTokens is the token estimate lost per drop reason, rolled up
+	// when the snapshot is built so readers never need the per-fragment audit.
+	DropReasonTokens map[string]int `json:"drop_reason_tokens,omitempty"`
 }
 
 type SelectionDecisionKind string

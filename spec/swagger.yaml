@@ -2311,6 +2311,13 @@ definitions:
     - DecisionDropped
   contextfrag.SelectionTrace:
     properties:
+      drop_reason_tokens:
+        additionalProperties:
+          type: integer
+        description: |-
+          DropReasonTokens is the token estimate lost per drop reason, rolled up
+          when the snapshot is built so readers never need the per-fragment audit.
+        type: object
       drop_reasons:
         additionalProperties:
           type: integer
@@ -2318,6 +2325,8 @@ definitions:
       dropped:
         type: integer
       selected:
+        type: integer
+      trimmed:
         type: integer
     type: object
   contextfrag.Slot:
@@ -3133,6 +3142,13 @@ definitions:
       type:
         type: string
     type: object
+  handlers.CompactionInfo:
+    properties:
+      auto_tokens:
+        type: integer
+      enabled:
+        type: boolean
+    type: object
   handlers.ConnectorCredentialRequest:
     properties:
       auth_method:
@@ -3322,6 +3338,10 @@ definitions:
         items:
           $ref: '#/definitions/contextfrag.KindBreakdown'
         type: array
+      budget_plan:
+        $ref: '#/definitions/contextfrag.ContextBudgetPlan'
+      compaction:
+        $ref: '#/definitions/handlers.CompactionInfo'
       context_window:
         type: integer
       tool_defs:
@@ -11377,7 +11397,9 @@ paths:
         newest first, with page-scoped aggregate totals (cache read/write tokens,
         drop reasons, mutation kinds). Aggregates cover only the returned page; has_more
         reports older turns. Sessions predating run lifecycle persistence fall back
-        to legacy assistant metadata (legacy_source)
+        to legacy assistant metadata (legacy_source). Per-fragment selection_decisions
+        are never returned; each turn's selection trace carries their rolled-up counts
+        and token costs
       parameters:
       - description: Bot ID
         in: path

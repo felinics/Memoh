@@ -218,6 +218,23 @@ export function createChatViews(deps: ChatViewsDeps) {
     )?.sessionId ?? null
   })
 
+  // Stable reference while the set is unchanged, so watchers only fire when a
+  // session actually starts or finishes streaming.
+  let lastStreamingSessionIds: string[] = []
+  const streamingSessionIds = computed(() => {
+    void projectionVersion.value
+    const botId = (deps.currentBotId.value ?? '').trim()
+    const ids = chatViews.entries()
+      .filter(view => view.kind === 'session' && view.botId === botId && view.sessionId && isSessionStreaming(botId, view.sessionId))
+      .map(view => view.sessionId as string)
+      .sort()
+    if (ids.length === lastStreamingSessionIds.length && ids.every((id, index) => id === lastStreamingSessionIds[index])) {
+      return lastStreamingSessionIds
+    }
+    lastStreamingSessionIds = ids
+    return ids
+  })
+
   const streaming = computed(() => {
     const botId = (deps.currentBotId.value ?? '').trim()
     const sessionId = (deps.sessionId.value ?? '').trim()
@@ -401,6 +418,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     locateMessageByExternalId,
     isSessionStreaming,
     streamingSessionId,
+    streamingSessionIds,
     streaming,
     isChatViewStreaming,
     workspaceTargetSelectionFor,

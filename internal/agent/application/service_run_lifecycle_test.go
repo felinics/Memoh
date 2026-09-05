@@ -29,7 +29,7 @@ const (
 type recordingContextLifecycleStore struct {
 	creates             []sqlc.CreateContextLifecycleParams
 	createErr           error
-	existing            *sqlc.ContextLifecycle
+	existing            *sqlc.GetContextLifecycleByRunIDRow
 	getErr              error
 	getCalls            int
 	updates             []sqlc.UpdateAbortedContextLifecycleSnapshotParams
@@ -53,17 +53,20 @@ type recordingContextLifecycleStore struct {
 func (s *recordingContextLifecycleStore) CreateContextLifecycle(
 	_ context.Context,
 	arg sqlc.CreateContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.CreateContextLifecycleRow, error) {
 	s.creates = append(s.creates, arg)
 	if s.createErr != nil {
-		return sqlc.ContextLifecycle{}, s.createErr
+		return sqlc.CreateContextLifecycleRow{}, s.createErr
 	}
-	created := sqlc.ContextLifecycle{
+	created := sqlc.GetContextLifecycleByRunIDRow{
 		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
 		Status: arg.Status, ErrorCode: arg.ErrorCode, Snapshot: arg.Snapshot,
 	}
 	s.existing = &created
-	return created, nil
+	return sqlc.CreateContextLifecycleRow{
+		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
+		Status: arg.Status, ErrorCode: arg.ErrorCode,
+	}, nil
 }
 
 type lifecycleTurnAdmitter struct {
@@ -102,13 +105,13 @@ func (a *lifecycleTurnAdmitter) FinishRunWithErrorCode(
 func (s *recordingContextLifecycleStore) GetContextLifecycleByRunID(
 	_ context.Context,
 	_ pgtype.UUID,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.GetContextLifecycleByRunIDRow, error) {
 	s.getCalls++
 	if s.getErr != nil {
-		return sqlc.ContextLifecycle{}, s.getErr
+		return sqlc.GetContextLifecycleByRunIDRow{}, s.getErr
 	}
 	if s.existing == nil {
-		return sqlc.ContextLifecycle{}, pgx.ErrNoRows
+		return sqlc.GetContextLifecycleByRunIDRow{}, pgx.ErrNoRows
 	}
 	return *s.existing, nil
 }
@@ -139,34 +142,37 @@ func (s *recordingContextLifecycleStore) GetLatestAssistantContextLifecycleByRun
 func (s *recordingContextLifecycleStore) UpdateAbortedContextLifecycleSnapshot(
 	_ context.Context,
 	arg sqlc.UpdateAbortedContextLifecycleSnapshotParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpdateAbortedContextLifecycleSnapshotRow, error) {
 	s.updates = append(s.updates, arg)
-	return sqlc.ContextLifecycle{}, s.updateErr
+	return sqlc.UpdateAbortedContextLifecycleSnapshotRow{}, s.updateErr
 }
 
 func (s *recordingContextLifecycleStore) UpsertAbortedContextLifecycle(
 	_ context.Context,
 	arg sqlc.UpsertAbortedContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertAbortedContextLifecycleRow, error) {
 	s.upserts = append(s.upserts, arg)
-	return sqlc.ContextLifecycle{}, s.upsertErr
+	return sqlc.UpsertAbortedContextLifecycleRow{}, s.upsertErr
 }
 
 func (s *recordingContextLifecycleStore) UpsertTerminalContextLifecycle(
 	ctx context.Context,
 	arg sqlc.UpsertTerminalContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.UpsertTerminalContextLifecycleRow, error) {
 	_, s.terminalUpsertBound = ctx.Deadline()
 	s.terminalUpserts = append(s.terminalUpserts, arg)
 	if s.terminalUpsertErr != nil {
-		return sqlc.ContextLifecycle{}, s.terminalUpsertErr
+		return sqlc.UpsertTerminalContextLifecycleRow{}, s.terminalUpsertErr
 	}
-	upserted := sqlc.ContextLifecycle{
+	upserted := sqlc.GetContextLifecycleByRunIDRow{
 		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
 		Status: arg.Status, ErrorCode: arg.ErrorCode, Snapshot: arg.Snapshot,
 	}
 	s.existing = &upserted
-	return upserted, nil
+	return sqlc.UpsertTerminalContextLifecycleRow{
+		RunID: arg.RunID, BotID: arg.BotID, SessionID: arg.SessionID,
+		Status: arg.Status, ErrorCode: arg.ErrorCode,
+	}, nil
 }
 
 func (s *recordingContextLifecycleStore) ListTerminalSessionRunsNeedingContextLifecycle(
@@ -405,7 +411,7 @@ func TestEnsureTerminalContextLifecycleCreatesMinimalFallbackOnlyWhenMissing(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.existing = &sqlc.ContextLifecycle{RunID: runUUID, BotID: botUUID, SessionID: sessionUUID}
+	store.existing = &sqlc.GetContextLifecycleByRunIDRow{RunID: runUUID, BotID: botUUID, SessionID: sessionUUID}
 	service.EnsureTerminalContextLifecycle(
 		context.Background(),
 		lifecycleTestRunID,
@@ -440,7 +446,7 @@ func TestAuthoritativeSnapshotReplacesOnlyRecoveredAbortedFallback(t *testing.T)
 	}
 	store := &recordingContextLifecycleStore{
 		createErr: &pgconn.PgError{Code: "23505"},
-		existing: &sqlc.ContextLifecycle{
+		existing: &sqlc.GetContextLifecycleByRunIDRow{
 			RunID: runUUID, BotID: botUUID, SessionID: sessionUUID,
 			Status: contextLifecycleStatusAborted,
 		},
@@ -688,7 +694,7 @@ func TestRecoverContextLifecycleFromAssistantMetadataSkipsExistingOrUnavailable(
 	}{
 		{
 			name: "existing lifecycle",
-			store: &recordingContextLifecycleStore{existing: &sqlc.ContextLifecycle{
+			store: &recordingContextLifecycleStore{existing: &sqlc.GetContextLifecycleByRunIDRow{
 				RunID: runID, BotID: botID, SessionID: sessionID,
 			}},
 		},

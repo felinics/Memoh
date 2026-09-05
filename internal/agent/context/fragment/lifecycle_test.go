@@ -2,6 +2,7 @@ package contextfrag_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -493,5 +494,69 @@ func TestStampLifecycleAssistantMessageIDPreservesUnknownFields(t *testing.T) {
 	}
 	if round["observation_scope"] != "provider_wire" || round["version"] != float64(9) {
 		t.Fatalf("stamped = %#v, want future version and fields intact", round)
+	}
+}
+
+func TestBuildLifecycleSnapshotSummarizesSelectionDecisions(t *testing.T) {
+	t.Parallel()
+
+	manifest := contextfrag.Manifest{
+		SelectionDecisions: []contextfrag.SelectionDecision{
+			{ID: "a", Decision: contextfrag.DecisionSelected, TokenEstimate: 10},
+			{ID: "b", Decision: contextfrag.DecisionDropped, Reason: "history_budget", TokenEstimate: 170},
+			{ID: "c", Decision: contextfrag.DecisionDropped, Reason: " history_budget ", TokenEstimate: 30},
+			{ID: "d", Decision: contextfrag.DecisionDropped, TokenEstimate: 5},
+			{ID: "e", Decision: contextfrag.DecisionTrimmed, Reason: "output_limit", TokenEstimate: 40},
+		},
+		Selection: &contextfrag.SelectionTrace{Selected: 2, Dropped: 3, DropReasons: map[string]int{"history_budget": 2, "unknown": 1}},
+	}
+
+	snapshot := contextfrag.BuildLifecycleSnapshot(manifest)
+	if snapshot.Selection.Trimmed != 1 {
+		t.Fatalf("trimmed = %d, want 1", snapshot.Selection.Trimmed)
+	}
+	wantTokens := map[string]int{"history_budget": 200, "unknown": 5}
+	if !reflect.DeepEqual(snapshot.Selection.DropReasonTokens, wantTokens) {
+		t.Fatalf("drop reason tokens = %v, want %v", snapshot.Selection.DropReasonTokens, wantTokens)
+	}
+	if snapshot.Selection.Selected != 2 || snapshot.Selection.Dropped != 3 {
+		t.Fatalf("selection counts = %+v, want the selector's counts kept", snapshot.Selection)
+	}
+	if len(snapshot.SelectionDecisions) != 5 {
+		t.Fatalf("decisions = %d, want the full audit kept on the snapshot", len(snapshot.SelectionDecisions))
+	}
+}
+
+func TestLifecycleSnapshotSummaryDropsOnlyTheDecisions(t *testing.T) {
+	t.Parallel()
+
+	snapshot := contextfrag.BuildLifecycleSnapshot(contextfrag.Manifest{
+		Counts: contextfrag.ManifestCounts{Fragments: 3, TokenEstimate: 215},
+		SelectionDecisions: []contextfrag.SelectionDecision{
+			{ID: "a", Decision: contextfrag.DecisionSelected, TokenEstimate: 10},
+			{ID: "b", Decision: contextfrag.DecisionDropped, Reason: "history_budget", TokenEstimate: 170},
+		},
+		Selection: &contextfrag.SelectionTrace{Selected: 1, Dropped: 1, DropReasons: map[string]int{"history_budget": 1}},
+	})
+
+	summary := snapshot.Summary()
+	if summary.SelectionDecisions != nil {
+		t.Fatalf("summary decisions = %v, want none", summary.SelectionDecisions)
+	}
+	if !reflect.DeepEqual(summary.Selection, snapshot.Selection) || summary.Counts != snapshot.Counts {
+		t.Fatalf("summary = %+v, want every bounded field of %+v", summary, snapshot)
+	}
+	if len(snapshot.SelectionDecisions) != 2 {
+		t.Fatalf("original decisions = %d, want untouched", len(snapshot.SelectionDecisions))
+	}
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	if strings.Contains(string(raw), "selection_decisions") {
+		t.Fatalf("summary JSON still carries selection_decisions: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"drop_reason_tokens":{"history_budget":170}`) || !strings.Contains(string(raw), `"dropped":1`) {
+		t.Fatalf("summary JSON lacks the bounded drop-reason rollup: %s", raw)
 	}
 }

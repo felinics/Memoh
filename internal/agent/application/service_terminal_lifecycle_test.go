@@ -96,7 +96,7 @@ func TestTerminalLifecycleReconciliationPrefersCompatibleCandidateStatus(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &recordingContextLifecycleStore{existing: &sqlc.ContextLifecycle{
+	store := &recordingContextLifecycleStore{existing: &sqlc.GetContextLifecycleByRunIDRow{
 		RunID:     runUUID,
 		BotID:     botUUID,
 		SessionID: sessionUUID,
@@ -213,7 +213,7 @@ func TestTerminalLifecycleReconciliationUsesCompatibleExistingThenDurableGeneric
 			if tt.existingCode != "" {
 				code = pgtype.Text{String: tt.existingCode, Valid: true}
 			}
-			store := &recordingContextLifecycleStore{existing: &sqlc.ContextLifecycle{
+			store := &recordingContextLifecycleStore{existing: &sqlc.GetContextLifecycleByRunIDRow{
 				RunID:     runUUID,
 				BotID:     botUUID,
 				SessionID: sessionUUID,
@@ -252,7 +252,7 @@ func TestTerminalLifecycleReconciliationRejectsIncompatibleCandidateCode(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &recordingContextLifecycleStore{existing: &sqlc.ContextLifecycle{
+	store := &recordingContextLifecycleStore{existing: &sqlc.GetContextLifecycleByRunIDRow{
 		RunID:     runUUID,
 		BotID:     botUUID,
 		SessionID: sessionUUID,
@@ -668,7 +668,7 @@ func TestTerminalLifecycleRepairKeepsRicherExistingOverMinimalCandidate(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &recordingContextLifecycleStore{existing: &sqlc.ContextLifecycle{
+	store := &recordingContextLifecycleStore{existing: &sqlc.GetContextLifecycleByRunIDRow{
 		RunID:     runUUID,
 		BotID:     botUUID,
 		SessionID: sessionUUID,

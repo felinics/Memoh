@@ -3,7 +3,7 @@ SELECT
   id,
   run_id,
   role,
-  metadata,
+  (metadata #- '{context_lifecycle,selection_decisions}'::text[])::jsonb AS metadata,
   created_at
 FROM bot_history_messages
 WHERE session_id = sqlc.arg(session_id)
@@ -19,7 +19,8 @@ INSERT INTO context_lifecycles (
   session_id,
   status,
   error_code,
-  snapshot
+  snapshot,
+  selection_decisions
 )
 VALUES (
   sqlc.arg(run_id),
@@ -27,25 +28,33 @@ VALUES (
   sqlc.arg(session_id),
   sqlc.arg(status),
   sqlc.narg(error_code)::text,
-  sqlc.arg(snapshot)
+  sqlc.arg(snapshot)::jsonb - 'selection_decisions',
+  sqlc.arg(snapshot)::jsonb -> 'selection_decisions'
 )
-RETURNING *;
+RETURNING run_id, bot_id, session_id, status, error_code, created_at;
 
 -- name: GetContextLifecycleByRunID :one
-SELECT *
+SELECT run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = sqlc.arg(run_id);
+
+-- name: GetContextLifecycleSelectionDecisionsByRunID :one
+SELECT selection_decisions
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id);
 
 -- name: UpdateAbortedContextLifecycleSnapshot :one
 UPDATE context_lifecycles
-SET snapshot = sqlc.arg(snapshot)
+SET snapshot = sqlc.arg(snapshot)::jsonb - 'selection_decisions',
+    selection_decisions = COALESCE(sqlc.arg(snapshot)::jsonb -> 'selection_decisions', selection_decisions)
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND bot_id = sqlc.arg(bot_id)
   AND session_id = sqlc.arg(session_id)
   AND status = 'aborted'
-RETURNING *;
+RETURNING run_id, bot_id, session_id, status, error_code, created_at;
 
 -- name: UpsertAbortedContextLifecycle :one
 INSERT INTO context_lifecycles (
@@ -54,7 +63,8 @@ INSERT INTO context_lifecycles (
   session_id,
   status,
   error_code,
-  snapshot
+  snapshot,
+  selection_decisions
 )
 VALUES (
   sqlc.arg(run_id),
@@ -62,7 +72,8 @@ VALUES (
   sqlc.arg(session_id),
   'aborted',
   NULL,
-  sqlc.arg(snapshot)
+  sqlc.arg(snapshot)::jsonb - 'selection_decisions',
+  sqlc.arg(snapshot)::jsonb -> 'selection_decisions'
 )
 ON CONFLICT (run_id) DO UPDATE
 SET
@@ -71,7 +82,7 @@ SET
 WHERE context_lifecycles.team_id = public.memoh_current_team_id()
   AND context_lifecycles.bot_id = EXCLUDED.bot_id
   AND context_lifecycles.session_id = EXCLUDED.session_id
-RETURNING *;
+RETURNING run_id, bot_id, session_id, status, error_code, created_at;
 
 -- name: UpsertTerminalContextLifecycle :one
 INSERT INTO context_lifecycles (
@@ -80,7 +91,8 @@ INSERT INTO context_lifecycles (
   session_id,
   status,
   error_code,
-  snapshot
+  snapshot,
+  selection_decisions
 )
 VALUES (
   sqlc.arg(run_id),
@@ -88,7 +100,8 @@ VALUES (
   sqlc.arg(session_id),
   sqlc.arg(status),
   sqlc.narg(error_code)::text,
-  sqlc.arg(snapshot)
+  sqlc.arg(snapshot)::jsonb - 'selection_decisions',
+  sqlc.arg(snapshot)::jsonb -> 'selection_decisions'
 )
 ON CONFLICT (run_id) DO UPDATE
 SET
@@ -102,12 +115,17 @@ SET
   snapshot = CASE
     WHEN sqlc.arg(replace_snapshot)::boolean THEN EXCLUDED.snapshot
     ELSE context_lifecycles.snapshot
+  END,
+  selection_decisions = CASE
+    WHEN sqlc.arg(replace_snapshot)::boolean
+      THEN COALESCE(EXCLUDED.selection_decisions, context_lifecycles.selection_decisions)
+    ELSE context_lifecycles.selection_decisions
   END
 WHERE context_lifecycles.team_id = public.memoh_current_team_id()
   AND context_lifecycles.team_id = EXCLUDED.team_id
   AND context_lifecycles.bot_id = EXCLUDED.bot_id
   AND context_lifecycles.session_id = EXCLUDED.session_id
-RETURNING *;
+RETURNING run_id, bot_id, session_id, status, error_code, created_at;
 
 -- name: GetLatestAssistantContextLifecycleByRunID :one
 SELECT id, metadata
@@ -135,12 +153,20 @@ SELECT
   status,
   error_code,
   created_at,
-  snapshot
+  (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND session_id = sqlc.arg(session_id)
 ORDER BY created_at DESC, run_id DESC
 LIMIT sqlc.arg(max_count);
+
+-- name: GetLatestContextLifecycleBySession :one
+SELECT (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = sqlc.arg(session_id)
+ORDER BY created_at DESC, run_id DESC
+LIMIT 1;
 
 -- name: ListTerminalSessionRunsNeedingContextLifecycle :many
 SELECT

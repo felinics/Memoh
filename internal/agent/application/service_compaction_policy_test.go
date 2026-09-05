@@ -89,14 +89,40 @@ func TestUnifiedCompactionController(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := autoCompactionThreshold(tc.threshold, tc.budget); got != tc.wantTrigger {
-				t.Fatalf("autoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.wantTrigger)
+			if got := AutoCompactionThreshold(tc.threshold, tc.budget); got != tc.wantTrigger {
+				t.Fatalf("AutoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.wantTrigger)
 			}
 			if got := compactionTargetTokens(tc.targetPercent, tc.budget); got != tc.wantTarget {
 				t.Fatalf("compactionTargetTokens(%v, %d) = %d, want %d", tc.targetPercent, tc.budget, got, tc.wantTarget)
 			}
 			if got := syncCompactionShouldRun(tc.pressure, tc.budget); got != tc.wantSync {
 				t.Fatalf("syncCompactionShouldRun(%d, %d) = %t, want %t", tc.pressure, tc.budget, got, tc.wantSync)
+			}
+		})
+	}
+}
+
+func TestAutoCompactionThreshold(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		threshold int
+		budget    int
+		want      int
+	}{
+		{name: "zero budget yields no mark", threshold: 90000},
+		{name: "negative budget yields no mark", threshold: 90000, budget: -1},
+		{name: "unset threshold uses the soft share", budget: 200000, want: 100000},
+		{name: "threshold below hard share is honored", threshold: 90000, budget: 200000, want: 90000},
+		{name: "threshold above hard share is capped", threshold: 500000, budget: 200000, want: 150000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := AutoCompactionThreshold(tc.threshold, tc.budget); got != tc.want {
+				t.Fatalf("AutoCompactionThreshold(%d, %d) = %d, want %d", tc.threshold, tc.budget, got, tc.want)
 			}
 		})
 	}

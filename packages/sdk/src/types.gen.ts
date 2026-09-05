@@ -1290,11 +1290,19 @@ export type ContextfragSelectionDecision = {
 export type ContextfragSelectionDecisionKind = 'selected' | 'trimmed' | 'dropped';
 
 export type ContextfragSelectionTrace = {
+    /**
+     * DropReasonTokens is the token estimate lost per drop reason, rolled up
+     * when the snapshot is built so readers never need the per-fragment audit.
+     */
+    drop_reason_tokens?: {
+        [key: string]: number;
+    };
     drop_reasons?: {
         [key: string]: number;
     };
     dropped?: number;
     selected?: number;
+    trimmed?: number;
 };
 
 export type ContextfragSlot = 'system' | 'before_history' | 'history' | 'after_history_before_current' | 'current_user' | 'after_current';
@@ -1754,6 +1762,11 @@ export type HandlersCommandEventResponse = {
     type?: string;
 };
 
+export type HandlersCompactionInfo = {
+    auto_tokens?: number;
+    enabled?: boolean;
+};
+
 export type HandlersConnectorCredentialRequest = {
     auth_method?: string;
     connector_type?: string;
@@ -1886,6 +1899,8 @@ export type HandlersContextLifecycleTurn = {
 
 export type HandlersContextUsage = {
     breakdown?: Array<ContextfragKindBreakdown>;
+    budget_plan?: ContextfragContextBudgetPlan;
+    compaction?: HandlersCompactionInfo;
     context_window?: number;
     tool_defs?: Array<HandlersToolDefBucket>;
     used_tokens?: number;

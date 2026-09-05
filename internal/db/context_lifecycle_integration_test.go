@@ -130,33 +130,53 @@ SELECT $3, $1, bot.id, 'local', 'context lifecycle', '{}' FROM bot
 	parsedBotID := mustParseLifecycleUUID(t, botID)
 	parsedSessionID := mustParseLifecycleUUID(t, sessionID)
 	queries := sqlc.New(conn)
-	created, err := queries.CreateContextLifecycle(ctx, sqlc.CreateContextLifecycleParams{
+	if _, err := queries.CreateContextLifecycle(ctx, sqlc.CreateContextLifecycleParams{
 		RunID:     parsedRunID,
 		BotID:     parsedBotID,
 		SessionID: parsedSessionID,
 		Status:    "failed_budget",
 		ErrorCode: pgtype.Text{String: "context.budget_unsatisfied", Valid: true},
 		Snapshot:  snapshotJSON,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("create context lifecycle: %v", err)
-	}
-	if created.RunID != parsedRunID || created.Status != "failed_budget" {
-		t.Fatalf("created lifecycle identity = (%v, %q), want (%v, failed_budget)", created.RunID, created.Status, parsedRunID)
 	}
 
 	got, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
 	if err != nil {
 		t.Fatalf("get context lifecycle: %v", err)
 	}
+	if got.RunID != parsedRunID || got.Status != "failed_budget" {
+		t.Fatalf("created lifecycle identity = (%v, %q), want (%v, failed_budget)", got.RunID, got.Status, parsedRunID)
+	}
+	// The summary column never carries the per-fragment audit; that lives in
+	// its own column so summary readers stay bounded however long the session.
+	if strings.Contains(string(got.Snapshot), "selection_decisions") {
+		t.Fatalf("summary column carries selection_decisions: %s", got.Snapshot)
+	}
 	var roundTripped contextfrag.LifecycleSnapshot
 	if err := json.Unmarshal(got.Snapshot, &roundTripped); err != nil {
 		t.Fatalf("unmarshal lifecycle snapshot: %v", err)
 	}
-	if !reflect.DeepEqual(roundTripped, snapshot) {
-		t.Fatalf("round-tripped lifecycle snapshot = %#v, want %#v", roundTripped, snapshot)
+	if !reflect.DeepEqual(roundTripped, snapshot.Summary()) {
+		t.Fatalf("round-tripped lifecycle summary = %#v, want %#v", roundTripped, snapshot.Summary())
 	}
-	if strings.Contains(string(got.Snapshot), secret) {
+	audit, err := queries.GetContextLifecycleSelectionDecisionsByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("get selection decisions: %v", err)
+	}
+	var decisions []contextfrag.SelectionDecision
+	if err := json.Unmarshal(audit, &decisions); err != nil {
+		t.Fatalf("unmarshal selection decisions: %v", err)
+	}
+	if !reflect.DeepEqual(decisions, snapshot.SelectionDecisions) {
+		t.Fatalf("persisted selection decisions = %#v, want %#v", decisions, snapshot.SelectionDecisions)
+	}
+	latest, err := queries.GetLatestContextLifecycleBySession(ctx, parsedSessionID)
+	if err != nil {
+		t.Fatalf("get latest context lifecycle summary: %v", err)
+	}
+	assertJSONSemanticallyEqual(t, latest, got.Snapshot)
+	if strings.Contains(string(got.Snapshot), secret) || strings.Contains(string(audit), secret) {
 		t.Fatal("persisted lifecycle snapshot contains raw prompt text")
 	}
 
@@ -232,33 +252,40 @@ VALUES ($1, $2, 'assistant', '{}'::jsonb, '{"other":"metadata"}'::jsonb,
 	}
 
 	replacementSnapshot := []byte(`{"version":999}`)
-	aborted, err := queries.UpsertAbortedContextLifecycle(ctx, sqlc.UpsertAbortedContextLifecycleParams{
+	if _, err := queries.UpsertAbortedContextLifecycle(ctx, sqlc.UpsertAbortedContextLifecycleParams{
 		RunID:     parsedRunID,
 		BotID:     parsedBotID,
 		SessionID: parsedSessionID,
 		Snapshot:  replacementSnapshot,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("upsert existing aborted context lifecycle: %v", err)
+	}
+	aborted, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read aborted context lifecycle: %v", err)
 	}
 	if aborted.Status != "aborted" || aborted.ErrorCode.Valid {
 		t.Fatalf("aborted lifecycle terminal = (%q, %#v), want aborted with no error code", aborted.Status, aborted.ErrorCode)
 	}
-	assertJSONSemanticallyEqual(t, aborted.Snapshot, created.Snapshot)
-	if aborted.CreatedAt != created.CreatedAt {
-		t.Fatalf("aborted lifecycle changed created_at = %#v, want %#v", aborted.CreatedAt, created.CreatedAt)
+	assertJSONSemanticallyEqual(t, aborted.Snapshot, got.Snapshot)
+	assertJSONSemanticallyEqual(t, mustSelectionDecisions(t, ctx, queries, parsedRunID), audit)
+	if aborted.CreatedAt != got.CreatedAt {
+		t.Fatalf("aborted lifecycle changed created_at = %#v, want %#v", aborted.CreatedAt, got.CreatedAt)
 	}
 
 	const abortedRunID = "00000000-0000-0000-0000-00000000d503"
 	parsedAbortedRunID := mustParseLifecycleUUID(t, abortedRunID)
-	insertedAborted, err := queries.UpsertAbortedContextLifecycle(ctx, sqlc.UpsertAbortedContextLifecycleParams{
+	if _, err := queries.UpsertAbortedContextLifecycle(ctx, sqlc.UpsertAbortedContextLifecycleParams{
 		RunID:     parsedAbortedRunID,
 		BotID:     parsedBotID,
 		SessionID: parsedSessionID,
 		Snapshot:  replacementSnapshot,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("insert aborted context lifecycle: %v", err)
+	}
+	insertedAborted, err := queries.GetContextLifecycleByRunID(ctx, parsedAbortedRunID)
+	if err != nil {
+		t.Fatalf("read inserted aborted context lifecycle: %v", err)
 	}
 	if insertedAborted.Status != "aborted" || insertedAborted.ErrorCode.Valid {
 		t.Fatalf("inserted aborted lifecycle = %#v", insertedAborted)
@@ -266,14 +293,17 @@ VALUES ($1, $2, 'assistant', '{}'::jsonb, '{"other":"metadata"}'::jsonb,
 	assertJSONSemanticallyEqual(t, insertedAborted.Snapshot, replacementSnapshot)
 
 	authoritativeSnapshot := []byte(`{"version":1000}`)
-	convergedAborted, err := queries.UpdateAbortedContextLifecycleSnapshot(ctx, sqlc.UpdateAbortedContextLifecycleSnapshotParams{
+	if _, err := queries.UpdateAbortedContextLifecycleSnapshot(ctx, sqlc.UpdateAbortedContextLifecycleSnapshotParams{
 		Snapshot:  authoritativeSnapshot,
 		RunID:     parsedAbortedRunID,
 		BotID:     parsedBotID,
 		SessionID: parsedSessionID,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("replace recovered aborted snapshot: %v", err)
+	}
+	convergedAborted, err := queries.GetContextLifecycleByRunID(ctx, parsedAbortedRunID)
+	if err != nil {
+		t.Fatalf("read converged aborted context lifecycle: %v", err)
 	}
 	if convergedAborted.Status != "aborted" || convergedAborted.ErrorCode.Valid {
 		t.Fatalf("converged aborted lifecycle = %#v", convergedAborted)
@@ -342,7 +372,7 @@ VALUES ($1, gen_random_uuid(), $2, $3, 'completed', '{}'::jsonb)
 		BotID:     parsedBotID,
 		SessionID: parsedSessionID,
 		Status:    "aborted",
-		Snapshot:  created.Snapshot,
+		Snapshot:  got.Snapshot,
 	}); err != nil {
 		t.Fatalf("materialize paused lifecycle row: %v", err)
 	}
@@ -352,6 +382,41 @@ VALUES ($1, gen_random_uuid(), $2, $3, 'completed', '{}'::jsonb)
 	}
 	if unmaterialized {
 		t.Fatal("probe = true, want false once every metadata run has a lifecycle row")
+	}
+
+	// Summary-only rewrites, which is what every read-back-and-write path now
+	// produces, must never erase the audit column.
+	if _, err := queries.UpdateAbortedContextLifecycleSnapshot(ctx, sqlc.UpdateAbortedContextLifecycleSnapshotParams{
+		Snapshot:  []byte(`{"version":2,"source":"summary-only"}`),
+		RunID:     parsedRunID,
+		BotID:     parsedBotID,
+		SessionID: parsedSessionID,
+	}); err != nil {
+		t.Fatalf("rewrite aborted summary: %v", err)
+	}
+	rewritten, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read rewritten aborted lifecycle: %v", err)
+	}
+	assertJSONSemanticallyEqual(t, rewritten.Snapshot, []byte(`{"version":2,"source":"summary-only"}`))
+	assertJSONSemanticallyEqual(t, mustSelectionDecisions(t, ctx, queries, parsedRunID), audit)
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+		RunID:           parsedRunID,
+		BotID:           parsedBotID,
+		SessionID:       parsedSessionID,
+		Status:          "completed",
+		Snapshot:        []byte(`{"version":2,"source":"terminal-summary-only"}`),
+		ReplaceSnapshot: true,
+	}); err != nil {
+		t.Fatalf("replace terminal summary: %v", err)
+	}
+	replaced, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read replaced terminal lifecycle: %v", err)
+	}
+	assertJSONSemanticallyEqual(t, mustSelectionDecisions(t, ctx, queries, parsedRunID), audit)
+	if strings.Contains(string(replaced.Snapshot), "selection_decisions") || !strings.Contains(string(replaced.Snapshot), "terminal-summary-only") {
+		t.Fatalf("replaced summary = %s, want the new summary without the audit", replaced.Snapshot)
 	}
 }
 
@@ -401,16 +466,19 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 	parsedSessionID := mustParseLifecycleUUID(t, sessionID)
 	parsedOtherSessionID := mustParseLifecycleUUID(t, otherSessionID)
 	initialSnapshot := []byte(`{"version":1,"source":"initial"}`)
-	created, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:           parsedRunID,
 		BotID:           parsedBotID,
 		SessionID:       parsedSessionID,
 		Status:          "completed",
 		Snapshot:        initialSnapshot,
 		ReplaceSnapshot: true,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("insert terminal context lifecycle: %v", err)
+	}
+	created, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if created.Status != "completed" || created.ErrorCode.Valid {
 		t.Fatalf("created terminal lifecycle = (%q, %#v), want completed with no error", created.Status, created.ErrorCode)
@@ -418,7 +486,7 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 	assertJSONSemanticallyEqual(t, created.Snapshot, initialSnapshot)
 
 	authoritativeSnapshot := []byte(`{"version":2,"source":"terminal-candidate"}`)
-	failed, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:           parsedRunID,
 		BotID:           parsedBotID,
 		SessionID:       parsedSessionID,
@@ -426,9 +494,12 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		ErrorCode:       pgtype.Text{String: "runtime.generic", Valid: true},
 		Snapshot:        authoritativeSnapshot,
 		ReplaceSnapshot: true,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("replace terminal context lifecycle: %v", err)
+	}
+	failed, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if failed.Status != "failed_provider" || !failed.ErrorCode.Valid || failed.ErrorCode.String != "runtime.generic" {
 		t.Fatalf("replaced terminal lifecycle = (%q, %#v), want failed_provider/runtime.generic", failed.Status, failed.ErrorCode)
@@ -439,7 +510,7 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 	}
 
 	errorOnlySnapshot := []byte(`{"version":0,"source":"error-only-repair"}`)
-	errorOnlyRepair, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:            parsedRunID,
 		BotID:            parsedBotID,
 		SessionID:        parsedSessionID,
@@ -448,16 +519,19 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		Snapshot:         errorOnlySnapshot,
 		ReplaceSnapshot:  false,
 		ReplaceErrorCode: true,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("apply error-only lifecycle repair: %v", err)
+	}
+	errorOnlyRepair, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if !errorOnlyRepair.ErrorCode.Valid || errorOnlyRepair.ErrorCode.String != "provider.timeout" {
 		t.Fatalf("error-only repair code = %#v, want provider.timeout", errorOnlyRepair.ErrorCode)
 	}
 	assertJSONSemanticallyEqual(t, errorOnlyRepair.Snapshot, authoritativeSnapshot)
 
-	staleRepair, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:           parsedRunID,
 		BotID:           parsedBotID,
 		SessionID:       parsedSessionID,
@@ -465,9 +539,12 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		ErrorCode:       pgtype.Text{String: "runtime.generic", Valid: true},
 		Snapshot:        []byte(`{"version":0,"source":"stale-repair"}`),
 		ReplaceSnapshot: false,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("apply stale same-status lifecycle repair: %v", err)
+	}
+	staleRepair, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if staleRepair.Status != "failed_provider" || !staleRepair.ErrorCode.Valid || staleRepair.ErrorCode.String != "provider.timeout" {
 		t.Fatalf("stale repair lifecycle = (%q, %#v), want richer provider.timeout code", staleRepair.Status, staleRepair.ErrorCode)
@@ -475,7 +552,7 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 	assertJSONSemanticallyEqual(t, staleRepair.Snapshot, authoritativeSnapshot)
 
 	recoveredMetadataSnapshot := []byte(`{"version":2,"source":"recovered-assistant-metadata"}`)
-	recoveredMetadataRepair, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:            parsedRunID,
 		BotID:            parsedBotID,
 		SessionID:        parsedSessionID,
@@ -484,9 +561,12 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		Snapshot:         recoveredMetadataSnapshot,
 		ReplaceSnapshot:  true,
 		ReplaceErrorCode: false,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("apply recovered-metadata lifecycle repair: %v", err)
+	}
+	recoveredMetadataRepair, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if !recoveredMetadataRepair.ErrorCode.Valid || recoveredMetadataRepair.ErrorCode.String != "provider.timeout" {
 		t.Fatalf("recovered-metadata repair code = %#v, want richer provider.timeout code", recoveredMetadataRepair.ErrorCode)
@@ -494,7 +574,7 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 	assertJSONSemanticallyEqual(t, recoveredMetadataRepair.Snapshot, recoveredMetadataSnapshot)
 
 	reclassifiedSnapshot := []byte(`{"version":3,"source":"authoritative-reclassification"}`)
-	reclassified, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, sqlc.UpsertTerminalContextLifecycleParams{
 		RunID:            parsedRunID,
 		BotID:            parsedBotID,
 		SessionID:        parsedSessionID,
@@ -503,9 +583,12 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		Snapshot:         reclassifiedSnapshot,
 		ReplaceSnapshot:  true,
 		ReplaceErrorCode: true,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("replace same-status lifecycle authoritatively: %v", err)
+	}
+	reclassified, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if !reclassified.ErrorCode.Valid || reclassified.ErrorCode.String != "provider.reclassified" {
 		t.Fatalf("authoritative lifecycle code = %#v, want provider.reclassified", reclassified.ErrorCode)
@@ -522,9 +605,12 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		Snapshot:        staleSnapshot,
 		ReplaceSnapshot: false,
 	}
-	preserved, err := queries.UpsertTerminalContextLifecycle(ctx, preserveArgs)
-	if err != nil {
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, preserveArgs); err != nil {
 		t.Fatalf("preserve terminal context lifecycle snapshot: %v", err)
+	}
+	preserved, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if preserved.Status != "aborted" || preserved.ErrorCode.Valid {
 		t.Fatalf("preserved terminal lifecycle = (%q, %#v), want aborted with no error", preserved.Status, preserved.ErrorCode)
@@ -534,9 +620,12 @@ CROSS JOIN unnest(ARRAY[$3::uuid, $4::uuid]) AS sessions(session_id)
 		t.Fatalf("snapshot-preserving upsert changed created_at = %#v, want %#v", preserved.CreatedAt, created.CreatedAt)
 	}
 
-	idempotent, err := queries.UpsertTerminalContextLifecycle(ctx, preserveArgs)
-	if err != nil {
+	if _, err := queries.UpsertTerminalContextLifecycle(ctx, preserveArgs); err != nil {
 		t.Fatalf("repeat terminal context lifecycle upsert: %v", err)
+	}
+	idempotent, err := queries.GetContextLifecycleByRunID(ctx, parsedRunID)
+	if err != nil {
+		t.Fatalf("read terminal lifecycle after upsert: %v", err)
 	}
 	if !reflect.DeepEqual(idempotent, preserved) {
 		t.Fatalf("idempotent terminal upsert = %#v, want %#v", idempotent, preserved)
@@ -648,4 +737,115 @@ func assertJSONSemanticallyEqual(t *testing.T, got, want []byte) {
 	if !reflect.DeepEqual(gotValue, wantValue) {
 		t.Fatalf("JSON mismatch: got %#v, want %#v", gotValue, wantValue)
 	}
+}
+
+func TestContextLifecycleSelectionDecisionsMigrationSplitsAndRollsUpExistingRows(t *testing.T) {
+	ctx := context.Background()
+	pool := freshMigratedDB(t)
+	dsn := teamMigrationDSN(t)
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire database connection: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT set_config('memoh.team_id', $1, false)", team.DefaultTeamID); err != nil {
+		t.Fatalf("bind default team: %v", err)
+	}
+
+	const (
+		botID     = "00000000-0000-0000-0000-00000000b521"
+		sessionID = "00000000-0000-0000-0000-00000000c521"
+		runID     = "00000000-0000-0000-0000-00000000d521"
+	)
+	if _, err := conn.Exec(ctx, `
+WITH principal AS (
+  INSERT INTO users (username, is_active, metadata)
+  VALUES ('lifecycle-split-owner', true, '{}')
+  RETURNING id
+), membership AS (
+  INSERT INTO team_members (team_id, user_id)
+  SELECT $1, principal.id FROM principal
+  RETURNING user_id
+), bot AS (
+  INSERT INTO bots (id, team_id, owner_user_id, name, status, metadata)
+  SELECT $2, $1, membership.user_id, 'lifecycle-split-bot', 'ready', '{}' FROM membership
+  RETURNING id
+)
+INSERT INTO bot_sessions (id, team_id, bot_id, channel_type, title, metadata)
+SELECT $3, $1, bot.id, 'local', 'lifecycle split', '{}' FROM bot
+`, team.DefaultTeamID, botID, sessionID); err != nil {
+		t.Fatalf("seed lifecycle split owner: %v", err)
+	}
+
+	// Roll back only 0146 so a row can be written in the pre-split shape.
+	stepDown(t, dsn, 1)
+	legacySnapshot := `{
+  "version": 2,
+  "counts": {"fragments": 4, "token_estimate": 400},
+  "selection": {"selected": 1, "dropped": 3, "drop_reasons": {"history_budget": 2, "unknown": 1}},
+  "selection_decisions": [
+    {"id": "message.001", "decision": "selected", "token_estimate": 100},
+    {"id": "message.002", "decision": "dropped", "reason": "history_budget", "token_estimate": 120},
+    {"id": "message.003", "decision": "dropped", "reason": " history_budget ", "token_estimate": 80},
+    {"id": "message.004", "decision": "dropped", "token_estimate": 5},
+    {"id": "message.005", "decision": "trimmed", "reason": "output_limit", "token_estimate": 60}
+  ]
+}`
+	if _, err := conn.Exec(ctx, `
+INSERT INTO context_lifecycles (run_id, team_id, bot_id, session_id, status, snapshot)
+VALUES ($1, $2, $3, $4, 'completed', $5::jsonb)
+`, runID, team.DefaultTeamID, botID, sessionID, legacySnapshot); err != nil {
+		t.Fatalf("seed pre-split lifecycle row: %v", err)
+	}
+
+	stepUp(t, dsn, 1)
+	var (
+		embedded  bool
+		decisions int
+		selection []byte
+	)
+	if err := conn.QueryRow(ctx, `
+SELECT snapshot ? 'selection_decisions', jsonb_array_length(selection_decisions), snapshot -> 'selection'
+FROM context_lifecycles WHERE run_id = $1
+`, runID).Scan(&embedded, &decisions, &selection); err != nil {
+		t.Fatalf("inspect migrated lifecycle row: %v", err)
+	}
+	if embedded || decisions != 5 {
+		t.Fatalf("migrated row embedded=%t decisions=%d, want the audit moved to its own column", embedded, decisions)
+	}
+	var trace contextfrag.SelectionTrace
+	if err := json.Unmarshal(selection, &trace); err != nil {
+		t.Fatalf("decode migrated selection trace: %v", err)
+	}
+	wantTokens := map[string]int{"history_budget": 200, "unknown": 5}
+	if trace.Trimmed != 1 || !reflect.DeepEqual(trace.DropReasonTokens, wantTokens) || trace.Dropped != 3 || trace.Selected != 1 {
+		t.Fatalf("migrated selection trace = %+v, want trimmed=1 tokens=%v with counts kept", trace, wantTokens)
+	}
+
+	queries := sqlc.New(conn)
+	latest, err := queries.GetLatestContextLifecycleBySession(ctx, mustParseLifecycleUUID(t, sessionID))
+	if err != nil {
+		t.Fatalf("get latest lifecycle summary: %v", err)
+	}
+	if strings.Contains(string(latest), "selection_decisions") || !strings.Contains(string(latest), "drop_reason_tokens") {
+		t.Fatalf("latest summary = %s, want rolled-up trace without the audit", latest)
+	}
+
+	// Rolling back folds the audit into the snapshot again and removes the rollup.
+	stepDown(t, dsn, 1)
+	var folded []byte
+	if err := conn.QueryRow(ctx, `SELECT snapshot FROM context_lifecycles WHERE run_id = $1`, runID).Scan(&folded); err != nil {
+		t.Fatalf("inspect rolled-back lifecycle row: %v", err)
+	}
+	assertJSONSemanticallyEqual(t, folded, []byte(legacySnapshot))
+	stepUp(t, dsn, 1)
+}
+
+func mustSelectionDecisions(t *testing.T, ctx context.Context, queries *sqlc.Queries, runID pgtype.UUID) []byte {
+	t.Helper()
+	audit, err := queries.GetContextLifecycleSelectionDecisionsByRunID(ctx, runID)
+	if err != nil {
+		t.Fatalf("get selection decisions for %v: %v", runID, err)
+	}
+	return audit
 }

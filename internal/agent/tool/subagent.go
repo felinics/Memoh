@@ -1661,7 +1661,7 @@ func (p *SpawnProvider) persistMessages(
 		var metadata map[string]any
 		if i == lastAssistantIdx && result.ContextLifecycle != nil {
 			metadata = map[string]any{
-				contextfrag.MetadataContextLifecycleKey: *result.ContextLifecycle,
+				contextfrag.MetadataContextLifecycleKey: result.ContextLifecycle.Summary(),
 			}
 		}
 		persisted, err := p.messageService.Persist(ctx, messagepkg.PersistInput{

@@ -72,7 +72,7 @@ type ContextLifecycleAggregates struct {
 
 // GetSessionContextLifecycle godoc
 // @Summary Get session context lifecycle
-// @Description List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source)
+// @Description List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
@@ -208,6 +208,7 @@ type contextLifecycleQueries interface {
 		sqlc.ListRecentAssistantMessagesBySessionParams,
 	) ([]sqlc.ListRecentAssistantMessagesBySessionRow, error)
 	HasUnmaterializedContextLifecycleMetadataBySession(ctx context.Context, sessionID pgtype.UUID) (bool, error)
+	GetLatestContextLifecycleBySession(ctx context.Context, sessionID pgtype.UUID) ([]byte, error)
 }
 
 type contextLifecycleLoad struct {
@@ -297,6 +298,38 @@ func lifecycleTurnsFromRunRows(
 	return turns, nil
 }
 
+// latestContextLifecycleSnapshot reads the newest bounded summary only: one
+// row, no page probe, and never the per-fragment audit.
+func latestContextLifecycleSnapshot(
+	ctx context.Context,
+	queries contextLifecycleQueries,
+	sessionID pgtype.UUID,
+) (contextfrag.LifecycleSnapshot, bool, error) {
+	raw, err := queries.GetLatestContextLifecycleBySession(ctx, sessionID)
+	if err == nil {
+		snapshot, err := contextfrag.DecodeLifecycleSnapshot(raw)
+		if err != nil {
+			return contextfrag.LifecycleSnapshot{}, false, fmt.Errorf("decode latest lifecycle snapshot: %w", err)
+		}
+		return snapshot, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return contextfrag.LifecycleSnapshot{}, false, fmt.Errorf("get latest run lifecycle: %w", err)
+	}
+	legacyRows, err := queries.ListRecentAssistantMessagesBySession(ctx, sqlc.ListRecentAssistantMessagesBySessionParams{
+		SessionID: sessionID,
+		MaxCount:  1,
+	})
+	if err != nil {
+		return contextfrag.LifecycleSnapshot{}, false, fmt.Errorf("list legacy assistant lifecycles: %w", err)
+	}
+	turns := legacyLifecycleTurnsFromRows(legacyRows, 1)
+	if len(turns) == 0 {
+		return contextfrag.LifecycleSnapshot{}, false, nil
+	}
+	return turns[0].Snapshot, true, nil
+}
+
 // legacyLifecycleTurnsFromRows extracts pre-run-table lifecycle snapshots from
 // assistant message metadata, newest first, bounded by limit.
 func legacyLifecycleTurnsFromRows(rows []sqlc.ListRecentAssistantMessagesBySessionRow, limit int) []ContextLifecycleTurn {
@@ -319,17 +352,13 @@ func legacyLifecycleTurnsFromRows(rows []sqlc.ListRecentAssistantMessagesBySessi
 	return turns
 }
 
-func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindBreakdown, []ToolDefBucket) {
-	if len(turns) == 0 {
-		return nil, nil
-	}
-	snapshot := turns[0].Snapshot
+func contextComposition(snapshot contextfrag.LifecycleSnapshot) ([]contextfrag.KindBreakdown, []ToolDefBucket, *contextfrag.ContextBudgetPlan) {
 	var buckets []ToolDefBucket
 	if len(snapshot.ToolDefs) > 0 {
-		byProvider := make(map[string]*ToolDefBucket, 2)
+		byProvider := make(map[string]*ToolDefBucket, 4)
 		for _, def := range snapshot.ToolDefs {
-			bucket, ok := byProvider[def.Provider]
-			if !ok {
+			bucket := byProvider[def.Provider]
+			if bucket == nil {
 				bucket = &ToolDefBucket{Provider: def.Provider}
 				byProvider[def.Provider] = bucket
 			}
@@ -341,13 +370,10 @@ func latestContextComposition(turns []ContextLifecycleTurn) ([]contextfrag.KindB
 			buckets = append(buckets, *bucket)
 		}
 		sort.Slice(buckets, func(i, j int) bool {
-			if buckets[i].TokenEstimate != buckets[j].TokenEstimate {
-				return buckets[i].TokenEstimate > buckets[j].TokenEstimate
-			}
 			return buckets[i].Provider < buckets[j].Provider
 		})
 	}
-	return snapshot.Breakdown, buckets
+	return snapshot.Breakdown, buckets, snapshot.BudgetPlan
 }
 
 func aggregateContextLifecycle(turns []ContextLifecycleTurn) ContextLifecycleAggregates {

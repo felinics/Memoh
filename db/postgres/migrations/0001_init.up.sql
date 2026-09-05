@@ -2408,6 +2408,7 @@ CREATE TABLE IF NOT EXISTS public.context_lifecycles (
     status     TEXT        NOT NULL,
     error_code TEXT,
     snapshot   JSONB       NOT NULL,
+    selection_decisions JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT context_lifecycles_team_run_key UNIQUE (team_id, run_id),
     CONSTRAINT context_lifecycles_status_check CHECK (status IN (

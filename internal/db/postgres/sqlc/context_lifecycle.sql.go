@@ -18,7 +18,8 @@ INSERT INTO context_lifecycles (
   session_id,
   status,
   error_code,
-  snapshot
+  snapshot,
+  selection_decisions
 )
 VALUES (
   $1,
@@ -26,9 +27,10 @@ VALUES (
   $3,
   $4,
   $5::text,
-  $6
+  $6::jsonb - 'selection_decisions',
+  $6::jsonb -> 'selection_decisions'
 )
-RETURNING run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
+RETURNING run_id, bot_id, session_id, status, error_code, created_at
 `
 
 type CreateContextLifecycleParams struct {
@@ -40,7 +42,16 @@ type CreateContextLifecycleParams struct {
 	Snapshot  []byte      `json:"snapshot"`
 }
 
-func (q *Queries) CreateContextLifecycle(ctx context.Context, arg CreateContextLifecycleParams) (ContextLifecycle, error) {
+type CreateContextLifecycleRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateContextLifecycle(ctx context.Context, arg CreateContextLifecycleParams) (CreateContextLifecycleRow, error) {
 	row := q.db.QueryRow(ctx, createContextLifecycle,
 		arg.RunID,
 		arg.BotID,
@@ -49,15 +60,13 @@ func (q *Queries) CreateContextLifecycle(ctx context.Context, arg CreateContextL
 		arg.ErrorCode,
 		arg.Snapshot,
 	)
-	var i ContextLifecycle
+	var i CreateContextLifecycleRow
 	err := row.Scan(
 		&i.RunID,
-		&i.TeamID,
 		&i.BotID,
 		&i.SessionID,
 		&i.Status,
 		&i.ErrorCode,
-		&i.Snapshot,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -70,9 +79,20 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = $1
 `
 
-func (q *Queries) GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (ContextLifecycle, error) {
+type GetContextLifecycleByRunIDRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	Snapshot  []byte             `json:"snapshot"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (GetContextLifecycleByRunIDRow, error) {
 	row := q.db.QueryRow(ctx, getContextLifecycleByRunID, runID)
-	var i ContextLifecycle
+	var i GetContextLifecycleByRunIDRow
 	err := row.Scan(
 		&i.RunID,
 		&i.TeamID,
@@ -84,6 +104,20 @@ func (q *Queries) GetContextLifecycleByRunID(ctx context.Context, runID pgtype.U
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getContextLifecycleSelectionDecisionsByRunID = `-- name: GetContextLifecycleSelectionDecisionsByRunID :one
+SELECT selection_decisions
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+`
+
+func (q *Queries) GetContextLifecycleSelectionDecisionsByRunID(ctx context.Context, runID pgtype.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getContextLifecycleSelectionDecisionsByRunID, runID)
+	var selection_decisions []byte
+	err := row.Scan(&selection_decisions)
+	return selection_decisions, err
 }
 
 const getLatestAssistantContextLifecycleByRunID = `-- name: GetLatestAssistantContextLifecycleByRunID :one
@@ -127,6 +161,22 @@ func (q *Queries) GetLatestAssistantContextLifecycleMetadataByRunID(ctx context.
 	return metadata, err
 }
 
+const getLatestContextLifecycleBySession = `-- name: GetLatestContextLifecycleBySession :one
+SELECT (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
+FROM context_lifecycles
+WHERE team_id = public.memoh_current_team_id()
+  AND session_id = $1
+ORDER BY created_at DESC, run_id DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestContextLifecycleBySession(ctx context.Context, sessionID pgtype.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getLatestContextLifecycleBySession, sessionID)
+	var snapshot []byte
+	err := row.Scan(&snapshot)
+	return snapshot, err
+}
+
 const hasUnmaterializedContextLifecycleMetadataBySession = `-- name: HasUnmaterializedContextLifecycleMetadataBySession :one
 SELECT EXISTS (
   SELECT 1
@@ -155,7 +205,7 @@ SELECT
   id,
   run_id,
   role,
-  metadata,
+  (metadata #- '{context_lifecycle,selection_decisions}'::text[])::jsonb AS metadata,
   created_at
 FROM bot_history_messages
 WHERE session_id = $1
@@ -210,7 +260,7 @@ SELECT
   status,
   error_code,
   created_at,
-  snapshot
+  (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
 FROM context_lifecycles
 WHERE team_id = public.memoh_current_team_id()
   AND session_id = $1
@@ -322,13 +372,14 @@ func (q *Queries) ListTerminalSessionRunsNeedingContextLifecycle(ctx context.Con
 
 const updateAbortedContextLifecycleSnapshot = `-- name: UpdateAbortedContextLifecycleSnapshot :one
 UPDATE context_lifecycles
-SET snapshot = $1
+SET snapshot = $1::jsonb - 'selection_decisions',
+    selection_decisions = COALESCE($1::jsonb -> 'selection_decisions', selection_decisions)
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $2
   AND bot_id = $3
   AND session_id = $4
   AND status = 'aborted'
-RETURNING run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
+RETURNING run_id, bot_id, session_id, status, error_code, created_at
 `
 
 type UpdateAbortedContextLifecycleSnapshotParams struct {
@@ -338,22 +389,29 @@ type UpdateAbortedContextLifecycleSnapshotParams struct {
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
-func (q *Queries) UpdateAbortedContextLifecycleSnapshot(ctx context.Context, arg UpdateAbortedContextLifecycleSnapshotParams) (ContextLifecycle, error) {
+type UpdateAbortedContextLifecycleSnapshotRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpdateAbortedContextLifecycleSnapshot(ctx context.Context, arg UpdateAbortedContextLifecycleSnapshotParams) (UpdateAbortedContextLifecycleSnapshotRow, error) {
 	row := q.db.QueryRow(ctx, updateAbortedContextLifecycleSnapshot,
 		arg.Snapshot,
 		arg.RunID,
 		arg.BotID,
 		arg.SessionID,
 	)
-	var i ContextLifecycle
+	var i UpdateAbortedContextLifecycleSnapshotRow
 	err := row.Scan(
 		&i.RunID,
-		&i.TeamID,
 		&i.BotID,
 		&i.SessionID,
 		&i.Status,
 		&i.ErrorCode,
-		&i.Snapshot,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -366,7 +424,8 @@ INSERT INTO context_lifecycles (
   session_id,
   status,
   error_code,
-  snapshot
+  snapshot,
+  selection_decisions
 )
 VALUES (
   $1,
@@ -374,7 +433,8 @@ VALUES (
   $3,
   'aborted',
   NULL,
-  $4
+  $4::jsonb - 'selection_decisions',
+  $4::jsonb -> 'selection_decisions'
 )
 ON CONFLICT (run_id) DO UPDATE
 SET
@@ -383,7 +443,7 @@ SET
 WHERE context_lifecycles.team_id = public.memoh_current_team_id()
   AND context_lifecycles.bot_id = EXCLUDED.bot_id
   AND context_lifecycles.session_id = EXCLUDED.session_id
-RETURNING run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
+RETURNING run_id, bot_id, session_id, status, error_code, created_at
 `
 
 type UpsertAbortedContextLifecycleParams struct {
@@ -393,22 +453,29 @@ type UpsertAbortedContextLifecycleParams struct {
 	Snapshot  []byte      `json:"snapshot"`
 }
 
-func (q *Queries) UpsertAbortedContextLifecycle(ctx context.Context, arg UpsertAbortedContextLifecycleParams) (ContextLifecycle, error) {
+type UpsertAbortedContextLifecycleRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertAbortedContextLifecycle(ctx context.Context, arg UpsertAbortedContextLifecycleParams) (UpsertAbortedContextLifecycleRow, error) {
 	row := q.db.QueryRow(ctx, upsertAbortedContextLifecycle,
 		arg.RunID,
 		arg.BotID,
 		arg.SessionID,
 		arg.Snapshot,
 	)
-	var i ContextLifecycle
+	var i UpsertAbortedContextLifecycleRow
 	err := row.Scan(
 		&i.RunID,
-		&i.TeamID,
 		&i.BotID,
 		&i.SessionID,
 		&i.Status,
 		&i.ErrorCode,
-		&i.Snapshot,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -421,7 +488,8 @@ INSERT INTO context_lifecycles (
   session_id,
   status,
   error_code,
-  snapshot
+  snapshot,
+  selection_decisions
 )
 VALUES (
   $1,
@@ -429,7 +497,8 @@ VALUES (
   $3,
   $4,
   $5::text,
-  $6
+  $6::jsonb - 'selection_decisions',
+  $6::jsonb -> 'selection_decisions'
 )
 ON CONFLICT (run_id) DO UPDATE
 SET
@@ -443,12 +512,17 @@ SET
   snapshot = CASE
     WHEN $8::boolean THEN EXCLUDED.snapshot
     ELSE context_lifecycles.snapshot
+  END,
+  selection_decisions = CASE
+    WHEN $8::boolean
+      THEN COALESCE(EXCLUDED.selection_decisions, context_lifecycles.selection_decisions)
+    ELSE context_lifecycles.selection_decisions
   END
 WHERE context_lifecycles.team_id = public.memoh_current_team_id()
   AND context_lifecycles.team_id = EXCLUDED.team_id
   AND context_lifecycles.bot_id = EXCLUDED.bot_id
   AND context_lifecycles.session_id = EXCLUDED.session_id
-RETURNING run_id, team_id, bot_id, session_id, status, error_code, snapshot, created_at
+RETURNING run_id, bot_id, session_id, status, error_code, created_at
 `
 
 type UpsertTerminalContextLifecycleParams struct {
@@ -462,7 +536,16 @@ type UpsertTerminalContextLifecycleParams struct {
 	ReplaceSnapshot  bool        `json:"replace_snapshot"`
 }
 
-func (q *Queries) UpsertTerminalContextLifecycle(ctx context.Context, arg UpsertTerminalContextLifecycleParams) (ContextLifecycle, error) {
+type UpsertTerminalContextLifecycleRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertTerminalContextLifecycle(ctx context.Context, arg UpsertTerminalContextLifecycleParams) (UpsertTerminalContextLifecycleRow, error) {
 	row := q.db.QueryRow(ctx, upsertTerminalContextLifecycle,
 		arg.RunID,
 		arg.BotID,
@@ -473,15 +556,13 @@ func (q *Queries) UpsertTerminalContextLifecycle(ctx context.Context, arg Upsert
 		arg.ReplaceErrorCode,
 		arg.ReplaceSnapshot,
 	)
-	var i ContextLifecycle
+	var i UpsertTerminalContextLifecycleRow
 	err := row.Scan(
 		&i.RunID,
-		&i.TeamID,
 		&i.BotID,
 		&i.SessionID,
 		&i.Status,
 		&i.ErrorCode,
-		&i.Snapshot,
 		&i.CreatedAt,
 	)
 	return i, err

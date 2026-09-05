@@ -7676,7 +7676,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
             "get": {
-                "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source)",
+                "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs",
                 "tags": [
                     "sessions"
                 ],
@@ -18508,6 +18508,13 @@ const docTemplate = `{
         "contextfrag.SelectionTrace": {
             "type": "object",
             "properties": {
+                "drop_reason_tokens": {
+                    "description": "DropReasonTokens is the token estimate lost per drop reason, rolled up\nwhen the snapshot is built so readers never need the per-fragment audit.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
                 "drop_reasons": {
                     "type": "object",
                     "additionalProperties": {
@@ -18518,6 +18525,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "selected": {
+                    "type": "integer"
+                },
+                "trimmed": {
                     "type": "integer"
                 }
             }
@@ -19729,6 +19739,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.CompactionInfo": {
+            "type": "object",
+            "properties": {
+                "auto_tokens": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
         "handlers.ConnectorCredentialRequest": {
             "type": "object",
             "properties": {
@@ -20000,6 +20021,12 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/contextfrag.KindBreakdown"
                     }
+                },
+                "budget_plan": {
+                    "$ref": "#/definitions/contextfrag.ContextBudgetPlan"
+                },
+                "compaction": {
+                    "$ref": "#/definitions/handlers.CompactionInfo"
                 },
                 "context_window": {
                     "type": "integer"

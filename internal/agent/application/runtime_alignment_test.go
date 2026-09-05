@@ -61,7 +61,7 @@ type blockingLifecycleCreateStore struct {
 func (s *blockingLifecycleCreateStore) CreateContextLifecycle(
 	ctx context.Context,
 	arg sqlc.CreateContextLifecycleParams,
-) (sqlc.ContextLifecycle, error) {
+) (sqlc.CreateContextLifecycleRow, error) {
 	close(s.started)
 	<-s.release
 	return s.recordingContextLifecycleStore.CreateContextLifecycle(ctx, arg)

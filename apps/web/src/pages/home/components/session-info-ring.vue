@@ -4,6 +4,7 @@
          的复合触发器,刻意无 hover 填充(安静的状态环,不是操作钮);
          rounded-full 几何与 circle 令牌一致,chrome 关系不同,留在本地。 -->
     <PopoverTrigger
+      ref="triggerRef"
       as="button"
       type="button"
       :class="[
@@ -11,11 +12,9 @@
         ($attrs.class as string | undefined) ?? '',
       ]"
       :disabled="!sessionId"
-      :aria-label="t('chat.sessionInfoRingAria')"
+      :aria-label="ringLabel"
       @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
-      @focus="handleMouseEnter"
-      @blur="handleMouseLeave"
     >
       <svg
         viewBox="0 0 24 24"
@@ -53,37 +52,75 @@
       :side-offset="8"
       @mouseenter="handleContentMouseEnter"
       @mouseleave="handleMouseLeave"
-      @open-auto-focus="(e) => e.preventDefault()"
+      @open-auto-focus="handleOpenAutoFocus"
     >
       <SessionInfoPanel
         :visible="open"
         :override-model-id="overrideModelId"
         :fallback-context-window="fallbackContextWindow"
+        @open-lifecycle="openLifecycle"
       />
     </PopoverContent>
   </Popover>
+  <!-- Sibling of the Popover: the modal's pointer-events lock closes the
+       hover popover, which unmounts the panel — a dialog nested there would
+       unmount with it. -->
+  <ContextLifecycleDialog
+    v-if="lifecycleEverOpened"
+    v-model:open="lifecycleOpen"
+  />
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Popover, PopoverContent, PopoverTrigger } from '@felinic/ui'
 import SessionInfoPanel from './session-info-panel.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
+import { contextPressureToneClass } from '../composables/context-categories'
 
 defineOptions({ inheritAttrs: false })
 
+const ContextLifecycleDialog = defineAsyncComponent(() => import('./context-lifecycle-dialog.vue'))
+
 const props = defineProps<{
+  visible?: boolean
   overrideModelId?: string
   fallbackContextWindow?: number | null
 }>()
 
 const { t } = useI18n()
 const open = ref(false)
+const lifecycleOpen = ref(false)
+const lifecycleEverOpened = ref(false)
+const triggerRef = ref<{ $el?: HTMLElement } | null>(null)
 
+function openLifecycle() {
+  clearTimers()
+  open.value = false
+  lifecycleEverOpened.value = true
+  lifecycleOpen.value = true
+}
+
+// The dialog's previous focus target lives in the closed popover, so hand
+// focus back to the ring instead of letting it fall to the body.
+watch(lifecycleOpen, (isOpen) => {
+  if (!isOpen) triggerRef.value?.$el?.focus?.()
+})
+
+// Hover opens without moving focus; a click or Enter on the trigger lets the
+// popover take focus so its actions are reachable from the keyboard.
+let openedByHover = false
+function handleOpenAutoFocus(event: Event) {
+  if (openedByHover) event.preventDefault()
+  openedByHover = false
+}
+
+const visibleRef = computed(() => props.visible ?? true)
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
-const { contextPercent, sessionId } = useSessionInfo({
+const { contextPercent, contextWindow, sessionId } = useSessionInfo({
+  visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,
 })
@@ -96,11 +133,10 @@ const dashOffset = computed(() => {
   return circumference.value * (1 - pct / 100)
 })
 
-const ringColorClass = computed(() => {
-  if (contextPercent.value >= 90) return 'text-destructive'
-  if (contextPercent.value >= 70) return 'text-warning'
-  return 'text-foreground'
-})
+const ringColorClass = computed(() => contextPressureToneClass(contextPercent.value, 'text'))
+const ringLabel = computed(() => (contextWindow.value == null
+  ? t('chat.sessionInfoRingAria')
+  : t('chat.sessionInfoRingAriaUsage', { percent: Math.round(contextPercent.value) })))
 
 let openTimer: ReturnType<typeof setTimeout> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null
@@ -124,6 +160,7 @@ function handleMouseEnter() {
   }
   if (open.value) return
   openTimer = setTimeout(() => {
+    openedByHover = true
     open.value = true
     openTimer = null
   }, 150)
