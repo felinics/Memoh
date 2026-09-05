@@ -725,7 +725,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Mode and skill commands remain control-plane messages even while an
 	// ask_user request is pending; they must not become text-question answers.
 	if pendingSkillIntent == nil && !isModeCommand {
-		if handled, err := p.handlePlainTextUserInput(ctx, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
+		if handled, err := p.handlePlainTextUserInput(ctx, cfg, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
 			return err
 		}
 	}

@@ -30,6 +30,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
@@ -74,7 +75,16 @@ func (f *fakeChatGateway) AdvancePlainTextUserInput(_ context.Context, input use
 	return f.advanceResult, f.advanceErr
 }
 
-type nativeUserInputTestAdapter struct{ typ channel.ChannelType }
+type nativeUserInputTestAdapter struct {
+	typ         channel.ChannelType
+	cardUpdates []string
+	cardPresent bool
+}
+
+func (a *nativeUserInputTestAdapter) UpdateUserInputCard(_ context.Context, _ channel.ChannelConfig, id string, _ *i18n.Localizer) (bool, error) {
+	a.cardUpdates = append(a.cardUpdates, id)
+	return a.cardPresent, nil
+}
 
 func (a *nativeUserInputTestAdapter) Type() channel.ChannelType { return a.typ }
 
@@ -3899,7 +3909,8 @@ func TestTelegramPendingTextRoutesToDecision(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(strconv.FormatBool(fail), func(t *testing.T) {
 			registry := channel.NewRegistry()
-			registry.MustRegister(&nativeUserInputTestAdapter{typ: channel.ChannelType("telegram")})
+			adapter := &nativeUserInputTestAdapter{typ: channel.ChannelType("telegram"), cardPresent: true}
+			registry.MustRegister(adapter)
 			routes := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
 			gateway := &fakeChatGateway{advanceResult: userinput.AdvanceTextResult{Handled: true, Request: userinput.Request{
 				ID: "input-1", UIPayload: userinput.UIPayload{Questions: []userinput.UIQuestion{{ID: "q1", Text: "End time?", Kind: userinput.QuestionKindSingleSelect, AllowCustom: true}}},
@@ -3927,7 +3938,10 @@ func TestTelegramPendingTextRoutesToDecision(t *testing.T) {
 			if got := gateway.userInputInput.Answers; len(got) != 1 || got[0].CustomText != "0点" {
 				t.Fatalf("answers: %#v", got)
 			}
-			if fail && len(sender.sent) != 0 {
+			if (len(adapter.cardUpdates) == 1) != (!fail) {
+				t.Fatalf("card updates: %#v", adapter.cardUpdates)
+			}
+			if len(sender.sent) != 0 {
 				t.Fatalf("failed answer announced success: %#v", sender.sent)
 			}
 			if fail {
@@ -4000,6 +4014,22 @@ func TestTelegramBusyProducesRetryHint(t *testing.T) {
 	for _, event := range sender.events {
 		if event.Type == channel.StreamEventError {
 			t.Fatalf("busy surfaced as error: %#v", event)
+		}
+	}
+}
+
+func TestNativeQuestionAuthorizationUsesSenderAndSource(t *testing.T) {
+	for _, allowed := range []bool{true, false} {
+		checker := &fakeChatACL{allowed: allowed}
+		p := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "actor"}}, &fakePolicyService{}, "", 0)
+		p.SetACLService(checker)
+		msg := channel.InboundMessage{BotID: "bot", Channel: channel.ChannelType("telegram"), Sender: channel.Identity{SubjectID: "42"}, Conversation: channel.Conversation{ID: "-123", Type: channel.ConversationTypeGroup}}
+		got, err := p.AuthorizeUserInputInteraction(context.Background(), channel.ChannelConfig{BotID: "bot", ChannelType: msg.Channel}, msg)
+		if err != nil || got != allowed {
+			t.Fatalf("allowed=%v, err=%v", got, err)
+		}
+		if checker.calls != 1 || checker.lastReq.ChannelIdentityID != "actor" || checker.lastReq.BotID != "bot" || checker.lastReq.SourceScope.ConversationID != "-123" {
+			t.Fatalf("wrong ACL scope: %#v", checker.lastReq)
 		}
 	}
 }

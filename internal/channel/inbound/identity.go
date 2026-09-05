@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/identities"
 )
@@ -340,4 +341,24 @@ func extractThreadID(msg channel.InboundMessage) string {
 		return strings.TrimSpace(msg.Conversation.ThreadID)
 	}
 	return ""
+}
+
+// AuthorizeUserInputInteraction runs before a native adapter changes a shared
+// answer draft. Authorizing only the later /respond command is too late: a
+// denied click would otherwise leave answers for the next authorized sender.
+func (p *ChannelInboundProcessor) AuthorizeUserInputInteraction(ctx context.Context, cfg channel.ChannelConfig, msg channel.InboundMessage) (bool, error) {
+	state, err := p.requireIdentity(ctx, cfg, msg)
+	if err != nil {
+		return false, err
+	}
+	if state.Decision != nil && state.Decision.Stop {
+		return false, nil
+	}
+	if p.acl == nil {
+		return false, nil
+	}
+	return p.acl.Evaluate(ctx, acl.EvaluateRequest{
+		BotID: state.Identity.BotID, ChannelIdentityID: state.Identity.ChannelIdentityID, ChannelType: msg.Channel.String(),
+		SourceScope: acl.SourceScope{ConversationType: channel.NormalizeConversationType(msg.Conversation.Type), ConversationID: strings.TrimSpace(msg.Conversation.ID), ThreadID: extractThreadID(msg)},
+	})
 }

@@ -66,6 +66,7 @@ type TelegramAdapter struct {
 	askUserPromptsOnce sync.Once
 	askUserPrompts     *askUserTextPromptStore
 	userInput          askUserInteractionService
+	userInputAuthorize func(context.Context, channel.ChannelConfig, channel.InboundMessage) (bool, error)
 }
 
 // askUserInteractionService is the slice of *userinput.Service the adapter
@@ -74,6 +75,11 @@ type askUserInteractionService interface {
 	Get(ctx context.Context, requestID string) (userinput.Request, error)
 	AdvanceInteraction(ctx context.Context, input userinput.AdvanceInteractionInput) (userinput.AdvanceInteractionResult, error)
 	UpdatePromptMessage(ctx context.Context, requestID, promptMessageID, externalID string) (userinput.Request, error)
+}
+
+// SetUserInputAuthorizer gates native interactions before they mutate a draft.
+func (a *TelegramAdapter) SetUserInputAuthorizer(authorize func(context.Context, channel.ChannelConfig, channel.InboundMessage) (bool, error)) {
+	a.userInputAuthorize = authorize
 }
 
 // SetUserInputService injects the durable ask_user interaction service.
@@ -734,6 +740,11 @@ func (a *TelegramAdapter) handleAskUserWizardCallback(ctx context.Context, cfg c
 		msgID = cb.Message.ID
 	}
 
+	if !a.authorizeAskUser(ctx, cfg, update, parsed.RequestID) {
+		_ = bot.Respond(cb, &tele.CallbackResponse{Text: loc.T("cmd.userInput.forbidden"), ShowAlert: true})
+		return true
+	}
+
 	op, needText := interactionOpFromCallback(parsed)
 	result, err := a.userInput.AdvanceInteraction(ctx, userinput.AdvanceInteractionInput{
 		BotID:     cfg.BotID,
@@ -841,6 +852,14 @@ func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg cha
 	if a.userInput == nil {
 		return false
 	}
+	if !a.authorizeAskUser(ctx, cfg, update, prompt.RequestID) {
+		a.askUserPromptStore().put(raw.Chat.ID, raw.ReplyTo.ID, prompt)
+		if bot != nil {
+			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), loc.T("cmd.userInput.forbidden"))
+		}
+		return true
+	}
+
 	text := strings.TrimSpace(raw.Text)
 	if text == "" {
 		text = strings.TrimSpace(raw.Caption)
@@ -945,7 +964,8 @@ func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, u
 	}
 	// Prefer callback identity; fall back to message (force-reply path).
 	if update != nil && update.Callback != nil && update.Callback.Message != nil {
-		raw := update.Callback.Message
+		rawCopy := *update.Callback.Message
+		raw := &rawCopy
 		raw.Text = "/respond"
 		raw.Sender = update.Callback.Sender
 		msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, extraMeta(update.ID))
@@ -956,7 +976,8 @@ func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, u
 		return msg, true
 	}
 	if update != nil && update.Message != nil {
-		raw := update.Message
+		rawCopy := *update.Message
+		raw := &rawCopy
 		raw.Text = "/respond"
 		msg, ok := a.toInboundTelegramMessage(nil, cfg, raw, "/respond", nil, extraMeta(update.ID))
 		if !ok {
@@ -2409,4 +2430,52 @@ func (a *TelegramAdapter) Unreact(_ context.Context, cfg channel.ChannelConfig, 
 		return err
 	}
 	return clearTelegramReaction(bot, target, messageID)
+}
+
+func (a *TelegramAdapter) authorizeAskUser(ctx context.Context, cfg channel.ChannelConfig, update *tele.Update, requestID string) bool {
+	if a.userInputAuthorize == nil {
+		return false
+	}
+	msg, ok := a.buildAskUserSubmitInbound(cfg, update, userinput.Request{ID: requestID}, 0)
+	if !ok {
+		return false
+	}
+	allowed, err := a.userInputAuthorize(ctx, cfg, msg)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Warn("telegram: ask_user authorization failed", slog.Any("error", err))
+		}
+		return false
+	}
+	return allowed
+}
+
+// UpdateUserInputCard keeps the original keyboard in sync when ordinary text
+// advances the same request. A completed draft is not an accepted submission.
+func (a *TelegramAdapter) UpdateUserInputCard(ctx context.Context, cfg channel.ChannelConfig, requestID string, loc *i18n.Localizer) (bool, error) {
+	if a.userInput == nil {
+		return false, nil
+	}
+	req, err := a.userInput.Get(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	if req.BotID != cfg.BotID || req.SourcePlatform != Type.String() || req.PromptExternalMessageID == "" || req.ReplyTarget == "" {
+		return false, nil
+	}
+	var text string
+	var actions []channel.Action
+	switch req.Status {
+	case userinput.StatusSubmitted:
+		text = formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
+	case userinput.StatusPending:
+		if req.Interaction.Completed {
+			return false, nil
+		}
+		text, actions = renderAskUserPage(req.ID, loc, req.UIPayload, req.Interaction)
+	default:
+		return false, nil
+	}
+	err = a.Update(ctx, cfg, req.ReplyTarget, req.PromptExternalMessageID, channel.PreparedMessage{Message: channel.Message{Text: text, Actions: actions}})
+	return err == nil, err
 }

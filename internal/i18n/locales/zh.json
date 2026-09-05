@@ -445,6 +445,7 @@
       "parseFailed": "无法识别。请回复对应请求发送 /approve 或 /reject，或点按下方按钮。"
     },
     "userInput": {
+      "forbidden": "你没有权限回答这个问题。",
       "busy": "Bot 仍在处理任务。请回答待处理的问题，或用 /stop 停止后重新发送消息。",
       "submitFailed": "答案提交失败，请重试。",
       "unavailable": "⚠️ 当前无法回复用户输入请求。",

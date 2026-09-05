@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -16,6 +17,7 @@ import (
 // the next reply.
 func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	ctx context.Context,
+	cfg channel.ChannelConfig,
 	msg channel.InboundMessage,
 	sender channel.StreamReplySender,
 	identity InboundIdentity,
@@ -46,6 +48,9 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	}
 	loc := p.localizer(ctx, identity.BotID)
 	if !result.Request.Interaction.Completed {
+		if p.updateUserInputCard(ctx, cfg, result.Request.ID, loc) && !result.Invalid {
+			return true, nil
+		}
 		return true, sender.Send(ctx, channel.OutboundMessage{
 			Target: strings.TrimSpace(msg.ReplyTarget),
 			Message: plainTextUserInputMessage(
@@ -67,6 +72,9 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	})
 	if err != nil {
 		return true, err
+	}
+	if p.updateUserInputCard(ctx, cfg, result.Request.ID, loc) {
+		return true, nil
 	}
 	return true, sender.Send(ctx, channel.OutboundMessage{
 		Target:  strings.TrimSpace(msg.ReplyTarget),
@@ -155,4 +163,30 @@ func replyTextMessage(text string, replyMessageID string) channel.Message {
 
 func isUserInputEvent(event *channel.StreamEvent) bool {
 	return event != nil && event.Type == channel.StreamEventToolCallStart && event.ToolCall != nil && hasUserInputAction(event.ToolCall.Actions)
+}
+
+// Native cards share the persisted cursor with text replies. The adapter reads
+// the latest state so submission is never inferred from a completed draft.
+type userInputCardUpdater interface {
+	UpdateUserInputCard(context.Context, channel.ChannelConfig, string, *i18n.Localizer) (bool, error)
+}
+
+func (p *ChannelInboundProcessor) updateUserInputCard(ctx context.Context, cfg channel.ChannelConfig, requestID string, loc *i18n.Localizer) bool {
+	if p.registry == nil {
+		return false
+	}
+	adapter, ok := p.registry.Get(cfg.ChannelType)
+	if !ok {
+		return false
+	}
+	updater, ok := adapter.(userInputCardUpdater)
+	if !ok {
+		return false
+	}
+	updated, err := updater.UpdateUserInputCard(ctx, cfg, requestID, loc)
+	if err != nil {
+		p.logger.Warn("update user input card failed", slog.Any("error", err))
+		return false
+	}
+	return updated
 }
