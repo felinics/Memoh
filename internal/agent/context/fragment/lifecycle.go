@@ -318,6 +318,25 @@ func (s LifecycleSnapshot) Summary() LifecycleSnapshot {
 	return s
 }
 
+// RowCopy is the copy stamped on every assistant row of a run. The run row
+// keeps the trace, the fragment refs, and the tool definition hashes; the
+// per-row copy exists for readers of sessions that predate the run table
+// and carries only the bounded accounting.
+func (s LifecycleSnapshot) RowCopy() LifecycleSnapshot {
+	s = s.Summary()
+	s.RunTrace = nil
+	s.Fragments = nil
+	if len(s.ToolDefs) > 0 {
+		defs := make([]ToolDefAccounting, len(s.ToolDefs))
+		copy(defs, s.ToolDefs)
+		for i := range defs {
+			defs[i].ContentHash = ""
+		}
+		s.ToolDefs = defs
+	}
+	return s
+}
+
 // DecodeLifecycleSnapshot parses a durable snapshot of any persisted version.
 // Version-1 rows carried a nested cache_plan object; its fields map onto the
 // flattened version-2 fields and the decoded snapshot is normalized to the

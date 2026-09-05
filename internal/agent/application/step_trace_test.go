@@ -268,13 +268,15 @@ func TestContextLifecycleRowCopyOmitsRunTrace(t *testing.T) {
 	t.Parallel()
 
 	holder := contextfrag.NewLifecycleHolder()
-	holder.SetManifest(contextfrag.BuildManifest(nil))
+	manifest := contextfrag.BuildManifest(nil)
+	manifest.ToolDefs = []contextfrag.ToolDefAccounting{{Provider: "workspace", Name: "exec", TokenEstimate: 22, ContentHash: "tool-exec"}}
+	holder.SetManifest(manifest)
 	holder.SetRunTraceSource(func() *contextfrag.RunTrace { return &contextfrag.RunTrace{Steps: 1} })
 	messages := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("answer")})
 	opts := storeRoundOptions{ContextLifecycle: holder}.withContextLifecycleMetadata(slog.New(slog.DiscardHandler), ChatRequest{}, messages)
 	rowCopy, ok := opts.MessageMetadataByIndex[0][contextfrag.MetadataContextLifecycleKey].(contextfrag.LifecycleSnapshot)
-	if !ok || rowCopy.RunTrace != nil {
-		t.Fatalf("row lifecycle copy = %#v, want no run trace", opts.MessageMetadataByIndex[0])
+	if !ok || rowCopy.RunTrace != nil || len(rowCopy.ToolDefs) != 1 || rowCopy.ToolDefs[0].ContentHash != "" {
+		t.Fatalf("row lifecycle copy = %#v, want no run trace and no tool hashes", opts.MessageMetadataByIndex[0])
 	}
 	if snapshot, _ := holder.Snapshot(); snapshot.RunTrace == nil {
 		t.Fatalf("terminal snapshot lost its run trace")

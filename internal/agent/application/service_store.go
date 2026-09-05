@@ -133,10 +133,7 @@ func (opts storeRoundOptions) withContextLifecycleMetadata(logger *slog.Logger, 
 	if existing == nil {
 		existing = map[string]any{}
 	}
-	summary := snapshot.Summary()
-	summary.RunTrace = nil
-	summary.Fragments = nil
-	existing[contextfrag.MetadataContextLifecycleKey] = summary
+	existing[contextfrag.MetadataContextLifecycleKey] = snapshot.RowCopy()
 	opts.MessageMetadataByIndex[idx] = existing
 	return opts
 }

@@ -164,3 +164,28 @@ func TestLifecycleSnapshotRefsCarryTheStoredTextHash(t *testing.T) {
 		}
 	}
 }
+
+func TestRowCopyKeepsOnlyTheBoundedAccounting(t *testing.T) {
+	t.Parallel()
+
+	holder := NewLifecycleHolder()
+	holder.SetTextSink(&recordingTextSink{})
+	frags := textFragments()
+	holder.SetManifest(BuildManifest(frags))
+	holder.RecordFragmentTexts(frags)
+	holder.SetRunTraceSource(func() *RunTrace { return &RunTrace{Steps: 1} })
+	snapshot, _ := holder.Snapshot()
+	snapshot.ToolDefs = []ToolDefAccounting{{Provider: "workspace", Name: "exec", Bytes: 90, TokenEstimate: 22, ContentHash: "tool-exec"}}
+	snapshot.SelectionDecisions = []SelectionDecision{{ID: "system.prompt.body"}}
+
+	row := snapshot.RowCopy()
+	if row.RunTrace != nil || row.Fragments != nil || row.SelectionDecisions != nil {
+		t.Fatalf("row copy keeps run facts: %#v", row)
+	}
+	if len(row.ToolDefs) != 1 || row.ToolDefs[0].ContentHash != "" || row.ToolDefs[0].TokenEstimate != 22 {
+		t.Fatalf("row copy must keep tool accounting without hashes: %#v", row.ToolDefs)
+	}
+	if snapshot.ToolDefs[0].ContentHash != "tool-exec" || snapshot.RunTrace == nil || len(snapshot.Fragments) != 3 {
+		t.Fatalf("the run snapshot must not be touched: %#v", snapshot)
+	}
+}
