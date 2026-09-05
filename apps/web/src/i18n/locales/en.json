@@ -1262,6 +1262,7 @@
       "contextHistoryCut": "{messages} messages · {tokens} tok · {dropped} dropped",
       "inspectorTexts": "Text",
       "inspectorTextsFailed": "Could not load the fragment texts",
+      "inspectorTextsForbidden": "Reading the injected texts needs workspace access on this bot",
       "inspectorTextUnavailable": "Text was not stored for this fragment"
     },
     "infoCacheHitRate": "Cache Hit Rate",

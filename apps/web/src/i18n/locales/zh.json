@@ -1262,6 +1262,7 @@
       "contextHistoryCut": "{messages} 条消息 · {tokens} tok · 丢弃 {dropped}",
       "inspectorTexts": "正文",
       "inspectorTextsFailed": "无法加载片段正文",
+      "inspectorTextsForbidden": "查看注入文本需要该 Bot 的工作区读取权限",
       "inspectorTextUnavailable": "该片段没有存储正文"
     },
     "infoCacheHitRate": "Cache 命中率",

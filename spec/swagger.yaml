@@ -3462,7 +3462,9 @@ definitions:
           $ref: '#/definitions/handlers.ContextFragmentPreview'
         description: |-
           FragmentPreviews maps a text hash referenced by the page's fragment
-          refs and tool definitions to the head of its stored text.
+          refs and tool definitions to the head of its stored text. Present only
+          for callers who may read the bot's workspace, because the texts include
+          workspace files and hook output.
         type: object
       has_more:
         description: HasMore reports whether older lifecycle turns exist beyond this
@@ -11737,8 +11739,10 @@ paths:
     get:
       description: Return every fragment the run put in front of the model outside
         the conversation (system prompt pieces, workspace rules, tool usage, skills,
-        memory recall, tool definitions) with the text that was stored for it. Conversation
-        messages are not included; the history holds them
+        tool definitions) with the text that was stored for it. Conversation messages
+        are not included; the history holds them. The texts include workspace files
+        and hook output, so the caller needs workspace_read on the bot besides access
+        to the session
       parameters:
       - description: Bot ID
         in: path

@@ -1240,6 +1240,7 @@
       "contextHistoryCut": "{messages} 件 · {tokens} tok · 除外 {dropped}",
       "inspectorTexts": "本文",
       "inspectorTextsFailed": "フラグメント本文を読み込めませんでした",
+      "inspectorTextsForbidden": "注入テキストの閲覧にはこの Bot の Workspace 読み取り権限が必要です",
       "inspectorTextUnavailable": "このフラグメントの本文は保存されていません"
     },
     "infoCacheHitRate": "キャッシュヒット率",

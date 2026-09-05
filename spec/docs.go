@@ -7864,7 +7864,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments": {
             "get": {
-                "description": "Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, memory recall, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them",
+                "description": "Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them. The texts include workspace files and hook output, so the caller needs workspace_read on the bot besides access to the session",
                 "tags": [
                     "sessions"
                 ],
@@ -20391,7 +20391,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/handlers.ContextLifecycleAggregates"
                 },
                 "fragment_previews": {
-                    "description": "FragmentPreviews maps a text hash referenced by the page's fragment\nrefs and tool definitions to the head of its stored text.",
+                    "description": "FragmentPreviews maps a text hash referenced by the page's fragment\nrefs and tool definitions to the head of its stored text. Present only\nfor callers who may read the bot's workspace, because the texts include\nworkspace files and hook output.",
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/handlers.ContextFragmentPreview"

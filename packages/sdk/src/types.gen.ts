@@ -1967,7 +1967,9 @@ export type HandlersContextLifecycleResponse = {
     aggregates?: HandlersContextLifecycleAggregates;
     /**
      * FragmentPreviews maps a text hash referenced by the page's fragment
-     * refs and tool definitions to the head of its stored text.
+     * refs and tool definitions to the head of its stored text. Present only
+     * for callers who may read the bot's workspace, because the texts include
+     * workspace files and hook output.
      */
     fragment_previews?: {
         [key: string]: HandlersContextFragmentPreview;

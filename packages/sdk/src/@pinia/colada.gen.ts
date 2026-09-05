@@ -2461,7 +2461,7 @@ export const getBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsQu
 /**
  * Get the injected context texts of a run
  *
- * Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, memory recall, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them
+ * Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them. The texts include workspace files and hook output, so the caller needs workspace_read on the bot besides access to the session
  */
 export const getBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsQuery = defineQueryOptions<Options<GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsData>, GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponse, GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsError>((options: Options<GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsData>) => ({
     key: getBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsQueryKey(options),

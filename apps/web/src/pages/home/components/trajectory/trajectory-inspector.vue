@@ -129,6 +129,12 @@
           />
         </div>
         <p
+          v-else-if="textsForbidden"
+          class="text-caption text-muted-foreground"
+        >
+          {{ $t('chat.trajectory.inspectorTextsForbidden') }}
+        </p>
+        <p
           v-else-if="fragmentStatus === 'error'"
           class="text-caption text-destructive"
         >
@@ -231,6 +237,7 @@ import { contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, 
 import { formatTokenCount } from '../../composables/context-categories'
 import { useContextLifecycleDecisions } from '../../composables/useContextLifecycleDecisions'
 import { useContextLifecycleFragments } from '../../composables/useContextLifecycleFragments'
+import { apiErrorStatus } from '@/utils/api-error'
 import ContextLifecycleTurns from '../context-lifecycle-turns.vue'
 
 const DECISION_ROW_LIMIT = 200
@@ -280,7 +287,10 @@ const textRunId = computed(() => {
   if (textRefs.value.length === 0 || (detail.kind !== 'system' && detail.kind !== 'context')) return null
   return detail.lifecycle.run_id ?? null
 })
-const { fragments, status: fragmentStatus } = useContextLifecycleFragments(textRunId)
+const { fragments, status: fragmentStatus, error: fragmentError } = useContextLifecycleFragments(textRunId)
+// The texts carry workspace files, so a reader without workspace access is
+// told so instead of seeing a load failure.
+const textsForbidden = computed(() => fragmentStatus.value === 'error' && apiErrorStatus(fragmentError.value) === 403)
 const textRows = computed(() => {
   const byHash = new Map(fragments.value.map(fragment => [fragment.text_hash ?? '', fragment]))
   return textRefs.value.map((ref, index) => {

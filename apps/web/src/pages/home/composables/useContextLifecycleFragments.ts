@@ -14,7 +14,7 @@ export function useContextLifecycleFragments(runId: Ref<string | null>) {
   const botId = computed(() => viewTarget.value.botId || storeRefs.currentBotId.value)
   const sessionId = computed(() => viewTarget.value.sessionId)
 
-  const { data, status } = useQuery({
+  const { data, status, error } = useQuery({
     key: () => ['context-lifecycle-fragments', botId.value ?? '', sessionId.value ?? '', runId.value ?? ''],
     query: async ({ signal }) => {
       const { data } = await getBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragments({
@@ -29,5 +29,5 @@ export function useContextLifecycleFragments(runId: Ref<string | null>) {
     refetchOnWindowFocus: false,
   })
 
-  return { fragments: computed(() => data.value ?? []), status }
+  return { fragments: computed(() => data.value ?? []), status, error }
 }
