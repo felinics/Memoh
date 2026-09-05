@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -29,12 +30,14 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
 )
 
 type fakeChatGateway struct {
+	startErr         error
 	resp             fakeChatResponse
 	err              error
 	gotReq           turn.StartTurnCommand
@@ -72,7 +75,16 @@ func (f *fakeChatGateway) AdvancePlainTextUserInput(_ context.Context, input use
 	return f.advanceResult, f.advanceErr
 }
 
-type nativeUserInputTestAdapter struct{ typ channel.ChannelType }
+type nativeUserInputTestAdapter struct {
+	typ         channel.ChannelType
+	cardUpdates []string
+	cardPresent bool
+}
+
+func (a *nativeUserInputTestAdapter) UpdateUserInputCard(_ context.Context, _ channel.ChannelConfig, id string, _ *i18n.Localizer) (bool, error) {
+	a.cardUpdates = append(a.cardUpdates, id)
+	return a.cardPresent, nil
+}
 
 func (a *nativeUserInputTestAdapter) Type() channel.ChannelType { return a.typ }
 
@@ -129,6 +141,9 @@ func TestRejectReservedSkillMetadataInInboundMessage(t *testing.T) {
 
 func (f *fakeChatGateway) StartTurn(_ context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
 	f.gotReq = cmd
+	if f.startErr != nil {
+		return nil, f.startErr
+	}
 	if f.onChat != nil {
 		f.onChat(cmd)
 	}
@@ -846,7 +861,7 @@ func TestChannelInboundProcessorPlainTextUserInputCompletesWithFullSummary(t *te
 	}
 }
 
-func TestChannelInboundProcessorNativeUserInputBypassesTextFallback(t *testing.T) {
+func TestChannelInboundProcessorNativeUserInputWithoutPendingQuestionFallsThrough(t *testing.T) {
 	registry := channel.NewRegistry()
 	registry.MustRegister(&nativeUserInputTestAdapter{typ: channel.ChannelType("native-test")})
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
@@ -864,7 +879,7 @@ func TestChannelInboundProcessorNativeUserInputBypassesTextFallback(t *testing.T
 	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}, msg, sender); err != nil {
 		t.Fatalf("HandleInbound() error = %v", err)
 	}
-	if gateway.advanceCalls != 0 || gateway.gotReq.Query != "normal chat" {
+	if gateway.advanceCalls != 1 || gateway.gotReq.Query != "normal chat" {
 		t.Fatalf("native channel routing: advance=%d query=%q", gateway.advanceCalls, gateway.gotReq.Query)
 	}
 }
@@ -3821,6 +3836,9 @@ type tailThenErrGateway struct {
 
 func (f *tailThenErrGateway) StartTurn(_ context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
 	f.gotReq = cmd
+	if f.startErr != nil {
+		return nil, f.startErr
+	}
 	events := make(chan turn.Event, len(f.deltas))
 	errs := make(chan error, 1)
 	for i, d := range f.deltas {
@@ -3884,5 +3902,134 @@ func TestChannelInboundProcessorDeliversTailEventsBeforeError(t *testing.T) {
 	}
 	if !errorSeen {
 		t.Fatal("expected error event after tail deltas")
+	}
+}
+
+func TestTelegramPendingTextRoutesToDecision(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(strconv.FormatBool(fail), func(t *testing.T) {
+			registry := channel.NewRegistry()
+			adapter := &nativeUserInputTestAdapter{typ: channel.ChannelType("telegram"), cardPresent: true}
+			registry.MustRegister(adapter)
+			routes := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
+			gateway := &fakeChatGateway{advanceResult: userinput.AdvanceTextResult{Handled: true, Request: userinput.Request{
+				ID: "input-1", UIPayload: userinput.UIPayload{Questions: []userinput.UIQuestion{{ID: "q1", Text: "End time?", Kind: userinput.QuestionKindSingleSelect, AllowCustom: true}}},
+				Interaction: userinput.TextInteractionState{Completed: true, Answers: []userinput.QuestionAnswer{{QuestionID: "q1", CustomText: "0点"}}},
+			}}}
+			if fail {
+				gateway.userInputErr = errors.New("SECRET provider diagnostic")
+			}
+			processor := NewChannelInboundProcessor(slog.Default(), registry, routes, routes, gateway, &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}, &fakePolicyService{}, "", 0)
+			processor.SetACLService(&fakeChatACL{allowed: true})
+			processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+			sender := &fakeReplySender{}
+			msg := channel.InboundMessage{
+				BotID: "bot-1", Channel: channel.ChannelType("telegram"), ReplyTarget: "target",
+				Message: channel.Message{ID: "reply-1", Text: "0点"}, Sender: channel.Identity{SubjectID: "user-1"},
+				Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+			}
+			err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}, msg, sender)
+			if (err != nil) != fail {
+				t.Fatalf("error = %v", err)
+			}
+			if gateway.advanceCalls != 1 || gateway.userInputCalls != 1 || gateway.gotReq.BotID != "" {
+				t.Fatalf("routing: %#v", gateway)
+			}
+			if got := gateway.userInputInput.Answers; len(got) != 1 || got[0].CustomText != "0点" {
+				t.Fatalf("answers: %#v", got)
+			}
+			if (len(adapter.cardUpdates) == 1) != (!fail) {
+				t.Fatalf("card updates: %#v", adapter.cardUpdates)
+			}
+			if len(sender.sent) != 0 {
+				t.Fatalf("failed answer announced success: %#v", sender.sent)
+			}
+			if fail {
+				sawError := false
+				for _, event := range sender.events {
+					if strings.Contains(event.Error, "SECRET") {
+						t.Fatal("private diagnostic leaked")
+					}
+					if event.Type == channel.StreamEventError && event.Error != "" {
+						sawError = true
+					}
+				}
+				if !sawError {
+					t.Fatal("submit failure left user in silence")
+				}
+			}
+		})
+	}
+}
+
+type stoppingGateway struct {
+	fakeChatGateway
+	stops []turn.StopCommand
+}
+
+func (g *stoppingGateway) StopTurn(_ context.Context, cmd turn.StopCommand) (bool, error) {
+	g.stops = append(g.stops, cmd)
+	return true, nil
+}
+
+func TestStopCommandWithoutActiveStream(t *testing.T) {
+	for _, allowed := range []bool{true, false} {
+		t.Run(strconv.FormatBool(allowed), func(t *testing.T) {
+			routes := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
+			gateway := &stoppingGateway{}
+			processor := NewChannelInboundProcessor(slog.Default(), nil, routes, routes, gateway, &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}, &fakePolicyService{}, "", 0)
+			processor.SetACLService(&fakeChatACL{allowed: allowed})
+			processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+			msg := channel.InboundMessage{
+				BotID: "bot-1", Channel: channel.ChannelType("telegram"), ReplyTarget: "target", Message: channel.Message{Text: "/stop"},
+				Sender: channel.Identity{SubjectID: "user-1"}, Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+			}
+			if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}, msg, &fakeReplySender{}); err != nil {
+				t.Fatal(err)
+			}
+			if (len(gateway.stops) == 1) != allowed {
+				t.Fatalf("stops: %#v", gateway.stops)
+			}
+			if allowed && gateway.stops[0].ThreadID != "session-1" {
+				t.Fatal("wrong thread")
+			}
+		})
+	}
+}
+
+func TestTelegramBusyProducesRetryHint(t *testing.T) {
+	routes := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "bot-1", RouteID: "route-1"}}
+	gateway := &fakeChatGateway{startErr: turn.ErrSessionBusy}
+	processor := NewChannelInboundProcessor(slog.Default(), nil, routes, routes, gateway, &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}, &fakePolicyService{}, "", 0)
+	processor.SetACLService(&fakeChatACL{allowed: true})
+	processor.SetSessionEnsurer(&fakeSessionEnsurer{activeSession: SessionResult{ID: "session-1"}})
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{BotID: "bot-1", Channel: channel.ChannelType("telegram"), ReplyTarget: "target", Message: channel.Message{ID: "msg-1", Text: "hello"}, Sender: channel.Identity{SubjectID: "user-1"}, Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate}}
+	if err := processor.HandleInbound(context.Background(), channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}, msg, sender); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.sent) != 1 || !strings.Contains(sender.sent[0].Message.PlainText(), "/stop") {
+		t.Fatalf("missing retry hint: %#v", sender.sent)
+	}
+	for _, event := range sender.events {
+		if event.Type == channel.StreamEventError {
+			t.Fatalf("busy surfaced as error: %#v", event)
+		}
+	}
+}
+
+func TestNativeQuestionAuthorizationUsesSenderAndSource(t *testing.T) {
+	for _, allowed := range []bool{true, false} {
+		checker := &fakeChatACL{allowed: allowed}
+		p := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "actor"}}, &fakePolicyService{}, "", 0)
+		p.SetACLService(checker)
+		msg := channel.InboundMessage{BotID: "bot", Channel: channel.ChannelType("telegram"), Sender: channel.Identity{SubjectID: "42"}, Conversation: channel.Conversation{ID: "-123", Type: channel.ConversationTypeGroup}}
+		got, err := p.AuthorizeUserInputInteraction(context.Background(), channel.ChannelConfig{BotID: "bot", ChannelType: msg.Channel}, msg)
+		if err != nil || got != allowed {
+			t.Fatalf("allowed=%v, err=%v", got, err)
+		}
+		if checker.calls != 1 || checker.lastReq.ChannelIdentityID != "actor" || checker.lastReq.BotID != "bot" || checker.lastReq.SourceScope.ConversationID != "-123" {
+			t.Fatalf("wrong ACL scope: %#v", checker.lastReq)
+		}
 	}
 }

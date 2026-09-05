@@ -447,3 +447,24 @@ func TestContinueRuntimeDecisionOwnershipLossDoesNotPersistLifecycle(t *testing.
 		t.Fatalf("ownership-lost continuation created lifecycle rows: %#v", lifecycles.creates)
 	}
 }
+
+func TestStopTurnAbortsParkedDecision(t *testing.T) {
+	manager, _ := newWaitingDecisionRuntime(t)
+	service := &Service{decisionRuntime: manager, abortRuntime: manager, allowedTeam: "team-1"}
+	cmd := turn.StopCommand{TeamID: "other-team", BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}
+	if _, err := service.StopTurn(context.Background(), cmd); !errors.Is(err, turn.ErrTeamNotServed) {
+		t.Fatalf("wrong team: %v", err)
+	}
+	cmd.TeamID = "team-1"
+	stopped, err := service.StopTurn(context.Background(), cmd)
+	if err != nil || !stopped {
+		t.Fatalf("stop = %t, %v", stopped, err)
+	}
+	snapshot, err := manager.Snapshot(context.Background(), cmd.BotID, cmd.ThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status != sessionruntime.RunStatusAborted {
+		t.Fatalf("run = %#v", snapshot.CurrentRunView)
+	}
+}

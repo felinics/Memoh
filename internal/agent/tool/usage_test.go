@@ -580,7 +580,7 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 
 	got := provider.Usage(context.Background(), SessionContext{CanRequestUserInput: true}, availableToolsForTest(ToolAskUser()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom", "`multi_select`", "（多选）"} {
+	for _, want := range []string{"`ask_user`", "multiple-choice question", "custom_text", "`multi_select`", "（多选）"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with ask_user should contain %q, got:\n%s", want, got)
 		}
@@ -593,7 +593,7 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 
 	got = provider.Usage(context.Background(), SessionContext{SessionType: sessionmode.Chat, CanListUserInput: true}, availableToolsForTest(ToolAskUser()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom", "`multi_select`", "（多选）"} {
+	for _, want := range []string{"`ask_user`", "multiple-choice question", "custom_text", "`multi_select`", "（多选）"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with list-only discovery should contain %q, got:\n%s", want, got)
 		}

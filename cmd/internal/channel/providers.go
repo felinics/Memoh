@@ -241,6 +241,9 @@ func provideChannelRouter(
 	discussDriver.SetTurnService(turnService)
 	discussDriver.SetBroadcaster(hub)
 	processor.SetACLService(aclService)
+	if adapter, ok := registry.Get(telegram.Type); ok {
+		adapter.(*telegram.TelegramAdapter).SetUserInputAuthorizer(processor.AuthorizeUserInputInteraction)
+	}
 	processor.SetMediaService(mediaService)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetDispatcher(inbound.NewRouteDispatcher(log))

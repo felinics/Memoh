@@ -445,6 +445,9 @@
       "parseFailed": "それは読めませんでした。 /approve または /reject を使用してリクエストに返信するか、ボタンをタップします。"
     },
     "userInput": {
+      "forbidden": "この質問に回答する権限がありません。",
+      "busy": "Bot は処理中です。保留中の質問に回答するか、/stop で停止してからメッセージを再送してください。",
+      "submitFailed": "回答を送信できませんでした。もう一度お試しください。",
       "unavailable": "⚠️ 現在、ここではユーザー入力の返信を利用できません。",
       "parseFailed": "読み取れませんでした。/respond <request> <answer> で返信してください。",
       "inputRequested": "回答が必要です",

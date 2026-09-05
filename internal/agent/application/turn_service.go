@@ -396,3 +396,25 @@ func parseKind(p json.RawMessage) string {
 	}
 	return env.Type
 }
+
+// StopTurn routes cancellation to the durable owner even after the channel
+// stream has closed, using the same application entry point as the web Stop.
+func (s *Service) StopTurn(ctx context.Context, cmd turn.StopCommand) (bool, error) {
+	if cmd.TeamID == "" || (s.allowedTeam != "" && cmd.TeamID != s.allowedTeam) {
+		return false, turn.ErrTeamNotServed
+	}
+	if cmd.BotID == "" || cmd.ThreadID == "" {
+		return false, errors.New("bot and thread are required")
+	}
+	if s.decisionRuntime == nil {
+		return false, nil
+	}
+	snapshot, err := s.decisionRuntime.Snapshot(ctx, cmd.BotID, cmd.ThreadID)
+	if err != nil {
+		return false, err
+	}
+	if snapshot.CurrentRunView == nil {
+		return false, nil
+	}
+	return s.AbortRuntimeRun(ctx, cmd.BotID, cmd.ThreadID, snapshot.CurrentRunView.RunID, "")
+}

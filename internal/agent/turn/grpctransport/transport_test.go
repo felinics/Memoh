@@ -471,3 +471,36 @@ func TestUnknownControlFrameIgnored(t *testing.T) {
 		t.Fatalf("unexpected run error after unknown frame: %v", err)
 	}
 }
+
+func TestSessionBusySurvivesTransport(t *testing.T) {
+	client, cleanup := newTestClient(t, &scriptedService{startErr: fmt.Errorf("private diagnostic: %w", turn.ErrSessionBusy)}, "secret")
+	defer cleanup()
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	if !errors.Is(err, turn.ErrSessionBusy) {
+		t.Fatalf("got %v, want busy sentinel", err)
+	}
+}
+
+type stoppingService struct {
+	fakeService
+	stopped chan turn.StopCommand
+}
+
+func (s *stoppingService) StopTurn(_ context.Context, cmd turn.StopCommand) (bool, error) {
+	s.stopped <- cmd
+	return true, nil
+}
+
+func TestStopTurnSurvivesTransport(t *testing.T) {
+	service := &stoppingService{stopped: make(chan turn.StopCommand, 1)}
+	client, cleanup := newTestClient(t, service, "secret")
+	defer cleanup()
+	cmd := turn.StopCommand{TeamID: "team-1", BotID: "bot-1", ThreadID: "thread-1"}
+	stopped, err := client.StopTurn(context.Background(), cmd)
+	if err != nil || !stopped {
+		t.Fatalf("stop = %t, %v", stopped, err)
+	}
+	if got := <-service.stopped; got != cmd {
+		t.Fatalf("command = %#v", got)
+	}
+}

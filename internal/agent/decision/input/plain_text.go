@@ -25,7 +25,7 @@ func (s *Service) AdvanceText(ctx context.Context, input AdvanceTextInput) (Adva
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	}
 	for attempt := 0; attempt < maxTextInteractionRetries; attempt++ {
-		req, err := s.ResolveTarget(ctx, resolve)
+		req, err := s.resolveInteractionTarget(ctx, resolve)
 		if errors.Is(err, ErrNotFound) {
 			return AdvanceTextResult{Handled: false}, nil
 		}
@@ -172,6 +172,9 @@ func parseTextAnswer(question UIQuestion, raw string) (QuestionAnswer, error) {
 	case QuestionKindMultiSelect:
 		parts := splitTextSelections(text)
 		if len(parts) == 0 {
+			if question.AllowCustom {
+				return QuestionAnswer{QuestionID: question.ID, CustomText: text}, nil
+			}
 			return QuestionAnswer{}, errors.New("at least one selection is required")
 		}
 		seen := map[string]struct{}{}
@@ -183,14 +186,12 @@ func parseTextAnswer(question UIQuestion, raw string) (QuestionAnswer, error) {
 				}
 				continue
 			}
-			if question.AllowCustom && answer.CustomText == "" {
-				answer.CustomText = part
-				continue
+			if question.AllowCustom {
+				// A sentence may contain commas or option words. If it is not
+				// entirely a selection list, return the whole reply to the LLM.
+				return QuestionAnswer{QuestionID: question.ID, CustomText: text}, nil
 			}
 			return QuestionAnswer{}, fmt.Errorf("selection %q does not match an option", part)
-		}
-		if question.CustomExclusive && len(answer.OptionIDs) > 0 && answer.CustomText != "" {
-			return QuestionAnswer{}, errors.New("options and a custom answer are mutually exclusive")
 		}
 	default:
 		return QuestionAnswer{}, fmt.Errorf("unsupported question kind %q", question.Kind)
