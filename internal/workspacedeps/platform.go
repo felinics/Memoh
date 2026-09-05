@@ -31,8 +31,8 @@ const platformProbeScript = `uname -s; uname -m; ls /lib/ld-musl-*.so.1 2>/dev/n
 const platformProbeTimeoutSeconds = 15
 
 // ProbePlatform runs the probe inside the workspace and normalises its
-// output. It never consults the image's own contract declaration
-// (WD-PLAT-004).
+// output. It never trusts a platform the image declares about itself; the
+// probe is the only source (WD-PLAT-004).
 func ProbePlatform(ctx context.Context, client *bridge.Client) (Platform, error) {
 	if client == nil {
 		return Platform{}, errors.New("workspacedeps: bridge client is nil")

@@ -11,9 +11,9 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-// toolkitCABundle is the CA bundle the workspace image ships for the agent
-// CLIs. Agent shims export it as SSL_CERT_FILE when nothing else set one,
-// mirroring docker/toolkit/bin/claude.
+// toolkitCABundle is the CA bundle the workspace image ships under the
+// toolkit. Agent shims export it as SSL_CERT_FILE when nothing else set one,
+// mirroring the toolkit's python3/pip3 wrappers (docker/toolkit/bin).
 const toolkitCABundle = "/opt/memoh/toolkit/certs/ca-certificates.crt"
 
 const shimChmodTimeoutSeconds = 30

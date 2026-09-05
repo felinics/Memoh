@@ -113,8 +113,6 @@ type createContainerErrorEvent struct {
 func newWorkspaceSetupAppError(setupErr error, requestID string) (createContainerErrorEvent, bool) {
 	var code apperror.Code
 	switch {
-	case errors.Is(setupErr, workspace.ErrWorkspaceImageIncompatible):
-		code = apperror.CodeWorkspaceImageIncompatible
 	case errors.Is(setupErr, workspace.ErrWorkspaceTemplateBootstrapFailed):
 		code = apperror.CodeWorkspaceTemplateBootstrapFailed
 	default:

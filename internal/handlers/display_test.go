@@ -369,7 +369,4 @@ func TestWorkspaceDockerfileInstallsDisplayAssetsGlobally(t *testing.T) {
 	if !strings.Contains(dockerfile, "COPY scripts/desktop-style.sh scripts/display-apply-style.sh scripts/display-prepare.sh /opt/memoh/scripts/") {
 		t.Fatal("workspace Dockerfile must provide immutable display scripts")
 	}
-	if !strings.Contains(dockerfile, "COPY docker/workspace-contract.json /opt/memoh/workspace-contract.json") {
-		t.Fatal("workspace Dockerfile must publish the workspace contract manifest")
-	}
 }

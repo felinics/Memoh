@@ -40,6 +40,13 @@ const (
 	DisplayRFBSocketName        = "display.rfb.sock"
 	ACPToolsProxyHTTPURL        = bridge.ACPToolsProxyHTTPURL
 
+	// WorkspaceInitPath and WorkspaceBridgePath are the container start
+	// parameters used by buildWorkspaceContainerSpec: the image's init and the
+	// mount point of the Server-supplied bridge binary. A container missing
+	// either never starts, so WaitForWorkspaceReady surfaces that on its own.
+	WorkspaceInitPath   = "/usr/bin/tini"
+	WorkspaceBridgePath = "/opt/memoh/bridge"
+
 	legacyGRPCPort           = 9090
 	bridgeReadyTimeout       = 45 * time.Second
 	bridgeReadyRPCTimeout    = 3 * time.Second
@@ -383,9 +390,6 @@ func (m *Manager) InitializeNativeWorkspace(ctx context.Context, botID string) e
 	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("%w: resolve native workspace filesystem: %w", ErrWorkspaceTemplateBootstrapFailed, err)
-	}
-	if err := validateWorkspaceContract(ctx, client); err != nil {
-		return err
 	}
 	if m.templateBootstrap == nil {
 		return fmt.Errorf("%w: template bootstrapper is not configured", ErrWorkspaceTemplateBootstrapFailed)
