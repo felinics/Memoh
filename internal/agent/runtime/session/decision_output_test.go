@@ -156,7 +156,7 @@ func TestDecisionOutputCanceledSubscription(t *testing.T) {
 // same periodic snapshot reconciliation used by web subscribers.
 type silentDecisionBackend struct{ Backend }
 
-func (b silentDecisionBackend) Publish(context.Context, Event) error { return nil }
+func (silentDecisionBackend) Publish(context.Context, Event) error { return nil }
 
 func TestDecisionOutputRecoversWithoutEndNotification(t *testing.T) {
 	backend := silentDecisionBackend{NewMemoryBackend()}

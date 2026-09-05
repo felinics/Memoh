@@ -192,12 +192,13 @@ func (m *Manager) PublishDecisionOutput(ctx context.Context, command Command, se
 		if seq != int64(len(c.Events)+1) {
 			return s, false, errors.New("decision output sequence mismatch")
 		}
-		if payload == nil {
+		switch {
+		case payload == nil:
 			c.Done = true
-		} else if c.Bytes+len(payload) > decisionOutputMaxBytes || len(c.Events) >= decisionOutputMaxEvents {
+		case c.Bytes+len(payload) > decisionOutputMaxBytes || len(c.Events) >= decisionOutputMaxEvents:
 			c.Failed = true
 			exceeded = true
-		} else {
+		default:
 			c.Events = append(c.Events, append(json.RawMessage(nil), payload...))
 			c.Bytes += len(payload)
 		}
