@@ -450,7 +450,7 @@ func TestContinueRuntimeDecisionOwnershipLossDoesNotPersistLifecycle(t *testing.
 
 func TestStopTurnAbortsParkedDecision(t *testing.T) {
 	manager, _ := newWaitingDecisionRuntime(t)
-	service := &Service{decisionRuntime: manager, allowedTeam: "team-1"}
+	service := &Service{decisionRuntime: manager, abortRuntime: manager, allowedTeam: "team-1"}
 	cmd := turn.StopCommand{TeamID: "other-team", BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}
 	if _, err := service.StopTurn(context.Background(), cmd); !errors.Is(err, turn.ErrTeamNotServed) {
 		t.Fatalf("wrong team: %v", err)

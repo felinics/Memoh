@@ -398,7 +398,7 @@ func parseKind(p json.RawMessage) string {
 }
 
 // StopTurn routes cancellation to the durable owner even after the channel
-// stream has closed. Abort terminalizes parked decisions through runtime hooks.
+// stream has closed, using the same application entry point as the web Stop.
 func (s *Service) StopTurn(ctx context.Context, cmd turn.StopCommand) (bool, error) {
 	if cmd.TeamID == "" || (s.allowedTeam != "" && cmd.TeamID != s.allowedTeam) {
 		return false, turn.ErrTeamNotServed
@@ -416,5 +416,5 @@ func (s *Service) StopTurn(ctx context.Context, cmd turn.StopCommand) (bool, err
 	if snapshot.CurrentRunView == nil {
 		return false, nil
 	}
-	return s.decisionRuntime.Abort(ctx, cmd.BotID, cmd.ThreadID, snapshot.CurrentRunView.RunID)
+	return s.AbortRuntimeRun(ctx, cmd.BotID, cmd.ThreadID, snapshot.CurrentRunView.RunID, "")
 }
