@@ -1840,6 +1840,14 @@ definitions:
     type: object
   compaction.Log:
     properties:
+      anchor_end_ms:
+        type: integer
+      anchor_start_ms:
+        description: |-
+          AnchorStartMS and AnchorEndMS bound the conversation time the summary
+          covers; Level is the rollup depth and SupersededAt is set once a later
+          compaction folded this one in.
+        type: integer
       bot_id:
         type: string
       completed_at:
@@ -1848,6 +1856,8 @@ definitions:
         type: string
       id:
         type: string
+      level:
+        type: integer
       message_count:
         type: integer
       model_id:
@@ -1859,6 +1869,8 @@ definitions:
       status:
         type: string
       summary:
+        type: string
+      superseded_at:
         type: string
       usage: {}
     type: object
@@ -4063,6 +4075,13 @@ definitions:
       skills:
         items:
           $ref: '#/definitions/skills.SafeCatalogItem'
+        type: array
+    type: object
+  handlers.SessionCompactionsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/compaction.Log'
         type: array
     type: object
   handlers.SessionInfoResponse:
@@ -11628,6 +11647,52 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/compactions:
+    get:
+      description: 'Return the compaction runs recorded for a chat session, newest
+        first: status, the summary that replaced the covered messages, how many messages
+        it covered and the conversation time it spans, the summarizer''s usage and
+        model, and when it ran. Session access suffices: the summary is conversation
+        the reader already sees'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SessionCompactionsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List a session's compactions
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/context-lifecycle:
     get:
       description: List run-keyed context lifecycle snapshots for a chat session,

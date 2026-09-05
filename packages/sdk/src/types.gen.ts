@@ -1082,16 +1082,25 @@ export type CompactionListLogsResponse = {
 };
 
 export type CompactionLog = {
+    anchor_end_ms?: number;
+    /**
+     * AnchorStartMS and AnchorEndMS bound the conversation time the summary
+     * covers; Level is the rollup depth and SupersededAt is set once a later
+     * compaction folded this one in.
+     */
+    anchor_start_ms?: number;
     bot_id?: string;
     completed_at?: string;
     error_message?: string;
     id?: string;
+    level?: number;
     message_count?: number;
     model_id?: string;
     session_id?: string;
     started_at?: string;
     status?: string;
     summary?: string;
+    superseded_at?: string;
     usage?: unknown;
 };
 
@@ -2334,6 +2343,10 @@ export type HandlersRollbackRequest = {
 
 export type HandlersSafeSkillsResponse = {
     skills?: Array<SkillsSafeCatalogItem>;
+};
+
+export type HandlersSessionCompactionsResponse = {
+    items?: Array<CompactionLog>;
 };
 
 export type HandlersSessionInfoResponse = {
@@ -10103,6 +10116,56 @@ export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/compactions';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsError = GetBotsByBotIdSessionsBySessionIdCompactionsErrors[keyof GetBotsByBotIdSessionsBySessionIdCompactionsErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSessionCompactionsResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsResponse = GetBotsByBotIdSessionsBySessionIdCompactionsResponses[keyof GetBotsByBotIdSessionsBySessionIdCompactionsResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleData = {
     body?: never;

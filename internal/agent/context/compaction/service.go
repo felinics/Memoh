@@ -455,7 +455,7 @@ func (s *Service) ListLogs(ctx context.Context, botID string, limit, offset int)
 
 	logs := make([]Log, len(rows))
 	for i, r := range rows {
-		logs[i] = toLog(r)
+		logs[i] = LogFromRow(r)
 	}
 	return logs, total, nil
 }
@@ -469,21 +469,29 @@ func (s *Service) DeleteLogs(ctx context.Context, botID string) error {
 	return s.queries.DeleteCompactionLogsByBot(ctx, botUUID)
 }
 
-func toLog(r sqlc.BotHistoryMessageCompact) Log {
+// LogFromRow maps a persisted compaction row to its API shape.
+func LogFromRow(r sqlc.BotHistoryMessageCompact) Log {
 	l := Log{
-		ID:           formatUUID(r.ID),
-		BotID:        formatUUID(r.BotID),
-		SessionID:    formatUUID(r.SessionID),
-		Status:       r.Status,
-		Summary:      r.Summary,
-		MessageCount: int(r.MessageCount),
-		ErrorMessage: r.ErrorMessage,
-		ModelID:      formatUUID(r.ModelID),
-		StartedAt:    r.StartedAt.Time,
+		ID:            formatUUID(r.ID),
+		BotID:         formatUUID(r.BotID),
+		SessionID:     formatUUID(r.SessionID),
+		Status:        r.Status,
+		Summary:       r.Summary,
+		MessageCount:  int(r.MessageCount),
+		ErrorMessage:  r.ErrorMessage,
+		ModelID:       formatUUID(r.ModelID),
+		StartedAt:     r.StartedAt.Time,
+		AnchorStartMS: r.AnchorStartMs,
+		AnchorEndMS:   r.AnchorEndMs,
+		Level:         int(r.ArtifactLevel),
 	}
 	if r.CompletedAt.Valid {
 		t := r.CompletedAt.Time
 		l.CompletedAt = &t
+	}
+	if r.SupersededAt.Valid {
+		t := r.SupersededAt.Time
+		l.SupersededAt = &t
 	}
 	if len(r.Usage) > 0 {
 		var u any

@@ -7717,6 +7717,69 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/compactions": {
+            "get": {
+                "description": "Return the compaction runs recorded for a chat session, newest first: status, the summary that replaced the covered messages, how many messages it covered and the conversation time it spans, the summarizer's usage and model, and when it ran. Session access suffices: the summary is conversation the reader already sees",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List a session's compactions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SessionCompactionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
             "get": {
                 "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs",
@@ -18019,6 +18082,13 @@ const docTemplate = `{
         "compaction.Log": {
             "type": "object",
             "properties": {
+                "anchor_end_ms": {
+                    "type": "integer"
+                },
+                "anchor_start_ms": {
+                    "description": "AnchorStartMS and AnchorEndMS bound the conversation time the summary\ncovers; Level is the rollup depth and SupersededAt is set once a later\ncompaction folded this one in.",
+                    "type": "integer"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -18030,6 +18100,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "level": {
+                    "type": "integer"
                 },
                 "message_count": {
                     "type": "integer"
@@ -18047,6 +18120,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "summary": {
+                    "type": "string"
+                },
+                "superseded_at": {
                     "type": "string"
                 },
                 "usage": {}
@@ -21283,6 +21359,17 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/skills.SafeCatalogItem"
+                    }
+                }
+            }
+        },
+        "handlers.SessionCompactionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/compaction.Log"
                     }
                 }
             }

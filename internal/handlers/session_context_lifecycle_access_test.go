@@ -15,6 +15,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 const lifecycleTestGranteeID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
@@ -86,7 +87,7 @@ func newContextLifecycleGranteeContext(t *testing.T, path string, runID bool) ec
 	return ctx
 }
 
-func newContextLifecycleGranteeHandler(queries *contextLifecycleAccessStub) *SessionInfoHandler {
+func newContextLifecycleGranteeHandler(queries dbstore.Queries) *SessionInfoHandler {
 	return NewSessionInfoHandler(slog.New(slog.DiscardHandler), queries, bots.NewService(nil, queries), newTestAdminAccountService("user"), nil, nil)
 }
 
