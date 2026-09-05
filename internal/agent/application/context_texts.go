@@ -142,6 +142,12 @@ func (s runTextSink) PersistFragmentTexts(texts []contextfrag.FragmentText) {
 	s.store.PersistFragmentTexts(s.ctx, s.botID, texts)
 }
 
+// SubagentLifecycleHolder builds the lifecycle holder of a spawned run so
+// its injected fragment texts reach the store like the parent run's.
+func (s *Service) SubagentLifecycleHolder(ctx context.Context, botID string) *contextfrag.LifecycleHolder {
+	return s.newContextLifecycleHolder(ctx, botID)
+}
+
 // newContextLifecycleHolder creates a run's lifecycle holder wired to the
 // fragment text store of the run's bot. A run without a bot id keeps its
 // texts unrecorded.

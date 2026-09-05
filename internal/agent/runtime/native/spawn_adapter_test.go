@@ -158,3 +158,27 @@ func TestSpawnContextSourceFragsDefersCustomSystemToFallback(t *testing.T) {
 		t.Fatalf("custom system source fragments = %#v, want legacy fallback", got)
 	}
 }
+
+func TestSpawnAdapterInstallsTheLifecycleHolderFromItsFactory(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewSpawnAdapter(New(Deps{}))
+	cfg := tools.SpawnRunConfig{Identity: tools.SpawnIdentity{BotID: "bot-7"}, Query: "do the task"}
+	plain := runConfigFromSpawnRunConfig(cfg)
+	adapter.installLifecycleHolder(context.Background(), cfg, &plain)
+	if plain.ContextLifecycle == nil {
+		t.Fatalf("a run without a factory keeps its plain holder")
+	}
+
+	wired := contextfrag.NewLifecycleHolder()
+	var gotBot string
+	adapter.SetLifecycleHolderFactory(func(_ context.Context, botID string) *contextfrag.LifecycleHolder {
+		gotBot = botID
+		return wired
+	})
+	rc := runConfigFromSpawnRunConfig(cfg)
+	adapter.installLifecycleHolder(context.Background(), cfg, &rc)
+	if rc.ContextLifecycle != wired || gotBot != "bot-7" {
+		t.Fatalf("holder = %p (bot %q), want the factory's holder for the spawn's bot", rc.ContextLifecycle, gotBot)
+	}
+}

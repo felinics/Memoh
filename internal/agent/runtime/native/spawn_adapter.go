@@ -46,14 +46,20 @@ type SpawnRunObserver func(StreamEvent) SpawnRunObservation
 // A nil return means nothing observes this run and events are not forwarded.
 type SpawnRunObserverFactory func(ctx context.Context) SpawnRunObserver
 
+// SpawnLifecycleHolderFactory builds the lifecycle holder of one spawned run
+// for the bot it belongs to, wired to the same fragment text store the
+// parent run uses. A nil return leaves the run with a plain holder.
+type SpawnLifecycleHolderFactory func(ctx context.Context, botID string) *contextfrag.LifecycleHolder
+
 var errSpawnAgentAborted = errors.New("agent run aborted")
 
 // SpawnAdapter wraps *Agent to satisfy tools.SpawnAgent without creating
 // an import cycle (tools -> agent).
 type SpawnAdapter struct {
-	agent       *Agent
-	stepCommit  SpawnStepCommitFactory
-	runObserver SpawnRunObserverFactory
+	agent           *Agent
+	stepCommit      SpawnStepCommitFactory
+	runObserver     SpawnRunObserverFactory
+	lifecycleHolder SpawnLifecycleHolderFactory
 }
 
 // NewSpawnAdapter creates a SpawnAdapter from the given Agent.
@@ -69,6 +75,23 @@ func (s *SpawnAdapter) SetStepCommitFactory(f SpawnStepCommitFactory) {
 // SetRunObserverFactory installs live event publishing for spawned runs.
 func (s *SpawnAdapter) SetRunObserverFactory(f SpawnRunObserverFactory) {
 	s.runObserver = f
+}
+
+// SetLifecycleHolderFactory installs the lifecycle holder source for spawned
+// runs, so their injected fragment texts reach the store like any run's.
+func (s *SpawnAdapter) SetLifecycleHolderFactory(f SpawnLifecycleHolderFactory) {
+	s.lifecycleHolder = f
+}
+
+// installLifecycleHolder replaces the run's plain holder with one from the
+// factory when a factory is installed and yields one.
+func (s *SpawnAdapter) installLifecycleHolder(ctx context.Context, cfg tools.SpawnRunConfig, rc *RunConfig) {
+	if s.lifecycleHolder == nil {
+		return
+	}
+	if holder := s.lifecycleHolder(ctx, cfg.Identity.BotID); holder != nil {
+		rc.ContextLifecycle = holder
+	}
 }
 
 // installStepCommit resolves the step-commit callback for this run and wires
@@ -97,6 +120,7 @@ func (s *SpawnAdapter) installStepCommit(ctx context.Context, cfg tools.SpawnRun
 
 func (s *SpawnAdapter) Generate(ctx context.Context, cfg tools.SpawnRunConfig) (*tools.SpawnResult, error) {
 	rc := runConfigFromSpawnRunConfig(cfg)
+	s.installLifecycleHolder(ctx, cfg, &rc)
 	persisted := s.installStepCommit(ctx, cfg, &rc)
 
 	result, err := s.agent.Generate(ctx, rc)
@@ -227,6 +251,7 @@ func SpawnContextSourceFrags(rc RunConfig) []contextfrag.ContextFrag {
 // This enables activity-based watchdog monitoring for subagent execution.
 func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.SpawnRunConfig, touchFn func()) (*tools.SpawnResult, error) {
 	rc := runConfigFromSpawnRunConfig(cfg)
+	s.installLifecycleHolder(ctx, cfg, &rc)
 	persisted := s.installStepCommit(ctx, cfg, &rc)
 	var observe SpawnRunObserver
 	if s.runObserver != nil {
