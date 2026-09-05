@@ -130,11 +130,15 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if err != nil {
 		return BotAgent{}, fmt.Errorf("marshal bot agent metadata: %w", err)
 	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
 	row, err := s.queries.CreateBotAgent(ctx, sqlc.CreateBotAgentParams{
 		BotID:    pgBotID,
 		Name:     name,
 		Runtime:  runtime,
-		Enabled:  true,
+		Enabled:  enabled,
 		Metadata: payload,
 	})
 	if err != nil {

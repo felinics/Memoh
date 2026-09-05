@@ -559,6 +559,12 @@ export type BotagentsBotAgent = {
     bot_id?: string;
     created_at?: string;
     deleted_at?: string;
+    /**
+     * Dependency is the workspace dependency the agent's runtime declares
+     * (design §9.3). It is derived from the driver at read time, never
+     * persisted, and omitted for runtimes without a declaration (ACP).
+     */
+    dependency?: BotagentsDependencyRequirement;
     enabled?: boolean;
     id?: string;
     metadata?: {
@@ -570,11 +576,20 @@ export type BotagentsBotAgent = {
 };
 
 export type BotagentsCreateRequest = {
+    /**
+     * Enabled defaults to true when omitted. The web passes false for direct
+     * runtimes so the dependency preflight runs before the agent goes live.
+     */
+    enabled?: boolean;
     metadata?: {
         [key: string]: unknown;
     };
     name?: string;
     runtime?: string;
+};
+
+export type BotagentsDependencyRequirement = {
+    dependency_id?: string;
 };
 
 export type BotagentsListResponse = {
@@ -1389,6 +1404,15 @@ export type ConversationUiForwardRef = {
 
 export type ConversationUiMessage = {
     approval?: ConversationUiToolApproval;
+    /**
+     * Args are the machine-readable parameters of a notice block: the string
+     * values of the runtime_notice event metadata (dep_id and install_task_id
+     * for a workspace dependency notice, for instance). The client renders
+     * actions from them instead of parsing Content.
+     */
+    args?: {
+        [key: string]: string;
+    };
     attachments?: Array<ConversationUiAttachment>;
     background_task?: ConversationUiBackgroundTask;
     code?: string;

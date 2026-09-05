@@ -13,6 +13,7 @@ package external
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -289,3 +290,88 @@ type PromptResult struct {
 	// Nil means no changes.
 	RuntimeMetadata map[string]any
 }
+
+// DependencyRequirer is implemented by drivers whose CLI is provisioned as a
+// managed workspace dependency (design §9.1). The CLI version is not part of
+// the declaration: the dependency manager installs whatever version the user
+// asks for (latest by default), and the runtime's own handshake warns when
+// the copy it talks to drifts from its protocol snapshot.
+type DependencyRequirer interface {
+	RequiredDependency() (depID string)
+}
+
+// DependencyRequirement is a driver's declared workspace dependency.
+type DependencyRequirement struct {
+	DependencyID string
+}
+
+// RequiredDependencies maps runtime type to the dependency each driver
+// declares. Drivers without a declaration (the generic ACP runtime) are
+// omitted.
+func (drivers Drivers) RequiredDependencies() map[string]DependencyRequirement {
+	out := map[string]DependencyRequirement{}
+	for _, driver := range drivers {
+		requirer, ok := driver.(DependencyRequirer)
+		if !ok {
+			continue
+		}
+		depID := strings.TrimSpace(requirer.RequiredDependency())
+		if depID == "" {
+			continue
+		}
+		out[strings.TrimSpace(driver.RuntimeType())] = DependencyRequirement{DependencyID: depID}
+	}
+	return out
+}
+
+// LauncherSource says which copy of a CLI a Launcher points at.
+type LauncherSource string
+
+const (
+	LauncherSourceManaged LauncherSource = "managed"
+	LauncherSourceToolkit LauncherSource = "toolkit"
+	LauncherSourcePath    LauncherSource = "path"
+)
+
+// Launcher is a resolved CLI executable inside the bot workspace.
+type Launcher struct {
+	// Path is the absolute path the driver must execute.
+	Path string
+	// Version is the observed CLI version, empty when unknown.
+	Version string
+	Source  LauncherSource
+}
+
+// LauncherResolver picks the CLI copy a driver should execute: the managed
+// copy first, then the image toolkit, then PATH (design §9.2). A missing
+// dependency yields a *DependencyMissingError whose TaskID identifies the
+// background install the resolver may already have started.
+type LauncherResolver interface {
+	ResolveLauncher(ctx context.Context, botID, depID string) (Launcher, error)
+}
+
+// VersionObserver lets drivers feed the CLI version reported during the
+// protocol handshake back into the resolver's cache.
+type VersionObserver interface {
+	ObserveLauncherVersion(ctx context.Context, botID, depID, version string)
+}
+
+// ErrDependencyMissing is the errors.Is target for DependencyMissingError.
+var ErrDependencyMissing = errors.New("workspace dependency is not installed")
+
+// DependencyMissingError reports that no copy of the dependency exists in the
+// workspace. TaskID is the background installation task, if one was started.
+type DependencyMissingError struct {
+	DependencyID string
+	TaskID       string
+}
+
+func (e *DependencyMissingError) Error() string {
+	if e == nil {
+		return ErrDependencyMissing.Error()
+	}
+	return fmt.Sprintf("workspace dependency %s is not installed", e.DependencyID)
+}
+
+// Is makes errors.Is(err, ErrDependencyMissing) true for any instance.
+func (*DependencyMissingError) Is(target error) bool { return target == ErrDependencyMissing }

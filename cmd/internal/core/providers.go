@@ -12,6 +12,7 @@ import (
 	"os"
 	stdpath "path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -581,7 +582,7 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore) *codexruntime.Driver {
+func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
 	driver := codexruntime.NewDriver(
 		workspaceManager,
 		botAgents,
@@ -591,6 +592,11 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
 		log,
 	)
+	// The dependency service sits upstream of the drivers in the FX graph
+	// (workspace manager, store, catalog, background manager), so it can be
+	// handed over here; the setter only keeps the driver constructible
+	// without a resolver (tests, toolkit fallback).
+	driver.SetLauncherResolver(workspaceDeps)
 	lc.Append(fx.Hook{
 		OnStop: func(context.Context) error {
 			driver.CloseAll()
@@ -600,8 +606,8 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 	return driver
 }
 
-func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore) *claudecoderuntime.Driver {
-	return claudecoderuntime.NewDriver(
+func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *claudecoderuntime.Driver {
+	driver := claudecoderuntime.NewDriver(
 		workspaceManager,
 		botAgents,
 		credentials,
@@ -610,10 +616,68 @@ func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manag
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
 		log,
 	)
+	driver.SetLauncherResolver(workspaceDeps)
+	return driver
 }
 
-func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderuntime.Driver) external.Drivers {
-	return external.Drivers{codex, claude}
+// directRuntimeLaunchers names the CLI command each direct runtime executes,
+// keyed by runtime type. validateDriverDependencies requires it to be the
+// primary command (provides[0]) of the dependency the driver declares: the
+// launcher resolver hands drivers the path of provides[0], so any other
+// arrangement would launch the wrong binary. A new direct runtime that
+// declares a dependency must be added here, or the Server refuses to start.
+var directRuntimeLaunchers = map[string]string{
+	codexruntime.RuntimeType:      "codex",
+	claudecoderuntime.RuntimeType: "claude",
+}
+
+// provideDirectAgentDrivers assembles the direct runtimes and checks their
+// dependency declarations against the catalog (design §9.1). A drift such as
+// "the driver wants codex, the catalog calls it openai-codex" fails the FX
+// start-up instead of surfacing when a user first enables the agent.
+func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderuntime.Driver, cat *depcatalog.Catalog) (external.Drivers, error) {
+	drivers := external.Drivers{codex, claude}
+	if err := validateDriverDependencies(drivers, cat); err != nil {
+		return nil, err
+	}
+	return drivers, nil
+}
+
+// validateDriverDependencies checks every driver that declares a workspace
+// dependency (external.DependencyRequirer): the dependency is in the catalog
+// and its primary command is the runtime's launcher. All violations are
+// reported together.
+func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalog) error {
+	if cat == nil {
+		return errors.New("validate direct agent dependencies: catalog is nil")
+	}
+	requirements := drivers.RequiredDependencies()
+	runtimes := make([]string, 0, len(requirements))
+	for runtimeType := range requirements {
+		runtimes = append(runtimes, runtimeType)
+	}
+	sort.Strings(runtimes)
+
+	var errs []error
+	for _, runtimeType := range runtimes {
+		req := requirements[runtimeType]
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("direct runtime %q requires workspace dependency %q: %s", runtimeType, req.DependencyID, fmt.Sprintf(format, args...)))
+		}
+		dep, ok := cat.Get(req.DependencyID)
+		if !ok {
+			fail("not in the catalog")
+			continue
+		}
+		command, known := directRuntimeLaunchers[runtimeType]
+		switch {
+		case !known:
+			fail("no launcher command registered in directRuntimeLaunchers")
+		case len(dep.Provides) == 0 || dep.Provides[0] != command:
+			fail("primary command %v (provides[0]) is not the runtime launcher %q", dep.Provides, command)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func provideExternalAgentCodexHandler(log *slog.Logger, driver *codexruntime.Driver, botAgents *botagents.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ExternalAgentCodexHandler {
@@ -715,12 +779,16 @@ func provideWorkspaceDependencyCatalog() (*depcatalog.Catalog, error) {
 	return cat, nil
 }
 
-func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, cat *depcatalog.Catalog) *workspacedeps.Service {
+func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, cat *depcatalog.Catalog, bgManager *background.Manager) *workspacedeps.Service {
 	return workspacedeps.NewService(workspacedeps.Options{
 		Workspace: workspacedeps.NewManagerWorkspaceAccess(manager),
 		Store:     workspacedeps.NewPostgresStore(queries),
 		Catalog:   cat,
 		Logger:    log,
+		// The launcher resolver hands installs of a missing dependency to the
+		// background manager (design §9.4, WD-EXT-005) so a turn never blocks
+		// on a download.
+		Background: bgManager,
 	})
 }
 

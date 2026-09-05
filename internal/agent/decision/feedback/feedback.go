@@ -29,6 +29,10 @@ const (
 	CodeAgentCommandStale     = "acp_agent_command_stale"
 	CodeImageInputUnsupported = "acp_image_input_unsupported"
 	CodeInvalidChatRuntime    = "invalid_chat_runtime"
+	// Workspace dependency feedback (design §9.4): a missing dependency blocks
+	// the turn and carries dep_id / install_task_id so the client can show the
+	// background install the resolver started.
+	CodeAgentDependencyMissing = "agent_dependency_missing"
 )
 
 type Error struct {

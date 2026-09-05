@@ -299,6 +299,9 @@ type fakeWorkspace struct {
 	ensureErr   error
 	ensureCalls []string
 	resetFns    []func(string)
+	// currentTarget is what CurrentTargetID reports; empty means native.
+	currentTarget    string
+	currentTargetErr error
 }
 
 func newFakeWorkspace(client *bridge.Client, dataRoot string) *fakeWorkspace {
@@ -343,6 +346,22 @@ func (f *fakeWorkspace) OnBridgeReset(fn func(botID string)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resetFns = append(f.resetFns, fn)
+}
+
+func (f *fakeWorkspace) CurrentTargetID(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.currentTargetErr != nil {
+		return "", f.currentTargetErr
+	}
+	return normalizeTargetID(f.currentTarget), nil
+}
+
+func (f *fakeWorkspace) setCurrentTarget(targetID string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.currentTarget = targetID
+	f.currentTargetErr = err
 }
 
 func (f *fakeWorkspace) reset(botID string) {
@@ -1906,5 +1925,50 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 	}
 	if len(leftovers) != 0 {
 		t.Errorf("runner left files behind: %v", leftovers)
+	}
+}
+
+// TestListFollowsLauncherCandidate pins the panel to the copy the launcher
+// resolver runs (design §9.2): the managed copy wins over a toolkit copy
+// whatever their versions, and Preflight reports the same copy.
+func TestListFollowsLauncherCandidate(t *testing.T) {
+	f := newServiceFixture(t)
+	f.seed("agent-x", StatusInstalled, "1.9.0")
+	f.seedCandidates(testTarget, managed("1.9.0"), toolkit("2.0.0"))
+
+	result, err := f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	agent := f.entry(t, result, "agent-x")
+	if agent.InstalledVersion != "1.9.0" || agent.ImageVersion != "2.0.0" || !agent.Overlay || agent.Status != StatusInstalled {
+		t.Errorf("agent-x entry = %+v, want the managed overlay in effect", agent)
+	}
+	if rec, ok := f.store.get(f.key("agent-x")); !ok || rec.InstalledVersion != "1.9.0" || rec.Source != InstallationSourceManaged {
+		t.Errorf("agent-x record = %+v", rec)
+	}
+	pre, err := f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
+	if err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+	if item := pre.Items[0]; !item.Satisfied || item.InstalledVersion != "1.9.0" {
+		t.Errorf("preflight item = %+v", item)
+	}
+
+	// Without a managed copy the toolkit copy runs and the record follows it.
+	f.seedCandidates(testTarget, toolkit("1.8.0"), onPath("3.0.0"))
+	result, err = f.svc.List(f.ctx(), testBot, testTarget)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if agent := f.entry(t, result, "agent-x"); agent.Overlay || agent.InstalledVersion != "1.8.0" || agent.ImageVersion != "1.8.0" || agent.Installation.Source != InstallationSourceImage {
+		t.Errorf("agent-x entry = %+v, want the image copy in effect", agent)
+	}
+	pre, err = f.svc.Preflight(f.ctx(), testBot, testTarget, []string{"agent-x"})
+	if err != nil {
+		t.Fatalf("Preflight: %v", err)
+	}
+	if item := pre.Items[0]; !item.Satisfied || item.InstalledVersion != "1.8.0" {
+		t.Errorf("preflight item = %+v", item)
 	}
 }

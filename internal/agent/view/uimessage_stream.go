@@ -111,6 +111,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			Type:    UIMessageNotice,
 			Name:    strings.TrimSpace(event.Code),
 			Content: strings.TrimSpace(event.Delta),
+			Args:    noticeArgsFromMetadata(event.Metadata),
 		}}
 
 	case "tool_call_start", "tool_call_input_start", "tool_call_metadata":
@@ -414,6 +415,34 @@ func cloneToolStreamMessage(message UIMessage) UIMessage {
 		clone.Progress = append([]any(nil), message.Progress...)
 	}
 	return clone
+}
+
+// noticeArgsFromMetadata projects the string-valued entries of a
+// runtime_notice's metadata into the notice's Args. Runtimes put the
+// machine-readable notice parameters there (dep_id and install_task_id for a
+// workspace dependency notice, for instance); nested objects and non-string
+// scalars are not part of that vocabulary and are dropped. Empty
+// values are dropped too, since the client treats an absent key and an unknown
+// value alike. The result is nil when nothing survives so the field is omitted
+// from the wire shape.
+func noticeArgsFromMetadata(metadata map[string]any) map[string]string {
+	var args map[string]string
+	for key, raw := range metadata {
+		value, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		if args == nil {
+			args = map[string]string{}
+		}
+		args[key] = value
+	}
+	return args
 }
 
 func applyExecutionLocationMetadata(message *UIMessage, metadata map[string]any) {

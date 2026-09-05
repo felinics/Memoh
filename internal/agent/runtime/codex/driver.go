@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
@@ -43,6 +45,9 @@ type Driver struct {
 	userInput   UserInputService
 	toolGateway toolmount.Gateway
 	logger      *slog.Logger
+	// launchers picks the codex CLI copy to run per bot (design §9.2). Nil
+	// falls back to the toolkit path.
+	launchers external.LauncherResolver
 
 	// servers owns the shared per-Agent app-server lifecycle: reference
 	// counting for concurrent users, drain-on-recycle instead of kill-by-bot.
@@ -74,6 +79,23 @@ func NewDriver(
 
 // RuntimeType implements external.Driver.
 func (*Driver) RuntimeType() string { return RuntimeType }
+
+var _ external.DependencyRequirer = (*Driver)(nil)
+
+// RequiredDependency implements external.DependencyRequirer: the codex CLI
+// is a managed workspace dependency. No version is declared; the handshake in
+// startAppServerSession warns when the running CLI drifts from the protocol
+// snapshot.
+func (*Driver) RequiredDependency() string {
+	return dependencyID
+}
+
+// SetLauncherResolver installs the workspace dependency resolver. Setter
+// injection keeps the driver constructible without one (tests, the toolkit
+// fallback); assembly wires it right after NewDriver.
+func (d *Driver) SetLauncherResolver(r external.LauncherResolver) {
+	d.launchers = r
+}
 
 func (d *Driver) ResetBot(botID string) { d.CloseBot(botID) }
 
@@ -221,7 +243,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	srv, releaseServer, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, wrapServerError(err)
 	}
 	defer releaseServer()
 	if err := srv.ensureAuth(ctx, cfg); err != nil {
@@ -235,12 +257,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err != nil {
 		return external.PromptResult{}, err
 	}
-	// Thread config is fixed at start, so a thread that began without a tool
-	// gateway stays toolless for the app-server's life. Re-notice every turn:
-	// silent capability loss is exactly what this channel exists to prevent.
-	if srv.threadToolless(threadID) {
-		toolmount.EmitUnavailableNotice(input.Sink, "this conversation started without Memoh tools; start a new session to restore them")
-	}
+	emitThreadNotices(srv, threadID, input.Sink)
 
 	turn := newTurnState(ctx, input, threadID, d.approval, d.approval.RegisterWaiter, d.userInput, srv.toolLookup, d.logger)
 	defer turn.close()
@@ -495,13 +512,98 @@ func (d *Driver) startServer(ctx context.Context, key string) (recyclable, error
 			return nil, external.CredentialError(err)
 		}
 	}
-	srv, err := startAppServerSession(context.WithoutCancel(ctx), botID, botAgentID, client, cfg, d.logger)
+	launcher, err := d.resolveLauncher(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
+	srv, err := startAppServerSession(context.WithoutCancel(ctx), botID, botAgentID, client, cfg, launcher, d.logger)
+	if err != nil {
+		return nil, err
+	}
+	// The handshake reports the version actually running; feed it back so the
+	// resolver's discovery cache is corrected without a second probe.
+	d.observeLauncherVersion(ctx, botID, srv.codexVersion)
 	srv.workspaceInfo = info
 	srv.toolLookup = d.botGatewayToolLookup(botID)
 	return srv, nil
+}
+
+// resolveLauncher picks the codex CLI copy for botID (design §9.2). Without a
+// resolver the toolkit path is used as before. A missing dependency becomes
+// the stable agent_dependency_missing feedback so the user learns what is
+// being installed and when to retry, instead of a bare exec failure.
+func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.Launcher, error) {
+	if d.launchers == nil {
+		return external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}, nil
+	}
+	launcher, err := d.launchers.ResolveLauncher(ctx, botID, dependencyID)
+	if err != nil {
+		var missing *external.DependencyMissingError
+		if errors.As(err, &missing) {
+			return external.Launcher{}, dependencyMissingFeedback(missing)
+		}
+		return external.Launcher{}, fmt.Errorf("resolve codex launcher for bot %s: %w", botID, err)
+	}
+	if strings.TrimSpace(launcher.Path) == "" {
+		return external.Launcher{}, fmt.Errorf("resolve codex launcher for bot %s: resolver returned no path", botID)
+	}
+	return launcher, nil
+}
+
+// dependencyMissingFeedback is the user-facing shape of a missing codex CLI
+// (design §9.4): it blocks this turn and names the background install task,
+// if one was started, so the UI can show progress and a cancel action.
+func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentfeedback.Error {
+	message := "Codex is not installed in this workspace yet. Install it from the bot's dependencies and send the message again."
+	if strings.TrimSpace(missing.TaskID) != "" {
+		message = "Codex is not installed in this workspace yet; installation has started in the background. Send the message again when it finishes."
+	}
+	return agentfeedback.New(
+		agentfeedback.CodeAgentDependencyMissing,
+		"dependency_missing",
+		http.StatusConflict,
+		"chat.externalAgent.dependencyMissing",
+		message,
+		map[string]string{
+			"dep_id":          firstNonEmpty(missing.DependencyID, dependencyID),
+			"install_task_id": strings.TrimSpace(missing.TaskID),
+		},
+	)
+}
+
+// observeLauncherVersion reports the handshake version to the resolver when
+// it keeps a version cache.
+func (d *Driver) observeLauncherVersion(ctx context.Context, botID, version string) {
+	observer, ok := d.launchers.(external.VersionObserver)
+	if !ok || strings.TrimSpace(version) == "" {
+		return
+	}
+	observer.ObserveLauncherVersion(ctx, botID, dependencyID, strings.TrimSpace(version))
+}
+
+// wrapServerError shapes an app-server acquisition failure for the caller.
+// Stable feedback (a missing workspace dependency) passes through untouched
+// so it reaches the user with its code, status, and args — apperror.Wrap
+// deliberately hides its cause, which would swallow the feedback. Anything
+// else is the generic runtime-unavailable failure.
+func wrapServerError(err error) error {
+	var feedbackErr *agentfeedback.Error
+	if errors.As(err, &feedbackErr) {
+		return feedbackErr
+	}
+	return apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+}
+
+// emitThreadNotices surfaces runtime-side degradations at the start of a turn.
+//
+// Thread config is fixed at start, so a thread that began without a tool
+// gateway stays toolless for the app-server's life; re-notice every turn,
+// since silent capability loss is exactly what this channel exists to
+// prevent.
+func emitThreadNotices(srv *appServer, threadID string, sink external.EventSink) {
+	if srv.threadToolless(threadID) {
+		toolmount.EmitUnavailableNotice(sink, "this conversation started without Memoh tools; start a new session to restore them")
+	}
 }
 
 // acquireServer returns the bot's live app-server plus a release the caller
@@ -539,7 +641,7 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runti
 	}
 	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
 	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return nil, wrapServerError(err)
 	}
 	defer releaseServer()
 	cwd := strings.TrimSpace(metadataString(runtimeMetadata, "project_path"))

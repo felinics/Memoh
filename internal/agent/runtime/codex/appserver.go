@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/version"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -32,6 +33,9 @@ type appServer struct {
 	mountCtx    context.Context
 	mountCancel context.CancelFunc
 
+	// launcher is the CLI copy this process runs; codexVersion is the version
+	// it reported during the initialize handshake.
+	launcher     external.Launcher
 	codexVersion string
 
 	mu    sync.Mutex
@@ -68,8 +72,8 @@ var ErrAuthRequired = errors.New("codex runtime authentication is required")
 // handshakeTimeout bounds initialize plus auth setup on a fresh process.
 const handshakeTimeout = 60 * time.Second
 
-func startAppServerSession(ctx context.Context, botID, botAgentID string, client *bridge.Client, cfg Config, logger *slog.Logger) (*appServer, error) {
-	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg)
+func startAppServerSession(ctx context.Context, botID, botAgentID string, client *bridge.Client, cfg Config, launcher external.Launcher, logger *slog.Logger) (*appServer, error) {
+	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg, launcher.Path)
 	if err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
@@ -80,6 +84,7 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		proc:            proc,
 		logger:          logger,
 		client:          client,
+		launcher:        launcher,
 		mountCtx:        mountCtx,
 		mountCancel:     mountCancel,
 		turns:           map[string]*turnState{},
@@ -117,6 +122,8 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 			slog.String("bot_id", botID),
 			slog.String("cli_version", srv.codexVersion),
 			slog.String("pinned", protocol.PinnedCodexVersion),
+			slog.String("launcher", launcher.Path),
+			slog.String("launcher_source", string(launcher.Source)),
 		)
 	}
 	return srv, nil

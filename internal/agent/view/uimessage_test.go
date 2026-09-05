@@ -1901,3 +1901,46 @@ func TestConvertTerminalMessagesSkipsTagOnlyLiveTextBlocks(t *testing.T) {
 		t.Fatalf("terminal text ID = %d, want %d (must skip the tag-only live block, not overwrite it)", terminalText.ID, realTextID)
 	}
 }
+
+func TestUIMessageStreamConverterRuntimeNoticeCarriesMetadataArgs(t *testing.T) {
+	t.Parallel()
+
+	messages := NewUIMessageStreamConverter().HandleEvent(UIMessageStreamEvent{
+		Type:  "runtime_notice",
+		Code:  "agent_dependency_missing",
+		Delta: " Codex is not installed in this workspace; installing it in the background. ",
+		Metadata: map[string]any{
+			"dep_id":          "codex",
+			"install_task_id": " task-42 ",
+			"installed_path":  "",
+			"attempts":        2,
+			"detail":          map[string]any{"path": "/opt/memoh/toolkit/bin/codex"},
+		},
+	})
+	want := UIMessage{
+		ID:      0,
+		Type:    UIMessageNotice,
+		Name:    "agent_dependency_missing",
+		Content: "Codex is not installed in this workspace; installing it in the background.",
+		// Only string values survive; empty ones are dropped so the client
+		// treats "unknown value" and "no key" alike.
+		Args: map[string]string{"dep_id": "codex", "install_task_id": "task-42"},
+	}
+	if len(messages) != 1 || !reflect.DeepEqual(messages[0], want) {
+		t.Fatalf("notice = %#v, want %#v", messages, want)
+	}
+
+	plain := NewUIMessageStreamConverter().HandleEvent(UIMessageStreamEvent{
+		Type: "runtime_notice", Code: "tools_unavailable", Delta: "no tools",
+	})
+	if len(plain) != 1 || plain[0].Args != nil {
+		t.Fatalf("notice without metadata = %#v, want nil args", plain)
+	}
+	data, err := json.Marshal(plain[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"args"`) {
+		t.Fatalf("args must be omitted from the wire shape when empty: %s", data)
+	}
+}

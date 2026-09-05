@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
+	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/config"
@@ -18,6 +23,7 @@ import (
 	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
 	modelspkg "github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
+	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func TestACPToolProvidersIncludeAskUser(t *testing.T) {
@@ -193,4 +199,175 @@ func mustTestUUID(s string) pgtype.UUID {
 		panic(err)
 	}
 	return id
+}
+
+// dependencyDriverStub is a direct-runtime shape that declares a workspace
+// dependency, so validateDriverDependencies can be exercised without the
+// real drivers' constructors.
+type dependencyDriverStub struct {
+	runtimeType string
+	depID       string
+}
+
+func (d dependencyDriverStub) RuntimeType() string { return d.runtimeType }
+
+func (dependencyDriverStub) Prompt(context.Context, external.PromptInput) (external.PromptResult, error) {
+	return external.PromptResult{}, nil
+}
+
+func (d dependencyDriverStub) RequiredDependency() string { return d.depID }
+
+// plainDriverStub declares no dependency, like the generic ACP runtime.
+type plainDriverStub struct{}
+
+func (plainDriverStub) RuntimeType() string { return "acp" }
+
+func (plainDriverStub) Prompt(context.Context, external.PromptInput) (external.PromptResult, error) {
+	return external.PromptResult{}, nil
+}
+
+// driverTestCatalog builds a catalog holding a codex agent dependency with
+// the given provides list, plus a tool dependency.
+func driverTestCatalog(t *testing.T, codexProvides string) *depcatalog.Catalog {
+	t.Helper()
+	codexYAML := `id: codex
+name: Codex
+category: agent
+source: managed
+provides: [` + codexProvides + `]
+platforms:
+  - { os: linux, arch: [amd64], libc: glibc }
+scripts:
+  install: install.sh
+  remove: remove.sh
+`
+	toolYAML := `id: tool-z
+name: Tool Z
+category: tool
+source: managed
+provides: [tool-z]
+platforms:
+  - { os: linux, arch: [amd64], libc: glibc }
+scripts:
+  install: install.sh
+  remove: remove.sh
+`
+	script := &fstest.MapFile{Data: []byte("dep_log noop\n")}
+	cat, err := depcatalog.LoadFS(fstest.MapFS{
+		"codex/dependency.yaml":  &fstest.MapFile{Data: []byte(codexYAML)},
+		"codex/install.sh":       script,
+		"codex/remove.sh":        script,
+		"tool-z/dependency.yaml": &fstest.MapFile{Data: []byte(toolYAML)},
+		"tool-z/install.sh":      script,
+		"tool-z/remove.sh":       script,
+	})
+	if err != nil {
+		t.Fatalf("LoadFS: %v", err)
+	}
+	return cat
+}
+
+// TestValidateDriverDependencies covers the start-up check of design §9.1:
+// the real declarations pass against the embedded catalog, and each kind of
+// drift between a driver and the catalog is an error, never a panic.
+func TestValidateDriverDependencies(t *testing.T) {
+	embedded, err := depcatalog.Load()
+	if err != nil {
+		t.Fatalf("catalog.Load() error = %v", err)
+	}
+
+	t.Run("real declarations pass", func(t *testing.T) {
+		drivers := external.Drivers{
+			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
+			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code"},
+			plainDriverStub{},
+		}
+		if err := validateDriverDependencies(drivers, embedded); err != nil {
+			t.Fatalf("validateDriverDependencies() error = %v", err)
+		}
+		// The assembly path with the real drivers' declarations (methods on a
+		// nil receiver, no constructor needed) is what FX runs at start-up.
+		assembled, err := provideDirectAgentDrivers((*codexruntime.Driver)(nil), (*claudecoderuntime.Driver)(nil), embedded)
+		if err != nil {
+			t.Fatalf("provideDirectAgentDrivers() error = %v", err)
+		}
+		if len(assembled) != 2 {
+			t.Fatalf("provideDirectAgentDrivers() = %d drivers, want 2", len(assembled))
+		}
+	})
+
+	t.Run("drivers without a declaration are ignored", func(t *testing.T) {
+		if err := validateDriverDependencies(external.Drivers{plainDriverStub{}}, embedded); err != nil {
+			t.Fatalf("validateDriverDependencies() error = %v", err)
+		}
+	})
+
+	t.Run("nil catalog", func(t *testing.T) {
+		if err := validateDriverDependencies(external.Drivers{plainDriverStub{}}, nil); err == nil {
+			t.Fatal("validateDriverDependencies(nil catalog) = nil, want error")
+		}
+	})
+
+	failures := []struct {
+		name     string
+		provides string
+		driver   dependencyDriverStub
+		want     string
+	}{
+		{
+			name:     "dependency not in the catalog",
+			provides: "codex",
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "openai-codex"},
+			want:     `workspace dependency "openai-codex": not in the catalog`,
+		},
+		{
+			name:     "primary command is not the launcher",
+			provides: "codex-cli, codex",
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
+			want:     `primary command [codex-cli codex] (provides[0]) is not the runtime launcher "codex"`,
+		},
+		{
+			name:     "dependency provides a different command",
+			provides: "codex",
+			driver:   dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "tool-z"},
+			want:     `primary command [tool-z] (provides[0]) is not the runtime launcher "codex"`,
+		},
+		{
+			name:     "runtime without a registered launcher command",
+			provides: "codex",
+			driver:   dependencyDriverStub{runtimeType: "gemini", depID: "codex"},
+			want:     "no launcher command registered",
+		},
+	}
+	for _, tt := range failures {
+		t.Run(tt.name, func(t *testing.T) {
+			cat := driverTestCatalog(t, tt.provides)
+			err := validateDriverDependencies(external.Drivers{tt.driver}, cat)
+			if err == nil {
+				t.Fatal("validateDriverDependencies() = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validateDriverDependencies() error = %q, want it to contain %q", err, tt.want)
+			}
+			if !strings.Contains(err.Error(), `direct runtime "`+tt.driver.runtimeType+`"`) {
+				t.Fatalf("validateDriverDependencies() error = %q, want the runtime type named", err)
+			}
+		})
+	}
+
+	t.Run("all violations reported together", func(t *testing.T) {
+		cat := driverTestCatalog(t, "codex-cli")
+		err := validateDriverDependencies(external.Drivers{
+			dependencyDriverStub{runtimeType: codexruntime.RuntimeType, depID: "codex"},
+			dependencyDriverStub{runtimeType: claudecoderuntime.RuntimeType, depID: "claude-code"},
+		}, cat)
+		if err == nil {
+			t.Fatal("validateDriverDependencies() = nil, want error")
+		}
+		for _, want := range []string{"provides[0]", `"claude-code": not in the catalog`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("validateDriverDependencies() error = %q, want it to contain %q", err, want)
+			}
+		}
+	})
 }
