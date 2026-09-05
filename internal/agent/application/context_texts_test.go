@@ -3,10 +3,12 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -95,4 +97,72 @@ func TestContextTextStoreRetriesAHashAfterAFailedWrite(t *testing.T) {
 	if len(queries.params) != 2 {
 		t.Fatalf("a persisted hash was written again")
 	}
+}
+
+type blockingFragmentTextQueries struct {
+	recordingFragmentTextQueries
+	started chan struct{}
+	release chan struct{}
+}
+
+func (q *blockingFragmentTextQueries) UpsertContextFragmentTexts(ctx context.Context, arg sqlc.UpsertContextFragmentTextsParams) error {
+	q.started <- struct{}{}
+	select {
+	case <-q.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return q.recordingFragmentTextQueries.UpsertContextFragmentTexts(ctx, arg)
+}
+
+func TestContextTextStoreBoundsWritersAndRetriesDroppedBatches(t *testing.T) {
+	t.Parallel()
+
+	queries := &blockingFragmentTextQueries{started: make(chan struct{}, maxFragmentTextWriters+1), release: make(chan struct{})}
+	store := newContextTextStore(queries, slog.New(slog.DiscardHandler))
+	for i := range maxFragmentTextWriters + 1 {
+		store.PersistFragmentTexts(context.Background(), textStoreBotA, []contextfrag.FragmentText{{TextHash: fmt.Sprintf("h%d", i), Kind: contextfrag.KindSystemPrompt, Text: "text"}})
+	}
+	for range maxFragmentTextWriters {
+		<-queries.started
+	}
+	select {
+	case <-queries.started:
+		t.Fatalf("a fifth batch started while every writer was busy")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(queries.release)
+	store.wait()
+	if len(queries.params) != maxFragmentTextWriters {
+		t.Fatalf("batches written = %d, want the writer bound", len(queries.params))
+	}
+
+	store.PersistFragmentTexts(context.Background(), textStoreBotA, []contextfrag.FragmentText{{TextHash: fmt.Sprintf("h%d", maxFragmentTextWriters), Kind: contextfrag.KindSystemPrompt, Text: "text"}})
+	<-queries.started
+	store.wait()
+	if len(queries.params) != maxFragmentTextWriters+1 {
+		t.Fatalf("the dropped batch must be written by a later run: %d batches", len(queries.params))
+	}
+}
+
+func TestContextTextStoreTimesOutAStuckWrite(t *testing.T) {
+	t.Parallel()
+
+	queries := &blockingFragmentTextQueries{started: make(chan struct{}, 1), release: make(chan struct{})}
+	store := newContextTextStore(queries, slog.New(slog.DiscardHandler))
+	store.timeout = 20 * time.Millisecond
+	store.PersistFragmentTexts(context.Background(), textStoreBotA, []contextfrag.FragmentText{{TextHash: "slow", Kind: contextfrag.KindSystemPrompt, Text: "text"}})
+	<-queries.started
+	store.wait()
+	if len(queries.params) != 0 {
+		t.Fatalf("a timed-out write must not count as written")
+	}
+	store.PersistFragmentTexts(context.Background(), textStoreBotA, []contextfrag.FragmentText{{TextHash: "slow", Kind: contextfrag.KindSystemPrompt, Text: "text"}})
+	select {
+	case <-queries.started:
+	case <-time.After(time.Second):
+		t.Fatalf("a timed-out hash must be retried")
+	}
+	close(queries.release)
+	store.wait()
 }

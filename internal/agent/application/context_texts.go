@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -16,6 +17,19 @@ import (
 // maxFragmentTextBytes bounds one stored fragment text; longer texts keep
 // their head and are marked truncated.
 const maxFragmentTextBytes = 256 << 10
+
+const (
+	// maxFragmentTextWriters bounds the batches in flight at once; a batch
+	// that finds no free writer is dropped and retried by the next run that
+	// renders the same text, so a slow database never piles up goroutines.
+	maxFragmentTextWriters = 4
+	// fragmentTextWriteTimeout bounds one batch write.
+	fragmentTextWriteTimeout = 30 * time.Second
+	// maxRememberedFragmentTexts bounds the in-memory record of written
+	// hashes; past it the record starts over and the store relies on the
+	// database's conflict handling.
+	maxRememberedFragmentTexts = 16384
+)
 
 type contextTextQueries interface {
 	UpsertContextFragmentTexts(ctx context.Context, arg sqlc.UpsertContextFragmentTextsParams) error
@@ -35,9 +49,11 @@ type textStoreKey struct {
 type contextTextStore struct {
 	queries  contextTextQueries
 	logger   *slog.Logger
+	timeout  time.Duration
 	mu       sync.Mutex
 	seen     map[textStoreKey]struct{}
 	inflight map[textStoreKey]struct{}
+	writers  chan struct{}
 	pending  sync.WaitGroup
 }
 
@@ -45,7 +61,14 @@ func newContextTextStore(queries contextTextQueries, logger *slog.Logger) *conte
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &contextTextStore{queries: queries, logger: logger, seen: make(map[textStoreKey]struct{}), inflight: make(map[textStoreKey]struct{})}
+	return &contextTextStore{
+		queries:  queries,
+		logger:   logger,
+		timeout:  fragmentTextWriteTimeout,
+		seen:     make(map[textStoreKey]struct{}),
+		inflight: make(map[textStoreKey]struct{}),
+		writers:  make(chan struct{}, maxFragmentTextWriters),
+	}
 }
 
 func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, botID pgtype.UUID, texts []contextfrag.FragmentText) {
@@ -85,22 +108,41 @@ func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, botID pgtyp
 	if len(params.ContentHashes) == 0 {
 		return
 	}
+	select {
+	case s.writers <- struct{}{}:
+	default:
+		s.release(keys, false)
+		s.logger.Warn("context fragment texts dropped: writers busy", slog.Int("count", len(params.ContentHashes)))
+		return
+	}
 	s.pending.Add(1)
 	go func(ctx context.Context) {
 		defer s.pending.Done()
+		defer func() { <-s.writers }()
+		ctx, cancel := context.WithTimeout(ctx, s.timeout)
+		defer cancel()
 		err := s.upsert(ctx, params)
-		s.mu.Lock()
-		for _, key := range keys {
-			delete(s.inflight, key)
-			if err == nil {
-				s.seen[key] = struct{}{}
-			}
-		}
-		s.mu.Unlock()
+		s.release(keys, err == nil)
 		if err != nil {
 			s.logger.Warn("context fragment texts not persisted", slog.Int("count", len(params.ContentHashes)), slog.Any("error", err))
 		}
 	}(context.WithoutCancel(ctx))
+}
+
+// release clears the in-flight marks of a batch and, when it was written,
+// remembers its keys so they are not written again by this process.
+func (s *contextTextStore) release(keys []textStoreKey, written bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if written && len(s.seen)+len(keys) > maxRememberedFragmentTexts {
+		s.seen = make(map[textStoreKey]struct{}, len(keys))
+	}
+	for _, key := range keys {
+		delete(s.inflight, key)
+		if written {
+			s.seen[key] = struct{}{}
+		}
+	}
 }
 
 // upsert never lets the debug store take a turn down: a store that panics
