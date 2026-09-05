@@ -50,9 +50,11 @@ func (s *Service) finalizeRuntimeDecisions(ctx context.Context, handle sessionru
 			if err != nil {
 				return fmt.Errorf("cancel run user input: %w", err)
 			}
-			event = native.StreamEvent{Type: native.EventUserInputRequest, UserInputID: req.ID,
+			event = native.StreamEvent{
+				Type: native.EventUserInputRequest, UserInputID: req.ID,
 				ToolName: req.ToolName, ToolCallID: req.ToolCallID, Status: req.Status,
-				Input: req.Input, Metadata: userinput.DeferredMetadata(req)}
+				Input: req.Input, Metadata: userinput.DeferredMetadata(req),
+			}
 		case sessionruntime.CommandToolApprovalResponse:
 			if s.toolApproval == nil {
 				return errors.New("tool approval service not configured")
@@ -64,9 +66,11 @@ func (s *Service) finalizeRuntimeDecisions(ctx context.Context, handle sessionru
 			if err != nil {
 				return fmt.Errorf("reject run tool approval: %w", err)
 			}
-			event = native.StreamEvent{Type: native.EventToolApprovalRequest, ApprovalID: req.ID,
+			event = native.StreamEvent{
+				Type: native.EventToolApprovalRequest, ApprovalID: req.ID,
 				ToolName: req.ToolName, ToolCallID: req.ToolCallID, Status: req.Status,
-				Input: req.ToolInput, Metadata: approvalResultMetadata(req)}
+				Input: req.ToolInput, Metadata: approvalResultMetadata(req),
+			}
 		}
 		s.publishCommittedRuntimeDecision(ctx, sessionruntime.Command{
 			BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID,
