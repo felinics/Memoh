@@ -33,6 +33,13 @@ type Log struct {
 	ModelID      string     `json:"model_id,omitempty"`
 	StartedAt    time.Time  `json:"started_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	// AnchorStartMS and AnchorEndMS bound the conversation time the summary
+	// covers; Level is the rollup depth and SupersededAt is set once a later
+	// compaction folded this one in.
+	AnchorStartMS int64      `json:"anchor_start_ms,omitempty"`
+	AnchorEndMS   int64      `json:"anchor_end_ms,omitempty"`
+	Level         int        `json:"level,omitempty"`
+	SupersededAt  *time.Time `json:"superseded_at,omitempty"`
 } // @name compaction.Log
 
 // ListLogsResponse is the API response for listing compaction logs.

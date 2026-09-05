@@ -161,6 +161,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		s.sessionRuntime.MarkInlineDecisionRun(req.BotID, req.ThreadID, req.RunID)
 	}
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	sess, err := s.sessionService.Get(ctx, req.ThreadID)
 	if err != nil {
 		return err
@@ -189,11 +190,13 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 	req.Query = strings.TrimSpace(req.Query)
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
-	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
-	contextLifecycle := contextfrag.NewLifecycleHolder()
+	contextMarkdown, contextURI, contextManifest, contextFrags := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
+	contextLifecycle := s.newContextLifecycleHolder(ctx, req.BotID)
+	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)
 	}
+	contextLifecycle.RecordFragmentTexts(contextFrags)
 	if memoryTrace != nil {
 		contextLifecycle.SetMemoryRecall(*memoryTrace)
 	}
@@ -306,6 +309,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 
 	emitWithContext := func(deliveryCtx context.Context, ev native.StreamEvent) {
 		reasoningTiming.observe(ev)
+		stepTrace.observe(ev)
 		if isRuntimeDecisionProjectionEvent(ev) && recordProjection(ev) {
 			completeProjection(ev.ToolCallID, s.persistRuntimeDecisionProjection(context.WithoutCancel(ctx), req, ev))
 		}
@@ -589,11 +593,14 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		Command:     payload.Command,
 	})
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
-	contextMarkdown, contextURI, contextManifest := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
-	contextLifecycle := contextfrag.NewLifecycleHolder()
+	contextMarkdown, contextURI, contextManifest, contextFrags := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
+	stepTrace := newStepTraceTracker(nil)
+	contextLifecycle := s.newContextLifecycleHolder(ctx, botID)
+	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)
 	}
+	contextLifecycle.RecordFragmentTexts(contextFrags)
 	if memoryTrace != nil {
 		contextLifecycle.SetMemoryRecall(*memoryTrace)
 	}
@@ -646,6 +653,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 				idleCancel.RecordToolCall()
 			}
 			reasoningTiming.observe(ev)
+			stepTrace.observe(ev)
 		}),
 	})
 	if idleCancel.DidFire() {

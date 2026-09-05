@@ -27,6 +27,7 @@ type terminalSnapshot struct {
 	sdkMessages     []sdk.Message
 	usage           json.RawMessage
 	reasoningTiming []messagepkg.ReasoningTimingSegment
+	stepTraces      []messagepkg.StepTraceMetadata
 	deferredToolID  string
 	aborted         bool
 	visibleOutput   bool
@@ -234,8 +235,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
 		reasoningTiming := newReasoningTimingTracker(nil)
+		stepTrace := newStepTraceTracker(nil)
 		stepCommitter := s.newAgentStepCommitter(streamCtx, streamReq, rc)
 		configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+		configureNativeStepTrace(&cfg, stepTrace, stepCommitter)
 		cfg = s.prepareRunConfig(streamCtx, cfg)
 		terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 		var lifecycleCause error
@@ -325,6 +328,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				if snap, ok := extractTerminalSnapshot(data); ok {
 					if stepCommitter == nil {
 						snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+						snap.stepTraces = stepTrace.take()
 					}
 					snap.visibleOutput = hasVisibleOutput
 					snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
@@ -587,8 +591,10 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(streamCtx, req, rc)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+	configureNativeStepTrace(&cfg, stepTrace, stepCommitter)
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	var lifecycleCause error
@@ -676,6 +682,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				if stepCommitter == nil {
 					snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+					snap.stepTraces = stepTrace.take()
 				}
 				snap.visibleOutput = hasVisibleOutput
 				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
@@ -890,6 +897,7 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 		RequireCompletePersist: true,
 		ContextLifecycle:       rc.runConfig.ContextLifecycle,
 		ReasoningTiming:        snap.reasoningTiming,
+		StepTraces:             snap.stepTraces,
 	})
 	if err != nil {
 		return nil, err
@@ -1041,37 +1049,6 @@ func (s *Service) persistTurnFailure(ctx context.Context, req ChatRequest, rc re
 		slog.String("code", string(code)),
 	)
 	return persisted, nil
-}
-
-// interleaveInjectedMessages inserts injected user messages at their correct
-// positions within the round. Each record's InsertAfter value indicates how
-// many output messages preceded the injection.
-//
-// round layout: [user_A, output_0, output_1, ..., output_N]
-// InsertAfter=K → insert after round[K] (i.e. after the K-th output message).
-func interleaveInjectedMessages(round []ModelMessage, injections []InjectedMessageRecord) []ModelMessage {
-	if len(injections) == 0 {
-		return round
-	}
-	result := make([]ModelMessage, 0, len(round)+len(injections))
-	injIdx := 0
-	for i, msg := range round {
-		result = append(result, msg)
-		for injIdx < len(injections) && injections[injIdx].InsertAfter == i {
-			result = append(result, ModelMessage{
-				Role:    "user",
-				Content: newTextContent(injections[injIdx].HeaderifiedText),
-			})
-			injIdx++
-		}
-	}
-	for ; injIdx < len(injections); injIdx++ {
-		result = append(result, ModelMessage{
-			Role:    "user",
-			Content: newTextContent(injections[injIdx].HeaderifiedText),
-		})
-	}
-	return result
 }
 
 func extractInputTokensFromUsage(raw json.RawMessage) int {

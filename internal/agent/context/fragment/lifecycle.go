@@ -101,6 +101,31 @@ type LifecycleSnapshot struct {
 	LoopSelectionMode         string              `json:"loop_selection_mode,omitempty"`
 	Steps                     []StepSnapshot      `json:"steps,omitempty"`
 	MemoryRecall              *MemoryRecallTrace  `json:"memory_recall,omitempty"`
+	RunTrace                  *RunTrace           `json:"run_trace,omitempty"`
+	// Fragments lists the injected fragments of the run, bounded by the prompt
+	// rather than the conversation; their texts live in the content store.
+	Fragments []FragmentRef `json:"fragments,omitempty"`
+}
+
+// RunTrace is the fixed-size timing and usage rollup of one run: request
+// count, wall clock per lane, and provider tokens. TTFT belongs to the first
+// request; DecodeMs and DecodeOutputTokens cover only requests that reported
+// both a first token and output tokens, so a throughput reading stays honest.
+type RunTrace struct {
+	Steps              int   `json:"steps"`
+	ToolCalls          int   `json:"tool_calls,omitempty"`
+	StartedAtMS        int64 `json:"started_at_ms,omitempty"`
+	EndedAtMS          int64 `json:"ended_at_ms,omitempty"`
+	LLMMs              int64 `json:"llm_ms,omitempty"`
+	ToolMs             int64 `json:"tool_ms,omitempty"`
+	TTFTMs             int64 `json:"ttft_ms,omitempty"`
+	DecodeMs           int64 `json:"decode_ms,omitempty"`
+	DecodeOutputTokens int   `json:"decode_output_tokens,omitempty"`
+	InputTokens        int   `json:"input_tokens,omitempty"`
+	CachedInputTokens  int   `json:"cached_input_tokens,omitempty"`
+	CacheWriteTokens   int   `json:"cache_write_tokens,omitempty"`
+	OutputTokens       int   `json:"output_tokens,omitempty"`
+	ReasoningTokens    int   `json:"reasoning_tokens,omitempty"`
 }
 
 type MemoryRecallTrace struct {
@@ -127,14 +152,31 @@ type MemoryRecallResultTrace struct {
 
 // LifecycleHolder shares the latest audit across copied RunConfig values.
 type LifecycleHolder struct {
-	mu       sync.RWMutex
-	snapshot LifecycleSnapshot
-	ledger   *MutationLedger
-	set      bool
+	mu            sync.RWMutex
+	snapshot      LifecycleSnapshot
+	ledger        *MutationLedger
+	runTrace      func() *RunTrace
+	set           bool
+	textSink      FragmentTextSink
+	recordedTexts map[string]struct{}
+	// textHashes maps a fragment's content hash to the store key of the text
+	// this run recorded for it.
+	textHashes map[string]string
 }
 
 func NewLifecycleHolder() *LifecycleHolder {
 	return &LifecycleHolder{}
+}
+
+// SetRunTraceSource registers the run rollup read at snapshot time, so the
+// terminal write sees the complete trace regardless of manifest replacement.
+func (h *LifecycleHolder) SetRunTraceSource(source func() *RunTrace) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.runTrace = source
+	h.mu.Unlock()
 }
 
 func (h *LifecycleHolder) SetMemoryRecall(trace MemoryRecallTrace) {
@@ -183,10 +225,20 @@ func (h *LifecycleHolder) Snapshot() (LifecycleSnapshot, bool) {
 	h.mu.RLock()
 	snapshot := cloneLifecycleSnapshot(h.snapshot)
 	ledger := h.ledger
+	runTrace := h.runTrace
 	ok := h.set
+	for i := range snapshot.Fragments {
+		snapshot.Fragments[i].TextHash = h.textHashes[snapshot.Fragments[i].ContentHash]
+	}
 	h.mu.RUnlock()
 	if !ok {
 		return LifecycleSnapshot{}, false
+	}
+	if runTrace != nil {
+		if trace := runTrace(); trace != nil {
+			copied := *trace
+			snapshot.RunTrace = &copied
+		}
 	}
 	if ledger != nil {
 		snapshot.Mutations = ledger.Records()
@@ -209,6 +261,7 @@ func BuildLifecycleSnapshot(manifest Manifest) LifecycleSnapshot {
 		TrustBreakdown:     append([]TrustBreakdown(nil), manifest.TrustBreakdown...),
 		ToolDefs:           append([]ToolDefAccounting(nil), manifest.ToolDefs...),
 		SelectionDecisions: append([]SelectionDecision(nil), manifest.SelectionDecisions...),
+		Fragments:          fragmentRefs(manifest.Items),
 	}
 	if manifest.Selection != nil {
 		snapshot.Selection = cloneSelectionTrace(*manifest.Selection)
@@ -265,6 +318,25 @@ func (s LifecycleSnapshot) Summary() LifecycleSnapshot {
 	return s
 }
 
+// RowCopy is the copy stamped on every assistant row of a run. The run row
+// keeps the trace, the fragment refs, and the tool definition hashes; the
+// per-row copy exists for readers of sessions that predate the run table
+// and carries only the bounded accounting.
+func (s LifecycleSnapshot) RowCopy() LifecycleSnapshot {
+	s = s.Summary()
+	s.RunTrace = nil
+	s.Fragments = nil
+	if len(s.ToolDefs) > 0 {
+		defs := make([]ToolDefAccounting, len(s.ToolDefs))
+		copy(defs, s.ToolDefs)
+		for i := range defs {
+			defs[i].ContentHash = ""
+		}
+		s.ToolDefs = defs
+	}
+	return s
+}
+
 // DecodeLifecycleSnapshot parses a durable snapshot of any persisted version.
 // Version-1 rows carried a nested cache_plan object; its fields map onto the
 // flattened version-2 fields and the decoded snapshot is normalized to the
@@ -308,6 +380,7 @@ func cloneLifecycleSnapshot(snapshot LifecycleSnapshot) LifecycleSnapshot {
 	snapshot.TrustBreakdown = append([]TrustBreakdown(nil), snapshot.TrustBreakdown...)
 	snapshot.ToolDefs = append([]ToolDefAccounting(nil), snapshot.ToolDefs...)
 	snapshot.SelectionDecisions = append([]SelectionDecision(nil), snapshot.SelectionDecisions...)
+	snapshot.Fragments = append([]FragmentRef(nil), snapshot.Fragments...)
 	snapshot.Selection = cloneSelectionTrace(snapshot.Selection)
 	snapshot.Mutations = append([]MutationRecord(nil), snapshot.Mutations...)
 	snapshot.CacheUsage = append([]CacheUsageRecord(nil), snapshot.CacheUsage...)

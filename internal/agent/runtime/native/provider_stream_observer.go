@@ -9,14 +9,18 @@ import (
 type providerStreamEventObserver struct {
 	sdk.Provider
 	observe func(StreamEvent)
+	clock   *stepClock
 }
 
-func modelWithProviderStreamEventObserver(model *sdk.Model, observe func(StreamEvent)) *sdk.Model {
-	if model == nil || model.Provider == nil || observe == nil {
+func modelWithProviderStreamObserver(model *sdk.Model, observe func(StreamEvent), clock *stepClock) *sdk.Model {
+	if model == nil || model.Provider == nil || (observe == nil && clock == nil) {
 		return model
 	}
+	if observe == nil {
+		observe = func(StreamEvent) {}
+	}
 	observed := *model
-	observed.Provider = providerStreamEventObserver{Provider: model.Provider, observe: observe}
+	observed.Provider = providerStreamEventObserver{Provider: model.Provider, observe: observe, clock: clock}
 	return &observed
 }
 
@@ -25,8 +29,11 @@ func (p providerStreamEventObserver) DoStream(ctx context.Context, params sdk.Ge
 	// the previous step has already consumed or checkpointed its timings; for a
 	// retry this discards the failed attempt before replacement parts arrive.
 	p.observe(StreamEvent{Type: EventRetry})
+	startedAt := p.clock.begin()
+	p.observe(StreamEvent{Type: EventStepStart, Timing: &StepTiming{StartedAtMS: startedAt}})
 	result, err := p.Provider.DoStream(ctx, params)
 	if err != nil || result == nil || result.Stream == nil {
+		p.clock.abandon()
 		return result, err
 	}
 
@@ -35,18 +42,11 @@ func (p providerStreamEventObserver) DoStream(ctx context.Context, params sdk.Ge
 	result.Stream = observed
 	go func() {
 		defer close(observed)
-		for {
-			var part sdk.StreamPart
-			var ok bool
-			select {
-			case part, ok = <-source:
-				if !ok {
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-			if event, ok := providerPartTimingEvent(part); ok {
+		// Read like Twilight ranges the provider stream: a cancelled context
+		// stops forwarding, never reading, so the provider always completes
+		// the send it is blocked on and observes the cancellation itself.
+		for part := range source {
+			if event, ok := p.partEvent(part); ok {
 				p.observe(event)
 			}
 			select {
@@ -57,6 +57,31 @@ func (p providerStreamEventObserver) DoStream(ctx context.Context, params sdk.Ge
 		}
 	}()
 	return result, nil
+}
+
+func (p providerStreamEventObserver) partEvent(part sdk.StreamPart) (StreamEvent, bool) {
+	switch v := part.(type) {
+	case *sdk.TextDeltaPart:
+		p.clock.firstTokenText(v.Text)
+	case *sdk.ReasoningDeltaPart:
+		p.clock.firstTokenText(v.Text)
+	case *sdk.ToolInputStartPart, *sdk.StreamToolCallPart:
+		p.clock.firstToken()
+	case *sdk.FinishStepPart:
+		usage := normalizeProviderUsage(p.Name(), v.Usage)
+		completed, ok := p.clock.finish(usage, v.FinishReason)
+		if !ok {
+			return StreamEvent{}, false
+		}
+		timing := completed.Timing
+		return StreamEvent{
+			Type:         EventStepEnd,
+			FinishReason: string(v.FinishReason),
+			Usage:        marshalUsage(usage),
+			Timing:       &timing,
+		}, true
+	}
+	return providerPartTimingEvent(part)
 }
 
 func providerPartTimingEvent(part sdk.StreamPart) (StreamEvent, bool) {

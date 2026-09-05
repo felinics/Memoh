@@ -1840,6 +1840,14 @@ definitions:
     type: object
   compaction.Log:
     properties:
+      anchor_end_ms:
+        type: integer
+      anchor_start_ms:
+        description: |-
+          AnchorStartMS and AnchorEndMS bound the conversation time the summary
+          covers; Level is the rollup depth and SupersededAt is set once a later
+          compaction folded this one in.
+        type: integer
       bot_id:
         type: string
       completed_at:
@@ -1848,6 +1856,8 @@ definitions:
         type: string
       id:
         type: string
+      level:
+        type: integer
       message_count:
         type: integer
       model_id:
@@ -1859,6 +1869,8 @@ definitions:
       status:
         type: string
       summary:
+        type: string
+      superseded_at:
         type: string
       usage: {}
     type: object
@@ -2039,6 +2051,21 @@ definitions:
       version:
         type: integer
     type: object
+  contextfrag.FragmentRef:
+    properties:
+      content_hash:
+        type: string
+      kind:
+        $ref: '#/definitions/contextfrag.Kind'
+      slot:
+        $ref: '#/definitions/contextfrag.Slot'
+      text_bytes:
+        type: integer
+      text_hash:
+        type: string
+      token_estimate:
+        type: integer
+    type: object
   contextfrag.Kind:
     enum:
     - system_prompt
@@ -2058,6 +2085,7 @@ definitions:
     - runtime_context
     - memory_recall
     - conversation_summary
+    - tool_definition
     type: string
     x-enum-varnames:
     - KindSystemPrompt
@@ -2077,6 +2105,7 @@ definitions:
     - KindRuntimeContext
     - KindMemoryRecall
     - KindConversationSummary
+    - KindToolDefinition
   contextfrag.KindBreakdown:
     properties:
       fragments:
@@ -2116,6 +2145,13 @@ definitions:
         $ref: '#/definitions/contextfrag.ManifestCounts'
       final_input_hash:
         type: string
+      fragments:
+        description: |-
+          Fragments lists the injected fragments of the run, bounded by the prompt
+          rather than the conversation; their texts live in the content store.
+        items:
+          $ref: '#/definitions/contextfrag.FragmentRef'
+        type: array
       loop_selection_mode:
         type: string
       memory_recall:
@@ -2126,6 +2162,8 @@ definitions:
         items:
           $ref: '#/definitions/contextfrag.MutationRecord'
         type: array
+      run_trace:
+        $ref: '#/definitions/contextfrag.RunTrace'
       selection:
         $ref: '#/definitions/contextfrag.SelectionTrace'
       selection_decisions:
@@ -2272,6 +2310,37 @@ definitions:
     - RetentionRequired
     - RetentionPreferred
     - RetentionOptional
+  contextfrag.RunTrace:
+    properties:
+      cache_write_tokens:
+        type: integer
+      cached_input_tokens:
+        type: integer
+      decode_ms:
+        type: integer
+      decode_output_tokens:
+        type: integer
+      ended_at_ms:
+        type: integer
+      input_tokens:
+        type: integer
+      llm_ms:
+        type: integer
+      output_tokens:
+        type: integer
+      reasoning_tokens:
+        type: integer
+      started_at_ms:
+        type: integer
+      steps:
+        type: integer
+      tool_calls:
+        type: integer
+      tool_ms:
+        type: integer
+      ttft_ms:
+        type: integer
+    type: object
   contextfrag.SelectionDecision:
     properties:
       cache_class:
@@ -2370,6 +2439,8 @@ definitions:
     properties:
       bytes:
         type: integer
+      content_hash:
+        type: string
       name:
         type: string
       provider:
@@ -2479,12 +2550,27 @@ definitions:
       task_id:
         type: string
     type: object
+  conversation.UIContextInjection:
+    properties:
+      kind:
+        enum:
+        - steering
+        - prepared
+        type: string
+    type: object
   conversation.UIExecutionLocation:
     properties:
       kind:
         type: string
       name:
         type: string
+    type: object
+  conversation.UIExecutionTiming:
+    properties:
+      ended_at_ms:
+        type: integer
+      started_at_ms:
+        type: integer
     type: object
   conversation.UIForwardRef:
     properties:
@@ -2515,6 +2601,8 @@ definitions:
         type: string
       execution_location:
         $ref: '#/definitions/conversation.UIExecutionLocation'
+      execution_timing:
+        $ref: '#/definitions/conversation.UIExecutionTiming'
       id:
         type: integer
       input: {}
@@ -2569,6 +2657,25 @@ definitions:
       sender:
         type: string
     type: object
+  conversation.UIStepTrace:
+    properties:
+      ended_at_ms:
+        type: integer
+      finish_reason:
+        type: string
+      first_message_id:
+        type: integer
+      first_token_at_ms:
+        type: integer
+      last_message_id:
+        type: integer
+      started_at_ms:
+        type: integer
+      step_index:
+        type: integer
+      usage:
+        $ref: '#/definitions/message.StepTraceUsage'
+    type: object
   conversation.UIToolApproval:
     properties:
       approval_id:
@@ -2608,6 +2715,8 @@ definitions:
         type: array
       background_task:
         $ref: '#/definitions/conversation.UIBackgroundTask'
+      context_injection:
+        $ref: '#/definitions/conversation.UIContextInjection'
       external_message_id:
         type: string
       forward:
@@ -2638,6 +2747,10 @@ definitions:
         type: string
       skill_activation:
         $ref: '#/definitions/conversation.SkillActivation'
+      step_traces:
+        items:
+          $ref: '#/definitions/conversation.UIStepTrace'
+        type: array
       text:
         type: string
       timestamp:
@@ -3267,6 +3380,51 @@ definitions:
       used_bytes:
         type: integer
     type: object
+  handlers.ContextFragmentPreview:
+    properties:
+      kind:
+        $ref: '#/definitions/contextfrag.Kind'
+      label:
+        type: string
+      preview:
+        type: string
+      text_bytes:
+        type: integer
+      truncated:
+        type: boolean
+    type: object
+  handlers.ContextFragmentText:
+    properties:
+      available:
+        description: |-
+          Available is false when the text was never stored for this fragment,
+          such as runs older than the text store.
+        type: boolean
+      content_hash:
+        type: string
+      kind:
+        $ref: '#/definitions/contextfrag.Kind'
+      label:
+        description: |-
+          Label names the fragment as the assembler did; empty when no text was
+          stored, because the snapshot itself never carries names.
+        type: string
+      slot:
+        $ref: '#/definitions/contextfrag.Slot'
+      text:
+        type: string
+      text_bytes:
+        type: integer
+      text_hash:
+        description: |-
+          TextHash is the store key of the fragment's text; tool definitions use
+          their serialized hash for both.
+        type: string
+      token_estimate:
+        type: integer
+      truncated:
+        type: boolean
+    type: object
   handlers.ContextLifecycleAggregates:
     properties:
       drop_reasons:
@@ -3284,6 +3442,24 @@ definitions:
       turns:
         type: integer
     type: object
+  handlers.ContextLifecycleDecisionsResponse:
+    properties:
+      decisions:
+        items:
+          $ref: '#/definitions/contextfrag.SelectionDecision'
+        type: array
+      run_id:
+        type: string
+    type: object
+  handlers.ContextLifecycleFragmentsResponse:
+    properties:
+      fragments:
+        items:
+          $ref: '#/definitions/handlers.ContextFragmentText'
+        type: array
+      run_id:
+        type: string
+    type: object
   handlers.ContextLifecycleResponse:
     properties:
       aggregate_scope:
@@ -3293,6 +3469,15 @@ definitions:
         type: string
       aggregates:
         $ref: '#/definitions/handlers.ContextLifecycleAggregates'
+      fragment_previews:
+        additionalProperties:
+          $ref: '#/definitions/handlers.ContextFragmentPreview'
+        description: |-
+          FragmentPreviews maps a text hash referenced by the page's fragment
+          refs and tool definitions to the head of its stored text. Present only
+          for callers who may read the bot's workspace, because the texts include
+          workspace files and hook output.
+        type: object
       has_more:
         description: HasMore reports whether older lifecycle turns exist beyond this
           page.
@@ -3312,6 +3497,11 @@ definitions:
         description: Limit is the page bound the turns and aggregates were computed
           over.
         type: integer
+      next_cursor:
+        description: |-
+          NextCursor is the opaque `before` value that continues past this page's
+          oldest run; absent when the page is complete or served from legacy rows.
+        type: string
       turns:
         items:
           $ref: '#/definitions/handlers.ContextLifecycleTurn'
@@ -3330,6 +3520,11 @@ definitions:
       snapshot:
         $ref: '#/definitions/contextfrag.LifecycleSnapshot'
       status:
+        type: string
+      turn_id:
+        description: |-
+          TurnID is the durable turn the run wrote into, joined from the run
+          ledger; absent for runs the ledger never recorded.
         type: string
     type: object
   handlers.ContextUsage:
@@ -3881,6 +4076,21 @@ definitions:
         items:
           $ref: '#/definitions/skills.SafeCatalogItem'
         type: array
+    type: object
+  handlers.SessionCompactionsResponse:
+    properties:
+      has_more:
+        description: HasMore reports whether older compactions exist beyond this page.
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/compaction.Log'
+        type: array
+      next_cursor:
+        description: |-
+          NextCursor is the opaque `before` value that continues past this
+          page's oldest compaction; absent when the page is complete.
+        type: string
     type: object
   handlers.SessionInfoResponse:
     properties:
@@ -5074,6 +5284,19 @@ definitions:
         type: string
       url:
         type: string
+    type: object
+  message.StepTraceUsage:
+    properties:
+      cache_write_tokens:
+        type: integer
+      cached_input_tokens:
+        type: integer
+      input_tokens:
+        type: integer
+      output_tokens:
+        type: integer
+      reasoning_tokens:
+        type: integer
     type: object
   models.AddRequest:
     properties:
@@ -11391,6 +11614,61 @@ paths:
       summary: Trigger immediate context compaction
       tags:
       - compaction
+  /bots/{bot_id}/sessions/{session_id}/compactions:
+    get:
+      description: 'Return the compaction runs recorded for a chat session, newest
+        first: status, the summary that replaced the covered messages, how many messages
+        it covered and the conversation time it spans, the summarizer''s usage and
+        model, and when it ran. Pages by an opaque keyset cursor. Session access suffices:
+        the summary is conversation the reader already sees'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Maximum number of compactions to return (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque next_cursor from a previous page; returns compactions
+          older than it
+        in: query
+        name: before
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SessionCompactionsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List a session's compactions
+      tags:
+      - sessions
   /bots/{bot_id}/sessions/{session_id}/context-lifecycle:
     get:
       description: List run-keyed context lifecycle snapshots for a chat session,
@@ -11415,6 +11693,11 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Opaque next_cursor from a previous page; returns run-keyed turns
+          older than it
+        in: query
+        name: before
+        type: string
       responses:
         "200":
           description: OK
@@ -11441,6 +11724,108 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Get session context lifecycle
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions:
+    get:
+      description: 'Return the content-light selection audit persisted for one run
+        of a chat session: each fragment the context selector considered with its
+        slot, source, token cost and decision. The list is read on demand because
+        it grows with the history the run considered'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextLifecycleDecisionsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get per-fragment selection decisions of a run
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments:
+    get:
+      description: Return every fragment the run put in front of the model outside
+        the conversation (system prompt pieces, workspace rules, tool usage, skills,
+        recalled memory, tool definitions) with the text that was stored for it. Conversation
+        messages are not included; the history holds them. The texts include workspace
+        files and hook output, so the caller needs workspace_read on the bot besides
+        access to the session
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextLifecycleFragmentsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get the injected context texts of a run
       tags:
       - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:

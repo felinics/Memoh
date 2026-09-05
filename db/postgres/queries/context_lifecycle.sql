@@ -149,15 +149,37 @@ LIMIT 1;
 
 -- name: ListRecentContextLifecyclesBySession :many
 SELECT
-  run_id,
-  status,
-  error_code,
-  created_at,
-  (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
+  context_lifecycles.run_id,
+  context_lifecycles.status,
+  context_lifecycles.error_code,
+  context_lifecycles.created_at,
+  session_runs.turn_id,
+  (context_lifecycles.snapshot - 'selection_decisions'::text)::jsonb AS snapshot
 FROM context_lifecycles
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = sqlc.arg(session_id)
-ORDER BY created_at DESC, run_id DESC
+LEFT JOIN session_runs
+  ON session_runs.team_id = context_lifecycles.team_id
+ AND session_runs.run_id = context_lifecycles.run_id
+WHERE context_lifecycles.team_id = public.memoh_current_team_id()
+  AND context_lifecycles.session_id = sqlc.arg(session_id)
+ORDER BY context_lifecycles.created_at DESC, context_lifecycles.run_id DESC
+LIMIT sqlc.arg(max_count);
+
+-- name: ListRecentContextLifecyclesBySessionBefore :many
+SELECT
+  context_lifecycles.run_id,
+  context_lifecycles.status,
+  context_lifecycles.error_code,
+  context_lifecycles.created_at,
+  session_runs.turn_id,
+  (context_lifecycles.snapshot - 'selection_decisions'::text)::jsonb AS snapshot
+FROM context_lifecycles
+LEFT JOIN session_runs
+  ON session_runs.team_id = context_lifecycles.team_id
+ AND session_runs.run_id = context_lifecycles.run_id
+WHERE context_lifecycles.team_id = public.memoh_current_team_id()
+  AND context_lifecycles.session_id = sqlc.arg(session_id)
+  AND (context_lifecycles.created_at, context_lifecycles.run_id) < (sqlc.arg(before_created_at)::timestamptz, sqlc.arg(before_run_id)::uuid)
+ORDER BY context_lifecycles.created_at DESC, context_lifecycles.run_id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: GetLatestContextLifecycleBySession :one

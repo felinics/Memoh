@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -33,34 +34,34 @@ func TestSubagentStepCommitRequiresHandleAndFence(t *testing.T) {
 	store := &recordingStepPersister{recordingMessageService: &recordingMessageService{}}
 	service := &Service{messageService: store}
 
-	if commit, interrupt := service.SubagentStepCommit(context.Background(), botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
+	if commit, interrupt, _ := service.SubagentStepCommit(context.Background(), botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
 		t.Fatal("commit enabled without an admitted run handle")
 	}
 	noFence := withSubagentRunHandle(context.Background(), sessionruntime.RunHandle{
 		BotID: botID, SessionID: sessionID, RunID: uuid.NewString(), Generation: "g", FencingToken: 7,
 	})
-	if commit, interrupt := service.SubagentStepCommit(noFence, botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
+	if commit, interrupt, _ := service.SubagentStepCommit(noFence, botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
 		t.Fatal("commit enabled without a runtime fence")
 	}
 	unfenced := runtimefence.WithContext(context.Background(), runtimefence.Fence{BotID: botID, SessionID: sessionID, Token: 7})
 	unfenced = withSubagentRunHandle(unfenced, sessionruntime.RunHandle{
 		BotID: botID, SessionID: sessionID, RunID: uuid.NewString(), Generation: "g",
 	})
-	if commit, interrupt := service.SubagentStepCommit(unfenced, botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
+	if commit, interrupt, _ := service.SubagentStepCommit(unfenced, botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
 		t.Fatal("commit enabled with a zero fencing token")
 	}
 	// A failed pre-run user message write leaves no request row. Committing
 	// steps then would report the run persisted and lose the task prompt for
 	// good, so incremental persistence must decline and let the terminal path
 	// write the whole run, user message included.
-	if commit, interrupt := service.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "  ", nil, nil); commit != nil || interrupt != nil {
+	if commit, interrupt, _ := service.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "  ", nil, nil); commit != nil || interrupt != nil {
 		t.Fatal("commit enabled without a persisted request row")
 	}
-	if commit, interrupt := service.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "req-msg-1", nil, nil); commit == nil || interrupt == nil {
+	if commit, interrupt, _ := service.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "req-msg-1", nil, nil); commit == nil || interrupt == nil {
 		t.Fatal("commit not enabled for an admitted fenced subagent run")
 	}
 	bare := &Service{messageService: &recordingMessageService{}}
-	if commit, interrupt := bare.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
+	if commit, interrupt, _ := bare.SubagentStepCommit(subagentRunContext(botID, sessionID, 7), botID, sessionID, "model", "req-msg-1", nil, nil); commit != nil || interrupt != nil {
 		t.Fatal("commit enabled on a message service without step persistence")
 	}
 }
@@ -76,7 +77,7 @@ func TestSubagentStepCommitPersistsStepsInOrder(t *testing.T) {
 		Counts: contextfrag.ManifestCounts{Fragments: 3, Messages: 2},
 	})
 	persistedSteps := 0
-	commit, interrupt := service.SubagentStepCommit(ctx, botID, sessionID, "model-uuid", "req-msg-1", holder, func() { persistedSteps++ })
+	commit, interrupt, _ := service.SubagentStepCommit(ctx, botID, sessionID, "model-uuid", "req-msg-1", holder, func() { persistedSteps++ })
 	if commit == nil || interrupt == nil {
 		t.Fatal("step persistence callbacks not enabled")
 	}
@@ -161,7 +162,7 @@ func TestSubagentStepCommitSkipsEmptyStepWithoutPersisting(t *testing.T) {
 	service := &Service{messageService: store}
 	ctx := subagentRunContext(botID, sessionID, 3)
 	persistedSteps := 0
-	commit, _ := service.SubagentStepCommit(ctx, botID, sessionID, "model", "req-msg-1", nil, func() { persistedSteps++ })
+	commit, _, _ := service.SubagentStepCommit(ctx, botID, sessionID, "model", "req-msg-1", nil, func() { persistedSteps++ })
 
 	if err := commit(ctx, 0, &sdk.StepResult{Messages: []sdk.Message{
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "only user"}}},
@@ -188,5 +189,46 @@ func TestSubagentRunObserverRequiresRuntimeAndHandle(t *testing.T) {
 	withRuntime := &Service{decisionRuntime: &sessionruntime.Manager{}}
 	if got := withRuntime.SubagentRunObserver(context.Background()); got != nil {
 		t.Fatal("observer enabled without an admitted run handle")
+	}
+}
+
+func TestSubagentStepCommitPersistsRequestTracesAndTheRunRollup(t *testing.T) {
+	botID, sessionID := uuid.NewString(), uuid.NewString()
+	store := &recordingStepPersister{recordingMessageService: &recordingMessageService{}}
+	service := &Service{messageService: store}
+	ctx := subagentRunContext(botID, sessionID, 5)
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetManifest(contextfrag.BuildManifest(nil))
+	commit, _, observers := service.SubagentStepCommit(ctx, botID, sessionID, "model", "req-msg-1", holder, nil)
+	if commit == nil || observers.Provider == nil || observers.Agent == nil {
+		t.Fatalf("a fenced spawned run must get commit and observers: %#v", observers)
+	}
+
+	observers.Agent(native.StreamEvent{Type: native.EventAgentStart})
+	observers.Provider(native.StreamEvent{Type: native.EventRetry})
+	observers.Provider(native.StreamEvent{Type: native.EventStepEnd, FinishReason: "stop", Usage: json.RawMessage(`{"inputTokens":22,"outputTokens":2}`), Timing: &native.StepTiming{StartedAtMS: 1_000, FirstTokenAtMS: 1_200, EndedAtMS: 1_500}})
+	if err := commit(ctx, 0, &sdk.StepResult{Messages: []sdk.Message{sdk.AssistantMessage("child answer")}}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	observers.Agent(native.StreamEvent{Type: native.EventAgentEnd})
+
+	var assistant *messagepkg.PersistInput
+	for i := range store.steps {
+		for j := range store.steps[i].Messages {
+			if store.steps[i].Messages[j].Role == "assistant" {
+				assistant = &store.steps[i].Messages[j]
+			}
+		}
+	}
+	if assistant == nil {
+		t.Fatalf("no assistant row persisted: %#v", store.steps)
+	}
+	trace := messagepkg.StepTraceFromMetadata(assistant.Metadata)
+	if trace == nil || trace.StartedAtMS != 1_000 || trace.EndedAtMS != 1_500 || trace.Usage == nil || trace.Usage.InputTokens != 22 {
+		t.Fatalf("persisted step trace = %#v", trace)
+	}
+	snapshot, ok := holder.Snapshot()
+	if !ok || snapshot.RunTrace == nil || snapshot.RunTrace.Steps != 1 || snapshot.RunTrace.InputTokens != 22 || snapshot.RunTrace.TTFTMs != 200 {
+		t.Fatalf("lifecycle run trace = %#v", snapshot.RunTrace)
 	}
 }

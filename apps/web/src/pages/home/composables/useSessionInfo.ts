@@ -98,7 +98,11 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
         throwOnError: true,
       })
       toast.success(t('chat.compactSuccess'))
-      queryCache.invalidateQueries({ key: ['session-status', botId, sid] })
+      // A compaction rewrites the context and adds a compaction run; the
+      // trajectory reads both.
+      for (const head of ['session-status', 'context-lifecycle', 'session-compactions']) {
+        queryCache.invalidateQueries({ key: [head, botId, sid] })
+      }
     }
     catch (error) {
       toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))

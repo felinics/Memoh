@@ -491,7 +491,9 @@ func (s *Service) continueToolApprovalSession(
 	}
 
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
+	configureNativeStepTrace(&cfg, stepTrace, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
 	defer idleCancel.Stop()
 	stream := s.agent.Stream(idleCtx, cfg)
@@ -543,6 +545,7 @@ func (s *Service) continueToolApprovalSession(
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				snap.stepTraces = stepTrace.take()
 				snap.visibleOutput = hasVisibleOutput
 				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""

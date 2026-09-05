@@ -146,6 +146,8 @@ type Service struct {
 	syncCompactionMode                string
 	clockLocation                     *time.Location
 	logger                            *slog.Logger
+	contextTextsOnce                  sync.Once
+	contextTexts                      *contextTextStore
 	allowedTeam                       string
 	sessionRuntime                    turnAdmitter
 	decisionRuntime                   *sessionruntime.Manager
@@ -976,7 +978,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		Skills:            agentSkills,
 		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: s.bgManager,
-		ContextLifecycle:  contextfrag.NewLifecycleHolder(),
+		ContextLifecycle:  s.newContextLifecycleHolder(ctx, p.BotID),
 		ContextScope: contextfrag.Scope{
 			BotID:             p.BotID,
 			ChatID:            chatID,

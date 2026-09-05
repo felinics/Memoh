@@ -34,6 +34,10 @@ const (
 	// in the conversation (tools unavailable, an interaction declined).
 	// Code carries the machine-readable reason, Delta the human text.
 	RuntimeNotice StreamEventType = "runtime_notice"
+	// StepStart and StepEnd bracket one model request. StepEnd carries the
+	// request's provider usage and server-observed timing.
+	StepStart StreamEventType = "step_start"
+	StepEnd   StreamEventType = "step_end"
 )
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
@@ -65,6 +69,27 @@ type StreamEvent struct {
 	StepNumber     int              `json:"stepNumber,omitempty"`
 	TotalSteps     int              `json:"totalSteps,omitempty"`
 	ProgressStatus string           `json:"progressStatus,omitempty"`
+	StepIndex      int              `json:"stepIndex,omitempty"`
+	FinishReason   string           `json:"finishReason,omitempty"`
+	Timing         *StepTiming      `json:"timing,omitempty"`
+}
+
+// StepTiming is the server-observed wall clock of one model request in Unix
+// milliseconds. FirstTokenAtMS is zero when no content arrived.
+type StepTiming struct {
+	StartedAtMS    int64 `json:"startedAtMs"`
+	FirstTokenAtMS int64 `json:"firstTokenAtMs,omitempty"`
+	EndedAtMS      int64 `json:"endedAtMs,omitempty"`
+}
+
+// ExecutionTimingMetadataKey carries an ExecutionTiming in tool call
+// metadata: on tool_call_end events and on the persisted tool-call part.
+const ExecutionTimingMetadataKey = "execution_timing"
+
+// ExecutionTiming is the server-observed wall clock of one tool execution.
+type ExecutionTiming struct {
+	StartedAtMS int64 `json:"started_at_ms"`
+	EndedAtMS   int64 `json:"ended_at_ms"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

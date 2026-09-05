@@ -82,6 +82,7 @@ export function createTranscriptHistory(deps: {
           ? skillActivationTextFromRaw(turn.text ?? '', turn.skill_activation)
           : turn.text ?? '',
         userMessageKind,
+        contextInjection: turn.context_injection,
         skillActivation: turn.skill_activation,
         attachments: (turn.attachments ?? []).map(normalizeAttachment),
         reply: normalizeReplyRef(turn.reply),
@@ -118,6 +119,7 @@ export function createTranscriptHistory(deps: {
       turnPosition: turn.turn_position ?? undefined,
       role: 'assistant',
       messages: (turn.messages ?? []).map(normalizeUIMessage),
+      stepTraces: turn.step_traces?.length ? turn.step_traces.map(trace => ({ ...trace })) : undefined,
       timestamp: normalizeTimestamp(turn.timestamp),
       platform: (turn.platform ?? '').trim() || undefined,
       externalMessageId: (turn.external_message_id ?? '').trim() || undefined,

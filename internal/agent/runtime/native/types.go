@@ -221,6 +221,11 @@ type RunConfig struct {
 	// the public event wire.
 	OnProviderStreamEventObserved func(StreamEvent)
 
+	// OnAgentEventObserved sees every public stream event in delivery order,
+	// before the consumer receives it. Persistence uses it for facts that only
+	// exist on the public wire, such as tool execution timing and terminal usage.
+	OnAgentEventObserved func(StreamEvent)
+
 	// OnStepCommitted is a synchronous durability barrier. The callback sees
 	// the complete step plus any user/read-media messages prepared immediately
 	// before it, with persistence-only tool metadata already attached.

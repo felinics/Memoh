@@ -534,6 +534,7 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 			// terminal-snapshot behavior on its own.
 			adapter.SetStepCommitFactory(agentService.SubagentStepCommit)
 			adapter.SetRunObserverFactory(agentService.SubagentRunObserver)
+			adapter.SetLifecycleHolderFactory(agentService.SubagentLifecycleHolder)
 			sp.SetAgent(adapter)
 			sp.SetMessageService(msgService)
 			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)

@@ -277,6 +277,9 @@ type CurrentRunView struct {
 	FinishProposedAt       *time.Time           `json:"finish_proposed_at,omitempty"`
 	Steer                  *SteerState          `json:"steer,omitempty"`
 	Operation              *RunOperationView    `json:"operation,omitempty"`
+	// StepTraces are the finished model requests of this run, each anchored
+	// to the first block it produced. Bounded by the run's step count.
+	StepTraces []chatview.UIStepTrace `json:"step_traces,omitempty"`
 }
 
 // RunAdmissionView is the canonical state published when a reserved run
@@ -325,6 +328,9 @@ type RuntimeDelta struct {
 	ProgressAppends []RuntimeProgressAppend `json:"progress_appends,omitempty"`
 	MessageUpserts  []chatview.UIMessage    `json:"message_upserts,omitempty"`
 	ResetMessages   bool                    `json:"reset_messages,omitempty"`
+	// StepTraceAppends carries newly finished model requests; ResetMessages
+	// also discards every step trace of the reset attempt.
+	StepTraceAppends []chatview.UIStepTrace `json:"step_trace_appends,omitempty"`
 }
 
 type CurrentRunPatch struct {

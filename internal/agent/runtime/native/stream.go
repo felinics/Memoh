@@ -11,7 +11,12 @@ type StreamEventType = event.StreamEventType
 // StreamEvent is emitted by the agent during streaming.
 type StreamEvent = event.StreamEvent
 
+// StepTiming is the server-observed wall clock of one model request.
+type StepTiming = event.StepTiming
+
 const (
+	EventStepStart           = event.StepStart
+	EventStepEnd             = event.StepEnd
 	EventAgentStart          = event.AgentStart
 	EventStart               = event.AgentStart
 	EventTextStart           = event.TextStart

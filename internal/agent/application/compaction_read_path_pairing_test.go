@@ -56,7 +56,7 @@ func compactionRowsForPairing(rows []sqlc.ListUncompactedMessagesBySessionRow) [
 	return converted
 }
 
-func (*pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
+func (*pairingQueries) ListCompactionLogsBySession(context.Context, sqlc.ListCompactionLogsBySessionParams) ([]sqlc.BotHistoryMessageCompact, error) {
 	return nil, nil
 }
 

@@ -256,15 +256,19 @@ func (q *Queries) ListRecentAssistantMessagesBySession(ctx context.Context, arg 
 
 const listRecentContextLifecyclesBySession = `-- name: ListRecentContextLifecyclesBySession :many
 SELECT
-  run_id,
-  status,
-  error_code,
-  created_at,
-  (snapshot - 'selection_decisions'::text)::jsonb AS snapshot
+  context_lifecycles.run_id,
+  context_lifecycles.status,
+  context_lifecycles.error_code,
+  context_lifecycles.created_at,
+  session_runs.turn_id,
+  (context_lifecycles.snapshot - 'selection_decisions'::text)::jsonb AS snapshot
 FROM context_lifecycles
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = $1
-ORDER BY created_at DESC, run_id DESC
+LEFT JOIN session_runs
+  ON session_runs.team_id = context_lifecycles.team_id
+ AND session_runs.run_id = context_lifecycles.run_id
+WHERE context_lifecycles.team_id = public.memoh_current_team_id()
+  AND context_lifecycles.session_id = $1
+ORDER BY context_lifecycles.created_at DESC, context_lifecycles.run_id DESC
 LIMIT $2
 `
 
@@ -278,6 +282,7 @@ type ListRecentContextLifecyclesBySessionRow struct {
 	Status    string             `json:"status"`
 	ErrorCode pgtype.Text        `json:"error_code"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	TurnID    pgtype.UUID        `json:"turn_id"`
 	Snapshot  []byte             `json:"snapshot"`
 }
 
@@ -295,6 +300,74 @@ func (q *Queries) ListRecentContextLifecyclesBySession(ctx context.Context, arg 
 			&i.Status,
 			&i.ErrorCode,
 			&i.CreatedAt,
+			&i.TurnID,
+			&i.Snapshot,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentContextLifecyclesBySessionBefore = `-- name: ListRecentContextLifecyclesBySessionBefore :many
+SELECT
+  context_lifecycles.run_id,
+  context_lifecycles.status,
+  context_lifecycles.error_code,
+  context_lifecycles.created_at,
+  session_runs.turn_id,
+  (context_lifecycles.snapshot - 'selection_decisions'::text)::jsonb AS snapshot
+FROM context_lifecycles
+LEFT JOIN session_runs
+  ON session_runs.team_id = context_lifecycles.team_id
+ AND session_runs.run_id = context_lifecycles.run_id
+WHERE context_lifecycles.team_id = public.memoh_current_team_id()
+  AND context_lifecycles.session_id = $1
+  AND (context_lifecycles.created_at, context_lifecycles.run_id) < ($2::timestamptz, $3::uuid)
+ORDER BY context_lifecycles.created_at DESC, context_lifecycles.run_id DESC
+LIMIT $4
+`
+
+type ListRecentContextLifecyclesBySessionBeforeParams struct {
+	SessionID       pgtype.UUID        `json:"session_id"`
+	BeforeCreatedAt pgtype.Timestamptz `json:"before_created_at"`
+	BeforeRunID     pgtype.UUID        `json:"before_run_id"`
+	MaxCount        int32              `json:"max_count"`
+}
+
+type ListRecentContextLifecyclesBySessionBeforeRow struct {
+	RunID     pgtype.UUID        `json:"run_id"`
+	Status    string             `json:"status"`
+	ErrorCode pgtype.Text        `json:"error_code"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	TurnID    pgtype.UUID        `json:"turn_id"`
+	Snapshot  []byte             `json:"snapshot"`
+}
+
+func (q *Queries) ListRecentContextLifecyclesBySessionBefore(ctx context.Context, arg ListRecentContextLifecyclesBySessionBeforeParams) ([]ListRecentContextLifecyclesBySessionBeforeRow, error) {
+	rows, err := q.db.Query(ctx, listRecentContextLifecyclesBySessionBefore,
+		arg.SessionID,
+		arg.BeforeCreatedAt,
+		arg.BeforeRunID,
+		arg.MaxCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentContextLifecyclesBySessionBeforeRow
+	for rows.Next() {
+		var i ListRecentContextLifecyclesBySessionBeforeRow
+		if err := rows.Scan(
+			&i.RunID,
+			&i.Status,
+			&i.ErrorCode,
+			&i.CreatedAt,
+			&i.TurnID,
 			&i.Snapshot,
 		); err != nil {
 			return nil, err

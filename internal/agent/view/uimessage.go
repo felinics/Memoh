@@ -1,11 +1,14 @@
 package view
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // UIMessageType identifies the frontend-friendly message block type.
@@ -71,6 +74,7 @@ type UIMessage struct {
 	Attachments       []UIAttachment       `json:"attachments,omitempty"`
 	Background        *UIBackgroundTask    `json:"background_task,omitempty"`
 	ReasoningTiming   *UIReasoningTiming   `json:"reasoning_timing,omitempty"`
+	ExecutionTiming   *UIExecutionTiming   `json:"execution_timing,omitempty"`
 	Code              string               `json:"code,omitempty"`
 } // @name conversation.UIMessage
 
@@ -80,6 +84,33 @@ type UIMessage struct {
 type UIReasoningTiming struct {
 	DurationMS int64 `json:"duration_ms"`
 } // @name conversation.UIReasoningTiming
+
+// UIExecutionTiming is the server-observed wall clock of one tool execution
+// in Unix milliseconds. It is absent when the runtime did not clock the call.
+type UIExecutionTiming struct {
+	StartedAtMS int64 `json:"started_at_ms"`
+	EndedAtMS   int64 `json:"ended_at_ms"`
+} // @name conversation.UIExecutionTiming
+
+// UIContextInjection marks a user-role turn the runtime injected into the
+// model context: steering sent mid-turn, or context prepared before a request.
+type UIContextInjection struct {
+	Kind string `json:"kind" enums:"steering,prepared"`
+} // @name conversation.UIContextInjection
+
+// UIStepTrace is one model request of an assistant turn: its server-observed
+// wall clock, finish reason, and provider usage, anchored to the first block
+// the request produced and bounded by the last one.
+type UIStepTrace struct {
+	FirstMessageID int                        `json:"first_message_id"`
+	LastMessageID  int                        `json:"last_message_id"`
+	StepIndex      int                        `json:"step_index"`
+	StartedAtMS    int64                      `json:"started_at_ms"`
+	FirstTokenAtMS int64                      `json:"first_token_at_ms,omitempty"`
+	EndedAtMS      int64                      `json:"ended_at_ms"`
+	FinishReason   string                     `json:"finish_reason,omitempty"`
+	Usage          *messagepkg.StepTraceUsage `json:"usage,omitempty"`
+} // @name conversation.UIStepTrace
 
 type UIExecutionLocation struct {
 	Kind string `json:"kind"`
@@ -123,6 +154,8 @@ type UITurn struct {
 	Role              string                `json:"role" validate:"required" enums:"user,assistant,system"`
 	Kind              string                `json:"kind,omitempty"`
 	Messages          []UIMessage           `json:"messages,omitempty"`
+	StepTraces        []UIStepTrace         `json:"step_traces,omitempty"`
+	ContextInjection  *UIContextInjection   `json:"context_injection,omitempty"`
 	Text              string                `json:"text,omitempty"`
 	UserMessageKind   string                `json:"user_message_kind,omitempty"`
 	SkillActivation   *turn.SkillActivation `json:"skill_activation,omitempty"`
@@ -173,6 +206,11 @@ type UIMessageStreamEvent struct {
 	Status      string
 	Code        string
 	Metadata    map[string]any
+	// StepIndex, FinishReason, Usage, and Timing describe step_end events.
+	StepIndex    int
+	FinishReason string
+	Usage        json.RawMessage
+	Timing       *event.StepTiming
 }
 
 var (

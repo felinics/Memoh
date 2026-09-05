@@ -245,7 +245,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			slog.Int("budget_tokens", admission.BudgetTokens))
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
 		if runConfig.ContextLifecycle == nil {
-			runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+			runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID)
 		}
 		runConfig.ContextLifecycle.SetManifest(contextfrag.BuildManifest(nil))
 		s.contextLifecycleTerminal(ctx, runConfig)(cause)
@@ -268,7 +268,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.ContextCurrentUserMessageIndex = nil
 	runConfig.ContextMemoryMessageIndex = nil
 	if runConfig.ContextLifecycle == nil {
-		runConfig.ContextLifecycle = contextfrag.NewLifecycleHolder()
+		runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID)
 	}
 	runConfig.ContextBudgetMaxTokens = resolved.ContextBudgetMaxTokens
 	if runConfig.ContextToolExchangePolicy == nil {
@@ -298,13 +298,16 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	}()
 
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
+	configureNativeStepTrace(&runConfig, stepTrace, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
 	var finalMessages json.RawMessage
 	var finalReasoningTiming []messagepkg.ReasoningTimingSegment
+	var finalStepTraces []messagepkg.StepTraceMetadata
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
 	var hasTerminalEvent bool
@@ -320,6 +323,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		if terminal {
 			finalMessages = event.Messages
 			finalReasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+			finalStepTraces = stepTrace.take()
 			terminalEvent = event
 			terminalPayload, _ = json.Marshal(event)
 			hasTerminalEvent = true
@@ -386,7 +390,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		if timedOut {
 			failureCode = snapshotFailureCode(true, lifecycleCause)
 		}
-		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode); storeErr != nil {
+		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, finalStepTraces, failureCode); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			lifecycleCause = historyErr
 			lifecycleDeferred = false
@@ -438,6 +442,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	modelID string,
 	finalMessages json.RawMessage,
 	reasoningTiming []messagepkg.ReasoningTimingSegment,
+	stepTraces []messagepkg.StepTraceMetadata,
 	failureCode apperror.Code,
 ) error {
 	var sdkMsgs []sdk.Message
@@ -453,6 +458,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 			modelID,
 			runConfig.ContextLifecycle,
 			reasoningTiming,
+			stepTraces,
 		)
 	}
 	if failureCode == "" {
@@ -597,7 +603,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 			slog.Int("estimated_tokens", admission.EstimatedTokens),
 			slog.Int("budget_tokens", admission.BudgetTokens))
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
-		lifecycle := contextfrag.NewLifecycleHolder()
+		lifecycle := s.newContextLifecycleHolder(ctx, cmd.BotID)
 		lifecycle.SetManifest(contextfrag.BuildManifest(nil))
 		s.contextLifecycleTerminal(ctx, native.RunConfig{
 			RunID: h.id,
@@ -737,6 +743,7 @@ func (s *Service) storeDiscussRound(
 	modelID string,
 	lifecycle *contextfrag.LifecycleHolder,
 	reasoningTiming []messagepkg.ReasoningTimingSegment,
+	stepTraces []messagepkg.StepTraceMetadata,
 ) error {
 	if s.turnHooks != nil && s.turnHooks.storeRound != nil {
 		return s.turnHooks.storeRound(
@@ -762,6 +769,7 @@ func (s *Service) storeDiscussRound(
 	}, sdkMessagesToModelMessages(messages), modelID, storeRoundOptions{
 		ContextLifecycle: lifecycle,
 		ReasoningTiming:  reasoningTiming,
+		StepTraces:       stepTraces,
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/textutil"
@@ -26,6 +27,8 @@ var (
 		[]byte(`"platform"`),
 		[]byte(`"reply"`),
 		[]byte(`"reasoning_timing"`),
+		[]byte(`"step_trace"`),
+		[]byte(`"context_injection"`),
 		[]byte(`"skill_activation"`),
 		[]byte(`"user_message_kind"`),
 		[]byte(`"error_code"`),
@@ -51,6 +54,7 @@ type uiExtractedToolCall struct {
 	Input             any
 	Approval          *UIToolApproval
 	ExecutionLocation *UIExecutionLocation
+	ExecutionTiming   *UIExecutionTiming
 	UserInput         *UIUserInput
 }
 
@@ -286,6 +290,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				Role:              "user",
 				Text:              text,
 				UserMessageKind:   userMessageKind,
+				ContextInjection:  uiContextInjection(raw),
 				SkillActivation:   activation,
 				Attachments:       attachments,
 				Reply:             reply,
@@ -329,6 +334,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			if pending == nil {
 				pending = newPendingAssistantTurn(raw)
 			}
+			firstBlockID := pending.NextID
 
 			reasoningTimings := uiReasoningTimingsByOrdinal(raw.Metadata)
 			for ordinal, reasoning := range reasonings {
@@ -355,6 +361,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 					Type:        UIMessageAttachments,
 					Attachments: attachments,
 				})
+			}
+			if trace := uiStepTraceFromMetadata(raw.Metadata, firstBlockID, pending.NextID-1); trace != nil && pending.NextID > firstBlockID {
+				pending.Turn.StepTraces = append(pending.Turn.StepTraces, *trace)
 			}
 
 		case "tool":
@@ -420,6 +429,9 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 			if call.ExecutionLocation != nil {
 				msg.ExecutionLocation = call.ExecutionLocation
 			}
+			if call.ExecutionTiming != nil {
+				msg.ExecutionTiming = call.ExecutionTiming
+			}
 			if call.UserInput != nil {
 				msg.UserInput = call.UserInput
 			}
@@ -435,6 +447,7 @@ func upsertPendingToolCall(pending *uiPendingAssistantTurn, call uiExtractedTool
 		Running:           uiBoolPtr(true),
 		Approval:          call.Approval,
 		ExecutionLocation: call.ExecutionLocation,
+		ExecutionTiming:   call.ExecutionTiming,
 		UserInput:         call.UserInput,
 	}
 	appendPendingAssistantMessage(pending, block)
@@ -775,6 +788,7 @@ func extractPersistedToolCalls(message *uiDecodedModelMessage) []uiExtractedTool
 			Input:             part.Input,
 			Approval:          extractApprovalMetadata(part.ProviderMetadata),
 			ExecutionLocation: extractExecutionLocationMetadata(part.ProviderMetadata),
+			ExecutionTiming:   extractExecutionTimingMetadata(part.ProviderMetadata),
 			UserInput:         extractUserInputMetadata(part.ProviderMetadata),
 		})
 	}
@@ -883,6 +897,46 @@ func extractExecutionLocationMetadata(metadata map[string]any) *UIExecutionLocat
 		return nil
 	}
 	return location
+}
+
+func extractExecutionTimingMetadata(metadata map[string]any) *UIExecutionTiming {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata[event.ExecutionTimingMetadataKey]
+	if !ok || raw == nil {
+		return nil
+	}
+	var timing event.ExecutionTiming
+	if typed, ok := raw.(event.ExecutionTiming); ok {
+		timing = typed
+	} else {
+		encoded, err := json.Marshal(raw)
+		if err != nil || json.Unmarshal(encoded, &timing) != nil {
+			return nil
+		}
+	}
+	if timing.StartedAtMS <= 0 || timing.EndedAtMS < timing.StartedAtMS {
+		return nil
+	}
+	return &UIExecutionTiming{StartedAtMS: timing.StartedAtMS, EndedAtMS: timing.EndedAtMS}
+}
+
+func uiStepTraceFromMetadata(metadata map[string]any, firstMessageID, lastMessageID int) *UIStepTrace {
+	trace := messagepkg.StepTraceFromMetadata(metadata)
+	if trace == nil {
+		return nil
+	}
+	return &UIStepTrace{
+		FirstMessageID: firstMessageID,
+		LastMessageID:  lastMessageID,
+		StepIndex:      trace.StepIndex,
+		StartedAtMS:    trace.StartedAtMS,
+		FirstTokenAtMS: trace.FirstTokenAtMS,
+		EndedAtMS:      trace.EndedAtMS,
+		FinishReason:   trace.FinishReason,
+		Usage:          trace.Usage,
+	}
 }
 
 func extractUserInputMetadata(metadata map[string]any) *UIUserInput {
@@ -1076,6 +1130,14 @@ func uiAttachmentsFromMessageAssets(raw messagepkg.Message) []UIAttachment {
 
 func uiUserMessageKind(raw messagepkg.Message) string {
 	return stringFromAny(raw.Metadata["user_message_kind"])
+}
+
+func uiContextInjection(raw messagepkg.Message) *UIContextInjection {
+	injection := messagepkg.ContextInjectionFromMetadata(raw.Metadata)
+	if injection == nil {
+		return nil
+	}
+	return &UIContextInjection{Kind: injection.Kind}
 }
 
 func uiSkillActivationFromMessage(raw messagepkg.Message) *turn.SkillActivation {

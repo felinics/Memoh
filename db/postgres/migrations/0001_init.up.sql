@@ -2439,6 +2439,41 @@ CREATE POLICY context_lifecycles_team_update ON public.context_lifecycles
 CREATE POLICY context_lifecycles_team_delete ON public.context_lifecycles
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
+-- Content-addressed store of the rendered context fragments a run sent, one
+-- row per distinct text per bot (content_hash covers the kind and the text
+-- alone); the trajectory reads it by the hashes the lifecycle snapshot
+-- references, and the rows go away with the bot.
+CREATE TABLE IF NOT EXISTS public.context_fragment_texts (
+    team_id      UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                              REFERENCES public.teams(id) ON DELETE RESTRICT,
+    bot_id       UUID        NOT NULL,
+    content_hash TEXT        NOT NULL,
+    kind         TEXT        NOT NULL,
+    label        TEXT        NOT NULL DEFAULT '',
+    text         TEXT        NOT NULL,
+    text_bytes   INTEGER     NOT NULL,
+    truncated    BOOLEAN     NOT NULL DEFAULT false,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (team_id, bot_id, content_hash),
+    CONSTRAINT context_fragment_texts_bot_id_fkey
+        FOREIGN KEY (team_id, bot_id)
+        REFERENCES public.bots(team_id, id) ON DELETE CASCADE
+);
+
+ALTER TABLE public.context_fragment_texts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.context_fragment_texts FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY context_fragment_texts_team_select ON public.context_fragment_texts
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY context_fragment_texts_team_insert ON public.context_fragment_texts
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY context_fragment_texts_team_update ON public.context_fragment_texts
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY context_fragment_texts_team_delete ON public.context_fragment_texts
+    FOR DELETE USING (team_id = public.memoh_current_team_id());
+
 -- Skill Package installations
 -- ---------------------------------------------------------------------------
 

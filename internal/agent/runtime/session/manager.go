@@ -1717,15 +1717,24 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}
 
 	var messages []chatview.UIMessage
+	var stepTrace *chatview.UIStepTrace
 	switch event.Type {
 	case native.EventAgentStart:
 	case native.EventAgentEnd, native.EventAgentAbort:
 		messages = ctrl.converter.ConvertTerminalMessages(event.Messages)
 	case native.EventError:
+	case native.EventStepStart:
+		ctrl.converter.HandleStepStart()
+	case native.EventStepEnd:
+		stepTrace = ctrl.converter.HandleStepEnd(chatview.UIStreamEventFromAgentEvent(event))
 	default:
 		messages = ctrl.converter.HandleEvent(chatview.UIStreamEventFromAgentEvent(event))
 	}
 	delta, visibleChange := runtimeDeltaForAgentEvent(event, messages)
+	if stepTrace != nil {
+		delta.StepTraceAppends = []chatview.UIStepTrace{*stepTrace}
+		visibleChange = true
+	}
 	if !visibleChange {
 		return messages, nil
 	}
@@ -1768,9 +1777,13 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 			// its own final EventError, so the failure is not lost either.
 			run.Error = ""
 			run.ErrorCode = ""
+			run.StepTraces = nil
 		}
 		for _, msg := range messages {
 			run.Messages = upsertUIMessage(run.Messages, msg)
+		}
+		if stepTrace != nil {
+			run.StepTraces = append(run.StepTraces, *stepTrace)
 		}
 		switch event.Type {
 		case native.EventToolApprovalRequest, native.EventUserInputRequest:

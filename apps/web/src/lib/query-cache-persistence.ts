@@ -45,6 +45,12 @@ function isQuotaExceeded(error: unknown): boolean {
 const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   'remote-runtimes',
   'session-status',
+  // The trajectory's per-run reads: the audit grows with the history a run
+  // considered, and the texts are workspace files and hook output that must
+  // not rest on disk.
+  'context-lifecycle-decisions',
+  'context-lifecycle-fragments',
+  'session-compactions',
   // Computer ACL state (which bot may use which runtime). Volatile and
   // cross-surface: writes land via the access dialog / bot page / API, so a
   // hydrated copy can silently disagree with the server — always refetch.

@@ -1082,16 +1082,25 @@ export type CompactionListLogsResponse = {
 };
 
 export type CompactionLog = {
+    anchor_end_ms?: number;
+    /**
+     * AnchorStartMS and AnchorEndMS bound the conversation time the summary
+     * covers; Level is the rollup depth and SupersededAt is set once a later
+     * compaction folded this one in.
+     */
+    anchor_start_ms?: number;
     bot_id?: string;
     completed_at?: string;
     error_message?: string;
     id?: string;
+    level?: number;
     message_count?: number;
     model_id?: string;
     session_id?: string;
     started_at?: string;
     status?: string;
     summary?: string;
+    superseded_at?: string;
     usage?: unknown;
 };
 
@@ -1192,7 +1201,16 @@ export type ContextfragContextRef = {
     version?: number;
 };
 
-export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
+export type ContextfragFragmentRef = {
+    content_hash?: string;
+    kind?: ContextfragKind;
+    slot?: ContextfragSlot;
+    text_bytes?: number;
+    text_hash?: string;
+    token_estimate?: number;
+};
+
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary' | 'tool_definition';
 
 export type ContextfragKindBreakdown = {
     fragments?: number;
@@ -1213,10 +1231,16 @@ export type ContextfragLifecycleSnapshot = {
     client_type?: string;
     counts?: ContextfragManifestCounts;
     final_input_hash?: string;
+    /**
+     * Fragments lists the injected fragments of the run, bounded by the prompt
+     * rather than the conversation; their texts live in the content store.
+     */
+    fragments?: Array<ContextfragFragmentRef>;
     loop_selection_mode?: string;
     memory_recall?: ContextfragMemoryRecallTrace;
     model?: string;
     mutations?: Array<ContextfragMutationRecord>;
+    run_trace?: ContextfragRunTrace;
     selection?: ContextfragSelectionTrace;
     selection_decisions?: Array<ContextfragSelectionDecision>;
     stable_message_count?: number;
@@ -1272,6 +1296,23 @@ export type ContextfragRefDurability = 'durable' | 'synthetic' | 'debug';
 
 export type ContextfragRetentionTier = '' | 'required' | 'preferred' | 'optional';
 
+export type ContextfragRunTrace = {
+    cache_write_tokens?: number;
+    cached_input_tokens?: number;
+    decode_ms?: number;
+    decode_output_tokens?: number;
+    ended_at_ms?: number;
+    input_tokens?: number;
+    llm_ms?: number;
+    output_tokens?: number;
+    reasoning_tokens?: number;
+    started_at_ms?: number;
+    steps?: number;
+    tool_calls?: number;
+    tool_ms?: number;
+    ttft_ms?: number;
+};
+
 export type ContextfragSelectionDecision = {
     cache_class?: ContextfragCacheClass;
     decision?: ContextfragSelectionDecisionKind;
@@ -1322,6 +1363,7 @@ export type ContextfragStepSnapshot = {
 
 export type ContextfragToolDefAccounting = {
     bytes?: number;
+    content_hash?: string;
     name?: string;
     provider?: string;
     token_estimate?: number;
@@ -1382,9 +1424,18 @@ export type ConversationUiBackgroundTask = {
     task_id?: string;
 };
 
+export type ConversationUiContextInjection = {
+    kind?: 'steering' | 'prepared';
+};
+
 export type ConversationUiExecutionLocation = {
     kind?: string;
     name?: string;
+};
+
+export type ConversationUiExecutionTiming = {
+    ended_at_ms?: number;
+    started_at_ms?: number;
 };
 
 export type ConversationUiForwardRef = {
@@ -1402,6 +1453,7 @@ export type ConversationUiMessage = {
     code?: string;
     content?: string;
     execution_location?: ConversationUiExecutionLocation;
+    execution_timing?: ConversationUiExecutionTiming;
     id?: number;
     input?: unknown;
     name?: string;
@@ -1427,6 +1479,17 @@ export type ConversationUiReplyRef = {
     sender?: string;
 };
 
+export type ConversationUiStepTrace = {
+    ended_at_ms?: number;
+    finish_reason?: string;
+    first_message_id?: number;
+    first_token_at_ms?: number;
+    last_message_id?: number;
+    started_at_ms?: number;
+    step_index?: number;
+    usage?: MessageStepTraceUsage;
+};
+
 export type ConversationUiToolApproval = {
     approval_id?: string;
     can_approve?: boolean;
@@ -1450,6 +1513,7 @@ export type ConversationUiToolApprovalOption = {
 export type ConversationUiTurn = {
     attachments?: Array<ConversationUiAttachment>;
     background_task?: ConversationUiBackgroundTask;
+    context_injection?: ConversationUiContextInjection;
     external_message_id?: string;
     forward?: ConversationUiForwardRef;
     id?: string;
@@ -1462,6 +1526,7 @@ export type ConversationUiTurn = {
     sender_display_name?: string;
     sender_user_id?: string;
     skill_activation?: ConversationSkillActivation;
+    step_traces?: Array<ConversationUiStepTrace>;
     text?: string;
     timestamp: Date;
     turn_id: string;
@@ -1847,6 +1912,39 @@ export type HandlersContainerStorageMetricsResponse = {
     used_bytes?: number;
 };
 
+export type HandlersContextFragmentPreview = {
+    kind?: ContextfragKind;
+    label?: string;
+    preview?: string;
+    text_bytes?: number;
+    truncated?: boolean;
+};
+
+export type HandlersContextFragmentText = {
+    /**
+     * Available is false when the text was never stored for this fragment,
+     * such as runs older than the text store.
+     */
+    available?: boolean;
+    content_hash?: string;
+    kind?: ContextfragKind;
+    /**
+     * Label names the fragment as the assembler did; empty when no text was
+     * stored, because the snapshot itself never carries names.
+     */
+    label?: string;
+    slot?: ContextfragSlot;
+    text?: string;
+    text_bytes?: number;
+    /**
+     * TextHash is the store key of the fragment's text; tool definitions use
+     * their serialized hash for both.
+     */
+    text_hash?: string;
+    token_estimate?: number;
+    truncated?: boolean;
+};
+
 export type HandlersContextLifecycleAggregates = {
     drop_reasons?: {
         [key: string]: number;
@@ -1859,6 +1957,16 @@ export type HandlersContextLifecycleAggregates = {
     turns?: number;
 };
 
+export type HandlersContextLifecycleDecisionsResponse = {
+    decisions?: Array<ContextfragSelectionDecision>;
+    run_id?: string;
+};
+
+export type HandlersContextLifecycleFragmentsResponse = {
+    fragments?: Array<HandlersContextFragmentText>;
+    run_id?: string;
+};
+
 export type HandlersContextLifecycleResponse = {
     /**
      * AggregateScope is always "returned_page": aggregates cover the returned
@@ -1866,6 +1974,15 @@ export type HandlersContextLifecycleResponse = {
      */
     aggregate_scope?: string;
     aggregates?: HandlersContextLifecycleAggregates;
+    /**
+     * FragmentPreviews maps a text hash referenced by the page's fragment
+     * refs and tool definitions to the head of its stored text. Present only
+     * for callers who may read the bot's workspace, because the texts include
+     * workspace files and hook output.
+     */
+    fragment_previews?: {
+        [key: string]: HandlersContextFragmentPreview;
+    };
     /**
      * HasMore reports whether older lifecycle turns exist beyond this page.
      */
@@ -1885,6 +2002,11 @@ export type HandlersContextLifecycleResponse = {
      * Limit is the page bound the turns and aggregates were computed over.
      */
     limit?: number;
+    /**
+     * NextCursor is the opaque `before` value that continues past this page's
+     * oldest run; absent when the page is complete or served from legacy rows.
+     */
+    next_cursor?: string;
     turns?: Array<HandlersContextLifecycleTurn>;
 };
 
@@ -1895,6 +2017,11 @@ export type HandlersContextLifecycleTurn = {
     run_id?: string;
     snapshot?: ContextfragLifecycleSnapshot;
     status?: string;
+    /**
+     * TurnID is the durable turn the run wrote into, joined from the run
+     * ledger; absent for runs the ledger never recorded.
+     */
+    turn_id?: string;
 };
 
 export type HandlersContextUsage = {
@@ -2216,6 +2343,19 @@ export type HandlersRollbackRequest = {
 
 export type HandlersSafeSkillsResponse = {
     skills?: Array<SkillsSafeCatalogItem>;
+};
+
+export type HandlersSessionCompactionsResponse = {
+    /**
+     * HasMore reports whether older compactions exist beyond this page.
+     */
+    has_more?: boolean;
+    items?: Array<CompactionLog>;
+    /**
+     * NextCursor is the opaque `before` value that continues past this
+     * page's oldest compaction; absent when the page is complete.
+     */
+    next_cursor?: string;
 };
 
 export type HandlersSessionInfoResponse = {
@@ -2883,6 +3023,14 @@ export type McpUpsertRequest = {
     name?: string;
     transport?: string;
     url?: string;
+};
+
+export type MessageStepTraceUsage = {
+    cache_write_tokens?: number;
+    cached_input_tokens?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    reasoning_tokens?: number;
 };
 
 export type ModelsAddRequest = {
@@ -9911,6 +10059,65 @@ export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
 
 export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
 
+export type GetBotsByBotIdSessionsBySessionIdCompactionsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: {
+        /**
+         * Maximum number of compactions to return (default 50, max 200)
+         */
+        limit?: number;
+        /**
+         * Opaque next_cursor from a previous page; returns compactions older than it
+         */
+        before?: string;
+    };
+    url: '/bots/{bot_id}/sessions/{session_id}/compactions';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsError = GetBotsByBotIdSessionsBySessionIdCompactionsErrors[keyof GetBotsByBotIdSessionsBySessionIdCompactionsErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSessionCompactionsResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdCompactionsResponse = GetBotsByBotIdSessionsBySessionIdCompactionsResponses[keyof GetBotsByBotIdSessionsBySessionIdCompactionsResponses];
+
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleData = {
     body?: never;
     path: {
@@ -9928,6 +10135,10 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleData = {
          * Maximum number of turns to return (default 50, max 200)
          */
         limit?: number;
+        /**
+         * Opaque next_cursor from a previous page; returns run-keyed turns older than it
+         */
+        before?: string;
     };
     url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle';
 };
@@ -9965,6 +10176,114 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses = {
 };
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsError = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersContextLifecycleDecisionsResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdDecisionsResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Run ID
+         */
+        run_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsError = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersContextLifecycleFragmentsResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses];
 
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**

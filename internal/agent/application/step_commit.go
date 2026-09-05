@@ -22,6 +22,7 @@ type agentStepCommitter struct {
 	rc              resolvedContext
 	persister       messagepkg.AgentStepPersister
 	reasoningTiming *reasoningTimingTracker
+	stepTrace       *stepTraceTracker
 
 	mu                   sync.Mutex
 	turnRequestMessageID string
@@ -79,6 +80,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		timingState = "interrupted"
 	}
 	reasoningTiming := c.reasoningTiming.take(timingState)
+	stepTraces := c.stepTrace.take()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -109,6 +111,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		AllowPendingToolCalls: step.DeferredToolApproval != nil,
 		ContextLifecycle:      c.rc.runConfig.ContextLifecycle,
 		ReasoningTiming:       reasoningTiming,
+		StepTraces:            stepTraces,
 	}
 	if interrupted {
 		opts.MessageMetadataByIndex = make(map[int]map[string]any)
@@ -116,6 +119,22 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 			if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
 				opts.MessageMetadataByIndex[i] = map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true}
 			}
+		}
+	}
+	// Twilight prepares context only before steps after the first, so a
+	// leading user row of a later step is runtime-injected, not the request.
+	if stepIndex > 0 {
+		for i, message := range messages {
+			if !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+				break
+			}
+			if contextInjectionKindOf(message) != "" {
+				continue
+			}
+			if opts.MessageMetadataByIndex == nil {
+				opts.MessageMetadataByIndex = make(map[int]map[string]any, 1)
+			}
+			opts.MessageMetadataByIndex[i] = mergeMetadata(opts.MessageMetadataByIndex[i], contextInjectionMetadata(messagepkg.ContextInjectionPrepared))
 		}
 	}
 	opts = opts.withContextLifecycleMetadata(c.service.logger, storeReq, messages)
