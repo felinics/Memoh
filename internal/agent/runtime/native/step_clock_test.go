@@ -55,3 +55,34 @@ func TestToolExecutionRegistryClocksWithElapsedTime(t *testing.T) {
 		t.Fatalf("timing = %#v", registry.metadata("c1"))
 	}
 }
+
+func TestStepBoundaryEmitterPairsFinishPartsWithCompletionsInOrder(t *testing.T) {
+	t.Parallel()
+
+	current := time.UnixMilli(1_000)
+	now := func() time.Time { return current }
+	clock := newStepClock(now)
+	clock.since = func(startedAt time.Time) time.Duration { return now().Sub(startedAt) }
+	emitter := &stepBoundaryEmitter{clock: clock}
+
+	// The seam finishes two requests before the event loop publishes either.
+	clock.begin()
+	current = current.Add(40 * time.Millisecond)
+	clock.finish(sdk.Usage{OutputTokens: 1}, sdk.FinishReasonToolCalls)
+	current = current.Add(10 * time.Millisecond)
+	clock.begin()
+	current = current.Add(70 * time.Millisecond)
+	clock.finish(sdk.Usage{OutputTokens: 2}, sdk.FinishReasonStop)
+
+	first, ok := emitter.observe(&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls})
+	if !ok || first.Timing == nil || first.Timing.StartedAtMS != 1_000 || first.Timing.EndedAtMS != 1_040 {
+		t.Fatalf("first step_end = %#v, want the first request's clock", first.Timing)
+	}
+	second, ok := emitter.observe(&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop})
+	if !ok || second.Timing == nil || second.Timing.StartedAtMS != 1_050 || second.Timing.EndedAtMS != 1_120 || second.StepIndex != 1 {
+		t.Fatalf("second step_end = %#v (index %d), want the second request's clock", second.Timing, second.StepIndex)
+	}
+	if third, _ := emitter.observe(&sdk.FinishStepPart{}); third.Timing != nil {
+		t.Fatalf("a finish without a completed request carries no timing: %#v", third.Timing)
+	}
+}

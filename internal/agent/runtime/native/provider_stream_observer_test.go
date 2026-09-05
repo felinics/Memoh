@@ -72,7 +72,7 @@ func TestProviderStreamObserverEmitsStepTimingEvents(t *testing.T) {
 	if err := json.Unmarshal(end.Usage, &usage); err != nil || usage.InputTokens != 12 || usage.OutputTokens != 3 {
 		t.Fatalf("usage = %s (%v)", end.Usage, err)
 	}
-	last, ok := clock.lastCompleted()
+	last, ok := clock.takeCompleted()
 	if !ok || last.Timing != *end.Timing {
 		t.Fatalf("clock last completed = %#v, %v", last, ok)
 	}
@@ -96,7 +96,7 @@ func TestProviderStreamObserverAbandonsAttemptWithoutFinish(t *testing.T) {
 	}
 	for range result.Stream {
 	}
-	if _, ok := clock.lastCompleted(); ok {
+	if _, ok := clock.takeCompleted(); ok {
 		t.Fatalf("an attempt without finish-step must not complete")
 	}
 }

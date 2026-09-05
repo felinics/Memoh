@@ -15,13 +15,15 @@ import (
 // first content part, and finish-step. Only attempts that reach finish-step
 // complete; an errored or retried attempt leaves no completed record. The
 // dispatch reading anchors the wall clock; later marks add monotonic elapsed
-// time so a wall-clock step never reorders them.
+// time so a wall-clock step never reorders them. Completed records queue up
+// in order, because the event loop that publishes them may run behind the
+// seam by a whole step.
 type stepClock struct {
-	mu     sync.Mutex
-	now    func() time.Time
-	since  func(time.Time) time.Duration
-	active *activeStep
-	last   *completedStep
+	mu        sync.Mutex
+	now       func() time.Time
+	since     func(time.Time) time.Duration
+	active    *activeStep
+	completed []completedStep
 }
 
 type activeStep struct {
@@ -106,20 +108,26 @@ func (c *stepClock) finish(usage sdk.Usage, reason sdk.FinishReason) (completedS
 	timing := c.active.timing
 	timing.EndedAtMS = c.mark()
 	c.active = nil
-	c.last = &completedStep{Timing: timing, Usage: usage, FinishReason: reason}
-	return *c.last, true
+	record := completedStep{Timing: timing, Usage: usage, FinishReason: reason}
+	c.completed = append(c.completed, record)
+	return record, true
 }
 
-func (c *stepClock) lastCompleted() (completedStep, bool) {
+// takeCompleted hands out the oldest completed record, so the k-th
+// finish-step the event loop sees pairs with the k-th request the seam
+// finished.
+func (c *stepClock) takeCompleted() (completedStep, bool) {
 	if c == nil {
 		return completedStep{}, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.last == nil {
+	if len(c.completed) == 0 {
 		return completedStep{}, false
 	}
-	return *c.last, true
+	record := c.completed[0]
+	c.completed = c.completed[1:]
+	return record, true
 }
 
 // stepBoundaryEmitter turns the provider's start-step and finish-step parts
@@ -161,8 +169,8 @@ func (e *stepBoundaryEmitter) observe(part sdk.StreamPart) (StreamEvent, bool) {
 			FinishReason: string(p.FinishReason),
 			Usage:        marshalUsage(p.Usage),
 		}
-		if last, ok := e.clock.lastCompleted(); ok {
-			timing := last.Timing
+		if completed, ok := e.clock.takeCompleted(); ok {
+			timing := completed.Timing
 			ev.Timing = &timing
 		}
 		e.index++
