@@ -528,7 +528,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		// ACP/MCP and other unfenced decisions retain their waiter-backed path.
 		return DecisionResponseResult{}, nil
 	}
-	result := DecisionResponseResult{Handled: true, RunID: target.RunID}
+	result := DecisionResponseResult{Handled: true, RunID: target.RunID, SessionID: target.SessionID}
 	if target.Type != response.Type ||
 		target.BotID != response.BotID ||
 		response.SessionID != "" && target.SessionID != response.SessionID ||
@@ -572,6 +572,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 	if !ok || strings.TrimSpace(ref.OwnerID) == "" && m.distributed != nil {
 		return result, ErrCommandOwnerUnavailable
 	}
+	result.Generation = ref.Generation
 	createdAt, err := m.backend.Now(ctx)
 	if err != nil {
 		return result, fmt.Errorf("load runtime command time: %w", err)

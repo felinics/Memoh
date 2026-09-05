@@ -452,9 +452,11 @@ type DecisionResponse struct {
 // answer changed it". A resolved terminal decision is handled but not applied;
 // an unfenced ACP/MCP request is not handled and follows its existing path.
 type DecisionResponseResult struct {
-	RunID   string
-	Handled bool
-	Applied bool
+	SessionID  string
+	Generation string
+	RunID      string
+	Handled    bool
+	Applied    bool
 
 	// Replayed acknowledges an earlier submission without rerunning its output.
 	Replayed bool

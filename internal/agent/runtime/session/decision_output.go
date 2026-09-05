@@ -57,10 +57,11 @@ func (m *Manager) StreamDecisionResponse(ctx context.Context, response DecisionR
 	case <-ctx.Done():
 		return result, ctx.Err()
 	}
-	return result, m.readDecisionOutput(ctx, response, result.RunID, key, sub, output)
+	response.SessionID = result.SessionID
+	return result, m.readDecisionOutput(ctx, response, result.RunID, key, sub, output, result.Generation)
 }
 
-func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionResponse, runID string, key Key, sub Subscription, output chan<- json.RawMessage) error {
+func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionResponse, runID string, key Key, sub Subscription, output chan<- json.RawMessage, generation ...string) error {
 	cursor := 0
 	epoch := ""
 	terminalObserved := false
@@ -131,22 +132,8 @@ func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionRespo
 					return err
 				}
 				ended := live.CurrentRunView == nil || live.CurrentRunView.RunID != runID || !isActiveRunStatus(live.CurrentRunView.Status)
-				if !ended && live.CurrentRunView.Status == RunStatusWaitingDecision {
-					m.mu.Lock()
-					decisions := m.decisionStore
-					m.mu.Unlock()
-					if decisions != nil {
-						pending, err := decisions.PendingRuntimeDecisions(ctx, runID)
-						if err != nil {
-							return err
-						}
-						for _, target := range pending {
-							if target.RunID == runID && target.ID != response.DecisionID {
-								ended = true
-								break
-							}
-						}
-					}
+				if !ended && len(generation) > 0 && generation[0] != "" && live.CurrentRunView.Generation != generation[0] {
+					ended = true
 				}
 				if ended {
 					// Drain a final checkpoint committed concurrently with the run terminal.

@@ -187,7 +187,7 @@ func TestDecisionOutputRecoversWithoutEndNotification(t *testing.T) {
 }
 
 func TestDecisionOutputStopsAfterOwnerRunTerminates(t *testing.T) {
-	for _, status := range []string{RunStatusLost, RunStatusWaitingDecision} {
+	for _, status := range []string{RunStatusLost} {
 		t.Run(status, func(t *testing.T) {
 			backend := NewMemoryBackend()
 			manager := NewManager(backend, Options{OwnerLeaseTTL: time.Second})

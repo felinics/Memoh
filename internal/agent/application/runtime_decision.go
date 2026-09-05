@@ -373,6 +373,12 @@ func (s *Service) continueRuntimeDecision(
 	command sessionruntime.Command,
 	continueRun func(context.Context, *continuationLifecycleResult, chan<- WSStreamEvent) error,
 ) {
+	handle := sessionruntime.RunHandle{
+		BotID:      command.BotID,
+		SessionID:  command.SessionID,
+		RunID:      command.RunID,
+		Generation: command.Generation,
+	}
 	var outputSeq int64
 	var outputCause error
 	defer func() {
@@ -381,16 +387,16 @@ func (s *Service) continueRuntimeDecision(
 			outputSeq++
 			_ = s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq, raw)
 		}
-		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil && s.logger != nil {
-			s.logger.Warn("close decision output failed", slog.Any("error", err))
+		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("close decision output failed", slog.Any("error", err))
+			}
+			// A failed checkpoint write must not leave a parked run owning an output
+			// subscription that can never finish. Use the normal run failure lifecycle.
+			s.finishRuntimeDecision(context.WithoutCancel(ctx), handle, err)
 		}
 	}()
-	handle := sessionruntime.RunHandle{
-		BotID:      command.BotID,
-		SessionID:  command.SessionID,
-		RunID:      command.RunID,
-		Generation: command.Generation,
-	}
+
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
 		outputCause = err
 		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
@@ -413,6 +419,11 @@ func (s *Service) continueRuntimeDecision(
 		lifecycleDeferred bool
 	)
 	for raw := range eventCh {
+		// Cancellation may leave already-buffered events. Drain them so the runner
+		// can return and finish through the same lifecycle as other stream failures.
+		if publishErr != nil {
+			continue
+		}
 		var event native.StreamEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
 			continue
@@ -436,11 +447,12 @@ func (s *Service) continueRuntimeDecision(
 		if _, err := s.decisionRuntime.HandleAgentEvent(runCtx, handle, event); err != nil {
 			publishErr = err
 			cancel()
-			break
+			continue
 		}
 		outputSeq++
-		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq, raw); err != nil && s.logger != nil {
-			s.logger.Warn("publish decision output failed", slog.Any("error", err))
+		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq, raw); err != nil {
+			publishErr = err
+			cancel()
 		}
 	}
 	runErr := <-runDone
