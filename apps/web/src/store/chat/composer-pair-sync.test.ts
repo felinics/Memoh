@@ -35,6 +35,58 @@ describe('composer preference operation ordering', () => {
     await state.refresh(async () => 'new confirmed', v => { display = v })
     expect(display).toBe('new confirmed')
   })
+  it('protects the displayed snapshot while attachments are being prepared', async () => {
+    const state = createComposerPairSync()
+    const request = deferred<string>()
+    const attachments = deferred<void>()
+    let display = 'A'
+    const read = state.refresh(() => request.promise, v => { display = v })
+    const snapshot = display
+    const release = state.holdReads()
+    let sent = ''
+    const send = (async () => {
+      await attachments.promise
+      const finish = state.beginSend()
+      sent = snapshot
+      finish(true)
+      release()
+    })()
+    request.resolve('B')
+    await read
+    expect(display).toBe('A')
+    expect(sent).toBe('')
+    attachments.resolve()
+    await send
+    expect(sent).toBe(display)
+    expect(sent).toBe('A')
+  })
+  it('discards a pre-snapshot read even if it returns after preparation ends', async () => {
+    const state = createComposerPairSync()
+    const request = deferred<string>()
+    let display = 'A'
+    const read = state.refresh(() => request.promise, v => { display = v })
+    const release = state.holdReads()
+    release()
+    request.resolve('B')
+    await read
+    expect(display).toBe('A')
+    expect(state.refreshing.value).toBe(false)
+    await state.refresh(async () => 'C', v => { display = v })
+    expect(display).toBe('C')
+  })
+  it('resumes refresh after preparation fails and releases overlapping holds independently', async () => {
+    const state = createComposerPairSync()
+    let display = 'A'
+    const first = state.holdReads()
+    const second = state.holdReads()
+    first()
+    first()
+    await state.refresh(async () => 'B', v => { display = v })
+    expect(display).toBe('A')
+    second()
+    await state.refresh(async () => 'C', v => { display = v })
+    expect(display).toBe('C')
+  })
   it('serializes PATCHes and never starts an obsolete queued selection', async () => {
     const state = createComposerPairSync()
     const first = deferred<string>()

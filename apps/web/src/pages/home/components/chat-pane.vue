@@ -3446,6 +3446,7 @@ async function handleSend() {
   )
   const sentView = paneView.value
   const sentPair = pairCarried.value
+  const releasePairReads = sentView.pairSync.holdReads()
   const pairSend: { finish?: (confirmed: boolean) => void } = {}
   const sentModelId = sentPair.modelId
   const sentReasoningEffort = sentPair.reasoningEffort
@@ -3463,6 +3464,7 @@ async function handleSend() {
       attachments = await Promise.all(files.map(fileToAttachment))
     }
   } catch (error) {
+    releasePairReads()
     if (!matchesChatPaneSendContext(
       sentContext,
       paneTarget.value,
@@ -3511,6 +3513,7 @@ async function handleSend() {
   }).finally(() => {
     directDraftPromotionPending = false
     pairSend.finish?.(false)
+    releasePairReads()
   })
   rollbackPin = null
   pairSend.finish?.(result.messageSent === true || result.stage === 'stream')

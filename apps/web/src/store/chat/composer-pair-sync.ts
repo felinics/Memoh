@@ -7,18 +7,21 @@ export function createComposerPairSync() {
   let epoch = 0
   let read = 0
   let dirty = false
+  let readGeneration = 0
+  let readHolds = 0
   let writes = Promise.resolve()
   let sending = Promise.resolve()
   const refreshing = ref(false)
 
   async function refresh<T>(load: () => Promise<T>, apply: (value: T) => void) {
-    if (dirty) return
+    if (dirty || readHolds) return
+    const generation = readGeneration
     const operation = epoch
     const request = ++read
     refreshing.value = true
     try {
       const value = await load()
-      if (operation === epoch && request === read && !dirty) apply(value)
+      if (operation === epoch && request === read && generation === readGeneration && !dirty && !readHolds) apply(value)
     } catch { /* Keep the displayed cache when offline. */ }
     finally { if (request === read) refreshing.value = false }
   }
@@ -40,6 +43,19 @@ export function createComposerPairSync() {
     return writes
   }
 
+  // Snapshot preparation can await attachments or resolve to a command. Block
+  // stale reads immediately without cancelling or confirming picker writes.
+  function holdReads() {
+    readGeneration++
+    readHolds++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      readHolds--
+    }
+  }
+
   function beginSend() {
     const operation = ++epoch
     dirty = true
@@ -51,5 +67,5 @@ export function createComposerPairSync() {
     }
   }
 
-  return { refreshing, refresh, write, beginSend }
+  return { refreshing, refresh, write, holdReads, beginSend }
 }
