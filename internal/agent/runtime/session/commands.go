@@ -510,7 +510,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		return DecisionResponseResult{Handled: true}, err
 	} else if ok {
 		err := commandResultErrorFor(Command{PayloadHash: requestHash}, stored)
-		return DecisionResponseResult{Handled: true, Applied: err == nil}, err
+		return DecisionResponseResult{Handled: true, Applied: err == nil, Replayed: true}, err
 	}
 
 	m.mu.Lock()
@@ -540,7 +540,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 			if target.PayloadHash != requestHash {
 				return result, ErrCommandPayloadConflict
 			}
-			return DecisionResponseResult{Handled: true, Applied: true}, nil
+			return DecisionResponseResult{Handled: true, Applied: true, Replayed: true}, nil
 		}
 		return result, nil
 	}

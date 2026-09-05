@@ -314,6 +314,9 @@ type Event struct {
 	Snapshot  *Snapshot     `json:"snapshot,omitempty"`
 	Delta     *RuntimeDelta `json:"delta,omitempty"`
 	Message   string        `json:"message,omitempty"`
+
+	// Output is used only on the internal decision-output topic, never the UI topic.
+	Output json.RawMessage `json:"output,omitempty"`
 }
 
 // RuntimeDelta carries only the state changed by one committed runtime
@@ -441,6 +444,9 @@ type DecisionResponse struct {
 type DecisionResponseResult struct {
 	Handled bool
 	Applied bool
+
+	// Replayed acknowledges an earlier submission without rerunning its output.
+	Replayed bool
 }
 
 type Subscription struct {

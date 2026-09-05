@@ -146,7 +146,7 @@ func pgText(value pgtype.Text) string {
 	return value.String
 }
 
-func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (bool, error) {
+func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
@@ -157,11 +157,11 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 	if err != nil {
 		return true, err
 	}
-	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
 		ControlID: input.ControlID, Type: sessionruntime.CommandToolApprovalResponse,
 		DecisionID: firstNonEmpty(input.ExplicitID, input.ApprovalID),
 		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	})
+	}, eventCh)
 	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
 		return false, nil
 	}
@@ -177,7 +177,7 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 	return true, nil
 }
 
-func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput) (bool, error) {
+func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
@@ -188,11 +188,11 @@ func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputRes
 	if err != nil {
 		return true, err
 	}
-	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
 		ControlID: input.ControlID, Type: sessionruntime.CommandUserInputResponse,
 		DecisionID: firstNonEmpty(input.ExplicitID, input.UserInputID),
 		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	})
+	}, eventCh)
 	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
 		return false, nil
 	}
@@ -349,6 +349,18 @@ func (s *Service) continueRuntimeDecision(
 	command sessionruntime.Command,
 	continueRun func(context.Context, *continuationLifecycleResult, chan<- WSStreamEvent) error,
 ) {
+	var outputSeq int64
+	var outputCause error
+	defer func() {
+		if outputCause != nil {
+			raw, _ := json.Marshal(agentFailureStreamEvent(outputCause))
+			outputSeq++
+			_ = s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq, raw)
+		}
+		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil && s.logger != nil {
+			s.logger.Warn("close decision output failed", slog.Any("error", err))
+		}
+	}()
 	handle := sessionruntime.RunHandle{
 		BotID:      command.BotID,
 		SessionID:  command.SessionID,
@@ -356,6 +368,7 @@ func (s *Service) continueRuntimeDecision(
 		Generation: command.Generation,
 	}
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
+		outputCause = err
 		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
 		s.finishRuntimeDecision(ctx, handle, err)
 		return
@@ -401,6 +414,10 @@ func (s *Service) continueRuntimeDecision(
 			cancel()
 			break
 		}
+		outputSeq++
+		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq, raw); err != nil && s.logger != nil {
+			s.logger.Warn("publish decision output failed", slog.Any("error", err))
+		}
 	}
 	runErr := <-runDone
 	lifecycleDeferred = lifecycleDeferred || lifecycle.deferred
@@ -411,6 +428,7 @@ func (s *Service) continueRuntimeDecision(
 		lifecycleDeferred = false
 	}
 	if runErr != nil {
+		outputCause = runErr
 		s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
 		s.finishRuntimeDecision(ctx, handle, runErr)
 		return
