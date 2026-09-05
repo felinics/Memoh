@@ -1,37 +1,49 @@
 <template>
-  <SettingsRow :label="$t('provider.apiKey')">
+  <SettingsRow
+    :label="$t('provider.apiKey')"
+    stack="sm"
+  >
     <Input
       id="yandex-api-key"
       v-model="localConfig.api_key"
       type="password"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('provider.apiKey')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.searchType')">
+  <SettingsRow
+    :label="$t('common.searchType')"
+    stack="sm"
+  >
     <Input
       id="yandex-search-type"
       v-model="localConfig.search_type"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.searchType')"
       placeholder="SEARCH_TYPE_RU"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.baseUrl')">
+  <SettingsRow
+    :label="$t('common.baseUrl')"
+    stack="sm"
+  >
     <Input
       id="yandex-base-url"
       v-model="localConfig.base_url"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.baseUrl')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.timeoutSeconds')">
+  <SettingsRow
+    :label="$t('common.timeoutSeconds')"
+    stack="sm"
+  >
     <Input
       id="yandex-timeout-seconds"
       v-model.number="localConfig.timeout_seconds"
       type="number"
       :min="1"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.timeoutSeconds')"
     />
   </SettingsRow>

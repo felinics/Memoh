@@ -1,6 +1,6 @@
 <template>
   <SettingsShell width="narrow">
-    <div class="space-y-6">
+    <div class="space-y-4 sm:space-y-6">
       <!-- Identity card: logo + name on the left, delete + enable on the right —
            the same header shape as the provider detail, so every backend reads
            the same way. -->
@@ -48,14 +48,20 @@
       </section>
 
       <form @submit="editProvider">
-        <SettingsSection :title="$t('provider.configurationTitle')">
+        <SettingsSection
+          :title="$t('provider.configurationTitle')"
+          class="provider-configuration"
+        >
           <div>
             <FormField
               v-slot="{ componentField }"
               name="name"
             >
-              <SettingsRow :label="$t('common.name')">
-                <FieldStack class="w-80">
+              <SettingsRow
+                :label="$t('common.name')"
+                stack="sm"
+              >
+                <FieldStack class="w-full sm:w-80">
                   <FormControl>
                     <Input
                       type="text"

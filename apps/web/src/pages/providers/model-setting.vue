@@ -1,6 +1,6 @@
 <template>
   <SettingsShell width="narrow">
-    <div class="space-y-6">
+    <div class="space-y-4 sm:space-y-6">
       <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
           <ProviderIcon

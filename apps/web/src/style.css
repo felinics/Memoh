@@ -1088,3 +1088,23 @@
 /* The settings list <-> detail swap transition classes (swap-forward/*,
  * swap-back/*) now live in the @felinic/ui style.css; the SwapTransition
  * owner moved into the component library. Do not re-add them here. */
+
+/* Provider forms share compact, divider-free rows while their controls stack.
+   Scope this to configuration cards so model lists keep their row separators. */
+@utility provider-configuration {
+  @variant max-sm {
+    & [data-settings-section-card] {
+      padding-top: --spacing(2);
+    }
+    & [data-settings-section-footer] {
+      padding-bottom: --spacing(4);
+    }
+    & .border-b {
+      border-bottom-width: 0;
+      padding-block: --spacing(2);
+    }
+    & .border-t {
+      border-top-width: 0;
+    }
+  }
+}
