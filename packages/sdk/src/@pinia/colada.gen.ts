@@ -2423,7 +2423,7 @@ export const getBotsByBotIdSessionsBySessionIdCompactionsQueryKey = (options: Op
 /**
  * List a session's compactions
  *
- * Return the compaction runs recorded for a chat session, newest first: status, the summary that replaced the covered messages, how many messages it covered and the conversation time it spans, the summarizer's usage and model, and when it ran. Session access suffices: the summary is conversation the reader already sees
+ * Return the compaction runs recorded for a chat session, newest first: status, the summary that replaced the covered messages, how many messages it covered and the conversation time it spans, the summarizer's usage and model, and when it ran. Pages by an opaque keyset cursor. Session access suffices: the summary is conversation the reader already sees
  */
 export const getBotsByBotIdSessionsBySessionIdCompactionsQuery = defineQueryOptions<Options<GetBotsByBotIdSessionsBySessionIdCompactionsData>, GetBotsByBotIdSessionsBySessionIdCompactionsResponse, GetBotsByBotIdSessionsBySessionIdCompactionsError>((options: Options<GetBotsByBotIdSessionsBySessionIdCompactionsData>) => ({
     key: getBotsByBotIdSessionsBySessionIdCompactionsQueryKey(options),

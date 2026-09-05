@@ -7719,7 +7719,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/{session_id}/compactions": {
             "get": {
-                "description": "Return the compaction runs recorded for a chat session, newest first: status, the summary that replaced the covered messages, how many messages it covered and the conversation time it spans, the summarizer's usage and model, and when it ran. Session access suffices: the summary is conversation the reader already sees",
+                "description": "Return the compaction runs recorded for a chat session, newest first: status, the summary that replaced the covered messages, how many messages it covered and the conversation time it spans, the summarizer's usage and model, and when it ran. Pages by an opaque keyset cursor. Session access suffices: the summary is conversation the reader already sees",
                 "tags": [
                     "sessions"
                 ],
@@ -7738,6 +7738,18 @@ const docTemplate = `{
                         "name": "session_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of compactions to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque next_cursor from a previous page; returns compactions older than it",
+                        "name": "before",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -21366,11 +21378,19 @@ const docTemplate = `{
         "handlers.SessionCompactionsResponse": {
             "type": "object",
             "properties": {
+                "has_more": {
+                    "description": "HasMore reports whether older compactions exist beyond this page.",
+                    "type": "boolean"
+                },
                 "items": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/compaction.Log"
                     }
+                },
+                "next_cursor": {
+                    "description": "NextCursor is the opaque ` + "`" + `before` + "`" + ` value that continues past this\npage's oldest compaction; absent when the page is complete.",
+                    "type": "string"
                 }
             }
         },

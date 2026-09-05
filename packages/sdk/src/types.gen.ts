@@ -2346,7 +2346,16 @@ export type HandlersSafeSkillsResponse = {
 };
 
 export type HandlersSessionCompactionsResponse = {
+    /**
+     * HasMore reports whether older compactions exist beyond this page.
+     */
+    has_more?: boolean;
     items?: Array<CompactionLog>;
+    /**
+     * NextCursor is the opaque `before` value that continues past this
+     * page's oldest compaction; absent when the page is complete.
+     */
+    next_cursor?: string;
 };
 
 export type HandlersSessionInfoResponse = {
@@ -10129,7 +10138,16 @@ export type GetBotsByBotIdSessionsBySessionIdCompactionsData = {
          */
         session_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Maximum number of compactions to return (default 50, max 200)
+         */
+        limit?: number;
+        /**
+         * Opaque next_cursor from a previous page; returns compactions older than it
+         */
+        before?: string;
+    };
     url: '/bots/{bot_id}/sessions/{session_id}/compactions';
 };
 

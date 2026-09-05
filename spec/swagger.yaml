@@ -4079,10 +4079,18 @@ definitions:
     type: object
   handlers.SessionCompactionsResponse:
     properties:
+      has_more:
+        description: HasMore reports whether older compactions exist beyond this page.
+        type: boolean
       items:
         items:
           $ref: '#/definitions/compaction.Log'
         type: array
+      next_cursor:
+        description: |-
+          NextCursor is the opaque `before` value that continues past this
+          page's oldest compaction; absent when the page is complete.
+        type: string
     type: object
   handlers.SessionInfoResponse:
     properties:
@@ -11652,8 +11660,8 @@ paths:
       description: 'Return the compaction runs recorded for a chat session, newest
         first: status, the summary that replaced the covered messages, how many messages
         it covered and the conversation time it spans, the summarizer''s usage and
-        model, and when it ran. Session access suffices: the summary is conversation
-        the reader already sees'
+        model, and when it ran. Pages by an opaque keyset cursor. Session access suffices:
+        the summary is conversation the reader already sees'
       parameters:
       - description: Bot ID
         in: path
@@ -11664,6 +11672,15 @@ paths:
         in: path
         name: session_id
         required: true
+        type: string
+      - description: Maximum number of compactions to return (default 50, max 200)
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque next_cursor from a previous page; returns compactions
+          older than it
+        in: query
+        name: before
         type: string
       responses:
         "200":

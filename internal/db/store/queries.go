@@ -297,6 +297,7 @@ type Queries interface {
 	ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]dbsqlc.ListChatRoutesRow, error)
 	ListCompactionLogsByBot(ctx context.Context, arg dbsqlc.ListCompactionLogsByBotParams) ([]dbsqlc.BotHistoryMessageCompact, error)
 	ListCompactionLogsBySession(ctx context.Context, arg dbsqlc.ListCompactionLogsBySessionParams) ([]dbsqlc.BotHistoryMessageCompact, error)
+	ListCompactionLogsBySessionBefore(ctx context.Context, arg dbsqlc.ListCompactionLogsBySessionBeforeParams) ([]dbsqlc.BotHistoryMessageCompact, error)
 	ListEmailOutboxByBot(ctx context.Context, arg dbsqlc.ListEmailOutboxByBotParams) ([]dbsqlc.EmailOutbox, error)
 	ListEmailProviders(ctx context.Context) ([]dbsqlc.EmailProvider, error)
 	ListEmailProvidersByProvider(ctx context.Context, provider string) ([]dbsqlc.EmailProvider, error)
