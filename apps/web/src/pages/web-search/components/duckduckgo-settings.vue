@@ -1,19 +1,25 @@
 <template>
-  <SettingsRow label="Base URL">
+  <SettingsRow
+    label="Base URL"
+    stack="sm"
+  >
     <Input
       id="duckduckgo-base-url"
       v-model="localConfig.base_url"
-      class="w-80"
+      class="w-full sm:w-80"
       aria-label="Base URL"
     />
   </SettingsRow>
-  <SettingsRow label="Timeout (seconds)">
+  <SettingsRow
+    label="Timeout (seconds)"
+    stack="sm"
+  >
     <Input
       id="duckduckgo-timeout-seconds"
       v-model.number="localConfig.timeout_seconds"
       type="number"
       :min="1"
-      class="w-80"
+      class="w-full sm:w-80"
       aria-label="Timeout (seconds)"
     />
   </SettingsRow>

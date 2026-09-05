@@ -1,6 +1,6 @@
 <template>
   <SettingsShell width="narrow">
-    <div class="space-y-6">
+    <div class="space-y-4 sm:space-y-6">
       <!-- Identity card: same header shape as the provider detail. -->
       <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -36,14 +36,20 @@
 
       <!-- Provider configuration card -->
       <form @submit.prevent="handleSaveProvider">
-        <SettingsSection :title="$t('provider.configurationTitle')">
+        <SettingsSection
+          class="provider-configuration"
+          :title="$t('provider.configurationTitle')"
+        >
           <div>
-            <SettingsRow :label="$t('common.name')">
+            <SettingsRow
+              stack="sm"
+              :label="$t('common.name')"
+            >
               <Input
                 id="speech-provider-name"
                 v-model="providerName"
                 type="text"
-                class="w-80"
+                class="w-full sm:w-80"
                 :placeholder="$t('common.namePlaceholder')"
               />
             </SettingsRow>
@@ -51,12 +57,13 @@
             <SettingsRow
               v-for="field in orderedProviderFields"
               :key="field.key"
+              stack="sm"
               :label="field.title || field.key"
               :description="field.description"
             >
               <div
                 v-if="field.type === 'secret'"
-                class="relative w-80"
+                class="relative w-full sm:w-80"
               >
                 <Input
                   :id="`speech-provider-${field.key}`"
@@ -86,7 +93,7 @@
                 :id="`speech-provider-${field.key}`"
                 v-model.number="providerConfig[field.key] as number"
                 type="number"
-                class="w-80"
+                class="w-full sm:w-80"
                 :placeholder="field.example ? String(field.example) : ''"
               />
               <Select
@@ -94,7 +101,7 @@
                 :model-value="String(providerConfig[field.key] ?? '')"
                 @update:model-value="(val) => providerConfig[field.key] = val"
               >
-                <SelectTrigger class="w-80">
+                <SelectTrigger class="w-full sm:w-80">
                   <SelectValue :placeholder="field.title || field.key" />
                 </SelectTrigger>
                 <SelectContent>
@@ -112,7 +119,7 @@
                 :id="`speech-provider-${field.key}`"
                 v-model="providerConfig[field.key] as string"
                 type="text"
-                class="w-80"
+                class="w-full sm:w-80"
                 :placeholder="field.example ? String(field.example) : ''"
               />
             </SettingsRow>
