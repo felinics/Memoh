@@ -129,7 +129,12 @@ const login = async () => {
       // 相同的 putUsersMe;仅在登录成功路径触发,普通刷新不会反复覆盖手选时区。
       readBrowserTimezone,
       syncTimezone: async (timezone) => {
-        const { data } = await putUsersMe({ body: { timezone }, throwOnError: true })
+        // Optional profile sync must not leave an authenticated user waiting forever.
+        const { data } = await putUsersMe({
+          body: { timezone },
+          signal: AbortSignal.timeout(3000),
+          throwOnError: true,
+        })
         return data
       },
       applySyncedTimezone: (timezone) => patchUserInfo({ timezone }),
