@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
@@ -18,16 +21,23 @@ type contextTextQueries interface {
 	UpsertContextFragmentTexts(ctx context.Context, arg sqlc.UpsertContextFragmentTextsParams) error
 }
 
+// textStoreKey is the row identity of a stored text: the bot that rendered
+// it and the text hash.
+type textStoreKey struct {
+	bot  [16]byte
+	hash string
+}
+
 // contextTextStore persists rendered fragment texts content-addressed by
-// their text hash, off the turn path. A hash is remembered only after its
-// write succeeded, so a failed batch is retried by the next run that renders
-// the same text.
+// their text hash, per bot, off the turn path. A hash is remembered only
+// after its write succeeded, so a failed batch is retried by the next run
+// that renders the same text.
 type contextTextStore struct {
 	queries  contextTextQueries
 	logger   *slog.Logger
 	mu       sync.Mutex
-	seen     map[string]struct{}
-	inflight map[string]struct{}
+	seen     map[textStoreKey]struct{}
+	inflight map[textStoreKey]struct{}
 	pending  sync.WaitGroup
 }
 
@@ -35,26 +45,29 @@ func newContextTextStore(queries contextTextQueries, logger *slog.Logger) *conte
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &contextTextStore{queries: queries, logger: logger, seen: make(map[string]struct{}), inflight: make(map[string]struct{})}
+	return &contextTextStore{queries: queries, logger: logger, seen: make(map[textStoreKey]struct{}), inflight: make(map[textStoreKey]struct{})}
 }
 
-func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, texts []contextfrag.FragmentText) {
-	if s == nil || s.queries == nil || len(texts) == 0 {
+func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, botID pgtype.UUID, texts []contextfrag.FragmentText) {
+	if s == nil || s.queries == nil || !botID.Valid || len(texts) == 0 {
 		return
 	}
-	params := sqlc.UpsertContextFragmentTextsParams{}
+	params := sqlc.UpsertContextFragmentTextsParams{BotID: botID}
+	keys := make([]textStoreKey, 0, len(texts))
 	s.mu.Lock()
 	for _, text := range texts {
 		if text.TextHash == "" || text.Text == "" {
 			continue
 		}
-		if _, seen := s.seen[text.TextHash]; seen {
+		key := textStoreKey{bot: botID.Bytes, hash: text.TextHash}
+		if _, seen := s.seen[key]; seen {
 			continue
 		}
-		if _, writing := s.inflight[text.TextHash]; writing {
+		if _, writing := s.inflight[key]; writing {
 			continue
 		}
-		s.inflight[text.TextHash] = struct{}{}
+		s.inflight[key] = struct{}{}
+		keys = append(keys, key)
 		body := text.Text
 		truncated := false
 		if len(body) > maxFragmentTextBytes {
@@ -77,10 +90,10 @@ func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, texts []con
 		defer s.pending.Done()
 		err := s.upsert(ctx, params)
 		s.mu.Lock()
-		for _, hash := range params.ContentHashes {
-			delete(s.inflight, hash)
+		for _, key := range keys {
+			delete(s.inflight, key)
 			if err == nil {
-				s.seen[hash] = struct{}{}
+				s.seen[key] = struct{}{}
 			}
 		}
 		s.mu.Unlock()
@@ -117,23 +130,31 @@ func (s *Service) contextTextStore() *contextTextStore {
 	return s.contextTexts
 }
 
-// runTextSink binds the store to one run's context, which carries the team
-// the texts belong to; cancellation of the turn must not lose them.
+// runTextSink binds the store to one run's bot and context, which carries
+// the team the texts belong to; cancellation of the turn must not lose them.
 type runTextSink struct {
 	ctx   context.Context
 	store *contextTextStore
+	botID pgtype.UUID
 }
 
 func (s runTextSink) PersistFragmentTexts(texts []contextfrag.FragmentText) {
-	s.store.PersistFragmentTexts(s.ctx, texts)
+	s.store.PersistFragmentTexts(s.ctx, s.botID, texts)
 }
 
 // newContextLifecycleHolder creates a run's lifecycle holder wired to the
-// fragment text store.
-func (s *Service) newContextLifecycleHolder(ctx context.Context) *contextfrag.LifecycleHolder {
+// fragment text store of the run's bot. A run without a bot id keeps its
+// texts unrecorded.
+func (s *Service) newContextLifecycleHolder(ctx context.Context, botID string) *contextfrag.LifecycleHolder {
 	holder := contextfrag.NewLifecycleHolder()
-	if store := s.contextTextStore(); store != nil {
-		holder.SetTextSink(runTextSink{ctx: context.WithoutCancel(ctx), store: store})
+	store := s.contextTextStore()
+	if store == nil {
+		return holder
 	}
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return holder
+	}
+	holder.SetTextSink(runTextSink{ctx: context.WithoutCancel(ctx), store: store, botID: pgBotID})
 	return holder
 }

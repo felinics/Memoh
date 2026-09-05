@@ -198,7 +198,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	req.Query = strings.TrimSpace(req.Query)
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
 	contextMarkdown, contextURI, contextManifest, contextFrags := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
-	contextLifecycle := s.newContextLifecycleHolder(ctx)
+	contextLifecycle := s.newContextLifecycleHolder(ctx, req.BotID)
 	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)
@@ -602,7 +602,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
 	contextMarkdown, contextURI, contextManifest, contextFrags := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	stepTrace := newStepTraceTracker(nil)
-	contextLifecycle := s.newContextLifecycleHolder(ctx)
+	contextLifecycle := s.newContextLifecycleHolder(ctx, botID)
 	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)

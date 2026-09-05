@@ -7,18 +7,22 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const listContextFragmentPreviews = `-- name: ListContextFragmentPreviews :many
 SELECT content_hash, kind, label, left(text, $1::int) AS preview, text_bytes, truncated
 FROM context_fragment_texts
 WHERE team_id = public.memoh_current_team_id()
-  AND content_hash = ANY($2::text[])
+  AND bot_id = $2
+  AND content_hash = ANY($3::text[])
 `
 
 type ListContextFragmentPreviewsParams struct {
-	PreviewChars  int32    `json:"preview_chars"`
-	ContentHashes []string `json:"content_hashes"`
+	PreviewChars  int32       `json:"preview_chars"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	ContentHashes []string    `json:"content_hashes"`
 }
 
 type ListContextFragmentPreviewsRow struct {
@@ -31,7 +35,7 @@ type ListContextFragmentPreviewsRow struct {
 }
 
 func (q *Queries) ListContextFragmentPreviews(ctx context.Context, arg ListContextFragmentPreviewsParams) ([]ListContextFragmentPreviewsRow, error) {
-	rows, err := q.db.Query(ctx, listContextFragmentPreviews, arg.PreviewChars, arg.ContentHashes)
+	rows, err := q.db.Query(ctx, listContextFragmentPreviews, arg.PreviewChars, arg.BotID, arg.ContentHashes)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +65,14 @@ const listContextFragmentTexts = `-- name: ListContextFragmentTexts :many
 SELECT content_hash, kind, label, text, text_bytes, truncated
 FROM context_fragment_texts
 WHERE team_id = public.memoh_current_team_id()
-  AND content_hash = ANY($1::text[])
+  AND bot_id = $1
+  AND content_hash = ANY($2::text[])
 `
+
+type ListContextFragmentTextsParams struct {
+	BotID         pgtype.UUID `json:"bot_id"`
+	ContentHashes []string    `json:"content_hashes"`
+}
 
 type ListContextFragmentTextsRow struct {
 	ContentHash string `json:"content_hash"`
@@ -73,8 +83,8 @@ type ListContextFragmentTextsRow struct {
 	Truncated   bool   `json:"truncated"`
 }
 
-func (q *Queries) ListContextFragmentTexts(ctx context.Context, contentHashes []string) ([]ListContextFragmentTextsRow, error) {
-	rows, err := q.db.Query(ctx, listContextFragmentTexts, contentHashes)
+func (q *Queries) ListContextFragmentTexts(ctx context.Context, arg ListContextFragmentTextsParams) ([]ListContextFragmentTextsRow, error) {
+	rows, err := q.db.Query(ctx, listContextFragmentTexts, arg.BotID, arg.ContentHashes)
 	if err != nil {
 		return nil, err
 	}
@@ -101,28 +111,31 @@ func (q *Queries) ListContextFragmentTexts(ctx context.Context, contentHashes []
 }
 
 const upsertContextFragmentTexts = `-- name: UpsertContextFragmentTexts :exec
-INSERT INTO context_fragment_texts (content_hash, kind, label, text, text_bytes, truncated)
+INSERT INTO context_fragment_texts (bot_id, content_hash, kind, label, text, text_bytes, truncated)
 SELECT
-  unnest($1::text[]),
+  $1::uuid,
   unnest($2::text[]),
   unnest($3::text[]),
   unnest($4::text[]),
-  unnest($5::int[]),
-  unnest($6::boolean[])
-ON CONFLICT (team_id, content_hash) DO NOTHING
+  unnest($5::text[]),
+  unnest($6::int[]),
+  unnest($7::boolean[])
+ON CONFLICT (team_id, bot_id, content_hash) DO NOTHING
 `
 
 type UpsertContextFragmentTextsParams struct {
-	ContentHashes []string `json:"content_hashes"`
-	Kinds         []string `json:"kinds"`
-	Labels        []string `json:"labels"`
-	Texts         []string `json:"texts"`
-	TextBytes     []int32  `json:"text_bytes"`
-	Truncated     []bool   `json:"truncated"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	ContentHashes []string    `json:"content_hashes"`
+	Kinds         []string    `json:"kinds"`
+	Labels        []string    `json:"labels"`
+	Texts         []string    `json:"texts"`
+	TextBytes     []int32     `json:"text_bytes"`
+	Truncated     []bool      `json:"truncated"`
 }
 
 func (q *Queries) UpsertContextFragmentTexts(ctx context.Context, arg UpsertContextFragmentTextsParams) error {
 	_, err := q.db.Exec(ctx, upsertContextFragmentTexts,
+		arg.BotID,
 		arg.ContentHashes,
 		arg.Kinds,
 		arg.Labels,

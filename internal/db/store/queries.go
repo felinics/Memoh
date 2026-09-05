@@ -368,7 +368,7 @@ type Queries interface {
 	ListRecentContextLifecyclesBySessionBefore(ctx context.Context, arg dbsqlc.ListRecentContextLifecyclesBySessionBeforeParams) ([]dbsqlc.ListRecentContextLifecyclesBySessionBeforeRow, error)
 	UpsertContextFragmentTexts(ctx context.Context, arg dbsqlc.UpsertContextFragmentTextsParams) error
 	ListContextFragmentPreviews(ctx context.Context, arg dbsqlc.ListContextFragmentPreviewsParams) ([]dbsqlc.ListContextFragmentPreviewsRow, error)
-	ListContextFragmentTexts(ctx context.Context, contentHashes []string) ([]dbsqlc.ListContextFragmentTextsRow, error)
+	ListContextFragmentTexts(ctx context.Context, arg dbsqlc.ListContextFragmentTextsParams) ([]dbsqlc.ListContextFragmentTextsRow, error)
 	ListScheduleLogsByBot(ctx context.Context, arg dbsqlc.ListScheduleLogsByBotParams) ([]dbsqlc.ListScheduleLogsByBotRow, error)
 	ListScheduleLogsBySchedule(ctx context.Context, arg dbsqlc.ListScheduleLogsByScheduleParams) ([]dbsqlc.ListScheduleLogsByScheduleRow, error)
 	ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Schedule, error)

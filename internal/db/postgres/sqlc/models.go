@@ -510,6 +510,7 @@ type ContainerVersion struct {
 
 type ContextFragmentText struct {
 	TeamID      pgtype.UUID        `json:"team_id"`
+	BotID       pgtype.UUID        `json:"bot_id"`
 	ContentHash string             `json:"content_hash"`
 	Kind        string             `json:"kind"`
 	Label       string             `json:"label"`

@@ -15,11 +15,14 @@ import (
 
 type contextFragmentTextStub struct {
 	contextLifecycleDecisionStub
-	texts     map[string]sqlc.ListContextFragmentTextsRow
-	requested []string
+	texts        map[string]sqlc.ListContextFragmentTextsRow
+	requested    []string
+	requestedBot pgtype.UUID
 }
 
-func (s *contextFragmentTextStub) ListContextFragmentTexts(_ context.Context, hashes []string) ([]sqlc.ListContextFragmentTextsRow, error) {
+func (s *contextFragmentTextStub) ListContextFragmentTexts(_ context.Context, arg sqlc.ListContextFragmentTextsParams) ([]sqlc.ListContextFragmentTextsRow, error) {
+	s.requestedBot = arg.BotID
+	hashes := arg.ContentHashes
 	s.requested = append(s.requested, hashes...)
 	rows := make([]sqlc.ListContextFragmentTextsRow, 0, len(hashes))
 	for _, hash := range hashes {
@@ -52,8 +55,9 @@ func TestLoadContextLifecycleFragmentsJoinsStoredTextsToTheRunsRefs(t *testing.T
 
 	sessionID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	runID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	botID := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
 	stub := &contextFragmentTextStub{
-		contextLifecycleDecisionStub: contextLifecycleDecisionStub{run: sqlc.GetContextLifecycleByRunIDRow{RunID: runID, SessionID: sessionID, Snapshot: fragmentSnapshotJSON(t)}},
+		contextLifecycleDecisionStub: contextLifecycleDecisionStub{run: sqlc.GetContextLifecycleByRunIDRow{RunID: runID, BotID: botID, SessionID: sessionID, Snapshot: fragmentSnapshotJSON(t)}},
 		texts: map[string]sqlc.ListContextFragmentTextsRow{
 			"sys":       {ContentHash: "sys", Kind: "system_prompt", Label: "system.prompt.body", Text: "You are Memoh.", TextBytes: 14},
 			"tool-exec": {ContentHash: "tool-exec", Kind: "tool_definition", Text: `{"name":"exec"}`, TextBytes: 15, Truncated: true},
@@ -80,8 +84,8 @@ func TestLoadContextLifecycleFragmentsJoinsStoredTextsToTheRunsRefs(t *testing.T
 		t.Fatalf("tool fragment = %#v", fragments[3])
 	}
 	sort.Strings(stub.requested)
-	if len(stub.requested) != 3 || stub.requested[0] != "rules" || stub.requested[1] != "sys" || stub.requested[2] != "tool-exec" {
-		t.Fatalf("requested hashes = %v", stub.requested)
+	if len(stub.requested) != 3 || stub.requested[0] != "rules" || stub.requested[1] != "sys" || stub.requested[2] != "tool-exec" || stub.requestedBot != botID {
+		t.Fatalf("requested hashes = %v for bot %v", stub.requested, stub.requestedBot)
 	}
 }
 
@@ -116,7 +120,8 @@ func TestContextFragmentPreviewsCoverEveryHashOnThePage(t *testing.T) {
 		{ContentHash: "tool-exec", Kind: "tool_definition", Preview: `{"name":"exec"}`, TextBytes: 15, Truncated: true},
 	}}
 
-	previews, err := contextFragmentPreviews(context.Background(), queries, turns)
+	botID := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+	previews, err := contextFragmentPreviews(context.Background(), queries, botID, turns)
 	if err != nil {
 		t.Fatalf("previews: %v", err)
 	}
@@ -125,7 +130,7 @@ func TestContextFragmentPreviewsCoverEveryHashOnThePage(t *testing.T) {
 	}
 	requested := append([]string(nil), queries.previewParams[0].ContentHashes...)
 	sort.Strings(requested)
-	if len(requested) != 3 || requested[0] != "rules" || requested[1] != "sys" || requested[2] != "tool-exec" || queries.previewParams[0].PreviewChars != contextFragmentPreviewChars {
+	if len(requested) != 3 || requested[0] != "rules" || requested[1] != "sys" || requested[2] != "tool-exec" || queries.previewParams[0].PreviewChars != contextFragmentPreviewChars || queries.previewParams[0].BotID != botID {
 		t.Fatalf("preview params = %#v", queries.previewParams[0])
 	}
 	if previews["sys"].Preview != "You are Memoh." || previews["sys"].Label != "system.prompt.body" || previews["sys"].Kind != contextfrag.KindSystemPrompt || previews["tool-exec"].Truncated != true || previews["tool-exec"].TextBytes != 15 {
@@ -134,7 +139,7 @@ func TestContextFragmentPreviewsCoverEveryHashOnThePage(t *testing.T) {
 	if _, ok := previews["rules"]; ok {
 		t.Fatalf("a hash without stored text must not appear in the map")
 	}
-	if empty, err := contextFragmentPreviews(context.Background(), queries, nil); err != nil || len(empty) != 0 || len(queries.previewParams) != 1 {
+	if empty, err := contextFragmentPreviews(context.Background(), queries, botID, nil); err != nil || len(empty) != 0 || len(queries.previewParams) != 1 {
 		t.Fatalf("a page without hashes must not query: %#v %v", empty, err)
 	}
 }

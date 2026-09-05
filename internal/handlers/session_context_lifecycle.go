@@ -108,7 +108,7 @@ type ContextLifecycleAggregates struct {
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle [get].
 func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
-	pgSessionID, err := h.authorizeContextLifecycleSession(c)
+	pgSessionID, pgBotID, err := h.authorizeContextLifecycleSession(c)
 	if err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	if err != nil {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
-	previews, err := contextFragmentPreviews(ctx, h.queries, load.Turns)
+	previews, err := contextFragmentPreviews(ctx, h.queries, pgBotID, load.Turns)
 	if err != nil {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
@@ -172,13 +172,14 @@ func contextFragmentHashes(turns []ContextLifecycleTurn) []string {
 	return hashes
 }
 
-func contextFragmentPreviews(ctx context.Context, queries contextLifecycleQueries, turns []ContextLifecycleTurn) (map[string]ContextFragmentPreview, error) {
+func contextFragmentPreviews(ctx context.Context, queries contextLifecycleQueries, botID pgtype.UUID, turns []ContextLifecycleTurn) (map[string]ContextFragmentPreview, error) {
 	hashes := contextFragmentHashes(turns)
 	if len(hashes) == 0 {
 		return nil, nil
 	}
 	rows, err := queries.ListContextFragmentPreviews(ctx, sqlc.ListContextFragmentPreviewsParams{
 		PreviewChars:  contextFragmentPreviewChars,
+		BotID:         botID,
 		ContentHashes: hashes,
 	})
 	if err != nil {
@@ -237,7 +238,7 @@ type ContextLifecycleFragmentsResponse struct {
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments [get].
 func (h *SessionInfoHandler) GetSessionContextLifecycleFragments(c echo.Context) error {
-	pgSessionID, err := h.authorizeContextLifecycleSession(c)
+	pgSessionID, _, err := h.authorizeContextLifecycleSession(c)
 	if err != nil {
 		return err
 	}
@@ -257,7 +258,7 @@ func (h *SessionInfoHandler) GetSessionContextLifecycleFragments(c echo.Context)
 
 type contextLifecycleFragmentQueries interface {
 	GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (sqlc.GetContextLifecycleByRunIDRow, error)
-	ListContextFragmentTexts(ctx context.Context, contentHashes []string) ([]sqlc.ListContextFragmentTextsRow, error)
+	ListContextFragmentTexts(ctx context.Context, arg sqlc.ListContextFragmentTextsParams) ([]sqlc.ListContextFragmentTextsRow, error)
 }
 
 func loadContextLifecycleFragments(
@@ -291,7 +292,7 @@ func loadContextLifecycleFragments(
 	if len(hashes) == 0 {
 		return fragments, nil
 	}
-	rows, err := queries.ListContextFragmentTexts(ctx, hashes)
+	rows, err := queries.ListContextFragmentTexts(ctx, sqlc.ListContextFragmentTextsParams{BotID: run.BotID, ContentHashes: hashes})
 	if err != nil {
 		return nil, fmt.Errorf("list context fragment texts: %w", err)
 	}
@@ -318,32 +319,33 @@ func loadContextLifecycleFragments(
 }
 
 // authorizeContextLifecycleSession resolves the session a lifecycle request
-// names and enforces the same visibility the chat itself has.
-func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (pgtype.UUID, error) {
+// names and enforces the same visibility the chat itself has. It returns the
+// session and the bot it belongs to.
+func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (pgtype.UUID, pgtype.UUID, error) {
 	userID, err := RequireChannelIdentityID(c)
 	if err != nil {
-		return pgtype.UUID{}, mapContextLifecycleError(err)
+		return pgtype.UUID{}, pgtype.UUID{}, mapContextLifecycleError(err)
 	}
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	if botID == "" {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+		return pgtype.UUID{}, pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
 	if sessionID == "" {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+		return pgtype.UUID{}, pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 	pgSessionID, err := db.ParseUUID(sessionID)
 	if err != nil {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
+		return pgtype.UUID{}, pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleRequestInvalid, nil)
 	}
 
 	ctx := c.Request().Context()
 	sessionRow, err := h.queries.GetSessionByID(ctx, pgSessionID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+			return pgtype.UUID{}, pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 		}
-		return pgtype.UUID{}, apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
+		return pgtype.UUID{}, pgtype.UUID{}, apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 	}
 	sessionMode, runtimeType := normalizedSessionDescriptor(session.Thread{
 		Type:        sessionRow.Type,
@@ -359,14 +361,14 @@ func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (p
 		requiredReadPermissionForSessionRuntime(sessionMode, runtimeType),
 	)
 	if err != nil {
-		return pgtype.UUID{}, mapContextLifecycleError(err)
+		return pgtype.UUID{}, pgtype.UUID{}, mapContextLifecycleError(err)
 	}
 	if sessionRow.BotID.String() != bot.ID {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+		return pgtype.UUID{}, pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 	}
 	perms, err := h.resolveCurrentUserPermissions(c, userID, bot.ID)
 	if err != nil {
-		return pgtype.UUID{}, mapContextLifecycleError(err)
+		return pgtype.UUID{}, pgtype.UUID{}, mapContextLifecycleError(err)
 	}
 	sess := session.Thread{
 		ID:          sessionRow.ID.String(),
@@ -379,9 +381,9 @@ func (h *SessionInfoHandler) authorizeContextLifecycleSession(c echo.Context) (p
 		sess.CreatedByUserID = sessionRow.CreatedByUserID.String()
 	}
 	if !canAccessSession(sess, userID, perms) {
-		return pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+		return pgtype.UUID{}, pgtype.UUID{}, apperror.New(apperror.CodeContextLifecycleNotFound, nil)
 	}
-	return pgSessionID, nil
+	return pgSessionID, sessionRow.BotID, nil
 }
 
 // ContextLifecycleDecisionsResponse is the per-fragment selection audit of one
@@ -407,7 +409,7 @@ type ContextLifecycleDecisionsResponse struct {
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions [get].
 func (h *SessionInfoHandler) GetSessionContextLifecycleDecisions(c echo.Context) error {
-	pgSessionID, err := h.authorizeContextLifecycleSession(c)
+	pgSessionID, _, err := h.authorizeContextLifecycleSession(c)
 	if err != nil {
 		return err
 	}

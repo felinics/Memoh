@@ -2448,11 +2448,13 @@ CREATE POLICY context_lifecycles_team_delete ON public.context_lifecycles
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
 -- Content-addressed store of the rendered context fragments a run sent, one
--- row per distinct fragment version per team; the trajectory reads it by the
--- hashes the lifecycle snapshot references.
+-- row per distinct text per bot (content_hash covers the kind and the text
+-- alone); the trajectory reads it by the hashes the lifecycle snapshot
+-- references, and the rows go away with the bot.
 CREATE TABLE IF NOT EXISTS public.context_fragment_texts (
     team_id      UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                               REFERENCES public.teams(id) ON DELETE RESTRICT,
+    bot_id       UUID        NOT NULL,
     content_hash TEXT        NOT NULL,
     kind         TEXT        NOT NULL,
     label        TEXT        NOT NULL DEFAULT '',
@@ -2460,7 +2462,10 @@ CREATE TABLE IF NOT EXISTS public.context_fragment_texts (
     text_bytes   INTEGER     NOT NULL,
     truncated    BOOLEAN     NOT NULL DEFAULT false,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (team_id, content_hash)
+    PRIMARY KEY (team_id, bot_id, content_hash),
+    CONSTRAINT context_fragment_texts_bot_id_fkey
+        FOREIGN KEY (team_id, bot_id)
+        REFERENCES public.bots(team_id, id) ON DELETE CASCADE
 );
 
 ALTER TABLE public.context_fragment_texts ENABLE ROW LEVEL SECURITY;
