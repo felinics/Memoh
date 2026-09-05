@@ -299,7 +299,7 @@ func (m *Manager) snapshotMounts(ctx context.Context, info ctr.ContainerInfo) ([
 }
 
 func (m *Manager) restartContainer(ctx context.Context, botID, containerID string) {
-	m.grpcPool.Remove(botID)
+	m.resetBridge(botID)
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil && !ctr.IsNotFound(err) {
 		m.logger.Warn("cleanup stale task after data operation failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
@@ -537,7 +537,7 @@ func (m *Manager) createArchiveSnapshotFromRef(ctx context.Context, ref *lockedC
 	if errors.Is(mountErr, errMountNotSupported) {
 		var lastErr error
 		for range 20 {
-			m.grpcPool.Remove(ref.botID)
+			m.resetBridge(ref.botID)
 			if err := m.preserveDataViaGRPC(ctx, ref.botID, archivePath, false); err == nil {
 				return nil
 			} else {

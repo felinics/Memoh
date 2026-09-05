@@ -1,0 +1,31 @@
+id: node
+name: Node.js
+category: runtime
+icon: nodejs
+description: JavaScript runtime with npm and npx.
+
+# The image copy under /opt/memoh/toolkit is the baseline. The scripts
+# install overlay versions into MEMOH_DEP_HOME/versions/<version> (latest LTS
+# by default, or an explicit version); removing the overlay returns to the
+# image copy. npm and npx ship inside every Node.js release archive.
+source: image
+provides:
+  - node
+  - npm
+  - npx
+
+platforms:
+  - { os: linux, arch: [amd64, arm64], libc: glibc }
+  - { os: darwin, arch: [arm64] }
+
+timeouts:
+  install: 1200
+  remove: 300
+  check_update: 60
+  version: 30
+
+scripts:
+  install: install.sh
+  update: update.sh
+  remove: remove.sh
+  check_update: check-update.sh
