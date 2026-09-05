@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -72,5 +73,35 @@ func TestContinuationPublishesTextAndNextQuestionToChannel(t *testing.T) {
 				t.Fatal("channel stream did not close")
 			}
 		})
+	}
+}
+
+type failedEndCheckpointBackend struct{ sessionruntime.Backend }
+
+func (b failedEndCheckpointBackend) Update(ctx context.Context, key sessionruntime.Key, update sessionruntime.SnapshotUpdate) (sessionruntime.Snapshot, bool, error) {
+	return b.Backend.Update(ctx, key, func(s sessionruntime.Snapshot, exists bool) (sessionruntime.Snapshot, bool, error) {
+		next, changed, err := update(s, exists)
+		if err == nil && next.DecisionOutput != nil && next.DecisionOutput.Done {
+			return s, false, errors.New("checkpoint write unavailable")
+		}
+		return next, changed, err
+	})
+}
+
+func TestContinuationClosesRunWhenEndCheckpointCannotPersist(t *testing.T) {
+	backend := failedEndCheckpointBackend{sessionruntime.NewMemoryBackend()}
+	manager, handle := newWaitingDecisionRuntime(t, backend)
+	service := &Service{decisionRuntime: manager}
+	service.continueRuntimeDecision(context.Background(), sessionruntime.Command{ID: "answer", BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, Generation: handle.Generation}, func(_ context.Context, _ *continuationLifecycleResult, ch chan<- WSStreamEvent) error {
+		ch <- runtimeDecisionEvent(t, native.StreamEvent{Type: native.EventUserInputRequest, UserInputID: "next", Status: "pending"})
+		ch <- runtimeDecisionEvent(t, native.StreamEvent{Type: native.EventAgentEnd, UserInputID: "next", Status: "pending"})
+		return nil
+	})
+	snapshot, err := manager.Snapshot(context.Background(), handle.BotID, handle.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status != sessionruntime.RunStatusErrored {
+		t.Fatalf("failed end write left run parked: %+v", snapshot.CurrentRunView)
 	}
 }
