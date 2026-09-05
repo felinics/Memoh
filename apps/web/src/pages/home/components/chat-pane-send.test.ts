@@ -155,11 +155,15 @@ describe('composer pair draft', () => {
 })
 
 describe('welcome send consumes the draft', () => {
+  it('keeps the draft when a command succeeds without sending a message', () => {
+    expect(welcomeSendConsumedDraft({}, { ok: true })).toBe(false)
+  })
+
   it('clears only on a successful welcome send', () => {
-    expect(welcomeSendConsumedDraft({ sessionId: '' }, { ok: true })).toBe(true)
-    expect(welcomeSendConsumedDraft({}, { ok: true })).toBe(true)
+    expect(welcomeSendConsumedDraft({ sessionId: '' }, { ok: true, messageSent: true })).toBe(true)
+    expect(welcomeSendConsumedDraft({}, { ok: true, messageSent: true })).toBe(true)
     // An existing-session send never touches the draft...
-    expect(welcomeSendConsumedDraft({ sessionId: 's-1' }, { ok: true })).toBe(false)
+    expect(welcomeSendConsumedDraft({ sessionId: 's-1' }, { ok: true, messageSent: true })).toBe(false)
     // ...and neither does a failed welcome send (the pick was never persisted).
     expect(welcomeSendConsumedDraft({ sessionId: '' }, { ok: false })).toBe(false)
   })

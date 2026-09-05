@@ -130,6 +130,10 @@
 - ACP 轮不经此链(在 `resolve` 前分流,现状)。
 - 恢复轮(ask_user / 工具审批,经 `ResolveRunConfig`)自动受益于记忆一级。
 
+命令处理与消息发送分开：`/help`、`/new` 等已处理命令不启动偏好发送操作，不取消待保存选择，也不消耗欢迎页草稿。实际发送成功由独立结果字段确认，不能只依据通用的 `ok`。
+
+native 每轮解析的记忆强度只属于记忆模型 UUID；显式请求解析到不同模型且未指定强度时使用目标模型默认，不能继承旧模型或旧 bot 配置的强度。同一 UUID 的别名引用继续使用记忆强度。
+
 ### 3.3 写点(全部经 reconcile)
 
 reconcile = `PatchSessionModelPreference` 现有逻辑:目标模型必须存在且 provider 启用;强度经 `reasoning.NormalizeSelection` 对目标模型校验,非法或空则落模型默认档;模型不支持推理则强度写 NULL。

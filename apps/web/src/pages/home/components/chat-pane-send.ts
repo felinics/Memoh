@@ -140,7 +140,7 @@ export function clearComposerPairDraft(botId: string): void {
 // keeps the draft: the pick was never persisted.
 export function welcomeSendConsumedDraft(
   target: { sessionId?: string | null },
-  result: { ok: boolean },
+  result: { ok: boolean, messageSent?: boolean },
 ): boolean {
-  return result.ok && !(target.sessionId ?? '').trim()
+  return result.ok && result.messageSent === true && !(target.sessionId ?? '').trim()
 }

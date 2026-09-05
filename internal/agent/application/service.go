@@ -934,7 +934,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	)
 
-	reasoningConfig := resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, p.SessionPrefEffort, provider.ClientType)
+	reasoningConfig := resolveRunReasoningConfig(chatModel, botSettings, p, provider.ClientType)
 
 	modelHTTPClient := p.HTTPClient
 	if modelHTTPClient == nil {
@@ -1054,6 +1054,24 @@ func supportsImageInputForModel(m models.GetResponse) bool {
 
 func supportsFileInputForModel(m models.GetResponse) bool {
 	return m.HasCompatibility(models.CompatFileInput)
+}
+
+// resolveRunReasoningConfig keeps remembered effort attached to its model UUID.
+// An explicit switch starts from the new model default; a slug resolving to
+// the same UUID is not a switch and may retain the remembered effort.
+func resolveRunReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, p baseRunConfigParams, clientType string) *models.ReasoningConfig {
+	sessionEffort := p.SessionPrefEffort
+	if !strings.EqualFold(strings.TrimSpace(chatModel.ID), strings.TrimSpace(p.SessionPrefModelID)) {
+		sessionEffort = ""
+		previousModel := p.SessionPrefModelID
+		if previousModel == "" {
+			previousModel = botSettings.ChatModelID
+		}
+		if strings.TrimSpace(p.Model) != "" && !strings.EqualFold(strings.TrimSpace(chatModel.ID), strings.TrimSpace(previousModel)) {
+			botSettings.ReasoningEffort = ""
+		}
+	}
+	return resolveReasoningConfig(chatModel, botSettings, p.ReasoningEffort, sessionEffort, clientType)
 }
 
 // resolveReasoningConfig makes the single reasoning decision for a call. The

@@ -275,6 +275,7 @@ export function createChatSend(deps: ChatSendDeps) {
 
     const deferSessionCreation = serverSkillActivation && wasDraft
     try {
+      options.onBeforeMessageSend?.()
       // The pair comes from options only (spec v2 §3.4): the composer passes
       // it when the pair has an explicit source (user/session) and omits it
       // for default-sourced pairs, which is how the server tells "never
@@ -348,7 +349,7 @@ export function createChatSend(deps: ChatSendDeps) {
       deps.forgetCreatedSession(sendInvocationId)
       if (refreshSessionId) await deps.refreshCurrentSession(botId, refreshSessionId)
 
-      return { ok: true }
+      return { ok: true, messageSent: true }
     } catch (error) {
       const failure = error instanceof Error ? error : new Error('Unknown error')
       const isAbort = failure.name === 'AbortError'

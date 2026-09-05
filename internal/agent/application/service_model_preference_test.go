@@ -244,3 +244,22 @@ func TestModelOnlyPatchUsesNewModelDefaultEffort(t *testing.T) {
 		t.Fatalf("model-only PATCH carried old effort %q; new model default is %q", got, defaultEffort)
 	}
 }
+
+func TestRunReasoningKeepsEffortWithResolvedModel(t *testing.T) {
+	const modelA = "00000000-0000-0000-0000-000000000611"
+	const modelB = "00000000-0000-0000-0000-000000000612"
+	for _, tc := range []struct{ name, resolved, requestedModel, requestedEffort, want string }{
+		{"switch uses model default", modelB, "model-b", "", "medium"},
+		{"same model slug keeps memory", modelA, "model-a", "", "high"},
+		{"explicit effort wins on switch", modelB, "model-b", "low", "low"},
+		{"omitted model keeps memory", modelA, "", "", "high"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := models.GetResponse{ID: tc.resolved, Model: models.Model{Config: models.ModelConfig{ThinkingMode: models.ThinkingModeToggle, ReasoningEfforts: []string{"low", "medium", "high"}}}}
+			got := resolveRunReasoningConfig(model, settings.Settings{ChatModelID: modelA, ReasoningEffort: "high"}, baseRunConfigParams{Model: tc.requestedModel, ReasoningEffort: tc.requestedEffort, SessionPrefModelID: modelA, SessionPrefEffort: "high"}, "openai-completions")
+			if got == nil || got.Effort != tc.want {
+				t.Fatalf("reasoning = %+v, want %s", got, tc.want)
+			}
+		})
+	}
+}

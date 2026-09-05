@@ -3444,7 +3444,9 @@ async function handleSend() {
     paneTarget.value,
     inputDraftKey.value || 'chat',
   )
-  const { pair: sentPair, finish: finishPairSend } = beginComposerPairSend()
+  const sentView = paneView.value
+  const sentPair = pairCarried.value
+  const pairSend: { finish?: (confirmed: boolean) => void } = {}
   const sentModelId = sentPair.modelId
   const sentReasoningEffort = sentPair.reasoningEffort
   const sentWorkspaceTargetId = sendWorkspaceTargetId.value
@@ -3461,7 +3463,6 @@ async function handleSend() {
       attachments = await Promise.all(files.map(fileToAttachment))
     }
   } catch (error) {
-    finishPairSend(false)
     if (!matchesChatPaneSendContext(
       sentContext,
       paneTarget.value,
@@ -3486,6 +3487,12 @@ async function handleSend() {
     workspaceTargetId: sentWorkspaceTargetId,
     requestedSkills: skills,
     composerScope: sentContext.composerScope,
+    onBeforeMessageSend: () => {
+      pairSend.finish = sentView.pairSync.beginSend()
+      if (sentModelId && (sentView.pairSource.value === 'default' || sentView.pairSource.value === 'unset')) {
+        sentView.pairSource.value = 'user'
+      }
+    },
     onBeforeTurnAppend: () => {
       if (preserveDirectDraftSelection) {
         void nextTick(() => { directDraftPromotionPending = false })
@@ -3503,10 +3510,10 @@ async function handleSend() {
     },
   }).finally(() => {
     directDraftPromotionPending = false
-    finishPairSend(false)
+    pairSend.finish?.(false)
   })
   rollbackPin = null
-  finishPairSend(result.ok || result.stage === 'stream')
+  pairSend.finish?.(result.messageSent === true || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.stage === 'startup') {
     const restoreInput = result.restoreInput ?? text
