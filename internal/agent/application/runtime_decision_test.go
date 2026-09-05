@@ -15,9 +15,13 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 )
 
-func newWaitingDecisionRuntime(t *testing.T) (*sessionruntime.Manager, sessionruntime.RunHandle) {
+func newWaitingDecisionRuntime(t *testing.T, backends ...sessionruntime.Backend) (*sessionruntime.Manager, sessionruntime.RunHandle) {
 	t.Helper()
-	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+	var backend sessionruntime.Backend = sessionruntime.NewMemoryBackend()
+	if len(backends) > 0 {
+		backend = backends[0]
+	}
+	manager := sessionruntime.NewManager(backend, sessionruntime.Options{
 		OwnerID:       "runtime-lifecycle-owner",
 		StateTTL:      time.Minute,
 		OwnerLeaseTTL: time.Second,

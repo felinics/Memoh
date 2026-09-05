@@ -272,7 +272,7 @@ func (h *runHandle) publishChunk(chunk StreamChunk) error {
 // RespondToolApproval resumes a turn deferred on tool approval.
 func (s *Service) RespondToolApproval(ctx context.Context, input turn.ToolApprovalResponse, eventCh chan<- json.RawMessage) error {
 	converted := toolApprovalInputFromResponse(input)
-	if handled, err := s.routeToolApprovalResponse(ctx, converted); handled || err != nil {
+	if handled, err := s.routeToolApprovalResponse(ctx, converted, eventCh); handled || err != nil {
 		return err
 	}
 	return s.respondToolApproval(ctx, converted, eventCh)
@@ -281,7 +281,7 @@ func (s *Service) RespondToolApproval(ctx context.Context, input turn.ToolApprov
 // RespondUserInput resumes a turn deferred on ask_user.
 func (s *Service) RespondUserInput(ctx context.Context, input turn.UserInputResponse, eventCh chan<- json.RawMessage) error {
 	converted := userInputInputFromResponse(input)
-	if handled, err := s.routeUserInputResponse(ctx, converted); handled || err != nil {
+	if handled, err := s.routeUserInputResponse(ctx, converted, eventCh); handled || err != nil {
 		return err
 	}
 	return s.respondUserInput(ctx, converted, eventCh)

@@ -510,7 +510,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		return DecisionResponseResult{Handled: true}, err
 	} else if ok {
 		err := commandResultErrorFor(Command{PayloadHash: requestHash}, stored)
-		return DecisionResponseResult{Handled: true, Applied: err == nil}, err
+		return DecisionResponseResult{Handled: true, Applied: err == nil, Replayed: true}, err
 	}
 
 	m.mu.Lock()
@@ -528,7 +528,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		// ACP/MCP and other unfenced decisions retain their waiter-backed path.
 		return DecisionResponseResult{}, nil
 	}
-	result := DecisionResponseResult{Handled: true}
+	result := DecisionResponseResult{Handled: true, RunID: target.RunID, SessionID: target.SessionID}
 	if target.Type != response.Type ||
 		target.BotID != response.BotID ||
 		response.SessionID != "" && target.SessionID != response.SessionID ||
@@ -540,7 +540,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 			if target.PayloadHash != requestHash {
 				return result, ErrCommandPayloadConflict
 			}
-			return DecisionResponseResult{Handled: true, Applied: true}, nil
+			return DecisionResponseResult{Handled: true, Applied: true, Replayed: true}, nil
 		}
 		return result, nil
 	}
@@ -572,6 +572,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 	if !ok || strings.TrimSpace(ref.OwnerID) == "" && m.distributed != nil {
 		return result, ErrCommandOwnerUnavailable
 	}
+	result.Generation = ref.Generation
 	createdAt, err := m.backend.Now(ctx)
 	if err != nil {
 		return result, fmt.Errorf("load runtime command time: %w", err)
