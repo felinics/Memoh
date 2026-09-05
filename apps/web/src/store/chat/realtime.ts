@@ -59,7 +59,7 @@ function isRuntimeEvent(event: UIStreamEvent): event is UIRuntimeEvent {
 }
 
 // Owns chat transport lifecycles. The WebSocket carries both turn commands and
-// session runtime subscriptions; the bot-wide SSE remains sidebar metadata only.
+// session runtime subscriptions; the bot-wide SSE carries lightweight activity.
 export function createChatRealtimeController(
   callbacks: ChatRealtimeCallbacks,
   transport: ChatRealtimeTransport = defaultTransport,
@@ -247,10 +247,18 @@ export function createChatRealtimeController(
     const generation = botSessionsActivityGeneration
     botSessionsActivityStream.start(async (signal) => {
       if (generation !== botSessionsActivityGeneration || signal.aborted) return
-      await transport.streamBotSessionsActivityEvents(bid, signal, (event) => {
-        if (generation !== botSessionsActivityGeneration) return
-        callbacks.onBotSessionsActivityEvent(bid, event)
-      })
+      try {
+        await transport.streamBotSessionsActivityEvents(bid, signal, (event) => {
+          if (generation !== botSessionsActivityGeneration) return
+          callbacks.onBotSessionsActivityEvent(bid, event)
+        })
+      } finally {
+        // A disconnected stream cannot vouch for a still-running compaction.
+        // The server sends a fresh snapshot when this stream reconnects.
+        if (generation === botSessionsActivityGeneration) {
+          callbacks.onBotSessionsActivityEvent(bid, { type: 'session_compaction', session_ids: [] })
+        }
+      }
     })
   }
 

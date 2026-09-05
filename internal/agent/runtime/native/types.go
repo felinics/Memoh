@@ -104,8 +104,11 @@ type ContextStepSelectionResult struct {
 	MessageSourceIndexesKnown bool
 	Dropped                   int
 	Truncated                 int
-	DropReasons               map[string]int
-	FatalError                error
+	// ProtectedPruned counts the subset of Truncated stubbed to resolve a
+	// protected-budget overflow that would otherwise fail the run.
+	ProtectedPruned int
+	DropReasons     map[string]int
+	FatalError      error
 }
 
 type ContextStepReselector func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult

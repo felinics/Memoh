@@ -331,10 +331,20 @@ describe('chat realtime controller', () => {
     controller.startBotSessionsActivityStream('bot-1')
     await retryingStreams[0]!.attempt!(new AbortController().signal)
     const staleHandler = activityHandlers[0]!
+    vi.mocked(callbacks.onBotSessionsActivityEvent).mockClear()
 
     controller.stopStreams()
     staleHandler({ type: 'ping' })
 
     expect(callbacks.onBotSessionsActivityEvent).not.toHaveBeenCalled()
+  })
+
+  it('clears compaction activity when the activity stream ends', async () => {
+    const { controller, callbacks, retryingStreams } = makeController()
+    controller.startBotSessionsActivityStream('bot-1')
+    await retryingStreams[0]!.attempt!(new AbortController().signal)
+    expect(callbacks.onBotSessionsActivityEvent).toHaveBeenLastCalledWith('bot-1', {
+      type: 'session_compaction', session_ids: [],
+    })
   })
 })

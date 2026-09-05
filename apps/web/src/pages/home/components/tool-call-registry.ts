@@ -179,6 +179,39 @@ export function toolBucket(toolName: string): ToolBucket {
   return 'other'
 }
 
+// Fragment kinds for the group header's details half — the bare counts that
+// follow the phase verb ("Explored 12 file operations, 4 searches, ran 3 commands").
+// Finer-grained than ToolBucket on purpose: 'browse' lumps reads and searches
+// together, but a research run reporting "8 file operations" when 6 calls
+// were web searches is the header lying. File tools deliberately count calls,
+// not unique files: one patch may touch several files and repeated reads may
+// target the same path. Anything not listed falls to 'steps' so the header
+// degrades to a plain step count instead of inventing a noun.
+export type SummaryFragment = 'fileOperations' | 'searches' | 'commands' | 'messages' | 'schedules' | 'media' | 'agents' | 'steps'
+
+const FRAGMENT_TOOLS: Array<[SummaryFragment, Set<string>]> = [
+  ['fileOperations', new Set(['read', 'list', 'write', 'edit', 'apply_patch'])],
+  ['commands', new Set(['exec'])],
+  ['messages', new Set(['send', 'react', 'send_email', 'speak'])],
+  ['schedules', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
+  ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
+  ['agents', new Set(['spawn_agent', 'send_message', 'list_agents'])],
+]
+
+export const SUMMARY_FRAGMENT_ORDER: SummaryFragment[] = [
+  'fileOperations', 'searches', 'commands', 'messages', 'schedules', 'media', 'agents', 'steps',
+]
+
+export function toolFragmentKind(toolName: string): SummaryFragment {
+  for (const [kind, names] of FRAGMENT_TOOLS) {
+    if (names.has(toolName)) return kind
+  }
+  // Read-only lookups (web/memory/message search, list_*/get_*, email reads,
+  // bg status, waits) all read to the user as "it looked something up" — one
+  // 'searches' counter keeps the header to one clause instead of a taxonomy.
+  return isReadOnlyTool(toolName) ? 'searches' : 'steps'
+}
+
 // GUI tools (browser + computer) interleave read-only "observe" and
 // side-effecting "action" calls as one continuous browsing activity. Splitting
 // them on every observe↔action flip would strand each step in its own segment,

@@ -176,12 +176,12 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request.'],
-    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。'],
-    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。'],
-    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget.'],
-    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。'],
-    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。'],
+    ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.'],
+    ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。'],
+    ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。/compact で古い履歴を要約するか、リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。'],
+    ['context.protected_overflow', 'en', 'Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.'],
+    ['context.protected_overflow', 'zh', '必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。'],
+    ['context.protected_overflow', 'ja', '必須コンテキストがモデルのコンテキスト予算を超えています。/compact で古い履歴を要約するか、より大きなコンテキストウィンドウのモデルをお試しください。'],
   ])('localizes %s for %s', (code, language, expected) => {
     locale = language
 

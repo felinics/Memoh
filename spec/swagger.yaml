@@ -4820,6 +4820,8 @@ definitions:
     properties:
       bot_agent_id:
         type: string
+      expected_model_preference_revision:
+        type: string
       metadata:
         additionalProperties: {}
         type: object
@@ -5848,9 +5850,13 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      model_preference_revision:
+        type: string
       parent_session_id:
         type: string
       preferred_chat_model_id:
+        type: string
+      preferred_external_model_id:
         description: |-
           Preferred* is the session's persisted (model, effort) pair (issue #879).
           Empty means "no memory"; the composer reseeds from it on open/repoint.
@@ -11129,6 +11135,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Update a session
       tags:
       - sessions

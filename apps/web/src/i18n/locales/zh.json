@@ -134,8 +134,8 @@
       "reasoning_options_unavailable": "暂时无法解析对话模型的推理选项，请稍后重试。"
     },
     "context": {
-      "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。",
-      "protected_overflow": "必要的上下文内容超出了模型上下文预算。"
+      "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。",
+      "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。"
     },
     "agent": {
       "response_timeout": "模型未能及时响应，请重试。",
@@ -229,6 +229,9 @@
       "encryption_unavailable": "此服务器尚未配置 Agent 账号存储。",
       "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
       "materialization_failed": "Agent 账号准备失败，请重试。"
+    },
+    "session": {
+      "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。"
     },
     "session_runtime": {
       "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
@@ -666,6 +669,29 @@
       "thought": "已思考",
       "thoughtBriefly": "思考了几秒",
       "thoughtSeconds": "已思考 {seconds} 秒",
+      "phase": {
+        "browse": { "ing": "探索中", "done": "已探索" },
+        "edit": { "ing": "修改中", "done": "已修改" },
+        "run": { "ing": "运行中", "done": "已运行" },
+        "message": { "ing": "发送中", "done": "已发送" },
+        "schedule": { "ing": "调整中", "done": "已调整" },
+        "media": { "ing": "生成中", "done": "已生成" },
+        "agent": { "ing": "委派中", "done": "已委派" },
+        "gui": { "ing": "浏览中", "done": "已浏览" },
+        "other": { "ing": "处理中", "done": "已处理" }
+      },
+      "frag": {
+        "fileOperations": "{count} 次文件操作",
+        "searches": "{count} 次搜索",
+        "commands": "{count} 条命令",
+        "messages": "{count} 条消息",
+        "schedules": "{count} 个定时任务",
+        "media": "{count} 个媒体文件",
+        "agents": "{count} 个 Agent",
+        "steps": "{count} 步",
+        "sites": "{count} 个网站"
+      },
+      "fragmentSeparator": "、",
       "thinkingHints": [
         "正在连接线索",
         "正在拼合信息",
@@ -1093,6 +1119,7 @@
     "infoNoData": "暂无数据",
     "compactNow": "立即压缩",
     "compactSuccess": "上下文压缩完成",
+    "compactingContext": "正在压缩上下文…",
     "compactFailed": "上下文压缩失败",
     "sessionStreaming": "生成中",
     "slash": {

@@ -100,6 +100,37 @@ func TestRunCompactionFailureCooldownSkipsImmediateRetry(t *testing.T) {
 	}
 }
 
+func TestRunCompactionHardPressureRetriesOnBackoff(t *testing.T) {
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	svc := newMachineryService(q)
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	cfg := machineryConfig(&stubModel{}, 450)
+	fail := &failingModel{}
+	cfg.HTTPClient = &http.Client{Transport: fail}
+
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+		t.Fatal("first attempt must run and fail")
+	}
+	now = now.Add(compactionFailureRetryBase + time.Second)
+
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil {
+		t.Fatalf("normal pressure inside the cooldown must skip, not error: %v", err)
+	}
+	if fail.calls != 1 {
+		t.Fatalf("normal pressure retried inside the cooldown, calls=%d", fail.calls)
+	}
+
+	cfg.HardPressure = true
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err == nil {
+		t.Fatal("hard pressure past the backoff step must run and fail again")
+	}
+	if fail.calls != 2 {
+		t.Fatalf("hard pressure past the backoff step should reach the model, calls=%d", fail.calls)
+	}
+}
+
 func TestRunCompactionManualRequestBypassesFailureCooldown(t *testing.T) {
 	q := &fakeQueries{uncompacted: machineryCorpus(t)}
 	svc := newMachineryService(q)
@@ -810,6 +841,70 @@ func TestExpiredFailureCooldownEntryIsDropped(t *testing.T) {
 	svc.inflightMu.Unlock()
 	if lingering {
 		t.Fatal("expired cooldown entry must be dropped from failedAt")
+	}
+}
+
+func TestFailureCooldownAllowsEarlyRetryUnderHardPressure(t *testing.T) {
+	t.Parallel()
+
+	svc := newMachineryService(&fakeQueries{})
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	svc.recordCompactionFailure("session-1")
+	now = now.Add(compactionFailureRetryBase + time.Second)
+	if svc.inHardPressureCooldown("session-1") {
+		t.Fatal("hard pressure must retry after the first backoff step")
+	}
+	if !svc.inFailureCooldown("session-1") {
+		t.Fatal("normal pressure keeps the full cooldown")
+	}
+
+	svc.recordCompactionFailure("session-1")
+	now = now.Add(compactionFailureRetryBase + time.Second)
+	if !svc.inHardPressureCooldown("session-1") {
+		t.Fatal("a repeat failure must double the backoff")
+	}
+	now = now.Add(compactionFailureRetryBase)
+	if svc.inHardPressureCooldown("session-1") {
+		t.Fatal("the second backoff step is two base intervals")
+	}
+}
+
+func TestFailureBackoffCapsBelowExpiryAndPersistsAttempts(t *testing.T) {
+	t.Parallel()
+
+	svc := newMachineryService(&fakeQueries{})
+	now := time.Now()
+	svc.nowFn = func() time.Time { return now }
+
+	for range 6 {
+		svc.recordCompactionFailure("session-1")
+	}
+	backoffCap := compactionFailureCooldown - compactionFailureRetryBase
+	now = now.Add(backoffCap - time.Second)
+	if !svc.inHardPressureCooldown("session-1") {
+		t.Fatal("repeated failures must back off up to the cap")
+	}
+	now = now.Add(2 * time.Second)
+	if svc.inHardPressureCooldown("session-1") {
+		t.Fatal("the cap must sit strictly below the expiry window")
+	}
+	if !svc.inFailureCooldown("session-1") {
+		t.Fatal("the entry must still be alive when the capped retry fires")
+	}
+
+	svc.recordCompactionFailure("session-1")
+	now = now.Add(compactionFailureRetryBase + time.Second)
+	if !svc.inHardPressureCooldown("session-1") {
+		t.Fatal("attempts must persist across a capped retry, not reset to the first step")
+	}
+
+	svc.clearCompactionFailure("session-1")
+	svc.recordCompactionFailure("session-1")
+	now = now.Add(compactionFailureRetryBase + time.Second)
+	if svc.inHardPressureCooldown("session-1") {
+		t.Fatal("success must reset the backoff to the first step")
 	}
 }
 

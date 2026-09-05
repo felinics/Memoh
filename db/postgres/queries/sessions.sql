@@ -127,7 +127,8 @@ created_session AS (
     created_by_user_id,
     workdir_id,
     preferred_chat_model_id,
-    preferred_reasoning_effort
+    preferred_reasoning_effort,
+    preferred_external_model_id
   )
   SELECT
     fp.bot_id,
@@ -161,7 +162,8 @@ created_session AS (
     -- continues the same conversation, so it should look and resolve the
     -- same way on open.
     fp.preferred_chat_model_id,
-    fp.preferred_reasoning_effort
+    fp.preferred_reasoning_effort,
+    fp.preferred_external_model_id
   FROM fork_plan fp
   CROSS JOIN prepared_metadata pm
   RETURNING *
@@ -311,7 +313,7 @@ FOR UPDATE;
 -- name: ListSessionsByBot :many
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -321,7 +323,7 @@ ORDER BY s.updated_at DESC;
 -- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -337,7 +339,7 @@ ORDER BY s.updated_at DESC;
 -- (workdir_unassigned) for the sidebar's ungrouped bucket.
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -368,7 +370,7 @@ LIMIT sqlc.arg(limit_count)::int;
 -- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
   s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = sqlc.arg(bot_id)
@@ -455,6 +457,8 @@ WHERE team_id = public.memoh_current_team_id()
 RETURNING *;
 
 -- name: UpdateSessionTypeAndMetadata :one
+-- A different runtime or Agent owns a different model namespace. Clear the
+-- old preference and invalidate pending picker writes when changing it.
 UPDATE bot_sessions
 SET type = sqlc.arg(type),
     session_mode = sqlc.arg(session_mode),
@@ -462,6 +466,14 @@ SET type = sqlc.arg(type),
     bot_agent_id = sqlc.arg(bot_agent_id),
     runtime_metadata = sqlc.arg(runtime_metadata),
     metadata = sqlc.arg(metadata),
+    preferred_chat_model_id = CASE WHEN runtime_type IS DISTINCT FROM sqlc.arg(runtime_type) OR bot_agent_id IS DISTINCT FROM sqlc.arg(bot_agent_id)
+      THEN NULL ELSE preferred_chat_model_id END,
+    preferred_external_model_id = CASE WHEN runtime_type IS DISTINCT FROM sqlc.arg(runtime_type) OR bot_agent_id IS DISTINCT FROM sqlc.arg(bot_agent_id)
+      THEN NULL ELSE preferred_external_model_id END,
+    preferred_reasoning_effort = CASE WHEN runtime_type IS DISTINCT FROM sqlc.arg(runtime_type) OR bot_agent_id IS DISTINCT FROM sqlc.arg(bot_agent_id)
+      THEN NULL ELSE preferred_reasoning_effort END,
+    model_preference_revision = CASE WHEN runtime_type IS DISTINCT FROM sqlc.arg(runtime_type) OR bot_agent_id IS DISTINCT FROM sqlc.arg(bot_agent_id)
+      THEN gen_random_uuid() ELSE model_preference_revision END,
     runtime_config_epoch = runtime_config_epoch + 1,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = sqlc.arg(id) AND deleted_at IS NULL
@@ -624,7 +636,9 @@ WHERE publication.team_id = public.memoh_current_team_id()
 -- guard keeps late writes out of soft-deleted sessions.
 UPDATE bot_sessions
 SET preferred_chat_model_id = $2,
-    preferred_reasoning_effort = $3
+    preferred_reasoning_effort = $3,
+    preferred_external_model_id = $4,
+    model_preference_revision = gen_random_uuid()
 WHERE team_id = public.memoh_current_team_id()
   AND id = $1
   AND deleted_at IS NULL;
@@ -648,3 +662,17 @@ WHERE team_id = public.memoh_current_team_id()
   AND preferred_chat_model_id IS NOT NULL
 ORDER BY updated_at DESC, id DESC
 LIMIT 1;
+
+-- name: CompareAndSetSessionModelPreference :execrows
+-- A picker may not overwrite a send or a newer picker operation. Nullable
+-- revisions allow existing sessions to upgrade without a table backfill.
+UPDATE bot_sessions
+SET preferred_chat_model_id = sqlc.narg(preferred_chat_model_id)::uuid,
+    preferred_external_model_id = sqlc.narg(preferred_external_model_id)::text,
+    preferred_reasoning_effort = sqlc.narg(preferred_reasoning_effort)::text,
+    model_preference_revision = gen_random_uuid()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(id)
+  AND runtime_type = sqlc.arg(runtime_type)
+  AND model_preference_revision IS NOT DISTINCT FROM sqlc.narg(expected_revision)::uuid
+  AND deleted_at IS NULL;

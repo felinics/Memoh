@@ -55,6 +55,7 @@ func TestProviderAttemptHandoffRejectsCanceledDispatch(t *testing.T) {
 				contextfrag.StepSnapshot{StepIndex: 1},
 				false,
 				"dropped=1",
+				0,
 				capture.latestProvenance(newParams.Messages),
 			)
 
@@ -153,6 +154,7 @@ func TestProviderAttemptHandoffPublishesBeforeProviderEntry(t *testing.T) {
 				contextfrag.StepSnapshot{StepIndex: 1},
 				false,
 				"dropped=1",
+				0,
 				capture.latestProvenance(params.Messages),
 			)
 

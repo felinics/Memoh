@@ -34,15 +34,56 @@
           :connector="item"
         />
       </div>
+      <!-- Two-tone adaptive title: a muted verb names the phase ("Exploring"
+           while streaming, "Explored" once settled) followed by the darker
+           bare-count details. ONLY the verb carries the shimmer — shimmering
+           the counts too turns the whole line into uniform noise and kills the
+           contrast between "phase" and "progress". -->
+      <template v-if="verbLabel">
+        <span
+          class="shrink-0 tracking-[0.01em]"
+          :class="(active || anyToolRunning) ? 'tool-shimmer-text' : 'text-muted-foreground'"
+        >{{ verbLabel }}</span>
+        <span class="min-w-0 truncate tabular-nums">{{ detailsLabel }}</span>
+      </template>
       <span
+        v-else
         class="min-w-0 truncate tracking-[0.01em]"
         :class="anyToolRunning || active ? 'tool-shimmer-text' : ''"
       >{{ headerLabel }}</span>
+      <!-- Segment-level diff totals, revealed only once the segment settles.
+           Mid-stream the per-row diffs inside the capsule already carry that
+           signal and a second growing total here would double-render it. -->
+      <span
+        v-if="!active && diffTotals.add"
+        class="font-mono shrink-0 text-success-foreground"
+      >+{{ diffTotals.add }}</span>
+      <span
+        v-if="!active && diffTotals.remove"
+        class="font-mono shrink-0 text-destructive"
+      >-{{ diffTotals.remove }}</span>
       <ExpandChevron
         :open="open"
         class="ml-0.5"
       />
     </HeaderRow>
+
+    <!-- Second layer of the running header: the header names the phase and the
+         live tally, this line rolls the one call happening right now. Only
+         while collapsed — an open capsule's own last row already carries that
+         signal, so the line steps aside instead of double-rendering it. -->
+    <div
+      v-if="active && !open"
+      class="now-line relative h-[1lh] overflow-hidden mt-0.5 text-cop-title"
+    >
+      <Transition name="now-roll">
+        <div
+          :key="tickerLabel"
+          class="absolute inset-0 truncate"
+          v-text="tickerLabel"
+        />
+      </Transition>
+    </div>
 
     <CollapseSection :open="open">
       <!-- Card body sets the in-card type scale (one notch below the root-level
@@ -84,7 +125,16 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ContentBlock, ThinkingBlock as ThinkingBlockType, ToolCallBlock as ToolCallBlockType } from '@/store/chat-list'
-import { SUMMARY_BUCKET_ORDER, getToolDisplay, isGuiTool, toolBucket } from './tool-call-registry'
+import {
+  SUMMARY_BUCKET_ORDER,
+  SUMMARY_FRAGMENT_ORDER,
+  getToolDisplay,
+  isGuiTool,
+  toolBucket,
+  toolFragmentKind,
+  type SummaryFragment,
+  type ToolBucket,
+} from './tool-call-registry'
 import ToolCallInline from './tool-call-inline.vue'
 import ThinkingBlock from './thinking-block.vue'
 import CollapseSection from './collapse-section.vue'
@@ -137,8 +187,8 @@ function toggle() {
 }
 
 // Any tool still executing (a live foreground tool during streaming, or a
-// background task outliving the turn). Drives the shimmer only; the label
-// choice is `active`-gated (see headerLabel).
+// background task outliving the turn). Drives the shimmer only; the header's
+// text content is `active`-gated (see verbLabel/detailsLabel).
 const anyToolRunning = computed(() => toolItems.value.some(tool => tool.running))
 
 function basename(path: string): string {
@@ -168,10 +218,6 @@ function labelFor(tool: ToolCallBlockType): string {
   return subject ? `${verb} ${subject}` : verb
 }
 
-// Collapsed summary: a single tool keeps its subject; multiple tools fall back
-// to category counts ("Read 3 files · Edited 2 files"). The buckets live in the
-// registry so this header and the per-row display share one tool catalog.
-
 // Where a browser navigation went, by host — the one piece of a browsing run
 // worth surfacing in the collapsed header ("Browsed example.com").
 function navigateHost(tool: ToolCallBlockType): string {
@@ -187,42 +233,131 @@ function navigateHost(tool: ToolCallBlockType): string {
   }
 }
 
-const aggregateLabel = computed(() => {
+// Phase of the segment, by its dominant bucket. Ties break by
+// SUMMARY_BUCKET_ORDER; 'other' never wins a tie because a generic "Working"
+// adds nothing over the details alone. A GUI run is always "Browsing"
+// regardless of mix (its observe+action steps are one browsing activity).
+const phaseKey = computed<ToolBucket | 'gui' | null>(() => {
   const tools = toolItems.value
-  if (tools.length === 0) return t('chat.process.thought')
-  if (tools.length === 1) return labelFor(tools[0]!)
-  // A browsing/desktop run is summarized by where it went, not by the screenshot
-  // reads it folded in — name the destination, fall back to a step count.
-  if (tools.some(tool => isGuiTool(tool.toolName))) {
-    const hosts = [...new Set(tools.map(navigateHost).filter(Boolean))]
-    if (hosts.length === 1) return t('chat.process.browsed', { target: hosts[0] })
-    if (hosts.length > 1) return t('chat.process.browsedSites', { count: hosts.length })
-    return t('chat.process.steps', { count: tools.length })
-  }
-  const acc = new Map<string, number>()
+  if (tools.length === 0) return null
+  if (tools.some(tool => isGuiTool(tool.toolName))) return 'gui'
+  const counts = new Map<ToolBucket, number>()
   for (const tool of tools) {
-    const b = toolBucket(tool.toolName)
-    if (b !== 'other') acc.set(b, (acc.get(b) ?? 0) + 1)
+    const bucket = toolBucket(tool.toolName)
+    counts.set(bucket, (counts.get(bucket) ?? 0) + 1)
   }
-  const segments = SUMMARY_BUCKET_ORDER
-    .filter(b => acc.has(b))
-    .map(b => t(`chat.process.${b}`, { count: acc.get(b)! }))
-  return segments.length ? segments.join(' · ') : t('chat.process.steps', { count: tools.length })
+  let best: ToolBucket = 'other'
+  let bestCount = 0
+  for (const bucket of SUMMARY_BUCKET_ORDER) {
+    const count = counts.get(bucket) ?? 0
+    if (count > bestCount) {
+      best = bucket
+      bestCount = count
+    }
+  }
+  if ((counts.get('other') ?? 0) > bestCount) return 'other'
+  return best
 })
 
-// Streaming header acts as a ticker for the current (last) item.
+// The verb names the phase; its tense is the segment's own lifecycle — present
+// while THIS segment is the streaming tail, past once anything supersedes it.
+// Only genuine multi-tool segments get the verb+details split: a lone tool's
+// own label ("Run ls /tmp") already IS the specific, and prefixing its bucket
+// verb would stutter ("Running Run ls /tmp") while duplicating the now line.
+const verbLabel = computed(() => {
+  const tools = toolItems.value
+  if (tools.length <= 1) return ''
+  const key = phaseKey.value
+  if (!key) return ''
+  return t(`chat.process.phase.${key}.${props.active ? 'ing' : 'done'}`)
+})
+
+// The details half: bare counts ("12 files, 4 searches, ran 3 commands") that
+// grow live while streaming and settle with the segment. GUI runs name the
+// destination instead.
+const detailsLabel = computed(() => {
+  const tools = toolItems.value
+  if (tools.length === 0) return props.active ? t('chat.thinkingInProgress') : t('chat.process.thought')
+  if (phaseKey.value === 'gui') {
+    const hosts = [...new Set(tools.map(navigateHost).filter(Boolean))]
+    if (hosts.length === 1) return hosts[0]!
+    if (hosts.length > 1) return t('chat.process.frag.sites', { count: hosts.length })
+    return t('chat.process.steps', { count: tools.length })
+  }
+  const counts = new Map<SummaryFragment, number>()
+  for (const tool of tools) {
+    const kind = toolFragmentKind(tool.toolName)
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+  const parts = SUMMARY_FRAGMENT_ORDER
+    .filter(kind => counts.has(kind))
+    .map(kind => t(`chat.process.frag.${kind}`, { count: counts.get(kind)! }))
+  return parts.length ? parts.join(t('chat.process.fragmentSeparator')) : t('chat.process.steps', { count: tools.length })
+})
+
+// Single-span fallback for the two cases without a verb: a thought-only
+// segment ("Thinking…" / "Thought") and a lone settled tool (its own label).
+const headerLabel = computed(() => {
+  const tools = toolItems.value
+  if (tools.length === 0) return props.active ? t('chat.thinkingInProgress') : t('chat.process.thought')
+  return labelFor(tools[0]!)
+})
+
+// Segment-level diff totals for the settled header (+284 −96), summed from
+// each row's own display math so the header can never disagree with the body.
+const diffTotals = computed(() => {
+  let add = 0
+  let remove = 0
+  for (const tool of toolItems.value) {
+    const display = getToolDisplay(tool)
+    add += display.diffAdd ?? 0
+    remove += display.diffRemove ?? 0
+  }
+  return { add, remove }
+})
+
+// The now line rolls the current (last) item. A reasoning tail reads as
+// "Thinking…"; a tool whose input hasn't streamed yet gets the pending label
+// (same wording as its in-capsule row) instead of a target-less bare verb.
 const tickerLabel = computed(() => {
   const current = props.items[props.items.length - 1]
   if (!current) return ''
   if (current.type === 'reasoning') return t('chat.thinkingInProgress')
-  if (current.type === 'tool') return labelFor(current as ToolCallBlockType)
-  return aggregateLabel.value
+  if (current.type === 'tool') {
+    const tool = current as ToolCallBlockType
+    const input = tool.input
+    const inputReady = input && typeof input === 'object' && Object.keys(input as Record<string, unknown>).length > 0
+    if (tool.running && !inputReady) {
+      const display = getToolDisplay(tool)
+      return t(`chat.tools.pending.${display.actionKey}`, t('chat.tools.pending.generic'))
+    }
+    return labelFor(tool)
+  }
+  return headerLabel.value
 })
-
-// The header is a live ticker ONLY while the turn itself is streaming (`active`).
-// A still-running background task inside a finished turn must not keep the
-// ticker alive: "Thinking…" is a claim about the model, and a background
-// command the model started before finishing says nothing about the model.
-// The background tool's own row already shows its running state.
-const headerLabel = computed(() => (props.active ? tickerLabel.value : aggregateLabel.value))
 </script>
+
+<style scoped>
+/* Roll animation for the now line: incoming row rises from below, outgoing
+   exits upward, both absolutely positioned so they overlap mid-swap. 300ms
+   matches the house motion palette's gentle end. */
+.now-roll-enter-active,
+.now-roll-leave-active {
+  transition: transform 300ms cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.now-roll-enter-from {
+  transform: translateY(calc(100% + 1px));
+}
+
+.now-roll-leave-to {
+  transform: translateY(calc(-100% - 1px));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now-roll-enter-active,
+  .now-roll-leave-active {
+    transition: none;
+  }
+}
+</style>

@@ -75,8 +75,8 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-func providePipeline() *timeline.Pipeline {
-	return timeline.NewPipeline(timeline.RenderParams{})
+func providePipeline(log *slog.Logger) *timeline.Pipeline {
+	return timeline.NewPipelineWithOptions(timeline.RenderParams{}, timeline.PipelineOptions{Logger: log})
 }
 
 func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Service {
@@ -88,7 +88,9 @@ func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Servic
 }
 
 func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.EventStore {
-	return timeline.NewEventStore(log, queries)
+	store := timeline.NewEventStore(log, queries)
+	store.SetReplayArtifactProvider(compaction.NewTimelineArtifactSource(queries))
+	return store
 }
 
 func provideDiscussDriver(log *slog.Logger, eventStore *timeline.EventStore, msgService *message.DBService, queries dbstore.Queries, cfg config.Config) *discuss.DiscussDriver {

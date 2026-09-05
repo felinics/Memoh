@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
@@ -30,6 +31,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/config"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -71,23 +73,26 @@ func provideAuthHandler(log *slog.Logger, accountService *accounts.Service, rc *
 	return handlers.NewAuthHandler(log, accountService, rc.JwtSecret, rc.JwtExpiresIn)
 }
 
-func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool) *handlers.MessageHandler {
+func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool, pipeline *timeline.Pipeline, compactionService *compaction.Service) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
 	h.SetUserInputService(userInput)
 	h.SetBackgroundManager(bgManager)
 	h.SetRuntimeResetService(acpPool)
+	h.SetProjectionCache(pipeline)
+	h.SetCompactionActivity(compactionService)
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service) *handlers.SessionHandler {
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline) *handlers.SessionHandler {
 	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
 	handler.SetThreadEnricher(routeService)
 	handler.SetWorkdirService(workdirService)
 	handler.SetBotAgents(botAgentsService)
 	handler.SetAgentRuntimeService(agentService)
 	handler.SetModelPreferenceService(agentService)
+	handler.SetProjectionCache(pipeline)
 	return handler
 }
 

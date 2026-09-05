@@ -14,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/agent/application"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
@@ -866,4 +868,56 @@ func callGetSession(handler *SessionHandler, botID, sessionID, userID string) (*
 	ctx.SetParamNames("bot_id", "session_id")
 	ctx.SetParamValues(botID, sessionID)
 	return rec, handler.GetSession(ctx)
+}
+
+type preferenceUpdateStub struct {
+	queries *sessionUpdateQueries
+	err     error
+}
+
+func (preferenceUpdateStub) ReconcileSessionModelPreference(context.Context, string, string, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (s preferenceUpdateStub) PatchSessionModelPreference(_ context.Context, _, _ string, model, effort, _ *string) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.queries.session.PreferredChatModelID = testUUID(*model)
+	s.queries.session.PreferredReasoningEffort = pgtype.Text{String: *effort, Valid: true}
+	s.queries.session.ModelPreferenceRevision = testUUID("44444444-4444-4444-8444-444444444444")
+	return nil
+}
+
+func TestPreferenceOnlyPatchReturnsUpdatedSession(t *testing.T) {
+	const botID = "11111111-1111-1111-1111-111111111111"
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	const modelID = "33333333-3333-3333-3333-333333333333"
+	q := &sessionUpdateQueries{bot: testBotRow(botID, nil), session: sqlc.BotSession{ID: testUUID(sessionID), BotID: testUUID(botID), Type: session.TypeChat, SessionMode: session.TypeChat, RuntimeType: session.RuntimeModel}}
+	h := NewSessionHandler(slog.Default(), newThreadServiceForTest(q), nil, bots.NewService(nil, q), newTestAdminAccountService("admin"))
+	h.SetModelPreferenceService(preferenceUpdateStub{queries: q})
+	rec, err := callUpdateSession(h, botID, sessionID, `{"preferred_chat_model_id":"`+modelID+`","preferred_reasoning_effort":"high","expected_model_preference_revision":""}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got session.Thread
+	if err = json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PreferredChatModelID != modelID || got.PreferredReasoningEffort != "high" || got.ModelPreferenceRevision == "" {
+		t.Fatalf("response=%s", rec.Body.String())
+	}
+}
+
+func TestPreferencePatchReturnsStableConflict(t *testing.T) {
+	const botID = "11111111-1111-1111-1111-111111111111"
+	const sessionID = "22222222-2222-2222-2222-222222222222"
+	q := &sessionUpdateQueries{bot: testBotRow(botID, nil), session: sqlc.BotSession{ID: testUUID(sessionID), BotID: testUUID(botID), Type: session.TypeChat, SessionMode: session.TypeChat, RuntimeType: session.RuntimeModel}}
+	h := NewSessionHandler(slog.Default(), newThreadServiceForTest(q), nil, bots.NewService(nil, q), newTestAdminAccountService("admin"))
+	h.SetModelPreferenceService(preferenceUpdateStub{queries: q, err: application.ErrModelPreferenceConflict})
+	_, err := callUpdateSession(h, botID, sessionID, `{"preferred_chat_model_id":"33333333-3333-3333-3333-333333333333","preferred_reasoning_effort":"high","expected_model_preference_revision":""}`)
+	var appErr *apperror.Error
+	if !errors.As(err, &appErr) || apperror.CodeOf(appErr) != apperror.CodeSessionModelPreferenceConflict {
+		t.Fatalf("error = %v", err)
+	}
 }

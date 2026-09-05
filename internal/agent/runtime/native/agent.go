@@ -1267,6 +1267,7 @@ func prepareProviderAttempt(
 	}
 	inputAllowance := stepReselectionAllowance(cfg)
 	reselectionDetail := ""
+	protectedPruned := 0
 	if reselector != nil && prefixCount < len(params.Messages) {
 		beforeMessages := append([]sdk.Message(nil), params.Messages...)
 		selection := reselector(ctx, ContextStepSelectionInput{
@@ -1312,6 +1313,7 @@ func prepareProviderAttempt(
 			snapshot.Dropped = selection.Dropped
 			snapshot.Truncated = selection.Truncated
 			snapshot.DropReasons = copyDropReasons(selection.DropReasons)
+			protectedPruned = selection.ProtectedPruned
 			if selection.Dropped > 0 || selection.Truncated > 0 {
 				reselectionDetail = contextStepSelectionDetail(selection)
 			}
@@ -1327,7 +1329,7 @@ func prepareProviderAttempt(
 			inputAllowance,
 		))
 	}
-	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, reselectionDetail, provenance)
+	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, reselectionDetail, protectedPruned, provenance)
 	return params
 }
 
@@ -1337,13 +1339,14 @@ func stagePreparedProviderAttempt(
 	snapshot contextfrag.StepSnapshot,
 	systemPrepended bool,
 	reselectionDetail string,
+	protectedPruned int,
 	provenance preparedMessageProvenance,
 ) {
 	if !providerAttemptDispatchAllowed(ctx) {
 		handoff.reject(provenance)
 		return
 	}
-	handoff.stage(snapshot, systemPrepended, reselectionDetail, provenance)
+	handoff.stage(snapshot, systemPrepended, reselectionDetail, protectedPruned, provenance)
 }
 
 func providerAttemptEnvelopeOverflow(params *sdk.GenerateParams, allowance int) int {
@@ -1871,6 +1874,12 @@ func wrapPrepareStepWithForkSnapshot(
 // mid-stream error. It re-invokes StreamText with the accumulated messages
 // and drains the new stream into the same output channel.
 //
+// The retry loop keeps going while a re-invoked stream fails with another
+// retryable error: the SDK poisons an errored step without committing it, so
+// every attempt regenerates that step from the same committed boundary, and
+// stopping after the first retry would waste the progress later attempts could
+// still make (overloaded upstreams recover within seconds).
+//
 // sendCtx is used for sendEvent so consumer disconnect (parent ctx) still
 // controls channel back-pressure; streamCtx is passed to the SDK for the same
 // cancellation semantics as the main stream (including loop-detect cancel).
@@ -1904,10 +1913,29 @@ func (a *Agent) runMidStreamRetry(
 	// committed boundary, so it must not survive as a checkpoint. Retried
 	// steps are numbered from the offset the commit barrier already uses.
 	interruptedStep.rebase(stepOffset)
-	retryInput := retryProviderAttemptMessages(cfg, prevResult)
+	// lastAttempt stays the latest failed attempt's own (unmerged) result:
+	// providerAttemptState.retryInput indexes Steps by the call-local step
+	// index, so handing it a merged result would append the wrong step's tail.
+	lastAttempt := prevResult
+	retryInput := retryProviderAttemptMessages(cfg, lastAttempt)
 	accumulatedCount := len(prevResult.Messages)
+	// folded* accumulates the durable output of every attempt that failed
+	// retryably, so whichever way the loop exits (success, terminal error,
+	// budget exhaustion) the returned result preserves the full history.
+	foldedMessages := append([]sdk.Message(nil), prevResult.Messages...)
+	foldedSteps := append([]sdk.StepResult(nil), prevResult.Steps...)
+	// failResult returns the original result carrying everything committed so
+	// far; its drained stream is what the caller expects on an abort path.
+	failResult := func() *sdk.StreamResult {
+		prevResult.Messages = foldedMessages
+		prevResult.Steps = foldedSteps
+		return prevResult
+	}
 
-	retryCfg := DefaultRetryConfig()
+	retryCfg := cfg.Retry
+	if retryCfg.MaxAttempts <= 0 {
+		retryCfg = DefaultRetryConfig()
+	}
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		a.logger.Warn("mid-stream error, retrying",
 			slog.Int("step", stepNumber),
@@ -1921,13 +1949,13 @@ func (a *Agent) runMidStreamRetry(
 			MaxAttempt: retryCfg.MaxAttempts,
 			RetryError: errMsg,
 		}) {
-			return prevResult, true
+			return failResult(), true
 		}
 
 		delay := retryDelay(attempt, retryCfg)
 		if delay > 0 {
 			if err := sleepWithContext(streamCtx, delay); err != nil {
-				return prevResult, true // aborted
+				return failResult(), true // aborted
 			}
 		}
 
@@ -1951,7 +1979,7 @@ func (a *Agent) runMidStreamRetry(
 			}))
 		}
 		if contextStepBudgetError(streamCtx) != nil {
-			return prevResult, true
+			return failResult(), true
 		}
 
 		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
@@ -1967,6 +1995,7 @@ func (a *Agent) runMidStreamRetry(
 
 		// Drain the retry stream into the main event loop
 		aborted := false
+		retryableFailure := false
 		for retryPart := range retryResult.Stream {
 			if streamCtx.Err() != nil {
 				aborted = true
@@ -2065,53 +2094,84 @@ func (a *Agent) runMidStreamRetry(
 					aborted = true
 					break
 				}
-				errMsg := rp.Error.Error()
-				if isAskUserArgumentParseError(errMsg) {
+				partErrMsg := rp.Error.Error()
+				if isAskUserArgumentParseError(partErrMsg) {
 					continue
 				}
-				sendEvent(sendCtx, ch, StreamEvent{Type: EventError, Error: errMsg})
-				aborted = true
+				sendEvent(sendCtx, ch, StreamEvent{Type: EventError, Error: partErrMsg})
+				if isRetryableStreamError(rp.Error) {
+					// A retryable failure inside a retry must not end the run:
+					// fold what this attempt committed and take the next loop
+					// iteration instead of giving up after a single re-call.
+					errMsg = partErrMsg
+					retryableFailure = true
+				} else {
+					aborted = true
+				}
 			case *sdk.AbortPart:
 				aborted = true
 			case *sdk.FinishPart:
 				// handled after loop
 			}
-			if aborted {
+			if aborted || retryableFailure {
 				break
 			}
 		}
-		if aborted {
+		if aborted || retryableFailure {
 			for retryPart := range retryResult.Stream {
 				interruptedStep.observe(retryPart)
 			}
 		}
-		// Merge prev messages into retryResult so the caller sees the full
-		// accumulated history (initial run + retry continuation). The SDK's
+		if retryableFailure && !aborted {
+			// Fold this attempt's durable output and go again. The errored step
+			// was poisoned by the SDK without committing, so folded output never
+			// contains the partial tail the next attempt will regenerate.
+			foldedMessages = append(foldedMessages, retryResult.Messages...)
+			foldedSteps = append(foldedSteps, retryResult.Steps...)
+			stepOffset += len(retryResult.Steps)
+			accumulatedCount += len(retryResult.Messages)
+			lastAttempt = retryResult
+			interruptedStep.rebase(stepOffset)
+			if input, ok := cfg.providerAttemptState.retryInput(lastAttempt); ok {
+				retryInput = input
+			} else {
+				// Without a stored provider attempt (tests, defensive paths),
+				// rebuild from the folded history so earlier attempts' committed
+				// work still reaches the next call.
+				retryInput = retryProviderAttemptMessages(cfg, &sdk.StreamResult{
+					Messages: foldedMessages,
+					Steps:    foldedSteps,
+				})
+			}
+			continue
+		}
+		// Merge the folded history into retryResult so the caller sees the full
+		// accumulated history (initial run + every retry continuation). The SDK's
 		// StreamResult.Messages only contains messages produced within that
 		// StreamText call, so without this merge the original steps before
 		// the mid-stream error would be lost when the retry result becomes
 		// the new streamResult.
-		if len(prevResult.Messages) > 0 {
-			merged := make([]sdk.Message, 0, len(prevResult.Messages)+len(retryResult.Messages))
-			merged = append(merged, prevResult.Messages...)
+		if len(foldedMessages) > 0 {
+			merged := make([]sdk.Message, 0, len(foldedMessages)+len(retryResult.Messages))
+			merged = append(merged, foldedMessages...)
 			merged = append(merged, retryResult.Messages...)
 			retryResult.Messages = merged
 		}
-		if len(prevResult.Steps) > 0 {
-			retryResult.Steps = append(append([]sdk.StepResult(nil), prevResult.Steps...), retryResult.Steps...)
+		if len(foldedSteps) > 0 {
+			retryResult.Steps = append(append([]sdk.StepResult(nil), foldedSteps...), retryResult.Steps...)
 		}
 		return retryResult, aborted || detectGenerateLoopAbort(streamCtx, streamCtx.Err()) != nil
 	}
-	// All retry attempts failed to even start a new stream — return the
-	// previous (already drained) result so its accumulated messages are
-	// preserved as the final partial state. Publish the giving-up error: every
-	// EventRetry retracts the failure it retried, so without this last event a
-	// consumer would see the run end with nothing to explain why it stopped.
+	// All retry attempts failed — return the original result carrying every
+	// attempt's committed output so its accumulated messages are preserved as
+	// the final partial state. Publish the giving-up error: every EventRetry
+	// retracts the failure it retried, so without this last event a consumer
+	// would see the run end with nothing to explain why it stopped.
 	sendEvent(sendCtx, ch, StreamEvent{
 		Type:  EventError,
 		Error: fmt.Sprintf("mid-stream retry: all %d attempts failed (last: %s)", retryCfg.MaxAttempts, errMsg),
 	})
-	return prevResult, true
+	return failResult(), true
 }
 
 func prepareMidStreamRetryConfig(cfg RunConfig, accumulated []sdk.Message, errMsg string) RunConfig {

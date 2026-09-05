@@ -11,35 +11,36 @@ import (
 // step-level / mid-task pruning.
 const StepToolResultTruncateBytes = 512
 
-// TruncateStepToolResult replaces every sdk.ToolResultPart in msg with a
-// "[tool result pruned: N bytes]" summary when their combined encoded size
-// exceeds thresholdBytes (falling back to StepToolResultTruncateBytes when
-// thresholdBytes <= 0), preserving ToolCallID/ToolName. ok reports whether
-// msg was changed.
+// TruncateStepToolResult replaces each sdk.ToolResultPart in msg whose own
+// encoded size exceeds thresholdBytes (falling back to
+// StepToolResultTruncateBytes when thresholdBytes <= 0) with a
+// "[tool result pruned: N bytes]" summary. Parallel-call batches share one
+// tool message, so sizing is per part: small siblings survive verbatim, and
+// every other field of the part — IsError above all — is preserved so a
+// failed result never reads as success. ok reports whether msg was changed.
 func TruncateStepToolResult(msg sdk.Message, thresholdBytes int) (out sdk.Message, ok bool) {
 	if thresholdBytes <= 0 {
 		thresholdBytes = StepToolResultTruncateBytes
 	}
-	contentSize := 0
-	for _, part := range msg.Content {
-		if tr, isResult := part.(sdk.ToolResultPart); isResult {
-			contentSize += len(fmt.Sprintf("%v", tr.Result))
-		}
-	}
-	if contentSize <= thresholdBytes {
-		return msg, false
-	}
+	changed := false
 	parts := make([]sdk.MessagePart, 0, len(msg.Content))
 	for _, part := range msg.Content {
-		if tr, isResult := part.(sdk.ToolResultPart); isResult {
-			parts = append(parts, sdk.ToolResultPart{
-				ToolCallID: tr.ToolCallID,
-				ToolName:   tr.ToolName,
-				Result:     fmt.Sprintf("[tool result pruned: %d bytes]", contentSize),
-			})
+		tr, isResult := part.(sdk.ToolResultPart)
+		if !isResult {
+			parts = append(parts, part)
 			continue
 		}
-		parts = append(parts, part)
+		size := len(fmt.Sprintf("%v", tr.Result))
+		if size <= thresholdBytes {
+			parts = append(parts, tr)
+			continue
+		}
+		tr.Result = fmt.Sprintf("[tool result pruned: %d bytes]", size)
+		parts = append(parts, tr)
+		changed = true
+	}
+	if !changed {
+		return msg, false
 	}
 	return sdk.Message{Role: msg.Role, Content: parts}, true
 }

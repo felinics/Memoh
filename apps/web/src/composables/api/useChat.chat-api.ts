@@ -173,15 +173,17 @@ export async function updateSessionTitle(botId: string, sessionId: string, title
 // The caller treats failures as silent — the next sent message writes the
 // resolved pair back server-side, so a dropped PATCH only loses the
 // pick-until-send window.
-export async function updateSessionModelPreference(botId: string, sessionId: string, modelId: string, reasoningEffort: string): Promise<void> {
-  await patchBotsByBotIdSessionsBySessionId({
+export async function updateSessionModelPreference(botId: string, sessionId: string, modelId: string, reasoningEffort: string, expectedRevision: string): Promise<SessionSummary> {
+  const { data } = await patchBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
     body: {
+      expected_model_preference_revision: expectedRevision,
       preferred_chat_model_id: modelId,
       preferred_reasoning_effort: reasoningEffort,
     },
     throwOnError: true,
   })
+  return data as SessionSummary
 }
 
 export interface ModelPreferenceSeed {

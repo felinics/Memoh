@@ -7302,6 +7302,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
                     }
                 }
             }
@@ -22253,6 +22259,9 @@ const docTemplate = `{
                 "bot_agent_id": {
                     "type": "string"
                 },
+                "expected_model_preference_revision": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
@@ -23664,10 +23673,16 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "model_preference_revision": {
+                    "type": "string"
+                },
                 "parent_session_id": {
                     "type": "string"
                 },
                 "preferred_chat_model_id": {
+                    "type": "string"
+                },
+                "preferred_external_model_id": {
                     "description": "Preferred* is the session's persisted (model, effort) pair (issue #879).\nEmpty means \"no memory\"; the composer reseeds from it on open/repoint.",
                     "type": "string"
                 },

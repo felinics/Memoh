@@ -206,7 +206,7 @@ func TestBuildMessagesFromPipelineInsertsArtifactSummary(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, _ := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 0)
@@ -276,7 +276,7 @@ func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, _ := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 200)

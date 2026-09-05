@@ -658,6 +658,30 @@ func TestAgentConfigEffectiveContextLoopReselectMode(t *testing.T) {
 	}
 }
 
+func TestAgentConfigEffectiveSyncCompactionMode(t *testing.T) {
+	cases := []struct {
+		name           string
+		value          string
+		wantMode       string
+		wantRecognized bool
+	}{
+		{"empty defaults to shadow", "", SyncCompactionModeShadow, true},
+		{"active", "active", SyncCompactionModeActive, true},
+		{"shadow", "shadow", SyncCompactionModeShadow, true},
+		{"off", "off", SyncCompactionModeOff, true},
+		{"case insensitive", "ACTIVE", SyncCompactionModeActive, true},
+		{"unknown normalizes to shadow", "garbage", SyncCompactionModeShadow, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotMode, gotRecognized := (AgentConfig{SyncCompaction: tc.value}).EffectiveSyncCompactionMode()
+			if gotMode != tc.wantMode || gotRecognized != tc.wantRecognized {
+				t.Fatalf("EffectiveSyncCompactionMode() = (%q, %v), want (%q, %v)", gotMode, gotRecognized, tc.wantMode, tc.wantRecognized)
+			}
+		})
+	}
+}
+
 func TestAgentConfigEffectiveContextAbsoluteMaxTokens(t *testing.T) {
 	if got := (AgentConfig{}).EffectiveContextAbsoluteMaxTokens(); got != contextfrag.DefaultAbsoluteCapTokens {
 		t.Fatalf("unset cap = %d, want default %d", got, contextfrag.DefaultAbsoluteCapTokens)

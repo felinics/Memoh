@@ -86,6 +86,11 @@ func isMustKeepFrag(frag contextfrag.ContextFrag, profile IntentProfile) bool {
 	if frag.Budget.Overflow == contextfrag.OverflowKeep {
 		return true
 	}
+	// A compaction summary is the sole survivor of everything already evicted;
+	// trimming it before newer raw rows silently re-loses the compacted span.
+	if frag.Kind == contextfrag.KindConversationSummary {
+		return true
+	}
 	if profile.MustKeepFrag != nil && profile.MustKeepFrag(frag) {
 		return true
 	}

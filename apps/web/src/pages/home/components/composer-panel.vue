@@ -20,6 +20,7 @@
           @select="emit('selectCommandItem', $event)"
           @dismiss="emit('dismissCommand')"
         />
+        <ComposerPanelCompaction v-else-if="section.kind === 'compaction'" />
         <Transition
           v-else
           mode="out-in"
@@ -78,6 +79,7 @@ import ComposerCapsule from './composer-capsule.vue'
 import ComposerPanelApproval from './composer-panel-approval.vue'
 import ComposerPanelCommand from './composer-panel-command.vue'
 import ComposerPanelError from './composer-panel-error.vue'
+import ComposerPanelCompaction from './composer-panel-compaction.vue'
 import type { PendingApprovalItem } from '../composables/usePendingApprovals'
 import type { CommandActionListItem } from '@/composables/api/useChat'
 
@@ -94,11 +96,13 @@ type PanelSection =
   | { kind: 'error', message: string }
   | { kind: 'command', panel: CommandPanelData }
   | { kind: 'approval' }
+  | { kind: 'compaction' }
 
 const props = defineProps<{
   approvals: PendingApprovalItem[]
   commandPanel: CommandPanelData | null
   errorMessage: string
+  compacting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -112,6 +116,7 @@ const sections = computed<PanelSection[]>(() => {
   const list: PanelSection[] = []
   if (props.errorMessage) list.push({ kind: 'error', message: props.errorMessage })
   if (props.commandPanel) list.push({ kind: 'command', panel: props.commandPanel })
+  if (props.compacting) list.push({ kind: 'compaction' })
   if (approvalHead.value) list.push({ kind: 'approval' })
   return list
 })

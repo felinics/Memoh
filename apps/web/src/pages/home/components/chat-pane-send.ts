@@ -139,7 +139,7 @@ export function clearComposerPairDraft(botId: string): void {
 // when the user merely opens a historical session (spec P2′). A failed send
 // keeps the draft: the pick was never persisted.
 export function welcomeSendConsumedDraft(
-  target: { sessionId?: string },
+  target: { sessionId?: string | null },
   result: { ok: boolean },
 ): boolean {
   return result.ok && !(target.sessionId ?? '').trim()

@@ -27,17 +27,22 @@ import (
 
 // SessionHandler handles bot session CRUD endpoints.
 type SessionHandler struct {
-	sessionService *session.Service
-	threadEnricher threadEnricher
-	acpRuntimes    acpSessionRuntimeService
-	runtimeResets  sessionResetService
-	workdirs       sessionWorkdirService
-	agentRuntimes  sessionAgentRuntimeService
-	botAgents      *botagents.Service
-	botService     *bots.Service
-	accountService *accounts.Service
-	modelPrefs     modelPreferenceService
-	logger         *slog.Logger
+	sessionService  *session.Service
+	threadEnricher  threadEnricher
+	acpRuntimes     acpSessionRuntimeService
+	runtimeResets   sessionResetService
+	workdirs        sessionWorkdirService
+	agentRuntimes   sessionAgentRuntimeService
+	botAgents       *botagents.Service
+	botService      *bots.Service
+	accountService  *accounts.Service
+	modelPrefs      modelPreferenceService
+	projectionCache sessionProjectionCache
+	logger          *slog.Logger
+}
+
+type sessionProjectionCache interface {
+	DropSession(sessionID string)
 }
 
 // sessionAgentRuntimeService owns external-runtime fork preparation and active
@@ -50,7 +55,7 @@ type sessionAgentRuntimeService interface {
 // modelPreferenceService is the picker-pair write path (issue #879),
 // satisfied by the agent application service.
 type modelPreferenceService interface {
-	PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort *string) error
+	PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort, expectedRevision *string) error
 	ReconcileSessionModelPreference(ctx context.Context, botID, modelRef, effort string) (string, string, error)
 }
 
@@ -125,6 +130,10 @@ func (h *SessionHandler) SetAgentRuntimeService(service sessionAgentRuntimeServi
 	h.agentRuntimes = service
 }
 
+func (h *SessionHandler) SetProjectionCache(cache sessionProjectionCache) {
+	h.projectionCache = cache
+}
+
 // Register registers session routes.
 func (h *SessionHandler) Register(e *echo.Echo) {
 	g := e.Group("/bots/:bot_id/sessions")
@@ -163,13 +172,14 @@ type createSessionRequest struct {
 }
 
 type updateSessionRequest struct {
-	BotAgentID      *string        `json:"bot_agent_id,omitempty"`
-	Title           *string        `json:"title,omitempty"`
-	Type            *string        `json:"type,omitempty"`
-	SessionMode     *string        `json:"session_mode,omitempty"`
-	RuntimeType     *string        `json:"runtime_type,omitempty"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
-	RuntimeMetadata map[string]any `json:"runtime_metadata,omitempty"`
+	ExpectedModelPreferenceRevision *string        `json:"expected_model_preference_revision,omitempty"`
+	BotAgentID                      *string        `json:"bot_agent_id,omitempty"`
+	Title                           *string        `json:"title,omitempty"`
+	Type                            *string        `json:"type,omitempty"`
+	SessionMode                     *string        `json:"session_mode,omitempty"`
+	RuntimeType                     *string        `json:"runtime_type,omitempty"`
+	Metadata                        map[string]any `json:"metadata,omitempty"`
+	RuntimeMetadata                 map[string]any `json:"runtime_metadata,omitempty"`
 	// PreferredChatModelID / PreferredReasoningEffort are the picker pair
 	// (issue #879). The composer always patches the pair together; either one
 	// alone is reconciled against the model the session would actually use.
@@ -793,6 +803,7 @@ func (h *SessionHandler) GetSession(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id} [patch].
 func (h *SessionHandler) UpdateSession(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)
@@ -1002,8 +1013,21 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		if h.modelPrefs == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "model preference service not configured")
 		}
-		if prefErr := h.modelPrefs.PatchSessionModelPreference(c.Request().Context(), botID, sessionID, req.PreferredChatModelID, req.PreferredReasoningEffort); prefErr != nil {
+		if prefErr := h.modelPrefs.PatchSessionModelPreference(c.Request().Context(), botID, sessionID, req.PreferredChatModelID, req.PreferredReasoningEffort, req.ExpectedModelPreferenceRevision); prefErr != nil {
+			if errors.Is(prefErr, application.ErrModelPreferenceConflict) {
+				return apperror.New(apperror.CodeSessionModelPreferenceConflict, nil)
+			}
+			if session.IsDirectRuntime(result) {
+				if errors.Is(prefErr, application.ErrDirectModelUnavailable) {
+					return apperror.New(apperror.CodeACPModelUnavailable, nil)
+				}
+				return apperror.Wrap(apperror.CodeACPOperationFailed, prefErr, nil)
+			}
 			return echo.NewHTTPError(http.StatusBadRequest, prefErr.Error())
+		}
+		result, err = h.sessionService.Get(c.Request().Context(), sessionID)
+		if err != nil {
+			return sessionServiceError(err)
 		}
 	}
 	if req.Title != nil {
@@ -1091,6 +1115,9 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 		if err := h.agentRuntimes.AbortSessionRuns(c.Request().Context(), botID, sessionID); err != nil {
 			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
 		}
+	}
+	if h.projectionCache != nil {
+		h.projectionCache.DropSession(sessionID)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

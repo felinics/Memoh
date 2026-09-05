@@ -2733,6 +2733,7 @@ export type HandlersTerminalInfoResponse = {
 
 export type HandlersUpdateSessionRequest = {
     bot_agent_id?: string;
+    expected_model_preference_revision?: string;
     metadata?: {
         [key: string]: unknown;
     };
@@ -3420,12 +3421,14 @@ export type SessionSession = {
     metadata?: {
         [key: string]: unknown;
     };
+    model_preference_revision?: string;
     parent_session_id?: string;
+    preferred_chat_model_id?: string;
     /**
      * Preferred* is the session's persisted (model, effort) pair (issue #879).
      * Empty means "no memory"; the composer reseeds from it on open/repoint.
      */
-    preferred_chat_model_id?: string;
+    preferred_external_model_id?: string;
     preferred_reasoning_effort?: string;
     route_conversation_type?: string;
     route_id?: string;
@@ -9630,6 +9633,10 @@ export type PatchBotsByBotIdSessionsBySessionIdErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdError = PatchBotsByBotIdSessionsBySessionIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdErrors];

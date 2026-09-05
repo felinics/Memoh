@@ -17,8 +17,11 @@ import (
 
 type fakeEventQueries struct {
 	dbstore.Queries
-	nextCursor int64
-	created    sqlc.CreateSessionEventParams
+	nextCursor   int64
+	created      sqlc.CreateSessionEventParams
+	replayRows   []sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow
+	replayParams []sqlc.ListSessionEventsBySessionPageBeforeWithinBytesParams
+	eventCount   int64
 }
 
 func (f *fakeEventQueries) NextSessionEventCursor(context.Context) (int64, error) {
@@ -32,6 +35,15 @@ func (f *fakeEventQueries) CreateSessionEvent(_ context.Context, arg sqlc.Create
 		return pgtype.UUID{}, err
 	}
 	return id, nil
+}
+
+func (f *fakeEventQueries) ListSessionEventsBySessionPageBeforeWithinBytes(_ context.Context, arg sqlc.ListSessionEventsBySessionPageBeforeWithinBytesParams) ([]sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow, error) {
+	f.replayParams = append(f.replayParams, arg)
+	return f.replayRows, nil
+}
+
+func (f *fakeEventQueries) CountSessionEvents(context.Context, pgtype.UUID) (int64, error) {
+	return f.eventCount, nil
 }
 
 func TestPersistEventStampsCursorIntoPayload(t *testing.T) {
@@ -120,5 +132,60 @@ func TestPersistEventReturnsOriginalEventOnDedup(t *testing.T) {
 	edit, ok := projected.(EditEvent)
 	if !ok || edit.EventCursor != 0 {
 		t.Fatalf("deduplicated delivery must project the original unstamped event, got %+v", projected)
+	}
+}
+
+type staticReplayArtifacts []CompactionArtifact
+
+func (a staticReplayArtifacts) ActiveCompactionArtifacts(context.Context, string, string) ([]CompactionArtifact, error) {
+	return a, nil
+}
+
+func TestLoadEventsForReplayPassesFrontierAndRestoresChronologicalOrder(t *testing.T) {
+	t.Parallel()
+	sessionID := "66666666-6666-6666-6666-666666666666"
+	makeRow := func(id string, receivedAt int64, messageID string) sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow {
+		event := MessageEvent{SessionID: sessionID, MessageID: messageID, ReceivedAtMs: receivedAt, Content: []ContentNode{{Type: "text", Text: messageID}}}
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pgID, err := dbpkg.ParseUUID(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow{
+			ID: pgID, EventKind: string(EventMessage), EventData: data,
+			ReceivedAtMs: receivedAt, PayloadBytes: int64(len(data)), CumulativeBytes: int64(len(data) * 2),
+		}
+	}
+	queries := &fakeEventQueries{
+		eventCount: 3,
+		replayRows: []sqlc.ListSessionEventsBySessionPageBeforeWithinBytesRow{
+			makeRow("55555555-5555-5555-5555-555555555552", 20, "new"),
+			makeRow("55555555-5555-5555-5555-555555555551", 10, "old"),
+		},
+	}
+	store := NewEventStore(slog.New(slog.DiscardHandler), queries)
+	store.SetReplayArtifactProvider(staticReplayArtifacts{{
+		ID: "artifact", Summary: "covered", CoverageAsOfMs: 15,
+		Sources: []CompactionSource{{ExternalMessageID: "covered-message", CreatedAtMs: 5}},
+	}})
+	events, err := store.LoadEventsForReplay(context.Background(), "77777777-7777-7777-7777-777777777777", sessionID)
+	if err != nil {
+		t.Fatalf("LoadEventsForReplay() error = %v", err)
+	}
+	if len(events) != 2 || events[0].(MessageEvent).MessageID != "old" || events[1].(MessageEvent).MessageID != "new" {
+		t.Fatalf("events not chronological: %#v", events)
+	}
+	if len(queries.replayParams) != 1 {
+		t.Fatalf("query calls = %d, want 1", len(queries.replayParams))
+	}
+	var coverage map[string]int64
+	if err := json.Unmarshal(queries.replayParams[0].CoveredExternalMessages, &coverage); err != nil {
+		t.Fatalf("decode coverage: %v", err)
+	}
+	if coverage["covered-message"] != 15 {
+		t.Fatalf("coverage = %#v", coverage)
 	}
 }

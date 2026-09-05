@@ -1,4 +1,4 @@
-import type { Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import {
   fetchSession,
   fetchSessions,
@@ -27,7 +27,24 @@ export function createSessionActivity(deps: {
   refreshSessionsList: (botId: string) => Promise<void>
 }) {
   const visibleSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
+  const compactingSessions = ref<Record<string, string[]>>({})
+  const manualCompactions = ref(new Map<string, symbol>())
   let loadMoreRequestVersion = 0
+
+  function isSessionCompacting(botId: string, sessionId: string): boolean {
+    return manualCompactions.value.has(`${botId}\u0000${sessionId}`)
+      || (compactingSessions.value[botId]?.includes(sessionId) ?? false)
+  }
+
+  function beginSessionCompaction(botId: string, sessionId: string): (() => void) | null {
+    if (!botId || !sessionId || isSessionCompacting(botId, sessionId)) return null
+    const key = `${botId}\u0000${sessionId}`
+    const request = Symbol()
+    manualCompactions.value.set(key, request)
+    return () => {
+      if (manualCompactions.value.get(key) === request) manualCompactions.value.delete(key)
+    }
+  }
 
   async function ensureSessionSummary(
     botId: string,
@@ -123,6 +140,10 @@ export function createSessionActivity(deps: {
   }
 
   function handleActivity(botId: string, event: BotSessionActivityEvent) {
+    if (event.type === 'session_compaction') {
+      compactingSessions.value[botId] = event.session_ids
+      return
+    }
     if (event.type === 'ping') return
     if (event.type === 'dropped') {
       void deps.refreshSessionsList(botId)
@@ -157,7 +178,11 @@ export function createSessionActivity(deps: {
     ensureVisibleSessionSummary,
     loadMoreSessions,
     handleActivity,
+    isSessionCompacting,
+    beginSessionCompaction,
     reset: () => {
+      compactingSessions.value = {}
+      manualCompactions.value.clear()
       visibleSummaryRequests.clear()
       loadMoreRequestVersion += 1
       deps.loadingMoreSessions.value = false

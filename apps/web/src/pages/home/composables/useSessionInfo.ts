@@ -73,14 +73,17 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   // invalidation of this composable's own query.
   const { t } = useI18n()
   const queryCache = useQueryCache()
-  const isCompacting = ref(false)
+  const isCompacting = computed(() => chatStore.isSessionCompacting(
+    currentBotId.value ?? '', sessionId.value ?? '',
+  ))
 
   async function triggerCompact() {
     const botId = currentBotId.value
     const sid = sessionId.value
-    if (!botId || !sid || isCompacting.value) return
+    if (!botId || !sid) return
+    const finish = chatStore.beginSessionCompaction(botId, sid)
+    if (!finish) return
 
-    isCompacting.value = true
     try {
       await postBotsByBotIdSessionsBySessionIdCompact({
         path: { bot_id: botId, session_id: sid },
@@ -93,7 +96,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
       toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
     }
     finally {
-      isCompacting.value = false
+      finish()
     }
   }
 

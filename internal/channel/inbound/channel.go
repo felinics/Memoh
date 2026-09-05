@@ -856,8 +856,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	var latestRC timeline.RenderedContext
 	var eventID string
 	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
-		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
-			p.replayPipelineSession(ctx, sessionID)
+		if !p.pipeline.HasSession(sessionID) {
+			p.replayPipelineSession(ctx, identity.BotID, sessionID)
 		}
 		pipelineMsg := msg
 		pipelineMsg.Message = msg.Message
@@ -3100,11 +3100,11 @@ func isLocalChannelType(ct channel.ChannelType) bool {
 
 // replayPipelineSession loads persisted events from the DB and replays them
 // into the pipeline. Called lazily on first access per session after cold start.
-func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, sessionID string) {
+func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) {
 	if p.eventStore == nil || p.pipeline == nil {
 		return
 	}
-	events, err := p.eventStore.LoadEvents(ctx, sessionID)
+	events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Warn("pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))

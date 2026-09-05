@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
@@ -109,18 +110,11 @@ func (s *Service) sessionModelPreference(ctx context.Context, sessionID string) 
 	return modelID, effort
 }
 
-// writeBackSessionModelPreference is the per-turn write-back (issue #879,
-// spec v2 §3.3). The gate is data, not entry: carriesPair is true only when
-// the request itself carried model/effort — the web composer omits them when
-// the pair is default-sourced (never picked), and channel requests
-// structurally never carry them, so both keep the session's columns NULL and
-// follow the bot default live. The written value is the RESOLVED pair (the
-// chain above has already reconciled it: request wins, so chatModel IS the
-// carried model, validated). The UPDATE is skipped when the stored pair
-// (loaded once at resolve time) already matches, so steady state costs no
-// writes. Best-effort: a failed write is logged, never fails the turn — the
-// next send is the retry (P7′).
-func (s *Service) writeBackSessionModelPreference(ctx context.Context, sessionIDRaw string, carriesPair bool, chatModel models.GetResponse, reasoning *models.ReasoningConfig, storedModelID, storedEffort string) {
+// writeBackSessionModelPreference persists the resolved pair only when the
+// request carries one. Every carried send advances the revision, even when
+// its value matches, so an older picker PATCH cannot overwrite that send.
+// Writes remain best-effort: failures are logged and the next send retries.
+func (s *Service) writeBackSessionModelPreference(ctx context.Context, sessionIDRaw string, carriesPair bool, chatModel models.GetResponse, reasoning *models.ReasoningConfig) {
 	if !carriesPair {
 		return
 	}
@@ -144,9 +138,8 @@ func (s *Service) writeBackSessionModelPreference(ctx context.Context, sessionID
 			effort = "disable"
 		}
 	}
-	if strings.EqualFold(storedModelID, modelID.String()) && storedEffort == effort {
-		return
-	}
+	// Every carried send advances the revision, including an unchanged pair.
+	// Otherwise a picker still comparing against this revision could overwrite it.
 	if err := s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
 		ID:                       sessionID,
 		PreferredChatModelID:     modelID,
@@ -204,7 +197,7 @@ func (s *Service) ReconcileSessionModelPreference(ctx context.Context, botID, mo
 // against the model the session would actually use. An explicit but
 // unresolvable/empty model reference is an error (the FK would reject it
 // anyway; fail loudly instead of degrading).
-func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort *string) error {
+func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort, expectedRevision *string) error {
 	sessionUUID, err := db.ParseUUID(sessionID)
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
@@ -224,18 +217,49 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 	targetEffort := ""
 	if effort != nil {
 		targetEffort = strings.TrimSpace(*effort)
-	} else if sess.PreferredReasoningEffort.Valid {
+	} else if (modelRef == nil || strings.TrimSpace(*modelRef) == "") && sess.PreferredReasoningEffort.Valid {
 		targetEffort = strings.TrimSpace(sess.PreferredReasoningEffort.String)
 	}
 
-	reconciledModelID, reconciledEffort, err := s.ReconcileSessionModelPreference(ctx, botID, modelID, targetEffort)
+	var nativeID pgtype.UUID
+	var externalID pgtype.Text
+	var reconciledEffort string
+	switch {
+	case sessionpkg.IsDirectRuntimeType(sess.RuntimeType):
+		if modelRef == nil || strings.TrimSpace(*modelRef) == "" {
+			modelID = db.TextToString(sess.PreferredExternalModelID)
+		}
+		modelID, reconciledEffort, err = s.reconcileDirectModelPreference(ctx, sess.BotID.String(), sess.BotAgentID.String(), sess.RuntimeType, modelID, targetEffort)
+		externalID = pgtype.Text{String: modelID, Valid: modelID != ""}
+	case sess.RuntimeType == sessionpkg.RuntimeACPAgent:
+		return errors.New("ACP preferences must be changed through the ACP runtime")
+	default:
+		modelID, reconciledEffort, err = s.ReconcileSessionModelPreference(ctx, botID, modelID, targetEffort)
+		nativeID = db.ParseUUIDOrEmpty(modelID)
+	}
 	if err != nil {
 		return err
 	}
+	value := pgtype.Text{String: reconciledEffort, Valid: reconciledEffort != ""}
+	if expectedRevision != nil {
+		revision, parseErr := parsePreferenceRevision(*expectedRevision)
+		if parseErr != nil {
+			return parseErr
+		}
+		n, writeErr := s.queries.CompareAndSetSessionModelPreference(ctx, sqlc.CompareAndSetSessionModelPreferenceParams{
+			ID: sessionUUID, RuntimeType: sess.RuntimeType, ExpectedRevision: revision,
+			PreferredChatModelID: nativeID, PreferredExternalModelID: externalID, PreferredReasoningEffort: value,
+		})
+		if writeErr != nil {
+			return writeErr
+		}
+		if n == 0 {
+			return ErrModelPreferenceConflict
+		}
+		return nil
+	}
 	return s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
-		ID:                       sessionUUID,
-		PreferredChatModelID:     db.ParseUUIDOrEmpty(reconciledModelID),
-		PreferredReasoningEffort: pgtype.Text{String: reconciledEffort, Valid: reconciledEffort != ""},
+		ID: sessionUUID, PreferredChatModelID: nativeID, PreferredExternalModelID: externalID, PreferredReasoningEffort: value,
 	})
 }
 
@@ -320,4 +344,14 @@ func (s *Service) listCandidates(ctx context.Context, providerFilter string) ([]
 		}
 	}
 	return filtered, nil
+}
+
+// ErrModelPreferenceConflict means a picker read predates a newer write.
+var ErrModelPreferenceConflict = errors.New("session model preference changed")
+
+func parsePreferenceRevision(value string) (pgtype.UUID, error) {
+	if strings.TrimSpace(value) == "" {
+		return pgtype.UUID{}, nil
+	}
+	return db.ParseUUID(value)
 }

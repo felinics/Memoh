@@ -57,6 +57,8 @@ type Thread struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 	// Preferred* is the session's persisted (model, effort) pair (issue #879).
 	// Empty means "no memory"; the composer reseeds from it on open/repoint.
+	PreferredExternalModelID string         `json:"preferred_external_model_id,omitempty"`
+	ModelPreferenceRevision  string         `json:"model_preference_revision,omitempty"`
 	PreferredChatModelID     string         `json:"preferred_chat_model_id,omitempty"`
 	PreferredReasoningEffort string         `json:"preferred_reasoning_effort,omitempty"`
 	RouteMetadata            map[string]any `json:"route_metadata,omitempty"`
@@ -1608,6 +1610,8 @@ func toThread(row sqlc.BotSession) Thread {
 		CreatedAt:                row.CreatedAt.Time,
 		UpdatedAt:                row.UpdatedAt.Time,
 		Visibility:               storedVisibility(row.Visibility, sessionMode),
+		PreferredExternalModelID: dbpkg.TextToString(row.PreferredExternalModelID),
+		ModelPreferenceRevision:  uuidText(row.ModelPreferenceRevision),
 		PreferredChatModelID:     prefModelID,
 		PreferredReasoningEffort: prefEffort,
 	}
@@ -1973,6 +1977,8 @@ func toThreadFromListRow(row sqlc.ListSessionsByBotRow) Thread {
 		CreatedAt:                row.CreatedAt.Time,
 		UpdatedAt:                row.UpdatedAt.Time,
 		Visibility:               storedVisibility(row.Visibility, sessionMode),
+		PreferredExternalModelID: dbpkg.TextToString(row.PreferredExternalModelID),
+		ModelPreferenceRevision:  uuidText(row.ModelPreferenceRevision),
 		PreferredChatModelID:     uuidText(row.PreferredChatModelID),
 		PreferredReasoningEffort: dbpkg.TextToString(row.PreferredReasoningEffort),
 	}
@@ -2010,6 +2016,8 @@ func toThreadFromUserListRow(row sqlc.ListSessionsByBotAndCreatedByUserRow) Thre
 		CreatedAt:                row.CreatedAt.Time,
 		UpdatedAt:                row.UpdatedAt.Time,
 		Visibility:               storedVisibility(row.Visibility, sessionMode),
+		PreferredExternalModelID: dbpkg.TextToString(row.PreferredExternalModelID),
+		ModelPreferenceRevision:  uuidText(row.ModelPreferenceRevision),
 		PreferredChatModelID:     uuidText(row.PreferredChatModelID),
 		PreferredReasoningEffort: dbpkg.TextToString(row.PreferredReasoningEffort),
 	}
@@ -2023,6 +2031,7 @@ func toThreadFromPagedRow(row sqlc.ListSessionsByBotPagedRow) Thread {
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		PreferredChatModelID: row.PreferredChatModelID, PreferredReasoningEffort: row.PreferredReasoningEffort,
+		PreferredExternalModelID: row.PreferredExternalModelID, ModelPreferenceRevision: row.ModelPreferenceRevision,
 	})
 }
 
@@ -2034,6 +2043,7 @@ func toThreadFromUserPagedRow(row sqlc.ListSessionsByBotAndCreatedByUserPagedRow
 		ParentThreadID: row.ParentSessionID, CreatedByUserID: row.CreatedByUserID, WorkdirID: row.WorkdirID,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		PreferredChatModelID: row.PreferredChatModelID, PreferredReasoningEffort: row.PreferredReasoningEffort,
+		PreferredExternalModelID: row.PreferredExternalModelID, ModelPreferenceRevision: row.ModelPreferenceRevision,
 	})
 }
 
@@ -2060,6 +2070,8 @@ type pagedColumns struct {
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
 	// Preferred* columns: the session's persisted pair (issue #879).
+	PreferredExternalModelID pgtype.Text
+	ModelPreferenceRevision  pgtype.UUID
 	PreferredChatModelID     pgtype.UUID
 	PreferredReasoningEffort pgtype.Text
 }
@@ -2096,6 +2108,8 @@ func threadFromPagedColumns(c pagedColumns) Thread {
 		CreatedAt:                c.CreatedAt.Time,
 		UpdatedAt:                c.UpdatedAt.Time,
 		Visibility:               storedVisibility(c.Visibility, sessionMode),
+		PreferredExternalModelID: dbpkg.TextToString(c.PreferredExternalModelID),
+		ModelPreferenceRevision:  uuidText(c.ModelPreferenceRevision),
 		PreferredChatModelID:     uuidText(c.PreferredChatModelID),
 		PreferredReasoningEffort: dbpkg.TextToString(c.PreferredReasoningEffort),
 	}

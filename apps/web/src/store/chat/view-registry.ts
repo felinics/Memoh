@@ -1,4 +1,5 @@
 import { ref, type Ref } from 'vue'
+import { createComposerPairSync } from './composer-pair-sync'
 import { createTranscriptController, type TranscriptDeps } from './transcript'
 import type {
   ChatMessage,
@@ -33,6 +34,7 @@ export interface ChatViewEntry {
   // drives the carry/omit rule: 'user' and 'session' pairs are sent with
   // messages; 'default' and 'unset' are omitted, so the server can tell
   // "never picked" apart from "picked the default".
+  pairSync: ReturnType<typeof createComposerPairSync>
   pairModelId: Ref<string>
   pairEffort: Ref<string>
   pairSource: Ref<ChatWorkspaceTargetSelectionSource>
@@ -136,6 +138,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       workspaceTargetId: ref(''),
       workspaceTargetSnapshot: ref(null),
       workspaceTargetSelectionSource: ref('unset'),
+      pairSync: createComposerPairSync(),
       pairModelId: ref(''),
       pairEffort: ref(''),
       pairSource: ref('unset'),
@@ -302,6 +305,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       // The pair follows the draft into the session view (P9′): the composer
       // keeps the first-send pair with no flash back to the bot default.
       if (draft.pairSource.value !== 'unset') {
+        existing.pairSync = draft.pairSync
         existing.pairModelId.value = draft.pairModelId.value
         existing.pairEffort.value = draft.pairEffort.value
         existing.pairSource.value = draft.pairSource.value
@@ -331,6 +335,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       ? { ...draft.workspaceTargetSnapshot.value }
       : null
     replacement.workspaceTargetSelectionSource.value = draft.workspaceTargetSelectionSource.value
+    replacement.pairSync = draft.pairSync
     replacement.pairModelId.value = draft.pairModelId.value
     replacement.pairEffort.value = draft.pairEffort.value
     replacement.pairSource.value = draft.pairSource.value

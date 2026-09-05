@@ -147,6 +147,46 @@ func (f *fakeQueries) ListUncompactedMessagesBySession(_ context.Context, _ pgty
 	return f.uncompacted, nil
 }
 
+func (f *fakeQueries) MeasureUncompactedMessagesBySession(_ context.Context, _ pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
+	var bytes int64
+	for _, row := range f.uncompacted {
+		bytes += int64(len(row.Content) + len(row.Metadata) + len(row.Usage) + len(row.DisplayText.String))
+	}
+	count := int64(len(f.uncompacted))
+	if count == 0 && f.listStarted != nil {
+		count = 1
+	}
+	return sqlc.MeasureUncompactedMessagesBySessionRow{CandidateCount: count, CandidateBytes: bytes}, nil
+}
+
+func (f *fakeQueries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, _ sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
+	legacy, err := f.ListUncompactedMessagesBySession(ctx, pgtype.UUID{})
+	if err != nil {
+		return nil, err
+	}
+	return boundedRowsForTest(legacy), nil
+}
+
+func boundedRowsForTest(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.ListUncompactedMessagesBySessionWithinBytesRow {
+	converted := make([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, len(rows))
+	var cumulative int64
+	for i, row := range rows {
+		cumulative += int64(len(row.Content) + len(row.Metadata) + len(row.Usage) + len(row.DisplayText.String))
+		converted[i] = sqlc.ListUncompactedMessagesBySessionWithinBytesRow{
+			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
+			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
+			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
+			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
+			EventID: row.EventID, DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
+			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl,
+			Platform: row.Platform, CompactionEpoch: row.CompactionEpoch,
+			ConversationType: row.ConversationType, ConversationName: row.ConversationName, ReplyTarget: row.ReplyTarget,
+			CandidateCount: int64(len(rows)), CandidateBytes: cumulative, CumulativeBytes: cumulative,
+		}
+	}
+	return converted
+}
+
 func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
 	f.queryCalls = append(f.queryCalls, "assets")
 	return nil, nil

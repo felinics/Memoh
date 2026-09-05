@@ -80,6 +80,7 @@ const (
 	CodeUserInputForbidden                      Code = "user_input.forbidden"
 	CodeUserInputExpired                        Code = "user_input.expired"
 	CodeUserInputOperationFailed                Code = "user_input.operation_failed"
+	CodeSessionModelPreferenceConflict          Code = "session.model_preference_conflict"
 	CodeSessionBusy                             Code = "session_runtime.session_busy"
 	CodeSessionInvocationConflict               Code = "session_runtime.invocation_conflict"
 	CodeSessionHistoryInconsistent              Code = "session_runtime.history_inconsistent"
@@ -200,11 +201,11 @@ var catalog = map[Code]Definition{
 	},
 	CodeContextBudgetUnsatisfied: {
 		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "The model context window is too small for this request.",
+		Detail:     "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
 	},
 	CodeContextProtectedOverflow: {
 		HTTPStatus: http.StatusUnprocessableEntity,
-		Detail:     "Required context exceeds the model context budget.",
+		Detail:     "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.",
 	},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
@@ -435,6 +436,7 @@ var catalog = map[Code]Definition{
 	// A session runs one turn at a time, so this is ordinary backpressure and
 	// the same submission succeeds once the session frees up. It is the one
 	// conflict in this catalog that a client should retry unchanged.
+	CodeSessionModelPreferenceConflict: {HTTPStatus: http.StatusConflict, Detail: "The conversation model selection has changed. Refresh and try again."},
 	CodeSessionBusy: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "This conversation is still working on the previous message. Please try again shortly.",

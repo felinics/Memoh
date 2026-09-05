@@ -22,6 +22,8 @@ export interface SessionSummary {
   route_metadata?: Record<string, unknown>
   route_conversation_type?: string
   /** Session's persisted (model, effort) pair (issue #879); empty = no memory. */
+  preferred_external_model_id?: string
+  model_preference_revision?: string
   preferred_chat_model_id?: string
   preferred_reasoning_effort?: string
 }
@@ -58,12 +60,19 @@ export interface BotSessionActivityPingEvent {
   type: 'ping'
 }
 
+export interface SessionCompactionEvent {
+  type: 'session_compaction'
+  /** Complete, permission-filtered set of sessions currently compacting. */
+  session_ids: string[]
+}
+
 export type BotSessionActivityEvent =
   | SessionTouchedEvent
   | SessionTitleChangedEvent
   | SessionCreatedEvent
   | BotSessionActivityDroppedEvent
   | BotSessionActivityPingEvent
+  | SessionCompactionEvent
 
 export interface FetchMessagesOptions {
   limit?: number

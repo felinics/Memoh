@@ -27,6 +27,10 @@ type discussRunOutcome struct {
 	endedClean bool
 	skipped    bool
 	cancelled  bool
+	// recomposeRequested reports that the runtime compacted the thread
+	// synchronously instead of running the model; the worker must reload
+	// artifacts, rebuild the plan, and resubmit without advancing the cursor.
+	recomposeRequested bool
 }
 
 // Run starts one Agent turn and reduces its ordered event stream to the
@@ -55,6 +59,8 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 				}
 			case turn.DiscussEventSkipped:
 				outcome.skipped = true
+			case turn.DiscussEventRecompose:
+				outcome.recomposeRequested = true
 			default:
 				var streamEvent agentevent.StreamEvent
 				if decodeErr := json.Unmarshal(event.Payload, &streamEvent); decodeErr != nil {

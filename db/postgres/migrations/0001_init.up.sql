@@ -543,6 +543,8 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   -- updated_at (sidebar recency must not move on picker changes).
   preferred_chat_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   preferred_reasoning_effort TEXT,
+  preferred_external_model_id TEXT,
+  model_preference_revision UUID,
   -- visibility says whether the session belongs in user-facing session
   -- lists. Distinct from session_mode on purpose: schedule-created sessions
   -- keep session_mode='schedule' for prompt/tool gating but can be 'user'

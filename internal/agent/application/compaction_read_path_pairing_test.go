@@ -30,6 +30,32 @@ func (f *pairingQueries) ListUncompactedMessagesBySession(context.Context, pgtyp
 	return f.uncompacted, nil
 }
 
+func (f *pairingQueries) MeasureUncompactedMessagesBySession(context.Context, pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
+	return sqlc.MeasureUncompactedMessagesBySessionRow{CandidateCount: int64(len(f.uncompacted)), CandidateBytes: 1}, nil
+}
+
+func (f *pairingQueries) ListUncompactedMessagesBySessionWithinBytes(context.Context, sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
+	return compactionRowsForPairing(f.uncompacted), nil
+}
+
+func compactionRowsForPairing(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.ListUncompactedMessagesBySessionWithinBytesRow {
+	converted := make([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, len(rows))
+	for i, row := range rows {
+		converted[i] = sqlc.ListUncompactedMessagesBySessionWithinBytesRow{
+			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
+			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
+			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
+			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
+			EventID: row.EventID, DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
+			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl,
+			Platform: row.Platform, CompactionEpoch: row.CompactionEpoch,
+			ConversationType: row.ConversationType, ConversationName: row.ConversationName, ReplyTarget: row.ReplyTarget,
+			CandidateCount: int64(len(rows)), CandidateBytes: 1, CumulativeBytes: 1,
+		}
+	}
+	return converted
+}
+
 func (*pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {
 	return nil, nil
 }

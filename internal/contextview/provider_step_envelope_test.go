@@ -2,7 +2,6 @@ package contextview
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,7 +12,7 @@ import (
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
-func TestProviderStepReselectionFailsClosedForEnvelopeS3HugeResult(t *testing.T) {
+func TestProviderStepReselectionRescuesEnvelopeS3HugeResult(t *testing.T) {
 	t.Parallel()
 	const (
 		inputAllowance = 24_000
@@ -49,11 +48,17 @@ func TestProviderStepReselectionFailsClosedForEnvelopeS3HugeResult(t *testing.T)
 		ProviderTools:                tools,
 		ProviderInputAllowanceTokens: inputAllowance,
 	})
-	if !errors.Is(result.FatalError, contextfrag.ErrProtectedContextOverflow) {
-		t.Fatalf("step reselection error = %v, want protected overflow for the newest tool closure", result.FatalError)
+	if result.FatalError != nil {
+		t.Fatalf("step reselection error = %v, want the newest tool closure pruned instead of a failed run", result.FatalError)
 	}
-	if result.Messages != nil {
-		t.Fatalf("fatal envelope overflow returned provider messages: %#v", result.Messages)
+	if result.Messages == nil || result.ProtectedPruned != 1 {
+		t.Fatalf("huge protected result was not pruned: %+v", result)
+	}
+	if !reflect.DeepEqual(result.Messages[:len(prefix)], prefix) {
+		t.Fatalf("immutable prefix changed: %#v", result.Messages[:len(prefix)])
+	}
+	if got := contextfrag.ProviderEnvelopeTokens(system, result.Messages, tools); got > inputAllowance {
+		t.Fatalf("rescued provider payload = %d tokens, want <= allowance %d", got, inputAllowance)
 	}
 }
 
@@ -144,7 +149,7 @@ func TestProviderStepReselectionAllowsExactlyFittingProtectedEnvelopeSuffix(t *t
 		ProviderSystem:               system,
 		ProviderTools:                tools,
 		ProviderInputAllowanceTokens: allowance - 1,
-	}); !errors.Is(result.FatalError, contextfrag.ErrProtectedContextOverflow) {
-		t.Fatalf("one token short of the protected suffix must fail closed, got %v", result.FatalError)
+	}); result.FatalError != nil || result.ProtectedPruned != 1 {
+		t.Fatalf("one token short of the protected suffix must prune the result, got %+v", result)
 	}
 }

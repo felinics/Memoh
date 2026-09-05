@@ -28,14 +28,17 @@ var errEOFPattern = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
 // serverErrPattern matches "api error 5XX" where XX is any two digits.
 var serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
 
-// DefaultRetryConfig returns the default retry strategy: 10 attempts total,
-// first 5 fast (no delay), last 5 with exponential backoff.
+// DefaultRetryConfig returns the default retry strategy: 5 attempts total.
+// Only the first retry fires immediately — it absorbs network blips and
+// instant upstream rejections. Later attempts back off 1s→8s with jitter, so
+// a sustained overload window (typically tens of seconds) is ridden out
+// without hammering the upstream with a burst of immediate retries.
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
-		MaxAttempts:  10,
-		FastAttempts: 5,
+		MaxAttempts:  5,
+		FastAttempts: 1,
 		BaseDelay:    1 * time.Second,
-		MaxDelay:     30 * time.Second,
+		MaxDelay:     8 * time.Second,
 	}
 }
 
@@ -86,8 +89,15 @@ func retryDelay(attempt int, cfg RetryConfig) time.Duration {
 	}
 	delay := cfg.BaseDelay * time.Duration(1<<backoffIdx)
 	delay = min(delay, cfg.MaxDelay)
-	// Add jitter: random value in [0, delay/2), so final delay is in [delay/2, delay).
+	// Int64N panics on a non-positive argument, so a config that leaves the
+	// delay fields at (near-)zero values must never reach it. "No delay
+	// configured" means the same as a fast attempt: fire immediately.
+	half := delay / 2
+	if half <= 0 {
+		return 0
+	}
+	// Add jitter: random value in [0, half), so final delay is in [half, delay).
 	// math/rand is intentional here — cryptographic randomness is not needed for backoff jitter.
-	jitter := time.Duration(rand.Int64N(int64(delay / 2))) //nolint:gosec // G404: jitter does not need crypto/rand
-	return delay/2 + jitter
+	jitter := time.Duration(rand.Int64N(int64(half))) //nolint:gosec // G404: jitter does not need crypto/rand
+	return half + jitter
 }

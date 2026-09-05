@@ -1,16 +1,7 @@
 -- 0146_session_model_preference
--- Per-session persisted (chat model, reasoning effort) pair (issue #879,
--- spec v2).
---
--- Two columns on bot_sessions, logically one value: the session's current
--- pair. Written only when the pair carries an explicit source: the picker
--- PATCH, the first-send INSERT (createSession body), and the per-turn
--- write-back when the request itself carries the pair and it differs from
--- the stored value. Requests that omit the pair (frontend source=default)
--- never write, so sessions the user never picked on keep following the bot
--- default live. Channel /model and /reasoning CLEAR the pair (fall back to
--- the bot default chain); otherwise channels never write, so untouched
--- channel sessions keep both columns NULL. NULL/NULL = no memory.
+-- Persist native or direct-runtime model/effort preferences and an optimistic
+-- concurrency revision. Unselected sessions retain NULL preferences. Explicit
+-- sends always rotate the revision to fence older picker PATCH requests.
 --
 -- updated_at is deliberately NOT bumped on preference writes: the
 -- (bot_id, updated_at DESC) indexes drive sidebar recency, and a picker
@@ -33,7 +24,9 @@
 -- is lost. (0001 keeps the valid form — its team phase predates RLS.)
 ALTER TABLE public.bot_sessions
   ADD COLUMN IF NOT EXISTS preferred_chat_model_id UUID,
-  ADD COLUMN IF NOT EXISTS preferred_reasoning_effort TEXT;
+  ADD COLUMN IF NOT EXISTS preferred_reasoning_effort TEXT,
+  ADD COLUMN IF NOT EXISTS preferred_external_model_id TEXT,
+  ADD COLUMN IF NOT EXISTS model_preference_revision UUID;
 
 ALTER TABLE public.bot_sessions
   DROP CONSTRAINT IF EXISTS bot_sessions_preferred_chat_model_id_fkey,

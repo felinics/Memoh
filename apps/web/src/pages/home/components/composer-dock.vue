@@ -14,6 +14,7 @@
         :approvals="approvals"
         :command-panel="commandPanel"
         :error-message="errorMessage"
+        :compacting="compacting"
         class="mb-2"
         @select-command-item="emit('selectCommandItem', $event)"
         @dismiss-command="emit('dismissCommand')"
@@ -85,6 +86,7 @@ const props = defineProps<{
   commandPanel: CommandPanelData | null
   errorMessage: string
   pendingUserInput: UIUserInput | null
+  compacting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -94,7 +96,7 @@ const emit = defineEmits<{
 }>()
 
 const stackVisible = computed(() => Boolean(
-  props.errorMessage || props.commandPanel || props.approvals.length,
+  props.errorMessage || props.commandPanel || props.approvals.length || props.compacting,
 ))
 
 // Box-tier mutex: while an ask_user request is pending the capsule owns the

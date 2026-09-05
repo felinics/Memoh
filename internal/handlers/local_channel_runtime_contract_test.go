@@ -204,14 +204,14 @@ func TestLocalChannelRuntimeContractSendsOnlyErrorsToTheInitiatingSocket(t *test
 		rawRuntimeContractEvent(t, native.StreamEvent{
 			Type:  native.EventError,
 			Code:  string(apperror.CodeContextBudgetUnsatisfied),
-			Error: "The model context window is too small for this request.",
+			Error: "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
 		}),
 	)
 	events := collectRuntimeContractWSEvents(t, script, "error")
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want the error alone", events)
 	}
-	if events[0]["message"] != "The model context window is too small for this request." {
+	if events[0]["message"] != "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window." {
 		t.Fatalf("error event = %#v", events[0])
 	}
 	if events[0]["code"] != string(apperror.CodeContextBudgetUnsatisfied) {

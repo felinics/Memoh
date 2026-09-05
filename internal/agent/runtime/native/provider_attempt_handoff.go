@@ -2,6 +2,7 @@ package native
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -15,6 +16,7 @@ type preparedProviderAttempt struct {
 	snapshot          contextfrag.StepSnapshot
 	systemPrepended   bool
 	reselectionDetail string
+	protectedPruned   int
 	provenance        preparedMessageProvenance
 }
 
@@ -36,6 +38,7 @@ func (h *providerAttemptHandoff) stage(
 	snapshot contextfrag.StepSnapshot,
 	systemPrepended bool,
 	reselectionDetail string,
+	protectedPruned int,
 	provenanceValues ...preparedMessageProvenance,
 ) {
 	if h == nil {
@@ -50,6 +53,7 @@ func (h *providerAttemptHandoff) stage(
 		snapshot:          snapshot,
 		systemPrepended:   systemPrepended,
 		reselectionDetail: reselectionDetail,
+		protectedPruned:   protectedPruned,
 		provenance:        clonePreparedMessageProvenance(provenance),
 	}
 	h.mu.Unlock()
@@ -104,6 +108,12 @@ func (h *providerAttemptHandoff) publish(params sdk.GenerateParams) error {
 	h.cfg.ContextMutations.AppendStepSnapshot(pending.snapshot)
 	if pending.reselectionDetail != "" {
 		h.cfg.ContextMutations.Record(contextfrag.MutationLoopStepReselection, pending.reselectionDetail)
+	}
+	if pending.protectedPruned > 0 {
+		h.cfg.ContextMutations.Record(
+			contextfrag.MutationMidTaskPrune,
+			fmt.Sprintf("truncated=%d", pending.protectedPruned),
+		)
 	}
 	h.pending = nil
 	return nil

@@ -80,6 +80,13 @@ system_files_max_bytes = 32768
 # no configured context window the cap alone bounds the context. Raise it for
 # models with windows above the default; it can never be disabled.
 # context_absolute_max_tokens = 200000
+# Pre-turn synchronous compaction backstop on the discuss and pipeline-chat
+# paths: shadow | active | off. shadow (default) only logs would-have-fired
+# decisions; active compacts synchronously before the model call once raw
+# history reaches the hard threshold (adds one summarizer LLM call of latency
+# to that turn); off disables the backstop. The legacy history chat path keeps
+# its always-on synchronous backstop regardless of this setting.
+# sync_compaction = "shadow"
 
 [session_runtime]
 # Stores live run snapshots for WebSocket attach/reconnect. memory is best for

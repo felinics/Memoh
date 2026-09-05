@@ -1,7 +1,8 @@
-# Session 模型+推理强度持久化 · 设计稿(v2)
+# Session 模型+推理强度持久化 · 设计稿(v3)
 
 - **Issue:** memohai/Memoh#879 — [Web] Chat session 模型切换未持久化,刷新后回退 bot 默认模型
-- **状态:** v2 定稿 2026-09-02(v1 拍板于 2026-08-25 ~ 08-31;v1→v2 变更与依据见附录 A)。实现分支 `feat/session-model-preference` 基于 v1,需按 §6 调整
+- **v3 边界（2026-09-05）:** 重新进入先显示缓存并刷新；刷新期间允许按显示值发送，迟到读取不得覆盖该发送或新选择；持久化覆盖 native、generic ACP、Codex、Claude Code。
+- **状态:** v3 行为已确认，修复及相关自动验证已完成；全量前端类型检查尚未通过，真人 QA 尚未完成。v1→v2 历史见附录 A。
 - **参照:** lobe-chat PR #15933 / #18178(独立同构演化,见 §5)
 - **读法:** §1 用户路径是验收标准;§2 由路径推导机制;§3 技术设计由 §2 生成,每条机制能指出服务哪条路径。凡路径与技术冲突,以路径为准。代码位置以 main 头 cd496786c 附近为准,行号会漂。
 
@@ -20,7 +21,7 @@
 ### 1.0 两个概念
 
 - **对:** picker 的状态永远是一个完整的 **(模型, 强度)对**。改强度 = 只换强度分量;改模型 = 换掉整个对,强度落到新模型的默认档。发送、显示、记忆、播种全是完整对。
-- **来源:** 对有一个来源:`默认`(bot 默认 / subagent pin 自动填入,用户没碰过)、`记忆`(从 session 持久值读出)、`用户`(本机 picker 明确选择)。**只有 `记忆` 和 `用户` 来源的对会随消息发出并被记住;`默认` 来源的对不发出、不记忆。** 这是"选过"与"没选过"的分界。
+- **来源:** 对有一个来源:`默认`(bot 默认 / subagent pin 自动填入,用户没碰过)、`记忆`(从 session 持久值读出)、`用户`(本机 picker 明确选择)。**只有 `记忆` 和 `用户` 来源的对会随消息发出并被记住;`默认` 来源的对不发出、不记忆。** 刷新尚未完成时例外：发送冻结当前显示对并记住它，后台返回不能改写本次发送。
 
 ### 1.1 修复前路径(现状,逐条可复现)
 
@@ -43,8 +44,8 @@
 - **P2′ 会话隔离:** welcome 选 (2, high) 不发 → 打开历史 session(它的对是 (3, low))→ 显示 (3, low);回 welcome 仍 (2, high)(本机草稿)。welcome 选 (2, high) 发首条 → 新 session = (2, high);回 welcome 仍 (2, high)(此时它是"我最近 session 的对",多设备一致)。
 - **草稿不跨设备:** 电脑 welcome 的未发草稿,手机上看不到 → 手机显示服务端"我最近 session 的对"。
 - **P3′ 跨设备:** 桌面把某 session 换成 (2, high) → 手机打开 → 显示 (2, high) → 不碰 picker 直接发 → 用 (2, high)。
-- **P4′ pane 无关:** 关 tab 重开 / ephemeral 被顶后重开 / 切 bot 再切回 → session 显示它自己的对。
-- **P5′ ACP 不回退:** 换成含 max 的对,刷新/重开/进程重建 → 仍是 max。
+- **P4′ pane 无关:** 关 tab 重开 / ephemeral 被顶后重开 / 切 bot 再切回，先显示该会话缓存，再读取最新持久值。读取失败保留缓存；请求发出后的手动选择或发送使该读取失效，不覆盖新操作。
+- **P5′ 外部 Agent 不回退:** generic ACP、Codex、Claude Code 均持久化会话选择；刷新/重开/进程重建后仍使用已选择且目标模型支持的强度。
 - **P6′ 换模型=换整个对:** (2, high) 切模型到 5 → (5, 5 的默认档);切回 2 → (2, 2 的默认档),不恢复 high。**这是对现状的有意改变**,QA 基线标注。
 - **P7′ 弱网:** 换对 → 立即显示,永不弹回;任何一条消息被服务端接收后对永久生效(回答生成失败不影响)。残余窗口(已接受):换了、PATCH 失败、一条没发就刷新 → 回旧值。
 - **P8′ 多 tab:** 同一页面内(app 的 dockview 面板共享 JS 上下文),同一 session 的多个面板**显示同一个对**(改一处全变);两个浏览器标签页/跨设备不实时同步,**谁发消息谁赢**,刷新后一致。
@@ -60,7 +61,7 @@
 - **S2 welcome 是草稿态:** 未发的对只待在本机 welcome;一发就进新 session。
 - **S3 显式选择即记忆:** 只有来源为 `用户` 或 `记忆` 的对会被发送和记住。没有记忆的 session(渠道会话、从未选过的 web session)沿用 bot 默认链,与今天一致。
 - **S4 选了就显示:** picker 不回弹;落库失败不产生用户可见错误。
-- **S5 发送时捕获:** picker 显示的对 = 下一条消息用的对;运行中的 turn 不被追改。
+- **S5 发送时捕获:** picker 显示的对 = 下一条消息用的对；运行中的 turn 不被追改。刷新未完成也允许发送，发送按显示值形成显式快照并持久化（即使暂显值来自默认）；后台读取不能再改这次快照。正常已完成播种的默认来源仍不携带、不持久化。
 - **S6 对永远完整合法:** 任何写库/播种/回放出口,对都经 reconcile 成完整合法对;DB 不存非法对。
 
 ### 1.4 第一人称走查(九幕,人类 QA 剧本)
@@ -93,8 +94,8 @@
 | P2′ | 打开已有 session 只认它自己的对;repoint 一律重播种 |
 | P2′(回 welcome 显示刚发的对) | welcome 来源链(低→高):bot 默认 < **该 bot 且该用户最近一条有记忆的 native session 的对** < 本机未发草稿 |
 | P7′/S4 | picker 纯乐观;PATCH best-effort;不加重试队列,下一次发送就是重试 |
-| P7′(发了一条即永久)+ S3 | 写回的门是**数据**:请求携带对才写。前端按来源决定携带/省略(`默认` 省略)。渠道请求结构上从不携带,自然不写 |
-| P10′ | `默认` 来源的对不写库;读链里"记忆"为空时落 bot 默认,管理员改默认即时生效 |
+| P7′(发了一条即永久)+ S3 | 写回的门是**数据**:请求携带对才写。前端按来源决定携带/省略(`默认` 通常省略，刷新中的发送携带显示快照)。渠道请求结构上从不携带,自然不写 |
+| P10′ | 除刷新期间主动发送的快照外，`默认` 来源的对不写库;读链里"记忆"为空时落 bot 默认,管理员改默认即时生效 |
 | P9′ | session INSERT 时随行写入首发对,行诞生即完整;`session_created` 广播携带完整行 |
 | P8′ | 同浏览器多 tab 共享一个前端 view 状态;跨浏览器不同步 |
 | P11′ | 渠道 `/model` `/reasoning` 命中有记忆的 session 时清空该 session 的对 |
@@ -109,7 +110,8 @@
 - 语义:物理两列逻辑一个对,成对写、成对清。`NULL/NULL` = 无记忆。写 UPDATE 不碰 `updated_at`(侧栏按 `updated_at` 排序,picker 不能改变会话顺序)。
 - 强度词汇与 bot settings 一致:tier 字符串或 `"disable"`;不存空串。
 - **不加** `bot_history_messages.reasoning_effort`。
-- ACP session 两列恒 NULL,其对在 `runtime_metadata`(§3.6)。
+- generic ACP 的 native/external 模型列恒 NULL，其对在 `runtime_metadata`（§3.6）。Codex/Claude Code 的模型字符串存 `preferred_external_model_id TEXT`，与 `preferred_reasoning_effort` 成对，native UUID 列保持 NULL。
+- `model_preference_revision UUID` 可空、无默认值；既有行不回填。每次偏好写入生成新 revision，包含值相同的显式发送，用于拒绝旧 picker 写入。
 
 ### 3.2 每轮解析链(native)
 
@@ -132,9 +134,9 @@
 
 reconcile = `PatchSessionModelPreference` 现有逻辑:目标模型必须存在且 provider 启用;强度经 `reasoning.NormalizeSelection` 对目标模型校验,非法或空则落模型默认档;模型不支持推理则强度写 NULL。
 
-1. **PATCH** `PATCH /bots/:bot_id/sessions/:session_id`,body 新增 `preferred_chat_model_id` / `preferred_reasoning_effort`(与 title 等并列,可单独出现)。模型不可解析 → 400;强度非法 → 静默落默认档(200)。前端乐观显示,失败静默。
+1. **PATCH** `PATCH /bots/:bot_id/sessions/:session_id` 支持 `expected_model_preference_revision` 条件更新（空字符串匹配初始 NULL），冲突不落库。成功返回更新后的完整 session。单独更换模型时强度用新模型默认；单独更换强度时保留模型。旧 API 调用省略 revision 时仍允许无条件写入。body 新增 `preferred_chat_model_id` / `preferred_reasoning_effort`(与 title 等并列,可单独出现)。模型不可解析 → 400;强度非法 → 静默落默认档(200)。前端乐观显示,失败静默。
 2. **INSERT** `POST /bots/:bot_id/sessions` body 新增同名两字段(仅前端有 `用户`/`记忆` 来源时携带)。handler 先 reconcile 再传 `CreateInput`。WS 内建 `createWSChatSession` 同样接收 `msg.ModelID/ReasoningEffort` 作兜底。fork 继承源 session 两列。
-3. **每轮** 在 `resolve()` 中、`buildBaseRunConfig` 返回后:若 `req.Model != ""` 或 `req.ReasoningEffort != ""`(即请求携带),取解析出的 `chatModel.ID` 与 `reasoningConfig` 归一后的强度,**与读到的记忆比较,不同才 UPDATE**。比较口径:模型按 UUID;强度按归一值(`Active→Effort`,`Disabled→"disable"`,`nil→NULL`)。失败仅记日志。
+3. **每轮** 在 `resolve()` 中、`buildBaseRunConfig` 返回后:若 `req.Model != ""` 或 `req.ReasoningEffort != ""`(即请求携带),取解析出的 `chatModel.ID` 与 `reasoningConfig` 归一后的强度,**UPDATE 并推进 revision，即使对没有变化**。比较口径:模型按 UUID;强度按归一值(`Active→Effort`,`Disabled→"disable"`,`nil→NULL`)。失败仅记日志。
 4. **渠道清空** `internal/command` 的 `/model` 与 `/reasoning` 处理器,在写 bot settings 成功后,若 `cc.SessionID` 非空且该 session 两列非 NULL,则 `UpdateSessionModelPreference(NULL, NULL)`。两个命令都清整对(对是单值)。渠道确认文案不变。
 
 不做的写点:轮末/成功后写(失败轮会丢对,违反 P7′);入口标志位(冗余且已漏 retry/edit)。
@@ -143,22 +145,22 @@ reconcile = `PatchSessionModelPreference` 现有逻辑:目标模型必须存在�
 
 对搬到 `ChatViewEntry`(与 workspace target 并列):`pairModelId: Ref<string>`、`pairEffort: Ref<string>`、`pairSource: Ref<'unset'|'default'|'session'|'user'>`。chat-pane 的 `overrideModelId/overrideReasoningEffort` 与其播种/重置 watch 群删除;`chat-list.ts` 同名死代码删除。
 
-来源转移表:
+来源与异步操作分开管理：`pairSource` 决定携带语义，共享的同步状态记录本机操作代次、未确认选择和发送屏障。
 
 | 事件 | 动作 |
 |---|---|
-| view 绑定到已有 session,行已加载 | 两列非 NULL → 置 `session`;否则 pin 或 bot 默认 → `default` |
-| session 行晚于 view 到达(列表刷新)| 仅当当前 `source ∈ {unset, default}` 时按上行重播种;`user` 不被覆盖 |
-| PATCH 在飞期间行刷新 | 跳过重播种(pending 守卫) |
-| welcome view 初始化 | 本机草稿 → `user`;否则种子端点 → `session`(它是别的 session 的记忆,但语义上是"我要携带");否则 bot 默认 → `default` |
-| 用户选模型 | 整对换新(强度=新模型默认档),`user`;有 session 则 PATCH,welcome 则写草稿 |
-| 用户选强度 | 只换强度,`user`;同上写点 |
-| promoteDraft(welcome→新 session)| 对随 view 迁移(现有机制);清本机草稿 |
-| view 切换 bot | reset → `unset` |
-| native↔ACP 切换 | reset → `unset`,ACP 走 §3.6 |
-| bot 默认变更(settings 刷新)| 仅 `default` 来源跟随 |
+| 打开/切回 session | 先显示缓存；没有缓存时用已加载的 session 行，再请求最新行 |
+| 最新行返回 | 没有期间的新操作、没有本机未确认选择时更新整对；否则忽略 |
+| 用户选模型 | 模型和新模型默认强度组成新对；立即显示，排队保存 |
+| 用户选强度 | 保留模型、换强度；立即显示，排队保存 |
+| 保存 | 读取最新 revision 后条件 PATCH；本机已被新操作替代的排队请求不执行 |
+| 发送/retry/edit | 捕获显示对，使此前读取和未执行旧写入失效；无需等待旧 PATCH |
+| 发送期间再次选择 | 立即显示新选择，待该发送结束后保存；不追改运行中 turn |
+| PATCH 在发送后迟到 | 服务端 revision 不匹配，返回 `session.model_preference_conflict`，不写入 |
+| 默认改变 | 只有 default 来源跟随；明确发送的刷新快照属于 user/session 来源 |
+| welcome 首发 | native 对随 INSERT 保存；direct 对在首轮分发到 driver 前保存；generic ACP 在绑定/发送时保存 |
 
-发送规则(send / retry / edit 共用):`source ∈ {user, session}` → payload 携带 `model_id` + `reasoning_effort`;`default`/`unset` → 两字段省略。createSession 同规则。
+发送规则：已确认的 `user/session` 对携带；刷新期间发送也携带显示对，并转成显式来源。正常 `default/unset` 省略，以继续跟随 bot 默认。
 
 草稿:localStorage 键 `memoh:composer-pair:<botId>`,值 `{model_id, reasoning_effort}`,首发即清;与 `useComposerDrafts` 并列,不合并(它按 tab 键,对按 bot 键)。
 
@@ -168,15 +170,17 @@ reconcile = `PatchSessionModelPreference` 现有逻辑:目标模型必须存在�
 
 ### 3.5 多 tab
 
-同一页面内同 session 的 dockview 面板共享 `ChatViewEntry`,天然同步。两个浏览器标签页(独立 JS 上下文)与跨设备一样不做同步,谁发消息谁的对写库,刷新后收敛(P8′)。
+同一页面内同 session 的 dockview 面板共享 `ChatViewEntry` 与偏好同步状态，天然同步。两个浏览器标签页(独立 JS 上下文)与跨设备一样不做同步,谁发消息谁的对写库,刷新后收敛(P8′)。
 
-### 3.6 ACP
+### 3.6 外部 Agent
 
 - 存储:`runtime_metadata.acp_model_id`(string)与 `runtime_metadata.acp_reasoning_effort`(string)。不进两列(ACP 模型 id 是 agent 命名空间字符串,不是 `models` UUID)。
-- PATCH 端点 `SetModel` / `SetReasoning`(`handlers/acp_runtime.go`)在 `pool.SetX` 成功后,把 agent 自报的当前值经 `sessionService.UpdateDescriptorAndMetadata...` 合并写入 `runtime_metadata`(只改这两个键)。失败仅日志。
+- generic ACP 在 runtime 操作锁内，将 agent 自报的模型/强度合并写入 `runtime_metadata`。覆盖 setter、草稿 runtime 绑定会话、发送应用配置后的路径；空值删除对应键。失败记录日志，保留活体进程的真实状态。
 - 挂点:`session_pool.startRuntime` 内、`client.Start` 返回后(即 `client/session.go` 已应用 profile 默认之后),读 `runtime_metadata` 两键:有值则 `SetModel` / `SetReasoningEffort`(先模型后强度,同 `applyPromptConfig` 顺序);值不可用(agent 拒绝)则日志并保留 agent 值。resume 路径同一挂点。
 - 前端 ACP composer 现状:PATCH 失败回滚并显示错误。**保留**,因为 ACP 端点是同步操作活体进程、有真实失败语义;S4"永不弹回"只约束 native 路径。
 - ACP 会话不参与 §3.4 种子查询(runtime_type 已排除)。
+
+Codex/Claude Code 使用 direct runtime 自己的 model catalog 校验 ID 与强度；picker 通过同一 session PATCH 保存，首发与后续显式发送在 driver 分发前保存。没有请求覆盖时读取会话持久对，空对仍由 driver 使用 Agent 配置。模型 ID 不进入 native 外键，偏好写入不修改 driver 的 thread/session metadata。schedule 触发轮跳过会话偏好。更换 session 的 runtime 或 Agent 时清空旧偏好并推进 revision，避免跨模型命名空间复用。
 
 ### 3.7 非目标
 
@@ -201,7 +205,7 @@ S1–S6 每条被 §1.2 覆盖;P1′–P11′ 每条能沿 §3 推出唯一确�
 机制级测试:
 - 解析链五级顺序(含 pin 与记忆的先后、schedule 跳过、恢复轮读到记忆);`service_model_selection_test.go` 现有 `TestSelectChatModelFallsBackToSessionLastModel` 需加记忆一级用例。
 - `ResolveConfig` 新一级:记忆在 stored 之上 requested 之下;记忆不进 `ReasoningRequestedEffort`。
-- 写回条件:携带才写;渠道命令不携带不写;retry/edit 写;值相同不写;归一比较口径。
+- 写回条件:携带才写;渠道命令不携带不写;retry/edit 写;值相同的显式发送也更新 revision，拒绝旧 PATCH。
 - reconcile:非法档落默认档;不支持推理的模型强度落 NULL;模型不存在 400。
 - INSERT 随写 + `session_created` 行完整;fork 继承。
 - 渠道 `/model` `/reasoning` 清空。
@@ -262,7 +266,7 @@ S1–S6 每条被 §1.2 覆盖;P1′–P11′ 每条能沿 §3 推出唯一确�
 
 **QA** §4 全表。
 
-## 附录 A. 评审修订记录(2026-09-02,对照仓库现状)
+## 附录 A. v2 历史评审修订记录（v3 实现以正文为准）(2026-09-02,对照仓库现状)
 
 > 本附录记录 v1(2026-08-31 稿)到 v2(正文)的变化与判断依据,供审阅追溯;实现只看正文。附录中"修订前"指 v1,"修订后"即正文。
 

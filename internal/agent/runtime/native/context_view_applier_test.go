@@ -194,8 +194,8 @@ func TestContextViewStreamErrorUsesStablePublicContract(t *testing.T) {
 		wantCode string
 		wantText string
 	}{
-		{fmt.Errorf("%w: private cost", contextfrag.ErrProtectedContextOverflow), "context.protected_overflow", "Required context exceeds the model context budget."},
-		{fmt.Errorf("%w: private math", contextfrag.ErrBudgetUnsatisfied), "context.budget_unsatisfied", "The model context window is too small for this request."},
+		{fmt.Errorf("%w: private cost", contextfrag.ErrProtectedContextOverflow), "context.protected_overflow", "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."},
+		{fmt.Errorf("%w: private math", contextfrag.ErrBudgetUnsatisfied), "context.budget_unsatisfied", "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window."},
 		{errors.New("private collector failure"), "", publicContextPreparationError},
 	} {
 		event := contextViewStreamError(tt.err)
@@ -252,7 +252,7 @@ func TestStreamContextBudgetErrorIsPublicAndStopsBeforeProvider(t *testing.T) {
 		}
 	}
 	if len(events) != 1 || events[0].Code != "context.budget_unsatisfied" ||
-		events[0].Error != "The model context window is too small for this request." {
+		events[0].Error != "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window." {
 		t.Fatalf("error events = %#v", events)
 	}
 	if strings.Contains(events[0].Error, "window=31") {

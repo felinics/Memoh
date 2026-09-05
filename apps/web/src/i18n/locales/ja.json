@@ -131,8 +131,8 @@
       "reasoning_options_unavailable": "チャットModelの推論オプションを確認できませんでした。しばらくしてからもう一度お試しください。"
     },
     "context": {
-      "budget_unsatisfied": "モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。",
-      "protected_overflow": "必須コンテキストがモデルのコンテキスト予算を超えています。"
+      "budget_unsatisfied": "モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。/compact で古い履歴を要約するか、リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。",
+      "protected_overflow": "必須コンテキストがモデルのコンテキスト予算を超えています。/compact で古い履歴を要約するか、より大きなコンテキストウィンドウのモデルをお試しください。"
     },
     "agent": {
       "response_timeout": "モデルから時間内に応答がありませんでした。もう一度お試しください。",
@@ -226,6 +226,9 @@
       "encryption_unavailable": "この Server では Agent アカウントの保存が設定されていません。",
       "runtime_busy": "現在の応答が完了してから Agent アカウントを切り替えてください。",
       "materialization_failed": "Agent アカウントを準備できませんでした。もう一度お試しください。"
+    },
+    "session": {
+      "model_preference_conflict": "モデルの選択が別の場所で更新されました。再読み込みするか、メッセージを送信して現在の選択を適用してください。"
     },
     "session_runtime": {
       "session_busy": "このセッションはまだ前のメッセージを処理しています。しばらくしてからもう一度お試しください。",
@@ -649,7 +652,30 @@
       "steps": "{count} ステップ",
       "thought": "考え",
       "thoughtBriefly": "少し考えた",
-      "thoughtSeconds": "{seconds}秒考えました"
+      "thoughtSeconds": "{seconds}秒考えました",
+      "phase": {
+        "browse": { "ing": "探索中", "done": "探索しました" },
+        "edit": { "ing": "編集中", "done": "編集しました" },
+        "run": { "ing": "実行中", "done": "実行しました" },
+        "message": { "ing": "送信中", "done": "送信しました" },
+        "schedule": { "ing": "変更中", "done": "変更しました" },
+        "media": { "ing": "生成中", "done": "生成しました" },
+        "agent": { "ing": "委譲中", "done": "委譲しました" },
+        "gui": { "ing": "閲覧中", "done": "閲覧しました" },
+        "other": { "ing": "作業中", "done": "作業しました" }
+      },
+      "frag": {
+        "fileOperations": "ファイル操作 {count} 件",
+        "searches": "{count} 件の検索",
+        "commands": "{count} コマンド",
+        "messages": "{count} 件のメッセージ",
+        "schedules": "{count} 件のスケジュール",
+        "media": "{count} 個のメディアファイル",
+        "agents": "{count} のAgent",
+        "steps": "{count} ステップ",
+        "sites": "{count} 件のサイト"
+      },
+      "fragmentSeparator": "、"
     },
     "currentBot": "現在のBot",
     "inputPlaceholder": "質問を入力してください…",
@@ -1061,6 +1087,7 @@
     "infoNoData": "利用可能なデータがありません",
     "compactNow": "今すぐコンパクトに",
     "compactSuccess": "コンテキストの圧縮が完了しました",
+    "compactingContext": "コンテキストを圧縮中…",
     "compactFailed": "コンテキストの圧縮に失敗しました",
     "sessionStreaming": "生成中",
     "slash": {

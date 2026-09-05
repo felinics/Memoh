@@ -356,6 +356,19 @@ func protectedHistoryTokenCost(tagged []TaggedFrag) int {
 	return total
 }
 
+// droppableHistoryTokenCost totals the units budget trimming may drop, so
+// the caller can tell whether trimming (and its notice) is even possible.
+func droppableHistoryTokenCost(tagged []TaggedFrag) int {
+	units := buildBudgetUnits(tagged)
+	total := 0
+	for i := range units {
+		if units[i].droppable {
+			total += units[i].tokens
+		}
+	}
+	return total
+}
+
 // hasSpatialBudgetDrop reports whether any drop reason came from budget
 // pressure rather than the unconditional orphan cut, so the trim notice
 // (which promises the model earlier or intervening messages were trimmed to

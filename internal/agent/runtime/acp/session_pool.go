@@ -152,6 +152,12 @@ type SessionDescriptorReader interface {
 	Get(ctx context.Context, sessionID string) (SessionDescriptor, error)
 }
 
+// SessionPreferenceWriter is implemented by the Chat adapter. ACP keeps its
+// agent-owned IDs in runtime metadata, independently of native model UUIDs.
+type SessionPreferenceWriter interface {
+	SaveModelPreference(ctx context.Context, sessionID, modelID, effort string) error
+}
+
 // runtimeHandle is the single owner of one agent process. All internal code
 // operates on handles resolved through the pool's tenancy gate - never on
 // bare string IDs - so cleanup can only ever touch the runtime it resolved.
@@ -601,6 +607,7 @@ func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, session
 	}
 	p.bySession[sessionID] = h.id
 	p.mu.Unlock()
+	p.persistModelPreference(opCtx, h)
 	return nil
 }
 
@@ -712,6 +719,7 @@ func (p *SessionPool) updateConfigOnHandle(
 		return RuntimeStatus{}, ErrRuntimeNotFound
 	}
 	if matches(sess) {
+		p.persistModelPreference(ctx, h)
 		return p.statusOf(h), nil
 	}
 
@@ -719,6 +727,7 @@ func (p *SessionPool) updateConfigOnHandle(
 	err := update(ctx, sess)
 	if err == nil {
 		h.setStatus(stateIdle)
+		p.persistModelPreference(ctx, h)
 		// Build the response before releasing h.op. Otherwise a concurrent
 		// setter can win the lock and make this request return its state.
 		return p.statusOf(h), nil
@@ -904,6 +913,8 @@ func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, inpu
 		return client.PromptResult{}, false, fmt.Errorf("%w: %w", ErrRuntimeConfigUpdateFailed, err)
 	}
 
+	p.persistModelPreference(ctx, h)
+
 	toolSink := newPromptToolEventSink(input.Sink, input.ToolOutputLimit)
 	unregisterToolSink := p.registerToolEventSink(input, toolSink)
 	defer unregisterToolSink()
@@ -1082,8 +1093,8 @@ func publicationHeadsEqual(a agentstate.SessionPublicationHead, aFound bool, b a
 }
 
 // rememberedACPPair reads the session's persisted ACP (model, effort) pair
-// from runtime_metadata (issue #879, spec v2 §3.6 — written by the PATCH
-// double-write in handlers). Missing/unreadable metadata is an empty pair,
+// from runtime_metadata, written under the runtime operation lock.
+// Missing/unreadable metadata is an empty pair,
 // never an error: a cold start must fall back to the profile defaults rather
 // than fail.
 func (p *SessionPool) rememberedACPPair(ctx context.Context, sessionID string) (string, string) {
@@ -2700,4 +2711,21 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// Caller holds h.op through both the live change and its durable write.
+func (p *SessionPool) persistModelPreference(ctx context.Context, h *runtimeHandle) {
+	writer, ok := p.store.(SessionPreferenceWriter)
+	if !ok {
+		return
+	}
+	h.state.Lock()
+	sessionID, sess := h.boundSession, h.session
+	h.state.Unlock()
+	if sessionID == "" || sess == nil {
+		return
+	}
+	if err := writer.SaveModelPreference(ctx, sessionID, strings.TrimSpace(sess.ModelState().CurrentModelID), strings.TrimSpace(sess.ReasoningState().CurrentEffort)); err != nil {
+		p.logger.Warn("persist ACP model preference", slog.String("session_id", sessionID), slog.Any("error", err))
+	}
 }

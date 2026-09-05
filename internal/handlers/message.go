@@ -31,17 +31,24 @@ import (
 
 // MessageHandler handles bot-scoped messaging endpoints.
 type MessageHandler struct {
-	messageService messagepkg.Service
-	sessionService *session.Service
-	runtimeResets  messageRuntimeResetService
-	messageEvents  messageevent.Subscriber
-	mediaService   *media.Service
-	botService     *bots.Service
-	accountService *accounts.Service
-	toolApproval   *toolapproval.Service
-	userInput      *userinput.Service
-	bgManager      *background.Manager
-	logger         *slog.Logger
+	messageService     messagepkg.Service
+	sessionService     *session.Service
+	runtimeResets      messageRuntimeResetService
+	messageEvents      messageevent.Subscriber
+	mediaService       *media.Service
+	botService         *bots.Service
+	accountService     *accounts.Service
+	toolApproval       *toolapproval.Service
+	userInput          *userinput.Service
+	bgManager          *background.Manager
+	projectionCache    messageProjectionCache
+	compactionActivity interface{ ActiveSessions(string) []string }
+	logger             *slog.Logger
+}
+
+type messageProjectionCache interface {
+	DropSession(sessionID string)
+	DropAll()
 }
 
 // runtimeResetService is intentionally a narrow handler-owned port. Clearing the
@@ -84,6 +91,14 @@ func NewMessageHandler(log *slog.Logger, messageService messagepkg.Service, sess
 // SetMediaService sets the optional media service for asset serving.
 func (h *MessageHandler) SetMediaService(svc *media.Service) {
 	h.mediaService = svc
+}
+
+func (h *MessageHandler) SetProjectionCache(cache messageProjectionCache) {
+	h.projectionCache = cache
+}
+
+func (h *MessageHandler) SetCompactionActivity(activity interface{ ActiveSessions(string) []string }) {
+	h.compactionActivity = activity
 }
 
 func (h *MessageHandler) SetToolApprovalService(svc *toolapproval.Service) {
@@ -706,6 +721,9 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 		if err := h.messageService.DeleteBySession(ctx, sessionID); err != nil {
 			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
 		}
+		if h.projectionCache != nil {
+			h.projectionCache.DropSession(sessionID)
+		}
 	} else {
 		ctx, release, resetErr := h.runtimeResets.BeginBotHistoryReset(ctx, botID)
 		if resetErr != nil {
@@ -714,6 +732,9 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 		defer release()
 		if err := h.messageService.DeleteByBot(ctx, botID); err != nil {
 			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
+		if h.projectionCache != nil {
+			h.projectionCache.DropAll()
 		}
 	}
 	return c.NoContent(http.StatusNoContent)

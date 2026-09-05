@@ -152,6 +152,7 @@ export const useChatStore = defineStore('chat', () => {
   const {
     ensureSessionSummary, ensureVisibleSessionSummary, loadMoreSessions,
     handleActivity: handleBotSessionsActivityEvent,
+    isSessionCompacting, beginSessionCompaction,
     reset: resetSessionActivity,
   } = createSessionActivity({
     currentBotId,
@@ -579,6 +580,7 @@ export const useChatStore = defineStore('chat', () => {
     initializeWorkspaceTargetSelection, resetWorkspaceTargetSelection,
     chatReadOnlyFor, chatCanForkFor, isChatViewStreaming,
     isChatViewCreatingSession, streaming, streamingSessionId,
+    isSessionCompacting, beginSessionCompaction,
     sessions, sessionsCursor, hasMoreSessions, loadingMoreSessions,
     loadMoreSessions, activeSession, knownSessions, knownSessionSummary,
     workdirSessionsFor, workdirSessionsState,

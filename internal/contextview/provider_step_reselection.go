@@ -2,6 +2,7 @@ package contextview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -47,7 +48,10 @@ func SelectProviderStepMessages(ctx context.Context, input agentpkg.ContextStepS
 
 	selector := &FragmentSelector{}
 	budget := input.BudgetMaxTokens
-	for attempt := 0; attempt <= len(frags)+1; attempt++ {
+	rescueLevels := protectedRescueLevels(input.KeepRecentToolResults)
+	protectedPruned := 0
+	maxAttempts := len(frags) + 1 + len(rescueLevels)
+	for attempt := 0; attempt <= maxAttempts; attempt++ {
 		attemptInput := input
 		attemptInput.BudgetMaxTokens = budget
 		selection := selector.Select(
@@ -56,13 +60,28 @@ func SelectProviderStepMessages(ctx context.Context, input agentpkg.ContextStepS
 			providerStepBudgetEnvelope(attemptInput),
 		)
 		if selection.FatalError != nil {
+			// A protected overflow would fail the whole run, so before failing
+			// closed the in-flight tool-result bodies are stubbed, newest last.
+			if errors.Is(selection.FatalError, contextfrag.ErrProtectedContextOverflow) {
+				pruned := 0
+				for pruned == 0 && len(rescueLevels) > 0 {
+					frags, pruned = truncateToolResultFragsKeeping(frags, rescueLevels[0])
+					rescueLevels = rescueLevels[1:]
+				}
+				if pruned > 0 {
+					protectedPruned += pruned
+					continue
+				}
+			}
 			return agentpkg.ContextStepSelectionResult{FatalError: selection.FatalError}
 		}
 
 		selected := selectedProviderStepFrags(selection, input.Scope)
-		truncated := 0
+		truncated := protectedPruned
 		if len(input.Messages) >= input.MinMessages {
-			selected, truncated = truncateOldToolResultFrags(selected, input.KeepRecentToolResults)
+			var cosmetic int
+			selected, cosmetic = truncateOldToolResultFrags(selected, input.KeepRecentToolResults)
+			truncated += cosmetic
 		}
 		changed := len(selection.Dropped) > 0 || truncated > 0
 		messages := input.Messages
@@ -85,6 +104,7 @@ func SelectProviderStepMessages(ctx context.Context, input agentpkg.ContextStepS
 				MessageSourceIndexesKnown: true,
 				Dropped:                   len(selection.Dropped),
 				Truncated:                 truncated,
+				ProtectedPruned:           protectedPruned,
 				DropReasons:               dropReasonHistogram(selection.Summary.DropReasons),
 			}
 		}
@@ -147,6 +167,15 @@ func messageHasNativeMediaPart(msg sdk.Message) bool {
 	return false
 }
 
+// protectedRescueLevels orders the keep-recent widths a protected-overflow
+// rescue walks through: the configured width first, then one cycle, then none.
+func protectedRescueLevels(keepRecent int) []int {
+	if keepRecent > 1 {
+		return []int{keepRecent, 1, 0}
+	}
+	return []int{1, 0}
+}
+
 // truncateOldToolResultFrags keeps the most recent keepRecent complete tool
 // cycles intact and replaces older bulky tool results with a size summary,
 // preserving the ToolResultPart shape so provider serializers stay happy.
@@ -155,6 +184,12 @@ func truncateOldToolResultFrags(frags []contextfrag.ContextFrag, keepRecent int)
 	if keepRecent <= 0 {
 		return frags, 0
 	}
+	return truncateToolResultFragsKeeping(frags, keepRecent)
+}
+
+// truncateToolResultFragsKeeping stubs every bulky tool result outside the
+// newest keep cycles; keep == 0 stubs them all.
+func truncateToolResultFragsKeeping(frags []contextfrag.ContextFrag, keep int) ([]contextfrag.ContextFrag, int) {
 	recentCycles := 0
 	cutoff := -1
 	for i := len(frags) - 1; i >= 0; i-- {
@@ -163,7 +198,7 @@ func truncateOldToolResultFrags(frags []contextfrag.ContextFrag, keepRecent int)
 			continue
 		}
 		recentCycles++
-		if recentCycles > keepRecent {
+		if recentCycles > keep {
 			cutoff = i
 			break
 		}

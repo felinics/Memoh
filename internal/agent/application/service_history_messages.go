@@ -18,15 +18,17 @@ import (
 // buildMessagesFromPipeline assembles chat context from the DCP pipeline's
 // RenderedContext (RC) merged with assistant/tool turns (TR) from
 // bot_history_messages. This gives chat mode the same event-driven context
-// that discuss mode uses, replacing the legacy loadMessages path.
-func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) []ModelMessage {
+// that discuss mode uses, replacing the legacy loadMessages path. The second
+// return value is the raw (compactable) token pressure measured before
+// trimming — what admission drops is exactly what compaction must cover.
+func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int) {
 	sessionID := strings.TrimSpace(req.ThreadID)
 	if s.pipeline == nil || sessionID == "" {
-		return nil
+		return nil, 0
 	}
 	rc := s.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
-		return nil
+		return nil, 0
 	}
 
 	trs := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
@@ -34,11 +36,12 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
-		return nil
+		return nil, 0
 	}
 
 	messages := make([]ModelMessage, 0, len(composed.Messages))
 	pinned := make([]bool, 0, len(composed.Messages))
+	compactable := 0
 	for _, m := range composed.Messages {
 		contentJSON := m.RawContent
 		if len(contentJSON) == 0 {
@@ -52,7 +55,11 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 			Role:    m.Role,
 			Content: contentJSON,
 		})
-		pinned = append(pinned, m.CompactionArtifactID != "")
+		isPinned := m.CompactionArtifactID != ""
+		pinned = append(pinned, isPinned)
+		if !isPinned {
+			compactable += estimateMessageTokens(messages[len(messages)-1])
+		}
 	}
 
 	// Apply context token budget trimming to pipeline path as well.
@@ -60,7 +67,7 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		messages = trimPipelineMessagesByTokens(s.logger, messages, pinned, contextTokenBudget)
 	}
 
-	return messages
+	return messages, compactable
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for

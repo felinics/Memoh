@@ -73,6 +73,23 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	defer cancel()
 
 	cache := newSessionCache(h.logger, h.sessionService)
+	// Subscribe before sampling: changes racing the snapshot remain queued.
+	// Re-sample on notification instead of replaying potentially stale payloads.
+	writeCompaction := func() error {
+		if h.compactionActivity == nil {
+			return nil
+		}
+		ids := h.visibleCompactingSessions(c.Request().Context(), channelIdentityID, botID, perms, cache)
+		return writeSSEJSON(writer, flusher, map[string]any{
+			"type": "session_compaction", "session_ids": ids,
+			// Older clients fall through to session_created for unknown types
+			// and trim session_id unconditionally. An empty id makes them ignore it.
+			"session_id": "",
+		})
+	}
+	if err := writeCompaction(); err != nil {
+		return nil
+	}
 
 	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
@@ -82,6 +99,10 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 		case <-c.Request().Context().Done():
 			return nil
 		case <-heartbeat.C:
+			// Also repairs missed notifications when a subscriber buffer overflowed.
+			if err := writeCompaction(); err != nil {
+				return nil
+			}
 			if err := writeSSEJSON(writer, flusher, map[string]any{"type": "ping"}); err != nil {
 				return nil
 			}
@@ -106,6 +127,10 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			}
 
 			switch event.Type {
+			case messageevent.EventTypeCompactionChanged:
+				if err := writeCompaction(); err != nil {
+					return nil
+				}
 			case messageevent.EventTypeMessageCreated:
 				var message messagepkg.Message
 				if err := json.Unmarshal(event.Data, &message); err != nil {
@@ -185,6 +210,18 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			}
 		}
 	}
+}
+
+func (h *MessageHandler) visibleCompactingSessions(ctx context.Context, userID, botID string, perms []string, cache *sessionCache) []string {
+	ids := make([]string, 0)
+	if h.compactionActivity != nil {
+		for _, id := range h.compactionActivity.ActiveSessions(botID) {
+			if canDeliverSessionActivity(ctx, userID, botID, perms, cache, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
 }
 
 // canDeliverSessionActivity returns true when the subscriber may see an

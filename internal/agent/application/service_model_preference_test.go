@@ -119,8 +119,8 @@ func TestResolveReasoningConfigSessionLevel(t *testing.T) {
 }
 
 // Write-back gate (spec §3.3): only a request that CARRIES the pair writes;
-// the write is skipped when the stored pair already matches; the stored value
-// is the resolved pair in its normalized vocabulary.
+// every carried pair rotates the revision; the stored value is the resolved
+// pair in its normalized vocabulary.
 func TestWriteBackSessionModelPreference(t *testing.T) {
 	ctx := context.Background()
 	const (
@@ -133,16 +133,7 @@ func TestWriteBackSessionModelPreference(t *testing.T) {
 	t.Run("request without the pair never writes", func(t *testing.T) {
 		fake := &modelSelectionFakeQueries{}
 		svc := newModelSelectionService(t, fake)
-		svc.writeBackSessionModelPreference(ctx, sessionID, false, chatModel, active, "", "")
-		if len(fake.updatedPrefs) != 0 {
-			t.Fatalf("writes = %d, want 0", len(fake.updatedPrefs))
-		}
-	})
-
-	t.Run("stored pair already matches: skipped", func(t *testing.T) {
-		fake := &modelSelectionFakeQueries{}
-		svc := newModelSelectionService(t, fake)
-		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, active, modelUUID, "high")
+		svc.writeBackSessionModelPreference(ctx, sessionID, false, chatModel, active)
 		if len(fake.updatedPrefs) != 0 {
 			t.Fatalf("writes = %d, want 0", len(fake.updatedPrefs))
 		}
@@ -151,7 +142,7 @@ func TestWriteBackSessionModelPreference(t *testing.T) {
 	t.Run("carried pair writes the resolved values", func(t *testing.T) {
 		fake := &modelSelectionFakeQueries{}
 		svc := newModelSelectionService(t, fake)
-		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, active, "", "")
+		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, active)
 		if len(fake.updatedPrefs) != 1 {
 			t.Fatalf("writes = %d, want 1", len(fake.updatedPrefs))
 		}
@@ -167,7 +158,7 @@ func TestWriteBackSessionModelPreference(t *testing.T) {
 	t.Run("disabled thinking stores the disable vocabulary", func(t *testing.T) {
 		fake := &modelSelectionFakeQueries{}
 		svc := newModelSelectionService(t, fake)
-		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, &models.ReasoningConfig{Disabled: true}, "", "")
+		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, &models.ReasoningConfig{Disabled: true})
 		if len(fake.updatedPrefs) != 1 || fake.updatedPrefs[0].PreferredReasoningEffort.String != "disable" {
 			t.Fatalf("writes = %+v, want one write with effort=disable", fake.updatedPrefs)
 		}
@@ -176,7 +167,7 @@ func TestWriteBackSessionModelPreference(t *testing.T) {
 	t.Run("reasoning-less model stores NULL effort", func(t *testing.T) {
 		fake := &modelSelectionFakeQueries{}
 		svc := newModelSelectionService(t, fake)
-		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, nil, "", "")
+		svc.writeBackSessionModelPreference(ctx, sessionID, true, chatModel, nil)
 		if len(fake.updatedPrefs) != 1 || fake.updatedPrefs[0].PreferredReasoningEffort.Valid {
 			t.Fatalf("writes = %+v, want one write with NULL effort", fake.updatedPrefs)
 		}
@@ -227,4 +218,29 @@ func TestSessionModelPreferenceHalfPair(t *testing.T) {
 			t.Fatalf("full pair = (%q, %q), want (%s, high)", modelID, effort, modelUUID.String())
 		}
 	})
+}
+
+func TestModelOnlyPatchUsesNewModelDefaultEffort(t *testing.T) {
+	provider := modelSelectionProviderRow(t, "00000000-0000-0000-0000-000000000610", "openai-completions", true)
+	old := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000611", "old", provider.ID, models.ModelTypeChat, true)
+	next := modelSelectionModelRow(t, "00000000-0000-0000-0000-000000000612", "next", provider.ID, models.ModelTypeChat, true)
+	next.Config = []byte(`{"thinking_mode":"toggle","reasoning_efforts":["low","medium","high"]}`)
+	fake := &modelSelectionFakeQueries{models: map[string]sqlc.Model{"old": old, "next": next}, provider: provider, session: sqlc.BotSession{ID: old.ID, PreferredChatModelID: old.ID, PreferredReasoningEffort: pgtype.Text{String: "high", Valid: true}}}
+	svc := newModelSelectionService(t, fake)
+	ref := next.ID.String()
+	_, defaultEffort, err := svc.ReconcileSessionModelPreference(context.Background(), "bot", ref, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = svc.PatchSessionModelPreference(context.Background(), "bot", "00000000-0000-0000-0000-000000000613", &ref, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.updatedPrefs) != 1 {
+		t.Fatal(fake.updatedPrefs)
+	}
+	got := fake.updatedPrefs[0].PreferredReasoningEffort.String
+	if got != defaultEffort {
+		t.Fatalf("model-only PATCH carried old effort %q; new model default is %q", got, defaultEffort)
+	}
 }

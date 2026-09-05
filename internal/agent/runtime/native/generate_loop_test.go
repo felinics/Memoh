@@ -258,6 +258,67 @@ func TestAgentGenerateRunsStepReselectorBeforeNextProviderCall(t *testing.T) {
 	}
 }
 
+func TestAgentGenerateRecordsMidTaskPruneForProtectedRescue(t *testing.T) {
+	t.Parallel()
+
+	ledger := contextfrag.NewMutationLedger()
+	modelProvider := &atomicMockProvider{
+		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			if call == 1 {
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "call-1",
+						ToolName:   "lookup",
+						Input:      map[string]any{"q": "one"},
+					}},
+				}, nil
+			}
+			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{
+		staticToolProvider{
+			tools: []sdk.Tool{{
+				Name:       "lookup",
+				Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+					return map[string]any{"answer": strings.Repeat("tool-result ", 64)}, nil
+				},
+			}},
+		},
+	})
+
+	_, err := a.Generate(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: modelProvider},
+		Messages:         []sdk.Message{sdk.UserMessage("start")},
+		SupportsToolCall: true,
+		Identity:         SessionContext{BotID: "bot-1"},
+		ContextMutations: ledger,
+		ContextStepReselector: func(_ context.Context, input ContextStepSelectionInput) ContextStepSelectionResult {
+			return ContextStepSelectionResult{
+				Messages:        append([]sdk.Message(nil), input.Messages...),
+				Truncated:       1,
+				ProtectedPruned: 1,
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	var pruneDetail string
+	for _, record := range ledger.Records() {
+		if record.Kind == contextfrag.MutationMidTaskPrune {
+			pruneDetail = record.Detail
+		}
+	}
+	if pruneDetail != "truncated=1" {
+		t.Fatalf("mutation records = %#v, want mid_task_prune with truncated=1", ledger.Records())
+	}
+}
+
 func TestAgentGeneratePassesRemainingBudgetToStepReselector(t *testing.T) {
 	t.Parallel()
 	const budget = 1_000

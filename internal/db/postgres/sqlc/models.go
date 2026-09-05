@@ -320,6 +320,8 @@ type BotSession struct {
 	RuntimeMetadata          []byte             `json:"runtime_metadata"`
 	PreferredChatModelID     pgtype.UUID        `json:"preferred_chat_model_id"`
 	PreferredReasoningEffort pgtype.Text        `json:"preferred_reasoning_effort"`
+	PreferredExternalModelID pgtype.Text        `json:"preferred_external_model_id"`
+	ModelPreferenceRevision  pgtype.UUID        `json:"model_preference_revision"`
 	Visibility               string             `json:"visibility"`
 	Title                    string             `json:"title"`
 	Metadata                 []byte             `json:"metadata"`
