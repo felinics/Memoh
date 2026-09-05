@@ -68,7 +68,8 @@ func (p providerStreamEventObserver) partEvent(part sdk.StreamPart) (StreamEvent
 	case *sdk.ToolInputStartPart, *sdk.StreamToolCallPart:
 		p.clock.firstToken()
 	case *sdk.FinishStepPart:
-		completed, ok := p.clock.finish(v.Usage, v.FinishReason)
+		usage := normalizeProviderUsage(p.Name(), v.Usage)
+		completed, ok := p.clock.finish(usage, v.FinishReason)
 		if !ok {
 			return StreamEvent{}, false
 		}
@@ -76,7 +77,7 @@ func (p providerStreamEventObserver) partEvent(part sdk.StreamPart) (StreamEvent
 		return StreamEvent{
 			Type:         EventStepEnd,
 			FinishReason: string(v.FinishReason),
-			Usage:        marshalUsage(v.Usage),
+			Usage:        marshalUsage(usage),
 			Timing:       &timing,
 		}, true
 	}

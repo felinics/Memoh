@@ -172,12 +172,45 @@ func (e *stepBoundaryEmitter) observe(part sdk.StreamPart) (StreamEvent, bool) {
 		if completed, ok := e.clock.takeCompleted(); ok {
 			timing := completed.Timing
 			ev.Timing = &timing
+			ev.Usage = marshalUsage(completed.Usage)
 		}
 		e.index++
 		return ev, true
 	default:
 		return StreamEvent{}, false
 	}
+}
+
+// anthropicMessagesProvider is the Twilight provider whose input_tokens omit
+// the cached prompt.
+const anthropicMessagesProvider = "anthropic-messages"
+
+// normalizeProviderUsage makes InputTokens count every prompt token the
+// provider billed, so a cache-hit ratio reads the same for every provider.
+// OpenAI-style providers already include cached tokens in the input count;
+// Anthropic reports input_tokens without cache reads and writes.
+func normalizeProviderUsage(providerName string, usage sdk.Usage) sdk.Usage {
+	if providerName != anthropicMessagesProvider {
+		return usage
+	}
+	cached := usage.InputTokenDetails.CacheReadTokens + usage.InputTokenDetails.CacheWriteTokens
+	if cached == 0 {
+		return usage
+	}
+	if usage.InputTokenDetails.NoCacheTokens == 0 {
+		usage.InputTokenDetails.NoCacheTokens = usage.InputTokens
+	}
+	usage.InputTokens += cached
+	usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+	return usage
+}
+
+// providerNameOf names the provider behind a model, or "" when unknown.
+func providerNameOf(model *sdk.Model) string {
+	if model == nil || model.Provider == nil {
+		return ""
+	}
+	return model.Provider.Name()
 }
 
 func marshalUsage(usage sdk.Usage) json.RawMessage {

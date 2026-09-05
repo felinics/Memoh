@@ -100,3 +100,58 @@ func TestProviderStreamObserverAbandonsAttemptWithoutFinish(t *testing.T) {
 		t.Fatalf("an attempt without finish-step must not complete")
 	}
 }
+
+type namedStreamProvider struct {
+	agentStreamTestProvider
+	name string
+}
+
+func (p namedStreamProvider) Name() string { return p.name }
+
+func TestProviderStreamObserverMakesAnthropicInputGross(t *testing.T) {
+	t.Parallel()
+
+	stream := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		return closedAgentTestStream(
+			&sdk.StartStepPart{},
+			&sdk.TextDeltaPart{ID: "text-1", Text: "hi"},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop, Usage: sdk.Usage{
+				InputTokens:       300,
+				OutputTokens:      40,
+				TotalTokens:       340,
+				CachedInputTokens: 30_000,
+				InputTokenDetails: sdk.InputTokenDetail{CacheReadTokens: 30_000, CacheWriteTokens: 100},
+			}},
+		), nil
+	})
+	for _, tc := range []struct {
+		name      string
+		wantInput int
+		wantTotal int
+	}{{anthropicMessagesProvider, 30_400, 30_440}, {"openai-responses", 300, 340}} {
+		clock := newStepClock(nil)
+		var end *StreamEvent
+		model := modelWithProviderStreamObserver(&sdk.Model{ID: "mock", Provider: namedStreamProvider{stream, tc.name}}, func(event StreamEvent) {
+			if event.Type == EventStepEnd {
+				end = &event
+			}
+		}, clock)
+		result, err := model.Provider.DoStream(context.Background(), sdk.GenerateParams{})
+		if err != nil {
+			t.Fatalf("%s: DoStream: %v", tc.name, err)
+		}
+		for range result.Stream {
+		}
+		var usage sdk.Usage
+		if end == nil || json.Unmarshal(end.Usage, &usage) != nil {
+			t.Fatalf("%s: step_end = %#v", tc.name, end)
+		}
+		if usage.InputTokens != tc.wantInput || usage.TotalTokens != tc.wantTotal || usage.CachedInputTokens != 30_000 || usage.InputTokenDetails.CacheWriteTokens != 100 {
+			t.Fatalf("%s: usage = %#v, want gross input %d", tc.name, usage, tc.wantInput)
+		}
+		completed, ok := clock.takeCompleted()
+		if !ok || completed.Usage.InputTokens != tc.wantInput {
+			t.Fatalf("%s: completed usage = %#v", tc.name, completed.Usage)
+		}
+	}
+}

@@ -22,8 +22,10 @@ type StepTraceMetadata struct {
 	Usage          *StepTraceUsage `json:"usage,omitempty"`
 }
 
-// StepTraceUsage mirrors the provider usage of one request. CachedInputTokens
-// counts the cache-read share of InputTokens, matching session status.
+// StepTraceUsage mirrors the provider usage of one request. InputTokens
+// counts every prompt token the provider billed, cache reads and writes
+// included, whatever the provider's own convention; CachedInputTokens is the
+// cache-read share of it.
 type StepTraceUsage struct {
 	InputTokens       int `json:"input_tokens,omitempty"`
 	CachedInputTokens int `json:"cached_input_tokens,omitempty"`

@@ -876,7 +876,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			finalMessages = annotateDeferredApproval(finalMessages, *streamResult.DeferredToolApproval)
 		}
 		finalMessages = toolExecutionMetadata.annotate(finalMessages)
-		totalUsage = aggregateStepUsage(streamResult.Steps)
+		totalUsage = normalizeProviderUsage(providerNameOf(cfg.Model), aggregateStepUsage(streamResult.Steps))
 	}
 	finalMessages = append(finalMessages, interruptedMessages...)
 	usageJSON, _ := json.Marshal(totalUsage)
