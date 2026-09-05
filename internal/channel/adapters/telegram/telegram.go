@@ -71,6 +71,7 @@ type TelegramAdapter struct {
 // askUserInteractionService is the slice of *userinput.Service the adapter
 // needs to drive ask_user buttons against the durable interaction state.
 type askUserInteractionService interface {
+	Get(ctx context.Context, requestID string) (userinput.Request, error)
 	AdvanceInteraction(ctx context.Context, input userinput.AdvanceInteractionInput) (userinput.AdvanceInteractionResult, error)
 	UpdatePromptMessage(ctx context.Context, requestID, promptMessageID, externalID string) (userinput.Request, error)
 }
@@ -855,13 +856,20 @@ func (a *TelegramAdapter) tryHandleAskUserTextReply(ctx context.Context, cfg cha
 		if err != nil && a.logger != nil {
 			a.logger.Warn("telegram: ask_user text answer failed", slog.Any("error", err))
 		}
+		if bot != nil {
+			key := "cmd.userInput.expired"
+			if err != nil {
+				key = "cmd.userInput.unavailable"
+			}
+			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), loc.T(key))
+		}
 		return true
 	}
 	if result.Reject != userinput.RejectNone {
 		// Rebind so the user can just reply again to the same prompt.
 		a.askUserPromptStore().put(raw.Chat.ID, raw.ReplyTo.ID, prompt)
-		if a.logger != nil {
-			a.logger.Debug("telegram: ask_user text answer rejected", slog.String("reject", string(result.Reject)))
+		if bot != nil {
+			_, _ = bot.Send(tele.ChatID(raw.Chat.ID), askUserRejectToast(loc, result.Reject))
 		}
 		return true
 	}
@@ -888,19 +896,39 @@ func askUserCardLocation(chatID int64, req userinput.Request) (int64, int) {
 	return chatID, msgID
 }
 
-// submitAskUser finalizes a completed interaction: freeze the card into a
-// summary, then dispatch a synthetic /respond continuation carrying the
-// structured answers from the durable state.
+// submitAskUser keeps the buttons usable until the server accepts the answer.
+// The persisted completed draft can be retried after a transient submit failure.
 func (a *TelegramAdapter) submitAskUser(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, update *tele.Update, loc *i18n.Localizer, req userinput.Request, cardChatID int64, cardMsgID int) {
-	if bot != nil && cardChatID != 0 && cardMsgID != 0 {
-		summary := formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
-		_ = editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil)
-	}
 	msg, ok := a.buildAskUserSubmitInbound(cfg, update, req, cardMsgID)
 	if !ok {
 		return
 	}
-	a.dispatchInbound(ctx, cfg, handler, msg)
+	a.logTelegramInbound(cfg.ID, msg)
+	go func() {
+		if err := a.finishAskUserSubmission(ctx, cfg, handler, bot, loc, req, msg, cardChatID, cardMsgID); err != nil && a.logger != nil {
+			a.logger.Warn("telegram: ask_user submit failed", slog.Any("error", err))
+		}
+	}()
+}
+
+func (a *TelegramAdapter) finishAskUserSubmission(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, msg channel.InboundMessage, cardChatID int64, cardMsgID int) error {
+	if err := handler(ctx, cfg, msg); err != nil {
+		return err
+	}
+	// Ingress can return nil after a permission denial. Only durable acceptance
+	// authorizes a submitted summary, never mere completion of the handler.
+	accepted, err := a.userInput.Get(ctx, req.ID)
+	if err != nil {
+		return err
+	}
+	if accepted.Status != userinput.StatusSubmitted {
+		return nil
+	}
+	if bot != nil && cardChatID != 0 && cardMsgID != 0 {
+		summary := formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
+		return editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil)
+	}
+	return nil
 }
 
 func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, update *tele.Update, req userinput.Request, cardMsgID int) (channel.InboundMessage, bool) {

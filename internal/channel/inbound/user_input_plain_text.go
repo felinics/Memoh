@@ -11,9 +11,9 @@ import (
 	"github.com/felinics/memoh/internal/i18n"
 )
 
-// handlePlainTextUserInput is the universal fallback for channels that do not
-// own a native ask_user interaction. In groups it only consumes messages that
-// explicitly target the bot; private conversations consume the next reply.
+// handlePlainTextUserInput accepts typed answers even on native button channels.
+// Group replies must explicitly target the bot; private conversations consume
+// the next reply.
 func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	ctx context.Context,
 	msg channel.InboundMessage,
@@ -23,7 +23,7 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	sessionID string,
 	text string,
 ) (bool, error) {
-	if p.channelCaps(msg.Channel).NativeUserInput || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(text) == "" || !isDirectedAtBot(msg) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(text) == "" || !isDirectedAtBot(msg) {
 		return false, nil
 	}
 	if p.turnSvc == nil {
@@ -56,13 +56,7 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 			),
 		})
 	}
-	if err := sender.Send(ctx, channel.OutboundMessage{
-		Target:  strings.TrimSpace(msg.ReplyTarget),
-		Message: plainTextUserInputSummary(result.Request, loc, strings.TrimSpace(msg.Message.ID)),
-	}); err != nil {
-		return true, err
-	}
-	return true, p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, responseRunner, turn.UserInputResponse{
+	err = p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, responseRunner, turn.UserInputResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		ThreadID:               strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -70,6 +64,13 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 		ExplicitID:             result.Request.ID,
 		Answers:                turnQuestionAnswers(result.Request.Interaction.Answers),
 		ChatToken:              p.issueChatToken(identity, routeID, msg),
+	})
+	if err != nil {
+		return true, err
+	}
+	return true, sender.Send(ctx, channel.OutboundMessage{
+		Target:  strings.TrimSpace(msg.ReplyTarget),
+		Message: plainTextUserInputSummary(result.Request, loc, strings.TrimSpace(msg.Message.ID)),
 	})
 }
 

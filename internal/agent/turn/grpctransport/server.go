@@ -235,6 +235,8 @@ func (s *Server) AdvancePlainTextUserInput(ctx context.Context, req *turnpb.Json
 
 func (s *Server) mapError(operation string, err error) error {
 	switch {
+	case errors.Is(err, turn.ErrSessionBusy):
+		return status.Error(codes.Aborted, "thread busy")
 	case errors.Is(err, turn.ErrDuplicateTurn):
 		return status.Error(codes.AlreadyExists, "duplicate turn")
 	case errors.Is(err, turn.ErrTeamNotServed):
@@ -259,4 +261,24 @@ func eventToProto(event turn.Event) *turnpb.EventResponse {
 		RunId: event.RunID, TeamId: event.TeamID, SessionId: event.ThreadID,
 		Seq: event.Seq, Kind: event.Kind, Payload: event.Payload,
 	}
+}
+
+func (s *Server) StopTurn(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
+	var cmd turn.StopCommand
+	if err := json.Unmarshal(req.GetJson(), &cmd); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid stop turn payload")
+	}
+	stopper, ok := s.service.(turn.Stopper)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "stop turn unavailable")
+	}
+	stopped, err := stopper.StopTurn(ctx, cmd)
+	if err != nil {
+		return nil, s.mapError("stop turn", err)
+	}
+	data, err := json.Marshal(stopped)
+	if err != nil {
+		return nil, s.mapError("encode stop turn", err)
+	}
+	return &turnpb.JsonResponse{Json: data}, nil
 }

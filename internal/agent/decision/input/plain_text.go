@@ -25,7 +25,7 @@ func (s *Service) AdvanceText(ctx context.Context, input AdvanceTextInput) (Adva
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	}
 	for attempt := 0; attempt < maxTextInteractionRetries; attempt++ {
-		req, err := s.ResolveTarget(ctx, resolve)
+		req, err := s.resolveInteractionTarget(ctx, resolve)
 		if errors.Is(err, ErrNotFound) {
 			return AdvanceTextResult{Handled: false}, nil
 		}

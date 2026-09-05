@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -839,5 +840,121 @@ func TestServiceAdvanceTextPersistsWizardState(t *testing.T) {
 	}
 	if _, err := svc.Submit(context.Background(), SubmitInput{RequestID: req.ID, Answers: reloaded.Interaction.Answers}); err != nil {
 		t.Fatalf("submit persisted answers: %v", err)
+	}
+}
+
+func TestFencedInteractionDraftDoesNotRequireRuntimeOwnership(t *testing.T) {
+	queries := newFakeUserInputQueries()
+	svc := NewService(slog.New(slog.DiscardHandler), queries)
+	req := createStorePending(t, svc, nil, "fenced-buttons")
+	queries.rows[req.ID].RuntimeFencingToken = pgtype.Int8{Int64: 7, Valid: true}
+	result, err := svc.AdvanceInteraction(context.Background(), AdvanceInteractionInput{
+		BotID: storeTestBotID, RequestID: req.ID,
+		Op: InteractionOp{Kind: OpSelectOption, OptionIndex: 0},
+	})
+	if err != nil || !result.Handled || !result.Request.Interaction.Completed {
+		t.Fatalf("button result = %#v, %v", result, err)
+	}
+	// UI authority must never imply authority to commit a fenced decision.
+	if _, err := svc.Submit(context.Background(), SubmitInput{RequestID: req.ID, Answers: result.Request.Interaction.Answers}); err == nil {
+		t.Fatal("unfenced submit unexpectedly accepted")
+	}
+	ctx := runtimefence.WithContext(context.Background(), runtimefence.Fence{BotID: storeTestBotID, SessionID: storeTestSessionID, Token: 7})
+	if _, err := svc.ResolveTarget(ctx, ResolveInput{BotID: storeTestBotID, ExplicitID: req.ID}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInteractionDraftScopeAndLifetime(t *testing.T) {
+	for _, kind := range []string{"wrong-bot", "wrong-session", "expired", "submitted", "canceled"} {
+		t.Run(kind, func(t *testing.T) {
+			queries := newFakeUserInputQueries()
+			svc := NewService(slog.New(slog.DiscardHandler), queries)
+			req := createStorePending(t, svc, nil, kind)
+			row := queries.rows[req.ID]
+			row.RuntimeFencingToken = pgtype.Int8{Int64: 7, Valid: true}
+			input := ResolveInput{BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID}
+			switch kind {
+			case "wrong-bot":
+				input.BotID = "99999999-9999-4999-8999-999999999999"
+			case "wrong-session":
+				input.SessionID = "99999999-9999-4999-8999-999999999999"
+			case "expired":
+				row.ExpiresAt = pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
+			default:
+				row.Status = kind
+			}
+			if _, err := svc.resolveInteractionTarget(context.Background(), input); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
+
+func TestFencedTextAnswerAcceptsCustomWithoutOtherButton(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		t.Run(strconv.FormatBool(allow), func(t *testing.T) {
+			queries := newFakeUserInputQueries()
+			svc := NewService(slog.New(slog.DiscardHandler), queries)
+			req, err := svc.CreatePending(context.Background(), CreatePendingInput{
+				BotID: storeTestBotID, SessionID: storeTestSessionID, ToolCallID: "midnight",
+				Input: map[string]any{"questions": []any{map[string]any{
+					"text": "End time?", "kind": QuestionKindSingleSelect, "allow_custom": allow,
+					"options": []any{map[string]any{"label": "September 15 00:00"}, map[string]any{"label": "September 15 23:59:59"}},
+				}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			queries.rows[req.ID].RuntimeFencingToken = pgtype.Int8{Int64: 7, Valid: true}
+			result, err := svc.AdvanceText(context.Background(), AdvanceTextInput{
+				BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID, Text: "0点",
+			})
+			if err != nil || !result.Handled || result.Invalid == allow {
+				t.Fatalf("text result = %#v, %v", result, err)
+			}
+			if allow && (!result.Request.Interaction.Completed || result.Request.Interaction.Answers[0].CustomText != "0点") {
+				t.Fatalf("answer = %#v", result.Request.Interaction)
+			}
+			if !allow && result.Request.Interaction.Completed {
+				t.Fatal("invalid answer completed request")
+			}
+		})
+	}
+}
+
+// A concurrent channel gesture changes the draft revision without changing
+// its answer cursor. The retry must retain this request's UUID and remain
+// editable without acquiring the runtime decision fence.
+type conflictingInteractionQueries struct {
+	*fakeUserInputQueries
+	calls int
+}
+
+func (q *conflictingInteractionQueries) UpdateUserInputInteraction(ctx context.Context, arg sqlc.UpdateUserInputInteractionParams) (sqlc.UserInputRequest, error) {
+	q.calls++
+	if q.calls == 1 {
+		q.mu.Lock()
+		arg.InteractionJson = q.rows[storeUUIDKey(arg.ID)].InteractionJson
+		q.mu.Unlock()
+		if _, err := q.fakeUserInputQueries.UpdateUserInputInteraction(ctx, arg); err != nil {
+			return sqlc.UserInputRequest{}, err
+		}
+		return sqlc.UserInputRequest{}, pgx.ErrNoRows
+	}
+	return q.fakeUserInputQueries.UpdateUserInputInteraction(ctx, arg)
+}
+
+func TestFencedTextInteractionRetriesPinnedUUID(t *testing.T) {
+	queries := &conflictingInteractionQueries{fakeUserInputQueries: newFakeUserInputQueries()}
+	svc := NewService(slog.New(slog.DiscardHandler), queries)
+	req := createStorePending(t, svc, nil, "cas-retry")
+	queries.rows[req.ID].RuntimeFencingToken = pgtype.Int8{Int64: 7, Valid: true}
+	result, err := svc.AdvanceText(context.Background(), AdvanceTextInput{BotID: storeTestBotID, SessionID: storeTestSessionID, Text: "1"})
+	if err != nil || !result.Handled || !result.Request.Interaction.Completed || queries.calls != 2 {
+		t.Fatalf("retry: %#v, %v, calls=%d", result, err, queries.calls)
+	}
+	if result.Request.ID != req.ID {
+		t.Fatal("retry switched requests")
 	}
 }
