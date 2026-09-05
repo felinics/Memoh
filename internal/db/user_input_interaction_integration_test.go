@@ -41,7 +41,7 @@ func TestUserInputFencedChannelInteractionPostgres(t *testing.T) {
 		BotID: botID, SessionID: sessionID, ToolCallID: "ask-user-test",
 		Input: map[string]any{"questions": []any{
 			map[string]any{"text": "Plan?", "kind": "single_select", "options": []any{map[string]any{"label": "A"}, map[string]any{"label": "B"}}},
-			map[string]any{"text": "End time?", "kind": "single_select", "allow_custom": true, "options": []any{map[string]any{"label": "September 15 00:00"}, map[string]any{"label": "September 15 23:59:59"}}},
+			map[string]any{"text": "End time?", "kind": "single_select", "allow_custom": false, "options": []any{map[string]any{"label": "September 15 00:00"}, map[string]any{"label": "September 15 23:59:59"}}},
 		}},
 	})
 	if err != nil {
@@ -51,11 +51,11 @@ func TestUserInputFencedChannelInteractionPostgres(t *testing.T) {
 	if err != nil || !clicked.Handled || clicked.Request.Interaction.QuestionIndex != 1 {
 		t.Fatalf("button: %#v, %v", clicked, err)
 	}
-	typed, err := svc.AdvanceText(ctx, userinput.AdvanceTextInput{BotID: botID, SessionID: sessionID, ExplicitID: req.ID, Text: "0点"})
+	typed, err := svc.AdvanceText(ctx, userinput.AdvanceTextInput{BotID: botID, SessionID: sessionID, ExplicitID: req.ID, Text: "0"})
 	if err != nil || !typed.Handled || !typed.Request.Interaction.Completed {
 		t.Fatalf("text: %#v, %v", typed, err)
 	}
-	if len(typed.Request.Interaction.Answers) != 2 || typed.Request.Interaction.Answers[1].CustomText != "0点" {
+	if len(typed.Request.Interaction.Answers) != 2 || typed.Request.Interaction.Answers[1].CustomText != "0" {
 		t.Fatalf("answers: %#v", typed.Request.Interaction.Answers)
 	}
 	input := userinput.SubmitInput{RequestID: req.ID, Answers: typed.Request.Interaction.Answers}
@@ -73,6 +73,9 @@ func TestUserInputFencedChannelInteractionPostgres(t *testing.T) {
 	accepted, err := svc.Submit(ownerCtx, input)
 	if err != nil || accepted.Status != userinput.StatusSubmitted {
 		t.Fatalf("owner submit: %#v, %v", accepted, err)
+	}
+	if answers := userinput.AnswersFromResult(accepted.Result); len(answers) != 2 || answers[1].CustomText != "0" {
+		t.Fatalf("LLM result lost raw reply: %#v", answers)
 	}
 	replay, err := svc.AdvanceInteraction(ctx, userinput.AdvanceInteractionInput{BotID: botID, RequestID: req.ID, Op: userinput.InteractionOp{Kind: userinput.OpSubmit}})
 	if err != nil || replay.Handled {

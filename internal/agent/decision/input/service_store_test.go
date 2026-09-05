@@ -822,7 +822,7 @@ func TestServiceAdvanceTextPersistsWizardState(t *testing.T) {
 		t.Fatalf("back state = %#v", got.Request.Interaction)
 	}
 	_ = advance("updated notes")
-	invalid := advance("maybe")
+	invalid := advance("")
 	if !invalid.Invalid || invalid.Request.Interaction.QuestionIndex != 3 || invalid.Request.Interaction.Completed {
 		t.Fatalf("invalid state = %#v", invalid)
 	}
@@ -910,14 +910,18 @@ func TestFencedTextAnswerAcceptsCustomWithoutOtherButton(t *testing.T) {
 			result, err := svc.AdvanceText(context.Background(), AdvanceTextInput{
 				BotID: storeTestBotID, SessionID: storeTestSessionID, ExplicitID: req.ID, Text: "0点",
 			})
-			if err != nil || !result.Handled || result.Invalid == allow {
+			if err != nil || !result.Handled || result.Invalid {
 				t.Fatalf("text result = %#v, %v", result, err)
 			}
-			if allow && (!result.Request.Interaction.Completed || result.Request.Interaction.Answers[0].CustomText != "0点") {
+			if !result.Request.Interaction.Completed || result.Request.Interaction.Answers[0].CustomText != "0点" {
 				t.Fatalf("answer = %#v", result.Request.Interaction)
 			}
-			if !allow && result.Request.Interaction.Completed {
-				t.Fatal("invalid answer completed request")
+			toolResult, err := submittedResult(result.Request.UIPayload, result.Request.Interaction.Answers)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := AnswersFromResult(toolResult); len(got) != 1 || got[0].CustomText != "0点" {
+				t.Fatalf("LLM result: %#v", got)
 			}
 		})
 	}
