@@ -158,13 +158,14 @@ func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpo
 		_ string,
 		_ *contextfrag.LifecycleHolder,
 		onPersisted func(),
-	) (func(context.Context, int, *sdk.StepResult) error, func(context.Context, int, *sdk.StepResult) error) {
+	) (func(context.Context, int, *sdk.StepResult) error, func(context.Context, int, *sdk.StepResult) error, SpawnStepObservers) {
 		return func(context.Context, int, *sdk.StepResult) error { return nil },
 			func(context.Context, int, *sdk.StepResult) error {
 				interruptedCalls.Add(1)
 				onPersisted()
 				return nil
-			}
+			},
+			SpawnStepObservers{}
 	})
 	var observed []StreamEvent
 	adapter.SetRunObserverFactory(func(context.Context) SpawnRunObserver {

@@ -182,3 +182,46 @@ func TestSpawnAdapterInstallsTheLifecycleHolderFromItsFactory(t *testing.T) {
 		t.Fatalf("holder = %p (bot %q), want the factory's holder for the spawn's bot", rc.ContextLifecycle, gotBot)
 	}
 }
+
+func TestSpawnAdapterInstallsTheStepObserversBesideTheCommit(t *testing.T) {
+	t.Parallel()
+
+	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		return closedAgentTestStream(
+			&sdk.StartStepPart{},
+			&sdk.TextDeltaPart{ID: "child", Text: "child answer"},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop, Usage: sdk.Usage{InputTokens: 22, OutputTokens: 2}},
+		), nil
+	})
+	adapter := NewSpawnAdapter(New(Deps{}))
+	var providerEnds, agentEnds int
+	adapter.SetStepCommitFactory(func(context.Context, string, string, string, string, *contextfrag.LifecycleHolder, func()) (
+		func(context.Context, int, *sdk.StepResult) error,
+		func(context.Context, int, *sdk.StepResult) error,
+		SpawnStepObservers,
+	) {
+		callback := func(context.Context, int, *sdk.StepResult) error { return nil }
+		return callback, callback, SpawnStepObservers{
+			Provider: func(ev StreamEvent) {
+				if ev.Type == EventStepEnd && ev.Timing != nil {
+					providerEnds++
+				}
+			},
+			Agent: func(ev StreamEvent) {
+				if ev.Type == EventAgentEnd {
+					agentEnds++
+				}
+			},
+		}
+	})
+	if _, err := adapter.GenerateWithWatchdog(context.Background(), tools.SpawnRunConfig{
+		Model:    &sdk.Model{ID: "mock", Provider: provider},
+		Query:    "task",
+		Identity: tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1"},
+	}, func() {}); err != nil {
+		t.Fatalf("GenerateWithWatchdog: %v", err)
+	}
+	if providerEnds != 1 || agentEnds != 1 {
+		t.Fatalf("observers saw provider step ends=%d agent ends=%d, want one each", providerEnds, agentEnds)
+	}
+}

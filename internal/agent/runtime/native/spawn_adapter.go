@@ -28,7 +28,16 @@ type SpawnStepCommitFactory func(
 ) (
 	func(context.Context, int, *sdk.StepResult) error,
 	func(context.Context, int, *sdk.StepResult) error,
+	SpawnStepObservers,
 )
+
+// SpawnStepObservers are the event observers a step-commit factory installs
+// beside its callbacks, so a spawned run's request traces reach persistence
+// and the lifecycle rollup the way a chat run's do. Either may be nil.
+type SpawnStepObservers struct {
+	Provider func(StreamEvent)
+	Agent    func(StreamEvent)
+}
 
 // SpawnRunObservation carries the terminal outcome selected by the session
 // runtime that serialized terminal publication against routed controls.
@@ -101,7 +110,7 @@ func (s *SpawnAdapter) installStepCommit(ctx context.Context, cfg tools.SpawnRun
 	if s.stepCommit == nil {
 		return false
 	}
-	commit, interrupt := s.stepCommit(
+	commit, interrupt, observers := s.stepCommit(
 		ctx,
 		cfg.Identity.BotID,
 		cfg.Identity.SessionID,
@@ -115,7 +124,22 @@ func (s *SpawnAdapter) installStepCommit(ctx context.Context, cfg tools.SpawnRun
 	}
 	rc.OnStepCommitted = commit
 	rc.OnStepInterrupted = interrupt
+	rc.OnProviderStreamEventObserved = chainStreamObserver(rc.OnProviderStreamEventObserved, observers.Provider)
+	rc.OnAgentEventObserved = chainStreamObserver(rc.OnAgentEventObserved, observers.Agent)
 	return true
+}
+
+func chainStreamObserver(first, second func(StreamEvent)) func(StreamEvent) {
+	if second == nil {
+		return first
+	}
+	if first == nil {
+		return second
+	}
+	return func(ev StreamEvent) {
+		first(ev)
+		second(ev)
+	}
 }
 
 func (s *SpawnAdapter) Generate(ctx context.Context, cfg tools.SpawnRunConfig) (*tools.SpawnResult, error) {

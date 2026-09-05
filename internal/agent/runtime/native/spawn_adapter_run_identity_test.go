@@ -51,10 +51,11 @@ func TestSpawnAdapterStepCommitSharesLifecycleAndInstallsInterrupt(t *testing.T)
 	) (
 		func(context.Context, int, *sdk.StepResult) error,
 		func(context.Context, int, *sdk.StepResult) error,
+		SpawnStepObservers,
 	) {
 		captured = lifecycle
 		callback := func(context.Context, int, *sdk.StepResult) error { return nil }
-		return callback, callback
+		return callback, callback, SpawnStepObservers{}
 	})
 	rc := runConfigFromSpawnRunConfig(tools.SpawnRunConfig{})
 
