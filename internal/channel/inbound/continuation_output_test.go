@@ -3,7 +3,9 @@ package inbound
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/felinics/memoh/internal/channel"
@@ -33,5 +35,32 @@ func TestContinuationForwardsReplyAndInteractiveFollowUp(t *testing.T) {
 	}
 	if !text || !question {
 		t.Fatalf("reply=%v follow-up=%v events=%+v", text, question, sender.events)
+	}
+}
+
+func TestAcceptanceReceiptPrecedesFailedContinuation(t *testing.T) {
+	p := NewChannelInboundProcessor(slog.Default(), nil, nil, nil, nil, nil, nil, "", 0)
+	sink := &fakeReplySender{}
+	accepted := false
+	sender := decisionReplySender{StreamReplySender: sink, accepted: func(context.Context, string) { accepted = true }}
+	msg := channel.InboundMessage{Channel: channel.ChannelType("telegram"), ReplyTarget: "chat"}
+	err := p.streamContinuationCommand(context.Background(), msg, sender, InboundIdentity{BotID: "bot"}, "", func(_ context.Context, ch chan<- json.RawMessage) error {
+		ch <- json.RawMessage(`{"type":"decision_accepted","decision_id":"question"}`)
+		return errors.New("SECRET transport failure after acceptance")
+	})
+	if err != nil || !accepted {
+		t.Fatalf("accepted=%v err=%v", accepted, err)
+	}
+	found := false
+	for _, event := range sink.events {
+		if event.Type == channel.StreamEventError {
+			found = true
+			if strings.Contains(event.Error, "SECRET") {
+				t.Fatal("private cause leaked")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing output failure feedback")
 	}
 }

@@ -11,12 +11,27 @@ import (
 
 type decisionOutputBackend struct {
 	sessionruntime.Backend
-	output []sessionruntime.Event
+	output []struct {
+		Type   string
+		Output json.RawMessage
+	}
 }
 
 func (b *decisionOutputBackend) Publish(ctx context.Context, event sessionruntime.Event) error {
-	if len(event.Output) > 0 || event.Type == "decision_output_end" {
-		b.output = append(b.output, event)
+	if event.Delta != nil && event.Delta.DecisionOutput != nil {
+		checkpoint := event.Delta.DecisionOutput
+		for _, raw := range checkpoint.Events {
+			b.output = append(b.output, struct {
+				Type   string
+				Output json.RawMessage
+			}{Output: raw})
+		}
+		if checkpoint.Done {
+			b.output = append(b.output, struct {
+				Type   string
+				Output json.RawMessage
+			}{Type: "decision_output_end"})
+		}
 	}
 	return b.Backend.Publish(ctx, event)
 }

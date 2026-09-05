@@ -1975,7 +1975,7 @@ func (m *Manager) liveSnapshot(ctx context.Context, botID, sessionID string) (Sn
 // it would put a run back into the structure other reads treat as live — the
 // snapshot would stop being a report and start being a claim.
 func (m *Manager) hydrateSnapshotFromLedger(ctx context.Context, snapshot Snapshot) Snapshot {
-	if m.runs == nil || snapshot.CurrentRunView != nil {
+	if m.runs == nil || snapshot.CurrentRunView != nil || snapshot.DecisionOutput != nil {
 		return snapshot
 	}
 	sessionID := strings.TrimSpace(snapshot.SessionID)

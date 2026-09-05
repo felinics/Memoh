@@ -528,7 +528,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		// ACP/MCP and other unfenced decisions retain their waiter-backed path.
 		return DecisionResponseResult{}, nil
 	}
-	result := DecisionResponseResult{Handled: true}
+	result := DecisionResponseResult{Handled: true, RunID: target.RunID}
 	if target.Type != response.Type ||
 		target.BotID != response.BotID ||
 		response.SessionID != "" && target.SessionID != response.SessionID ||

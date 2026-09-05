@@ -166,6 +166,18 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 		return false, nil
 	}
 	if err != nil {
+		if result.Applied && eventCh != nil {
+			if s.logger != nil {
+				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+			}
+			raw, _ := json.Marshal(agentFailureStreamEvent(err))
+			select {
+			case eventCh <- raw:
+				return true, nil
+			case <-ctx.Done():
+				return true, ctx.Err()
+			}
+		}
 		return true, err
 	}
 	if !result.Handled {
@@ -197,6 +209,18 @@ func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputRes
 		return false, nil
 	}
 	if err != nil {
+		if result.Applied && eventCh != nil {
+			if s.logger != nil {
+				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+			}
+			raw, _ := json.Marshal(agentFailureStreamEvent(err))
+			select {
+			case eventCh <- raw:
+				return true, nil
+			case <-ctx.Done():
+				return true, ctx.Err()
+			}
+		}
 		return true, err
 	}
 	if !result.Handled {

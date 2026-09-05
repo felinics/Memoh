@@ -211,16 +211,28 @@ func (h RunHandle) key() Key {
 	return Key{BotID: h.BotID, SessionID: h.SessionID}
 }
 
+// DecisionOutputCheckpoint retains channel payloads using the same live-state
+// storage and gap recovery as web subscriptions. It expires with the backend
+// snapshot; it is not an external delivery receipt or a durable outbox.
+type DecisionOutputCheckpoint struct {
+	Offset int               `json:"offset,omitempty"`
+	Events []json.RawMessage `json:"events,omitempty"`
+	Done   bool              `json:"done,omitempty"`
+	Failed bool              `json:"failed,omitempty"`
+	Bytes  int               `json:"bytes,omitempty"`
+}
+
 // Snapshot is the authoritative live view of one session. It holds at most one
 // run: admission answers busy rather than queueing, so there is no pending list
 // to project and a subscriber never has to reason about work it cannot see yet.
 type Snapshot struct {
-	BotID          string          `json:"bot_id"`
-	SessionID      string          `json:"session_id"`
-	Epoch          string          `json:"epoch"`
-	Seq            int64           `json:"seq"`
-	CurrentRunView *CurrentRunView `json:"current_run_view,omitempty"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	DecisionOutput *DecisionOutputCheckpoint `json:"decision_output,omitempty" swaggerignore:"true"`
+	BotID          string                    `json:"bot_id"`
+	SessionID      string                    `json:"session_id"`
+	Epoch          string                    `json:"epoch"`
+	Seq            int64                     `json:"seq"`
+	CurrentRunView *CurrentRunView           `json:"current_run_view,omitempty"`
+	UpdatedAt      time.Time                 `json:"updated_at"`
 }
 
 // EmptySnapshot returns the canonical empty runtime snapshot for a session.
@@ -314,20 +326,18 @@ type Event struct {
 	Snapshot  *Snapshot     `json:"snapshot,omitempty"`
 	Delta     *RuntimeDelta `json:"delta,omitempty"`
 	Message   string        `json:"message,omitempty"`
-
-	// Output is used only on the internal decision-output topic, never the UI topic.
-	Output json.RawMessage `json:"output,omitempty"`
 }
 
 // RuntimeDelta carries only the state changed by one committed runtime
 // transition. Full snapshots are reserved for hydration and gap recovery.
 type RuntimeDelta struct {
-	CurrentRunView  *CurrentRunView         `json:"current_run_view,omitempty"`
-	Run             *CurrentRunPatch        `json:"run,omitempty"`
-	MessageAppends  []RuntimeMessageAppend  `json:"message_appends,omitempty"`
-	ProgressAppends []RuntimeProgressAppend `json:"progress_appends,omitempty"`
-	MessageUpserts  []chatview.UIMessage    `json:"message_upserts,omitempty"`
-	ResetMessages   bool                    `json:"reset_messages,omitempty"`
+	DecisionOutput  *DecisionOutputCheckpoint `json:"decision_output,omitempty" swaggerignore:"true"`
+	CurrentRunView  *CurrentRunView           `json:"current_run_view,omitempty"`
+	Run             *CurrentRunPatch          `json:"run,omitempty"`
+	MessageAppends  []RuntimeMessageAppend    `json:"message_appends,omitempty"`
+	ProgressAppends []RuntimeProgressAppend   `json:"progress_appends,omitempty"`
+	MessageUpserts  []chatview.UIMessage      `json:"message_upserts,omitempty"`
+	ResetMessages   bool                      `json:"reset_messages,omitempty"`
 }
 
 type CurrentRunPatch struct {
@@ -442,6 +452,7 @@ type DecisionResponse struct {
 // answer changed it". A resolved terminal decision is handled but not applied;
 // an unfenced ACP/MCP request is not handled and follows its existing path.
 type DecisionResponseResult struct {
+	RunID   string
 	Handled bool
 	Applied bool
 

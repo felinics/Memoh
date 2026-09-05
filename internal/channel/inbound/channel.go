@@ -22,6 +22,7 @@ import (
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
@@ -424,6 +425,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if sender == nil {
 		return errors.New("reply sender not configured")
 	}
+	sender = p.withDecisionReceipts(sender, cfg)
 	text := strings.TrimSpace(msg.Message.PlainText())
 	if p.logger != nil {
 		p.logger.Debug("inbound handle start",
@@ -3800,6 +3802,8 @@ func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Con
 type streamContinuationFunc func(context.Context, chan<- json.RawMessage) error
 
 func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing")
@@ -3850,11 +3854,24 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	}()
 
 	var finalMessages []turn.ModelMessage
+	var continuationErr error
+	accepted := false
 	for eventCh != nil || errCh != nil {
 		select {
 		case chunk, ok := <-eventCh:
 			if !ok {
 				eventCh = nil
+				continue
+			}
+			var receipt struct {
+				Type       string `json:"type"`
+				DecisionID string `json:"decision_id"`
+			}
+			if json.Unmarshal(chunk, &receipt) == nil && receipt.Type == "decision_accepted" {
+				accepted = true
+				if receiver, ok := sender.(interface{ AcceptDecision(context.Context, string) }); ok {
+					receiver.AcceptDecision(ctx, receipt.DecisionID)
+				}
 				continue
 			}
 			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
@@ -3892,12 +3909,25 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				continue
 			}
 			if runErr != nil {
-				_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: runErr.Error()})
-				return runErr
+				continuationErr = runErr
 			}
 		}
 	}
 
+	if continuationErr != nil {
+		if !accepted {
+			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: continuationErr.Error()})
+			return continuationErr
+		}
+		if p.logger != nil {
+			p.logger.Warn("accepted decision delivery interrupted", slog.Any("error", continuationErr))
+		}
+		public, _ := apperror.PublicFrom(apperror.Wrap(apperror.CodeAgentResponseInterrupted, continuationErr, nil), "")
+		if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: public.Detail}); err != nil {
+			return err
+		}
+		return closeStream()
+	}
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
 	if !suppressReplies {
 		outputs := turn.ExtractAssistantOutputs(finalMessages)
