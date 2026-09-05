@@ -1,8 +1,9 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useActiveGate } from './useActiveGate'
 import { useChatViewTarget } from './useChatViewContext'
 import { useContextLifecycle } from './useContextLifecycle'
 import {
@@ -11,6 +12,8 @@ import {
   foldTrajectoryStats,
   lifecycleByTurnId,
   previousLifecycleByRun,
+  type TrajectoryRow,
+  type TrajectoryStats,
 } from './trajectory-model'
 import { rowMapGeometry, type TimelineMode } from './trajectory-view'
 
@@ -32,8 +35,19 @@ export function useTrajectory() {
   const lifecycleByTurn = computed(() => lifecycleByTurnId(lifecycle.turns.value))
   const previousByRun = computed(() => previousLifecycleByRun(lifecycle.turns.value, lifecycle.hasOlder.value))
   const buildRows = createTrajectoryRowBuilder()
-  const rows = computed(() => buildRows(messages.value, lifecycleByTurn.value, previousByRun.value))
-  const stats = computed(() => foldTrajectoryStats(messages.value, lifecycleByTurn.value))
+  // A hidden trajectory tab keeps its last rows and stats instead of
+  // rebuilding them on every streamed token; it catches up when shown.
+  const active = useActiveGate()
+  const rows = shallowRef<TrajectoryRow[]>([])
+  const stats = shallowRef<TrajectoryStats>(foldTrajectoryStats([], new Map()))
+  watchEffect(() => {
+    if (!active.value) return
+    rows.value = buildRows(messages.value, lifecycleByTurn.value, previousByRun.value)
+  })
+  watchEffect(() => {
+    if (!active.value) return
+    stats.value = foldTrajectoryStats(messages.value, lifecycleByTurn.value)
+  })
 
   const selectedKey = ref<string | null>(null)
   const selectedRow = computed(() => rows.value.find(row => row.key === selectedKey.value) ?? null)
