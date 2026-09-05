@@ -21,9 +21,80 @@
 
       <template v-if="row.detail.kind === 'system'">
         <ContextLifecycleTurns
-          :turns="[row.detail.lifecycle]"
-          :has-older="false"
+          :turns="systemTurns"
+          :has-older="row.detail.previous === undefined"
+          :show-count="1"
         />
+        <p class="text-caption text-muted-foreground">
+          {{ $t('chat.trajectory.inspectorPromptChanges') }}
+        </p>
+        <p
+          v-if="row.detail.previous === null"
+          class="text-caption text-muted-foreground"
+          data-testid="trajectory-inspector-prompt-first"
+        >
+          {{ $t('chat.trajectory.inspectorPromptFirstRun') }}
+        </p>
+        <p
+          v-else-if="row.detail.previous === undefined"
+          class="text-caption text-muted-foreground"
+        >
+          {{ $t('chat.trajectory.inspectorPromptPreviousUnknown') }}
+        </p>
+        <p
+          v-else-if="promptChanges.length === 0"
+          class="text-caption text-muted-foreground"
+          data-testid="trajectory-inspector-prompt-same"
+        >
+          {{ $t('chat.trajectory.inspectorPromptSame') }}
+        </p>
+        <div
+          v-else
+          class="divide-y divide-border"
+          data-testid="trajectory-inspector-prompt-changes"
+        >
+          <div
+            v-for="change in promptChanges"
+            :key="change.key"
+            class="space-y-1 py-1"
+          >
+            <div class="flex items-center gap-2 text-caption">
+              <span
+                class="w-14 shrink-0 font-medium"
+                :class="PROMPT_CHANGE_TONE[change.change]"
+              >{{ $t(`chat.trajectory.promptChange.${change.change}`) }}</span>
+              <span class="min-w-0 flex-1 truncate font-mono text-foreground">{{ change.label }}</span>
+            </div>
+            <template v-if="change.change === 'changed'">
+              <pre
+                v-if="diffFor(change)"
+                class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-accent p-2 font-mono text-caption"
+                data-testid="trajectory-inspector-diff"
+              ><template
+                v-for="(line, index) in diffFor(change)"
+                :key="index"
+              ><span
+                v-if="line.type === 'skip'"
+                class="text-muted-foreground"
+              >… {{ $t('chat.trajectory.inspectorDiffSkipped', { n: line.count }) }}
+</span><span
+                v-else
+                :class="DIFF_LINE_CLASS[line.type]"
+              >{{ DIFF_PREFIX[line.type] }}{{ line.text }}
+</span></template></pre>
+              <Skeleton
+                v-else-if="diffStatus === 'pending' || fragmentStatus === 'pending'"
+                class="h-4 w-full"
+              />
+              <p
+                v-else
+                class="text-caption text-muted-foreground"
+              >
+                {{ $t('chat.trajectory.inspectorDiffUnavailable') }}
+              </p>
+            </template>
+          </div>
+        </div>
       </template>
 
       <template v-else-if="row.detail.kind === 'context'">
@@ -233,7 +304,7 @@ import { X } from 'lucide-vue-next'
 import { Button, ScrollArea, Skeleton } from '@felinic/ui'
 import type { ContextfragSelectionDecision } from '@memohai/sdk'
 import { entryRefs, type TrajectoryRow } from '../../composables/trajectory-model'
-import { contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS, type DecisionScope } from '../../composables/trajectory-view'
+import { contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS, lineDiff, promptFragmentChanges, type DecisionScope, type DiffLine, type FragmentPreviews, type PromptChange, type PromptChangeKind } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 import { useContextLifecycleDecisions } from '../../composables/useContextLifecycleDecisions'
 import { useContextLifecycleFragments } from '../../composables/useContextLifecycleFragments'
@@ -242,7 +313,7 @@ import ContextLifecycleTurns from '../context-lifecycle-turns.vue'
 
 const DECISION_ROW_LIMIT = 200
 
-const props = defineProps<{ row: TrajectoryRow }>()
+const props = defineProps<{ row: TrajectoryRow, previews?: FragmentPreviews | null }>()
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
 
@@ -305,6 +376,53 @@ const textRows = computed(() => {
     }
   })
 })
+
+// A system row compares its prompt with the run before it: the lifecycle
+// card labels the change, the change list names the fragments, and a
+// changed fragment shows a line diff once both runs' texts are loaded.
+const systemTurns = computed(() => {
+  const detail = props.row.detail
+  if (detail.kind !== 'system') return []
+  return detail.previous ? [detail.lifecycle, detail.previous] : [detail.lifecycle]
+})
+const promptChanges = computed<PromptChange[]>(() => {
+  const detail = props.row.detail
+  if (detail.kind !== 'system' || !detail.previous) return []
+  return promptFragmentChanges(detail.lifecycle.snapshot, detail.previous.snapshot, props.previews)
+})
+const previousRunId = computed(() => {
+  const detail = props.row.detail
+  if (detail.kind !== 'system' || !detail.previous || !promptChanges.value.some(change => change.change === 'changed')) return null
+  return detail.previous.run_id ?? null
+})
+const { fragments: previousFragments, status: diffStatus } = useContextLifecycleFragments(previousRunId)
+const diffs = computed(() => {
+  const current = new Map(fragments.value.map(fragment => [fragment.text_hash ?? '', fragment]))
+  const previous = new Map(previousFragments.value.map(fragment => [fragment.text_hash ?? '', fragment]))
+  const out = new Map<string, DiffLine[] | null>()
+  for (const change of promptChanges.value) {
+    if (change.change !== 'changed') continue
+    const before = previous.get(change.previousHash)
+    const after = current.get(change.currentHash)
+    out.set(change.key, before?.available && after?.available ? lineDiff(before.text ?? '', after.text ?? '') : null)
+  }
+  return out
+})
+function diffFor(change: PromptChange): DiffLine[] | null {
+  return diffs.value.get(change.key) ?? null
+}
+
+const PROMPT_CHANGE_TONE: Record<PromptChangeKind, string> = {
+  added: 'text-accent-green',
+  removed: 'text-destructive',
+  changed: 'text-warning',
+}
+const DIFF_LINE_CLASS: Record<'same' | 'add' | 'remove', string> = {
+  same: 'text-muted-foreground',
+  add: 'text-accent-green',
+  remove: 'text-destructive',
+}
+const DIFF_PREFIX: Record<'same' | 'add' | 'remove', string> = { same: '  ', add: '+ ', remove: '- ' }
 
 // The per-fragment audit is read only for the rows it can explain: what the
 // system slot holds, and which history rows were kept, trimmed or dropped.

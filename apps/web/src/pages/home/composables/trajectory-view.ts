@@ -384,3 +384,131 @@ export const LANE_LABEL_KEY: Record<TimelineLane, string> = {
 }
 
 export const LANE_TTFT_CLASS = 'bg-accent-purple-soft-active'
+
+export type PromptChangeKind = 'added' | 'removed' | 'changed'
+
+export interface PromptChange {
+  key: string
+  label: string
+  kind: string
+  change: PromptChangeKind
+  currentHash: string
+  previousHash: string
+}
+
+interface PromptPart {
+  key: string
+  label: string
+  kind: string
+  hash: string
+}
+
+function promptParts(snapshot: ContextfragLifecycleSnapshot | undefined, previews: FragmentPreviews | null | undefined): PromptPart[] {
+  const parts: PromptPart[] = []
+  const seen = new Map<string, number>()
+  const push = (kind: string, label: string, hash: string) => {
+    const base = `${kind}\u0000${label}`
+    const ordinal = seen.get(base) ?? 0
+    seen.set(base, ordinal + 1)
+    parts.push({ key: ordinal ? `${base}\u0000${ordinal}` : base, label, kind, hash })
+  }
+  ;(snapshot?.fragments ?? []).forEach((ref, index) => {
+    const hash = ref.text_hash ?? ''
+    push(ref.kind ?? '', previews?.[hash]?.label || `${ref.kind ?? ''}#${index}`, hash || ref.content_hash || '')
+  })
+  for (const def of snapshot?.tool_defs ?? []) {
+    push('tool_definition', `${def.provider ?? ''}/${def.name ?? ''}`, def.content_hash ?? '')
+  }
+  return parts
+}
+
+// What the prompt of one run added, dropped, or rewrote relative to the run
+// before it, fragment by fragment, from the hashes both snapshots carry.
+export function promptFragmentChanges(
+  current: ContextfragLifecycleSnapshot | undefined,
+  previous: ContextfragLifecycleSnapshot | undefined,
+  previews: FragmentPreviews | null | undefined,
+): PromptChange[] {
+  const before = new Map(promptParts(previous, previews).map(part => [part.key, part]))
+  const changes: PromptChange[] = []
+  for (const part of promptParts(current, previews)) {
+    const prior = before.get(part.key)
+    before.delete(part.key)
+    if (!prior) {
+      changes.push({ key: part.key, label: part.label, kind: part.kind, change: 'added', currentHash: part.hash, previousHash: '' })
+    } else if (prior.hash !== part.hash) {
+      changes.push({ key: part.key, label: part.label, kind: part.kind, change: 'changed', currentHash: part.hash, previousHash: prior.hash })
+    }
+  }
+  for (const part of before.values()) {
+    changes.push({ key: part.key, label: part.label, kind: part.kind, change: 'removed', currentHash: '', previousHash: part.hash })
+  }
+  return changes
+}
+
+export type DiffLine = { type: 'same' | 'add' | 'remove', text: string } | { type: 'skip', count: number }
+
+export const MAX_DIFF_LINES = 400
+const DIFF_CONTEXT_LINES = 2
+
+// A line diff of two texts as an edit script, or null when either side is
+// too long to compare cheaply; unchanged runs longer than the context fold
+// into a skip marker.
+export function lineDiff(before: string, after: string): DiffLine[] | null {
+  const a = before.split('\n')
+  const b = after.split('\n')
+  if (a.length > MAX_DIFF_LINES || b.length > MAX_DIFF_LINES) return null
+  const n = a.length
+  const m = b.length
+  const width = m + 1
+  const lcs = new Uint16Array((n + 1) * width)
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      lcs[i * width + j] = a[i] === b[j]
+        ? lcs[(i + 1) * width + j + 1]! + 1
+        : Math.max(lcs[(i + 1) * width + j]!, lcs[i * width + j + 1]!)
+    }
+  }
+  const script: Extract<DiffLine, { text: string }>[] = []
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      script.push({ type: 'same', text: a[i]! })
+      i += 1
+      j += 1
+    } else if (lcs[(i + 1) * width + j]! >= lcs[i * width + j + 1]!) {
+      script.push({ type: 'remove', text: a[i]! })
+      i += 1
+    } else {
+      script.push({ type: 'add', text: b[j]! })
+      j += 1
+    }
+  }
+  while (i < n) script.push({ type: 'remove', text: a[i++]! })
+  while (j < m) script.push({ type: 'add', text: b[j++]! })
+  if (!script.some(line => line.type !== 'same')) return script
+
+  const out: DiffLine[] = []
+  let run: Extract<DiffLine, { text: string }>[] = []
+  const flush = (atEnd: boolean) => {
+    const keepHead = out.length === 0 ? 0 : DIFF_CONTEXT_LINES
+    const keepTail = atEnd ? 0 : DIFF_CONTEXT_LINES
+    if (run.length <= keepHead + keepTail) {
+      out.push(...run)
+    } else {
+      out.push(...run.slice(0, keepHead), { type: 'skip', count: run.length - keepHead - keepTail }, ...run.slice(run.length - keepTail))
+    }
+    run = []
+  }
+  for (const line of script) {
+    if (line.type === 'same') {
+      run.push(line)
+      continue
+    }
+    flush(false)
+    out.push(line)
+  }
+  flush(true)
+  return out
+}

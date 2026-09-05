@@ -10,6 +10,7 @@ import {
   createTrajectoryRowBuilder,
   foldTrajectoryStats,
   lifecycleByTurnId,
+  previousLifecycleByRun,
 } from './trajectory-model'
 import { rowMapGeometry, type TimelineMode } from './trajectory-view'
 
@@ -29,8 +30,9 @@ export function useTrajectory() {
   const messages = computed(() => transcript.value?.visibleMessages.value ?? [])
   const loadingMessages = computed(() => transcript.value?.loadingMessages.value ?? false)
   const lifecycleByTurn = computed(() => lifecycleByTurnId(lifecycle.turns.value))
+  const previousByRun = computed(() => previousLifecycleByRun(lifecycle.turns.value, lifecycle.hasOlder.value))
   const buildRows = createTrajectoryRowBuilder()
-  const rows = computed(() => buildRows(messages.value, lifecycleByTurn.value))
+  const rows = computed(() => buildRows(messages.value, lifecycleByTurn.value, previousByRun.value))
   const stats = computed(() => foldTrajectoryStats(messages.value, lifecycleByTurn.value))
 
   const selectedKey = ref<string | null>(null)

@@ -1266,6 +1266,17 @@
       "contextHistoryCut": "{messages} 条消息 · {tokens} tok · 丢弃 {dropped}",
       "inspectorTexts": "正文",
       "inspectorTextsFailed": "无法加载片段正文",
+      "inspectorPromptChanges": "与上一轮的差异",
+      "inspectorPromptFirstRun": "本会话的第一轮",
+      "inspectorPromptPreviousUnknown": "上一轮尚未加载",
+      "inspectorPromptSame": "与上一轮提示词相同",
+      "inspectorDiffSkipped": "{n} 行未变",
+      "inspectorDiffUnavailable": "两轮都有存储文本时才能对比",
+      "promptChange": {
+        "added": "新增",
+        "removed": "移除",
+        "changed": "变更"
+      },
       "inspectorTextsForbidden": "查看注入文本需要该 Bot 的工作区读取权限",
       "inspectorTextUnavailable": "该片段没有存储正文"
     },

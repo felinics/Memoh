@@ -4,6 +4,7 @@ import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ToolCallBlock } from
 import {
   buildRowMap,
   buildTrajectoryRows,
+  previousLifecycleByRun,
   contextEntries,
   createTrajectoryRowBuilder,
   foldTrajectoryStats,
@@ -333,5 +334,25 @@ describe('virtual row range', () => {
     expect(visibleRowRange({ scrollTop: 2_800, viewportHeight: 100, rowHeight: 28, count: 1_000, overscan: 2 })).toEqual({ start: 98, end: 106, offsetTop: 2_744, totalHeight: 28_000 })
     expect(visibleRowRange({ scrollTop: 27_990, viewportHeight: 100, rowHeight: 28, count: 1_000, overscan: 2 })).toEqual({ start: 997, end: 1_000, offsetTop: 27_916, totalHeight: 28_000 })
     expect(visibleRowRange({ scrollTop: 0, viewportHeight: 100, rowHeight: 28, count: 0, overscan: 2 })).toEqual({ start: 0, end: 0, offsetTop: 0, totalHeight: 0 })
+  })
+})
+
+describe('previousLifecycleByRun', () => {
+  it('names the run before each run and marks the oldest as first or unknown', () => {
+    const turn = (runId: string): HandlersContextLifecycleTurn => ({ run_id: runId, created_at: '2026-09-03T00:00:00.000Z', snapshot: {} })
+    const turns = [turn('r3'), turn('r2'), turn('r1')]
+    const complete = previousLifecycleByRun(turns, false)
+    expect(complete.get('r3')?.run_id).toBe('r2')
+    expect(complete.get('r2')?.run_id).toBe('r1')
+    expect(complete.get('r1')).toBeNull()
+    expect(previousLifecycleByRun(turns, true).get('r1')).toBeUndefined()
+  })
+
+  it('reaches the system row so the inspector can compare prompts', () => {
+    const older: HandlersContextLifecycleTurn = { ...lifecycleTurn, run_id: 'run-0', turn_id: 'turn-0' }
+    const previous = previousLifecycleByRun([lifecycleTurn, older], false)
+    const rows = buildTrajectoryRows([user('user-1', 'hi'), assistantTurn()], lifecycleByTurnId([lifecycleTurn, older]), previous)
+    const system = rows[0]!
+    expect(system.detail.kind === 'system' && system.detail.previous?.run_id).toBe('run-0')
   })
 })

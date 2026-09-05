@@ -129,11 +129,15 @@ import { formatCalendarTime } from '@/utils/date-time'
 import { buildTurnRow, type TurnRow } from '../composables/context-lifecycle-view'
 import ContextUsageBreakdown from './context-usage-breakdown.vue'
 
+// showCount limits the rows rendered; turns past it still serve as the
+// previous run of the row before them.
 const props = withDefaults(defineProps<{
   turns: HandlersContextLifecycleTurn[]
   hasOlder?: boolean
+  showCount?: number
 }>(), {
   hasOlder: false,
+  showCount: undefined,
 })
 
 const { t, locale } = useI18n()
@@ -148,7 +152,7 @@ const rows = computed<TurnRow[]>(() => props.turns.map((turn, index) => {
     formatTime: iso => formatCalendarTime(iso, { locale: locale.value }),
     previous: older ?? (props.hasOlder ? undefined : null),
   })
-}))
+}).slice(0, props.showCount ?? props.turns.length))
 
 const openKeys = shallowRef<Set<string>>(new Set())
 

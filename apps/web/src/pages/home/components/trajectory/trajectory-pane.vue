@@ -72,6 +72,7 @@
         >
           <TrajectoryInspector
             :row="selectedRow"
+            :previews="fragmentPreviews"
             @close="select(null)"
           />
         </div>

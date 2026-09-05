@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ContextfragKind } from '@memohai/sdk'
+import type { ContextfragKind, ContextfragLifecycleSnapshot, HandlersContextFragmentPreview } from '@memohai/sdk'
 import en from '@/i18n/locales/en.json'
 import ja from '@/i18n/locales/ja.json'
 import zh from '@/i18n/locales/zh.json'
 import type { RowMapSegment, TrajectoryStats } from './trajectory-model'
-import { contextPreview, formatDurationMs, fragmentRowPreview, MAX_STRIP_BARS, rowMapGeometry, statsSegments } from './trajectory-view'
+import { contextPreview, formatDurationMs, fragmentRowPreview, lineDiff, MAX_STRIP_BARS, promptFragmentChanges, rowMapGeometry, statsSegments } from './trajectory-view'
 
 function segment(overrides: Partial<RowMapSegment>): RowMapSegment {
   return {
@@ -203,5 +203,54 @@ describe('context kind labels', () => {
       const labels = (locale as { chat: { trajectory: { contextKind: Record<string, string> } } }).chat.trajectory.contextKind
       for (const kind of EVERY_KIND) expect(labels[kind], kind).toBeTruthy()
     }
+  })
+})
+
+describe('promptFragmentChanges', () => {
+  it('lists what a run added, rewrote, or dropped against the run before it', () => {
+    const previews: Record<string, HandlersContextFragmentPreview> = {
+      'h-sys-1': { kind: 'system_prompt', label: 'system.prompt.body', preview: '', text_bytes: 1 },
+      'h-sys-2': { kind: 'system_prompt', label: 'system.prompt.body', preview: '', text_bytes: 1 },
+      'h-rules': { kind: 'workspace_instruction', label: 'system.workspace_file.AGENTS.md', preview: '', text_bytes: 1 },
+      'h-skill': { kind: 'skills_catalog', label: 'system.skill.hooks-setup', preview: '', text_bytes: 1 },
+    }
+    const previous: ContextfragLifecycleSnapshot = {
+      fragments: [{ kind: 'system_prompt', text_hash: 'h-sys-1' }, { kind: 'workspace_instruction', text_hash: 'h-rules' }],
+      tool_defs: [{ provider: 'workspace', name: 'exec', content_hash: 't-exec' }, { provider: 'workspace', name: 'write', content_hash: 't-write' }],
+    }
+    const current: ContextfragLifecycleSnapshot = {
+      fragments: [{ kind: 'system_prompt', text_hash: 'h-sys-2' }, { kind: 'workspace_instruction', text_hash: 'h-rules' }, { kind: 'skills_catalog', text_hash: 'h-skill' }],
+      tool_defs: [{ provider: 'workspace', name: 'exec', content_hash: 't-exec-2' }],
+    }
+    const changes = promptFragmentChanges(current, previous, previews)
+    expect(changes.map(change => `${change.change}:${change.label}`)).toEqual([
+      'changed:system.prompt.body',
+      'added:system.skill.hooks-setup',
+      'changed:workspace/exec',
+      'removed:workspace/write',
+    ])
+    expect(changes[0]).toMatchObject({ kind: 'system_prompt', currentHash: 'h-sys-2', previousHash: 'h-sys-1' })
+    expect(promptFragmentChanges(current, current, previews)).toEqual([])
+    expect(promptFragmentChanges({ fragments: [{ kind: 'bot_identity', text_hash: 'h-x' }] }, undefined, null)[0]!.label).toBe('bot_identity#0')
+  })
+})
+
+describe('lineDiff', () => {
+  it('yields an edit script with unchanged runs folded around the changes', () => {
+    const before = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].join('\n')
+    const after = ['a', 'b', 'c', 'd', 'X', 'f', 'g', 'h', 'i'].join('\n')
+    expect(lineDiff(before, after)).toEqual([
+      { type: 'skip', count: 2 },
+      { type: 'same', text: 'c' },
+      { type: 'same', text: 'd' },
+      { type: 'remove', text: 'e' },
+      { type: 'add', text: 'X' },
+      { type: 'same', text: 'f' },
+      { type: 'same', text: 'g' },
+      { type: 'same', text: 'h' },
+      { type: 'add', text: 'i' },
+    ])
+    expect(lineDiff('same', 'same')).toEqual([{ type: 'same', text: 'same' }])
+    expect(lineDiff(Array.from({ length: 401 }, () => 'x').join('\n'), 'y')).toBeNull()
   })
 })

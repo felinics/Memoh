@@ -57,7 +57,9 @@ export interface ContextEntries {
 
 export type TrajectoryDetail =
   | { kind: 'user', turn: ChatUserTurn }
-  | { kind: 'system', lifecycle: HandlersContextLifecycleTurn, entry: SystemEntry }
+  // previous is the run before this one in the session: null for the first
+  // run, undefined when the older run is not loaded.
+  | { kind: 'system', lifecycle: HandlersContextLifecycleTurn, entry: SystemEntry, previous: HandlersContextLifecycleTurn | null | undefined }
   | { kind: 'context', lifecycle: HandlersContextLifecycleTurn, entry: ContextEntry }
   | { kind: 'block', turn: ChatAssistantTurn, block: ContentBlock, trace: UIStepTrace | null }
 
@@ -118,6 +120,17 @@ export function lifecycleByTurnId(turns: HandlersContextLifecycleTurn[]): Map<st
     if (turnId && !byTurn.has(turnId)) byTurn.set(turnId, turn)
   }
   return byTurn
+}
+
+// The run before each run in a newest-first lifecycle list: null for the
+// oldest run of a complete list, undefined for the oldest of a partial one.
+export function previousLifecycleByRun(turns: HandlersContextLifecycleTurn[], hasOlder: boolean): Map<string, HandlersContextLifecycleTurn | null | undefined> {
+  const previous = new Map<string, HandlersContextLifecycleTurn | null | undefined>()
+  turns.forEach((turn, index) => {
+    if (!turn.run_id) return
+    previous.set(turn.run_id, turns[index + 1] ?? (hasOlder ? undefined : null))
+  })
+  return previous
 }
 
 export function previewText(value: unknown, limit: number): string {
@@ -255,7 +268,7 @@ function contextRow(lifecycle: HandlersContextLifecycleTurn, entry: ContextEntry
 
 // The rows a turn's context assembly contributes ahead of its first request:
 // the system prompt, then everything else the manifest injected.
-function turnContextRows(lifecycle: HandlersContextLifecycleTurn, entries: ContextEntries, turnId: string, turnLabel: string): { system: TrajectoryRow | null, before: TrajectoryRow[] } {
+function turnContextRows(lifecycle: HandlersContextLifecycleTurn, entries: ContextEntries, turnId: string, turnLabel: string, previous: HandlersContextLifecycleTurn | null | undefined): { system: TrajectoryRow | null, before: TrajectoryRow[] } {
   const runId = lifecycle.run_id ?? turnId
   const system: TrajectoryRow | null = entries.system
     ? {
@@ -271,7 +284,7 @@ function turnContextRows(lifecycle: HandlersContextLifecycleTurn, entries: Conte
         startedAtMs: null,
         endedAtMs: null,
         running: false,
-        detail: { kind: 'system', lifecycle, entry: entries.system },
+        detail: { kind: 'system', lifecycle, entry: entries.system, previous },
       }
     : null
   const before = entries.before.map((entry, index) => contextRow(lifecycle, entry, `${runId}:context:${index}`, turnId, turnLabel, null))
@@ -373,6 +386,7 @@ function assistantSignature(turn: ChatAssistantTurn, lifecycle: HandlersContextL
 export type TrajectoryRowBuilder = (
   messages: ChatMessage[],
   lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
+  previousByRun?: ReadonlyMap<string, HandlersContextLifecycleTurn | null | undefined>,
 ) => TrajectoryRow[]
 
 // Rows of unchanged assistant turns are reused across rebuilds, so a streamed
@@ -381,16 +395,16 @@ export type TrajectoryRowBuilder = (
 // whether its user message or only its assistant output is loaded.
 export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
   const assistantCache = new WeakMap<ChatAssistantTurn, { signature: string, rows: TrajectoryRow[] }>()
-  const contextCache = new WeakMap<HandlersContextLifecycleTurn, { turnLabel: string, entries: ContextEntries, system: TrajectoryRow | null, before: TrajectoryRow[] }>()
-  const contextOf = (lifecycle: HandlersContextLifecycleTurn, turnId: string, turnLabel: string) => {
+  const contextCache = new WeakMap<HandlersContextLifecycleTurn, { turnLabel: string, previous: HandlersContextLifecycleTurn | null | undefined, entries: ContextEntries, system: TrajectoryRow | null, before: TrajectoryRow[] }>()
+  const contextOf = (lifecycle: HandlersContextLifecycleTurn, turnId: string, turnLabel: string, previous: HandlersContextLifecycleTurn | null | undefined) => {
     const cached = contextCache.get(lifecycle)
-    if (cached && cached.turnLabel === turnLabel) return cached
+    if (cached && cached.turnLabel === turnLabel && cached.previous === previous) return cached
     const entries = contextEntries(lifecycle.snapshot)
-    const built = { turnLabel, entries, ...turnContextRows(lifecycle, entries, turnId, turnLabel) }
+    const built = { turnLabel, previous, entries, ...turnContextRows(lifecycle, entries, turnId, turnLabel, previous) }
     contextCache.set(lifecycle, built)
     return built
   }
-  return (messages, lifecycleByTurn) => {
+  return (messages, lifecycleByTurn, previousByRun) => {
     const rows: TrajectoryRow[] = []
     let lastTurnKey: string | null = null
     let position = 0
@@ -404,12 +418,13 @@ export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
       }
       const turnLabel = String(turn.turnPosition ?? position)
       const lifecycle = turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined
-      const context = lifecycle && turnStart ? contextOf(lifecycle, turn.turnId ?? '', turnLabel) : null
+      const previous = lifecycle?.run_id ? previousByRun?.get(lifecycle.run_id) : undefined
+      const context = lifecycle && turnStart ? contextOf(lifecycle, turn.turnId ?? '', turnLabel, previous) : null
       let turnRows: TrajectoryRow[]
       if (turn.role === 'user') {
         turnRows = context ? [...(context.system ? [context.system] : []), userRow(turn, turnLabel), ...context.before] : [userRow(turn, turnLabel)]
       } else {
-        const perStep = lifecycle ? contextOf(lifecycle, turn.turnId ?? '', turnLabel).entries.perStep : new Map<number, ContextEntry[]>()
+        const perStep = lifecycle ? contextOf(lifecycle, turn.turnId ?? '', turnLabel, previous).entries.perStep : new Map<number, ContextEntry[]>()
         const signature = assistantSignature(turn, lifecycle, turnLabel)
         const cached = assistantCache.get(turn)
         let blocks: TrajectoryRow[]
@@ -435,8 +450,9 @@ export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
 export function buildTrajectoryRows(
   messages: ChatMessage[],
   lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
+  previousByRun?: ReadonlyMap<string, HandlersContextLifecycleTurn | null | undefined>,
 ): TrajectoryRow[] {
-  return createTrajectoryRowBuilder()(messages, lifecycleByTurn)
+  return createTrajectoryRowBuilder()(messages, lifecycleByTurn, previousByRun)
 }
 
 // DSH's lane rule: tools on their own lane, model output on the model lane

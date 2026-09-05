@@ -1244,6 +1244,17 @@
       "contextHistoryCut": "{messages} 件 · {tokens} tok · 除外 {dropped}",
       "inspectorTexts": "本文",
       "inspectorTextsFailed": "フラグメント本文を読み込めませんでした",
+      "inspectorPromptChanges": "前回の実行からの変更",
+      "inspectorPromptFirstRun": "このセッションの最初の実行",
+      "inspectorPromptPreviousUnknown": "前回の実行は未読み込み",
+      "inspectorPromptSame": "前回と同じプロンプト",
+      "inspectorDiffSkipped": "{n} 行は変更なし",
+      "inspectorDiffUnavailable": "差分には両方の実行の保存テキストが必要です",
+      "promptChange": {
+        "added": "追加",
+        "removed": "削除",
+        "changed": "変更"
+      },
       "inspectorTextsForbidden": "注入テキストの閲覧にはこの Bot の Workspace 読み取り権限が必要です",
       "inspectorTextUnavailable": "このフラグメントの本文は保存されていません"
     },

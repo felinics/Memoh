@@ -1266,6 +1266,17 @@
       "contextHistoryCut": "{messages} messages · {tokens} tok · {dropped} dropped",
       "inspectorTexts": "Text",
       "inspectorTextsFailed": "Could not load the fragment texts",
+      "inspectorPromptChanges": "Changes from the previous run",
+      "inspectorPromptFirstRun": "First run of the session",
+      "inspectorPromptPreviousUnknown": "Previous run not loaded",
+      "inspectorPromptSame": "Same prompt as the previous run",
+      "inspectorDiffSkipped": "{n} unchanged lines",
+      "inspectorDiffUnavailable": "Both runs need stored texts for a diff",
+      "promptChange": {
+        "added": "added",
+        "removed": "removed",
+        "changed": "changed"
+      },
       "inspectorTextsForbidden": "Reading the injected texts needs workspace access on this bot",
       "inspectorTextUnavailable": "Text was not stored for this fragment"
     },
