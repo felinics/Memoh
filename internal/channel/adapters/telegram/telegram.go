@@ -931,23 +931,21 @@ func (a *TelegramAdapter) submitAskUser(ctx context.Context, cfg channel.Channel
 }
 
 func (a *TelegramAdapter) finishAskUserSubmission(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, msg channel.InboundMessage, cardChatID int64, cardMsgID int) error {
-	if err := handler(ctx, cfg, msg); err != nil {
-		return err
-	}
+	handlerErr := handler(ctx, cfg, msg)
 	// Ingress can return nil after a permission denial. Only durable acceptance
 	// authorizes a submitted summary, never mere completion of the handler.
 	accepted, err := a.userInput.Get(ctx, req.ID)
 	if err != nil {
-		return err
+		return errors.Join(handlerErr, err)
 	}
 	if accepted.Status != userinput.StatusSubmitted {
-		return nil
+		return handlerErr
 	}
 	if bot != nil && cardChatID != 0 && cardMsgID != 0 {
 		summary := formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
-		return editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil)
+		return errors.Join(handlerErr, editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil))
 	}
-	return nil
+	return handlerErr
 }
 
 func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, update *tele.Update, req userinput.Request, cardMsgID int) (channel.InboundMessage, bool) {
