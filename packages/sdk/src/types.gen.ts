@@ -1201,7 +1201,7 @@ export type ContextfragFragmentRef = {
     token_estimate?: number;
 };
 
-export type ContextfragKind = 'tool_definition' | 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary' | 'tool_definition';
 
 export type ContextfragKindBreakdown = {
     fragments?: number;

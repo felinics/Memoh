@@ -2056,7 +2056,6 @@ definitions:
     type: object
   contextfrag.Kind:
     enum:
-    - tool_definition
     - system_prompt
     - system_policy
     - bot_identity
@@ -2074,9 +2073,9 @@ definitions:
     - runtime_context
     - memory_recall
     - conversation_summary
+    - tool_definition
     type: string
     x-enum-varnames:
-    - KindToolDefinition
     - KindSystemPrompt
     - KindSystemPolicy
     - KindBotIdentity
@@ -2094,6 +2093,7 @@ definitions:
     - KindRuntimeContext
     - KindMemoryRecall
     - KindConversationSummary
+    - KindToolDefinition
   contextfrag.KindBreakdown:
     properties:
       fragments:
@@ -11739,10 +11739,10 @@ paths:
     get:
       description: Return every fragment the run put in front of the model outside
         the conversation (system prompt pieces, workspace rules, tool usage, skills,
-        tool definitions) with the text that was stored for it. Conversation messages
-        are not included; the history holds them. The texts include workspace files
-        and hook output, so the caller needs workspace_read on the bot besides access
-        to the session
+        recalled memory, tool definitions) with the text that was stored for it. Conversation
+        messages are not included; the history holds them. The texts include workspace
+        files and hook output, so the caller needs workspace_read on the bot besides
+        access to the session
       parameters:
       - description: Bot ID
         in: path

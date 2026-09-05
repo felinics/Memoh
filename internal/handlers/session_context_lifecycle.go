@@ -231,7 +231,7 @@ type ContextLifecycleFragmentsResponse struct {
 
 // GetSessionContextLifecycleFragments godoc
 // @Summary Get the injected context texts of a run
-// @Description Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them. The texts include workspace files and hook output, so the caller needs workspace_read on the bot besides access to the session
+// @Description Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, recalled memory, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them. The texts include workspace files and hook output, so the caller needs workspace_read on the bot besides access to the session
 // @Tags sessions
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"

@@ -189,3 +189,22 @@ func TestRowCopyKeepsOnlyTheBoundedAccounting(t *testing.T) {
 		t.Fatalf("the run snapshot must not be touched: %#v", snapshot)
 	}
 }
+
+func TestFragmentTextsStoreMemoryRecallFromTheHistorySlot(t *testing.T) {
+	t.Parallel()
+
+	recall := sdk.UserMessage("Recalled: likes tea")
+	history := sdk.AssistantMessage("earlier answer")
+	frags := []ContextFrag{
+		{ID: "memory.recall", Kind: KindMemoryRecall, Slot: SlotHistory, Parts: []Part{{Type: PartSDKMessage, SDKMessage: &recall}}},
+		{ID: "message.003", Kind: KindConversationEvent, Slot: SlotHistory, Parts: []Part{{Type: PartSDKMessage, SDKMessage: &history}}},
+	}
+	texts := FragmentTexts(frags)
+	if len(texts) != 1 || texts[0].Kind != KindMemoryRecall || texts[0].Text != "Recalled: likes tea" {
+		t.Fatalf("texts = %#v, want only the recalled memory", texts)
+	}
+	refs := BuildLifecycleSnapshot(BuildManifest(frags)).Fragments
+	if len(refs) != 1 || refs[0].Kind != KindMemoryRecall || refs[0].Slot != SlotHistory {
+		t.Fatalf("refs = %#v, want the recall ref in its history slot", refs)
+	}
+}

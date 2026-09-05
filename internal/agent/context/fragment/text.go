@@ -53,8 +53,12 @@ type FragmentRef struct {
 
 // injectedFragment reports whether a fragment is context the runtime put in
 // front of the model rather than a conversation message the history already
-// keeps.
+// keeps. Recalled memory is injected wherever it lands: the history slot
+// only positions it, and no persisted message holds its text.
 func injectedFragment(kind Kind, slot Slot) bool {
+	if kind == KindMemoryRecall {
+		return true
+	}
 	if slot == SlotHistory || slot == SlotCurrentUser {
 		return false
 	}

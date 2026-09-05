@@ -7864,7 +7864,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments": {
             "get": {
-                "description": "Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them. The texts include workspace files and hook output, so the caller needs workspace_read on the bot besides access to the session",
+                "description": "Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, recalled memory, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them. The texts include workspace files and hook output, so the caller needs workspace_read on the bot besides access to the session",
                 "tags": [
                     "sessions"
                 ],
@@ -18347,7 +18347,6 @@ const docTemplate = `{
         "contextfrag.Kind": {
             "type": "string",
             "enum": [
-                "tool_definition",
                 "system_prompt",
                 "system_policy",
                 "bot_identity",
@@ -18364,10 +18363,10 @@ const docTemplate = `{
                 "background_summary",
                 "runtime_context",
                 "memory_recall",
-                "conversation_summary"
+                "conversation_summary",
+                "tool_definition"
             ],
             "x-enum-varnames": [
-                "KindToolDefinition",
                 "KindSystemPrompt",
                 "KindSystemPolicy",
                 "KindBotIdentity",
@@ -18384,7 +18383,8 @@ const docTemplate = `{
                 "KindBackgroundSummary",
                 "KindRuntimeContext",
                 "KindMemoryRecall",
-                "KindConversationSummary"
+                "KindConversationSummary",
+                "KindToolDefinition"
             ]
         },
         "contextfrag.KindBreakdown": {
