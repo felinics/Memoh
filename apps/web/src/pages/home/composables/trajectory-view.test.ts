@@ -158,6 +158,10 @@ describe('formatDurationMs', () => {
     expect(formatDurationMs(33_500)).toBe('33.5s')
     expect(formatDurationMs(95_000)).toBe('1m 35s')
     expect(formatDurationMs(0)).toBe('0ms')
+    expect(formatDurationMs(59_960)).toBe('1m 0s')
+    expect(formatDurationMs(119_600)).toBe('2m 0s')
+    expect(formatDurationMs(3_599_600)).toBe('1h 0m')
+    expect(formatDurationMs(5_400_000)).toBe('1h 30m')
   })
 })
 

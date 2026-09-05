@@ -121,13 +121,18 @@ export function rowMapGeometry(segments: RowMapSegment[], mode: TimelineMode): R
   })
 }
 
+// Rounding happens once, on the unit that is shown, so a value just under a
+// boundary rolls over to the next unit instead of reading "1m 60s".
 export function formatDurationMs(ms: number): string {
   const value = Math.max(ms, 0)
   if (value < 1_000) return `${Math.round(value)}ms`
-  if (value < 60_000) return `${(value / 1_000).toFixed(1)}s`
-  const minutes = Math.floor(value / 60_000)
-  const seconds = Math.round((value - minutes * 60_000) / 1_000)
-  return `${minutes}m ${seconds}s`
+  const tenths = Math.round(value / 100)
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`
+  const totalSeconds = Math.round(value / 1_000)
+  const hours = Math.floor(totalSeconds / 3_600)
+  const minutes = Math.floor((totalSeconds % 3_600) / 60)
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m ${totalSeconds % 60}s`
 }
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
