@@ -35,8 +35,9 @@ func fragmentSnapshotJSON(t *testing.T) []byte {
 	raw, err := json.Marshal(contextfrag.LifecycleSnapshot{
 		Version: contextfrag.LifecycleSnapshotVersion,
 		Fragments: []contextfrag.FragmentRef{
-			{Kind: contextfrag.KindSystemPrompt, Slot: contextfrag.SlotSystem, ContentHash: "sys", TokenEstimate: 40, TextBytes: 160},
-			{Kind: contextfrag.KindWorkspaceInstruction, Slot: contextfrag.SlotSystem, ContentHash: "rules", TokenEstimate: 120, TextBytes: 480},
+			{Kind: contextfrag.KindSystemPrompt, Slot: contextfrag.SlotSystem, ContentHash: "canon-sys", TextHash: "sys", TokenEstimate: 40, TextBytes: 160},
+			{Kind: contextfrag.KindWorkspaceInstruction, Slot: contextfrag.SlotSystem, ContentHash: "canon-rules", TextHash: "rules", TokenEstimate: 120, TextBytes: 480},
+			{Kind: contextfrag.KindBotIdentity, Slot: contextfrag.SlotSystem, ContentHash: "canon-only", TokenEstimate: 8, TextBytes: 30},
 		},
 		ToolDefs: []contextfrag.ToolDefAccounting{{Provider: "workspace", Name: "exec", Bytes: 90, TokenEstimate: 22, ContentHash: "tool-exec"}},
 	})
@@ -63,17 +64,20 @@ func TestLoadContextLifecycleFragmentsJoinsStoredTextsToTheRunsRefs(t *testing.T
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(fragments) != 3 {
-		t.Fatalf("fragments = %#v, want two refs plus the tool definition", fragments)
+	if len(fragments) != 4 {
+		t.Fatalf("fragments = %#v, want three refs plus the tool definition", fragments)
 	}
-	if fragments[0].Label != "system.prompt.body" || !fragments[0].Available || fragments[0].Text != "You are Memoh." || fragments[0].TokenEstimate != 40 {
+	if fragments[0].Label != "system.prompt.body" || !fragments[0].Available || fragments[0].Text != "You are Memoh." || fragments[0].TokenEstimate != 40 || fragments[0].ContentHash != "canon-sys" || fragments[0].TextHash != "sys" {
 		t.Fatalf("system fragment = %#v", fragments[0])
 	}
-	if fragments[1].Label != "" || fragments[1].Kind != contextfrag.KindWorkspaceInstruction || fragments[1].Available || fragments[1].Text != "" || fragments[1].ContentHash != "rules" {
+	if fragments[1].Label != "" || fragments[1].Kind != contextfrag.KindWorkspaceInstruction || fragments[1].Available || fragments[1].Text != "" || fragments[1].ContentHash != "canon-rules" || fragments[1].TextHash != "rules" {
 		t.Fatalf("missing text must stay unavailable, not empty-available: %#v", fragments[1])
 	}
-	if fragments[2].Label != "workspace/exec" || fragments[2].Kind != contextfrag.KindToolDefinition || !fragments[2].Truncated || fragments[2].Text != `{"name":"exec"}` {
-		t.Fatalf("tool fragment = %#v", fragments[2])
+	if fragments[2].Kind != contextfrag.KindBotIdentity || fragments[2].Available || fragments[2].TextHash != "" {
+		t.Fatalf("a ref that stored no text stays unavailable: %#v", fragments[2])
+	}
+	if fragments[3].Label != "workspace/exec" || fragments[3].Kind != contextfrag.KindToolDefinition || !fragments[3].Truncated || fragments[3].Text != `{"name":"exec"}` || fragments[3].TextHash != "tool-exec" {
+		t.Fatalf("tool fragment = %#v", fragments[3])
 	}
 	sort.Strings(stub.requested)
 	if len(stub.requested) != 3 || stub.requested[0] != "rules" || stub.requested[1] != "sys" || stub.requested[2] != "tool-exec" {
@@ -100,11 +104,11 @@ func TestContextFragmentPreviewsCoverEveryHashOnThePage(t *testing.T) {
 
 	turns := []ContextLifecycleTurn{
 		{RunID: "run-1", Snapshot: contextfrag.LifecycleSnapshot{
-			Fragments: []contextfrag.FragmentRef{{Kind: contextfrag.KindSystemPrompt, ContentHash: "sys"}, {Kind: contextfrag.KindWorkspaceInstruction, ContentHash: "rules"}},
+			Fragments: []contextfrag.FragmentRef{{Kind: contextfrag.KindSystemPrompt, ContentHash: "canon-sys", TextHash: "sys"}, {Kind: contextfrag.KindWorkspaceInstruction, ContentHash: "canon-rules", TextHash: "rules"}},
 			ToolDefs:  []contextfrag.ToolDefAccounting{{Provider: "workspace", Name: "exec", ContentHash: "tool-exec"}},
 		}},
 		{RunID: "run-2", Snapshot: contextfrag.LifecycleSnapshot{
-			Fragments: []contextfrag.FragmentRef{{Kind: contextfrag.KindSystemPrompt, ContentHash: "sys"}},
+			Fragments: []contextfrag.FragmentRef{{Kind: contextfrag.KindSystemPrompt, ContentHash: "canon-sys", TextHash: "sys"}, {Kind: contextfrag.KindBotIdentity, ContentHash: "canon-only"}},
 		}},
 	}
 	queries := &contextLifecycleQueryStub{previewRows: []sqlc.ListContextFragmentPreviewsRow{

@@ -84,8 +84,8 @@ const lifecycle: HandlersContextLifecycleTurn = {
       { kind: 'conversation_event', fragments: 6, token_estimate: 84 },
     ],
     fragments: [
-      { kind: 'system_prompt', slot: 'system', content_hash: 'h-sys', token_estimate: 1_300 },
-      { kind: 'workspace_instruction', slot: 'system', content_hash: 'h-rules', token_estimate: 500 },
+      { kind: 'system_prompt', slot: 'system', content_hash: 'c-sys', text_hash: 'h-sys', token_estimate: 1_300 },
+      { kind: 'workspace_instruction', slot: 'system', content_hash: 'c-rules', text_hash: 'h-rules', token_estimate: 500 },
     ],
     tool_defs: [{ provider: 'workspace', name: 'exec', bytes: 800, token_estimate: 200 }],
     selection: { selected: 6, dropped: 2, drop_reasons: { budget: 2 } },

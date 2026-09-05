@@ -159,6 +159,9 @@ type LifecycleHolder struct {
 	set           bool
 	textSink      FragmentTextSink
 	recordedTexts map[string]struct{}
+	// textHashes maps a fragment's content hash to the store key of the text
+	// this run recorded for it.
+	textHashes map[string]string
 }
 
 func NewLifecycleHolder() *LifecycleHolder {
@@ -224,6 +227,9 @@ func (h *LifecycleHolder) Snapshot() (LifecycleSnapshot, bool) {
 	ledger := h.ledger
 	runTrace := h.runTrace
 	ok := h.set
+	for i := range snapshot.Fragments {
+		snapshot.Fragments[i].TextHash = h.textHashes[snapshot.Fragments[i].ContentHash]
+	}
 	h.mu.RUnlock()
 	if !ok {
 		return LifecycleSnapshot{}, false

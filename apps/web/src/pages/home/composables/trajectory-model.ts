@@ -19,12 +19,13 @@ export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'assistant' | 'r
 // lifecycle manifest: counts and token estimates per fragment kind, never
 // prompt text.
 // One injected fragment as the run recorded it; its text and name live in the
-// content-addressed store under contentHash. Only tool definitions carry a
-// name of their own, from the accounting the snapshot keeps.
+// content-addressed store under textHash, which is empty when the run stored
+// no text for it. Only tool definitions carry a name of their own, from the
+// accounting the snapshot keeps.
 export interface FragmentRef {
   id: string
   kind: string
-  contentHash: string
+  textHash: string
   tokens: number
   bytes: number
 }
@@ -152,7 +153,7 @@ export function contextEntries(snapshot: ContextfragLifecycleSnapshot | null | u
     const kind = ref.kind ?? ''
     if (!kind) continue
     const list = refsByKind.get(kind) ?? []
-    list.push({ id: '', kind, contentHash: ref.content_hash ?? '', tokens: ref.token_estimate ?? 0, bytes: ref.text_bytes ?? 0 })
+    list.push({ id: '', kind, textHash: ref.text_hash ?? '', tokens: ref.token_estimate ?? 0, bytes: ref.text_bytes ?? 0 })
     refsByKind.set(kind, list)
   }
   let system: SystemEntry | null = null
@@ -185,7 +186,7 @@ export function contextEntries(snapshot: ContextfragLifecycleSnapshot | null | u
       tools: toolDefs.length,
       tokens: toolDefs.reduce((sum, def) => sum + (def.token_estimate ?? 0), 0),
       providers: [...new Set(toolDefs.map(def => def.provider ?? '').filter(Boolean))].sort(),
-      refs: toolDefs.map(def => ({ id: `${def.provider ?? ''}/${def.name ?? ''}`, kind: 'tool_definition', contentHash: def.content_hash ?? '', tokens: def.token_estimate ?? 0, bytes: def.bytes ?? 0 })),
+      refs: toolDefs.map(def => ({ id: `${def.provider ?? ''}/${def.name ?? ''}`, kind: 'tool_definition', textHash: def.content_hash ?? '', tokens: def.token_estimate ?? 0, bytes: def.bytes ?? 0 })),
     })
   }
   const selection = snapshot.selection

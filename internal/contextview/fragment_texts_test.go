@@ -35,7 +35,7 @@ func TestApplyProviderRunConfigRecordsSelectedFragmentTexts(t *testing.T) {
 		t.Fatalf("texts = %#v, system items = %#v, want the two system fragments and no message", sink.texts, hashes)
 	}
 	for _, text := range sink.texts {
-		if kind, ok := hashes[text.ContentHash]; !ok || kind != text.Kind || text.Text == "" || text.Label == "" {
+		if kind, ok := hashes[text.ContentHash]; !ok || kind != text.Kind || text.Text == "" || text.Label == "" || text.TextHash == "" {
 			t.Fatalf("text %#v does not match a manifest item %#v", text, hashes)
 		}
 	}

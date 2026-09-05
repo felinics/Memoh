@@ -18,9 +18,10 @@ type contextTextQueries interface {
 	UpsertContextFragmentTexts(ctx context.Context, arg sqlc.UpsertContextFragmentTextsParams) error
 }
 
-// contextTextStore persists rendered fragment texts content-addressed, off the
-// turn path. A hash is remembered only after its write succeeded, so a failed
-// batch is retried by the next run that renders the same fragment.
+// contextTextStore persists rendered fragment texts content-addressed by
+// their text hash, off the turn path. A hash is remembered only after its
+// write succeeded, so a failed batch is retried by the next run that renders
+// the same text.
 type contextTextStore struct {
 	queries  contextTextQueries
 	logger   *slog.Logger
@@ -44,23 +45,23 @@ func (s *contextTextStore) PersistFragmentTexts(ctx context.Context, texts []con
 	params := sqlc.UpsertContextFragmentTextsParams{}
 	s.mu.Lock()
 	for _, text := range texts {
-		if text.ContentHash == "" || text.Text == "" {
+		if text.TextHash == "" || text.Text == "" {
 			continue
 		}
-		if _, seen := s.seen[text.ContentHash]; seen {
+		if _, seen := s.seen[text.TextHash]; seen {
 			continue
 		}
-		if _, writing := s.inflight[text.ContentHash]; writing {
+		if _, writing := s.inflight[text.TextHash]; writing {
 			continue
 		}
-		s.inflight[text.ContentHash] = struct{}{}
+		s.inflight[text.TextHash] = struct{}{}
 		body := text.Text
 		truncated := false
 		if len(body) > maxFragmentTextBytes {
 			body = body[:maxFragmentTextBytes]
 			truncated = true
 		}
-		params.ContentHashes = append(params.ContentHashes, text.ContentHash)
+		params.ContentHashes = append(params.ContentHashes, text.TextHash)
 		params.Kinds = append(params.Kinds, string(text.Kind))
 		params.Labels = append(params.Labels, text.Label)
 		params.Texts = append(params.Texts, body)

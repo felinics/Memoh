@@ -82,8 +82,8 @@ describe('contextPreview', () => {
 
 describe('fragmentRowPreview', () => {
   const refs = [
-    { id: 'system.prompt.intro', kind: 'system_prompt', contentHash: 'h1', tokens: 50, bytes: 200 },
-    { id: 'system.prompt.body', kind: 'system_prompt', contentHash: 'h2', tokens: 100, bytes: 400 },
+    { id: 'system.prompt.intro', kind: 'system_prompt', textHash: 'h1', tokens: 50, bytes: 200 },
+    { id: 'system.prompt.body', kind: 'system_prompt', textHash: 'h2', tokens: 100, bytes: 400 },
   ]
 
   it('reads like the injected text and counts the fragments after it', () => {

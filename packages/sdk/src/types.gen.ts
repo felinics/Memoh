@@ -1197,10 +1197,11 @@ export type ContextfragFragmentRef = {
     kind?: ContextfragKind;
     slot?: ContextfragSlot;
     text_bytes?: number;
+    text_hash?: string;
     token_estimate?: number;
 };
 
-export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary' | 'tool_definition';
+export type ContextfragKind = 'tool_definition' | 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
 
 export type ContextfragKindBreakdown = {
     fragments?: number;
@@ -1926,6 +1927,11 @@ export type HandlersContextFragmentText = {
     slot?: ContextfragSlot;
     text?: string;
     text_bytes?: number;
+    /**
+     * TextHash is the store key of the fragment's text; tool definitions use
+     * their serialized hash for both.
+     */
+    text_hash?: string;
     token_estimate?: number;
     truncated?: boolean;
 };
@@ -1960,7 +1966,7 @@ export type HandlersContextLifecycleResponse = {
     aggregate_scope?: string;
     aggregates?: HandlersContextLifecycleAggregates;
     /**
-     * FragmentPreviews maps a content hash referenced by the page's fragment
+     * FragmentPreviews maps a text hash referenced by the page's fragment
      * refs and tool definitions to the head of its stored text.
      */
     fragment_previews?: {

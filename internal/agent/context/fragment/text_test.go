@@ -112,3 +112,55 @@ func TestLifecycleHolderRecordsEachFragmentTextOnce(t *testing.T) {
 	nilHolder.RecordFragmentTexts(frags)
 	NewLifecycleHolder().RecordFragmentTexts(frags)
 }
+
+func TestFragmentTextHashIgnoresScopeAndRef(t *testing.T) {
+	t.Parallel()
+
+	a := ContextFrag{ID: "system.prompt.body", Kind: KindSystemPrompt, Slot: SlotSystem, Scope: Scope{SessionID: "sess-a", CurrentMessageID: "tg:1"}, Ref: ContextRef{ContentHash: "canon-a"}, Parts: []Part{{Type: PartText, Text: "You are Memoh."}}}
+	b := a
+	b.Scope = Scope{SessionID: "sess-b"}
+	b.Ref = ContextRef{ContentHash: "canon-b"}
+	texts := FragmentTexts([]ContextFrag{a, b})
+	if len(texts) != 2 || texts[0].TextHash == "" || texts[0].TextHash != texts[1].TextHash {
+		t.Fatalf("the same text must share one store key across scopes: %#v", texts)
+	}
+	if texts[0].ContentHash != "canon-a" || texts[1].ContentHash != "canon-b" {
+		t.Fatalf("texts must keep their fragment's own content hash: %#v", texts)
+	}
+	if texts[0].TextHash != TextHash(KindSystemPrompt, "You are Memoh.") || TextHash(KindWorkspaceInstruction, "You are Memoh.") == texts[0].TextHash {
+		t.Fatalf("store key must be the kind-qualified text hash: %#v", texts[0])
+	}
+	_, tool := ToolDefinitionText("workspace", sdk.Tool{Name: "exec"})
+	if tool.TextHash == "" || tool.TextHash != tool.ContentHash {
+		t.Fatalf("tool definitions are keyed by their serialized hash: %#v", tool)
+	}
+}
+
+func TestLifecycleSnapshotRefsCarryTheStoredTextHash(t *testing.T) {
+	t.Parallel()
+
+	holder := NewLifecycleHolder()
+	holder.SetTextSink(&recordingTextSink{})
+	frags := textFragments()
+	holder.SetManifest(BuildManifest(frags))
+	holder.RecordFragmentTexts(frags)
+	snapshot, ok := holder.Snapshot()
+	if !ok || len(snapshot.Fragments) != 3 {
+		t.Fatalf("snapshot = %#v, %v", snapshot, ok)
+	}
+	if snapshot.Fragments[1].ContentHash != "abc123" || snapshot.Fragments[1].TextHash != TextHash(KindWorkspaceInstruction, "Follow AGENTS.md") {
+		t.Fatalf("ref must carry both the fragment hash and the text store key: %#v", snapshot.Fragments[1])
+	}
+	if snapshot.Fragments[0].TextHash != TextHash(KindSystemPrompt, "You are Memoh.") || snapshot.Fragments[2].TextHash == "" {
+		t.Fatalf("every recorded fragment resolves its text hash: %#v", snapshot.Fragments)
+	}
+
+	unrecorded := NewLifecycleHolder()
+	unrecorded.SetManifest(BuildManifest(frags))
+	snapshot, _ = unrecorded.Snapshot()
+	for _, ref := range snapshot.Fragments {
+		if ref.TextHash != "" {
+			t.Fatalf("a run that stored no text must not claim a text hash: %#v", ref)
+		}
+	}
+}

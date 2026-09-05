@@ -282,11 +282,11 @@ const textRunId = computed(() => {
 })
 const { fragments, status: fragmentStatus } = useContextLifecycleFragments(textRunId)
 const textRows = computed(() => {
-  const byHash = new Map(fragments.value.map(fragment => [fragment.content_hash ?? '', fragment]))
+  const byHash = new Map(fragments.value.map(fragment => [fragment.text_hash ?? '', fragment]))
   return textRefs.value.map((ref, index) => {
-    const stored = byHash.get(ref.contentHash)
+    const stored = ref.textHash ? byHash.get(ref.textHash) : undefined
     return {
-      key: `${ref.contentHash || ref.id}/${index}`,
+      key: `${ref.textHash || ref.id}/${index}`,
       id: stored?.label || ref.id || t(`chat.trajectory.contextKind.${ref.kind}`),
       tokens: ref.tokens ? formatTokenCount(ref.tokens) : '',
       text: stored?.text ?? '',

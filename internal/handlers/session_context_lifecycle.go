@@ -48,7 +48,7 @@ type ContextLifecycleResponse struct {
 	// AggregateScope is always "returned_page": aggregates cover the returned
 	// turns, never the whole session.
 	AggregateScope string `json:"aggregate_scope"`
-	// FragmentPreviews maps a content hash referenced by the page's fragment
+	// FragmentPreviews maps a text hash referenced by the page's fragment
 	// refs and tool definitions to the head of its stored text.
 	FragmentPreviews map[string]ContextFragmentPreview `json:"fragment_previews,omitempty"`
 }
@@ -145,7 +145,8 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 }
 
 // contextFragmentHashes collects every stored-text hash a page of turns
-// references, deduplicated, in first-seen order.
+// references, deduplicated, in first-seen order. A fragment ref without a
+// text hash stored no text, so it is not looked up.
 func contextFragmentHashes(turns []ContextLifecycleTurn) []string {
 	seen := make(map[string]struct{})
 	var hashes []string
@@ -162,7 +163,7 @@ func contextFragmentHashes(turns []ContextLifecycleTurn) []string {
 	}
 	for _, turn := range turns {
 		for _, ref := range turn.Snapshot.Fragments {
-			add(ref.ContentHash)
+			add(ref.TextHash)
 		}
 		for _, def := range turn.Snapshot.ToolDefs {
 			add(def.ContentHash)
@@ -200,14 +201,17 @@ func contextFragmentPreviews(ctx context.Context, queries contextLifecycleQuerie
 type ContextFragmentText struct {
 	// Label names the fragment as the assembler did; empty when no text was
 	// stored, because the snapshot itself never carries names.
-	Label         string           `json:"label,omitempty"`
-	Kind          contextfrag.Kind `json:"kind"`
-	Slot          contextfrag.Slot `json:"slot,omitempty"`
-	ContentHash   string           `json:"content_hash,omitempty"`
-	TokenEstimate int              `json:"token_estimate,omitempty"`
-	TextBytes     int              `json:"text_bytes,omitempty"`
-	Text          string           `json:"text"`
-	Truncated     bool             `json:"truncated,omitempty"`
+	Label       string           `json:"label,omitempty"`
+	Kind        contextfrag.Kind `json:"kind"`
+	Slot        contextfrag.Slot `json:"slot,omitempty"`
+	ContentHash string           `json:"content_hash,omitempty"`
+	// TextHash is the store key of the fragment's text; tool definitions use
+	// their serialized hash for both.
+	TextHash      string `json:"text_hash,omitempty"`
+	TokenEstimate int    `json:"token_estimate,omitempty"`
+	TextBytes     int    `json:"text_bytes,omitempty"`
+	Text          string `json:"text"`
+	Truncated     bool   `json:"truncated,omitempty"`
 	// Available is false when the text was never stored for this fragment,
 	// such as runs older than the text store.
 	Available bool `json:"available"`
@@ -278,10 +282,10 @@ func loadContextLifecycleFragments(
 	}
 	fragments := make([]ContextFragmentText, 0, len(snapshot.Fragments)+len(snapshot.ToolDefs))
 	for _, ref := range snapshot.Fragments {
-		fragments = append(fragments, ContextFragmentText{Kind: ref.Kind, Slot: ref.Slot, ContentHash: ref.ContentHash, TokenEstimate: ref.TokenEstimate, TextBytes: ref.TextBytes})
+		fragments = append(fragments, ContextFragmentText{Kind: ref.Kind, Slot: ref.Slot, ContentHash: ref.ContentHash, TextHash: ref.TextHash, TokenEstimate: ref.TokenEstimate, TextBytes: ref.TextBytes})
 	}
 	for _, def := range snapshot.ToolDefs {
-		fragments = append(fragments, ContextFragmentText{Label: def.Provider + "/" + def.Name, Kind: contextfrag.KindToolDefinition, ContentHash: def.ContentHash, TokenEstimate: def.TokenEstimate, TextBytes: def.Bytes})
+		fragments = append(fragments, ContextFragmentText{Label: def.Provider + "/" + def.Name, Kind: contextfrag.KindToolDefinition, ContentHash: def.ContentHash, TextHash: def.ContentHash, TokenEstimate: def.TokenEstimate, TextBytes: def.Bytes})
 	}
 	hashes := contextFragmentHashes([]ContextLifecycleTurn{{Snapshot: snapshot}})
 	if len(hashes) == 0 {
@@ -296,7 +300,7 @@ func loadContextLifecycleFragments(
 		texts[row.ContentHash] = row
 	}
 	for i := range fragments {
-		row, ok := texts[fragments[i].ContentHash]
+		row, ok := texts[fragments[i].TextHash]
 		if !ok {
 			continue
 		}

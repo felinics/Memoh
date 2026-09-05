@@ -18336,6 +18336,9 @@ const docTemplate = `{
                 "text_bytes": {
                     "type": "integer"
                 },
+                "text_hash": {
+                    "type": "string"
+                },
                 "token_estimate": {
                     "type": "integer"
                 }
@@ -18344,6 +18347,7 @@ const docTemplate = `{
         "contextfrag.Kind": {
             "type": "string",
             "enum": [
+                "tool_definition",
                 "system_prompt",
                 "system_policy",
                 "bot_identity",
@@ -18360,10 +18364,10 @@ const docTemplate = `{
                 "background_summary",
                 "runtime_context",
                 "memory_recall",
-                "conversation_summary",
-                "tool_definition"
+                "conversation_summary"
             ],
             "x-enum-varnames": [
+                "KindToolDefinition",
                 "KindSystemPrompt",
                 "KindSystemPolicy",
                 "KindBotIdentity",
@@ -18380,8 +18384,7 @@ const docTemplate = `{
                 "KindBackgroundSummary",
                 "KindRuntimeContext",
                 "KindMemoryRecall",
-                "KindConversationSummary",
-                "KindToolDefinition"
+                "KindConversationSummary"
             ]
         },
         "contextfrag.KindBreakdown": {
@@ -20311,6 +20314,10 @@ const docTemplate = `{
                 "text_bytes": {
                     "type": "integer"
                 },
+                "text_hash": {
+                    "description": "TextHash is the store key of the fragment's text; tool definitions use\ntheir serialized hash for both.",
+                    "type": "string"
+                },
                 "token_estimate": {
                     "type": "integer"
                 },
@@ -20384,7 +20391,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/handlers.ContextLifecycleAggregates"
                 },
                 "fragment_previews": {
-                    "description": "FragmentPreviews maps a content hash referenced by the page's fragment\nrefs and tool definitions to the head of its stored text.",
+                    "description": "FragmentPreviews maps a text hash referenced by the page's fragment\nrefs and tool definitions to the head of its stored text.",
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/handlers.ContextFragmentPreview"

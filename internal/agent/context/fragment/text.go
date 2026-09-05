@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -14,10 +15,13 @@ import (
 // schemas can share the content-addressed text store with fragments.
 const KindToolDefinition Kind = "tool_definition"
 
-// FragmentText is the rendered text of one context fragment, addressed by the
-// same content hash the manifest and selection audit carry.
+// FragmentText is the rendered text of one context fragment. ContentHash is
+// the fragment's own (scope-bound) hash the manifest and selection audit
+// carry; TextHash is the store key, derived from the kind and the text alone
+// so one text is stored once however many sessions or messages render it.
 type FragmentText struct {
 	ContentHash string
+	TextHash    string
 	Kind        Kind
 	// Label names the fragment as the assembler did (system.prompt.body,
 	// workspace/exec); it travels with the text, never with the snapshot.
@@ -36,11 +40,13 @@ type FragmentTextSink interface {
 // FragmentRef is the bounded per-run record of one injected fragment: enough to
 // find its text in the content-addressed store and account for it. Neither the
 // text nor the fragment's own name is part of it; the snapshot stays
-// content-light.
+// content-light. TextHash is the store key of the text this run recorded;
+// it is empty when the run stored no text for the fragment.
 type FragmentRef struct {
 	Kind          Kind   `json:"kind"`
 	Slot          Slot   `json:"slot"`
 	ContentHash   string `json:"content_hash,omitempty"`
+	TextHash      string `json:"text_hash,omitempty"`
 	TokenEstimate int    `json:"token_estimate,omitempty"`
 	TextBytes     int    `json:"text_bytes,omitempty"`
 }
@@ -76,6 +82,16 @@ func fragmentText(frag ContextFrag) string {
 	return strings.Join(chunks, "\n")
 }
 
+// TextHash is the content-addressed key of a stored fragment text: the kind
+// and the rendered text, nothing scope-bound.
+func TextHash(kind Kind, text string) string {
+	digest := sha256.New()
+	_, _ = io.WriteString(digest, string(kind))
+	digest.Write([]byte{0})
+	_, _ = io.WriteString(digest, text)
+	return hex.EncodeToString(digest.Sum(nil))
+}
+
 func fragmentContentHash(frag ContextFrag) string {
 	if hash := strings.TrimSpace(frag.Ref.ContentHash); hash != "" {
 		return hash
@@ -101,7 +117,7 @@ func FragmentTexts(frags []ContextFrag) []FragmentText {
 		if text == "" || hash == "" {
 			continue
 		}
-		texts = append(texts, FragmentText{ContentHash: hash, Kind: frag.Kind, Label: frag.ID, Text: text})
+		texts = append(texts, FragmentText{ContentHash: hash, TextHash: TextHash(frag.Kind, text), Kind: frag.Kind, Label: frag.ID, Text: text})
 	}
 	return texts
 }
@@ -124,6 +140,7 @@ func ToolDefinitionText(provider string, tool sdk.Tool) (ToolDefAccounting, Frag
 			ContentHash:   hash,
 		}, FragmentText{
 			ContentHash: hash,
+			TextHash:    hash,
 			Kind:        KindToolDefinition,
 			Label:       provider + "/" + tool.Name,
 			Text:        string(data),
@@ -160,7 +177,8 @@ func (h *LifecycleHolder) SetTextSink(sink FragmentTextSink) {
 }
 
 // RecordFragmentTexts hands the injected fragments' texts to the sink once per
-// content hash for this run, so per-step refreshes cost a map lookup each.
+// text hash for this run, so per-step refreshes cost a map lookup each, and
+// remembers which store key each fragment resolved to for the snapshot.
 func (h *LifecycleHolder) RecordFragmentTexts(frags []ContextFrag) {
 	if h == nil || len(frags) == 0 {
 		return
@@ -185,16 +203,20 @@ func (h *LifecycleHolder) recordTexts(texts []FragmentText) {
 	}
 	if h.recordedTexts == nil {
 		h.recordedTexts = make(map[string]struct{}, len(texts))
+		h.textHashes = make(map[string]string, len(texts))
 	}
 	fresh := make([]FragmentText, 0, len(texts))
 	for _, text := range texts {
-		if text.ContentHash == "" {
+		if text.TextHash == "" {
 			continue
 		}
-		if _, seen := h.recordedTexts[text.ContentHash]; seen {
+		if text.ContentHash != "" {
+			h.textHashes[text.ContentHash] = text.TextHash
+		}
+		if _, seen := h.recordedTexts[text.TextHash]; seen {
 			continue
 		}
-		h.recordedTexts[text.ContentHash] = struct{}{}
+		h.recordedTexts[text.TextHash] = struct{}{}
 		fresh = append(fresh, text)
 	}
 	h.mu.Unlock()

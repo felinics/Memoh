@@ -232,7 +232,7 @@ export type FragmentPreviews = Readonly<Record<string, HandlersContextFragmentPr
 export function fragmentRowPreview(refs: FragmentRef[], previews: FragmentPreviews | null | undefined): string | null {
   if (!previews) return null
   for (let index = 0; index < refs.length; index += 1) {
-    const stored = previews[refs[index]!.contentHash]
+    const stored = previews[refs[index]!.textHash]
     if (!stored?.preview) continue
     const head = previewText(stored.preview, PREVIEW_SOURCE_CHARACTERS)
     const rest = refs.length - index - 1

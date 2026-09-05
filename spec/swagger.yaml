@@ -2049,11 +2049,14 @@ definitions:
         $ref: '#/definitions/contextfrag.Slot'
       text_bytes:
         type: integer
+      text_hash:
+        type: string
       token_estimate:
         type: integer
     type: object
   contextfrag.Kind:
     enum:
+    - tool_definition
     - system_prompt
     - system_policy
     - bot_identity
@@ -2071,9 +2074,9 @@ definitions:
     - runtime_context
     - memory_recall
     - conversation_summary
-    - tool_definition
     type: string
     x-enum-varnames:
+    - KindToolDefinition
     - KindSystemPrompt
     - KindSystemPolicy
     - KindBotIdentity
@@ -2091,7 +2094,6 @@ definitions:
     - KindRuntimeContext
     - KindMemoryRecall
     - KindConversationSummary
-    - KindToolDefinition
   contextfrag.KindBreakdown:
     properties:
       fragments:
@@ -3401,6 +3403,11 @@ definitions:
         type: string
       text_bytes:
         type: integer
+      text_hash:
+        description: |-
+          TextHash is the store key of the fragment's text; tool definitions use
+          their serialized hash for both.
+        type: string
       token_estimate:
         type: integer
       truncated:
@@ -3454,7 +3461,7 @@ definitions:
         additionalProperties:
           $ref: '#/definitions/handlers.ContextFragmentPreview'
         description: |-
-          FragmentPreviews maps a content hash referenced by the page's fragment
+          FragmentPreviews maps a text hash referenced by the page's fragment
           refs and tool definitions to the head of its stored text.
         type: object
       has_more:

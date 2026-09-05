@@ -31,10 +31,10 @@ func TestContextTextStorePersistsEachHashOnce(t *testing.T) {
 	queries := &recordingFragmentTextQueries{}
 	store := newContextTextStore(queries, slog.New(slog.DiscardHandler))
 	store.PersistFragmentTexts(context.Background(), []contextfrag.FragmentText{
-		{ContentHash: "h1", Kind: contextfrag.KindSystemPrompt, Text: "You are Memoh."},
-		{ContentHash: "h2", Kind: contextfrag.KindWorkspaceInstruction, Text: "Follow AGENTS.md"},
+		{TextHash: "h1", Kind: contextfrag.KindSystemPrompt, Text: "You are Memoh."},
+		{TextHash: "h2", Kind: contextfrag.KindWorkspaceInstruction, Text: "Follow AGENTS.md"},
 	})
-	store.PersistFragmentTexts(context.Background(), []contextfrag.FragmentText{{ContentHash: "h1", Kind: contextfrag.KindSystemPrompt, Text: "You are Memoh."}})
+	store.PersistFragmentTexts(context.Background(), []contextfrag.FragmentText{{TextHash: "h1", Kind: contextfrag.KindSystemPrompt, Text: "You are Memoh."}})
 	store.wait()
 
 	if len(queries.params) != 1 {
@@ -51,7 +51,7 @@ func TestContextTextStoreTruncatesOversizedTexts(t *testing.T) {
 
 	queries := &recordingFragmentTextQueries{}
 	store := newContextTextStore(queries, slog.New(slog.DiscardHandler))
-	store.PersistFragmentTexts(context.Background(), []contextfrag.FragmentText{{ContentHash: "big", Kind: contextfrag.KindSkillsCatalog, Text: strings.Repeat("x", maxFragmentTextBytes+10)}})
+	store.PersistFragmentTexts(context.Background(), []contextfrag.FragmentText{{TextHash: "big", Kind: contextfrag.KindSkillsCatalog, Text: strings.Repeat("x", maxFragmentTextBytes+10)}})
 	store.wait()
 
 	if len(queries.params) != 1 || len(queries.params[0].Texts[0]) != maxFragmentTextBytes || !queries.params[0].Truncated[0] || queries.params[0].TextBytes[0] != int32(maxFragmentTextBytes+10) {
@@ -64,7 +64,7 @@ func TestContextTextStoreRetriesAHashAfterAFailedWrite(t *testing.T) {
 
 	queries := &recordingFragmentTextQueries{err: errors.New("db down")}
 	store := newContextTextStore(queries, slog.New(slog.DiscardHandler))
-	text := []contextfrag.FragmentText{{ContentHash: "h9", Kind: contextfrag.KindSystemPrompt, Text: "retry me"}}
+	text := []contextfrag.FragmentText{{TextHash: "h9", Kind: contextfrag.KindSystemPrompt, Text: "retry me"}}
 	store.PersistFragmentTexts(context.Background(), text)
 	store.wait()
 	queries.mu.Lock()
