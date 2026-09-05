@@ -20,26 +20,84 @@ export interface RowMapBar {
   durationMs: number
   running: boolean
   turnStart: boolean
+  // Ledger rows the bar stands for: one, or a fold of consecutive turns
+  // when the window holds more rows than the strip can show.
+  rows: number
 }
 
+// The strip never mounts more bars than this; a longer window folds
+// consecutive turns into one bar per lane.
+export const MAX_STRIP_BARS = 400
 const MIN_BAR_PCT = 1
 const TURN_GAP_PCT = 0.6
+const MAX_GAP_TOTAL_PCT = 20
+const LANES: TimelineLane[] = ['input', 'model', 'tools']
+
+type FoldedSegment = RowMapSegment & { rows: number }
+
+// Folds keep ledger order: turns are grouped in runs of equal size, and each
+// group yields one bar per lane that focuses the group's first row on that
+// lane and sums its wall time.
+function foldRowMap(segments: RowMapSegment[], maxBars: number): FoldedSegment[] {
+  if (segments.length <= maxBars) return segments.map(segment => ({ ...segment, rows: 1 }))
+  const turns: RowMapSegment[][] = []
+  let last: string | null = null
+  for (const segment of segments) {
+    if (turns.length === 0 || segment.turnId !== last) {
+      turns.push([])
+      last = segment.turnId
+    }
+    turns[turns.length - 1]!.push(segment)
+  }
+  const turnsPerGroup = Math.max(1, Math.ceil((turns.length * LANES.length) / maxBars))
+  const folded: FoldedSegment[] = []
+  for (let start = 0; start < turns.length; start += turnsPerGroup) {
+    const group = turns.slice(start, start + turnsPerGroup).flat()
+    let groupStart = folded.length > 0
+    for (const lane of LANES) {
+      const members = group.filter(segment => segment.lane === lane)
+      const first = members[0]
+      if (!first) continue
+      folded.push({
+        key: `fold:${first.key}`,
+        rowKey: first.rowKey,
+        lane,
+        kind: first.kind,
+        turnId: first.turnId,
+        turnStart: groupStart,
+        durationMs: members.reduce((sum, segment) => sum + Math.max(segment.durationMs, 0), 0),
+        splitMs: null,
+        label: '',
+        running: members.some(segment => segment.running),
+        stepIndex: null,
+        rows: members.length,
+      })
+      groupStart = false
+    }
+  }
+  return folded
+}
 
 // Segments keep ledger order. Duration mode scales each by its own wall
 // time with a floor so timeless rows stay visible; sequence mode gives every
-// segment the same width. Turns are separated by a small gap.
+// segment the same width. Turns are separated by a small gap whose total
+// stays bounded, and the floor never exceeds an equal share, so a long
+// window keeps every bar visible and duration mode stays proportional.
 export function rowMapGeometry(segments: RowMapSegment[], mode: TimelineMode): RowMapBar[] {
   if (segments.length === 0) return []
-  const gaps = segments.filter((segment, index) => index > 0 && segment.turnStart).length
-  const available = 100 - gaps * TURN_GAP_PCT
-  const durations = segments.map(segment => Math.max(segment.durationMs, 0))
+  const folded = foldRowMap(segments, MAX_STRIP_BARS)
+  const gaps = folded.filter((segment, index) => index > 0 && segment.turnStart).length
+  const gapPct = gaps > 0 ? Math.min(TURN_GAP_PCT, MAX_GAP_TOTAL_PCT / gaps) : 0
+  const available = 100 - gaps * gapPct
+  const durations = folded.map(segment => Math.max(segment.durationMs, 0))
   const total = durations.reduce((sum, value) => sum + value, 0)
-  const weights = mode === 'duration' && total > 0 ? durations.map(value => value / total) : segments.map(() => 1 / segments.length)
-  const floored = weights.map(weight => Math.max(weight * available, MIN_BAR_PCT))
+  const weights = mode === 'duration' && total > 0 ? durations.map(value => value / total) : folded.map(() => 1 / folded.length)
+  const minPct = Math.min(MIN_BAR_PCT, available / folded.length)
+  const floored = weights.map(weight => Math.max(weight * available, minPct))
   const scale = available / floored.reduce((sum, value) => sum + value, 0)
   let cursor = 0
-  return segments.map((segment, index) => {
-    if (index > 0 && segment.turnStart) cursor += TURN_GAP_PCT
+  return folded.map((segment, index) => {
+    if (index > 0 && segment.turnStart) cursor += gapPct
     const widthPct = floored[index]! * scale
     const leftPct = cursor
     cursor += widthPct
@@ -58,6 +116,7 @@ export function rowMapGeometry(segments: RowMapSegment[], mode: TimelineMode): R
       durationMs: segment.durationMs,
       running: segment.running,
       turnStart: segment.turnStart,
+      rows: segment.rows,
     }
   })
 }

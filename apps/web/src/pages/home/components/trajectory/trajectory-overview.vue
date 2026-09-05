@@ -68,7 +68,7 @@ const barsByLane = computed(() => {
 })
 
 function barTitle(bar: RowMapBar): string {
-  const parts = [t(KIND_LABEL_KEY[bar.kind])]
+  const parts = [bar.rows > 1 ? t('chat.trajectory.barRows', { n: bar.rows }) : t(KIND_LABEL_KEY[bar.kind])]
   if (bar.label) parts.push(bar.label)
   if (bar.durationMs > 0) parts.push(formatDurationMs(bar.durationMs))
   return parts.join(' · ')

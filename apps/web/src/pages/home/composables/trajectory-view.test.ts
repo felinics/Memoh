@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RowMapSegment, TrajectoryStats } from './trajectory-model'
-import { contextPreview, formatDurationMs, fragmentRowPreview, rowMapGeometry, statsSegments } from './trajectory-view'
+import { contextPreview, formatDurationMs, fragmentRowPreview, MAX_STRIP_BARS, rowMapGeometry, statsSegments } from './trajectory-view'
 
 function segment(overrides: Partial<RowMapSegment>): RowMapSegment {
   return {
@@ -48,6 +48,55 @@ describe('rowMapGeometry', () => {
     expect(widths.size).toBe(1)
     expect(bars[bars.length - 1]!.leftPct + bars[bars.length - 1]!.widthPct).toBeCloseTo(100, 6)
     expect(bars.find(bar => bar.key === 'model:0')!.splitPct).toBe(25)
+  })
+
+  it('keeps every bar visible across hundreds of turns', () => {
+    const many: RowMapSegment[] = []
+    for (let turn = 0; turn < 170; turn += 1) {
+      many.push(segment({ key: `u${turn}`, rowKey: `u${turn}`, turnId: `t${turn}`, turnStart: true }))
+    }
+    for (const mode of ['duration', 'sequence'] as const) {
+      const bars = rowMapGeometry(many, mode)
+      expect(bars.length).toBe(170)
+      let cursor = 0
+      for (const bar of bars) {
+        expect(bar.widthPct).toBeGreaterThan(0)
+        expect(bar.leftPct).toBeGreaterThanOrEqual(cursor - 1e-9)
+        cursor = bar.leftPct + bar.widthPct
+      }
+      expect(cursor).toBeLessThanOrEqual(100 + 1e-6)
+      expect(cursor).toBeGreaterThan(80)
+    }
+  })
+
+  it('folds a long window into a bounded number of proportional bars that focus their first row', () => {
+    const many: RowMapSegment[] = []
+    for (let turn = 0; turn < 600; turn += 1) {
+      many.push(segment({ key: `u${turn}`, rowKey: `u${turn}`, turnId: `t${turn}`, turnStart: true }))
+      many.push(segment({ key: `m${turn}`, rowKey: `m${turn}`, lane: 'model', kind: 'assistant', durationMs: (turn + 1) * 10, turnId: `t${turn}` }))
+      many.push(segment({ key: `x${turn}`, rowKey: `x${turn}`, lane: 'tools', kind: 'tool', durationMs: 5, turnId: `t${turn}` }))
+    }
+    const bars = rowMapGeometry(many, 'duration')
+    expect(bars.length).toBeLessThanOrEqual(MAX_STRIP_BARS)
+    expect(bars.length).toBeGreaterThan(MAX_STRIP_BARS / 2)
+    const model = bars.filter(bar => bar.lane === 'model')
+    expect(model[0]!.rowKey).toBe('m0')
+    expect(model[0]!.rows).toBeGreaterThan(1)
+    expect(model.reduce((sum, bar) => sum + bar.rows, 0)).toBe(600)
+    // Bars above the visibility floor keep their proportions: the last group
+    // covers about twice the wall time of the middle one.
+    const ratio = model[model.length - 1]!.widthPct / model[Math.floor(model.length / 2)]!.widthPct
+    expect(ratio).toBeGreaterThan(1.8)
+    expect(ratio).toBeLessThan(2.2)
+    expect(model[0]!.widthPct).toBeGreaterThan(0)
+    let cursor = 0
+    for (const bar of bars) {
+      expect(bar.widthPct).toBeGreaterThan(0)
+      expect(bar.leftPct).toBeGreaterThanOrEqual(cursor - 1e-9)
+      cursor = bar.leftPct + bar.widthPct
+    }
+    expect(cursor).toBeLessThanOrEqual(100 + 1e-6)
+    expect(rowMapGeometry(segments, 'duration').every(bar => bar.rows === 1)).toBe(true)
   })
 
   it('handles an empty map and a map without any timing', () => {

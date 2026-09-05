@@ -1137,6 +1137,7 @@
       "laneInput": "入力",
       "laneModel": "モデル",
       "laneTools": "ツール",
+      "barRows": "{n} 行",
       "kindSystem": "SYSTEM",
       "kindUser": "USER",
       "kindContext": "CONTEXT",
