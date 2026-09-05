@@ -383,14 +383,18 @@ function assistantRows(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecy
   return turnRows
 }
 
-// The signature captures everything a settled turn's rows depend on; a
-// streaming turn changes its tail block, so only that turn rebuilds.
+// The signature captures everything a settled turn's rows depend on. Every
+// block contributes, not only the tail: tools run in parallel, so an earlier
+// tool can finish while a later one is still streaming.
+function blockSignature(block: ContentBlock): string {
+  if (block.type === 'tool') {
+    return `${block.id}:t:${block.running ? 1 : 0}:${block.result == null && block.output == null ? 0 : 1}:${block.execution_timing ? 1 : 0}`
+  }
+  return `${block.id}:${block.type}:${'content' in block ? block.content.length : ''}`
+}
+
 function assistantSignature(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecycleTurn | undefined, turnLabel: string): string {
-  const last = turn.messages[turn.messages.length - 1]
-  const tail = last
-    ? `${last.id}:${last.type}:${'content' in last ? last.content.length : ''}:${last.type === 'tool' ? `${last.running}:${last.result == null ? '' : 'r'}` : ''}`
-    : ''
-  return `${turnLabel}|${turn.turnId ?? ''}|${turn.messages.length}|${tail}|${turn.stepTraces?.length ?? 0}|${lifecycle?.run_id ?? ''}|${turn.streaming}`
+  return `${turnLabel}|${turn.turnId ?? ''}|${turn.messages.map(blockSignature).join(',')}|${turn.stepTraces?.length ?? 0}|${lifecycle?.run_id ?? ''}|${turn.streaming}`
 }
 
 export type TrajectoryRowBuilder = (

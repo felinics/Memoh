@@ -420,3 +420,21 @@ describe('continued turns', () => {
     expect(rows.filter(row => row.kind === 'assistant').map(row => row.stepIndex)).toEqual([0, 0, 1])
   })
 })
+
+describe('parallel tools', () => {
+  it('rebuilds a turn when an earlier tool finishes while the last one still runs', () => {
+    const running = (id: number): ToolCallBlock => ({ ...tool(id, 'exec'), running: true, result: undefined, output: undefined, execution_timing: undefined })
+    const turn = assistantTurn()
+    turn.streaming = true
+    turn.stepTraces = []
+    turn.messages = [running(0), running(1)]
+    const build = createTrajectoryRowBuilder()
+    expect(build([turn], new Map()).every(row => row.running)).toBe(true)
+    turn.messages = [{ ...running(0), running: false, result: 'done', execution_timing: { started_at_ms: 1_000, ended_at_ms: 2_000 } }, running(1)]
+    const rows = build([turn], new Map())
+    expect(rows[0]!.running).toBe(false)
+    expect(rows[0]!.output).toBe('done')
+    expect(rows[0]!.endedAtMs).toBe(2_000)
+    expect(rows[1]!.running).toBe(true)
+  })
+})
