@@ -2485,6 +2485,225 @@ export type HandlersUpdateContainerResourceLimitsRequest = {
     storage_bytes?: number;
 };
 
+export type HandlersWorkspaceDependencyCatalogItem = {
+    /**
+     * ActionsSupported lists the actions the catalog gives the dependency,
+     * before any workspace state is considered.
+     */
+    actions_supported?: Array<'install' | 'update' | 'reinstall' | 'remove' | 'rollback' | 'check_update'>;
+    /**
+     * Category is agent, runtime, or tool.
+     */
+    category?: 'agent' | 'runtime' | 'tool';
+    description?: string;
+    /**
+     * HasImageBaseline is set when the workspace image ships a copy of the
+     * dependency; removing a managed overlay returns to that copy.
+     */
+    has_image_baseline?: boolean;
+    icon?: string;
+    id?: string;
+    /**
+     * Installable is set when the catalog has an install script for the
+     * dependency, i.e. it can be installed into a workspace (as a managed
+     * overlay when the image already ships it).
+     */
+    installable?: boolean;
+    name?: string;
+    platforms?: Array<HandlersWorkspaceDependencyCatalogPlatform>;
+    /**
+     * Provides lists the commands the dependency makes available.
+     */
+    provides?: Array<string>;
+    /**
+     * VersionPin is the version every install produces when the manifest
+     * locks one; omitted when installs follow the latest release.
+     */
+    version_pin?: string;
+};
+
+export type HandlersWorkspaceDependencyCatalogPlatform = {
+    arch?: Array<string>;
+    /**
+     * Libc is empty when the libc flavour does not matter for the OS.
+     */
+    libc?: string;
+    os?: string;
+};
+
+export type HandlersWorkspaceDependencyCatalogResponse = {
+    items?: Array<HandlersWorkspaceDependencyCatalogItem>;
+};
+
+export type HandlersWorkspaceDependencyInstallRequest = {
+    /**
+     * Version to install. Empty (or no body) installs the latest version the
+     * catalog script resolves, or the manifest pin when the dependency has
+     * one. The version recorded afterwards is the one the script reports.
+     */
+    version?: string;
+};
+
+export type HandlersWorkspaceDependencyItem = {
+    /**
+     * Actions lists what may be requested right now.
+     */
+    actions?: Array<'install' | 'update' | 'reinstall' | 'remove' | 'rollback' | 'check_update'>;
+    /**
+     * Category is agent, runtime, or tool.
+     */
+    category?: 'agent' | 'runtime' | 'tool';
+    description?: string;
+    icon?: string;
+    id?: string;
+    /**
+     * ImageVersion is the version of the copy the workspace image ships,
+     * omitted when the image has none. It is the baseline a managed overlay
+     * sits on and what remove returns to.
+     */
+    image_version?: string;
+    /**
+     * InstallPath is the dependency home when a managed copy is in effect or
+     * can be installed, and the discovered command path when the image copy
+     * is in effect.
+     */
+    install_path?: string;
+    /**
+     * InstalledVersion is the version of the copy in effect: the one the
+     * runtime launches and the one first on PATH (managed, then image, then
+     * PATH).
+     */
+    installed_version?: string;
+    last_checked_at?: string;
+    last_error?: string;
+    /**
+     * LatestVersion is the last upstream check result, omitted until a check
+     * ran.
+     */
+    latest_version?: string;
+    name?: string;
+    /**
+     * Overlay is set when the copy in effect is a managed one installed over
+     * an image copy.
+     */
+    overlay?: boolean;
+    platform_reason?: 'unsupported_platform';
+    /**
+     * PlatformSupported is false when the probed workspace platform is not
+     * listed by the catalog manifest; PlatformReason then says why.
+     */
+    platform_supported?: boolean;
+    /**
+     * PreviousVersion is the version rollback would switch back to.
+     */
+    previous_version?: string;
+    /**
+     * Provides lists the commands the dependency makes available.
+     */
+    provides?: Array<string>;
+    /**
+     * Source is image for dependencies shipped with the workspace image and
+     * managed for dependencies installed by catalog scripts.
+     */
+    source?: 'image' | 'managed';
+    /**
+     * Status is omitted when the dependency has no record and was not found
+     * in the workspace.
+     */
+    status?: 'installed' | 'installing' | 'updating' | 'removing' | 'missing' | 'failed';
+    /**
+     * UpdateAvailable is set for installed dependencies whose last upstream
+     * check reported a version other than the one in effect.
+     */
+    update_available?: boolean;
+};
+
+export type HandlersWorkspaceDependencyListResponse = {
+    /**
+     * DiscoveryError is set when the workspace is running but could not be
+     * inspected (the discovery command was killed or timed out). Items then
+     * reflect the installation records alone, without workspace facts or
+     * actions; a refresh retries discovery.
+     */
+    discovery_error?: string;
+    items?: Array<HandlersWorkspaceDependencyItem>;
+    platform?: HandlersWorkspaceDependencyPlatform;
+    workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
+};
+
+export type HandlersWorkspaceDependencyOperationResponse = {
+    action?: string;
+    dependency_id?: string;
+    entrypoints?: {
+        [key: string]: string;
+    };
+    status?: string;
+    version?: string;
+};
+
+export type HandlersWorkspaceDependencyPlatform = {
+    arch?: string;
+    libc?: string;
+    os?: string;
+};
+
+export type HandlersWorkspaceDependencyPreflightItem = {
+    dependency_id?: string;
+    installed_version?: string;
+    name?: string;
+    state?: 'satisfied' | 'missing' | 'platform_unsupported' | 'unknown_dependency';
+};
+
+export type HandlersWorkspaceDependencyPreflightRequest = {
+    dependency_ids?: Array<string>;
+    /**
+     * WorkspaceTargetID overrides the query parameter of the same name.
+     */
+    workspace_target_id?: string;
+};
+
+export type HandlersWorkspaceDependencyPreflightResponse = {
+    items?: Array<HandlersWorkspaceDependencyPreflightItem>;
+    workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
+};
+
+export type HandlersWorkspaceDependencyScriptEnv = {
+    key?: string;
+    secret?: boolean;
+    /**
+     * Value is empty when Secret is set.
+     */
+    value?: string;
+};
+
+export type HandlersWorkspaceDependencyScriptResponse = {
+    action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
+    dependency_id?: string;
+    digest?: string;
+    env?: Array<HandlersWorkspaceDependencyScriptEnv>;
+    exec?: string;
+    script?: string;
+    timeout_seconds?: number;
+};
+
+export type HandlersWorkspaceDependencyStreamEvent = {
+    args?: {
+        [key: string]: string;
+    };
+    code?: string;
+    data?: string;
+    dependency_id?: string;
+    detail?: string;
+    entrypoints?: {
+        [key: string]: string;
+    };
+    message?: string;
+    request_id?: string;
+    stream?: 'stdout' | 'stderr';
+    type?: 'started' | 'log' | 'done' | 'error';
+    version?: string;
+};
+
 export type HandlersAcpRuntimeCreateRequest = {
     acp_agent_id?: string;
     project_path?: string;
@@ -7375,6 +7594,513 @@ export type GetBotsByBotIdContainerTerminalWsErrors = {
 };
 
 export type GetBotsByBotIdContainerTerminalWsError = GetBotsByBotIdContainerTerminalWsErrors[keyof GetBotsByBotIdContainerTerminalWsErrors];
+
+export type GetBotsByBotIdDependenciesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies';
+};
+
+export type GetBotsByBotIdDependenciesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdDependenciesError = GetBotsByBotIdDependenciesErrors[keyof GetBotsByBotIdDependenciesErrors];
+
+export type GetBotsByBotIdDependenciesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyListResponse;
+};
+
+export type GetBotsByBotIdDependenciesResponse = GetBotsByBotIdDependenciesResponses[keyof GetBotsByBotIdDependenciesResponses];
+
+export type PostBotsByBotIdDependenciesCheckUpdatesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/check-updates';
+};
+
+export type PostBotsByBotIdDependenciesCheckUpdatesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesCheckUpdatesError = PostBotsByBotIdDependenciesCheckUpdatesErrors[keyof PostBotsByBotIdDependenciesCheckUpdatesErrors];
+
+export type PostBotsByBotIdDependenciesCheckUpdatesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyListResponse;
+};
+
+export type PostBotsByBotIdDependenciesCheckUpdatesResponse = PostBotsByBotIdDependenciesCheckUpdatesResponses[keyof PostBotsByBotIdDependenciesCheckUpdatesResponses];
+
+export type PostBotsByBotIdDependenciesPreflightData = {
+    /**
+     * Dependencies to check
+     */
+    body: HandlersWorkspaceDependencyPreflightRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/preflight';
+};
+
+export type PostBotsByBotIdDependenciesPreflightErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesPreflightError = PostBotsByBotIdDependenciesPreflightErrors[keyof PostBotsByBotIdDependenciesPreflightErrors];
+
+export type PostBotsByBotIdDependenciesPreflightResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyPreflightResponse;
+};
+
+export type PostBotsByBotIdDependenciesPreflightResponse = PostBotsByBotIdDependenciesPreflightResponses[keyof PostBotsByBotIdDependenciesPreflightResponses];
+
+export type DeleteBotsByBotIdDependenciesByDepIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}';
+};
+
+export type DeleteBotsByBotIdDependenciesByDepIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdDependenciesByDepIdError = DeleteBotsByBotIdDependenciesByDepIdErrors[keyof DeleteBotsByBotIdDependenciesByDepIdErrors];
+
+export type DeleteBotsByBotIdDependenciesByDepIdResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type DeleteBotsByBotIdDependenciesByDepIdResponse = DeleteBotsByBotIdDependenciesByDepIdResponses[keyof DeleteBotsByBotIdDependenciesByDepIdResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdInstallData = {
+    /**
+     * Version to install (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/install';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdInstallErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdInstallError = PostBotsByBotIdDependenciesByDepIdInstallErrors[keyof PostBotsByBotIdDependenciesByDepIdInstallErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdInstallResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdInstallResponse = PostBotsByBotIdDependenciesByDepIdInstallResponses[keyof PostBotsByBotIdDependenciesByDepIdInstallResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallData = {
+    /**
+     * Version to install (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/reinstall';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallError = PostBotsByBotIdDependenciesByDepIdReinstallErrors[keyof PostBotsByBotIdDependenciesByDepIdReinstallErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallResponse = PostBotsByBotIdDependenciesByDepIdReinstallResponses[keyof PostBotsByBotIdDependenciesByDepIdReinstallResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/rollback';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackError = PostBotsByBotIdDependenciesByDepIdRollbackErrors[keyof PostBotsByBotIdDependenciesByDepIdRollbackErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyOperationResponse;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackResponse = PostBotsByBotIdDependenciesByDepIdRollbackResponses[keyof PostBotsByBotIdDependenciesByDepIdRollbackResponses];
+
+export type GetBotsByBotIdDependenciesByDepIdScriptData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Action
+         */
+        action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/script';
+};
+
+export type GetBotsByBotIdDependenciesByDepIdScriptErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdDependenciesByDepIdScriptError = GetBotsByBotIdDependenciesByDepIdScriptErrors[keyof GetBotsByBotIdDependenciesByDepIdScriptErrors];
+
+export type GetBotsByBotIdDependenciesByDepIdScriptResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyScriptResponse;
+};
+
+export type GetBotsByBotIdDependenciesByDepIdScriptResponse = GetBotsByBotIdDependenciesByDepIdScriptResponses[keyof GetBotsByBotIdDependenciesByDepIdScriptResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateData = {
+    /**
+     * Version to update to (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/update';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateError = PostBotsByBotIdDependenciesByDepIdUpdateErrors[keyof PostBotsByBotIdDependenciesByDepIdUpdateErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateResponse = PostBotsByBotIdDependenciesByDepIdUpdateResponses[keyof PostBotsByBotIdDependenciesByDepIdUpdateResponses];
 
 export type GetBotsByBotIdEmailBindingsData = {
     body?: never;
@@ -15915,3 +16641,32 @@ export type GetWebhookTunnelStatusResponses = {
 };
 
 export type GetWebhookTunnelStatusResponse = GetWebhookTunnelStatusResponses[keyof GetWebhookTunnelStatusResponses];
+
+export type GetWorkspaceDependenciesCatalogData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/workspace-dependencies/catalog';
+};
+
+export type GetWorkspaceDependenciesCatalogErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetWorkspaceDependenciesCatalogError = GetWorkspaceDependenciesCatalogErrors[keyof GetWorkspaceDependenciesCatalogErrors];
+
+export type GetWorkspaceDependenciesCatalogResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyCatalogResponse;
+};
+
+export type GetWorkspaceDependenciesCatalogResponse = GetWorkspaceDependenciesCatalogResponses[keyof GetWorkspaceDependenciesCatalogResponses];

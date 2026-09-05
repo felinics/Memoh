@@ -4447,6 +4447,354 @@ definitions:
       storage_bytes:
         type: integer
     type: object
+  handlers.WorkspaceDependencyCatalogItem:
+    properties:
+      actions_supported:
+        description: |-
+          ActionsSupported lists the actions the catalog gives the dependency,
+          before any workspace state is considered.
+        items:
+          enum:
+          - install
+          - update
+          - reinstall
+          - remove
+          - rollback
+          - check_update
+          type: string
+        type: array
+      category:
+        description: Category is agent, runtime, or tool.
+        enum:
+        - agent
+        - runtime
+        - tool
+        type: string
+      description:
+        type: string
+      has_image_baseline:
+        description: |-
+          HasImageBaseline is set when the workspace image ships a copy of the
+          dependency; removing a managed overlay returns to that copy.
+        type: boolean
+      icon:
+        type: string
+      id:
+        type: string
+      installable:
+        description: |-
+          Installable is set when the catalog has an install script for the
+          dependency, i.e. it can be installed into a workspace (as a managed
+          overlay when the image already ships it).
+        type: boolean
+      name:
+        type: string
+      platforms:
+        items:
+          $ref: '#/definitions/handlers.WorkspaceDependencyCatalogPlatform'
+        type: array
+      provides:
+        description: Provides lists the commands the dependency makes available.
+        items:
+          type: string
+        type: array
+      version_pin:
+        description: |-
+          VersionPin is the version every install produces when the manifest
+          locks one; omitted when installs follow the latest release.
+        type: string
+    type: object
+  handlers.WorkspaceDependencyCatalogPlatform:
+    properties:
+      arch:
+        items:
+          type: string
+        type: array
+      libc:
+        description: Libc is empty when the libc flavour does not matter for the OS.
+        type: string
+      os:
+        type: string
+    type: object
+  handlers.WorkspaceDependencyCatalogResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.WorkspaceDependencyCatalogItem'
+        type: array
+    type: object
+  handlers.WorkspaceDependencyInstallRequest:
+    properties:
+      version:
+        description: |-
+          Version to install. Empty (or no body) installs the latest version the
+          catalog script resolves, or the manifest pin when the dependency has
+          one. The version recorded afterwards is the one the script reports.
+        type: string
+    type: object
+  handlers.WorkspaceDependencyItem:
+    properties:
+      actions:
+        description: Actions lists what may be requested right now.
+        items:
+          enum:
+          - install
+          - update
+          - reinstall
+          - remove
+          - rollback
+          - check_update
+          type: string
+        type: array
+      category:
+        description: Category is agent, runtime, or tool.
+        enum:
+        - agent
+        - runtime
+        - tool
+        type: string
+      description:
+        type: string
+      icon:
+        type: string
+      id:
+        type: string
+      image_version:
+        description: |-
+          ImageVersion is the version of the copy the workspace image ships,
+          omitted when the image has none. It is the baseline a managed overlay
+          sits on and what remove returns to.
+        type: string
+      install_path:
+        description: |-
+          InstallPath is the dependency home when a managed copy is in effect or
+          can be installed, and the discovered command path when the image copy
+          is in effect.
+        type: string
+      installed_version:
+        description: |-
+          InstalledVersion is the version of the copy in effect: the one the
+          runtime launches and the one first on PATH (managed, then image, then
+          PATH).
+        type: string
+      last_checked_at:
+        type: string
+      last_error:
+        type: string
+      latest_version:
+        description: |-
+          LatestVersion is the last upstream check result, omitted until a check
+          ran.
+        type: string
+      name:
+        type: string
+      overlay:
+        description: |-
+          Overlay is set when the copy in effect is a managed one installed over
+          an image copy.
+        type: boolean
+      platform_reason:
+        enum:
+        - unsupported_platform
+        type: string
+      platform_supported:
+        description: |-
+          PlatformSupported is false when the probed workspace platform is not
+          listed by the catalog manifest; PlatformReason then says why.
+        type: boolean
+      previous_version:
+        description: PreviousVersion is the version rollback would switch back to.
+        type: string
+      provides:
+        description: Provides lists the commands the dependency makes available.
+        items:
+          type: string
+        type: array
+      source:
+        description: |-
+          Source is image for dependencies shipped with the workspace image and
+          managed for dependencies installed by catalog scripts.
+        enum:
+        - image
+        - managed
+        type: string
+      status:
+        description: |-
+          Status is omitted when the dependency has no record and was not found
+          in the workspace.
+        enum:
+        - installed
+        - installing
+        - updating
+        - removing
+        - missing
+        - failed
+        type: string
+      update_available:
+        description: |-
+          UpdateAvailable is set for installed dependencies whose last upstream
+          check reported a version other than the one in effect.
+        type: boolean
+    type: object
+  handlers.WorkspaceDependencyListResponse:
+    properties:
+      discovery_error:
+        description: |-
+          DiscoveryError is set when the workspace is running but could not be
+          inspected (the discovery command was killed or timed out). Items then
+          reflect the installation records alone, without workspace facts or
+          actions; a refresh retries discovery.
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/handlers.WorkspaceDependencyItem'
+        type: array
+      platform:
+        $ref: '#/definitions/handlers.WorkspaceDependencyPlatform'
+      workspace_state:
+        enum:
+        - running
+        - not_running
+        - missing
+        - remote_offline
+        type: string
+    type: object
+  handlers.WorkspaceDependencyOperationResponse:
+    properties:
+      action:
+        type: string
+      dependency_id:
+        type: string
+      entrypoints:
+        additionalProperties:
+          type: string
+        type: object
+      status:
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.WorkspaceDependencyPlatform:
+    properties:
+      arch:
+        type: string
+      libc:
+        type: string
+      os:
+        type: string
+    type: object
+  handlers.WorkspaceDependencyPreflightItem:
+    properties:
+      dependency_id:
+        type: string
+      installed_version:
+        type: string
+      name:
+        type: string
+      state:
+        enum:
+        - satisfied
+        - missing
+        - platform_unsupported
+        - unknown_dependency
+        type: string
+    type: object
+  handlers.WorkspaceDependencyPreflightRequest:
+    properties:
+      dependency_ids:
+        items:
+          type: string
+        type: array
+      workspace_target_id:
+        description: WorkspaceTargetID overrides the query parameter of the same name.
+        type: string
+    type: object
+  handlers.WorkspaceDependencyPreflightResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/handlers.WorkspaceDependencyPreflightItem'
+        type: array
+      workspace_state:
+        enum:
+        - running
+        - not_running
+        - missing
+        - remote_offline
+        type: string
+    type: object
+  handlers.WorkspaceDependencyScriptEnv:
+    properties:
+      key:
+        type: string
+      secret:
+        type: boolean
+      value:
+        description: Value is empty when Secret is set.
+        type: string
+    type: object
+  handlers.WorkspaceDependencyScriptResponse:
+    properties:
+      action:
+        enum:
+        - install
+        - update
+        - remove
+        - reinstall
+        - rollback
+        type: string
+      dependency_id:
+        type: string
+      digest:
+        type: string
+      env:
+        items:
+          $ref: '#/definitions/handlers.WorkspaceDependencyScriptEnv'
+        type: array
+      exec:
+        type: string
+      script:
+        type: string
+      timeout_seconds:
+        type: integer
+    type: object
+  handlers.WorkspaceDependencyStreamEvent:
+    properties:
+      args:
+        additionalProperties:
+          type: string
+        type: object
+      code:
+        type: string
+      data:
+        type: string
+      dependency_id:
+        type: string
+      detail:
+        type: string
+      entrypoints:
+        additionalProperties:
+          type: string
+        type: object
+      message:
+        type: string
+      request_id:
+        type: string
+      stream:
+        enum:
+        - stdout
+        - stderr
+        type: string
+      type:
+        enum:
+        - started
+        - log
+        - done
+        - error
+        type: string
+      version:
+        type: string
+    type: object
   handlers.acpRuntimeCreateRequest:
     properties:
       acp_agent_id:
@@ -9265,6 +9613,491 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Interactive WebSocket terminal for bot workspace
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies:
+    get:
+      description: Every catalog dependency (image-provided runtimes, managed agent
+        CLIs and tools) reconciled with its installation record and, when the workspace
+        is running, with what is actually installed.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List workspace dependencies
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}:
+    delete:
+      description: Runs the catalog remove script, deletes the generated shims, drops
+        the installation record, and streams the output. For a dependency the image
+        ships this removes the managed overlay only; the image copy becomes the one
+        in effect again.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Remove a workspace dependency
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/install:
+    post:
+      consumes:
+      - application/json
+      description: 'Runs the catalog install script and streams its output. The optional
+        body names the version to install; without one the script installs the latest
+        version (or the manifest pin). For a dependency the image already ships this
+        installs a managed overlay that takes precedence over the image copy. A stopped
+        native workspace is started first. Events: started, log, done, error.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      - description: Version to install (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Install a workspace dependency
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/reinstall:
+    post:
+      consumes:
+      - application/json
+      description: Runs the catalog reinstall script, or remove followed by install,
+        and streams the output. The optional body names the version to install; without
+        one the script picks the latest version (or the manifest pin).
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      - description: Version to install (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Reinstall a workspace dependency
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/rollback:
+    post:
+      description: 'Switches the dependency back to the previous version kept in the
+        workspace. A pure data operation: nothing is downloaded and no log is streamed.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyOperationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Roll a workspace dependency back to its previous version
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/script:
+    get:
+      description: The exact stdin text the workspace shell receives, prelude included,
+        with the command, time budget, and environment the runner uses. Scripts never
+        touch the workspace disk, so this is the only way to inspect them.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - default: install
+        description: Action
+        enum:
+        - install
+        - update
+        - remove
+        - reinstall
+        - rollback
+        in: query
+        name: action
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyScriptResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Show the script a dependency action would run
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/update:
+    post:
+      consumes:
+      - application/json
+      description: Runs the catalog update script (or the install script when the
+        manifest has none) and streams its output. The optional body names the version
+        to update to; without one the script picks the latest version (or the manifest
+        pin). The previous version is kept for rollback.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      - description: Version to update to (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Update a workspace dependency
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/check-updates:
+    post:
+      description: Re-discovers the workspace and runs the upstream update check of
+        every installed tool dependency, then returns the refreshed list.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Check workspace dependencies for updates
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/preflight:
+    post:
+      consumes:
+      - application/json
+      description: 'Reports for each requested dependency whether a copy is installed,
+        whatever its version. Never starts the workspace: when it is not running,
+        items is empty and workspace_state says why.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      - description: Dependencies to check
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyPreflightRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyPreflightResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Check whether dependencies are ready
       tags:
       - containerd
   /bots/{bot_id}/email-bindings:
@@ -16508,4 +17341,28 @@ paths:
       summary: Get webhook tunnel status
       tags:
       - system
+  /workspace-dependencies/catalog:
+    get:
+      description: 'Every dependency the catalog declares, as its manifest describes
+        it: what it provides, where it installs, whether it can be installed and whether
+        the workspace image ships a baseline copy. Reads no workspace and needs no
+        bot; the Supermarket shows it before a bot is chosen.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyCatalogResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List the workspace dependency catalog
+      tags:
+      - containerd
 swagger: "2.0"

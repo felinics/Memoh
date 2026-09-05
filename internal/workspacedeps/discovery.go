@@ -70,6 +70,11 @@ type Observed struct {
 	// Candidates lists every copy found, in precedence order, so callers can
 	// prefer a copy at the pinned version over the default winner.
 	Candidates []Candidate
+	// LockHeld reports that the dependency's workspace lock directory
+	// (.locks/<dep>.lock, design §8.4) existed at discovery time: a script
+	// was running in some Server instance, or was cut off and left the lock
+	// for the prelude's stale rule to reclaim.
+	LockHeld bool
 	// Err records non-fatal problems such as an unreadable state.json or a
 	// failed version probe. It never prevents discovery from returning.
 	Err string
@@ -85,6 +90,7 @@ const (
 	markerManaged      = "__MEMOH_MANAGED__"
 	markerToolkit      = "__MEMOH_TOOLKIT__"
 	markerPath         = "__MEMOH_PATH__"
+	markerLock         = "__MEMOH_LOCK__"
 	markerVersionBegin = "__MEMOH_VERSION_BEGIN__"
 	markerVersionEnd   = "__MEMOH_VERSION_END__"
 	markerEnd          = "__MEMOH_END__"
@@ -174,19 +180,24 @@ func buildDiscoveryScript(dataRoot string, deps []catalog.Dependency) string {
 	b.WriteString(discoveryPreamble)
 	shimDir := ShimDir(dataRoot)
 	for _, dep := range deps {
-		writeDependencyProbe(&b, dep, StatePath(Home(dataRoot, dep.ID)), shimDir)
+		home := Home(dataRoot, dep.ID)
+		writeDependencyProbe(&b, dep, StatePath(home), lockPath(home, dep.ID), shimDir)
 	}
 	b.WriteString("printf '" + markerEnd + "\\n'\n")
 	return b.String()
 }
 
-func writeDependencyProbe(b *strings.Builder, dep catalog.Dependency, statePath, shimDir string) {
+func writeDependencyProbe(b *strings.Builder, dep catalog.Dependency, statePath, lock, shimDir string) {
 	primary := dep.Provides[0]
 	// Dependencies with scripts.version are probed by Run afterwards; the
 	// inline `--version` probe would be wrong for them (WD-CAT-005).
 	inlineVersion := dep.Scripts.Version == ""
 
 	fmt.Fprintf(b, "printf '%s\\t%%s\\n' %s\n", markerDep, shellQuote(dep.ID))
+	// The lock directory is what the prelude creates (design §8.4); its
+	// presence tells the service whether an in-progress record may still
+	// have a running script behind it.
+	fmt.Fprintf(b, "if [ -d %s ]; then printf '%s\\t%%s\\n' %s; fi\n", shellQuote(lock), markerLock, shellQuote(dep.ID))
 	fmt.Fprintf(b, "memoh_state=%s\n", shellQuote(statePath))
 	b.WriteString("if [ -f \"$memoh_state\" ]; then\n")
 	b.WriteString("  printf '" + markerStateBegin + "\\n'\n")
@@ -256,6 +267,8 @@ type rawProbe struct {
 	path    map[string]string
 	// versions maps a probed path to the raw `--version` output.
 	versions map[string]string
+	// lockHeld is set when the script saw the dependency's lock directory.
+	lockHeld bool
 }
 
 type managedProbe struct {
@@ -342,6 +355,10 @@ func parseDiscoveryOutput(stdout string) (probes map[string]*rawProbe, complete 
 			if current != nil && len(fields) >= 3 {
 				current.path[fields[1]] = fields[2]
 			}
+		case markerLock:
+			if current != nil {
+				current.lockHeld = true
+			}
 		case markerEnd:
 			complete = true
 		}
@@ -362,6 +379,7 @@ func resolveObserved(dep catalog.Dependency, probe *rawProbe) Observed {
 		obs.Err = "discovery produced no output for this dependency"
 		return obs
 	}
+	obs.LockHeld = probe.lockHeld
 	primary := dep.Provides[0]
 	var problems []string
 

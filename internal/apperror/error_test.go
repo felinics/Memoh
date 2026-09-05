@@ -257,3 +257,34 @@ func TestContextBudgetErrorsHaveStableCatalogContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceDependencyErrorCatalog(t *testing.T) {
+	cases := map[Code]int{
+		CodeWorkspaceDependencyNotFound:            http.StatusNotFound,
+		CodeWorkspaceDependencyRequestInvalid:      http.StatusBadRequest,
+		CodeWorkspaceDependencyActionUnsupported:   http.StatusUnprocessableEntity,
+		CodeWorkspaceDependencyPlatformUnsupported: http.StatusUnprocessableEntity,
+		CodeWorkspaceDependencyBusy:                http.StatusConflict,
+		CodeWorkspaceDependencyWorkspaceNotRunning: http.StatusConflict,
+		CodeWorkspaceDependencyWorkspaceMissing:    http.StatusConflict,
+		CodeWorkspaceDependencyRemoteOffline:       http.StatusConflict,
+		CodeWorkspaceDependencyRollbackUnavailable: http.StatusConflict,
+		CodeWorkspaceDependencyOperationFailed:     http.StatusInternalServerError,
+	}
+	for code, status := range cases {
+		definition, ok := Lookup(code)
+		if !ok {
+			t.Fatalf("%s is not in the catalog", code)
+		}
+		if definition.HTTPStatus != status {
+			t.Errorf("%s status = %d, want %d", code, definition.HTTPStatus, status)
+		}
+		if definition.Detail == "" {
+			t.Errorf("%s has no detail", code)
+		}
+		problem, ok := ProblemFrom(Wrap(code, errors.New("private cause"), nil), "req-1")
+		if !ok || problem.Code != string(code) || problem.Status != status {
+			t.Errorf("%s problem = %+v, %v", code, problem, ok)
+		}
+	}
+}

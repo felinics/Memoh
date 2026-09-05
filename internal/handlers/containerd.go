@@ -42,6 +42,7 @@ type ContainerdHandler struct {
 	policyService    *policy.Service
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
+	workspaceDeps    workspaceDependencyService
 }
 
 type ContainerGPURequest struct {
@@ -340,6 +341,19 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/mcp-stdio", h.CreateMCPStdio)
 	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
 	root.POST("/tools", h.HandleMCPTools)
+	// Workspace dependency routes (design docs/design/workspace-dependencies.md §11).
+	// The catalog is bot independent and needs only a signed-in user.
+	e.GET("/workspace-dependencies/catalog", h.ListWorkspaceDependencyCatalog)
+	deps := e.Group("/bots/:bot_id/dependencies")
+	deps.GET("", h.ListWorkspaceDependencies)
+	deps.POST("/preflight", h.PreflightWorkspaceDependencies)
+	deps.POST("/check-updates", h.CheckWorkspaceDependencyUpdates)
+	deps.GET("/:dep_id/script", h.GetWorkspaceDependencyScript)
+	deps.POST("/:dep_id/install", h.InstallWorkspaceDependency)
+	deps.POST("/:dep_id/update", h.UpdateWorkspaceDependency)
+	deps.POST("/:dep_id/reinstall", h.ReinstallWorkspaceDependency)
+	deps.POST("/:dep_id/rollback", h.RollbackWorkspaceDependency)
+	deps.DELETE("/:dep_id", h.RemoveWorkspaceDependency)
 }
 
 // CreateContainer godoc

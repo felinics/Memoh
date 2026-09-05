@@ -280,6 +280,31 @@ func TestDiscoverUsesVersionScriptWhenConfigured(t *testing.T) {
 	}
 }
 
+// TestDiscoverReportsLockDirectory covers the lock probe the service uses to
+// tell an interrupted operation from one another instance is still running:
+// the lock directory is reported per dependency and says nothing about
+// presence.
+func TestDiscoverReportsLockDirectory(t *testing.T) {
+	f := newDiscoveryFixture(t)
+	if err := os.MkdirAll(f.lockDir("tool-a"), 0o750); err != nil {
+		t.Fatalf("mkdir lock: %v", err)
+	}
+
+	observed := f.discover(t, "tool-a", "tool-b")
+	if a := observed["tool-a"]; !a.LockHeld || a.Present {
+		t.Errorf("tool-a = %+v, want the lock reported for an absent dependency", a)
+	}
+	if b := observed["tool-b"]; b.LockHeld {
+		t.Errorf("tool-b = %+v, want no lock", b)
+	}
+	if err := os.Remove(f.lockDir("tool-a")); err != nil {
+		t.Fatalf("rmdir lock: %v", err)
+	}
+	if a := f.discover(t, "tool-a")["tool-a"]; a.LockHeld {
+		t.Errorf("tool-a after the lock is gone = %+v", a)
+	}
+}
+
 func TestDiscoverRejectsUnknownDependency(t *testing.T) {
 	f := newDiscoveryFixture(t)
 	if _, err := Discover(testContext(t), f.client, f.cat, f.dataRoot, []string{"nope"}, f.platform); err == nil {
@@ -299,6 +324,7 @@ func TestParseDiscoveryOutputToolkitPrecedence(t *testing.T) {
 	dep := catalog.Dependency{ID: "codex", Provides: []string{"codex"}}
 	stdout := strings.Join([]string{
 		"__MEMOH_DEP__\tcodex",
+		"__MEMOH_LOCK__\tcodex",
 		"__MEMOH_TOOLKIT__\tcodex\t/opt/memoh/toolkit/bin/codex",
 		"__MEMOH_VERSION_BEGIN__\t/opt/memoh/toolkit/bin/codex",
 		"codex-cli 0.150.0",
@@ -322,6 +348,9 @@ func TestParseDiscoveryOutputToolkitPrecedence(t *testing.T) {
 	}
 	if len(obs.Candidates) != 2 || obs.Candidates[1].Source != SourcePath || obs.Candidates[1].Version != "0.151.0-rc.1" {
 		t.Errorf("Candidates = %+v, want toolkit then PATH with a pre-release version", obs.Candidates)
+	}
+	if !obs.LockHeld {
+		t.Error("LockHeld = false, want the lock marker honoured")
 	}
 
 	// The toolkit bin being first on PATH is the usual case: same path, one

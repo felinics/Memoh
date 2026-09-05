@@ -195,6 +195,18 @@
       "template_bootstrap_failed": "Workspace ファイルを初期化できませんでした。Workspace を再構築してからもう一度お試しください。",
       "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
     },
+    "workspace_dependency": {
+      "not_found": "この依存関係は存在しません。",
+      "request_invalid": "依存関係のリクエストが無効です。内容を確認して、もう一度お試しください。",
+      "action_unsupported": "この依存関係ではこの操作を利用できません。",
+      "platform_unsupported": "この Workspace のプラットフォームでは利用できません。",
+      "busy": "この依存関係で別の操作が進行中です。しばらくしてからもう一度お試しください。",
+      "workspace_not_running": "Workspace が起動していません。先に起動してください。",
+      "workspace_missing": "Workspace がまだ作成されていません。先に作成してください。",
+      "remote_offline": "そのコンピューターはオフラインです。",
+      "rollback_unavailable": "ロールバックできる以前のバージョンがありません。",
+      "operation_failed": "依存関係の操作に失敗しました。ログを確認して、もう一度お試しください。"
+    },
     "acp": {
       "request_invalid": "Agent ランタイムのリクエストが無効です。内容を確認して、もう一度お試しください。",
       "access_forbidden": "この Agent ランタイムを操作する権限がありません。",

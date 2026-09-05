@@ -96,6 +96,11 @@ func (e *ExitError) Error() string {
 	return "dependency script exited with status " + strconv.Itoa(e.Code) + ": " + tail
 }
 
+// scriptExecCommand is the process the runner starts inside the workspace;
+// the wrapped script arrives on its stdin (design §5.1). ScriptPreview
+// reports it so the UI shows exactly how the script is executed.
+const scriptExecCommand = "exec sh -s"
+
 const (
 	// defaultRunTimeout applies when RunSpec.Timeout is unset; callers are
 	// expected to pass the catalog timeout for the action.
@@ -169,7 +174,7 @@ func Run(ctx context.Context, client *bridge.Client, spec RunSpec, sink LogSink)
 	defer func() { cleanupRun(ctx, client, resultPath, lock, removeLock) }()
 
 	env := buildEnv(spec, resultPath, timeout)
-	stream, err := client.ExecStreamWithOptions(ctx, "exec sh -s", workDir, int32(timeout/time.Second), bridge.ExecOptions{Env: env})
+	stream, err := client.ExecStreamWithOptions(ctx, scriptExecCommand, workDir, int32(timeout/time.Second), bridge.ExecOptions{Env: env})
 	if err != nil {
 		return Result{}, fmt.Errorf("workspacedeps: start script for %s: %w", spec.DepID, err)
 	}
