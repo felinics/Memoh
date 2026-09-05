@@ -194,7 +194,12 @@ describe('cancelPendingQueryCacheSave', () => {
 
 describe('context lifecycle queries stay off disk', () => {
   it('excludes the per-turn audit payloads, which grow with conversation length', () => {
-    for (const key of [['context-lifecycle', 'b', 's', 50]]) {
+    for (const key of [
+      ['context-lifecycle', 'b', 's', 50],
+      ['context-lifecycle-decisions', 'b', 's', 'run'],
+      ['context-lifecycle-fragments', 'b', 's', 'run'],
+      ['session-compactions', 'b', 's'],
+    ]) {
       expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
     }
   })
