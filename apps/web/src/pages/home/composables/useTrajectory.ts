@@ -6,6 +6,7 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useActiveGate } from './useActiveGate'
 import { useChatViewTarget } from './useChatViewContext'
 import { useContextLifecycle } from './useContextLifecycle'
+import { useSessionCompactions } from './useSessionCompactions'
 import {
   buildRowMap,
   createTrajectoryRowBuilder,
@@ -25,6 +26,7 @@ export function useTrajectory() {
   const chatStore = useChatStore()
   const target = useChatViewTarget()
   const lifecycle = useContextLifecycle()
+  const { compactions } = useSessionCompactions()
 
   const transcript = computed(() => {
     const { botId, sessionId, viewId } = target.value
@@ -42,7 +44,7 @@ export function useTrajectory() {
   const stats = shallowRef<TrajectoryStats>(foldTrajectoryStats([], new Map()))
   watchEffect(() => {
     if (!active.value) return
-    rows.value = buildRows(messages.value, lifecycleByTurn.value, previousByRun.value)
+    rows.value = buildRows(messages.value, lifecycleByTurn.value, previousByRun.value, compactions.value)
   })
   watchEffect(() => {
     if (!active.value) return

@@ -1,4 +1,5 @@
 import type {
+  CompactionLog,
   ContextfragKind,
   ContextfragLifecycleSnapshot,
   ContextfragMemoryRecallTrace,
@@ -13,7 +14,7 @@ import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ContentBlock, ToolCa
 export const PREVIEW_SOURCE_CHARACTERS = 2048
 export const PREVIEW_OUTPUT_CHARACTERS = 512
 
-export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'notice'
+export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'notice' | 'compaction'
 
 // What the turn's context was assembled from, read off the persisted
 // lifecycle manifest: counts and token estimates per fragment kind, never
@@ -62,6 +63,7 @@ export type TrajectoryDetail =
   | { kind: 'system', lifecycle: HandlersContextLifecycleTurn, entry: SystemEntry, previous: HandlersContextLifecycleTurn | null | undefined }
   | { kind: 'context', lifecycle: HandlersContextLifecycleTurn, entry: ContextEntry }
   | { kind: 'block', turn: ChatAssistantTurn, block: ContentBlock, trace: UIStepTrace | null }
+  | { kind: 'compaction', compaction: CompactionLog }
 
 export interface TrajectoryRow {
   key: string
@@ -387,7 +389,34 @@ export type TrajectoryRowBuilder = (
   messages: ChatMessage[],
   lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
   previousByRun?: ReadonlyMap<string, HandlersContextLifecycleTurn | null | undefined>,
+  compactions?: readonly CompactionLog[],
 ) => TrajectoryRow[]
+
+// A compaction is a model request of its own: it sits between the turns it
+// ran between, on the turn it followed, and reads like DSH's compacted row.
+function compactionRow(compaction: CompactionLog, turnId: string, turnLabel: string): TrajectoryRow {
+  const started = Date.parse(compaction.started_at ?? '')
+  const ended = compaction.completed_at ? Date.parse(compaction.completed_at) : Number.NaN
+  return {
+    key: `compaction:${compaction.id ?? started}`,
+    kind: 'compaction',
+    turnId,
+    turnLabel,
+    turnStart: false,
+    stepIndex: null,
+    label: compaction.status ?? '',
+    preview: previewText(compaction.summary, PREVIEW_OUTPUT_CHARACTERS),
+    output: null,
+    startedAtMs: Number.isFinite(started) ? started : null,
+    endedAtMs: Number.isFinite(ended) ? ended : null,
+    running: compaction.status === 'pending',
+    detail: { kind: 'compaction', compaction },
+  }
+}
+
+function compactionStartMs(compaction: CompactionLog): number {
+  return Date.parse(compaction.started_at ?? '')
+}
 
 // Rows of unchanged assistant turns are reused across rebuilds, so a streamed
 // token costs the rows of one turn, not the whole loaded window. A turn's
@@ -404,19 +433,32 @@ export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
     contextCache.set(lifecycle, built)
     return built
   }
-  return (messages, lifecycleByTurn, previousByRun) => {
+  return (messages, lifecycleByTurn, previousByRun, compactions) => {
     const rows: TrajectoryRow[] = []
     let lastTurnKey: string | null = null
+    let lastTurnId = ''
+    let lastTurnLabel = ''
     let position = 0
+    // Compactions older than the loaded window belong to turns that are not
+    // loaded; the rest interleave by the time they ran.
+    const pending = compactions ?? []
+    let nextCompaction = 0
     for (const turn of messages) {
       if (turn.role === 'system') continue
       const turnKey = turn.turnId || turn.id
       const turnStart = turnKey !== lastTurnKey
       if (turnStart) {
+        const at = Date.parse(turn.timestamp)
+        while (nextCompaction < pending.length && !(compactionStartMs(pending[nextCompaction]!) > at)) {
+          if (lastTurnKey !== null) rows.push(compactionRow(pending[nextCompaction]!, lastTurnId, lastTurnLabel))
+          nextCompaction += 1
+        }
         position = turn.turnPosition ?? position + 1
         lastTurnKey = turnKey
       }
       const turnLabel = String(turn.turnPosition ?? position)
+      lastTurnId = turn.turnId ?? ''
+      lastTurnLabel = turnLabel
       const lifecycle = turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined
       const previous = lifecycle?.run_id ? previousByRun?.get(lifecycle.run_id) : undefined
       const context = lifecycle && turnStart ? contextOf(lifecycle, turn.turnId ?? '', turnLabel, previous) : null
@@ -443,6 +485,11 @@ export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
       }
       rows.push(...turnRows)
     }
+    if (lastTurnKey !== null) {
+      for (; nextCompaction < pending.length; nextCompaction += 1) {
+        rows.push(compactionRow(pending[nextCompaction]!, lastTurnId, lastTurnLabel))
+      }
+    }
     return rows
   }
 }
@@ -451,19 +498,37 @@ export function buildTrajectoryRows(
   messages: ChatMessage[],
   lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
   previousByRun?: ReadonlyMap<string, HandlersContextLifecycleTurn | null | undefined>,
+  compactions?: readonly CompactionLog[],
 ): TrajectoryRow[] {
-  return createTrajectoryRowBuilder()(messages, lifecycleByTurn, previousByRun)
+  return createTrajectoryRowBuilder()(messages, lifecycleByTurn, previousByRun, compactions)
 }
 
-// DSH's lane rule: tools on their own lane, model output on the model lane
-// split at the first token, everything else the context received on the
-// input lane. The reasoning and text a single request streamed fold into one
-// model segment; blocks still streaming after the last finished request stay
-// their own untimed segment.
+// DSH's lane rule: tools on their own lane, model output and compactions on
+// the model lane split at the first token, everything else the context
+// received on the input lane. The reasoning and text a single request
+// streamed fold into one model segment; blocks still streaming after the
+// last finished request stay their own untimed segment.
 export function buildRowMap(rows: TrajectoryRow[]): RowMapSegment[] {
   const segments: RowMapSegment[] = []
   let open: RowMapSegment | null = null
   for (const row of rows) {
+    if (row.kind === 'compaction') {
+      open = null
+      segments.push({
+        key: `map:${row.key}`,
+        rowKey: row.key,
+        lane: 'model',
+        kind: row.kind,
+        turnId: row.turnId,
+        turnStart: false,
+        durationMs: row.startedAtMs != null && row.endedAtMs != null ? Math.max(row.endedAtMs - row.startedAtMs, 0) : 0,
+        splitMs: null,
+        label: row.label,
+        running: row.running,
+        stepIndex: null,
+      })
+      continue
+    }
     if ((row.kind === 'reasoning' || row.kind === 'assistant') && row.detail.kind === 'block') {
       const trace = row.detail.trace
       if (trace && open && open.turnId === row.turnId && open.stepIndex === trace.step_index) continue

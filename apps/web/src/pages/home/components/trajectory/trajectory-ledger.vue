@@ -115,6 +115,9 @@ function rowLabel(row: TrajectoryRow): string {
     const key = row.label === 'steering' || row.label === 'prepared' ? `chat.trajectory.${row.label}` : ''
     return key ? t(key) : row.label
   }
+  if (row.kind === 'compaction') {
+    return row.label ? t(`chat.trajectory.compactionStatus.${row.label}`) : ''
+  }
   return row.kind === 'tool' || row.kind === 'error' ? row.label : ''
 }
 

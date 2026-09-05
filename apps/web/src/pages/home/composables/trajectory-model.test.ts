@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
+import type { CompactionLog, HandlersContextLifecycleTurn } from '@memohai/sdk'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ToolCallBlock } from '@/store/chat/types'
 import {
   buildRowMap,
@@ -354,5 +354,47 @@ describe('previousLifecycleByRun', () => {
     const rows = buildTrajectoryRows([user('user-1', 'hi'), assistantTurn()], lifecycleByTurnId([lifecycleTurn, older]), previous)
     const system = rows[0]!
     expect(system.detail.kind === 'system' && system.detail.previous?.run_id).toBe('run-0')
+  })
+})
+
+describe('compaction rows', () => {
+  const compaction = (id: string, startedAt: string, extra: Partial<CompactionLog> = {}): CompactionLog => ({
+    id, status: 'ok', summary: 'Earlier the user set up the workspace and listed files.', message_count: 12,
+    started_at: startedAt, completed_at: new Date(Date.parse(startedAt) + 9_000).toISOString(), ...extra,
+  })
+
+  it('places each compaction after the turn it followed and skips ones older than the window', () => {
+    const messages: ChatMessage[] = [
+      user('user-1', 'first', { timestamp: '2026-09-03T00:00:00.000Z', turnId: 'turn-1', turnPosition: 1 }),
+      assistantTurn(),
+      user('user-2', 'second', { timestamp: '2026-09-03T00:10:00.000Z', turnId: 'turn-2', turnPosition: 2 }),
+    ]
+    const rows = buildTrajectoryRows(messages, new Map(), undefined, [
+      compaction('c-old', '2026-09-02T23:00:00.000Z'),
+      compaction('c-between', '2026-09-03T00:05:00.000Z'),
+      compaction('c-tail', '2026-09-03T00:20:00.000Z', { status: 'pending', completed_at: undefined }),
+    ])
+    const kinds = rows.map(row => `${row.kind}:${row.kind === 'compaction' ? row.key : row.turnId}`)
+    expect(kinds.filter(kind => kind.startsWith('compaction'))).toEqual(['compaction:compaction:c-between', 'compaction:compaction:c-tail'])
+    const between = rows.findIndex(row => row.key === 'compaction:c-between')
+    expect(rows[between - 1]!.turnId).toBe('turn-1')
+    expect(rows[between + 1]!.turnId).toBe('turn-2')
+    expect(rows[between]!.turnId).toBe('turn-1')
+    expect(rows[between]!.turnStart).toBe(false)
+    expect(rows[between]!.endedAtMs! - rows[between]!.startedAtMs!).toBe(9_000)
+    expect(rows[between]!.preview).toContain('Earlier the user')
+    const tail = rows[rows.length - 1]!
+    expect(tail.key).toBe('compaction:c-tail')
+    expect(tail.running).toBe(true)
+    expect(tail.endedAtMs).toBeNull()
+  })
+
+  it('shows on the model lane of the row map with its own wall time', () => {
+    const rows = buildTrajectoryRows([user('user-1', 'first', { timestamp: '2026-09-03T00:00:00.000Z' })], new Map(), undefined, [compaction('c-1', '2026-09-03T00:05:00.000Z')])
+    const segments = buildRowMap(rows)
+    const segment = segments.find(item => item.rowKey === 'compaction:c-1')!
+    expect(segment.lane).toBe('model')
+    expect(segment.durationMs).toBe(9_000)
+    expect(segment.kind).toBe('compaction')
   })
 })

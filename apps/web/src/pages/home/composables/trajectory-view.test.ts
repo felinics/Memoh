@@ -4,7 +4,7 @@ import en from '@/i18n/locales/en.json'
 import ja from '@/i18n/locales/ja.json'
 import zh from '@/i18n/locales/zh.json'
 import type { RowMapSegment, TrajectoryStats } from './trajectory-model'
-import { contextPreview, formatDurationMs, fragmentRowPreview, lineDiff, MAX_STRIP_BARS, promptFragmentChanges, rowMapGeometry, statsSegments } from './trajectory-view'
+import { compactionDetailRows, contextPreview, formatDurationMs, fragmentRowPreview, lineDiff, MAX_STRIP_BARS, promptFragmentChanges, rowMapGeometry, statsSegments } from './trajectory-view'
 
 function segment(overrides: Partial<RowMapSegment>): RowMapSegment {
   return {
@@ -252,5 +252,32 @@ describe('lineDiff', () => {
     ])
     expect(lineDiff('same', 'same')).toEqual([{ type: 'same', text: 'same' }])
     expect(lineDiff(Array.from({ length: 401 }, () => 'x').join('\n'), 'y')).toBeNull()
+  })
+})
+
+describe('compactionDetailRows', () => {
+  it('lays out what the compaction replaced, when it ran, and what it cost', () => {
+    const t = (key: string) => key.replace('chat.trajectory.', '')
+    const clock = (ms: number) => new Date(ms).toISOString()
+    const rows = compactionDetailRows({
+      status: 'ok', message_count: 12, level: 1,
+      anchor_start_ms: Date.parse('2026-09-03T00:00:00.000Z'), anchor_end_ms: Date.parse('2026-09-03T00:04:00.000Z'),
+      started_at: '2026-09-03T00:05:00.000Z', completed_at: '2026-09-03T00:05:09.000Z',
+      usage: { inputTokens: 4100, outputTokens: 320 },
+    }, t, clock)
+    expect(rows.map(row => `${row.key}=${row.value}`)).toEqual([
+      'status=compactionStatus.ok',
+      'messages=12',
+      'span=2026-09-03T00:00:00.000Z → 2026-09-03T00:04:00.000Z',
+      'level=1',
+      'started=2026-09-03T00:05:00.000Z',
+      'ended=2026-09-03T00:05:09.000Z',
+      'duration=9.0s',
+      'input=4.1K',
+      'output=320',
+    ])
+    const failed = compactionDetailRows({ status: 'error', error_message: 'summarizer timed out', started_at: '2026-09-03T00:05:00.000Z' }, t, clock)
+    expect(failed[failed.length - 1]).toMatchObject({ key: 'error', value: 'summarizer timed out' })
+    expect(failed.some(row => row.key === 'ended')).toBe(false)
   })
 })

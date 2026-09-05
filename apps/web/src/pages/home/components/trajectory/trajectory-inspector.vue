@@ -134,6 +134,29 @@
         </template>
       </template>
 
+      <template v-else-if="row.detail.kind === 'compaction'">
+        <div
+          class="divide-y divide-border"
+          data-testid="trajectory-inspector-compaction"
+        >
+          <div
+            v-for="entry in compactionRows"
+            :key="entry.key"
+            class="flex items-center justify-between gap-3 py-1"
+          >
+            <span class="text-muted-foreground">{{ entry.label }}</span>
+            <span class="min-w-0 truncate text-right font-medium tabular-nums text-foreground">{{ entry.value }}</span>
+          </div>
+        </div>
+        <p class="text-caption text-muted-foreground">
+          {{ $t('chat.trajectory.inspectorSummary') }}
+        </p>
+        <pre
+          class="whitespace-pre-wrap break-words rounded-md bg-accent p-2 font-mono text-body text-foreground"
+          data-testid="trajectory-inspector-summary"
+        >{{ row.detail.compaction.summary }}</pre>
+      </template>
+
       <template v-else-if="row.detail.kind === 'user'">
         <pre
           class="whitespace-pre-wrap break-words font-mono text-body text-foreground"
@@ -304,7 +327,7 @@ import { X } from 'lucide-vue-next'
 import { Button, ScrollArea, Skeleton } from '@felinic/ui'
 import type { ContextfragSelectionDecision } from '@memohai/sdk'
 import { entryRefs, type TrajectoryRow } from '../../composables/trajectory-model'
-import { contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS, lineDiff, promptFragmentChanges, type DecisionScope, type DiffLine, type FragmentPreviews, type PromptChange, type PromptChangeKind } from '../../composables/trajectory-view'
+import { compactionDetailRows, contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS, lineDiff, promptFragmentChanges, type DecisionScope, type DiffLine, type FragmentPreviews, type PromptChange, type PromptChangeKind } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 import { useContextLifecycleDecisions } from '../../composables/useContextLifecycleDecisions'
 import { useContextLifecycleFragments } from '../../composables/useContextLifecycleFragments'
@@ -332,6 +355,7 @@ function pretty(value: unknown): string {
 }
 
 const detailRows = computed(() => (props.row.detail.kind === 'context' ? contextDetailRows(props.row.detail.entry, t) : []))
+const compactionRows = computed(() => (props.row.detail.kind === 'compaction' ? compactionDetailRows(props.row.detail.compaction, t, clock) : []))
 const listRows = computed(() => (props.row.detail.kind === 'context' ? contextListRows(props.row.detail.entry, props.row.detail.lifecycle.snapshot, t) : []))
 const listTitleKey = computed(() => {
   const detail = props.row.detail

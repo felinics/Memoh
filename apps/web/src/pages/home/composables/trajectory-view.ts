@@ -1,4 +1,4 @@
-import type { ContextfragLifecycleSnapshot, HandlersContextFragmentPreview } from '@memohai/sdk'
+import type { CompactionLog, ContextfragLifecycleSnapshot, HandlersContextFragmentPreview } from '@memohai/sdk'
 import { formatTokenCount } from './context-categories'
 import { dropReasonRows } from './context-lifecycle-view'
 import type { ContextEntry, FragmentRef, RowMapSegment, TimelineLane, TrajectoryRow, TrajectoryRowKind, TrajectoryStats } from './trajectory-model'
@@ -352,6 +352,7 @@ export const KIND_LABEL_KEY: Record<TrajectoryRowKind, string> = {
   tool: 'chat.trajectory.kindTool',
   error: 'chat.trajectory.kindError',
   notice: 'chat.trajectory.kindNotice',
+  compaction: 'chat.trajectory.kindCompaction',
 }
 
 // Every class below is a literal so the Tailwind scanner can see it.
@@ -364,6 +365,7 @@ export const KIND_TONE_CLASS: Record<TrajectoryRowKind, string> = {
   tool: 'text-accent-orange',
   error: 'text-destructive',
   notice: 'text-warning',
+  compaction: 'text-accent-purple',
 }
 
 export const KIND_BAR_CLASS: Record<TrajectoryRowKind, string> = {
@@ -375,6 +377,7 @@ export const KIND_BAR_CLASS: Record<TrajectoryRowKind, string> = {
   tool: 'bg-accent-orange',
   error: 'bg-destructive',
   notice: 'bg-warning',
+  compaction: 'bg-accent-purple',
 }
 
 export const LANE_LABEL_KEY: Record<TimelineLane, string> = {
@@ -511,4 +514,38 @@ export function lineDiff(before: string, after: string): DiffLine[] | null {
   }
   flush(true)
   return out
+}
+
+function usageNumber(usage: unknown, key: string): number | undefined {
+  if (!usage || typeof usage !== 'object') return undefined
+  const value = (usage as Record<string, unknown>)[key]
+  return typeof value === 'number' ? value : undefined
+}
+
+// The facts of one compaction in the inspector's label/value shape: what it
+// replaced, when it ran, what the summarizer cost, and how it ended.
+export function compactionDetailRows(compaction: CompactionLog, t: Translate, clock: (ms: number) => string): LabeledRow[] {
+  const started = Date.parse(compaction.started_at ?? '')
+  const ended = compaction.completed_at ? Date.parse(compaction.completed_at) : Number.NaN
+  const status = compaction.status ?? ''
+  const rows: LabeledRow[] = [
+    { key: 'status', label: t('chat.trajectory.inspectorStatus'), value: status ? t(`chat.trajectory.compactionStatus.${status}`) : '' },
+    { key: 'messages', label: t('chat.trajectory.inspectorMessagesCompacted'), value: String(compaction.message_count ?? 0) },
+  ]
+  if (compaction.anchor_start_ms && compaction.anchor_end_ms) {
+    rows.push({ key: 'span', label: t('chat.trajectory.inspectorCoveredSpan'), value: `${clock(compaction.anchor_start_ms)} → ${clock(compaction.anchor_end_ms)}` })
+  }
+  if ((compaction.level ?? 0) > 0) rows.push({ key: 'level', label: t('chat.trajectory.inspectorLevel'), value: String(compaction.level) })
+  if (Number.isFinite(started)) rows.push({ key: 'started', label: t('chat.trajectory.inspectorStarted'), value: clock(started) })
+  if (Number.isFinite(ended)) {
+    rows.push({ key: 'ended', label: t('chat.trajectory.inspectorEnded'), value: clock(ended) })
+    rows.push({ key: 'duration', label: t('chat.trajectory.inspectorDuration'), value: formatDurationMs(ended - started) })
+  }
+  const input = usageNumber(compaction.usage, 'inputTokens')
+  const output = usageNumber(compaction.usage, 'outputTokens')
+  if (input) rows.push({ key: 'input', label: t('chat.trajectory.inspectorInputTokens'), value: formatTokenCount(input) })
+  if (output) rows.push({ key: 'output', label: t('chat.trajectory.inspectorOutputTokens'), value: formatTokenCount(output) })
+  if (compaction.superseded_at) rows.push({ key: 'superseded', label: t('chat.trajectory.inspectorSuperseded'), value: clock(Date.parse(compaction.superseded_at)) })
+  if (compaction.error_message) rows.push({ key: 'error', label: t('chat.trajectory.inspectorError'), value: compaction.error_message })
+  return rows
 }
