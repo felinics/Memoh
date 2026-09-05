@@ -354,21 +354,29 @@ function userRow(turn: ChatUserTurn, turnLabel: string): TrajectoryRow {
 }
 
 // Block rows of one assistant turn; a step that re-selected its context gets
-// that change listed before the first block the step produced.
+// that change listed before the first block the step produced. A turn
+// continued by a later run (a tool approval, an answered question) counts
+// its steps from zero again, so a step index can recur: the lifecycle's
+// step context belongs to its first occurrence, and later ones only keep
+// their rows apart.
 function assistantRows(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecycleTurn | undefined, perStep: ReadonlyMap<number, ContextEntry[]>, turnLabel: string): TrajectoryRow[] {
   const turnRows: TrajectoryRow[] = []
   const turnId = turn.turnId ?? ''
   const runId = lifecycle?.run_id ?? turnId
   let openStep: number | null = null
+  const seenSteps = new Set<number>()
   for (const block of turn.messages) {
     const row = blockRow(turn, block, turnLabel)
     if (!row) continue
     if (row.stepIndex != null && row.stepIndex !== openStep) {
       openStep = row.stepIndex
-      const entries = lifecycle ? perStep.get(row.stepIndex) ?? [] : []
-      entries.forEach((entry, index) => {
-        turnRows.push(contextRow(lifecycle!, entry, `${runId}:step:${row.stepIndex}:${index}`, turnId, turnLabel, row.stepIndex))
-      })
+      if (!seenSteps.has(row.stepIndex)) {
+        seenSteps.add(row.stepIndex)
+        const entries = lifecycle ? perStep.get(row.stepIndex) ?? [] : []
+        entries.forEach((entry, index) => {
+          turnRows.push(contextRow(lifecycle!, entry, `${runId}:step:${row.stepIndex}:${index}`, turnId, turnLabel, row.stepIndex))
+        })
+      }
     }
     turnRows.push(row)
   }

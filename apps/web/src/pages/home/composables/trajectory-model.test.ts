@@ -398,3 +398,25 @@ describe('compaction rows', () => {
     expect(segment.kind).toBe('compaction')
   })
 })
+
+describe('continued turns', () => {
+  it('keeps rows apart and lists a step\'s context once when a later run restarts step indexes', () => {
+    const turn = assistantTurn()
+    turn.messages = [
+      { id: 0, type: 'text', content: 'first run, step zero' },
+      tool(1, 'exec', { started_at_ms: 1_600, ended_at_ms: 2_200 }),
+      { id: 2, type: 'text', content: 'continuation, step zero again' },
+      { id: 3, type: 'text', content: 'continuation, step one' },
+    ]
+    turn.stepTraces = [
+      { first_message_id: 0, last_message_id: 1, step_index: 0, started_at_ms: 1_000, ended_at_ms: 1_500 },
+      { first_message_id: 2, last_message_id: 2, step_index: 0, started_at_ms: 5_000, ended_at_ms: 5_500 },
+      { first_message_id: 3, last_message_id: 3, step_index: 1, started_at_ms: 6_000, ended_at_ms: 6_500 },
+    ]
+    const rows = buildTrajectoryRows([turn], lifecycleByTurnId([lifecycleTurn]))
+    const keys = rows.map(row => row.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(rows.filter(row => row.detail.kind === 'context' && row.detail.entry.kind === 'step').map(row => row.stepIndex)).toEqual([1])
+    expect(rows.filter(row => row.kind === 'assistant').map(row => row.stepIndex)).toEqual([0, 0, 1])
+  })
+})
