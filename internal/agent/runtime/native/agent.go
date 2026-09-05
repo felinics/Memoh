@@ -1968,7 +1968,10 @@ func (a *Agent) runMidStreamRetry(
 	textLoopProbeBuffer *TextLoopProbeBuffer,
 ) (*sdk.StreamResult, bool) {
 	// Drain the previous stream before reading prevResult.Messages.
-	// This avoids racing with the SDK's final StreamResult write.
+	// This avoids racing with the SDK's final StreamResult write. The failed
+	// attempt is over: a finish-step still in its stream must not complete a
+	// request the retry is about to make again.
+	stepBoundary.abandon()
 	if prevResult.Stream != nil {
 		for range prevResult.Stream {
 		}

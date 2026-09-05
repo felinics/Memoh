@@ -66,6 +66,18 @@ func (c *stepClock) abandon() {
 	c.mu.Unlock()
 }
 
+// discardCompleted drops completed records no finish-step has taken yet: a
+// retry regenerates the failed attempt, whose records would otherwise be
+// paired with the next request's finish-step.
+func (c *stepClock) discardCompleted() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.completed = nil
+	c.mu.Unlock()
+}
+
 func (c *stepClock) mark() int64 {
 	return c.active.timing.StartedAtMS + c.since(c.active.startedAt).Milliseconds()
 }
@@ -140,14 +152,25 @@ type stepBoundaryEmitter struct {
 }
 
 // reset rewinds the emitter to the last committed request after a retry: the
-// failed attempt never finished, so its index is reused and its open start is
-// forgotten.
+// failed attempt never finished, so its index is reused, its open start is
+// forgotten, and any record its stream completed while being drained is
+// dropped.
 func (e *stepBoundaryEmitter) reset(index int) {
 	if e == nil {
 		return
 	}
 	e.open = false
 	e.index = index
+	e.clock.discardCompleted()
+}
+
+// abandon forgets the request the seam is still clocking, so the parts of a
+// failed stream drained before a retry complete nothing.
+func (e *stepBoundaryEmitter) abandon() {
+	if e == nil {
+		return
+	}
+	e.clock.abandon()
 }
 
 func (e *stepBoundaryEmitter) observe(part sdk.StreamPart) (StreamEvent, bool) {
