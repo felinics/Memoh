@@ -26,7 +26,8 @@ export function useTrajectory() {
   const chatStore = useChatStore()
   const target = useChatViewTarget()
   const lifecycle = useContextLifecycle()
-  const { compactions } = useSessionCompactions()
+  const compactionPages = useSessionCompactions()
+  const compactions = compactionPages.compactions
 
   const transcript = computed(() => {
     const { botId, sessionId, viewId } = target.value
@@ -61,13 +62,14 @@ export function useTrajectory() {
   const segments = computed(() => buildRowMap(rows.value))
   const bars = computed(() => rowMapGeometry(segments.value, mode.value))
 
-  const hasOlder = computed(() => (transcript.value?.hasMoreOlder.value ?? false) || lifecycle.canLoadOlder.value)
-  const loadingOlder = computed(() => (transcript.value?.loadingOlder.value ?? false) || lifecycle.loadingOlder.value)
+  const hasOlder = computed(() => (transcript.value?.hasMoreOlder.value ?? false) || lifecycle.canLoadOlder.value || compactionPages.canLoadOlder.value)
+  const loadingOlder = computed(() => (transcript.value?.loadingOlder.value ?? false) || lifecycle.loadingOlder.value || compactionPages.loadingOlder.value)
 
   async function loadOlder() {
     const tasks: Promise<unknown>[] = []
     if (transcript.value?.hasMoreOlder.value) tasks.push(chatStore.loadOlderMessages(target.value))
     if (lifecycle.canLoadOlder.value) tasks.push(lifecycle.loadOlder())
+    if (compactionPages.canLoadOlder.value) tasks.push(compactionPages.loadOlder())
     try {
       await Promise.all(tasks)
     } catch (error) {
