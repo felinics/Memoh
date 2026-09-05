@@ -113,17 +113,6 @@ func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionRespo
 				return err
 			}
 		case <-ticker.C:
-			// The end checkpoint is authoritative even if its notification is lost.
-			snapshot, exists, err := m.backend.Load(ctx, key)
-			if err != nil {
-				return err
-			}
-			if !exists {
-				return io.ErrUnexpectedEOF
-			}
-			if done, err := consume(snapshot.DecisionOutput); done || err != nil {
-				return err
-			}
 			// An owner crash does not close another process's Redis subscription.
 			// Reuse the run snapshot's existing ledger/lease reconciliation instead.
 			if runID != "" {
