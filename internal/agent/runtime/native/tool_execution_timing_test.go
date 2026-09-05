@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -121,5 +122,42 @@ func TestAgentStreamToolCallEndCarriesExecutionTiming(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("terminal messages carry no tool call: %s", terminal.Messages)
+	}
+}
+
+func TestAgentStreamRetryPathToolCallEndCarriesExecutionTiming(t *testing.T) {
+	t.Parallel()
+
+	var invocations atomic.Int32
+	provider := &atomicMockProvider{}
+	provider.stream = streamScript(&invocations,
+		scriptStreamError("", "api error 429: engine overloaded"),
+		scriptToolCall("call-retry", "echo"),
+		scriptText("done"),
+	)
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+		Name:       "echo",
+		Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			time.Sleep(5 * time.Millisecond)
+			return "ok", nil
+		},
+	}}}})
+	cfg := retryLoopTestConfig(provider, fastRetry)
+	cfg.SupportsToolCall = true
+
+	var toolEnd StreamEvent
+	for ev := range a.Stream(context.Background(), cfg) {
+		if ev.Type == EventToolCallEnd && ev.ToolCallID == "call-retry" {
+			toolEnd = ev
+		}
+	}
+	if invocations.Load() < 2 {
+		t.Fatalf("provider invocations = %d, want the retry to run", invocations.Load())
+	}
+	timing, ok := toolEnd.Metadata[event.ExecutionTimingMetadataKey].(event.ExecutionTiming)
+	if !ok || timing.StartedAtMS == 0 || timing.EndedAtMS < timing.StartedAtMS+5 {
+		t.Fatalf("retried tool_call_end metadata = %#v", toolEnd.Metadata)
 	}
 }

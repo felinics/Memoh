@@ -72,6 +72,7 @@ func TestRunMidStreamRetrySuppressesRawErrorAfterStepBudgetCancellation(t *testi
 		nil,
 		&interruptedStepCapture{},
 		nil,
+		nil,
 		0,
 		"api error 500",
 		&strings.Builder{},

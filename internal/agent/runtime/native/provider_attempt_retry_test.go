@@ -117,6 +117,7 @@ func runRound8MidStreamRetry(
 		nil,
 		&interruptedStepCapture{},
 		nil,
+		nil,
 		0,
 		"api error 500",
 		&strings.Builder{},
