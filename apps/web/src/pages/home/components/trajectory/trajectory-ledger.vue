@@ -1,10 +1,18 @@
 <template>
   <div
     ref="viewport"
-    class="h-full overflow-x-hidden overflow-y-auto"
+    class="h-full overflow-x-hidden overflow-y-auto outline-none"
     role="listbox"
+    :tabindex="rowFocused ? -1 : 0"
     :aria-label="$t('chat.trajectory.title')"
     data-testid="trajectory-ledger"
+    @pointerdown="onPointerDown"
+    @pointerup="onPointerUp"
+    @pointercancel="onPointerUp"
+    @focus="onListFocus"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
+    @keydown="onKeydown"
   >
     <div
       class="relative"
@@ -17,14 +25,16 @@
         <div
           v-for="row in mounted"
           :key="row.key"
+          :ref="(el) => bindRow(row.key, el)"
           role="option"
-          tabindex="0"
+          tabindex="-1"
           class="grid cursor-pointer grid-cols-[3.5rem_5.25rem_minmax(0,1fr)_4.5rem] items-center gap-2 px-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           :class="row.turnStart ? 'border-t border-border' : 'border-t border-transparent'"
           :style="{ height: `${rowHeight}px` }"
           :aria-selected="row.key === selectedKey"
           :data-ui-selected="row.key === selectedKey ? '' : undefined"
           :data-testid="`trajectory-row-${row.kind}`"
+          @focus="activeKey = row.key"
           @click="emit('select', row.key)"
           @keydown.enter.prevent="emit('select', row.key)"
           @keydown.space.prevent="emit('select', row.key)"
@@ -64,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight } from 'lucide-vue-next'
 import { Spinner } from '@felinic/ui'
@@ -79,13 +89,111 @@ const props = defineProps<{
   previews?: FragmentPreviews | null
 }>()
 
-const emit = defineEmits<{ select: [key: string] }>()
+// select toggles the inspector on a row; navigate only says the caret moved,
+// so the pane decides whether the inspector follows it.
+const emit = defineEmits<{ select: [key: string], navigate: [key: string] }>()
 
 const { t } = useI18n()
 const viewport = useTemplateRef<HTMLElement>('viewport')
 const count = computed(() => props.rows.length)
-const { range, rowHeight, keepAnchored } = useVirtualRows(viewport, count)
+const { range, rowHeight, keepAnchored, scrollRowIntoView, pageRows } = useVirtualRows(viewport, count)
 const mounted = computed(() => props.rows.slice(range.value.start, range.value.end))
+
+// The list is one tab stop: rows are reached from the list itself, and the
+// row that last had focus (or the selected one) takes the caret again. Rows
+// outside the window are not in the DOM, so the list scrolls first and
+// focuses once the row is mounted.
+const rowElements = new Map<string, HTMLElement>()
+const activeKey = ref<string | null>(null)
+const rowFocused = ref(false)
+
+function bindRow(key: string, el: Element | ComponentPublicInstance | null) {
+  if (el) rowElements.set(key, el as HTMLElement)
+  else rowElements.delete(key)
+}
+
+function activeIndex(): number {
+  const key = activeKey.value ?? props.selectedKey
+  const index = key ? props.rows.findIndex(row => row.key === key) : -1
+  return index >= 0 ? index : props.rows.length > 0 ? 0 : -1
+}
+
+async function focusRow(target: number | string): Promise<boolean> {
+  const index = typeof target === 'string' ? props.rows.findIndex(row => row.key === target) : target
+  const row = props.rows[index]
+  if (!row) return false
+  scrollRowIntoView(index)
+  await nextTick()
+  const element = rowElements.get(row.key)
+  if (!element) return false
+  activeKey.value = row.key
+  element.focus({ preventScroll: true })
+  return true
+}
+
+// Keyboard entry hands the caret to a row. A pointer pressed on the list
+// itself (its scrollbar, the space under the rows) must not: the flag is
+// raised for that press only, never for a press on a row, and drops with
+// the release so a stale press cannot swallow a later keyboard entry.
+let pointerOnList = false
+
+function onPointerDown(event: PointerEvent) {
+  pointerOnList = !(event.target as Element | null)?.closest('[role="option"]')
+}
+
+function onPointerUp() {
+  pointerOnList = false
+}
+
+function onListFocus() {
+  if (pointerOnList) {
+    pointerOnList = false
+    return
+  }
+  void focusRow(activeIndex())
+}
+
+function onFocusIn(event: FocusEvent) {
+  rowFocused.value = event.target !== viewport.value
+}
+
+function onFocusOut(event: FocusEvent) {
+  if (!viewport.value?.contains(event.relatedTarget as Node | null)) rowFocused.value = false
+}
+
+function onKeydown(event: KeyboardEvent) {
+  const last = props.rows.length - 1
+  if (last < 0) return
+  const current = activeIndex()
+  let next: number
+  switch (event.key) {
+    case 'ArrowDown':
+      next = Math.min(current + 1, last)
+      break
+    case 'ArrowUp':
+      next = Math.max(current - 1, 0)
+      break
+    case 'PageDown':
+      next = Math.min(current + pageRows.value, last)
+      break
+    case 'PageUp':
+      next = Math.max(current - pageRows.value, 0)
+      break
+    case 'Home':
+      next = 0
+      break
+    case 'End':
+      next = last
+      break
+    default:
+      return
+  }
+  event.preventDefault()
+  void focusRow(next)
+  if (next !== current) emit('navigate', props.rows[next]!.key)
+}
+
+defineExpose({ focusRow })
 
 // Older history loads in above the current rows; the first key that was on
 // screen tells how many rows arrived in front of it.
@@ -96,14 +204,14 @@ watch(() => props.rows, (rows, previous) => {
   if (index > 0) keepAnchored(index)
 }, { flush: 'pre' })
 
-// A selection made on the strip may point at a row outside the window;
-// bring it into view without disturbing selections made in the list itself.
+// A selection made on the strip may point at a row off screen, mounted in
+// the overscan or not; center it when it is not fully visible, and let it
+// take the caret next.
 watch(() => props.selectedKey, (key) => {
-  const element = viewport.value
-  if (!key || !element) return
+  if (!key) return
+  activeKey.value = key
   const index = props.rows.findIndex(row => row.key === key)
-  if (index < 0 || (index >= range.value.start && index < range.value.end)) return
-  element.scrollTop = Math.max(index * rowHeight.value - element.clientHeight / 2, 0)
+  if (index >= 0) scrollRowIntoView(index, 'center')
 })
 
 function rowLabel(row: TrajectoryRow): string {

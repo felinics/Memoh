@@ -669,3 +669,15 @@ export function visibleRowRange(input: { scrollTop: number, viewportHeight: numb
   const end = Math.min(first + visible + overscan, count)
   return { start, end, offsetTop: start * rowHeight, totalHeight: count * rowHeight }
 }
+
+// Where the viewport should scroll for a row to be on screen, or null when
+// it already is: nearest moves the closest edge, center puts the row in the
+// middle of the viewport.
+export function rowScrollTarget(input: { index: number, rowHeight: number, scrollTop: number, viewportHeight: number, align: 'nearest' | 'center' }): number | null {
+  const { index, rowHeight, scrollTop, viewportHeight, align } = input
+  const top = index * rowHeight
+  const bottom = top + rowHeight
+  if (top >= scrollTop && bottom <= scrollTop + viewportHeight) return null
+  if (align === 'center') return Math.max(top - (viewportHeight - rowHeight) / 2, 0)
+  return top < scrollTop ? top : Math.max(bottom - viewportHeight, 0)
+}

@@ -11,6 +11,7 @@ import {
   lifecycleByTurnId,
   previewText,
   stepIndexForBlock,
+  rowScrollTarget,
   visibleRowRange,
 } from './trajectory-model'
 
@@ -334,6 +335,24 @@ describe('virtual row range', () => {
     expect(visibleRowRange({ scrollTop: 2_800, viewportHeight: 100, rowHeight: 28, count: 1_000, overscan: 2 })).toEqual({ start: 98, end: 106, offsetTop: 2_744, totalHeight: 28_000 })
     expect(visibleRowRange({ scrollTop: 27_990, viewportHeight: 100, rowHeight: 28, count: 1_000, overscan: 2 })).toEqual({ start: 997, end: 1_000, offsetTop: 27_916, totalHeight: 28_000 })
     expect(visibleRowRange({ scrollTop: 0, viewportHeight: 100, rowHeight: 28, count: 0, overscan: 2 })).toEqual({ start: 0, end: 0, offsetTop: 0, totalHeight: 0 })
+  })
+})
+
+describe('row scroll target', () => {
+  it('leaves a fully visible row alone and moves the nearest edge otherwise', () => {
+    const view = { rowHeight: 28, scrollTop: 280, viewportHeight: 140 }
+    expect(rowScrollTarget({ ...view, index: 10, align: 'nearest' })).toBeNull()
+    expect(rowScrollTarget({ ...view, index: 14, align: 'nearest' })).toBeNull()
+    expect(rowScrollTarget({ ...view, index: 15, align: 'nearest' })).toBe(308)
+    expect(rowScrollTarget({ ...view, index: 9, align: 'nearest' })).toBe(252)
+    expect(rowScrollTarget({ ...view, index: 0, align: 'nearest' })).toBe(0)
+  })
+
+  it('centers a row the strip picked outside the viewport', () => {
+    const view = { rowHeight: 28, scrollTop: 0, viewportHeight: 140 }
+    expect(rowScrollTarget({ ...view, index: 2, align: 'center' })).toBeNull()
+    expect(rowScrollTarget({ ...view, index: 10, align: 'center' })).toBe(224)
+    expect(rowScrollTarget({ ...view, index: 1, scrollTop: 300, align: 'center' })).toBe(0)
   })
 })
 

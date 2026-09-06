@@ -1,5 +1,5 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
-import { visibleRowRange, type VisibleRowRange } from './trajectory-model'
+import { rowScrollTarget, visibleRowRange, type VisibleRowRange } from './trajectory-model'
 
 const ROW_HEIGHT_REM = 1.75
 
@@ -76,5 +76,18 @@ export function useVirtualRows(container: Ref<HTMLElement | null>, count: Ref<nu
     scrollTop.value = attached.scrollTop
   }
 
-  return { range, rowHeight, keepAnchored }
+  // Moves the viewport so a row is on screen and publishes the new offset
+  // at once, so the row is mounted by the next tick instead of the next
+  // scroll event.
+  function scrollRowIntoView(index: number, align: 'nearest' | 'center' = 'nearest') {
+    if (!attached) return
+    const target = rowScrollTarget({ index, rowHeight: rowHeight.value, scrollTop: attached.scrollTop, viewportHeight: attached.clientHeight, align })
+    if (target == null) return
+    attached.scrollTop = target
+    scrollTop.value = attached.scrollTop
+  }
+
+  const pageRows = computed(() => Math.max(Math.floor(viewportHeight.value / rowHeight.value), 1))
+
+  return { range, rowHeight, keepAnchored, scrollRowIntoView, pageRows }
 }

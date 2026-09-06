@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /* eslint-disable vue/one-component-per-file */
 
-import { createApp, defineComponent, h, nextTick } from 'vue'
+import { createApp, defineComponent, h, nextTick, reactive } from 'vue'
 import { createI18n } from 'vue-i18n'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
 import type { ChatAssistantTurn, ChatUserTurn } from '@/store/chat/types'
 import { buildRowMap, buildTrajectoryRows, lifecycleByTurnId } from '../../composables/trajectory-model'
@@ -17,6 +17,32 @@ vi.mock('@felinic/ui', () => ({
 }))
 
 const mounted: { app: ReturnType<typeof createApp>, root: HTMLDivElement }[] = []
+
+// jsdom lays nothing out: the ledger's viewport reads its height from a
+// data attribute and keeps its own scroll offset so the window arithmetic
+// and scroll-then-focus paths run for real.
+beforeAll(() => {
+  const offsets = new WeakMap<Element, number>()
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get() {
+      return Number((this as HTMLElement).dataset.viewportHeight ?? 0)
+    },
+  })
+  Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+    configurable: true,
+    get() {
+      return offsets.get(this as Element) ?? 0
+    },
+    set(value: number) {
+      offsets.set(this as Element, Math.max(value, 0))
+    },
+  })
+})
+
+function key(target: Element, name: string) {
+  target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }))
+}
 
 function mount(component: unknown, props: Record<string, unknown>) {
   const root = document.createElement('div')
@@ -106,6 +132,93 @@ describe('trajectory ledger', () => {
     expect(root.querySelector('[data-ui-selected]')?.textContent).toContain('block 0')
     ;(root.querySelector('[data-testid="trajectory-row-user"]') as HTMLElement).click()
     expect(onSelect).toHaveBeenCalledWith(rows[0]!.key)
+  })
+
+  it('enters on one tab stop, walks rows with the keyboard and scrolls before it focuses', async () => {
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 400)], new Map())
+    const onSelect = vi.fn()
+    const onNavigate = vi.fn()
+    const root = mount(TrajectoryLedger, { 'rows': rows, 'selectedKey': null, onSelect, onNavigate, 'data-viewport-height': '140' })
+    await nextTick()
+    const list = root.querySelector('[data-testid="trajectory-ledger"]') as HTMLElement
+    expect(list.tabIndex).toBe(0)
+    expect([...root.querySelectorAll('[role="option"]')].every(row => (row as HTMLElement).tabIndex === -1)).toBe(true)
+
+    list.focus()
+    await nextTick()
+    expect(document.activeElement?.textContent).toContain('hello')
+    await nextTick()
+    expect(list.tabIndex).toBe(-1)
+
+    key(document.activeElement!, 'ArrowDown')
+    await nextTick()
+    expect(onNavigate).toHaveBeenLastCalledWith(rows[1]!.key)
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(document.activeElement?.textContent).toContain('block 0')
+    expect(list.scrollTop).toBe(0)
+
+    key(document.activeElement!, 'End')
+    await nextTick()
+    expect(onNavigate).toHaveBeenLastCalledWith(rows[400]!.key)
+    expect(list.scrollTop).toBe(401 * 28 - 140)
+    expect(document.activeElement?.textContent).toContain('block 399')
+
+    key(document.activeElement!, 'PageUp')
+    await nextTick()
+    expect(onNavigate).toHaveBeenLastCalledWith(rows[395]!.key)
+    expect(document.activeElement?.textContent).toContain('block 394')
+
+    key(document.activeElement!, 'Home')
+    await nextTick()
+    expect(list.scrollTop).toBe(0)
+    expect(document.activeElement?.textContent).toContain('hello')
+
+    key(document.activeElement!, 'Enter')
+    expect(onSelect).toHaveBeenLastCalledWith(rows[0]!.key)
+    expect(onNavigate).toHaveBeenCalledTimes(4)
+  })
+
+  it('returns the caret to the row the pointer picked when the keyboard comes back', async () => {
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 400)], new Map())
+    const onSelect = vi.fn()
+    const root = mount(TrajectoryLedger, { 'rows': rows, 'selectedKey': null, onSelect, 'data-viewport-height': '140' })
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    await nextTick()
+    const list = root.querySelector('[data-testid="trajectory-ledger"]') as HTMLElement
+    const third = root.querySelectorAll('[role="option"]')[2] as HTMLElement
+    third.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    third.focus()
+    third.click()
+    expect(onSelect).toHaveBeenLastCalledWith(rows[2]!.key)
+
+    outside.focus()
+    await nextTick()
+    expect(list.tabIndex).toBe(0)
+
+    list.focus()
+    await nextTick()
+    expect(document.activeElement).toBe(third)
+    outside.remove()
+  })
+
+  it('scrolls a mounted but off-screen row into view when the strip selects it', async () => {
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 400)], new Map())
+    const props = reactive<Record<string, unknown>>({ 'rows': rows, 'selectedKey': null, 'data-viewport-height': '140' })
+    const root = mount(TrajectoryLedger, props)
+    await nextTick()
+    const list = root.querySelector('[data-testid="trajectory-ledger"]') as HTMLElement
+    expect(root.querySelectorAll('[role="option"]').length).toBe(13)
+
+    props.selectedKey = rows[10]!.key
+    await nextTick()
+    expect(list.scrollTop).toBe(224)
+    await nextTick()
+    expect(root.querySelector('[data-ui-selected]')?.textContent).toContain('block 9')
+
+    props.selectedKey = rows[11]!.key
+    await nextTick()
+    expect(list.scrollTop).toBe(224)
   })
 
   it('describes the system prompt and each context entry from the manifest', async () => {

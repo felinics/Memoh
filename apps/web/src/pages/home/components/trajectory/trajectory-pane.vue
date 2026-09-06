@@ -64,6 +64,7 @@
             :selected-key="selectedKey"
             :previews="fragmentPreviews"
             @select="select"
+            @navigate="focus"
           />
         </div>
         <div
