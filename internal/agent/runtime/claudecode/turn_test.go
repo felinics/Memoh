@@ -300,3 +300,18 @@ func TestClaudeCLIArgsIncludeTurnOverrides(t *testing.T) {
 		t.Fatalf("args = %q", args)
 	}
 }
+
+func TestClaudeCatalogPreservesResolvedModelWithoutDuplicateOption(t *testing.T) {
+	const full = "claude-opus-5"
+	catalog := modelCatalogFromInitialize(full, initializeResponse{Models: []initializeModel{
+		{Value: "default", ResolvedModel: full},
+		{Value: "opus", ResolvedModel: full, SupportsEffort: true, SupportedEffortLevels: []string{"high"}},
+	}})
+	if catalog.ConfiguredModelID != full || len(catalog.Models) != 1 || catalog.Models[0].ID != "opus" || catalog.Models[0].ResolvedModelID != full {
+		t.Fatalf("catalog=%+v", catalog)
+	}
+	args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{ModelID: full, ReasoningEffort: "high"}, "", ""), " ")
+	if !strings.Contains(args, "--model '"+full+"'") {
+		t.Fatalf("args=%q", args)
+	}
+}

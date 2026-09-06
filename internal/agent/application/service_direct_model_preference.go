@@ -46,7 +46,7 @@ func reconcileDirectPair(catalog external.ModelCatalog, modelID, effort string) 
 		}
 	}
 	for _, model := range catalog.Models {
-		if model.ID != modelID {
+		if model.ID != modelID && (modelID == "" || model.ResolvedModelID != modelID) {
 			continue
 		}
 		effort = strings.TrimSpace(effort)

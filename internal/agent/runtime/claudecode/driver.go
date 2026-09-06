@@ -192,6 +192,7 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 		defaultAssigned = defaultAssigned || isDefault
 		models = append(models, external.ModelOption{
 			ID:               id,
+			ResolvedModelID:  resolved,
 			Name:             firstNonEmpty(model.DisplayName, id),
 			Description:      strings.TrimSpace(model.Description),
 			Default:          isDefault,

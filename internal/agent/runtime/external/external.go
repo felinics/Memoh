@@ -149,6 +149,9 @@ type ModelCatalog struct {
 
 // ModelOption is one runtime model and its supported reasoning options.
 type ModelOption struct {
+	// ResolvedModelID preserves a runtime-advertised full model name for
+	// validation without duplicating its alias in the model picker.
+	ResolvedModelID        string                  `json:"-"`
 	ID                     string                  `json:"id"`
 	Name                   string                  `json:"name"`
 	Description            string                  `json:"description,omitempty"`

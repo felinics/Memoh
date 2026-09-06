@@ -61,7 +61,37 @@ func TestDirectModelSwitchReconcilesAgainstNewModel(t *testing.T) {
 	if err != nil || id != "B" || effort != "low" {
 		t.Fatalf("pair=%s/%s err=%v", id, effort, err)
 	}
+	if _, _, err = reconcileDirectPair(catalog, "", ""); err == nil {
+		t.Fatal("accepted empty model without a configured or advertised default")
+	}
 	if _, _, err = reconcileDirectPair(catalog, "missing", ""); err == nil {
 		t.Fatal("accepted missing model")
+	}
+}
+
+func TestDirectModelPreferencePreservesClaudeResolvedModel(t *testing.T) {
+	const full = "claude-opus-5"
+	catalog := external.ModelCatalog{ConfiguredModelID: full, Models: []external.ModelOption{{ID: "opus", ResolvedModelID: full, ReasoningEfforts: []external.ReasoningEffortOption{{ID: "high"}}}}}
+	for _, requested := range []string{full, "", "opus"} {
+		t.Run("model="+requested, func(t *testing.T) {
+			fake := &modelSelectionFakeQueries{}
+			svc := newModelSelectionService(t, fake)
+			svc.externalDrivers = map[string]external.Driver{session.RuntimeClaudeCode: preferenceCatalogDriver{catalog: catalog}}
+			sess := session.Thread{ID: "00000000-0000-0000-0000-000000000610", BotID: "bot", RuntimeType: session.RuntimeClaudeCode}
+			req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: requested, ReasoningEffort: "high"}, sess)
+			want := requested
+			if want == "" {
+				want = full
+			}
+			if err != nil || req.Model != want || req.ReasoningEffort != "high" {
+				t.Fatalf("request=%+v err=%v", req, err)
+			}
+			if len(fake.updatedPrefs) != 1 || fake.updatedPrefs[0].PreferredExternalModelID.String != want {
+				t.Fatalf("stored=%+v", fake.updatedPrefs)
+			}
+		})
+	}
+	if _, _, err := reconcileDirectPair(catalog, "unknown", "high"); err == nil {
+		t.Fatal("accepted an unadvertised model")
 	}
 }
