@@ -220,6 +220,10 @@ type DecisionOutputCheckpoint struct {
 	Done   bool              `json:"done,omitempty"`
 	Failed bool              `json:"failed,omitempty"`
 	Bytes  int               `json:"bytes,omitempty"`
+
+	// One accepted request owns forwarding for this command across all callers.
+	// Retain the claim until expiry; retries must not resend external messages.
+	Claimed bool `json:"claimed,omitempty"`
 }
 
 // Snapshot is the authoritative live view of one session. It holds at most one

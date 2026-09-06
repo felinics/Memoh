@@ -14,7 +14,7 @@ import (
 	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
-func TestDecisionOutputSurvivesEarlyAcknowledgement(t *testing.T) {
+func TestDecisionOutputConcurrentRetriesAndEarlyAcknowledgement(t *testing.T) {
 	for _, commandType := range []string{CommandUserInputResponse, CommandToolApprovalResponse} {
 		t.Run(commandType, func(t *testing.T) {
 			const (
@@ -37,7 +37,7 @@ func TestDecisionOutputSurvivesEarlyAcknowledgement(t *testing.T) {
 				BotID: testBotID, SessionID: sessionID, RunID: runID, TurnID: turnID,
 				Status: "pending", FencingToken: token,
 			}}
-			manager.SetDecisionStore(store)
+			manager.SetDecisionStore(&concurrentDecisionStore{fakeDecisionStore: store, ready: make(chan struct{})})
 
 			lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 			defer lifecycleCancel()
@@ -103,10 +103,25 @@ func TestDecisionOutputSurvivesEarlyAcknowledgement(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			response := DecisionResponse{ControlID: "control", Type: commandType, DecisionID: decisionID, BotID: testBotID, SessionID: sessionID, Payload: json.RawMessage(`{}`)}
-			output := make(chan json.RawMessage, len(expected)+1)
-			result, err := manager.StreamDecisionResponse(ctx, response, output)
-			if err != nil || !result.Applied {
-				t.Fatalf("result=%+v error=%v", result, err)
+			output := make(chan json.RawMessage, 2*(len(expected)+1))
+			type outcome struct {
+				result DecisionResponseResult
+				err    error
+			}
+			done := make(chan outcome, 2)
+			for i := 0; i < 2; i++ {
+				go func() {
+					result, err := manager.StreamDecisionResponse(ctx, response, output)
+					done <- outcome{result, err}
+				}()
+			}
+			first, second := <-done, <-done
+			if first.err != nil || second.err != nil || !first.result.Applied || !second.result.Applied {
+				t.Fatalf("concurrent results: %+v %+v", first, second)
+			}
+			if first.result.Replayed == second.result.Replayed || executions.Load() != 1 || len(output) != len(expected)+1 {
+				t.Fatalf("replayed=%v/%v executions=%d events=%d, want one consumer and %d events",
+					first.result.Replayed, second.result.Replayed, executions.Load(), len(output), len(expected)+1)
 			}
 			var accepted map[string]string
 			if err := json.Unmarshal(<-output, &accepted); err != nil || accepted["type"] != "decision_accepted" {
@@ -234,7 +249,7 @@ func TestDecisionOutputStopsAfterOwnerRunTerminates(t *testing.T) {
 	}
 }
 
-func TestDecisionOutputRedisRecoveryOptional(t *testing.T) {
+func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	url := os.Getenv("MEMOH_TEST_REDIS_URL")
 	if url == "" {
 		t.Skip("set MEMOH_TEST_REDIS_URL for two-client Redis recovery")
@@ -258,6 +273,25 @@ func TestDecisionOutputRedisRecoveryOptional(t *testing.T) {
 	if err := producer.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{"type":"text_delta","delta":"first"}`)); err != nil {
 		t.Fatal(err)
 	}
+	// Independent clients must arbitrate through Redis, not a manager-local lock.
+	type claimResult struct {
+		claimed bool
+		err     error
+	}
+	claims := make(chan claimResult, 2)
+	start := make(chan struct{})
+	for _, manager := range []*Manager{producer, consumer} {
+		go func() {
+			<-start
+			claimed, err := manager.claimDecisionOutput(ctx, key)
+			claims <- claimResult{claimed, err}
+		}()
+	}
+	close(start)
+	first, second := <-claims, <-claims
+	if first.err != nil || second.err != nil || first.claimed == second.claimed {
+		t.Fatalf("expected exactly one Redis output consumer: %+v %+v", first, second)
+	}
 	sub, err := consumer.Subscribe(ctx, key.BotID, key.SessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -275,6 +309,9 @@ func TestDecisionOutputRedisRecoveryOptional(t *testing.T) {
 	// must finish from shared state without a single notification, including end.
 	if err := producer.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if claimed, err := consumer.claimDecisionOutput(ctx, key); err != nil || claimed {
+		t.Fatalf("output updates or publisher close lost the claim: claimed=%v err=%v", claimed, err)
 	}
 	out := make(chan json.RawMessage, 133)
 	if err := consumer.readDecisionOutput(ctx, DecisionResponse{}, "", key, sub, out); err != nil {
@@ -298,4 +335,24 @@ func TestDecisionOutputRetentionLimitIsExplicit(t *testing.T) {
 	if err != nil || !ok || s.DecisionOutput == nil || !s.DecisionOutput.Failed || len(s.DecisionOutput.Events) != 0 {
 		t.Fatalf("limit did not leave recoverable failure: %+v %v", s, err)
 	}
+}
+
+// Both requests must pass the initial command-result lookup before either can
+// execute. Sequential retries would only exercise the existing replay shortcut.
+type concurrentDecisionStore struct {
+	*fakeDecisionStore
+	arrivals atomic.Int32
+	ready    chan struct{}
+}
+
+func (s *concurrentDecisionStore) ResolveRuntimeDecision(ctx context.Context, kind, id string) (DecisionTarget, error) {
+	if s.arrivals.Add(1) == 2 {
+		close(s.ready)
+	}
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		return DecisionTarget{}, ctx.Err()
+	}
+	return s.fakeDecisionStore.ResolveRuntimeDecision(ctx, kind, id)
 }

@@ -57,6 +57,14 @@ func (m *Manager) StreamDecisionResponse(ctx context.Context, response DecisionR
 	if err != nil || !result.Handled || !result.Applied || result.Replayed {
 		return result, err
 	}
+	claimed, err := m.claimDecisionOutput(ctx, key)
+	if err != nil {
+		return result, err
+	}
+	if !claimed {
+		result.Replayed = true
+		return result, nil
+	}
 	accepted, _ := json.Marshal(map[string]string{"type": "decision_accepted", "decision_id": response.DecisionID})
 	select {
 	case output <- accepted:
@@ -65,6 +73,23 @@ func (m *Manager) StreamDecisionResponse(ctx context.Context, response DecisionR
 	}
 	response.SessionID = result.SessionID
 	return result, m.readDecisionOutput(ctx, response, result.RunID, key, sub, output, result.Generation)
+}
+
+// Execution deduplication can return success to concurrent callers that both
+// passed routing's replay check. Shared backend arbitration gives only one of
+// those callers permission to forward, including across server instances.
+func (m *Manager) claimDecisionOutput(ctx context.Context, key Key) (bool, error) {
+	_, claimed, err := m.backend.Update(ctx, key, func(s Snapshot, exists bool) (Snapshot, bool, error) {
+		if !exists || s.DecisionOutput == nil {
+			return s, false, io.ErrUnexpectedEOF
+		}
+		if s.DecisionOutput.Claimed {
+			return s, false, nil
+		}
+		s.DecisionOutput.Claimed = true
+		return s, true, nil
+	})
+	return claimed, err
 }
 
 func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionResponse, runID string, key Key, sub Subscription, output chan<- json.RawMessage, generation ...string) error {
