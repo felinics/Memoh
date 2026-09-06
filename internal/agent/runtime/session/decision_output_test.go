@@ -410,6 +410,52 @@ func TestDecisionOutputLogAppendContract(t *testing.T) {
 	}
 }
 
+// A backend read failure must surface immediately, not wait for the caller's
+// context: the channel needs to report the interruption while it still can.
+type failingReadDecisionBackend struct {
+	Backend
+	fail atomic.Bool
+}
+
+func (b *failingReadDecisionBackend) ReadDecisionOutput(ctx context.Context, ref DecisionOutputRef, from int) (DecisionOutputPage, error) {
+	if b.fail.Load() {
+		return DecisionOutputPage{}, errors.New("log unavailable")
+	}
+	return b.Backend.ReadDecisionOutput(ctx, ref, from)
+}
+
+func TestDecisionOutputReadFailureStopsReader(t *testing.T) {
+	backend := &failingReadDecisionBackend{Backend: NewMemoryBackend()}
+	manager := NewManager(backend, Options{})
+	defer func() { _ = manager.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := Command{StreamOutput: true, BotID: "bot", ID: "unreadable"}
+	ref := decisionOutputRef(command.BotID, command.ID)
+	sub, err := backend.Subscribe(ctx, ref.topic())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- manager.readDecisionOutput(ctx, DecisionResponse{}, "", "", ref, sub, make(chan json.RawMessage, 1))
+	}()
+	time.Sleep(50 * time.Millisecond)
+	backend.fail.Store(true)
+	if err := manager.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-readDone:
+		if err == nil || errors.Is(err, context.DeadlineExceeded) || err.Error() != "log unavailable" {
+			t.Fatalf("reader must return the read error, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("reader kept waiting after a failed log read")
+	}
+}
+
 // Both requests must pass the initial command-result lookup before either can
 // execute. Sequential retries would only exercise the existing replay shortcut.
 type concurrentDecisionStore struct {

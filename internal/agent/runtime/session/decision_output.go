@@ -96,14 +96,19 @@ func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionRespo
 		}
 		return page.Done, nil
 	}
+	// finish decides whether the reader stops. Every error stops it, including a
+	// backend read failure: waiting on would hide an interrupted delivery until
+	// the request context expires.
 	finish := func(done bool, err error) (bool, error) {
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) || !done && err == nil {
-			return done, err
+		if err == nil && !done {
+			return false, nil
 		}
-		// Done or Failed: the log has no further readers. Reclaim the entries now
-		// instead of waiting for the state TTL; the claim marker stays.
-		if releaseErr := m.backend.ReleaseDecisionOutput(context.WithoutCancel(ctx), ref); releaseErr != nil {
-			m.logger.Warn("release decision output log failed", slog.Any("error", releaseErr))
+		if done || errors.Is(err, io.ErrUnexpectedEOF) {
+			// Done or Failed: the log has no further readers. Reclaim the entries
+			// now instead of waiting for the state TTL; the claim marker stays.
+			if releaseErr := m.backend.ReleaseDecisionOutput(context.WithoutCancel(ctx), ref); releaseErr != nil {
+				m.logger.Warn("release decision output log failed", slog.Any("error", releaseErr))
+			}
 		}
 		return true, err
 	}
