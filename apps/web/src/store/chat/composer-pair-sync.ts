@@ -56,6 +56,15 @@ export function createComposerPairSync() {
     }
   }
 
+  // The pair's runtime namespace changed (Agent / runtime switch on the same
+  // view): whatever the old namespace had in flight — a picker write, a
+  // pending read — must not land on the new one. The next refresh is allowed
+  // immediately.
+  function invalidate() {
+    epoch++
+    dirty = false
+  }
+
   function beginSend() {
     const operation = ++epoch
     dirty = true
@@ -67,5 +76,5 @@ export function createComposerPairSync() {
     }
   }
 
-  return { refreshing, refresh, write, holdReads, beginSend }
+  return { refreshing, refresh, write, holdReads, beginSend, invalidate }
 }

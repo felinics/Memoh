@@ -132,3 +132,24 @@ describe('composer preference operation ordering', () => {
     expect(applied).toBe(false)
   })
 })
+
+describe('composer preference invalidation', () => {
+  it('drops in-flight reads and writes and allows the next refresh at once', async () => {
+    const state = createComposerPairSync()
+    const read = deferred<string>()
+    let display = 'old'
+    const refresh = state.refresh(() => read.promise, v => { display = v })
+    let saved = false
+    const load = deferred<string>()
+    const write = state.write(() => load.promise, async v => { saved = true; return v }, v => { display = v })
+    state.invalidate()
+    read.resolve('stale runtime')
+    load.resolve('stale runtime')
+    await refresh
+    await write
+    expect(display).toBe('old')
+    expect(saved).toBe(false)
+    await state.refresh(async () => 'new runtime', v => { display = v })
+    expect(display).toBe('new runtime')
+  })
+})
