@@ -672,12 +672,15 @@ export function visibleRowRange(input: { scrollTop: number, viewportHeight: numb
 
 // Where the viewport should scroll for a row to be on screen, or null when
 // it already is: nearest moves the closest edge, center puts the row in the
-// middle of the viewport.
+// middle of the viewport. Scroll offsets come back from the browser rounded
+// to device pixels, so a row within a pixel of an edge counts as on screen.
+const SCROLL_SLACK = 1
+
 export function rowScrollTarget(input: { index: number, rowHeight: number, scrollTop: number, viewportHeight: number, align: 'nearest' | 'center' }): number | null {
   const { index, rowHeight, scrollTop, viewportHeight, align } = input
   const top = index * rowHeight
   const bottom = top + rowHeight
-  if (top >= scrollTop && bottom <= scrollTop + viewportHeight) return null
+  if (top >= scrollTop - SCROLL_SLACK && bottom <= scrollTop + viewportHeight + SCROLL_SLACK) return null
   if (align === 'center') return Math.max(top - (viewportHeight - rowHeight) / 2, 0)
   return top < scrollTop ? top : Math.max(bottom - viewportHeight, 0)
 }

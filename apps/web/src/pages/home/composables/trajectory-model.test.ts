@@ -346,6 +346,8 @@ describe('row scroll target', () => {
     expect(rowScrollTarget({ ...view, index: 15, align: 'nearest' })).toBe(308)
     expect(rowScrollTarget({ ...view, index: 9, align: 'nearest' })).toBe(252)
     expect(rowScrollTarget({ ...view, index: 0, align: 'nearest' })).toBe(0)
+    expect(rowScrollTarget({ ...view, index: 14, scrollTop: 280.4, align: 'center' })).toBeNull()
+    expect(rowScrollTarget({ ...view, index: 10, scrollTop: 280.6, align: 'nearest' })).toBeNull()
   })
 
   it('centers a row the strip picked outside the viewport', () => {

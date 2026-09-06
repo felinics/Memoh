@@ -1,7 +1,7 @@
 <template>
   <div
     ref="viewport"
-    class="h-full overflow-x-hidden overflow-y-auto outline-none"
+    class="h-full overflow-x-hidden overflow-y-auto outline-none [overflow-anchor:none]"
     role="listbox"
     :tabindex="rowFocused ? -1 : 0"
     :aria-label="$t('chat.trajectory.title')"
