@@ -1,36 +1,48 @@
 <template>
-  <SettingsRow label="API Key">
+  <SettingsRow
+    label="API Key"
+    stack="sm"
+  >
     <Input
       id="google-api-key"
       v-model="localConfig.api_key"
       type="password"
-      class="w-80"
+      class="w-full sm:w-80"
       aria-label="API Key"
     />
   </SettingsRow>
-  <SettingsRow label="Search Engine ID (cx)">
+  <SettingsRow
+    label="Search Engine ID (cx)"
+    stack="sm"
+  >
     <Input
       id="google-cx"
       v-model="localConfig.cx"
-      class="w-80"
+      class="w-full sm:w-80"
       aria-label="Search Engine ID"
     />
   </SettingsRow>
-  <SettingsRow label="Base URL">
+  <SettingsRow
+    label="Base URL"
+    stack="sm"
+  >
     <Input
       id="google-base-url"
       v-model="localConfig.base_url"
-      class="w-80"
+      class="w-full sm:w-80"
       aria-label="Base URL"
     />
   </SettingsRow>
-  <SettingsRow label="Timeout (seconds)">
+  <SettingsRow
+    label="Timeout (seconds)"
+    stack="sm"
+  >
     <Input
       id="google-timeout-seconds"
       v-model.number="localConfig.timeout_seconds"
       type="number"
       :min="1"
-      class="w-80"
+      class="w-full sm:w-80"
       aria-label="Timeout (seconds)"
     />
   </SettingsRow>

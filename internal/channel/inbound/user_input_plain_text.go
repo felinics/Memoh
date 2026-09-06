@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -11,11 +12,12 @@ import (
 	"github.com/felinics/memoh/internal/i18n"
 )
 
-// handlePlainTextUserInput is the universal fallback for channels that do not
-// own a native ask_user interaction. In groups it only consumes messages that
-// explicitly target the bot; private conversations consume the next reply.
+// handlePlainTextUserInput accepts typed answers even on native button channels.
+// Group replies must explicitly target the bot; private conversations consume
+// the next reply.
 func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	ctx context.Context,
+	cfg channel.ChannelConfig,
 	msg channel.InboundMessage,
 	sender channel.StreamReplySender,
 	identity InboundIdentity,
@@ -23,7 +25,7 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	sessionID string,
 	text string,
 ) (bool, error) {
-	if p.channelCaps(msg.Channel).NativeUserInput || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(text) == "" || !isDirectedAtBot(msg) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(text) == "" || !isDirectedAtBot(msg) {
 		return false, nil
 	}
 	if p.turnSvc == nil {
@@ -46,6 +48,9 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	}
 	loc := p.localizer(ctx, identity.BotID)
 	if !result.Request.Interaction.Completed {
+		if p.updateUserInputCard(ctx, cfg, result.Request.ID, loc) && !result.Invalid {
+			return true, nil
+		}
 		return true, sender.Send(ctx, channel.OutboundMessage{
 			Target: strings.TrimSpace(msg.ReplyTarget),
 			Message: plainTextUserInputMessage(
@@ -56,13 +61,7 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 			),
 		})
 	}
-	if err := sender.Send(ctx, channel.OutboundMessage{
-		Target:  strings.TrimSpace(msg.ReplyTarget),
-		Message: plainTextUserInputSummary(result.Request, loc, strings.TrimSpace(msg.Message.ID)),
-	}); err != nil {
-		return true, err
-	}
-	return true, p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, responseRunner, turn.UserInputResponse{
+	err = p.streamUserInputResponseCommand(ctx, msg, sender, identity, routeID, responseRunner, turn.UserInputResponse{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		ThreadID:               strings.TrimSpace(sessionID),
 		ActorChannelIdentityID: strings.TrimSpace(identity.ChannelIdentityID),
@@ -70,6 +69,16 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 		ExplicitID:             result.Request.ID,
 		Answers:                turnQuestionAnswers(result.Request.Interaction.Answers),
 		ChatToken:              p.issueChatToken(identity, routeID, msg),
+	})
+	if err != nil {
+		return true, err
+	}
+	if p.updateUserInputCard(ctx, cfg, result.Request.ID, loc) {
+		return true, nil
+	}
+	return true, sender.Send(ctx, channel.OutboundMessage{
+		Target:  strings.TrimSpace(msg.ReplyTarget),
+		Message: plainTextUserInputSummary(result.Request, loc, strings.TrimSpace(msg.Message.ID)),
 	})
 }
 
@@ -154,4 +163,30 @@ func replyTextMessage(text string, replyMessageID string) channel.Message {
 
 func isUserInputEvent(event *channel.StreamEvent) bool {
 	return event != nil && event.Type == channel.StreamEventToolCallStart && event.ToolCall != nil && hasUserInputAction(event.ToolCall.Actions)
+}
+
+// Native cards share the persisted cursor with text replies. The adapter reads
+// the latest state so submission is never inferred from a completed draft.
+type userInputCardUpdater interface {
+	UpdateUserInputCard(context.Context, channel.ChannelConfig, string, *i18n.Localizer) (bool, error)
+}
+
+func (p *ChannelInboundProcessor) updateUserInputCard(ctx context.Context, cfg channel.ChannelConfig, requestID string, loc *i18n.Localizer) bool {
+	if p.registry == nil {
+		return false
+	}
+	adapter, ok := p.registry.Get(cfg.ChannelType)
+	if !ok {
+		return false
+	}
+	updater, ok := adapter.(userInputCardUpdater)
+	if !ok {
+		return false
+	}
+	updated, err := updater.UpdateUserInputCard(ctx, cfg, requestID, loc)
+	if err != nil {
+		p.logger.Warn("update user input card failed", slog.Any("error", err))
+		return false
+	}
+	return updated
 }

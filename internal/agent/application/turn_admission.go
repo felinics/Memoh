@@ -60,6 +60,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	}
 	manager.SetDecisionStore(s)
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
+	manager.SetDecisionFinalizer(s.finalizeRuntimeDecisions)
 	manager.SetTerminalObserver(s.reconcileTerminalContextLifecycle)
 	manager.SetTerminalReconciler(s.reconcileTerminalContextLifecycles)
 }

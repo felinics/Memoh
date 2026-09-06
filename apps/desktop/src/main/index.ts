@@ -497,7 +497,8 @@ function createChatWindow(): BrowserWindow {
     ...rememberedWindowOptions('chat', CHAT_DEFAULTS),
     ...macWindowChromeOptions(process.platform, 'memoh-chat'),
     show: false,
-    autoHideMenuBar: true,
+    // Electron's auto-hide mode lets a single Alt press reveal the menu.
+    autoHideMenuBar: process.platform !== 'win32',
     title: DESKTOP_PRODUCT_NAME,
     icon: iconPng,
     webPreferences: {
@@ -507,6 +508,7 @@ function createChatWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   })
+  if (process.platform === 'win32') window.setMenuBarVisibility(false)
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
   window.once('ready-to-show', () => {
@@ -618,6 +620,13 @@ async function rebuildAppMenu(): Promise<void> {
   )
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  // Keep native accelerators registered while hiding the Windows menu bar,
+  // including after renderer shortcut changes rebuild the application menu.
+  if (process.platform === 'win32') {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.setMenuBarVisibility(false)
+    }
+  }
 }
 
 app.whenReady().then(async () => {

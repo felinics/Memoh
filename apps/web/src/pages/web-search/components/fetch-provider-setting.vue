@@ -1,6 +1,6 @@
 <template>
   <SettingsShell width="narrow">
-    <div class="space-y-6">
+    <div class="space-y-4 sm:space-y-6">
       <!-- Identity card mirrors the search provider detail, while Native keeps
            its managed/non-destructive behavior. -->
       <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
@@ -46,7 +46,10 @@
         </div>
       </section>
 
-      <SettingsSection :title="$t('provider.configurationTitle')">
+      <SettingsSection
+        :title="$t('provider.configurationTitle')"
+        class="provider-configuration"
+      >
         <div
           v-if="isNative"
           class="px-4 py-3 text-xs text-muted-foreground"
@@ -64,9 +67,12 @@
               v-slot="{ componentField }"
               name="name"
             >
-              <SettingsRow :label="$t('common.name')">
+              <SettingsRow
+                :label="$t('common.name')"
+                stack="sm"
+              >
                 <FieldStack
-                  class="w-80"
+                  class="w-full sm:w-80"
                   for="fetch-provider-name"
                 >
                   <FormControl>

@@ -1,47 +1,62 @@
 <template>
-  <SettingsRow :label="$t('common.baseUrl')">
+  <SettingsRow
+    :label="$t('common.baseUrl')"
+    stack="sm"
+  >
     <Input
       id="searxng-base-url"
       v-model="localConfig.base_url"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.baseUrl')"
       placeholder="http://localhost:8080/search"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('settings.language')">
+  <SettingsRow
+    :label="$t('settings.language')"
+    stack="sm"
+  >
     <Input
       id="searxng-language"
       v-model="localConfig.language"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('settings.language')"
       placeholder="all"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.safeSearch')">
+  <SettingsRow
+    :label="$t('common.safeSearch')"
+    stack="sm"
+  >
     <Input
       id="searxng-safesearch"
       v-model="localConfig.safesearch"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.safeSearch')"
       placeholder="0, 1, or 2"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.categories')">
+  <SettingsRow
+    :label="$t('common.categories')"
+    stack="sm"
+  >
     <Input
       id="searxng-categories"
       v-model="localConfig.categories"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.categories')"
       placeholder="general"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.timeoutSeconds')">
+  <SettingsRow
+    :label="$t('common.timeoutSeconds')"
+    stack="sm"
+  >
     <Input
       id="searxng-timeout-seconds"
       v-model.number="localConfig.timeout_seconds"
       type="number"
       :min="1"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.timeoutSeconds')"
     />
   </SettingsRow>

@@ -95,7 +95,7 @@ func (s *Service) AdvanceInteraction(ctx context.Context, input AdvanceInteracti
 		return AdvanceInteractionResult{}, errors.New("user input request id is required")
 	}
 	for attempt := 0; attempt < maxTextInteractionRetries; attempt++ {
-		req, err := s.ResolveTarget(ctx, resolve)
+		req, err := s.resolveInteractionTarget(ctx, resolve)
 		if errors.Is(err, ErrNotFound) {
 			return AdvanceInteractionResult{Handled: false}, nil
 		}
@@ -318,4 +318,41 @@ func interactionQuestionAt(payload UIPayload, index int) (UIQuestion, bool) {
 		return UIQuestion{}, false
 	}
 	return payload.Questions[index], true
+}
+
+// Interaction drafts are channel-owned UI state, not runtime decisions. Reading
+// a draft must not require the run owner's fence; Submit/Cancel still require
+// that authority. Keep this separate from ResolveTarget so a UI lookup cannot
+// weaken the final decision guard (including when a CAS retry pins the UUID).
+func (s *Service) resolveInteractionTarget(ctx context.Context, input ResolveInput) (Request, error) {
+	if explicit := strings.TrimSpace(input.ExplicitID); explicit != "" {
+		if id, err := db.ParseUUID(explicit); err == nil {
+			botID, err := db.ParseUUID(input.BotID)
+			if err != nil {
+				return Request{}, err
+			}
+			row, err := s.queries.GetUserInputRequest(ctx, id)
+			if err != nil {
+				return Request{}, mapLookupErr(err)
+			}
+			if row.BotID != botID {
+				return Request{}, ErrNotFound
+			}
+			if input.SessionID != "" {
+				sessionID, err := db.ParseUUID(input.SessionID)
+				if err != nil {
+					return Request{}, err
+				}
+				if row.SessionID != sessionID {
+					return Request{}, ErrNotFound
+				}
+			}
+			req := requestFromRow(row)
+			if req.Status != StatusPending {
+				return Request{}, ErrNotFound
+			}
+			return req, nil
+		}
+	}
+	return s.ResolveTarget(ctx, input)
 }

@@ -31,7 +31,7 @@ func (*AskUserProvider) Usage(_ context.Context, session SessionContext, availab
 		"Each question's `kind` decides the interaction: `single_select` for exactly one choice, `multi_select` for select-all-that-apply or multi-answer questions, `text` for open input. Put only the question in `text` and every answer choice in `options`; never duplicate A/B/C choices inside the question text.",
 		"For `multi_select`, make the interaction clear in the question text itself, for example by appending `（多选）` in Chinese or `(select all that apply)` in English. Channel renderers do not add this hint for you.",
 		"Several related questions can go into one call as separate `questions` entries instead of multiple calls.",
-		"Use `allow_custom: true` on a select question to let the user type their own answer alongside the options.",
+		"Select options are shortcuts: users can always reply in their own words. Interpret custom_text in the tool result as their answer, and ask a follow-up if its meaning is unclear.",
 		"Wait for the tool result before grading or explaining answers. If the latest user message asks for another question, another quiz, or another choice, create the new question with " + ref + "; do not treat that request itself as the user's answer.",
 		"Do not simulate an " + ref + " interaction in ordinary text when the tool is available.",
 	})
@@ -87,7 +87,7 @@ func (*AskUserProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 							},
 							"allow_custom": map[string]any{
 								"type":        "boolean",
-								"description": "Select kinds only: also offer an \"Other\" free-text entry alongside the options.",
+								"description": "Select kinds only: retained for compatibility; Memoh always offers and accepts custom answers.",
 							},
 							"placeholder": map[string]any{
 								"type":        "string",

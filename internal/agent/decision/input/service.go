@@ -128,6 +128,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
+	enableConversationalAnswers(&uiPayload, input.ProviderMetadata)
 	rawInput, err := marshalObject(input.Input)
 	if err != nil {
 		return Request{}, err
@@ -917,6 +918,7 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 	_ = json.Unmarshal(row.InteractionJson, &req.Interaction)
 	_ = json.Unmarshal(row.ResultJson, &req.Result)
 	_ = json.Unmarshal(row.ProviderMetadata, &req.ProviderMetadata)
+	enableConversationalAnswers(&req.UIPayload, req.ProviderMetadata)
 	return req
 }
 
@@ -981,4 +983,18 @@ func (s *Service) optionalChannelIdentityUUID(ctx context.Context, value string)
 		return pgtype.UUID{}, err
 	}
 	return id, nil
+}
+
+// Memoh ask_user options are shortcuts, not a closed answer schema. Apply this
+// on both creation and loading so pending questions from older versions also
+// accept text. External elicitation forms retain their provider's constraints.
+func enableConversationalAnswers(payload *UIPayload, metadata map[string]any) {
+	if source, exists := metadata["source"]; exists && source != "" && source != ProviderSourceACPMCP {
+		return
+	}
+	for i := range payload.Questions {
+		if payload.Questions[i].Kind == QuestionKindSingleSelect || payload.Questions[i].Kind == QuestionKindMultiSelect {
+			payload.Questions[i].AllowCustom = true
+		}
+	}
 }
