@@ -129,17 +129,16 @@ export function useComposerPair(deps: ComposerPairDeps) {
   // are blocked immediately and the send itself begins later, or never.
   function captureSend(view: ChatViewEntry = deps.view.value) {
     const pair = carriedFor(view)
-    const releaseReads = view.pairSync.holdReads()
-    let finishSend: ((confirmed: boolean) => void) | undefined
+    const send = view.pairSync.prepareSend()
     return {
       pair,
-      releaseReads,
+      releaseReads: send.release,
       begin() {
-        finishSend = view.pairSync.beginSend()
+        send.begin()
         confirmDisplayed(view, pair)
       },
       finish(confirmed: boolean) {
-        finishSend?.(confirmed)
+        send.finish(confirmed)
       },
     }
   }
@@ -205,16 +204,14 @@ export function useComposerPair(deps: ComposerPairDeps) {
     // while the request is in flight; that reset must win, otherwise a native
     // UUID lands in a direct composer.
     const identity = deps.runtimeIdentity.value
-    try {
-      const seed = await api.fetchSeed(botId)
-      // Bot switch, repoint, runtime change, pick or session open while in
-      // flight: drop it. Re-read the source through deps.view: the early
-      // return above narrowed `view.pairSource.value` to exclude 'user', which
-      // is exactly what can change during the await.
-      if (deps.botId.value !== botId || deps.view.value !== view || deps.runtimeIdentity.value !== identity) return
-      if (!seed.model_id || deps.target.value.sessionId || deps.view.value.pairSource.value === 'user') return
-      setPair(seed.model_id, seed.reasoning_effort || deps.botSettings.value?.reasoning_effort || 'medium', 'session', view)
-    } catch { /* best-effort; the bot default remains */ }
+    await view.pairSync.refresh(
+      () => api.fetchSeed(botId),
+      (seed) => {
+        if (deps.botId.value !== botId || deps.view.value !== view || deps.runtimeIdentity.value !== identity) return
+        if (!seed.model_id || deps.target.value.sessionId || deps.view.value.pairSource.value === 'user') return
+        setPair(seed.model_id, seed.reasoning_effort || deps.botSettings.value?.reasoning_effort || 'medium', 'session', view)
+      },
+    )
   }
 
   // The bot default is the lowest seed level: it only feeds views with no

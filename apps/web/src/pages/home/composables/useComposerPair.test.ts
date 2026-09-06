@@ -181,3 +181,53 @@ describe('useComposerPair runtime namespace', () => {
     expect(env.view.value.pairSource.value).toBe('default')
   })
 })
+
+
+describe('composer send preparation', () => {
+  it('keeps a welcome send snapshot when its seed arrives during attachment conversion', async () => {
+    let resolveSeed!: (seed: { model_id: string, reasoning_effort: string }) => void
+    const env = setup({ seed: () => new Promise(r => { resolveSeed = r }) })
+    await flush()
+    const send = env.pair.captureSend()
+    const displayed = env.view.value.pairModelId.value
+    resolveSeed({ model_id: 'previous-model', reasoning_effort: 'high' })
+    await flush()
+    expect(env.view.value.pairModelId.value).toBe(displayed)
+    expect(send.pair.modelId).toBe(displayed)
+    send.begin()
+    send.finish(true)
+    send.releaseReads()
+  })
+
+  it('saves a choice made during preparation after the captured send finishes', async () => {
+    const env = setup({ sessionId: 'sess-1' })
+    await flush()
+    env.pair.setPair('A', 'low', 'session')
+    const send = env.pair.captureSend()
+    env.pair.setPair('B', 'high', 'user')
+    env.pair.persist()
+    await flush()
+    send.begin()
+    env.server.set(session({ id: 'sess-1', preferred_chat_model_id: send.pair.modelId, preferred_reasoning_effort: send.pair.reasoningEffort }))
+    await flush()
+    expect(env.api.updatePreference).not.toHaveBeenCalled()
+    send.finish(true)
+    send.releaseReads()
+    await flush()
+    expect(send.pair).toEqual({ modelId: 'A', reasoningEffort: 'low' })
+    expect(env.server.get('sess-1').preferred_chat_model_id).toBe('B')
+    expect(env.view.value.pairModelId.value).toBe('B')
+  })
+
+  it('releases a newer choice when preparation fails or resolves to a command', async () => {
+    const env = setup({ sessionId: 'sess-1' })
+    await flush()
+    const send = env.pair.captureSend()
+    env.pair.setPair('B', 'high', 'user')
+    env.pair.persist()
+    await flush()
+    send.releaseReads()
+    await flush()
+    expect(env.server.get('sess-1').preferred_chat_model_id).toBe('B')
+  })
+})

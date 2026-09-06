@@ -153,3 +153,32 @@ describe('composer preference invalidation', () => {
     expect(display).toBe('new runtime')
   })
 })
+
+
+describe('prepared send cancellation', () => {
+  it('keeps an earlier picker write when preparation never becomes a message', async () => {
+    const state = createComposerPairSync()
+    const read = deferred<string>()
+    let saved = ''
+    const write = state.write(() => read.promise, async value => value, value => { saved = value })
+    await tick()
+    const send = state.prepareSend()
+    send.release()
+    read.resolve('picked')
+    await write
+    expect(saved).toBe('picked')
+  })
+
+  it('does not confirm a newer failed pick when the older send succeeds', async () => {
+    const state = createComposerPairSync()
+    const send = state.prepareSend()
+    const write = state.write(async () => '', async () => { throw new Error('offline') }, () => {})
+    send.begin()
+    send.finish(true)
+    send.release()
+    await write
+    let refreshed = false
+    await state.refresh(async () => 'old pair', () => { refreshed = true })
+    expect(refreshed).toBe(false)
+  })
+})

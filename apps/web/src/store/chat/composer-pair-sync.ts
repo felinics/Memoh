@@ -65,16 +65,40 @@ export function createComposerPairSync() {
     dirty = false
   }
 
-  function beginSend() {
-    const operation = ++epoch
-    dirty = true
+  // Reserve ordering at snapshot time, before attachment conversion. Choices
+  // made afterwards wait for this send (or its cancellation) and must not be
+  // invalidated when that older snapshot is finally admitted.
+  function prepareSend() {
+    const snapshotEpoch = epoch
+    const releaseReads = holdReads()
     let release!: () => void
-    sending = new Promise<void>((resolve) => { release = resolve })
-    return (confirmed: boolean) => {
-      if (operation === epoch && confirmed) dirty = false
-      release()
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    sending = Promise.all([sending, pending]).then(() => {})
+    let operation: number | undefined
+    return {
+      begin() {
+        if (epoch === snapshotEpoch) operation = ++epoch
+        dirty = true
+      },
+      finish(confirmed: boolean) {
+        if (operation === epoch && confirmed) dirty = false
+        release()
+      },
+      release() {
+        releaseReads()
+        release()
+      },
     }
   }
 
-  return { refreshing, refresh, write, holdReads, beginSend, invalidate }
+  function beginSend() {
+    const send = prepareSend()
+    send.begin()
+    return (confirmed: boolean) => {
+      send.finish(confirmed)
+      send.release()
+    }
+  }
+
+  return { refreshing, refresh, write, holdReads, beginSend, prepareSend, invalidate }
 }
