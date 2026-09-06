@@ -1,7 +1,10 @@
 <template>
   <ScrollArea class="h-full">
     <div class="space-y-3 px-3 py-2 text-body">
-      <div class="flex items-center justify-between gap-2">
+      <div
+        ref="header"
+        class="flex items-center justify-between gap-2"
+      >
         <span
           class="text-caption font-medium"
           :class="KIND_TONE_CLASS[row.kind]"
@@ -321,7 +324,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
 import { Button, ScrollArea, Skeleton } from '@felinic/ui'
@@ -339,6 +342,11 @@ const DECISION_ROW_LIMIT = 200
 const props = defineProps<{ row: TrajectoryRow, previews?: FragmentPreviews | null }>()
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
+const header = useTemplateRef<HTMLElement>('header')
+
+defineExpose({
+  focus: () => header.value?.querySelector<HTMLElement>('button')?.focus(),
+})
 
 function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })
