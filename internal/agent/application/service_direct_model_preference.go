@@ -79,17 +79,27 @@ func (s *Service) applyDirectModelPreference(ctx context.Context, req ChatReques
 		}
 		return req, nil
 	}
-	modelID := req.Model
-	if strings.TrimSpace(modelID) == "" {
+	modelID := strings.TrimSpace(req.Model)
+	if modelID == "" {
 		modelID = sess.PreferredExternalModelID
 	}
-	modelID, effort, err := s.reconcileDirectModelPreference(ctx, req.BotID, sess.BotAgentID, sess.RuntimeType, modelID, req.ReasoningEffort)
-	if err != nil {
-		return req, err
+	effort := strings.TrimSpace(req.ReasoningEffort)
+	// Catalog discovery is expensive (Claude Code spawns a CLI and waits for
+	// initialize; Codex calls model/list or the custom /models endpoint). A
+	// remembered Web session repeats its stored pair on every send, so only
+	// re-validate when the request actually differs from what the session
+	// already reconciled. The revision still advances below so an older picker
+	// PATCH cannot overwrite this send.
+	if modelID == "" || modelID != sess.PreferredExternalModelID || effort != sess.PreferredReasoningEffort {
+		var err error
+		modelID, effort, err = s.reconcileDirectModelPreference(ctx, req.BotID, sess.BotAgentID, sess.RuntimeType, modelID, effort)
+		if err != nil {
+			return req, err
+		}
 	}
 	req.Model = modelID
 	req.ReasoningEffort = effort
-	err = s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
+	err := s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
 		ID: db.ParseUUIDOrEmpty(sess.ID), PreferredExternalModelID: pgtype.Text{String: modelID, Valid: true}, PreferredReasoningEffort: pgtype.Text{String: effort, Valid: effort != ""},
 	})
 	if err != nil {

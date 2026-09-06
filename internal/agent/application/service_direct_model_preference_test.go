@@ -11,9 +11,13 @@ import (
 type preferenceCatalogDriver struct {
 	external.Driver
 	catalog external.ModelCatalog
+	calls   *int
 }
 
 func (d preferenceCatalogDriver) ModelCatalog(context.Context, string, string) (external.ModelCatalog, error) {
+	if d.calls != nil {
+		*d.calls++
+	}
 	return d.catalog, nil
 }
 
@@ -93,5 +97,37 @@ func TestDirectModelPreferencePreservesClaudeResolvedModel(t *testing.T) {
 	}
 	if _, _, err := reconcileDirectPair(catalog, "unknown", "high"); err == nil {
 		t.Fatal("accepted an unadvertised model")
+	}
+}
+
+// A remembered pair repeated on every send must not re-run catalog discovery
+// (Claude Code spawns a CLI for it), but each carried send still advances the
+// revision so a stale picker PATCH cannot overwrite it.
+func TestDirectModelPreferenceRepeatedPairSkipsCatalog(t *testing.T) {
+	catalog := external.ModelCatalog{Models: []external.ModelOption{{ID: "A", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}}}}
+	calls := 0
+	fake := &modelSelectionFakeQueries{}
+	svc := newModelSelectionService(t, fake)
+	svc.externalDrivers = map[string]external.Driver{session.RuntimeCodex: preferenceCatalogDriver{catalog: catalog, calls: &calls}}
+	sess := session.Thread{ID: "00000000-0000-0000-0000-000000000610", BotID: "bot", RuntimeType: session.RuntimeCodex, PreferredExternalModelID: "A", PreferredReasoningEffort: "high"}
+
+	req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "A", ReasoningEffort: "high"}, sess)
+	if err != nil || req.Model != "A" || req.ReasoningEffort != "high" {
+		t.Fatalf("request=%+v err=%v", req, err)
+	}
+	if calls != 0 {
+		t.Fatalf("unchanged pair re-ran catalog discovery %d time(s)", calls)
+	}
+	if len(fake.updatedPrefs) != 1 {
+		t.Fatalf("revision must still advance on a carried send: %+v", fake.updatedPrefs)
+	}
+
+	// A changed component goes back through the catalog.
+	req, err = svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "A", ReasoningEffort: "medium"}, sess)
+	if err != nil || req.ReasoningEffort != "medium" {
+		t.Fatalf("request=%+v err=%v", req, err)
+	}
+	if calls != 1 {
+		t.Fatalf("changed pair skipped catalog discovery (calls=%d)", calls)
 	}
 }
