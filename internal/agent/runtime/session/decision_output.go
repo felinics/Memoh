@@ -9,8 +9,13 @@ import (
 	"time"
 )
 
-// Each answer uses an independent checkpoint: a run can park again without
-// ending, and its next question must not reuse the previous answer's cursor.
+// Channel output reuses the session runtime snapshot and subscription recovery
+// introduced in #800 (47fd904d4), including sequence-gap repair and periodic
+// reconciliation. Backend.Update retains its existing full-snapshot write and
+// TTL semantics; this adapter does not implement another recovery protocol.
+// Raw events preserve channel actions and attachments that the UI projection
+// cannot reproduce. Each answer needs its own checkpoint because one run can
+// park again without ending; successive answers must not share a cursor.
 func decisionOutputKey(botID, commandID string) Key {
 	return Key{BotID: botID, SessionID: "decision-output/" + commandID}
 }
