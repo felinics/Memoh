@@ -581,7 +581,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		Type: response.Type, ID: commandID,
 		BotID: target.BotID, SessionID: target.SessionID, RunID: target.RunID,
 		Generation: ref.Generation, FencingToken: target.FencingToken,
-		TargetID: target.ID, DecisionResolved: true,
+		TargetID: target.ID, DecisionResolved: true, StreamOutput: response.streamOutput,
 		Payload: append([]byte(nil), response.Payload...), PayloadHash: requestHash,
 		CreatedAt: createdAt, ExpiresAt: createdAt.Add(m.commandTimeout()),
 	}

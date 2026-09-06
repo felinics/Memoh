@@ -384,6 +384,10 @@ type Command struct {
 	Error            string          `json:"error,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
 	ExpiresAt        time.Time       `json:"expires_at,omitempty"`
+
+	// StreamOutput is fixed at admission and travels to the owner with the command.
+	// It must not depend on subscriber liveness: disconnecting cannot change a run.
+	StreamOutput bool `json:"stream_output,omitempty"`
 }
 
 // DecisionTarget is the durable identity of one approval or user-input
@@ -446,6 +450,9 @@ type DecisionResponse struct {
 	SessionID  string
 	RunID      string
 	Payload    json.RawMessage
+
+	// Only StreamDecisionResponse enables channel output capture.
+	streamOutput bool
 }
 
 // DecisionResponseResult separates "this is a runtime decision" from "the

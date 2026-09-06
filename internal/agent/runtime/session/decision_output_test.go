@@ -80,6 +80,18 @@ func TestDecisionOutputSurvivesEarlyAcknowledgement(t *testing.T) {
 			}
 			manager.SetCommandHandler(func(ctx context.Context, command Command) error {
 				executions.Add(1)
+				if !command.StreamOutput {
+					t.Fatal("streaming admission did not enable output on the owner command")
+				}
+				rawCommand, err := json.Marshal(command)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var routed Command
+				if err := json.Unmarshal(rawCommand, &routed); err != nil || !routed.StreamOutput {
+					t.Fatalf("routed output flag lost: %v", err)
+				}
+
 				// Publish before acknowledgement: subscribing afterwards would lose all of it.
 				for i, raw := range expected {
 					if err := manager.PublishDecisionOutput(ctx, command, int64(i+1), raw); err != nil {
@@ -129,7 +141,7 @@ func TestDecisionOutputTopicIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	for _, command := range []Command{{BotID: "other-bot", ID: "answer-a"}, {BotID: "bot", ID: "answer-b"}} {
+	for _, command := range []Command{{StreamOutput: true, BotID: "other-bot", ID: "answer-a"}, {StreamOutput: true, BotID: "bot", ID: "answer-b"}} {
 		if err := manager.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +176,7 @@ func TestDecisionOutputRecoversWithoutEndNotification(t *testing.T) {
 	defer func() { _ = manager.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
-	command := Command{BotID: "bot", ID: "silent"}
+	command := Command{StreamOutput: true, BotID: "bot", ID: "silent"}
 	key := decisionOutputKey(command.BotID, command.ID)
 	if err := manager.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{"type":"text_delta","delta":"one"}`)); err != nil {
 		t.Fatal(err)
@@ -195,7 +207,7 @@ func TestDecisionOutputStopsAfterOwnerRunTerminates(t *testing.T) {
 			manager.SetDecisionStore(&fakeDecisionStore{target: DecisionTarget{ID: "next-question", RunID: "run", Status: "pending"}})
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			command := Command{BotID: "bot", ID: "orphan", RunID: "run"}
+			command := Command{StreamOutput: true, BotID: "bot", ID: "orphan", RunID: "run"}
 			key := decisionOutputKey(command.BotID, command.ID)
 			if err := manager.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{"type":"text_delta","delta":"partial"}`)); err != nil {
 				t.Fatal(err)
@@ -241,7 +253,7 @@ func TestDecisionOutputRedisRecoveryOptional(t *testing.T) {
 	producer := NewManager(silentDecisionBackend{writer}, Options{})
 	consumer := NewManager(reader, Options{})
 	defer func() { _ = producer.Close(); _ = consumer.Close() }()
-	command := Command{BotID: testBotID, ID: "answer"}
+	command := Command{StreamOutput: true, BotID: testBotID, ID: "answer"}
 	key := decisionOutputKey(command.BotID, command.ID)
 	if err := producer.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{"type":"text_delta","delta":"first"}`)); err != nil {
 		t.Fatal(err)
@@ -277,7 +289,7 @@ func TestDecisionOutputRetentionLimitIsExplicit(t *testing.T) {
 	b := NewMemoryBackend()
 	m := NewManager(b, Options{})
 	defer func() { _ = m.Close() }()
-	command := Command{BotID: "bot", ID: "limit"}
+	command := Command{StreamOutput: true, BotID: "bot", ID: "limit"}
 	payload, _ := json.Marshal(strings.Repeat("x", decisionOutputMaxBytes))
 	if err := m.PublishDecisionOutput(context.Background(), command, 1, payload); err == nil {
 		t.Fatal("oversized checkpoint accepted")

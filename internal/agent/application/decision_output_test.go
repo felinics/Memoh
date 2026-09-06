@@ -51,7 +51,7 @@ func TestContinuationPublishesTextAndNextQuestionToChannel(t *testing.T) {
 				terminal.Status = "pending"
 			}
 			events = append(events, terminal)
-			service.continueRuntimeDecision(context.Background(), sessionruntime.Command{ID: "answer-command", BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, Generation: handle.Generation}, func(_ context.Context, _ *continuationLifecycleResult, ch chan<- WSStreamEvent) error {
+			service.continueRuntimeDecision(context.Background(), sessionruntime.Command{StreamOutput: true, ID: "answer-command", BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, Generation: handle.Generation}, func(_ context.Context, _ *continuationLifecycleResult, ch chan<- WSStreamEvent) error {
 				for _, event := range events {
 					ch <- runtimeDecisionEvent(t, event)
 				}
@@ -92,7 +92,7 @@ func TestContinuationClosesRunWhenEndCheckpointCannotPersist(t *testing.T) {
 	backend := failedEndCheckpointBackend{sessionruntime.NewMemoryBackend()}
 	manager, handle := newWaitingDecisionRuntime(t, backend)
 	service := &Service{decisionRuntime: manager}
-	service.continueRuntimeDecision(context.Background(), sessionruntime.Command{ID: "answer", BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, Generation: handle.Generation}, func(_ context.Context, _ *continuationLifecycleResult, ch chan<- WSStreamEvent) error {
+	service.continueRuntimeDecision(context.Background(), sessionruntime.Command{StreamOutput: true, ID: "answer", BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, Generation: handle.Generation}, func(_ context.Context, _ *continuationLifecycleResult, ch chan<- WSStreamEvent) error {
 		ch <- runtimeDecisionEvent(t, native.StreamEvent{Type: native.EventUserInputRequest, UserInputID: "next", Status: "pending"})
 		ch <- runtimeDecisionEvent(t, native.StreamEvent{Type: native.EventAgentEnd, UserInputID: "next", Status: "pending"})
 		return nil

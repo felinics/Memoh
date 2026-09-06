@@ -52,6 +52,7 @@ func (m *Manager) StreamDecisionResponse(ctx context.Context, response DecisionR
 		return DecisionResponseResult{}, err
 	}
 	defer sub.Close()
+	response.streamOutput = true
 	result, err := m.RouteDecisionResponse(ctx, response)
 	if err != nil || !result.Handled || !result.Applied || result.Replayed {
 		return result, err
@@ -156,6 +157,9 @@ func (m *Manager) readDecisionOutput(ctx context.Context, response DecisionRespo
 // Commit state before notifying, exactly as runtime UI deltas do. A nil payload
 // closes this continuation, including when the agent parks on a new question.
 func (m *Manager) PublishDecisionOutput(ctx context.Context, command Command, seq int64, payload json.RawMessage) error {
+	if !command.StreamOutput {
+		return nil
+	}
 	key := decisionOutputKey(command.BotID, command.ID)
 	exceeded := false
 	_, _, err := m.updateAndPublish(ctx, key, command.RunID, func(s Snapshot, exists bool) (Snapshot, bool, error) {
