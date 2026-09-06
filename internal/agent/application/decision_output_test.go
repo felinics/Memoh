@@ -18,23 +18,19 @@ type decisionOutputBackend struct {
 	}
 }
 
-func (b *decisionOutputBackend) Publish(ctx context.Context, event sessionruntime.Event) error {
-	if event.Delta != nil && event.Delta.DecisionOutput != nil {
-		checkpoint := event.Delta.DecisionOutput
-		for _, raw := range checkpoint.Events {
-			b.output = append(b.output, struct {
-				Type   string
-				Output json.RawMessage
-			}{Output: raw})
+func (b *decisionOutputBackend) AppendDecisionOutput(ctx context.Context, ref sessionruntime.DecisionOutputRef, seq int64, payload json.RawMessage, limits sessionruntime.DecisionOutputLimits) (sessionruntime.DecisionOutputState, error) {
+	state, err := b.Backend.AppendDecisionOutput(ctx, ref, seq, payload, limits)
+	if err == nil && state.Applied {
+		entry := struct {
+			Type   string
+			Output json.RawMessage
+		}{Output: payload}
+		if payload == nil {
+			entry.Type = "decision_output_end"
 		}
-		if checkpoint.Done {
-			b.output = append(b.output, struct {
-				Type   string
-				Output json.RawMessage
-			}{Type: "decision_output_end"})
-		}
+		b.output = append(b.output, entry)
 	}
-	return b.Backend.Publish(ctx, event)
+	return state, err
 }
 
 func TestContinuationPublishesTextAndNextQuestionToChannel(t *testing.T) {
@@ -78,14 +74,11 @@ func TestContinuationPublishesTextAndNextQuestionToChannel(t *testing.T) {
 
 type failedEndCheckpointBackend struct{ sessionruntime.Backend }
 
-func (b failedEndCheckpointBackend) Update(ctx context.Context, key sessionruntime.Key, update sessionruntime.SnapshotUpdate) (sessionruntime.Snapshot, bool, error) {
-	return b.Backend.Update(ctx, key, func(s sessionruntime.Snapshot, exists bool) (sessionruntime.Snapshot, bool, error) {
-		next, changed, err := update(s, exists)
-		if err == nil && next.DecisionOutput != nil && next.DecisionOutput.Done {
-			return s, false, errors.New("checkpoint write unavailable")
-		}
-		return next, changed, err
-	})
+func (b failedEndCheckpointBackend) AppendDecisionOutput(ctx context.Context, ref sessionruntime.DecisionOutputRef, seq int64, payload json.RawMessage, limits sessionruntime.DecisionOutputLimits) (sessionruntime.DecisionOutputState, error) {
+	if payload == nil {
+		return sessionruntime.DecisionOutputState{}, errors.New("checkpoint write unavailable")
+	}
+	return b.Backend.AppendDecisionOutput(ctx, ref, seq, payload, limits)
 }
 
 func TestContinuationClosesRunWhenEndCheckpointCannotPersist(t *testing.T) {

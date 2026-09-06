@@ -20,7 +20,7 @@ func TestWebContinuationDoesNotCreateChannelCheckpoint(t *testing.T) {
 		}
 		return nil
 	})
-	s, exists, err := backend.Load(context.Background(), sessionruntime.Key{BotID: handle.BotID, SessionID: "decision-output/" + cmd.ID})
+	page, err := backend.ReadDecisionOutput(context.Background(), sessionruntime.DecisionOutputRef{BotID: handle.BotID, CommandID: cmd.ID}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestWebContinuationDoesNotCreateChannelCheckpoint(t *testing.T) {
 	if err != nil || live.CurrentRunView == nil || live.CurrentRunView.Status != sessionruntime.RunStatusCompleted {
 		t.Fatalf("web continuation did not finish: %+v, %v", live.CurrentRunView, err)
 	}
-	if exists && s.DecisionOutput != nil {
-		t.Fatalf("Web-only continuation retained %d channel events without a channel subscription", len(s.DecisionOutput.Events))
+	if page.Exists {
+		t.Fatalf("Web-only continuation retained %d channel events without a channel subscription", page.Length)
 	}
 }

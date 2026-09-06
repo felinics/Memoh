@@ -117,7 +117,7 @@ func TestDecisionOutputConcurrentRetriesAndEarlyAcknowledgement(t *testing.T) {
 			}
 			first, second := <-done, <-done
 			if first.err != nil || second.err != nil || !first.result.Applied || !second.result.Applied {
-				t.Fatalf("concurrent results: %+v %+v", first, second)
+				t.Fatalf("concurrent results: %+v %+v errs=%T/%v %T/%v", first, second, first.err, first.err, second.err, second.err)
 			}
 			if first.result.Replayed == second.result.Replayed || executions.Load() != 1 || len(output) != len(expected)+1 {
 				t.Fatalf("replayed=%v/%v executions=%d events=%d, want one consumer and %d events",
@@ -150,8 +150,7 @@ func TestDecisionOutputTopicIsolation(t *testing.T) {
 	manager := NewManager(backend, Options{})
 	defer func() { _ = manager.Close() }()
 	ctx := context.Background()
-	key := decisionOutputKey("bot", "answer-a")
-	sub, err := backend.Subscribe(ctx, key)
+	sub, err := backend.Subscribe(ctx, decisionOutputRef("bot", "answer-a").topic())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,8 +178,8 @@ func TestDecisionOutputCanceledSubscription(t *testing.T) {
 	}
 }
 
-// A successful write with every notification lost must still recover via the
-// same periodic snapshot reconciliation used by web subscribers.
+// A successful append with every wakeup lost must still be delivered: the
+// reader re-reads the log from its cursor on every reconciliation tick.
 type silentDecisionBackend struct{ Backend }
 
 func (silentDecisionBackend) Publish(context.Context, Event) error { return nil }
@@ -192,24 +191,31 @@ func TestDecisionOutputRecoversWithoutEndNotification(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	command := Command{StreamOutput: true, BotID: "bot", ID: "silent"}
-	key := decisionOutputKey(command.BotID, command.ID)
+	ref := decisionOutputRef(command.BotID, command.ID)
 	if err := manager.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{"type":"text_delta","delta":"one"}`)); err != nil {
 		t.Fatal(err)
 	}
-	sub, err := manager.Subscribe(ctx, key.BotID, key.SessionID)
+	sub, err := backend.Subscribe(ctx, ref.topic())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sub.Close()
+	output := make(chan json.RawMessage, 2)
+	readDone := make(chan error, 1)
+	go func() { readDone <- manager.readDecisionOutput(ctx, DecisionResponse{}, "", "", ref, sub, output) }()
+	// The reader is already blocked on a wakeup that will never arrive.
+	time.Sleep(100 * time.Millisecond)
 	if err := manager.PublishDecisionOutput(ctx, command, 2, nil); err != nil {
 		t.Fatal(err)
 	}
-	output := make(chan json.RawMessage, 2)
-	if err := manager.readDecisionOutput(ctx, DecisionResponse{}, "", key, sub, output); err != nil {
+	if err := <-readDone; err != nil {
 		t.Fatal(err)
 	}
 	if len(output) != 1 {
 		t.Fatalf("recovered %d events", len(output))
+	}
+	if page, err := backend.ReadDecisionOutput(ctx, ref, 0); err != nil || !page.Done || page.Length != 0 {
+		t.Fatalf("finished log was not reclaimed: %+v err=%v", page.DecisionOutputState, err)
 	}
 }
 
@@ -223,7 +229,7 @@ func TestDecisionOutputStopsAfterOwnerRunTerminates(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			command := Command{StreamOutput: true, BotID: "bot", ID: "orphan", RunID: "run"}
-			key := decisionOutputKey(command.BotID, command.ID)
+			ref := decisionOutputRef(command.BotID, command.ID)
 			if err := manager.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{"type":"text_delta","delta":"partial"}`)); err != nil {
 				t.Fatal(err)
 			}
@@ -236,14 +242,18 @@ func TestDecisionOutputStopsAfterOwnerRunTerminates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sub, err := manager.Subscribe(ctx, key.BotID, key.SessionID)
+			sub, err := backend.Subscribe(ctx, ref.topic())
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer sub.Close()
-			err = manager.readDecisionOutput(ctx, DecisionResponse{BotID: "bot", SessionID: "session", DecisionID: "old-question"}, "run", key, sub, make(chan json.RawMessage, 2))
+			out := make(chan json.RawMessage, 2)
+			err = manager.readDecisionOutput(ctx, DecisionResponse{BotID: "bot", SessionID: "session", DecisionID: "old-question"}, "run", "", ref, sub, out)
 			if !errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Fatalf("owner loss should release reader: %v", err)
+			}
+			if len(out) != 1 {
+				t.Fatalf("partial output before owner loss was not forwarded: %d", len(out))
 			}
 		})
 	}
@@ -269,7 +279,7 @@ func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	consumer := NewManager(reader, Options{})
 	defer func() { _ = producer.Close(); _ = consumer.Close() }()
 	command := Command{StreamOutput: true, BotID: testBotID, ID: "answer"}
-	key := decisionOutputKey(command.BotID, command.ID)
+	ref := decisionOutputRef(command.BotID, command.ID)
 	if err := producer.PublishDecisionOutput(ctx, command, 1, json.RawMessage(`{"type":"text_delta","delta":"first"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +293,7 @@ func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	for _, manager := range []*Manager{producer, consumer} {
 		go func() {
 			<-start
-			claimed, err := manager.claimDecisionOutput(ctx, key)
+			claimed, err := manager.backend.ClaimDecisionOutput(ctx, ref)
 			claims <- claimResult{claimed, err}
 		}()
 	}
@@ -292,7 +302,7 @@ func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	if first.err != nil || second.err != nil || first.claimed == second.claimed {
 		t.Fatalf("expected exactly one Redis output consumer: %+v %+v", first, second)
 	}
-	sub, err := consumer.Subscribe(ctx, key.BotID, key.SessionID)
+	sub, err := reader.Subscribe(ctx, ref.topic())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,15 +320,18 @@ func TestDecisionOutputRedisRecoveryAndClaimOptional(t *testing.T) {
 	if err := producer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if claimed, err := consumer.claimDecisionOutput(ctx, key); err != nil || claimed {
+	if claimed, err := reader.ClaimDecisionOutput(ctx, ref); err != nil || claimed {
 		t.Fatalf("output updates or publisher close lost the claim: claimed=%v err=%v", claimed, err)
 	}
 	out := make(chan json.RawMessage, 133)
-	if err := consumer.readDecisionOutput(ctx, DecisionResponse{}, "", key, sub, out); err != nil {
+	if err := consumer.readDecisionOutput(ctx, DecisionResponse{}, "", "", ref, sub, out); err != nil {
 		t.Fatal(err)
 	}
 	if len(out) != 133 {
 		t.Fatalf("recovered %d events", len(out))
+	}
+	if page, err := reader.ReadDecisionOutput(ctx, ref, 0); err != nil || !page.Done || !page.Claimed || page.Length != 0 {
+		t.Fatalf("finished Redis log was not reclaimed with its markers kept: %+v err=%v", page.DecisionOutputState, err)
 	}
 }
 
@@ -327,13 +340,73 @@ func TestDecisionOutputRetentionLimitIsExplicit(t *testing.T) {
 	m := NewManager(b, Options{})
 	defer func() { _ = m.Close() }()
 	command := Command{StreamOutput: true, BotID: "bot", ID: "limit"}
-	payload, _ := json.Marshal(strings.Repeat("x", decisionOutputMaxBytes))
+	payload, _ := json.Marshal(strings.Repeat("x", decisionOutputLimits.MaxBytes))
 	if err := m.PublishDecisionOutput(context.Background(), command, 1, payload); err == nil {
 		t.Fatal("oversized checkpoint accepted")
 	}
-	s, ok, err := b.Load(context.Background(), decisionOutputKey(command.BotID, command.ID))
-	if err != nil || !ok || s.DecisionOutput == nil || !s.DecisionOutput.Failed || len(s.DecisionOutput.Events) != 0 {
-		t.Fatalf("limit did not leave recoverable failure: %+v %v", s, err)
+	page, err := b.ReadDecisionOutput(context.Background(), decisionOutputRef(command.BotID, command.ID), 0)
+	if err != nil || !page.Exists || !page.Failed || page.Length != 0 {
+		t.Fatalf("limit did not leave recoverable failure: %+v %v", page.DecisionOutputState, err)
+	}
+	// A failed log refuses further appends instead of resuming silently.
+	if err := m.PublishDecisionOutput(context.Background(), command, 1, json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := b.ReadDecisionOutput(context.Background(), decisionOutputRef(command.BotID, command.ID), 0); err != nil || page.Length != 0 {
+		t.Fatalf("failed log accepted an append: %+v %v", page.DecisionOutputState, err)
+	}
+}
+
+// Append is the only write; its idempotency and gap detection are what let the
+// producer retry a seq and let the reader trust Length as a cursor bound.
+func TestDecisionOutputLogAppendContract(t *testing.T) {
+	ctx := context.Background()
+	b := NewMemoryBackend()
+	ref := decisionOutputRef("bot", "contract")
+	limits := DecisionOutputLimits{MaxBytes: 1 << 10, MaxEvents: 3}
+	if page, err := b.ReadDecisionOutput(ctx, ref, 0); err != nil || page.Exists {
+		t.Fatalf("empty ref: %+v %v", page.DecisionOutputState, err)
+	}
+	if _, err := b.AppendDecisionOutput(ctx, ref, 2, json.RawMessage(`{}`), limits); !errors.Is(err, ErrDecisionOutputSequenceGap) {
+		t.Fatalf("gap accepted: %v", err)
+	}
+	first, err := b.AppendDecisionOutput(ctx, ref, 1, json.RawMessage(`{"n":1}`), limits)
+	if err != nil || !first.Applied || first.Length != 1 {
+		t.Fatalf("first append: %+v %v", first, err)
+	}
+	replay, err := b.AppendDecisionOutput(ctx, ref, 1, json.RawMessage(`{"n":"other"}`), limits)
+	if err != nil || replay.Applied || replay.Length != 1 {
+		t.Fatalf("replayed seq must be a no-op: %+v %v", replay, err)
+	}
+	if _, err := b.AppendDecisionOutput(ctx, ref, 2, json.RawMessage(`{"n":2}`), limits); err != nil {
+		t.Fatal(err)
+	}
+	page, err := b.ReadDecisionOutput(ctx, ref, 1)
+	if err != nil || len(page.Events) != 1 || string(page.Events[0]) != `{"n":2}` || page.Length != 2 {
+		t.Fatalf("read from cursor: %+v %v", page, err)
+	}
+	if claimed, err := b.ClaimDecisionOutput(ctx, ref); err != nil || !claimed {
+		t.Fatalf("first claim: %v %v", claimed, err)
+	}
+	if claimed, err := b.ClaimDecisionOutput(ctx, ref); err != nil || claimed {
+		t.Fatalf("second claim must lose: %v %v", claimed, err)
+	}
+	closed, err := b.AppendDecisionOutput(ctx, ref, 3, nil, limits)
+	if err != nil || !closed.Applied || !closed.Done || !closed.Claimed {
+		t.Fatalf("close: %+v %v", closed, err)
+	}
+	if after, err := b.AppendDecisionOutput(ctx, ref, 4, json.RawMessage(`{}`), limits); err != nil || after.Applied {
+		t.Fatalf("append after close must be ignored: %+v %v", after, err)
+	}
+	if err := b.ReleaseDecisionOutput(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	// Entries are gone; the markers that guard against a second forwarder stay.
+	if page, err := b.ReadDecisionOutput(ctx, ref, 0); err != nil || page.Length != 0 || len(page.Events) != 0 || !page.Done || !page.Claimed {
+		t.Fatalf("released log: %+v %v", page.DecisionOutputState, err)
+	}
+	if claimed, err := b.ClaimDecisionOutput(ctx, ref); err != nil || claimed {
+		t.Fatalf("release must not reopen the claim: %v %v", claimed, err)
 	}
 }
 

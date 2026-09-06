@@ -15,6 +15,9 @@ const (
 	EventRuntimeSnapshot = "runtime_snapshot"
 	EventRuntimeDelta    = "runtime_delta"
 	EventRuntimeDropped  = "runtime_dropped"
+	// EventDecisionOutput wakes a channel continuation reader. It carries no
+	// payload: the reader always resumes from its cursor in the output log.
+	EventDecisionOutput = "decision_output"
 
 	RunStatusRunning   = "running"
 	RunStatusAdmitting = "admitting"
@@ -211,32 +214,16 @@ func (h RunHandle) key() Key {
 	return Key{BotID: h.BotID, SessionID: h.SessionID}
 }
 
-// DecisionOutputCheckpoint retains channel payloads using the same live-state
-// storage and gap recovery as web subscriptions. It expires with the backend
-// snapshot; it is not an external delivery receipt or a durable outbox.
-type DecisionOutputCheckpoint struct {
-	Offset int               `json:"offset,omitempty"`
-	Events []json.RawMessage `json:"events,omitempty"`
-	Done   bool              `json:"done,omitempty"`
-	Failed bool              `json:"failed,omitempty"`
-	Bytes  int               `json:"bytes,omitempty"`
-
-	// One accepted request owns forwarding for this command across all callers.
-	// Retain the claim until expiry; retries must not resend external messages.
-	Claimed bool `json:"claimed,omitempty"`
-}
-
 // Snapshot is the authoritative live view of one session. It holds at most one
 // run: admission answers busy rather than queueing, so there is no pending list
 // to project and a subscriber never has to reason about work it cannot see yet.
 type Snapshot struct {
-	DecisionOutput *DecisionOutputCheckpoint `json:"decision_output,omitempty" swaggerignore:"true"`
-	BotID          string                    `json:"bot_id"`
-	SessionID      string                    `json:"session_id"`
-	Epoch          string                    `json:"epoch"`
-	Seq            int64                     `json:"seq"`
-	CurrentRunView *CurrentRunView           `json:"current_run_view,omitempty"`
-	UpdatedAt      time.Time                 `json:"updated_at"`
+	BotID          string          `json:"bot_id"`
+	SessionID      string          `json:"session_id"`
+	Epoch          string          `json:"epoch"`
+	Seq            int64           `json:"seq"`
+	CurrentRunView *CurrentRunView `json:"current_run_view,omitempty"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 // EmptySnapshot returns the canonical empty runtime snapshot for a session.
@@ -335,13 +322,12 @@ type Event struct {
 // RuntimeDelta carries only the state changed by one committed runtime
 // transition. Full snapshots are reserved for hydration and gap recovery.
 type RuntimeDelta struct {
-	DecisionOutput  *DecisionOutputCheckpoint `json:"decision_output,omitempty" swaggerignore:"true"`
-	CurrentRunView  *CurrentRunView           `json:"current_run_view,omitempty"`
-	Run             *CurrentRunPatch          `json:"run,omitempty"`
-	MessageAppends  []RuntimeMessageAppend    `json:"message_appends,omitempty"`
-	ProgressAppends []RuntimeProgressAppend   `json:"progress_appends,omitempty"`
-	MessageUpserts  []chatview.UIMessage      `json:"message_upserts,omitempty"`
-	ResetMessages   bool                      `json:"reset_messages,omitempty"`
+	CurrentRunView  *CurrentRunView         `json:"current_run_view,omitempty"`
+	Run             *CurrentRunPatch        `json:"run,omitempty"`
+	MessageAppends  []RuntimeMessageAppend  `json:"message_appends,omitempty"`
+	ProgressAppends []RuntimeProgressAppend `json:"progress_appends,omitempty"`
+	MessageUpserts  []chatview.UIMessage    `json:"message_upserts,omitempty"`
+	ResetMessages   bool                    `json:"reset_messages,omitempty"`
 }
 
 type CurrentRunPatch struct {
@@ -490,8 +476,75 @@ type Backend interface {
 	Update(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error)
 	Publish(ctx context.Context, event Event) error
 	Subscribe(ctx context.Context, key Key) (Subscription, error)
+	DecisionOutputStore
 	Close() error
 }
+
+// DecisionOutputRef identifies the raw output log of one accepted decision
+// command. Logs are keyed per command, not per session: one run can park on a
+// second question without ending, and successive answers must not share a
+// cursor.
+type DecisionOutputRef struct {
+	BotID     string
+	CommandID string
+}
+
+// topic is the pub/sub wakeup channel for one log. Nothing is stored under this
+// key; Manager.Subscribe must not be used with it because there is no snapshot
+// to reconcile against.
+func (r DecisionOutputRef) topic() Key {
+	return Key{BotID: r.BotID, SessionID: "decision-output/" + r.CommandID}
+}
+
+// DecisionOutputLimits bounds one log. Exceeding them marks the log failed
+// rather than silently truncating it; the producer reports the overflow.
+type DecisionOutputLimits struct {
+	MaxBytes  int
+	MaxEvents int
+}
+
+// DecisionOutputState is the log's committed position after an append or read.
+type DecisionOutputState struct {
+	Exists  bool
+	Length  int
+	Bytes   int
+	Done    bool
+	Failed  bool
+	Claimed bool
+	// Applied reports whether this append changed the log. Replays of an
+	// already-committed seq and writes after a terminal marker are no-ops.
+	Applied bool
+	// Exceeded reports that this append tripped the limits and failed the log.
+	Exceeded bool
+}
+
+// DecisionOutputPage is a read from a cursor to the current end of the log.
+type DecisionOutputPage struct {
+	DecisionOutputState
+	Events []json.RawMessage
+}
+
+// DecisionOutputStore is an append-only raw event log with the same
+// lifetime/TTL as live state. It is separate from Snapshot so session state
+// keeps one meaning and each append writes one entry, not the whole log.
+//
+// Append is idempotent by seq: seq must be Length+1 to apply; seq <= Length is
+// a replay and returns the current state; a larger seq is a gap and an error.
+// A nil payload closes the log (Done). Claim hands exclusive forwarding rights
+// to one caller across processes. Release drops the stored entries once they
+// are delivered but keeps the Done/Failed/Claimed markers until the TTL: a
+// retry that arrives after delivery must still lose the claim, never replay
+// the run's output to the channel a second time.
+type DecisionOutputStore interface {
+	AppendDecisionOutput(ctx context.Context, ref DecisionOutputRef, seq int64, payload json.RawMessage, limits DecisionOutputLimits) (DecisionOutputState, error)
+	ReadDecisionOutput(ctx context.Context, ref DecisionOutputRef, from int) (DecisionOutputPage, error)
+	ClaimDecisionOutput(ctx context.Context, ref DecisionOutputRef) (bool, error)
+	ReleaseDecisionOutput(ctx context.Context, ref DecisionOutputRef) error
+}
+
+// ErrDecisionOutputSequenceGap reports an append whose seq skips uncommitted
+// entries. The producer treats it as a failed checkpoint write.
+var ErrDecisionOutputSequenceGap = errors.New("decision output sequence gap")
 
 // DistributedBackend adds cross-process run ownership and command routing.
 // MemoryBackend intentionally does not implement this interface.
