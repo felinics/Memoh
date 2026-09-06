@@ -40,6 +40,13 @@ beforeAll(() => {
   })
 })
 
+// The caret must sit on a row: the list and the body also contain the
+// row's text, so a bare textContent check would pass with focus lost.
+function caret(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null
+  return active?.getAttribute('role') === 'option' ? active : null
+}
+
 function key(target: Element, name: string) {
   target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }))
 }
@@ -146,7 +153,7 @@ describe('trajectory ledger', () => {
 
     list.focus()
     await nextTick()
-    expect(document.activeElement?.textContent).toContain('hello')
+    expect(caret()?.textContent).toContain('hello')
     await nextTick()
     expect(list.tabIndex).toBe(-1)
 
@@ -154,24 +161,24 @@ describe('trajectory ledger', () => {
     await nextTick()
     expect(onNavigate).toHaveBeenLastCalledWith(rows[1]!.key)
     expect(onSelect).not.toHaveBeenCalled()
-    expect(document.activeElement?.textContent).toContain('block 0')
+    expect(caret()?.textContent).toContain('block 0')
     expect(list.scrollTop).toBe(0)
 
     key(document.activeElement!, 'End')
     await nextTick()
     expect(onNavigate).toHaveBeenLastCalledWith(rows[400]!.key)
     expect(list.scrollTop).toBe(401 * 28 - 140)
-    expect(document.activeElement?.textContent).toContain('block 399')
+    expect(caret()?.textContent).toContain('block 399')
 
     key(document.activeElement!, 'PageUp')
     await nextTick()
     expect(onNavigate).toHaveBeenLastCalledWith(rows[395]!.key)
-    expect(document.activeElement?.textContent).toContain('block 394')
+    expect(caret()?.textContent).toContain('block 394')
 
     key(document.activeElement!, 'Home')
     await nextTick()
     expect(list.scrollTop).toBe(0)
-    expect(document.activeElement?.textContent).toContain('hello')
+    expect(caret()?.textContent).toContain('hello')
 
     key(document.activeElement!, 'Enter')
     expect(onSelect).toHaveBeenLastCalledWith(rows[0]!.key)
@@ -200,6 +207,47 @@ describe('trajectory ledger', () => {
     await nextTick()
     expect(document.activeElement).toBe(third)
     outside.remove()
+  })
+
+  it('forgets a press on the list itself once focus leaves the list', async () => {
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 400)], new Map())
+    const root = mount(TrajectoryLedger, { 'rows': rows, 'selectedKey': null, 'data-viewport-height': '140' })
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    await nextTick()
+    const list = root.querySelector('[data-testid="trajectory-ledger"]') as HTMLElement
+    list.focus()
+    await nextTick()
+    expect(caret()?.textContent).toContain('hello')
+
+    list.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    outside.focus()
+    await nextTick()
+    expect(list.tabIndex).toBe(0)
+
+    list.focus()
+    await nextTick()
+    expect(caret()?.textContent).toContain('hello')
+    outside.remove()
+  })
+
+  it('hands the tab stop back when the focused row leaves the window', async () => {
+    const rows = buildTrajectoryRows([user('u1', 'hello', 'turn-1'), assistant('a1', 'turn-1', 400)], new Map())
+    const root = mount(TrajectoryLedger, { 'rows': rows, 'selectedKey': null, 'data-viewport-height': '140' })
+    await nextTick()
+    const list = root.querySelector('[data-testid="trajectory-ledger"]') as HTMLElement
+    list.focus()
+    await nextTick()
+    await nextTick()
+    expect(caret()?.textContent).toContain('hello')
+    expect(list.tabIndex).toBe(-1)
+
+    list.scrollTop = 28 * 40
+    list.dispatchEvent(new Event('scroll'))
+    await nextTick()
+    await nextTick()
+    expect(root.querySelector('[data-testid="trajectory-row-user"]')).toBeNull()
+    expect(list.tabIndex).toBe(0)
   })
 
   it('scrolls a mounted but off-screen row into view when the strip selects it', async () => {

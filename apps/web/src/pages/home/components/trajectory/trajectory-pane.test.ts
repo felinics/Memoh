@@ -123,6 +123,11 @@ afterEach(() => {
   focus.mockClear()
 })
 
+function caret(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null
+  return active?.getAttribute('role') === 'option' ? active : null
+}
+
 function key(target: Element, name: string) {
   target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }))
 }
@@ -143,13 +148,13 @@ describe('trajectory pane', () => {
     await settle()
     expect(focus).toHaveBeenCalledWith(rows[1]!.key)
     expect(root.querySelector('[data-testid="trajectory-inspector-host"]')).not.toBeNull()
-    expect(document.activeElement?.textContent).toContain('first answer')
+    expect(caret()?.textContent).toContain('first answer')
 
     key(document.activeElement!, 'Escape')
     await settle()
     expect(selectedKey.value).toBeNull()
     expect(root.querySelector('[data-testid="trajectory-inspector-host"]')).toBeNull()
-    expect(document.activeElement?.textContent).toContain('first answer')
+    expect(caret()?.textContent).toContain('first answer')
   })
 
   it('keeps the list in reach when the inspector would cover it', async () => {
@@ -164,7 +169,7 @@ describe('trajectory pane', () => {
     await settle()
     expect(focus).not.toHaveBeenCalled()
     expect(selectedKey.value).toBeNull()
-    expect(document.activeElement?.textContent).toContain('second answer')
+    expect(caret()?.textContent).toContain('second answer')
 
     key(document.activeElement!, 'Enter')
     await settle()
@@ -178,7 +183,7 @@ describe('trajectory pane', () => {
     await settle()
     expect(selectedKey.value).toBeNull()
     expect(root.querySelector('[data-testid="trajectory-column"]')?.hasAttribute('inert')).toBe(false)
-    expect(document.activeElement?.textContent).toContain('second answer')
+    expect(caret()?.textContent).toContain('second answer')
   })
 
   it('moves a covered caret into the inspector when the pane narrows with a row open', async () => {

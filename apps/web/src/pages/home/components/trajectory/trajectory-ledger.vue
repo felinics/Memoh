@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onDeactivated, ref, useTemplateRef, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight } from 'lucide-vue-next'
 import { Spinner } from '@felinic/ui'
@@ -107,10 +107,21 @@ const rowElements = new Map<string, HTMLElement>()
 const activeKey = ref<string | null>(null)
 const rowFocused = ref(false)
 
+// A focused row that scrolls out of the window is removed without every
+// browser sending focusout, and a deactivated tab keeps its focus state
+// with it; both hand the tab stop back to the list.
 function bindRow(key: string, el: Element | ComponentPublicInstance | null) {
-  if (el) rowElements.set(key, el as HTMLElement)
-  else rowElements.delete(key)
+  if (el) {
+    rowElements.set(key, el as HTMLElement)
+    return
+  }
+  if (rowElements.get(key) === document.activeElement) rowFocused.value = false
+  rowElements.delete(key)
 }
+
+onDeactivated(() => {
+  rowFocused.value = false
+})
 
 function activeIndex(): number {
   const key = activeKey.value ?? props.selectedKey
@@ -158,7 +169,9 @@ function onFocusIn(event: FocusEvent) {
 }
 
 function onFocusOut(event: FocusEvent) {
-  if (!viewport.value?.contains(event.relatedTarget as Node | null)) rowFocused.value = false
+  if (viewport.value?.contains(event.relatedTarget as Node | null)) return
+  rowFocused.value = false
+  pointerOnList = false
 }
 
 function onKeydown(event: KeyboardEvent) {
