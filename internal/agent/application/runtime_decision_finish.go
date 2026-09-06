@@ -16,6 +16,10 @@ import (
 // continuation. A parked native run has no waiter to cancel these rows when
 // its execution context ends. Resolve only this run, under its original fence,
 // before releasing ownership; never clear a successor's session-wide inputs.
+//
+// Ownership/fencing comes from #865 (207844099); finish retry and reaper handoff
+// come from #1107 (a23d24a1f). This callback adds decision cleanup to owner-side
+// finalization; it does not replace that protocol or run on direct reaper finalization.
 func (s *Service) finalizeRuntimeDecisions(ctx context.Context, handle sessionruntime.RunHandle) error {
 	if s.queries == nil {
 		return nil
