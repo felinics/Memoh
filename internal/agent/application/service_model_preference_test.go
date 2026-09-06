@@ -232,14 +232,14 @@ func TestModelOnlyPatchUsesNewModelDefaultEffort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = svc.PatchSessionModelPreference(context.Background(), "bot", "00000000-0000-0000-0000-000000000613", &ref, nil, nil)
+	err = svc.PatchSessionModelPreference(context.Background(), "bot", "00000000-0000-0000-0000-000000000613", &ref, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.updatedPrefs) != 1 {
-		t.Fatal(fake.updatedPrefs)
+	if len(fake.patchedPrefs) != 1 {
+		t.Fatal(fake.patchedPrefs)
 	}
-	got := fake.updatedPrefs[0].PreferredReasoningEffort.String
+	got := fake.patchedPrefs[0].PreferredReasoningEffort.String
 	if got != defaultEffort {
 		t.Fatalf("model-only PATCH carried old effort %q; new model default is %q", got, defaultEffort)
 	}

@@ -879,7 +879,7 @@ func (preferenceUpdateStub) ReconcileSessionModelPreference(context.Context, str
 	return "", "", nil
 }
 
-func (s preferenceUpdateStub) PatchSessionModelPreference(_ context.Context, _, _ string, model, effort, _ *string) error {
+func (s preferenceUpdateStub) PatchSessionModelPreference(_ context.Context, _, _ string, model, effort *string, _ string) error {
 	if s.err != nil {
 		return s.err
 	}

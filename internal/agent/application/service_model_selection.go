@@ -197,7 +197,11 @@ func (s *Service) ReconcileSessionModelPreference(ctx context.Context, botID, mo
 // against the model the session would actually use. An explicit but
 // unresolvable/empty model reference is an error (the FK would reject it
 // anyway; fail loudly instead of degrading).
-func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort, expectedRevision *string) error {
+//
+// expectedRevision is the revision the picker read; "" means the session has
+// none yet. Every PATCH is compare-and-set: a picker may never overwrite a
+// send or a newer picker operation it did not see.
+func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort *string, expectedRevision string) error {
 	sessionUUID, err := db.ParseUUID(sessionID)
 	if err != nil {
 		return fmt.Errorf("invalid session id: %w", err)
@@ -240,27 +244,22 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 	if err != nil {
 		return err
 	}
-	value := pgtype.Text{String: reconciledEffort, Valid: reconciledEffort != ""}
-	if expectedRevision != nil {
-		revision, parseErr := parsePreferenceRevision(*expectedRevision)
-		if parseErr != nil {
-			return parseErr
-		}
-		n, writeErr := s.queries.CompareAndSetSessionModelPreference(ctx, sqlc.CompareAndSetSessionModelPreferenceParams{
-			ID: sessionUUID, RuntimeType: sess.RuntimeType, ExpectedRevision: revision,
-			PreferredChatModelID: nativeID, PreferredExternalModelID: externalID, PreferredReasoningEffort: value,
-		})
-		if writeErr != nil {
-			return writeErr
-		}
-		if n == 0 {
-			return ErrModelPreferenceConflict
-		}
-		return nil
+	revision, err := parsePreferenceRevision(expectedRevision)
+	if err != nil {
+		return err
 	}
-	return s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
-		ID: sessionUUID, PreferredChatModelID: nativeID, PreferredExternalModelID: externalID, PreferredReasoningEffort: value,
+	n, err := s.queries.CompareAndSetSessionModelPreference(ctx, sqlc.CompareAndSetSessionModelPreferenceParams{
+		ID: sessionUUID, RuntimeType: sess.RuntimeType, ExpectedRevision: revision,
+		PreferredChatModelID: nativeID, PreferredExternalModelID: externalID,
+		PreferredReasoningEffort: pgtype.Text{String: reconciledEffort, Valid: reconciledEffort != ""},
 	})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrModelPreferenceConflict
+	}
+	return nil
 }
 
 func (s *Service) fetchChatModel(ctx context.Context, modelID string) (models.GetResponse, sqlc.Provider, error) {

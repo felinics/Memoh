@@ -1,27 +1,13 @@
 -- 0146_session_model_preference
--- Persist native or direct-runtime model/effort preferences and an optimistic
--- concurrency revision. Unselected sessions retain NULL preferences. Explicit
--- sends always rotate the revision to fence older picker PATCH requests.
+-- Per-session (model, reasoning effort) pair for native and direct runtimes,
+-- plus an optimistic-concurrency revision. NULL = the session never picked.
+-- Preference writes never bump updated_at: the (bot_id, updated_at DESC)
+-- indexes drive sidebar recency and a picker change must not reorder it.
 --
--- updated_at is deliberately NOT bumped on preference writes: the
--- (bot_id, updated_at DESC) indexes drive sidebar recency, and a picker
--- change or per-turn write-back must not reorder the session list.
-
--- This migration runs AFTER the team core: new FKs must be written in the
--- post-team composite form (team_id, col) -> (team_id, col) with the column
--- list on SET NULL. The plain inline form would leave confdelsetcols NULL,
--- which the team schema guards reject (a bare SET NULL could clear team_id).
--- 0001 needs no such care: its team phase rewrites every single-column FK
--- into this exact shape generically, so the fresh and incremental paths
--- converge on the same constraint (same auto name).
---
--- NOT VALID is required here, not optional (same as 0141/0142): post-team
--- migrations run as the database owner under FORCE RLS, and validating the
--- FK would scan bot_sessions through the team policy, whose
--- memoh_current_team_id() raises because the migration connection never
--- sets memoh.team_id. NOT VALID skips the pre-existing-rows scan; the
--- column is born NULL and every future write is still checked, so nothing
--- is lost. (0001 keeps the valid form — its team phase predates RLS.)
+-- FK form follows 0141/0142: post-team composite (team_id, col) with the
+-- column list on SET NULL, and NOT VALID because post-team migrations run
+-- under FORCE RLS without memoh.team_id (see 0141 for the full rationale).
+-- The column is born NULL, so nothing is skipped by NOT VALID.
 ALTER TABLE public.bot_sessions
   ADD COLUMN IF NOT EXISTS preferred_chat_model_id UUID,
   ADD COLUMN IF NOT EXISTS preferred_reasoning_effort TEXT,
@@ -36,9 +22,5 @@ ALTER TABLE public.bot_sessions
     ON DELETE SET NULL (preferred_chat_model_id)
     NOT VALID;
 
--- Seed query support: "the bot's (per user) most recent native session that
--- has a pair" (welcome composer seed). Existing
--- idx_bot_sessions_bot_mode_runtime_active_updated(bot_id, session_mode,
--- runtime_type, updated_at DESC) already narrows bot_id + mode/runtime +
--- recency; the created_by_user_id + IS NOT NULL pair filter applies on top
--- of a small set.
+-- No new index: the welcome-seed query is served by the existing
+-- idx_bot_sessions_bot_mode_runtime_active_updated.

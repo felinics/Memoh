@@ -396,6 +396,9 @@ type modelSelectionFakeQueries struct {
 	provider       sqlc.Provider
 	sessionModelID pgtype.UUID
 	updatedPrefs   []sqlc.UpdateSessionModelPreferenceParams
+	// patchedPrefs records picker compare-and-set writes; the fake always
+	// reports one row matched.
+	patchedPrefs []sqlc.CompareAndSetSessionModelPreferenceParams
 	// session is the row GetSessionByID serves; the zero value is the "no
 	// memory" default every derived fake wants (issue #879). Half-pair tests
 	// set it explicitly.
@@ -416,6 +419,11 @@ func (f *modelSelectionFakeQueries) GetSessionByID(_ context.Context, id pgtype.
 func (f *modelSelectionFakeQueries) UpdateSessionModelPreference(_ context.Context, arg sqlc.UpdateSessionModelPreferenceParams) error {
 	f.updatedPrefs = append(f.updatedPrefs, arg)
 	return nil
+}
+
+func (f *modelSelectionFakeQueries) CompareAndSetSessionModelPreference(_ context.Context, arg sqlc.CompareAndSetSessionModelPreferenceParams) (int64, error) {
+	f.patchedPrefs = append(f.patchedPrefs, arg)
+	return 1, nil
 }
 
 func (f *modelSelectionFakeQueries) ListModelsByModelID(_ context.Context, modelID string) ([]sqlc.Model, error) {

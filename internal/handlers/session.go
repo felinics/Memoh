@@ -55,7 +55,7 @@ type sessionAgentRuntimeService interface {
 // modelPreferenceService is the picker-pair write path (issue #879),
 // satisfied by the agent application service.
 type modelPreferenceService interface {
-	PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort, expectedRevision *string) error
+	PatchSessionModelPreference(ctx context.Context, botID, sessionID string, modelRef, effort *string, expectedRevision string) error
 	ReconcileSessionModelPreference(ctx context.Context, botID, modelRef, effort string) (string, string, error)
 }
 
@@ -183,6 +183,8 @@ type updateSessionRequest struct {
 	// PreferredChatModelID / PreferredReasoningEffort are the picker pair
 	// (issue #879). The composer always patches the pair together; either one
 	// alone is reconciled against the model the session would actually use.
+	// Changing either requires ExpectedModelPreferenceRevision ("" when the
+	// session has none yet): picker writes are always compare-and-set.
 	PreferredChatModelID     *string `json:"preferred_chat_model_id,omitempty"`
 	PreferredReasoningEffort *string `json:"preferred_reasoning_effort,omitempty"`
 }
@@ -1013,7 +1015,10 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		if h.modelPrefs == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "model preference service not configured")
 		}
-		if prefErr := h.modelPrefs.PatchSessionModelPreference(c.Request().Context(), botID, sessionID, req.PreferredChatModelID, req.PreferredReasoningEffort, req.ExpectedModelPreferenceRevision); prefErr != nil {
+		if req.ExpectedModelPreferenceRevision == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "expected_model_preference_revision is required when changing the model preference; send \"\" for a session without one")
+		}
+		if prefErr := h.modelPrefs.PatchSessionModelPreference(c.Request().Context(), botID, sessionID, req.PreferredChatModelID, req.PreferredReasoningEffort, *req.ExpectedModelPreferenceRevision); prefErr != nil {
 			if errors.Is(prefErr, application.ErrModelPreferenceConflict) {
 				return apperror.New(apperror.CodeSessionModelPreferenceConflict, nil)
 			}
