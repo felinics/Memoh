@@ -80,7 +80,7 @@
         </div>
         <div
           v-if="selectedRow"
-          class="absolute inset-0 bg-background @3xl:static @3xl:w-80 @3xl:shrink-0 @3xl:border-l @3xl:border-border"
+          class="absolute inset-0 flex flex-col bg-background @3xl:static @3xl:w-80 @3xl:shrink-0 @3xl:border-l @3xl:border-border"
           data-testid="trajectory-inspector-host"
         >
           <TrajectoryInspector

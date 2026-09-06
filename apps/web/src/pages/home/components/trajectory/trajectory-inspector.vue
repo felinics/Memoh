@@ -1,27 +1,36 @@
 <template>
-  <ScrollArea class="h-full">
-    <div class="space-y-3 px-3 py-2 text-body">
-      <div
-        ref="header"
-        class="flex items-center justify-between gap-2"
-      >
-        <span
-          class="text-caption font-medium"
-          :class="KIND_TONE_CLASS[row.kind]"
-        >
-          {{ $t(KIND_LABEL_KEY[row.kind]) }}
-          <template v-if="row.stepIndex != null"> · {{ $t('chat.trajectory.step', { n: row.stepIndex }) }}</template>
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          :aria-label="$t('chat.trajectory.closeInspector')"
-          @click="emit('close')"
-        >
-          <X />
-        </Button>
-      </div>
+  <div
+    ref="header"
+    class="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-1"
+    data-testid="trajectory-inspector-header"
+  >
+    <span class="min-w-0 truncate text-caption">
+      <span class="text-muted-foreground">{{ $t('chat.trajectory.turn', { n: row.turnLabel }) }} · </span>
+      <span
+        class="font-medium"
+        :class="KIND_TONE_CLASS[row.kind]"
+      >{{ $t(KIND_LABEL_KEY[row.kind]) }}</span>
+      <template v-if="row.stepIndex != null"> · {{ $t('chat.trajectory.step', { n: row.stepIndex }) }}</template>
+      <span
+        v-if="headerLabel"
+        class="font-mono text-foreground"
+      > · {{ headerLabel }}</span>
+    </span>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      :aria-label="$t('chat.trajectory.closeInspector')"
+      @click="emit('close')"
+    >
+      <X />
+    </Button>
+  </div>
 
+  <ScrollArea
+    ref="body"
+    class="min-h-0 flex-1"
+  >
+    <div class="space-y-3 px-3 py-2 text-body">
       <template v-if="row.detail.kind === 'system'">
         <ContextLifecycleTurns
           :turns="systemTurns"
@@ -324,7 +333,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from 'lucide-vue-next'
 import { Button, ScrollArea, Skeleton } from '@felinic/ui'
@@ -343,10 +352,22 @@ const props = defineProps<{ row: TrajectoryRow, previews?: FragmentPreviews | nu
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
 const header = useTemplateRef<HTMLElement>('header')
+const body = useTemplateRef<InstanceType<typeof ScrollArea>>('body')
 
 defineExpose({
   focus: () => header.value?.querySelector<HTMLElement>('button')?.focus(),
 })
+
+// The header names what the body explains: the tool, error code or notice
+// the row stands for, since the body only shows its input and output.
+const headerLabel = computed(() => (props.row.kind === 'tool' || props.row.kind === 'error' || props.row.kind === 'notice' ? props.row.label : ''))
+
+// Another row starts its detail at the top; the inspector itself stays
+// mounted so the texts and audit already loaded are not fetched again.
+watch(() => props.row.key, () => {
+  const viewport = (body.value?.$el as HTMLElement | undefined)?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
+  if (viewport) viewport.scrollTop = 0
+}, { flush: 'post' })
 
 function clock(ms: number): string {
   return new Date(ms).toLocaleTimeString(undefined, { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })
