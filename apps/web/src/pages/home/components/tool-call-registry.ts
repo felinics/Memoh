@@ -119,6 +119,24 @@ export interface ToolDisplay {
   hideAction?: boolean
 }
 
+// Missing input marks argument streaming; an empty object is a complete,
+// valid argument set for tools such as list_models.
+export function getToolTitle(
+  block: ToolCallBlock,
+  translate: (key: string, params: Record<string, unknown>) => string,
+) {
+  const display = getToolDisplay(block)
+  const pending = !block.done && block.input == null
+  const pendingKey = ['write', 'edit', 'apply_patch'].includes(display.actionKey)
+    ? display.actionKey : 'generic'
+  const action = pending
+    ? translate(`chat.tools.pending.${pendingKey}`, {})
+    : translate(`chat.tools.${display.actionKey}`, display.actionParams ?? {})
+  const showAction = pending || !display.hideAction
+  const label = [showAction ? action : '', display.target].filter(Boolean).join(' ')
+  return { display, pending, action, showAction, label }
+}
+
 const FILE_PATH_TOOLS = new Set(['read', 'write', 'edit', 'list'])
 
 export function isFilePathTool(toolName: string): boolean {

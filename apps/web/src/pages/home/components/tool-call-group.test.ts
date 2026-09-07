@@ -101,7 +101,9 @@ function mountGroup(items: ContentBlock[], active: boolean | undefined, showExec
             exec: 'Run',
             edit: 'Edit',
             ask_user: 'Ask user',
-            pending: { generic: 'Preparing the next step' },
+            list: 'List files in',
+            list_models: 'List models',
+            pending: { generic: 'Preparing the next step', write: 'Writing file' },
           },
         },
       },
@@ -274,7 +276,7 @@ describe('ToolCallGroup adaptive header layers', () => {
     const root = mountGroup([
       toolBlock('read', { path: 'a.ts' }),
       toolBlock('read', { path: 'b.ts' }),
-      toolBlock('exec', {}, true),
+      toolBlock('exec', null, true),
     ], true)
 
     expect(nowLine(root)?.textContent).toContain('Preparing the next step')
@@ -364,4 +366,33 @@ it('wraps generic details in cards both standalone and inside a process', async 
   group.querySelector<HTMLElement>('[role="button"]')!.click()
   await nextTick()
   expect(group.querySelector('.bg-card')?.textContent).toContain('session_id')
+})
+
+
+describe('shared process titles', () => {
+  it('keeps a pending write title in the row, group header and preview', () => {
+    const block = toolBlock('write', null, true)
+    expect(mountGroup([block], true).textContent).toContain('Writing file')
+    const root = mountGroup([reasoning(2001), block], true)
+    expect(headerText(root)).toBe('Writing file')
+    expect(nowLine(root)?.textContent).toBe('Writing file')
+  })
+
+  it('preserves directory paths in the row, group header and preview', () => {
+    const block = toolBlock('list', { path: '/data/project' }, true)
+    const row = mountGroup([block], true)
+    expect(row.textContent).toContain('List files in')
+    expect(row.textContent).toContain('/data/project')
+    const root = mountGroup([reasoning(2002), block], true)
+    expect(headerText(root)).toBe('List files in /data/project')
+    expect(nowLine(root)?.textContent).toBe('List files in /data/project')
+  })
+
+  it('keeps a no-argument tool action in the row, group header and preview', () => {
+    const block = toolBlock('list_models', {}, true)
+    expect(mountGroup([block], true).textContent).toContain('List models')
+    const root = mountGroup([reasoning(2003), block], true)
+    expect(headerText(root)).toBe('List models')
+    expect(nowLine(root)?.textContent).toBe('List models')
+  })
 })

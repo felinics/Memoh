@@ -137,6 +137,7 @@ import {
   SUMMARY_BUCKET_ORDER,
   SUMMARY_FRAGMENT_ORDER,
   getToolDisplay,
+  getToolTitle,
   isGuiTool,
   toolBucket,
   toolFragmentKind,
@@ -200,32 +201,8 @@ function toggle() {
 // text content is `active`-gated (see verbLabel/detailsLabel).
 const anyToolRunning = computed(() => toolItems.value.some(tool => tool.running))
 
-function basename(path: string): string {
-  if (!path) return ''
-  const parts = path.split('/').filter(Boolean)
-  return parts[parts.length - 1] ?? path
-}
-
-const FILE_PATH_TOOLS = new Set(['read', 'write', 'edit', 'list'])
-
-// Subject of a single tool call: a short, human target (filename / query /
-// command) rather than a bare count — "Read chat-pane.vue", not "Read 1".
-function subjectOf(tool: ToolCallBlockType): string {
-  const display = getToolDisplay(tool)
-  if (FILE_PATH_TOOLS.has(tool.toolName)) return basename(display.target) || display.target
-  return display.target
-}
-
-function verbOf(tool: ToolCallBlockType): string {
-  const display = getToolDisplay(tool)
-  return t(`chat.tools.${display.actionKey}`, display.actionParams ?? {})
-}
-
 function labelFor(tool: ToolCallBlockType): string {
-  const subject = subjectOf(tool)
-  if (getToolDisplay(tool).hideAction) return subject
-  const verb = verbOf(tool)
-  return subject ? `${verb} ${subject}` : verb
+  return getToolTitle(tool, t).label
 }
 
 // Where a browser navigation went, by host — the one piece of a browsing run
@@ -333,16 +310,7 @@ const tickerLabel = computed(() => {
   const current = props.items[props.items.length - 1]
   if (!current) return ''
   if (current.type === 'reasoning') return t('chat.thinkingInProgress')
-  if (current.type === 'tool') {
-    const tool = current as ToolCallBlockType
-    const input = tool.input
-    const inputReady = input && typeof input === 'object' && Object.keys(input as Record<string, unknown>).length > 0
-    if (tool.running && !inputReady) {
-      const display = getToolDisplay(tool)
-      return t(`chat.tools.pending.${display.actionKey}`, t('chat.tools.pending.generic'))
-    }
-    return labelFor(tool)
-  }
+  if (current.type === 'tool') return labelFor(current as ToolCallBlockType)
   return headerLabel.value
 })
 </script>

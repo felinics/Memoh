@@ -169,7 +169,7 @@ import type { ToolCallBlock } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 import { useConnectorLogos } from '../composables/useConnectorLogos'
 import {
-  getToolDisplay,
+  getToolTitle,
   isDirPathTool,
   isFilePathTool,
 } from './tool-call-registry'
@@ -187,7 +187,8 @@ const { t } = useI18n()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
-const display = computed(() => getToolDisplay(props.block))
+const title = computed(() => getToolTitle(props.block, t))
+const display = computed(() => title.value.display)
 
 // A Connect-It tool carries its binding's alias in the tool name; when that
 // alias resolves to one of the bot's connectors the row leads with its logo.
@@ -224,38 +225,10 @@ const exitLabel = computed(() => (
   display.value.exitCode ? t('chat.tools.exitCode', { code: display.value.exitCode }) : ''
 ))
 
-const actionLabel = computed(() => {
-  const key = `chat.tools.${display.value.actionKey}`
-  return t(key, display.value.actionParams ?? {})
-})
-
-// A tool is "pending" while it is running and its input arguments have not
-// streamed in yet (tool_call_input_start fires before the full call). In that
-// window tools like write/edit hide their action label and have no target, so
-// only a bare icon would show. We surface a placeholder label instead.
-const isPending = computed(() => {
-  if (props.block.done) return false
-  const input = props.block.input
-  return !(
-    input
-    && typeof input === 'object'
-    && Object.keys(input as Record<string, unknown>).length > 0
-  )
-})
-
-const showPendingLabel = computed(() => isPending.value)
-
-const pendingLabel = computed(
-  () => t(`chat.tools.pending.${display.value.actionKey}`, t('chat.tools.pending.generic')),
-)
-
-const showActionLabel = computed(
-  () => showPendingLabel.value || !display.value.hideAction,
-)
-
-const renderedActionLabel = computed(
-  () => (showPendingLabel.value ? pendingLabel.value : actionLabel.value),
-)
+const isPending = computed(() => title.value.pending)
+const showPendingLabel = computed(() => title.value.pending)
+const showActionLabel = computed(() => title.value.showAction)
+const renderedActionLabel = computed(() => title.value.action)
 
 // Every row is gray at rest and animates to near-black (foreground) on hover:
 // one neutral material, with color expressing interaction. Rest ink matches the
