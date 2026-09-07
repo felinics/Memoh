@@ -8,7 +8,8 @@
   },
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ui": "./src/ui/index.ts"
   },
   "scripts": {
     "generate": "tsx scripts/generate.ts"
@@ -18,5 +19,8 @@
   },
   "devDependencies": {
     "tsx": "^4.21.0"
+  },
+  "dependencies": {
+    "lucide-vue-next": "^0.562.0"
   }
 }
