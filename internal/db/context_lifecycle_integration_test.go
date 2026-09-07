@@ -777,7 +777,7 @@ SELECT $3, $1, bot.id, 'local', 'lifecycle split', '{}' FROM bot
 		t.Fatalf("seed lifecycle split owner: %v", err)
 	}
 
-	// Roll back only 0146 so a row can be written in the pre-split shape.
+	// Roll back only 0147 so a row can be written in the pre-split shape.
 	stepDown(t, dsn, 1)
 	legacySnapshot := `{
   "version": 2,

@@ -1,4 +1,4 @@
--- 0146_context_lifecycle_selection_decisions
+-- 0147_context_lifecycle_selection_decisions
 -- Move the per-fragment selection decisions out of the lifecycle snapshot into
 -- their own column. The snapshot becomes a bounded summary, so list and status
 -- readers never detoast the one part that grows with conversation length.

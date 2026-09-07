@@ -639,8 +639,11 @@
                 <!-- The controls row owns the remaining width and right-aligns,
                      so a long model name truncates instead of overflowing. -->
                 <div class="order-3 flex min-w-0 flex-1 items-center justify-end gap-2 self-end">
-                  <!-- shrink-0 keeps the model name the one that truncates. -->
+                  <!-- shrink-0 keeps the model name the one that truncates.
+                       Native and ACP turns persist a context lifecycle; direct
+                       runtimes own their own context, so the ring stays off. -->
                   <SessionInfoRing
+                    v-if="showSessionInfoRing"
                     class="shrink-0"
                     :visible="isVisible"
                     :override-model-id="overrideModelId"
@@ -1523,6 +1526,7 @@ const activeDirectRuntime = computed(() => {
   return ''
 })
 const activeUsesDirectRuntime = computed(() => activeDirectRuntime.value !== '')
+const showSessionInfoRing = computed(() => !activeUsesExternalAgentComposer.value || activeUsesACPRuntime.value)
 const activeACPAgentId = computed(() => normalizeACPAgentID(activeSessionMetadata.value.acp_agent_id))
 const activeACPProjectPath = computed(() => String(activeSessionMetadata.value.project_path ?? '').trim())
 const activeACPProjectMode = computed(() => String(activeSessionMetadata.value.acp_project_mode ?? '').trim())
