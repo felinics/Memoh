@@ -62,6 +62,7 @@ export class CommandStreamError extends StreamFailureError {
 }
 
 interface TrackStreamInput {
+  onModelPreferenceSettled?: () => void
   invocationId: string
   assistantTurn: ChatAssistantTurn
   botId: string
@@ -318,6 +319,7 @@ export function createChatSend(deps: ChatSendDeps) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
+        onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId: sendInvocationId,
         assistantTurn,
         botId,

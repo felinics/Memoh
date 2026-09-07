@@ -234,6 +234,7 @@ export function connectWebSocket(
         const eventType = String(parsed.type ?? '').trim()
         if (
           eventType !== 'run_accepted'
+          && eventType !== 'model_preference_settled'
           && eventType !== 'run_rejected'
           && eventType !== 'error'
           && eventType !== 'session_created'

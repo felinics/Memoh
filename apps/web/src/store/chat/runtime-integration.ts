@@ -173,6 +173,10 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       handleSessionCreated(event, sourceBotId)
       return
     }
+    if (event.type === 'model_preference_settled') {
+      deps.assistantStreams.settleModelPreference(event)
+      return
+    }
     if (event.type === 'run_accepted') {
       const turnId = event.turn_id.trim()
       if (!turnId) {

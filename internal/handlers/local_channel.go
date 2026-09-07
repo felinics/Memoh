@@ -2290,6 +2290,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws stream error", submission, messageAdmission.build, releaseActiveWSTurn,
 				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
 					req := application.ChatRequest{
+						OnModelPreferenceSettled: func() {
+							writer.SendJSON(wsOutboundEvent{
+								Type:         "model_preference_settled",
+								RunID:        runRef.RunID,
+								InvocationID: runRef.InvocationID,
+								SessionID:    runRef.SessionID,
+							})
+						},
 						BotID:                   botID,
 						ChatID:                  botID,
 						ThreadID:                sessionID,

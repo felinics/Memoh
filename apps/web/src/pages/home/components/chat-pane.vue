@@ -3307,6 +3307,7 @@ async function handleSend() {
     requestedSkills: skills,
     composerScope: sentContext.composerScope,
     onBeforeMessageSend: () => pairSend.begin(),
+    onModelPreferenceSettled: () => pairSend.finish(false),
     onBeforeTurnAppend: () => {
       if (preserveDirectDraftSelection) {
         void nextTick(() => { directDraftPromotionPending = false })

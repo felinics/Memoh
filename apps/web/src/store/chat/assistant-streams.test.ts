@@ -1,6 +1,7 @@
 import { toRaw } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { createAssistantStreamRegistry } from './assistant-streams'
+import { createComposerPairSync } from './composer-pair-sync'
 import type { ChatAssistantTurn } from './types'
 
 function assistantTurn(id: string): ChatAssistantTurn {
@@ -178,5 +179,41 @@ describe('assistant stream registry', () => {
 
     expect(beforeReject).toEqual(['invocation-a1', 'invocation-b1', 'invocation-a2'])
     expect(await Promise.all(completions)).toEqual([failure, failure, failure])
+  })
+})
+
+
+describe('model preference settlement', () => {
+  it('saves a later pick before generation ends, only after the matching write settles', async () => {
+    const { registry } = makeRegistry()
+    const pair = createComposerPairSync()
+    const send = pair.prepareSend()
+    let persisted = 'A'
+    const write = pair.write(async () => persisted, async () => { persisted = 'B'; return 'B' }, () => {})
+    send.begin()
+    const notify = vi.fn(() => send.finish(false))
+    let completed = false
+    const completion = registry.trackAssistantStream({
+      invocationId: 'inv', botId: 'bot', sessionId: 'session',
+      assistantTurn: assistantTurn('turn'), onModelPreferenceSettled: notify,
+    }).then(() => { completed = true })
+    registry.bindRunId('inv', 'run', 'turn')
+    await Promise.resolve()
+    expect(persisted).toBe('A')
+    registry.settleModelPreference({ invocation_id: 'inv', run_id: 'other', session_id: 'session' })
+    registry.settleModelPreference({ invocation_id: 'inv', run_id: 'run', session_id: 'other' })
+    expect(notify).not.toHaveBeenCalled()
+    const event = { invocation_id: 'inv', run_id: 'run', session_id: 'session' }
+    registry.settleModelPreference(event)
+    registry.settleModelPreference(event)
+    await write
+    expect(notify).toHaveBeenCalledOnce()
+    expect(persisted).toBe('B')
+    expect(completed).toBe(false)
+    registry.resolveAssistantStream('inv')
+    await completion
+    send.release()
+    registry.settleModelPreference(event)
+    expect(notify).toHaveBeenCalledOnce()
   })
 })

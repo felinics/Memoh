@@ -525,7 +525,15 @@ export type UIRuntimeEvent =
   | UIRuntimeDeltaEvent
   | UIRuntimeDroppedEvent
 
+export interface UIStreamModelPreferenceSettledEvent {
+  type: 'model_preference_settled'
+  invocation_id: string
+  run_id: string
+  session_id: string
+}
+
 export type UIStreamEvent =
+  | UIStreamModelPreferenceSettledEvent
   | UIStreamRunAcceptedEvent
   | UIStreamRunRejectedEvent
   | UIStreamErrorEvent

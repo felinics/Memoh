@@ -179,6 +179,9 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	if err != nil {
 		return err
 	}
+	if req.OnModelPreferenceSettled != nil {
+		req.OnModelPreferenceSettled()
+	}
 	// A concurrent turn never reaches here: admission holds the session's
 	// single active slot upstream.
 	preparedAttachments, err := s.prepareRuntimeAttachments(ctx, req)

@@ -514,6 +514,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	// even for matching values. Schedule payloads describe the scheduled turn,
 	// not a session preference, and must never enter this write path.
 	s.writeBackSessionModelPreference(ctx, req.ThreadID, requestCarriesPair && pairMemoryApplies, chatModel, runCfg.ReasoningConfig)
+	if req.OnModelPreferenceSettled != nil {
+		req.OnModelPreferenceSettled()
+	}
 	if strings.EqualFold(strings.TrimSpace(req.SessionType), sessionpkg.TypeSubagent) {
 		// A direct turn on a subagent thread runs as the subagent, not as a
 		// chat turn that happens to share its history: same restricted tool
