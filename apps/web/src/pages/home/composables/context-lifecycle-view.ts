@@ -43,7 +43,7 @@ export function lifecycleStatusLabelKey(status: string | null | undefined): stri
   return STATUS_VIEW[status ?? '']?.labelKey ?? null
 }
 
-export type PromptDiff = 'initial' | 'tools' | 'system' | 'system_tools' | 'history'
+export type PromptDiff = 'initial' | 'tools' | 'prefix' | 'prefix_tools'
 
 function toolRoster(defs: ContextfragToolDefAccounting[] | undefined): string {
   return (defs ?? []).map(def => `${def.provider ?? ''}/${def.name ?? ''}:${def.bytes ?? 0}`).sort().join('|')
@@ -59,17 +59,18 @@ export function classifyPromptDiff(
   if (previous === undefined) return null
   const toolsChanged = toolRoster(current.tool_defs) !== toolRoster(previous.tool_defs)
   if (!current.stable_prefix_hash || !previous.stable_prefix_hash) return toolsChanged ? 'tools' : null
-  const systemChanged = current.stable_prefix_hash !== previous.stable_prefix_hash
-  if (toolsChanged) return systemChanged ? 'system_tools' : 'tools'
-  return systemChanged ? 'system' : 'history'
+  // The stable prefix includes persisted history, not just system instructions.
+  // Unchanged prefix and tool metadata do not prove that history changed.
+  const prefixChanged = current.stable_prefix_hash !== previous.stable_prefix_hash
+  if (toolsChanged) return prefixChanged ? 'prefix_tools' : 'tools'
+  return prefixChanged ? 'prefix' : null
 }
 
 const DIFF_LABEL_KEY: Record<PromptDiff, string> = {
   initial: 'chat.lifecycle.diffInitial',
   tools: 'chat.lifecycle.diffTools',
-  system: 'chat.lifecycle.diffSystem',
-  system_tools: 'chat.lifecycle.diffSystemTools',
-  history: 'chat.lifecycle.diffHistory',
+  prefix: 'chat.lifecycle.diffPrefix',
+  prefix_tools: 'chat.lifecycle.diffPrefixTools',
 }
 
 const TRUST_LABEL_KEY: Record<string, string> = {

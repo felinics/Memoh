@@ -95,8 +95,8 @@ async function mountTurns(turns: HandlersContextLifecycleTurn[], options: MountO
             truncatedCount: '{n} truncated',
             diffInitial: 'First turn',
             diffTools: 'Tools changed',
-            diffSystem: 'System changed',
-            diffHistory: 'History only',
+            diffPrefix: 'Stable prefix changed',
+            diffPrefixTools: 'Stable prefix and tools changed',
             dropReasons: 'Drop reasons',
             trust: 'Trust',
             trustSystem: 'System',
@@ -259,13 +259,22 @@ describe('context-lifecycle-turns', () => {
   it('tags each turn with its prompt diff against the older turn on the page', async () => {
     const root = await mountTurns([richTurn, bareTurn])
 
-    expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['System changed', 'First turn'])
+    expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['Stable prefix changed', 'First turn'])
+  })
+
+  it('omits an unproven history-only tag when prefix and tools are unchanged', async () => {
+    const root = await mountTurns([
+      { ...richTurn, run_id: 'newer', snapshot: { ...richTurn.snapshot } },
+      richTurn,
+    ])
+
+    expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['First turn'])
   })
 
   it('leaves the oldest row untagged when older turns exist beyond the page', async () => {
     const root = await mountTurns([richTurn, bareTurn], { hasOlder: true })
 
-    expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['System changed'])
+    expect(texts(root, '[data-testid="turn-diff"]')).toEqual(['Stable prefix changed'])
   })
 
   it('labels trust levels and leaves an unknown level raw', async () => {

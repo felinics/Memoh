@@ -123,17 +123,33 @@ describe('classifyPromptDiff', () => {
     expect(classifyPromptDiff(next, base)).toBe('tools')
   })
 
-  it('reports system and tools together when both moved', () => {
+  it('reports stable prefix and tools together when both moved', () => {
     const next = { ...base, stable_prefix_hash: 'h2', tool_defs: [...tools, { provider: 'mcp', name: 'jira', bytes: 300 }] }
-    expect(classifyPromptDiff(next, base)).toBe('system_tools')
+    expect(classifyPromptDiff(next, base)).toBe('prefix_tools')
   })
 
-  it('reports a system change when only the stable prefix hash moved', () => {
-    expect(classifyPromptDiff({ ...base, stable_prefix_hash: 'h2' }, base)).toBe('system')
+  it('reports a stable prefix change without attributing it to system instructions', () => {
+    expect(classifyPromptDiff({ ...base, stable_prefix_hash: 'h2' }, base)).toBe('prefix')
   })
 
-  it('reports history-only when prefix and tools are unchanged', () => {
-    expect(classifyPromptDiff({ ...base }, base)).toBe('history')
+  it('does not infer a history change when prefix and tools are unchanged', () => {
+    expect(classifyPromptDiff({ ...base }, base)).toBeNull()
+  })
+
+  it('labels appended stable history as a prefix change with unchanged system and tools', () => {
+    // Hashes produced by StablePrefixPlacer for the same system instructions,
+    // before and after adding one persisted user/assistant exchange.
+    const before: ContextfragLifecycleSnapshot = {
+      ...base,
+      stable_prefix_hash: '1d04e6a4405027e2b8adc1bf2675f10fc610bfe66f851749846e906613ca5995',
+      stable_message_count: 0,
+    }
+    const after: ContextfragLifecycleSnapshot = {
+      ...before,
+      stable_prefix_hash: '03eb6e2d759f50f305671e9c8b87937b1806532986c99dca03a1cff9337cfec9',
+      stable_message_count: 2,
+    }
+    expect(classifyPromptDiff(after, before)).toBe('prefix')
   })
 
   it('stays silent without prefix hashes unless the tools changed', () => {
