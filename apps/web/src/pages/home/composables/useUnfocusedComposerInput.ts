@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
+import { detectPlatform } from '@/lib/keyboard-bindings'
 
 const INPUT_OWNER = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="listbox"], [role="menu"], [role="tree"], [role="grid"], [role="slider"], [role="spinbutton"], .monaco-editor, .cm-editor, .xterm'
 const OPEN_OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
@@ -29,7 +30,11 @@ export function useUnfocusedComposerInput(options: {
   }
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return
+    if (event.metaKey || event.isComposing) return
+    // AltGr and macOS Option produce text; ordinary Ctrl/Alt shortcuts do not.
+    const altGraph = event.getModifierState('AltGraph')
+    const optionText = detectPlatform() === 'mac' && event.altKey && !event.ctrlKey
+    if ((event.ctrlKey || event.altKey) && !altGraph && !optionText) return
     if (event.key.length !== 1 && event.key !== 'Process' && event.key !== 'Dead') return
     // Space on a focused control belongs to that control, not the composer.
     if (event.key === ' ' && event.composedPath().some(node => node instanceof Element

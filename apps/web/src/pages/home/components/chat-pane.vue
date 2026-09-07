@@ -2659,7 +2659,9 @@ const {
 
 useUnfocusedComposerInput({
   textarea: textareaEl,
-  enabled: () => isActive.value && isVisible.value,
+  // Settings keeps the dock mounted underneath its full-screen layer.
+  enabled: () => (router.currentRoute.value.name === 'home' || router.currentRoute.value.name === 'bot')
+    && isActive.value && isVisible.value,
   onPaste: handlePaste,
 })
 

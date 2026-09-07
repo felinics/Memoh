@@ -4,13 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useUnfocusedComposerInput } from './useUnfocusedComposerInput'
 
 let cleanup: (() => void) | undefined
-function setup(enabled = true, onPaste = vi.fn()) {
+function setup(enabled: boolean | (() => boolean) = true, onPaste = vi.fn()) {
   const host = document.createElement('div')
   document.body.append(host)
   const app = createApp(defineComponent({
     setup() {
       const textarea = ref<HTMLTextAreaElement | null>(null)
-      useUnfocusedComposerInput({ textarea, enabled: () => enabled, onPaste })
+      useUnfocusedComposerInput({ textarea, enabled: () => typeof enabled === 'function' ? enabled() : enabled, onPaste })
       return () => h('textarea', { ref: textarea })
     },
   }))
@@ -106,6 +106,34 @@ describe('unfocused composer input', () => {
     document.body.dispatchEvent(event)
     expect(textarea.value).toBe('你好')
     expect(event.defaultPrevented).toBe(true)
+  })
+  it('stops capture when the application hides a still-mounted chat pane', () => {
+    let chatRoute = true
+    const textarea = setup(() => chatRoute)
+    chatRoute = false
+    expect(paste(document.body).defaultPrevented).toBe(false)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+    expect(document.activeElement).not.toBe(textarea)
+    expect(textarea.value).toBe('')
+    chatRoute = true
+    paste(document.body)
+    expect(textarea.value).toBe('Typeless')
+  })
+  it('allows AltGr text without treating Ctrl+Alt shortcuts as text', () => {
+    const textarea = setup()
+    const shortcut = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, altKey: true, bubbles: true })
+    document.body.dispatchEvent(shortcut)
+    expect(document.activeElement).not.toBe(textarea)
+    const text = new KeyboardEvent('keydown', { key: '@', ctrlKey: true, altKey: true, bubbles: true })
+    vi.spyOn(text, 'getModifierState').mockImplementation(key => key === 'AltGraph')
+    document.body.dispatchEvent(text)
+    expect(document.activeElement).toBe(textarea)
+  })
+  it.each(['€', 'Dead'])('allows macOS Option-produced %s', (key) => {
+    vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
+    const textarea = setup()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key, altKey: true, bubbles: true }))
+    expect(document.activeElement).toBe(textarea)
   })
   it('removes listeners on unmount', () => {
     const textarea = setup()
