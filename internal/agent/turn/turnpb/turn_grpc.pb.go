@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	TurnService_StopTurn_FullMethodName                  = "/memoh.turn.v1.TurnService/StopTurn"
 	TurnService_Run_FullMethodName                       = "/memoh.turn.v1.TurnService/Run"
 	TurnService_RespondToolApproval_FullMethodName       = "/memoh.turn.v1.TurnService/RespondToolApproval"
 	TurnService_RespondUserInput_FullMethodName          = "/memoh.turn.v1.TurnService/RespondUserInput"
@@ -29,6 +30,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TurnServiceClient interface {
+	StopTurn(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error)
 	Run(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RunRequest, RunResponse], error)
 	RespondToolApproval(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EventResponse], error)
 	RespondUserInput(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EventResponse], error)
@@ -41,6 +43,16 @@ type turnServiceClient struct {
 
 func NewTurnServiceClient(cc grpc.ClientConnInterface) TurnServiceClient {
 	return &turnServiceClient{cc}
+}
+
+func (c *turnServiceClient) StopTurn(ctx context.Context, in *JsonRequest, opts ...grpc.CallOption) (*JsonResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(JsonResponse)
+	err := c.cc.Invoke(ctx, TurnService_StopTurn_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *turnServiceClient) Run(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RunRequest, RunResponse], error) {
@@ -108,6 +120,7 @@ func (c *turnServiceClient) AdvancePlainTextUserInput(ctx context.Context, in *J
 // All implementations must embed UnimplementedTurnServiceServer
 // for forward compatibility.
 type TurnServiceServer interface {
+	StopTurn(context.Context, *JsonRequest) (*JsonResponse, error)
 	Run(grpc.BidiStreamingServer[RunRequest, RunResponse]) error
 	RespondToolApproval(*JsonRequest, grpc.ServerStreamingServer[EventResponse]) error
 	RespondUserInput(*JsonRequest, grpc.ServerStreamingServer[EventResponse]) error
@@ -122,6 +135,9 @@ type TurnServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTurnServiceServer struct{}
 
+func (UnimplementedTurnServiceServer) StopTurn(context.Context, *JsonRequest) (*JsonResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StopTurn not implemented")
+}
 func (UnimplementedTurnServiceServer) Run(grpc.BidiStreamingServer[RunRequest, RunResponse]) error {
 	return status.Error(codes.Unimplemented, "method Run not implemented")
 }
@@ -153,6 +169,24 @@ func RegisterTurnServiceServer(s grpc.ServiceRegistrar, srv TurnServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&TurnService_ServiceDesc, srv)
+}
+
+func _TurnService_StopTurn_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JsonRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TurnServiceServer).StopTurn(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TurnService_StopTurn_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TurnServiceServer).StopTurn(ctx, req.(*JsonRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _TurnService_Run_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -209,6 +243,10 @@ var TurnService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "memoh.turn.v1.TurnService",
 	HandlerType: (*TurnServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "StopTurn",
+			Handler:    _TurnService_StopTurn_Handler,
+		},
 		{
 			MethodName: "AdvancePlainTextUserInput",
 			Handler:    _TurnService_AdvancePlainTextUserInput_Handler,

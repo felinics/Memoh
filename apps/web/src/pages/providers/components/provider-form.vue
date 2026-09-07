@@ -2,14 +2,18 @@
   <form @submit.prevent="submitDraft">
     <SettingsSection
       v-if="!isManagedOAuthProvider"
+      class="provider-configuration"
       :title="$t('provider.configurationTitle')"
     >
       <!-- Field rows are grouped so the LAST one keeps its `last:border-b-0`
            (no trailing inset hairline) — the footer below owns the only divider,
            and it spans full width. -->
       <div>
-        <SettingsRow :label="$t('common.name')">
-          <div class="w-80">
+        <SettingsRow
+          stack="sm"
+          :label="$t('common.name')"
+        >
+          <div class="w-full sm:w-80">
             <!-- Free-typing draft committed on blur/Enter (appearance-page
                  idiom): autosave must fire once per edit, not per keystroke. -->
             <Input
@@ -33,8 +37,11 @@
           </div>
         </SettingsRow>
 
-        <SettingsRow :label="$t('provider.clientType')">
-          <div class="w-80">
+        <SettingsRow
+          stack="sm"
+          :label="$t('provider.clientType')"
+        >
+          <div class="w-full sm:w-80">
             <Select
               :model-value="form.client_type"
               @update:model-value="(value) => updateClientType(String(value ?? ''))"
@@ -57,9 +64,10 @@
 
         <SettingsRow
           v-if="form.client_type !== 'github-copilot'"
+          stack="sm"
           :label="$t('provider.url')"
         >
-          <div class="w-80">
+          <div class="w-full sm:w-80">
             <Input
               type="text"
               :model-value="baseUrlDraft"
@@ -83,9 +91,10 @@
 
         <SettingsRow
           v-if="!isManagedOAuthClientType(form.client_type)"
+          stack="sm"
           :label="$t('provider.apiKey')"
         >
-          <div class="w-80">
+          <div class="w-full sm:w-80">
             <!-- The key is write-only: the box starts empty, commits only a
                  non-empty value, and clears itself once stored. An empty
                  commit is a no-op so autosave can never wipe a secret. -->
@@ -112,6 +121,7 @@
 
         <SettingsRow
           v-if="supportsPromptCache(form.client_type)"
+          stack="sm"
           :label="$t('provider.promptCache.label')"
           :description="cacheDescription"
         >
@@ -121,7 +131,7 @@
           >
             <SelectTrigger
               size="sm"
-              class="min-w-36"
+              class="w-full sm:w-auto sm:min-w-36"
             >
               <SelectValue :placeholder="$t('provider.promptCache.label')" />
             </SelectTrigger>

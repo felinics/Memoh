@@ -761,7 +761,7 @@
                             :reasoning-options="composerReasoningOptions"
                             :models="composerModels"
                             :providers="composerModelProviders"
-                            :none-label="activeUsesDirectRuntime ? composerDefaultModelLabel : undefined"
+                            :none-label="activeUsesDirectRuntime && composerDefaultModelId && composerDefaultModelId !== 'default' ? composerDefaultModelLabel : undefined"
                             model-type="chat"
                             :open="modelPopoverOpen"
                             :show-reasoning="!activeUsesDirectRuntime || !!composerReasoningOptions?.length"
@@ -2000,15 +2000,14 @@ const composerModelProviders = computed(() => composerModelCatalog.value.provide
 // for the native composer. Falls back to the bare label while the catalog is
 // still loading (or, for Claude Code, when the runtime keeps its default to
 // itself).
+const composerDefaultModelId = computed(() => activeUsesDirectRuntime.value
+  ? composerModelCatalog.value.configuredModelId || composerModelCatalog.value.defaultModelId
+  : !activeUsesExternalAgentComposer.value ? botSettings.value?.chat_model_id ?? '' : '')
 const composerDefaultModelName = computed(() => {
-  let id = ''
-  if (activeUsesDirectRuntime.value) {
-    id = composerModelCatalog.value.configuredModelId || composerModelCatalog.value.defaultModelId
-  } else if (!activeUsesExternalAgentComposer.value) {
-    id = botSettings.value?.chat_model_id ?? ''
-  }
-  id = id.trim()
-  if (!id) return ''
+  const id = composerDefaultModelId.value.trim()
+  // Claude may advertise only its opaque `default` alias; that real model
+  // option already supplies the Default row, without a second empty option.
+  if (!id || id === 'default') return ''
   const model = composerModels.value.find(m => m.id === id || m.model_id === id)
   return model?.name || model?.model_id || id
 })
@@ -2521,28 +2520,16 @@ function onModelSelected() {
   overrideReasoningEffort.value = activeModelReasoning.value?.default_effort?.trim() ?? ''
 }
 
-function reconcileDirectReasoningEffort() {
-  if (!activeUsesDirectRuntime.value) return
-  const available = new Set((composerReasoningOptions.value ?? []).map(option => option.value))
-  const fallback = composerModelCatalog.value.defaultReasoningEffort
-  overrideReasoningEffort.value = available.has(fallback) ? fallback : ''
-  // The value now comes from the runtime's own state: it is the session's
-  // pair, carried on sends like any remembered pair.
-  composerPair.setSource('session')
-}
-
 async function onComposerModelValueSelected(value: string) {
   if (activeUsesACPRuntime.value && acpConfigChanging.value) return
   const previous = composerPair.snapshot()
-  overrideModelId.value = value
-  composerPair.setSource('user')
+  if (!composerPair.selectModel(value)) return
   if (!activeUsesExternalAgentComposer.value) {
     onModelSelected() // the effort follows the new model before the pair is persisted
     composerPair.persist()
     return
   }
   if (activeUsesDirectRuntime.value) {
-    reconcileDirectReasoningEffort()
     composerPair.persist()
     return
   }

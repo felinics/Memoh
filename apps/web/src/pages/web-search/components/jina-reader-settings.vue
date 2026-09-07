@@ -1,27 +1,36 @@
 <template>
-  <SettingsRow :label="$t('provider.apiKey')">
+  <SettingsRow
+    :label="$t('provider.apiKey')"
+    stack="sm"
+  >
     <Input
       id="jina-reader-api-key"
       v-model="localConfig.api_key"
       type="password"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('provider.apiKey')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.baseUrl')">
+  <SettingsRow
+    :label="$t('common.baseUrl')"
+    stack="sm"
+  >
     <Input
       id="jina-reader-base-url"
       v-model="localConfig.base_url"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.baseUrl')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.timeoutSeconds')">
+  <SettingsRow
+    :label="$t('common.timeoutSeconds')"
+    stack="sm"
+  >
     <Input
       id="jina-reader-timeout-seconds"
       v-model.number="localConfig.timeout_seconds"
       type="number"
-      class="w-40"
+      class="w-full sm:w-40"
       :min="1"
       :aria-label="$t('common.timeoutSeconds')"
     />

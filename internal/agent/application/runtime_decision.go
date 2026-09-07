@@ -146,7 +146,7 @@ func pgText(value pgtype.Text) string {
 	return value.String
 }
 
-func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (bool, error) {
+func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
@@ -157,15 +157,27 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 	if err != nil {
 		return true, err
 	}
-	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
 		ControlID: input.ControlID, Type: sessionruntime.CommandToolApprovalResponse,
 		DecisionID: firstNonEmpty(input.ExplicitID, input.ApprovalID),
 		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	})
+	}, eventCh)
 	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
 		return false, nil
 	}
 	if err != nil {
+		if result.Applied && eventCh != nil {
+			if s.logger != nil {
+				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+			}
+			raw, _ := json.Marshal(agentFailureStreamEvent(err))
+			select {
+			case eventCh <- raw:
+				return true, nil
+			case <-ctx.Done():
+				return true, ctx.Err()
+			}
+		}
 		return true, err
 	}
 	if !result.Handled {
@@ -177,7 +189,7 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 	return true, nil
 }
 
-func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput) (bool, error) {
+func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
@@ -188,15 +200,27 @@ func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputRes
 	if err != nil {
 		return true, err
 	}
-	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
 		ControlID: input.ControlID, Type: sessionruntime.CommandUserInputResponse,
 		DecisionID: firstNonEmpty(input.ExplicitID, input.UserInputID),
 		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	})
+	}, eventCh)
 	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
 		return false, nil
 	}
 	if err != nil {
+		if result.Applied && eventCh != nil {
+			if s.logger != nil {
+				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+			}
+			raw, _ := json.Marshal(agentFailureStreamEvent(err))
+			select {
+			case eventCh <- raw:
+				return true, nil
+			case <-ctx.Done():
+				return true, ctx.Err()
+			}
+		}
 		return true, err
 	}
 	if !result.Handled {
@@ -355,7 +379,26 @@ func (s *Service) continueRuntimeDecision(
 		RunID:      command.RunID,
 		Generation: command.Generation,
 	}
+	var outputSeq int64
+	var outputCause error
+	defer func() {
+		if outputCause != nil {
+			raw, _ := json.Marshal(agentFailureStreamEvent(outputCause))
+			outputSeq++
+			_ = s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq, raw)
+		}
+		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("close decision output failed", slog.Any("error", err))
+			}
+			// A failed checkpoint write must not leave a parked run owning an output
+			// subscription that can never finish. Use the normal run failure lifecycle.
+			s.finishRuntimeDecision(context.WithoutCancel(ctx), handle, err)
+		}
+	}()
+
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
+		outputCause = err
 		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
 		s.finishRuntimeDecision(ctx, handle, err)
 		return
@@ -376,6 +419,11 @@ func (s *Service) continueRuntimeDecision(
 		lifecycleDeferred bool
 	)
 	for raw := range eventCh {
+		// Cancellation may leave already-buffered events. Drain them so the runner
+		// can return and finish through the same lifecycle as other stream failures.
+		if publishErr != nil {
+			continue
+		}
 		var event native.StreamEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
 			continue
@@ -399,7 +447,12 @@ func (s *Service) continueRuntimeDecision(
 		if _, err := s.decisionRuntime.HandleAgentEvent(runCtx, handle, event); err != nil {
 			publishErr = err
 			cancel()
-			break
+			continue
+		}
+		outputSeq++
+		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq, raw); err != nil {
+			publishErr = err
+			cancel()
 		}
 	}
 	runErr := <-runDone
@@ -411,6 +464,7 @@ func (s *Service) continueRuntimeDecision(
 		lifecycleDeferred = false
 	}
 	if runErr != nil {
+		outputCause = runErr
 		s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
 		s.finishRuntimeDecision(ctx, handle, runErr)
 		return

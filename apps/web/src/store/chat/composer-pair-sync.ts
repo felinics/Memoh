@@ -115,14 +115,17 @@ export function createComposerPairSync() {
     let release!: () => void
     const pendingWrite = new Promise<void>((resolve) => { release = resolve })
     sending = Promise.all([sending, pendingWrite]).then(() => {})
+    let started = false
     let settled = false
+    let confirmationEpoch: number | undefined
     return {
       begin() {
-        if (settled) return
+        if (started || settled) return
+        started = true
         // The epoch bump is the fence: reads/writes started before this send
         // was admitted must not land after it. A send admitted after a newer
         // choice does not bump — the newer operation owns the epoch.
-        if (epoch === snapshotEpoch) epoch++
+        if (epoch === snapshotEpoch) confirmationEpoch = ++epoch
         pending++
       },
       finish(confirmed: boolean) {
@@ -130,11 +133,11 @@ export function createComposerPairSync() {
         // and again from its finally safety net.
         if (!settled) {
           settled = true
-          pending--
+          if (started) pending--
         }
-        // A confirmed send carried and persisted any unsaved pick (the send
-        // gate only carries explicit sources), so reads may resume.
-        if (confirmed) unsaved = false
+        // Persistence may settle before generation ends. The later success
+        // confirms only this snapshot, never a newer picker choice or runtime.
+        if (confirmed && confirmationEpoch === epoch) unsaved = false
         release()
       },
       release() {

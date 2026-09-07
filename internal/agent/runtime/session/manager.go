@@ -56,6 +56,7 @@ type Manager struct {
 	commandReconciler      func(context.Context, Command) (bool, error)
 	decisionStore          DecisionStore
 	terminalObserver       func(context.Context, TerminalRun)
+	decisionFinalizer      func(context.Context, RunHandle) error
 	terminalReconciler     func(context.Context) error
 	historyResetHandler    HistoryResetHandler
 	pendingCommands        map[string]map[*commandWaiter]struct{}
@@ -441,6 +442,17 @@ func (m *Manager) SetTerminalObserver(observer func(context.Context, TerminalRun
 	}
 	m.mu.Lock()
 	m.terminalObserver = observer
+	m.mu.Unlock()
+}
+
+// SetDecisionFinalizer closes durable decisions before a run becomes terminal.
+// A failure retains ownership so the normal finish retry can complete cleanup.
+func (m *Manager) SetDecisionFinalizer(finalizer func(context.Context, RunHandle) error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.decisionFinalizer = finalizer
 	m.mu.Unlock()
 }
 
@@ -1323,6 +1335,15 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 		status = liveRunStatus(prepared.State)
 		errorCode = strings.TrimSpace(prepared.ErrorCode)
 		finishMessage = strings.TrimSpace(prepared.ErrorMessage)
+	}
+	m.mu.Lock()
+	finalizeDecisions := m.decisionFinalizer
+	m.mu.Unlock()
+	if finalizeDecisions != nil {
+		if err := finalizeDecisions(ctx, handle); err != nil {
+			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, finishMessage)
+			return fmt.Errorf("finalize runtime decisions: %w", err)
+		}
 	}
 	terminal, err := m.finalizeLedgerRun(ctx, handle, status, errorCode, finishMessage)
 	if terminal.RunID != "" {

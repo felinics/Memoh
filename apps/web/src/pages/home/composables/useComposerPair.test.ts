@@ -45,7 +45,14 @@ function setup(options: { sessionId?: string, direct?: boolean, seed?: () => Pro
     fetchSession: vi.fn(async (_botId: string, id: string) => server.get(id)),
     fetchSeed: vi.fn(options.seed ?? (async () => ({ model_id: '', reasoning_effort: '' }))),
     updatePreference: vi.fn(async (_botId: string, id: string, modelId: string, effort: string) => {
-      const row = session({ ...server.get(id), preferred_chat_model_id: modelId, preferred_reasoning_effort: effort, model_preference_revision: `r-${modelId}` })
+      const row = session({
+        ...server.get(id),
+        ...(runtime.value === 'claude-code' || runtime.value === 'codex'
+          ? { preferred_external_model_id: modelId }
+          : { preferred_chat_model_id: modelId }),
+        preferred_reasoning_effort: effort,
+        model_preference_revision: `r-${modelId}`,
+      })
       server.set(row)
       return row
     }),
@@ -65,16 +72,95 @@ function setup(options: { sessionId?: string, direct?: boolean, seed?: () => Pro
     usesDirectRuntime: computed(() => runtime.value === 'claude-code' || runtime.value === 'codex'),
     usesACPRuntime: computed(() => runtime.value === 'acp_agent'),
     runtimeIdentity: computed(() => JSON.stringify([runtime.value, usesExternal.value, botAgentId.value])),
-    directCatalog: ref({ configuredModelId: 'cc-default', defaultModelId: 'cc-default', configuredReasoningEffort: 'medium' }),
+    directCatalog: ref({
+      configuredModelId: 'cc-default', defaultModelId: 'cc-default', configuredReasoningEffort: 'medium',
+      defaultReasoningEffort: 'medium', reasoningEfforts: [{ id: 'medium' }, { id: 'high' }],
+    }),
     draftPromotionPending: () => false,
     onPreferenceConflict,
     api,
   }
   const pair = useComposerPair(deps)
-  return { pair, view, target, runtime, botAgentId, activeSession, server, api, visible, onPreferenceConflict }
+  return { pair, view, target, runtime, botAgentId, activeSession, server, api, visible, onPreferenceConflict, deps }
 }
 
 const flush = async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); await nextTick() }
+
+describe('direct composer default selection', () => {
+  it.each([
+    { configured: 'configured-B', advertised: 'runtime-C', expected: 'configured-B' },
+    { configured: '', advertised: 'runtime-B', expected: 'runtime-B' },
+    { configured: '', advertised: 'default', expected: 'default' },
+  ])('persists, sends and reloads Default as $expected', async ({ configured, advertised, expected }) => {
+    const env = setup({ sessionId: 'sess-1', direct: true })
+    await flush()
+    env.server.set(session({ id: 'sess-1', preferred_external_model_id: 'A', preferred_reasoning_effort: 'high' }))
+    env.pair.setPair('A', 'high', 'session')
+    // Like useAgentModelCatalog, effort options react synchronously to the
+    // chosen model. The click must read B's default after replacing A.
+    env.deps.directCatalog = computed(() => ({
+      configuredModelId: configured,
+      defaultModelId: advertised,
+      configuredReasoningEffort: 'high',
+      defaultReasoningEffort: env.view.value.pairModelId.value === expected ? 'low' : 'high',
+      reasoningEfforts: [{ id: 'low' }, { id: 'high' }],
+    }))
+
+    expect(env.pair.selectModel('')).toBe(true)
+    expect(env.pair.snapshot()).toEqual({ modelId: expected, effort: 'low', source: 'user' })
+    env.pair.persist()
+    await flush()
+    expect(env.server.get('sess-1').preferred_external_model_id).toBe(expected)
+    expect(env.server.get('sess-1').preferred_reasoning_effort).toBe('low')
+    const send = env.pair.captureSend()
+    expect(send.pair).toEqual({ modelId: expected, reasoningEffort: 'low' })
+    send.begin()
+    send.finish(true)
+    send.releaseReads()
+
+    // A new view has no optimistic state to fall back on; it must recover
+    // the default selection from the persisted external preference.
+    env.target.value = { ...env.target.value, viewId: 'reopened' }
+    await flush()
+    expect(env.pair.snapshot()).toEqual({ modelId: expected, effort: 'low', source: 'session' })
+  })
+
+  it('carries the selected default on the next send when the picker save fails', async () => {
+    const env = setup({ sessionId: 'sess-1', direct: true })
+    await flush()
+    env.server.set(session({ id: 'sess-1', preferred_external_model_id: 'A', preferred_reasoning_effort: 'high' }))
+    env.pair.setPair('A', 'high', 'session')
+    env.api.updatePreference.mockRejectedValueOnce(new TypeError('network'))
+
+    expect(env.pair.selectModel('')).toBe(true)
+    env.pair.persist()
+    await flush()
+    env.visible.value = false
+    await flush()
+    env.visible.value = true
+    await flush()
+    expect(env.server.get('sess-1').preferred_external_model_id).toBe('A')
+    expect(env.pair.snapshot()).toEqual({ modelId: 'cc-default', effort: 'medium', source: 'user' })
+    const send = env.pair.captureSend()
+    expect(send.pair).toEqual({ modelId: 'cc-default', reasoningEffort: 'medium' })
+    send.begin()
+    send.finish(false)
+    send.releaseReads()
+  })
+
+  it('keeps the current pair when the runtime advertises no default model', async () => {
+    const env = setup({ sessionId: 'sess-1', direct: true })
+    await flush()
+    env.pair.setPair('A', 'high', 'session')
+    env.deps.directCatalog.value.configuredModelId = ''
+    env.deps.directCatalog.value.defaultModelId = ''
+
+    expect(env.pair.selectModel('')).toBe(false)
+    expect(env.pair.snapshot()).toEqual({ modelId: 'A', effort: 'high', source: 'session' })
+    expect(env.pair.selectModel('B')).toBe(true)
+    expect(env.pair.carried.value.modelId).toBe('B')
+  })
+})
 
 describe('useComposerPair runtime namespace', () => {
   it('drops an external pick when an empty session switches back to the native runtime', async () => {

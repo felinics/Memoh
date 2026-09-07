@@ -228,3 +228,13 @@ type Service interface {
 	RespondUserInput(ctx context.Context, input UserInputResponse, eventCh chan<- json.RawMessage) error
 	AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
 }
+
+// StopCommand targets the current durable run, including a parked decision.
+// TeamID must match the runtime instance; channel ingress authorizes the actor.
+type StopCommand struct{ TeamID, BotID, ThreadID string }
+
+// Stopper supplements stream cancellation for runs whose output stream ended
+// while waiting for a decision. Kept separate for alternate turn providers.
+type Stopper interface {
+	StopTurn(context.Context, StopCommand) (bool, error)
+}

@@ -40,6 +40,8 @@ export interface ComposerPairDirectCatalog {
   configuredModelId: string
   defaultModelId: string
   configuredReasoningEffort: string
+  defaultReasoningEffort: string
+  reasoningEfforts?: Array<{ id?: string }>
 }
 
 export interface ComposerPairDeps {
@@ -99,6 +101,27 @@ export function useComposerPair(deps: ComposerPairDeps) {
   }
   function setSource(src: ComposerPairSource) {
     deps.view.value.pairSource.value = src
+  }
+  function selectModel(value: string): boolean {
+    const view = deps.view.value
+    const direct = deps.usesDirectRuntime.value
+    // Default is an explicit pick of the model displayed by the catalog.
+    // Resolve it before persisting or capturing a send: an empty model on
+    // the wire means "reuse the session preference", not "restore default".
+    const modelId = value.trim() || (direct
+      ? deps.directCatalog.value.configuredModelId || deps.directCatalog.value.defaultModelId
+      : '')
+    if (direct && !modelId) return false
+    view.pairModelId.value = modelId
+    view.pairSource.value = 'user'
+    if (direct) {
+      // The catalog reacts to the selected model, so read it after setting
+      // the ID and replace the old model's effort with the new one's default.
+      const catalog = deps.directCatalog.value
+      const effort = catalog.defaultReasoningEffort
+      view.pairEffort.value = catalog.reasoningEfforts?.some(option => option.id === effort) ? effort : ''
+    }
+    return true
   }
   function snapshot(): ComposerPairSnapshot {
     const view = deps.view.value
@@ -311,6 +334,7 @@ export function useComposerPair(deps: ComposerPairDeps) {
     carried,
     setPair,
     setSource,
+    selectModel,
     snapshot,
     restore,
     persist,

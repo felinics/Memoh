@@ -301,6 +301,36 @@ func TestClaudeCLIArgsIncludeTurnOverrides(t *testing.T) {
 	}
 }
 
+func TestClaudeCatalogPreservesAdvertisedDefaultWithoutConcreteAlias(t *testing.T) {
+	for _, resolved := range []string{"", "unlisted-model"} {
+		t.Run("resolved="+resolved, func(t *testing.T) {
+			catalog := modelCatalogFromInitialize("", initializeResponse{Models: []initializeModel{
+				{Value: "default", ResolvedModel: resolved, DisplayName: "Default"},
+				{Value: "sonnet", ResolvedModel: "claude-sonnet"},
+			}})
+			if len(catalog.Models) != 2 || catalog.Models[0].ID != "default" || !catalog.Models[0].Default {
+				t.Fatalf("catalog=%+v", catalog)
+			}
+			// The advertised alias travels through the same --model override as
+			// every explicit pick, replacing any old session model on resume.
+			args := strings.Join(cliArgs(claudecfg.Config{}, external.PromptInput{ModelID: catalog.Models[0].ID}, "resumed-session", ""), " ")
+			if !strings.Contains(args, "--model 'default'") || !strings.Contains(args, "--resume 'resumed-session'") {
+				t.Fatalf("args=%q", args)
+			}
+		})
+	}
+}
+
+func TestClaudeCatalogUsesConcreteDefaultAliasWhenAvailable(t *testing.T) {
+	catalog := modelCatalogFromInitialize("", initializeResponse{Models: []initializeModel{
+		{Value: "default", ResolvedModel: "claude-opus-5"},
+		{Value: "opus", ResolvedModel: "claude-opus-5"},
+	}})
+	if len(catalog.Models) != 1 || catalog.Models[0].ID != "opus" || !catalog.Models[0].Default {
+		t.Fatalf("catalog=%+v", catalog)
+	}
+}
+
 func TestClaudeCatalogPreservesResolvedModelWithoutDuplicateOption(t *testing.T) {
 	const full = "claude-opus-5"
 	catalog := modelCatalogFromInitialize(full, initializeResponse{Models: []initializeModel{

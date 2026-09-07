@@ -167,12 +167,25 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 			break
 		}
 	}
+	defaultModelID := "default"
+	if defaultResolved != "" {
+		for _, model := range response.Models {
+			id := strings.TrimSpace(model.Value)
+			if id != "" && id != "default" && strings.TrimSpace(model.ResolvedModel) == defaultResolved {
+				defaultModelID = id
+				break
+			}
+		}
+	}
 	models := make([]external.ModelOption, 0, len(response.Models))
 	configuredFound := configuredModel == ""
 	defaultAssigned := false
 	for _, model := range response.Models {
 		id := strings.TrimSpace(model.Value)
-		if id == "" || id == "default" {
+		// Prefer a concrete advertised alias when the CLI resolves its default.
+		// Otherwise retain the CLI's own `default` model ID so a user can return
+		// to it after a persisted pick; an omitted model reuses that old pick.
+		if id == "" || (id == "default" && (configuredModel != "" || defaultModelID != "default")) {
 			continue
 		}
 		resolved := strings.TrimSpace(model.ResolvedModel)
@@ -188,7 +201,7 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 				}
 			}
 		}
-		isDefault := configuredModel == "" && !defaultAssigned && defaultResolved != "" && resolved == defaultResolved
+		isDefault := configuredModel == "" && !defaultAssigned && id == defaultModelID
 		defaultAssigned = defaultAssigned || isDefault
 		models = append(models, external.ModelOption{
 			ID:               id,

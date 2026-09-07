@@ -22,6 +22,7 @@ import (
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
@@ -424,6 +425,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if sender == nil {
 		return errors.New("reply sender not configured")
 	}
+	sender = p.withDecisionReceipts(sender, cfg)
 	text := strings.TrimSpace(msg.Message.PlainText())
 	if p.logger != nil {
 		p.logger.Debug("inbound handle start",
@@ -725,7 +727,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Mode and skill commands remain control-plane messages even while an
 	// ask_user request is pending; they must not become text-question answers.
 	if pendingSkillIntent == nil && !isModeCommand {
-		if handled, err := p.handlePlainTextUserInput(ctx, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
+		if handled, err := p.handlePlainTextUserInput(ctx, cfg, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
 			return err
 		}
 	}
@@ -1235,13 +1237,10 @@ startStream:
 			return nil
 		}
 		if errors.Is(startErr, turn.ErrSessionBusy) {
-			// The thread is already running a turn and the runtime persisted
-			// nothing for this message, so the platform's own retry is what
-			// carries it: the redelivery repeats this idempotency key and is
-			// admitted as the same invocation once the thread frees up. Reporting
-			// an error to the user would describe a transient queueing detail as a
-			// failure, so only the marker is cleared and the error is returned to
-			// the adapter, whose non-2xx response is what asks for the retry.
+			// Telegram dispatches updates asynchronously: returning an error cannot
+			// request redelivery. Tell the sender to retry instead of silently
+			// dropping a message the runtime never admitted. Webhook channels
+			// retain their existing adapter retry contract.
 			if p.logger != nil {
 				p.logger.Info(
 					"inbound turn deferred: thread busy",
@@ -1253,6 +1252,12 @@ startStream:
 				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
 					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
 				}
+			}
+			if msg.Channel == channel.ChannelType("telegram") {
+				return sender.Send(ctx, channel.OutboundMessage{
+					Target:  target,
+					Message: replyTextMessage(p.localizer(ctx, identity.BotID).T("cmd.userInput.busy"), sourceMessageID),
+				})
 			}
 			return startErr
 		}
@@ -3550,6 +3555,44 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		})
 	}
 
+	// /stop is handled before the normal message ACL gate. Check the same
+	// source scope before allowing it to cancel a durable run.
+	if p.acl != nil {
+		allowed, err := p.acl.Evaluate(ctx, acl.EvaluateRequest{
+			BotID: identity.BotID, ChannelIdentityID: identity.ChannelIdentityID,
+			ChannelType: msg.Channel.String(), SourceScope: acl.SourceScope{
+				ConversationType: channel.NormalizeConversationType(msg.Conversation.Type),
+				ConversationID:   strings.TrimSpace(msg.Conversation.ID), ThreadID: threadID,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return nil
+		}
+	}
+	if stopper, ok := p.turnSvc.(turn.Stopper); ok && p.sessionEnsurer != nil {
+		sess, err := p.sessionEnsurer.GetActiveSession(ctx, resolved.RouteID)
+		if err == nil && sess.ID != "" {
+			stopped, stopErr := stopper.StopTurn(ctx, turn.StopCommand{
+				TeamID: cfg.TeamID, BotID: identity.BotID, ThreadID: sess.ID,
+			})
+			if stopErr != nil {
+				if p.logger != nil {
+					p.logger.Warn("stop durable turn failed", slog.Any("error", stopErr))
+				}
+				return sender.Send(ctx, channel.OutboundMessage{
+					Target:  target,
+					Message: plainTextMessage(friendlyOps(loc, "ops.verb.stopReply"), caps),
+				})
+			}
+			if stopped {
+				return nil
+			}
+		}
+	}
+
 	streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
 	cancelVal, loaded := p.activeStreams.LoadAndDelete(streamKey)
 	if !loaded {
@@ -3800,6 +3843,8 @@ func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Con
 type streamContinuationFunc func(context.Context, chan<- json.RawMessage) error
 
 func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing")
@@ -3850,11 +3895,24 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	}()
 
 	var finalMessages []turn.ModelMessage
+	var continuationErr error
+	accepted := false
 	for eventCh != nil || errCh != nil {
 		select {
 		case chunk, ok := <-eventCh:
 			if !ok {
 				eventCh = nil
+				continue
+			}
+			var receipt struct {
+				Type       string `json:"type"`
+				DecisionID string `json:"decision_id"`
+			}
+			if json.Unmarshal(chunk, &receipt) == nil && receipt.Type == "decision_accepted" {
+				accepted = true
+				if receiver, ok := sender.(interface{ AcceptDecision(context.Context, string) }); ok {
+					receiver.AcceptDecision(ctx, receipt.DecisionID)
+				}
 				continue
 			}
 			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
@@ -3892,12 +3950,25 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				continue
 			}
 			if runErr != nil {
-				_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: runErr.Error()})
-				return runErr
+				continuationErr = runErr
 			}
 		}
 	}
 
+	if continuationErr != nil {
+		if !accepted {
+			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: p.localizer(ctx, identity.BotID).T("cmd.userInput.submitFailed")})
+			return continuationErr
+		}
+		if p.logger != nil {
+			p.logger.Warn("accepted decision delivery interrupted", slog.Any("error", continuationErr))
+		}
+		public, _ := apperror.PublicFrom(apperror.Wrap(apperror.CodeAgentResponseInterrupted, continuationErr, nil), "")
+		if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: public.Detail}); err != nil {
+			return err
+		}
+		return closeStream()
+	}
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
 	if !suppressReplies {
 		outputs := turn.ExtractAssistantOutputs(finalMessages)

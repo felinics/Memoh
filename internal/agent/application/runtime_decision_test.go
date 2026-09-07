@@ -15,9 +15,13 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 )
 
-func newWaitingDecisionRuntime(t *testing.T) (*sessionruntime.Manager, sessionruntime.RunHandle) {
+func newWaitingDecisionRuntime(t *testing.T, backends ...sessionruntime.Backend) (*sessionruntime.Manager, sessionruntime.RunHandle) {
 	t.Helper()
-	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+	var backend sessionruntime.Backend = sessionruntime.NewMemoryBackend()
+	if len(backends) > 0 {
+		backend = backends[0]
+	}
+	manager := sessionruntime.NewManager(backend, sessionruntime.Options{
 		OwnerID:       "runtime-lifecycle-owner",
 		StateTTL:      time.Minute,
 		OwnerLeaseTTL: time.Second,
@@ -445,5 +449,26 @@ func TestContinueRuntimeDecisionOwnershipLossDoesNotPersistLifecycle(t *testing.
 	})
 	if len(lifecycles.creates) != 0 {
 		t.Fatalf("ownership-lost continuation created lifecycle rows: %#v", lifecycles.creates)
+	}
+}
+
+func TestStopTurnAbortsParkedDecision(t *testing.T) {
+	manager, _ := newWaitingDecisionRuntime(t)
+	service := &Service{decisionRuntime: manager, abortRuntime: manager, allowedTeam: "team-1"}
+	cmd := turn.StopCommand{TeamID: "other-team", BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID}
+	if _, err := service.StopTurn(context.Background(), cmd); !errors.Is(err, turn.ErrTeamNotServed) {
+		t.Fatalf("wrong team: %v", err)
+	}
+	cmd.TeamID = "team-1"
+	stopped, err := service.StopTurn(context.Background(), cmd)
+	if err != nil || !stopped {
+		t.Fatalf("stop = %t, %v", stopped, err)
+	}
+	snapshot, err := manager.Snapshot(context.Background(), cmd.BotID, cmd.ThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CurrentRunView != nil && snapshot.CurrentRunView.Status != sessionruntime.RunStatusAborted {
+		t.Fatalf("run = %#v", snapshot.CurrentRunView)
 	}
 }

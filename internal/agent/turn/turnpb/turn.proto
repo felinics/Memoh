@@ -5,6 +5,7 @@ package memoh.turn.v1;
 option go_package = "github.com/felinics/memoh/internal/agent/turn/turnpb";
 
 service TurnService {
+  rpc StopTurn(JsonRequest) returns (JsonResponse);
   rpc Run(stream RunRequest) returns (stream RunResponse);
   rpc RespondToolApproval(JsonRequest) returns (stream EventResponse);
   rpc RespondUserInput(JsonRequest) returns (stream EventResponse);

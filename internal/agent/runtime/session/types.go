@@ -15,6 +15,9 @@ const (
 	EventRuntimeSnapshot = "runtime_snapshot"
 	EventRuntimeDelta    = "runtime_delta"
 	EventRuntimeDropped  = "runtime_dropped"
+	// EventDecisionOutput wakes a channel continuation reader. It carries no
+	// payload: the reader always resumes from its cursor in the output log.
+	EventDecisionOutput = "decision_output"
 
 	RunStatusRunning   = "running"
 	RunStatusAdmitting = "admitting"
@@ -371,6 +374,10 @@ type Command struct {
 	Error            string          `json:"error,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
 	ExpiresAt        time.Time       `json:"expires_at,omitempty"`
+
+	// StreamOutput is fixed at admission and travels to the owner with the command.
+	// It must not depend on subscriber liveness: disconnecting cannot change a run.
+	StreamOutput bool `json:"stream_output,omitempty"`
 }
 
 // DecisionTarget is the durable identity of one approval or user-input
@@ -433,14 +440,23 @@ type DecisionResponse struct {
 	SessionID  string
 	RunID      string
 	Payload    json.RawMessage
+
+	// Only StreamDecisionResponse enables channel output capture.
+	streamOutput bool
 }
 
 // DecisionResponseResult separates "this is a runtime decision" from "the
 // answer changed it". A resolved terminal decision is handled but not applied;
 // an unfenced ACP/MCP request is not handled and follows its existing path.
 type DecisionResponseResult struct {
-	Handled bool
-	Applied bool
+	SessionID  string
+	Generation string
+	RunID      string
+	Handled    bool
+	Applied    bool
+
+	// Replayed acknowledges an earlier submission without rerunning its output.
+	Replayed bool
 }
 
 type Subscription struct {
@@ -460,8 +476,75 @@ type Backend interface {
 	Update(ctx context.Context, key Key, update SnapshotUpdate) (Snapshot, bool, error)
 	Publish(ctx context.Context, event Event) error
 	Subscribe(ctx context.Context, key Key) (Subscription, error)
+	DecisionOutputStore
 	Close() error
 }
+
+// DecisionOutputRef identifies the raw output log of one accepted decision
+// command. Logs are keyed per command, not per session: one run can park on a
+// second question without ending, and successive answers must not share a
+// cursor.
+type DecisionOutputRef struct {
+	BotID     string
+	CommandID string
+}
+
+// topic is the pub/sub wakeup channel for one log. Nothing is stored under this
+// key; Manager.Subscribe must not be used with it because there is no snapshot
+// to reconcile against.
+func (r DecisionOutputRef) topic() Key {
+	return Key{BotID: r.BotID, SessionID: "decision-output/" + r.CommandID}
+}
+
+// DecisionOutputLimits bounds one log. Exceeding them marks the log failed
+// rather than silently truncating it; the producer reports the overflow.
+type DecisionOutputLimits struct {
+	MaxBytes  int
+	MaxEvents int
+}
+
+// DecisionOutputState is the log's committed position after an append or read.
+type DecisionOutputState struct {
+	Exists  bool
+	Length  int
+	Bytes   int
+	Done    bool
+	Failed  bool
+	Claimed bool
+	// Applied reports whether this append changed the log. Replays of an
+	// already-committed seq and writes after a terminal marker are no-ops.
+	Applied bool
+	// Exceeded reports that this append tripped the limits and failed the log.
+	Exceeded bool
+}
+
+// DecisionOutputPage is a read from a cursor to the current end of the log.
+type DecisionOutputPage struct {
+	DecisionOutputState
+	Events []json.RawMessage
+}
+
+// DecisionOutputStore is an append-only raw event log with the same
+// lifetime/TTL as live state. It is separate from Snapshot so session state
+// keeps one meaning and each append writes one entry, not the whole log.
+//
+// Append is idempotent by seq: seq must be Length+1 to apply; seq <= Length is
+// a replay and returns the current state; a larger seq is a gap and an error.
+// A nil payload closes the log (Done). Claim hands exclusive forwarding rights
+// to one caller across processes. Release drops the stored entries once they
+// are delivered but keeps the Done/Failed/Claimed markers until the TTL: a
+// retry that arrives after delivery must still lose the claim, never replay
+// the run's output to the channel a second time.
+type DecisionOutputStore interface {
+	AppendDecisionOutput(ctx context.Context, ref DecisionOutputRef, seq int64, payload json.RawMessage, limits DecisionOutputLimits) (DecisionOutputState, error)
+	ReadDecisionOutput(ctx context.Context, ref DecisionOutputRef, from int) (DecisionOutputPage, error)
+	ClaimDecisionOutput(ctx context.Context, ref DecisionOutputRef) (bool, error)
+	ReleaseDecisionOutput(ctx context.Context, ref DecisionOutputRef) error
+}
+
+// ErrDecisionOutputSequenceGap reports an append whose seq skips uncommitted
+// entries. The producer treats it as a failed checkpoint write.
+var ErrDecisionOutputSequenceGap = errors.New("decision output sequence gap")
 
 // DistributedBackend adds cross-process run ownership and command routing.
 // MemoryBackend intentionally does not implement this interface.

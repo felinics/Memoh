@@ -1,38 +1,50 @@
 <template>
-  <SettingsRow :label="$t('common.secretId')">
+  <SettingsRow
+    :label="$t('common.secretId')"
+    stack="sm"
+  >
     <Input
       id="sogou-secret-id"
       v-model="localConfig.secret_id"
       type="password"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.secretId')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.secretKey')">
+  <SettingsRow
+    :label="$t('common.secretKey')"
+    stack="sm"
+  >
     <Input
       id="sogou-secret-key"
       v-model="localConfig.secret_key"
       type="password"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.secretKey')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.baseUrl')">
+  <SettingsRow
+    :label="$t('common.baseUrl')"
+    stack="sm"
+  >
     <Input
       id="sogou-base-url"
       v-model="localConfig.base_url"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.baseUrl')"
       placeholder="wsa.tencentcloudapi.com"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.timeoutSeconds')">
+  <SettingsRow
+    :label="$t('common.timeoutSeconds')"
+    stack="sm"
+  >
     <Input
       id="sogou-timeout-seconds"
       v-model.number="localConfig.timeout_seconds"
       type="number"
       :min="1"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.timeoutSeconds')"
     />
   </SettingsRow>

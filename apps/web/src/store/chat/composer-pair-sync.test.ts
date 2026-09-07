@@ -187,10 +187,85 @@ describe('prepared send cancellation', () => {
     const write = state.write(() => read.promise, async value => value, value => { saved = value })
     await tick()
     const send = state.prepareSend()
+    send.finish(false)
     send.release()
     read.resolve('picked')
     await write
     expect(saved).toBe('picked')
+  })
+
+  it('resumes preference refresh after a command returns without starting a turn', async () => {
+    const state = createComposerPairSync()
+    let display = 'A'
+    const command = state.prepareSend()
+    // /help returns before onBeforeMessageSend; the pane still runs finally.
+    command.finish(false)
+    command.release()
+    command.finish(false)
+    await state.refresh(async () => 'B', value => { display = value })
+    expect(display).toBe('B')
+
+    const finish = state.beginSend()
+    finish(true)
+    await state.refresh(async () => 'C', value => { display = value })
+    expect(display).toBe('C')
+  })
+
+  it('counts each admitted send once even if lifecycle callbacks repeat', async () => {
+    const state = createComposerPairSync()
+    const send = state.prepareSend()
+    send.begin()
+    send.begin()
+    send.finish(false)
+    send.finish(true)
+    send.release()
+    let refreshed = false
+    await state.refresh(async () => 'server', () => { refreshed = true })
+    expect(refreshed).toBe(true)
+  })
+
+  it('lets a confirmed retry clear the failed choice it actually carried', async () => {
+    const state = createComposerPairSync()
+    await state.write(async () => '', async () => { throw new Error('offline') }, () => {})
+    const finish = state.beginSend()
+    finish(false)
+    finish(true)
+    let refreshed = false
+    await state.refresh(async () => 'confirmed pair', () => { refreshed = true })
+    expect(refreshed).toBe(true)
+  })
+
+  it.each(['send', 'retry/edit'] as const)('preserves a newer failed pick when %s completes after preference settlement', async (path) => {
+    const state = createComposerPairSync()
+    let display = 'A'
+    const send = path === 'send' ? state.prepareSend() : null
+    const finish = send ? send.finish : state.beginSend()
+    send?.begin()
+    finish(false) // model_preference_settled releases the queued picker write.
+    display = 'B'
+    await state.write(async () => '', async () => { throw new Error('offline') }, value => { display = value })
+    finish(false) // pane finally
+    send?.release()
+    finish(true) // terminal result for the older A request
+    await state.refresh(async () => 'A', value => { display = value })
+    expect(display).toBe('B')
+
+    const retry = state.beginSend()
+    retry(true)
+    await state.refresh(async () => 'B confirmed', value => { display = value })
+    expect(display).toBe('B confirmed')
+  })
+
+  it('does not confirm a failed choice from a replacement runtime', async () => {
+    const state = createComposerPairSync()
+    const finish = state.beginSend()
+    finish(false)
+    state.invalidate()
+    await state.write(async () => '', async () => { throw new Error('offline') }, () => {})
+    finish(true)
+    let refreshed = false
+    await state.refresh(async () => 'new runtime default', () => { refreshed = true })
+    expect(refreshed).toBe(false)
   })
 
   it('does not confirm a newer failed pick when the older send succeeds', async () => {

@@ -72,12 +72,13 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/store/user'
 import { toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { postAuthLogin } from '@memohai/sdk'
+import { postAuthLogin, putUsersMe } from '@memohai/sdk'
 import LoadingButton from '@/components/loading-button/index.vue'
 import PasswordInput from '@/components/password-input/index.vue'
 import DotMatrixBg from '@/pages/login/components/dot-matrix-bg.vue'
 import { submitLogin } from './login-submit'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { LOGIN_ENTRY_ANIMATION_KEY } from './transition'
 
@@ -104,8 +105,17 @@ const canSubmit = computed(() =>
   !!username.value.trim() && !!password.value.trim(),
 )
 
-const { login: loginHandle } = useUserStore()
+const { login: loginHandle, patchUserInfo } = useUserStore()
 const isSubmitting = ref(false)
+
+// 浏览器时区读取可能抛错或返回空(老 WebView / 隐私模式),按"无可用时区"跳过。
+const readBrowserTimezone = (): string | null => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null
+  } catch {
+    return null
+  }
+}
 
 const login = async () => {
   if (!canSubmit.value || isSubmitting.value) return
@@ -115,6 +125,23 @@ const login = async () => {
     {
       authenticate: (body) => postAuthLogin({ body }),
       applyLogin: loginHandle,
+      // 登录边界自动上报浏览器时区(#1148):凭据就绪后走与手动修改 profile
+      // 相同的 putUsersMe;仅在登录成功路径触发,普通刷新不会反复覆盖手选时区。
+      readBrowserTimezone,
+      syncTimezone: async (timezone) => {
+        // Optional profile sync must not leave an authenticated user waiting forever.
+        const { data } = await putUsersMe({
+          body: { timezone },
+          signal: AbortSignal.timeout(3000),
+          throwOnError: true,
+        })
+        return data
+      },
+      applySyncedTimezone: (timezone) => patchUserInfo({ timezone }),
+      // 时区写回失败 ≠ 登录失败:不能用 invalidCredentials,单独提示后照常进入应用。
+      notifyTimezoneSyncFailed: (error) => {
+        toast.error(resolveApiErrorMessage(error, t('settings.profileUpdateFailed'), { prefixFallback: true }))
+      },
       // 成功后直接退场进应用,不设成功勾中间页:纯勾无信息量,只是人为
       // 推迟跳转;忙碌反馈由提交按钮的 loading 覆盖(isSubmitting 到
       // navigateHome 返回后才复位)。
