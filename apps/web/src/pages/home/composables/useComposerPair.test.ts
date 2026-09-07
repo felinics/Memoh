@@ -51,10 +51,12 @@ function setup(options: { sessionId?: string, direct?: boolean, seed?: () => Pro
     }),
   }
   const usesExternal = computed(() => runtime.value !== 'model')
+  const visible = ref(true)
+  const onPreferenceConflict = vi.fn()
   const deps: ComposerPairDeps = {
     view,
     target,
-    visible: ref(true),
+    visible,
     botId: ref('bot'),
     activeSession,
     botSettings: ref({ chat_model_id: 'native-default', reasoning_effort: 'medium' }),
@@ -65,10 +67,11 @@ function setup(options: { sessionId?: string, direct?: boolean, seed?: () => Pro
     runtimeIdentity: computed(() => JSON.stringify([runtime.value, usesExternal.value, botAgentId.value])),
     directCatalog: ref({ configuredModelId: 'cc-default', defaultModelId: 'cc-default', configuredReasoningEffort: 'medium' }),
     draftPromotionPending: () => false,
+    onPreferenceConflict,
     api,
   }
   const pair = useComposerPair(deps)
-  return { pair, view, target, runtime, botAgentId, activeSession, server, api }
+  return { pair, view, target, runtime, botAgentId, activeSession, server, api, visible, onPreferenceConflict }
 }
 
 const flush = async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); await nextTick() }
@@ -229,5 +232,95 @@ describe('composer send preparation', () => {
     send.releaseReads()
     await flush()
     expect(env.server.get('sess-1').preferred_chat_model_id).toBe('B')
+  })
+})
+
+describe('composer pair persist failures', () => {
+  // A failed send must not wedge the view: refresh stays enabled once no
+  // write/send is in flight (regression: a plain startup failure used to
+  // leave the dirty flag set forever, silently freezing pair revalidation).
+  it('a failed send does not block later server revalidation', async () => {
+    const env = setup({ sessionId: 'sess-1' })
+    await flush()
+    env.pair.setPair('A', 'low', 'session')
+    const send = env.pair.captureSend()
+    send.begin()
+    send.finish(false) // startup failure: the pair never reached the server
+    send.releaseReads()
+    env.server.set(session({ id: 'sess-1', preferred_chat_model_id: 'C', preferred_reasoning_effort: 'max' }))
+    env.visible.value = false
+    await flush()
+    env.visible.value = true
+    await flush()
+    expect(env.view.value.pairModelId.value).toBe('C')
+    expect(env.view.value.pairSource.value).toBe('session')
+  })
+
+  // A transiently failed pick is the opposite: the optimistic choice stays
+  // and reads hold off until a confirmed send persists it.
+  it('keeps an unsaved pick across reloads until a confirmed send persists it', async () => {
+    const env = setup({ sessionId: 'sess-1' })
+    await flush()
+    env.pair.setPair('B', 'high', 'user')
+    env.api.updatePreference.mockRejectedValueOnce(new TypeError('network'))
+    env.pair.persist()
+    await flush()
+    expect(env.onPreferenceConflict).not.toHaveBeenCalled()
+    // The "other writer" moved the server on; a reload must not clobber B.
+    env.server.set(session({ id: 'sess-1', preferred_chat_model_id: 'A', preferred_reasoning_effort: 'low' }))
+    env.visible.value = false
+    await flush()
+    env.visible.value = true
+    await flush()
+    expect(env.view.value.pairModelId.value).toBe('B')
+    // A confirmed send carries and persists the pick; reads resume.
+    const send = env.pair.captureSend()
+    send.begin()
+    send.finish(true)
+    send.releaseReads()
+    env.visible.value = false
+    await flush()
+    env.visible.value = true
+    await flush()
+    expect(env.view.value.pairModelId.value).toBe('A')
+  })
+
+  // 409: the pick lost the revision race. Drop the unsaved protection, adopt
+  // the server's winning pair, and notify the pane.
+  it('a conflicted pick reverts to the server pair and notifies the pane', async () => {
+    const env = setup({ sessionId: 'sess-1' })
+    await flush()
+    env.pair.setPair('B', 'high', 'user')
+    env.server.set(session({ id: 'sess-1', preferred_chat_model_id: 'winner', preferred_reasoning_effort: 'low', model_preference_revision: 'r2' }))
+    env.api.updatePreference.mockRejectedValueOnce({ code: 'session.model_preference_conflict', status: 409 })
+    env.pair.persist()
+    await flush()
+    expect(env.onPreferenceConflict).toHaveBeenCalledOnce()
+    expect(env.view.value.pairModelId.value).toBe('winner')
+    expect(env.view.value.pairSource.value).toBe('session')
+  })
+
+  // The PATCH response carries both columns on a direct session; only the
+  // external one belongs in a direct composer, and vice versa.
+  it('applies the PATCH response from the column of the current runtime', async () => {
+    const env = setup({ sessionId: 'sess-1', direct: true })
+    await flush()
+    env.pair.setPair('opus', 'high', 'user')
+    env.api.updatePreference.mockImplementationOnce(async (_botId: string, id: string) => {
+      const row = session({
+        id,
+        runtime_type: 'claude-code',
+        preferred_external_model_id: 'opus',
+        preferred_chat_model_id: 'stale-native-uuid',
+        preferred_reasoning_effort: 'high',
+        model_preference_revision: 'r2',
+      } as Partial<SessionSummary>)
+      env.server.set(row)
+      return row
+    })
+    env.pair.persist()
+    await flush()
+    expect(env.view.value.pairModelId.value).toBe('opus')
+    expect(env.view.value.pairSource.value).toBe('session')
   })
 })

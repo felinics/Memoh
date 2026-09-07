@@ -30,6 +30,10 @@ type RetryLatestMessageInput struct {
 	ReasoningEffort        string
 	WorkspaceTargetID      string
 	ToolHTTPURL            string
+	// OnModelPreferenceSettled releases subsequent picker writes once this
+	// turn's preference write-back has finished (issue #879). Same contract
+	// as ChatRequest.OnModelPreferenceSettled.
+	OnModelPreferenceSettled func()
 }
 
 type EditLatestMessageInput struct {
@@ -49,6 +53,8 @@ type EditLatestMessageInput struct {
 	ReasoningEffort        string
 	WorkspaceTargetID      string
 	ToolHTTPURL            string
+	// OnModelPreferenceSettled: see RetryLatestMessageInput.
+	OnModelPreferenceSettled func()
 }
 
 func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
@@ -92,6 +98,7 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: cutoffMessageID,
 		RequiredHistoryMessageID:     requestMessage.ID,
+		OnModelPreferenceSettled:     input.OnModelPreferenceSettled,
 	}
 	return s.streamReplacementWS(ctx, req, turn.ID, requestMessage.ID, "retry", eventCh, abortCh)
 }
@@ -132,6 +139,7 @@ func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessa
 		ToolHTTPURL:                  strings.TrimSpace(input.ToolHTTPURL),
 		SkipHistoryTurn:              true,
 		HistoryCutoffBeforeMessageID: strings.TrimSpace(turn.RequestMessageID),
+		OnModelPreferenceSettled:     input.OnModelPreferenceSettled,
 	}
 	return s.streamReplacementWS(ctx, req, turn.ID, "", "edit", eventCh, abortCh)
 }

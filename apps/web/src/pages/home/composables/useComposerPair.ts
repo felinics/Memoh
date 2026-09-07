@@ -9,6 +9,7 @@ import {
   type SessionSummary,
 } from '@/composables/api/useChat'
 import { carriedPairForSource, readComposerPairDraft, writeComposerPairDraft } from '../components/chat-pane-send'
+import { isApiErrorCode } from '@/utils/api-error'
 
 // The composer (model, effort) pair (issue #879). The values live on the
 // shared ChatViewEntry so same-session tabs share one pair; this composable
@@ -63,6 +64,8 @@ export interface ComposerPairDeps {
   directCatalog: Ref<ComposerPairDirectCatalog>
   /** Draft→session promotion flickers several identity pieces; skip those ticks. */
   draftPromotionPending: () => boolean
+  /** The picker's PATCH lost the revision race; the pane shows the conflict hint. */
+  onPreferenceConflict?: (error: unknown) => void
   api?: Partial<ComposerPairApi>
 }
 
@@ -181,7 +184,24 @@ export function useComposerPair(deps: ComposerPairDeps) {
       () => api.fetchSession(botId, sessionId),
       row => api.updatePreference(botId, sessionId, modelId, effort, row.model_preference_revision || ''),
       // Applies to the captured view even if this pane was repointed since.
-      row => setPair(row.preferred_external_model_id || row.preferred_chat_model_id || modelId, row.preferred_reasoning_effort || '', 'session', view),
+      // Read the column for THIS runtime's namespace, like applySessionPair:
+      // an external id must never land in a native composer.
+      (row) => {
+        const applied = deps.usesDirectRuntime.value ? row.preferred_external_model_id : row.preferred_chat_model_id
+        setPair(applied || modelId, row.preferred_reasoning_effort || '', 'session', view)
+      },
+      (error) => {
+        if (!isApiErrorCode(error, 'session.model_preference_conflict')) return
+        // The pick lost to a newer write elsewhere (another tab, a send).
+        // Drop the unsaved protection, adopt the server's pair, and tell the
+        // user their pick didn't stick.
+        view.pairSync.dropUnsavedChoice()
+        void view.pairSync.refresh(
+          () => api.fetchSession(botId, sessionId),
+          (row) => { if (deps.view.value === view && deps.visible.value) applySessionPair(view, row) },
+        )
+        deps.onPreferenceConflict?.(error)
+      },
     )
   }
 

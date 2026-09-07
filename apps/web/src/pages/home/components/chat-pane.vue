@@ -2294,6 +2294,9 @@ const composerPair = useComposerPair({
   runtimeIdentity: pairRuntimeIdentity,
   directCatalog: composerModelCatalog,
   draftPromotionPending: () => directDraftPromotionPending,
+  onPreferenceConflict: (error) => {
+    composerError.value = resolveApiErrorMessage(error, t('errors.session.model_preference_conflict'))
+  },
 })
 
 // Switching models can strand the composer's override on a tier the new model
@@ -3194,6 +3197,7 @@ async function handleRetryMessage(turnId: string) {
     modelId: sendPair.modelId,
     reasoningEffort: sendPair.reasoningEffort,
     workspaceTargetId: sendWorkspaceTargetId.value,
+    onModelPreferenceSettled: () => finishPairSend(false),
   }).finally(() => finishPairSend(false))
   finishPairSend(result.ok || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
@@ -3215,6 +3219,7 @@ async function handleEditMessage(turnId: string, text: string, done?: (started: 
       modelId: sendPair.modelId,
       reasoningEffort: sendPair.reasoningEffort,
       workspaceTargetId: sendWorkspaceTargetId.value,
+      onModelPreferenceSettled: () => finishPairSend(false),
     })
     finishPairSend(result.ok || result.stage === 'stream')
     await refreshACPComposerConfigAfterSelectionError(result)

@@ -2346,6 +2346,142 @@ describe('chat-list store', () => {
       expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
     })
 
+  // The retry/edit turns must release the composer pair write barrier as soon
+  // as their preference write-back settles, not only when generation ends —
+  // otherwise a pick made during a retry/edit generation is lost on refresh.
+  it('releases the composer pair barrier when a retry turn settles its preference write', async () => {
+      h.sendUpdates = [runtime.started]
+      api.fetchSessions.mockResolvedValueOnce({
+        items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+        nextCursor: null,
+      })
+      api.fetchMessagesUI.mockResolvedValueOnce([
+        {
+          id: 'user-1',
+          turn_id: 'turn-fx-4-9',
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          timestamp: '2026-05-17T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-old',
+          turn_id: 'turn-fx-4-9',
+          role: 'assistant',
+          messages: [{ id: 1, type: 'text', content: 'old answer' }],
+          timestamp: '2026-05-17T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      await flushPromises()
+
+      const onSettled = vi.fn()
+      const retry = store.retryLatestAssistant('turn-fx-4-9', { onModelPreferenceSettled: onSettled })
+      await flushPromises()
+      expect(onSettled).not.toHaveBeenCalled()
+      // Only the matching (invocation, run, session) releases the barrier.
+      h.streamHandler?.({
+        type: 'model_preference_settled',
+        invocation_id: wsInvocationId(),
+        run_id: 'some-other-run',
+        session_id: h.lastSessionId,
+      })
+      expect(onSettled).not.toHaveBeenCalled()
+      h.streamHandler?.({
+        type: 'model_preference_settled',
+        invocation_id: wsInvocationId(),
+        run_id: wsRunId(),
+        session_id: h.lastSessionId,
+      })
+      expect(onSettled).toHaveBeenCalledOnce()
+      api.fetchMessagesUI.mockResolvedValueOnce([
+        {
+          id: 'user-1',
+          turn_id: 'turn-fx-4-10',
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          timestamp: '2026-05-17T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-new',
+          turn_id: 'turn-fx-4-10',
+          role: 'assistant',
+          messages: [{ id: 1, type: 'text', content: 'new answer' }],
+          timestamp: '2026-05-17T08:00:02.000Z',
+          streaming: false,
+        },
+      ])
+      emitRuntime(runtime.completed, h.lastSessionId, h.lastRunId)
+      await retry
+      await flushPromises()
+    })
+
+  it('releases the composer pair barrier when an edit turn settles its preference write', async () => {
+      h.sendUpdates = [runtime.started]
+      api.fetchSessions.mockResolvedValueOnce({
+        items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
+        nextCursor: null,
+      })
+      api.fetchMessagesUI.mockResolvedValueOnce([
+        {
+          id: 'user-1',
+          turn_id: 'turn-fx-4-11',
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          timestamp: '2026-05-17T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-old',
+          turn_id: 'turn-fx-4-11',
+          role: 'assistant',
+          messages: [{ id: 1, type: 'text', content: 'old answer' }],
+          timestamp: '2026-05-17T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      await flushPromises()
+
+      const onSettled = vi.fn()
+      const edit = store.editLatestUser('turn-fx-4-11', 'hello again', { onModelPreferenceSettled: onSettled })
+      await flushPromises()
+      h.streamHandler?.({
+        type: 'model_preference_settled',
+        invocation_id: wsInvocationId(),
+        run_id: wsRunId(),
+        session_id: h.lastSessionId,
+      })
+      expect(onSettled).toHaveBeenCalledOnce()
+      api.fetchMessagesUI.mockResolvedValueOnce([
+        {
+          id: 'user-1',
+          turn_id: 'turn-fx-4-12',
+          role: 'user',
+          text: 'hello again',
+          attachments: [],
+          timestamp: '2026-05-17T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-new',
+          turn_id: 'turn-fx-4-12',
+          role: 'assistant',
+          messages: [{ id: 1, type: 'text', content: 'new answer' }],
+          timestamp: '2026-05-17T08:00:02.000Z',
+          streaming: false,
+        },
+      ])
+      emitRuntime(runtime.completed, h.lastSessionId, h.lastRunId)
+      await edit
+      await flushPromises()
+    })
+
   it('does not restore a failed retry tail into a different active session', async () => {
       h.sendUpdates = []
       api.fetchSessions.mockResolvedValueOnce({

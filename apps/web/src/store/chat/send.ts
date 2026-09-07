@@ -449,6 +449,8 @@ export function createChatSend(deps: ChatSendDeps) {
       modelId?: string
       reasoningEffort?: string
       workspaceTargetId?: string
+      /** See SendMessageOptions.onModelPreferenceSettled. */
+      onModelPreferenceSettled?: () => void
     } = {},
   ): Promise<SendMessageResult> {
     const viewTarget = deps.normalizeTarget(options.target)
@@ -482,6 +484,7 @@ export function createChatSend(deps: ChatSendDeps) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
+        onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId,
         assistantTurn,
         botId,
@@ -532,6 +535,8 @@ export function createChatSend(deps: ChatSendDeps) {
       modelId?: string
       reasoningEffort?: string
       workspaceTargetId?: string
+      /** See SendMessageOptions.onModelPreferenceSettled. */
+      onModelPreferenceSettled?: () => void
     } = {},
   ): Promise<SendMessageResult> {
     const trimmed = text.trim()
@@ -568,6 +573,7 @@ export function createChatSend(deps: ChatSendDeps) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
+        onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId,
         assistantTurn,
         botId,

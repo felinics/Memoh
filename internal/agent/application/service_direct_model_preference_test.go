@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
@@ -129,5 +131,24 @@ func TestDirectModelPreferenceRepeatedPairSkipsCatalog(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("changed pair skipped catalog discovery (calls=%d)", calls)
+	}
+}
+
+// A failed write-back must not break the turn (#879): same best-effort
+// contract as the native writeBackSessionModelPreference. The request pair
+// still applies to the in-flight turn; the next send retries the persist.
+func TestDirectModelPreferenceWriteFailureDoesNotBreakTurn(t *testing.T) {
+	catalog := external.ModelCatalog{ConfiguredModelID: "A", ConfiguredReasoningEffort: "medium", Models: []external.ModelOption{{ID: "A", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}}}}
+	fake := &modelSelectionFakeQueries{updatePrefErr: errors.New("db down")}
+	svc := newModelSelectionService(t, fake)
+	svc.logger = slog.New(slog.DiscardHandler)
+	svc.externalDrivers = map[string]external.Driver{session.RuntimeClaudeCode: preferenceCatalogDriver{catalog: catalog}}
+	sess := session.Thread{ID: "00000000-0000-0000-0000-000000000611", BotID: "bot", RuntimeType: session.RuntimeClaudeCode}
+	req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: "A", ReasoningEffort: "high"}, sess)
+	if err != nil {
+		t.Fatalf("write-back failure broke the turn: %v", err)
+	}
+	if req.Model != "A" || req.ReasoningEffort != "high" {
+		t.Fatalf("request=%+v", req)
 	}
 }

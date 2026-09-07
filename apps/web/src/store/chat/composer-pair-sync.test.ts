@@ -131,6 +131,30 @@ describe('composer preference operation ordering', () => {
     await state.refresh(async () => 'old', () => { applied = true })
     expect(applied).toBe(false)
   })
+  it('a failed send does not wedge later refreshes', async () => {
+    const state = createComposerPairSync()
+    const finish = state.beginSend()
+    finish(false) // startup failure: nothing reached the server
+    let applied = false
+    await state.refresh(async () => 'server', () => { applied = true })
+    expect(applied).toBe(true)
+  })
+  it('onError runs after the write settles, so a conflict handler can refresh immediately', async () => {
+    const state = createComposerPairSync()
+    let applied = ''
+    const write = state.write(
+      async () => 'rev',
+      async () => { throw new Error('conflict') },
+      () => {},
+      () => {
+        state.dropUnsavedChoice()
+        void state.refresh(async () => 'winner', (v) => { applied = v })
+      },
+    )
+    await write
+    await tick()
+    expect(applied).toBe('winner')
+  })
 })
 
 describe('composer preference invalidation', () => {

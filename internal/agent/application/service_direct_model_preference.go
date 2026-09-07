@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -99,11 +100,17 @@ func (s *Service) applyDirectModelPreference(ctx context.Context, req ChatReques
 	}
 	req.Model = modelID
 	req.ReasoningEffort = effort
+	// Best-effort like the native write-back: a preference write must not be
+	// able to break a turn. The request pair still applies to this turn and
+	// the next send retries the persist.
 	err := s.queries.UpdateSessionModelPreference(ctx, sqlc.UpdateSessionModelPreferenceParams{
 		ID: db.ParseUUIDOrEmpty(sess.ID), PreferredExternalModelID: pgtype.Text{String: modelID, Valid: true}, PreferredReasoningEffort: pgtype.Text{String: effort, Valid: effort != ""},
 	})
 	if err != nil {
-		return req, fmt.Errorf("persist external model preference: %w", err)
+		s.logger.Warn("write-back direct model preference",
+			slog.String("session_id", sess.ID),
+			slog.Any("error", err),
+		)
 	}
 	return req, nil
 }

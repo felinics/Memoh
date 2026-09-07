@@ -396,6 +396,9 @@ type modelSelectionFakeQueries struct {
 	provider       sqlc.Provider
 	sessionModelID pgtype.UUID
 	updatedPrefs   []sqlc.UpdateSessionModelPreferenceParams
+	// updatePrefErr simulates a failed preference write (#879): write-back
+	// must degrade to a log line, never fail the turn.
+	updatePrefErr error
 	// patchedPrefs records picker compare-and-set writes; the fake always
 	// reports one row matched.
 	patchedPrefs []sqlc.CompareAndSetSessionModelPreferenceParams
@@ -417,6 +420,9 @@ func (f *modelSelectionFakeQueries) GetSessionByID(_ context.Context, id pgtype.
 
 // updatedPrefs records preference writes for the write-back gate tests (#879).
 func (f *modelSelectionFakeQueries) UpdateSessionModelPreference(_ context.Context, arg sqlc.UpdateSessionModelPreferenceParams) error {
+	if f.updatePrefErr != nil {
+		return f.updatePrefErr
+	}
 	f.updatedPrefs = append(f.updatedPrefs, arg)
 	return nil
 }

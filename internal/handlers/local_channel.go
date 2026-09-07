@@ -2409,6 +2409,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					input.RunID = runRef.RunID
 					input.TurnID = admittedTurn.TurnID
 					input.TurnPosition = admittedTurn.Position
+					input.OnModelPreferenceSettled = func() {
+						writer.SendJSON(wsOutboundEvent{
+							Type:         "model_preference_settled",
+							RunID:        runRef.RunID,
+							InvocationID: runRef.InvocationID,
+							SessionID:    runRef.SessionID,
+						})
+					}
 					return h.agentService.RetryLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
 			)
@@ -2503,6 +2511,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					input.TurnID = admittedTurn.TurnID
 					input.TurnPosition = admittedTurn.Position
 					input.Attachments = editAdmission.preparedAttachments()
+					input.OnModelPreferenceSettled = func() {
+						writer.SendJSON(wsOutboundEvent{
+							Type:         "model_preference_settled",
+							RunID:        runRef.RunID,
+							InvocationID: runRef.InvocationID,
+							SessionID:    runRef.SessionID,
+						})
+					}
 					return h.agentService.EditLatestMessageWS(ctx, input, eventCh, abortCh)
 				},
 			)
