@@ -91,6 +91,13 @@ function toolBlock(toolName: string, input: Record<string, unknown> = {}): ToolC
 }
 
 describe('tool call registry', () => {
+  it('uses a command description without a redundant Run prefix, with command fallback', () => {
+    expect(getToolDisplay(toolBlock('exec', { command: 'cat /etc/resolv.conf', description: 'Read DNS configuration' })))
+      .toMatchObject({ target: 'Read DNS configuration', hideAction: true })
+    expect(getToolDisplay(toolBlock('exec', { command: 'echo done', description: '  ' })))
+      .toMatchObject({ target: 'echo done', hideAction: false })
+  })
+
   it('reads the backend tool catalog', () => {
     expect(BUILT_IN_TOOLS.length).toBeGreaterThan(40)
     expect(BUILT_IN_TOOLS).toContain('browser_action')

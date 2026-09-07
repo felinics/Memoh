@@ -46,8 +46,7 @@ function stringify(val: unknown): string {
   }
 }
 
-// Input params rendered as a half-embedded key:value list (the codegraph look:
-// format: flat / maxDepth: 3 / projectPath: …), not a JSON blob in a card.
+// Keep input parameters readable as key:value rows inside the shared detail card.
 const inputEntries = computed(() => {
   const input = props.block.input
   if (!input || typeof input !== 'object' || Array.isArray(input)) return []

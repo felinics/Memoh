@@ -12,6 +12,12 @@ vi.mock('@/i18n', () => ({
   default: { global: { t: (key: string) => key } },
   i18nRef: (key: string) => ({ value: key }),
 }))
+// These tests exercise disclosure and its card shell, not Shiki rendering.
+vi.mock('@/composables/useShikiHighlighter', () => ({
+  useShikiHighlighter: () => ({
+    html: { value: '' }, loading: { value: false }, highlightLang: vi.fn(),
+  }),
+}))
 import ToolCallGroup from './tool-call-group.vue'
 
 // Two contracts pinned here:
@@ -46,10 +52,10 @@ afterEach(() => {
 let nextBlockId = 0
 let nextMessageId = 0
 
-function mountGroup(items: ContentBlock[], active: boolean | undefined): HTMLDivElement {
+function mountGroup(items: ContentBlock[], active: boolean | undefined, showExecutionLocation = false): HTMLDivElement {
   const messageId = `group-message-${nextMessageId++}`
   const harness = defineComponent({
-    setup: () => () => h(ToolCallGroup, { items, messageId, active }),
+    setup: () => () => h(ToolCallGroup, { items, messageId, active, showExecutionLocation }),
   })
   const root = document.createElement('div')
   document.body.append(root)
@@ -91,10 +97,11 @@ function mountGroup(items: ContentBlock[], active: boolean | undefined): HTMLDiv
           tools: {
             run: 'Run',
             read: 'Read',
+            write: 'Write',
             exec: 'Run',
             edit: 'Edit',
             ask_user: 'Ask user',
-            pending: { generic: 'Working…' },
+            pending: { generic: 'Preparing the next step' },
           },
         },
       },
@@ -270,10 +277,10 @@ describe('ToolCallGroup adaptive header layers', () => {
       toolBlock('exec', {}, true),
     ], true)
 
-    expect(nowLine(root)?.textContent).toContain('Working…')
+    expect(nowLine(root)?.textContent).toContain('Preparing the next step')
   })
 
-  it('hides the now line once the user opens the body', async () => {
+  it('crossfades the preview and card as separate layers', async () => {
     const root = mountGroup([
       toolBlock('read', { path: 'a.ts' }),
       toolBlock('read', { path: 'b.ts' }),
@@ -284,6 +291,77 @@ describe('ToolCallGroup adaptive header layers', () => {
     root.querySelector('button')?.click()
     await nextTick()
 
-    expect(nowLine(root)).toBeNull()
+    expect(nowLine(root)?.classList.contains('preview-layer-leave-active')).toBe(true)
+    expect(root.querySelector('.bg-muted')).not.toBeNull()
+    expect(root.querySelector('.process-card-layer')).not.toBeNull()
+    await vi.waitFor(() => expect(nowLine(root)).toBeNull())
   })
+})
+
+
+describe('process row context', () => {
+  it('hides a single computer and shows locations when the reply needs disambiguation', () => {
+    const block = toolBlock('read', { path: '/data/a.md' })
+    block.execution_location = { kind: 'remote', name: 'Local Computer' }
+    expect(mountGroup([block], false).textContent).not.toContain('Local Computer')
+    expect(mountGroup([block], false, true).textContent).toContain('Local Computer')
+  })
+
+  it('uses the command description in the running header and ticker', () => {
+    const root = mountGroup([reasoning(999), toolBlock('exec', {
+      command: 'cat /etc/resolv.conf', description: 'Read DNS configuration',
+    }, true)], true)
+    expect(headerText(root)).toContain('Read DNS configuration')
+    expect(headerText(root)).not.toContain('Run Read')
+    expect(nowLine(root)?.textContent).toBe('Read DNS configuration')
+  })
+})
+
+
+it('summarizes mixed browser and command tools without leaking a translation key', () => {
+  const root = mountGroup([
+    toolBlock('exec', { command: 'ls' }),
+    toolBlock('get_messages', { session_id: 'session-1' }),
+    toolBlock('browser_action', { action: 'get_url' }),
+  ], false)
+  expect(headerText(root)).toContain('1 commands')
+  expect(headerText(root)).toContain('2 steps')
+  expect(headerText(root)).not.toContain('chat.process.')
+})
+
+
+it('does not advertise an empty write as expandable', () => {
+  const root = mountGroup([toolBlock('write', { path: 'a.py' }, true)], true)
+  expect(root.querySelector('[aria-expanded]')).toBeNull()
+})
+
+
+it('keeps patch-backed writes expandable even without a content parameter', () => {
+  const root = mountGroup([toolBlock('write', {
+    changes: [{ path: 'a.py', kind: 'modify', diff: '-old\n+new' }],
+  })], false)
+  expect(root.querySelector('[aria-expanded]')).not.toBeNull()
+})
+
+it('keeps a truncated write notice accessible', () => {
+  const root = mountGroup([toolBlock('write', {
+    path: 'a.py', content_truncated: true, content_bytes: 10000,
+  })], false)
+  expect(root.querySelector('[aria-expanded]')).not.toBeNull()
+})
+
+it('wraps generic details in cards both standalone and inside a process', async () => {
+  const single = mountGroup([toolBlock('get_messages', { session_id: 's1' })], false)
+  single.querySelector<HTMLElement>('[role="button"]')!.click()
+  await nextTick()
+  expect(single.querySelector('.bg-muted')?.textContent).toContain('session_id')
+
+  const group = mountGroup([
+    toolBlock('get_messages', { session_id: 's2' }), reasoning(1001),
+  ], false)
+  group.querySelector('button')!.click()
+  await nextTick()
+  group.querySelector<HTMLElement>('[role="button"]')!.click()
+  await nextTick()
+  expect(group.querySelector('.bg-card')?.textContent).toContain('session_id')
 })

@@ -536,7 +536,7 @@
 
 .cop-typewriter {
   clip-path: inset(0 100% 0 0);
-  animation: cop-typewriter 0.55s steps(18, end) forwards;
+  animation: cop-typewriter 0.55s steps(18, end) forwards, tool-shimmer 1.6s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

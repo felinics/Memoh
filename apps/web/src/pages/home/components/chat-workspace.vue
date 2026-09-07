@@ -214,7 +214,7 @@ provide(openInFileManagerKey, (path: string, isDir = false) => {
   if (isDir) {
     store.openFilesAt(normalizedPath)
   } else {
-    store.openFile(normalizedPath)
+    store.openFilePinned(normalizedPath)
   }
 })
 

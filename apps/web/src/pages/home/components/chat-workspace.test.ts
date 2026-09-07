@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
-import { createApp, defineComponent, h, nextTick, onMounted, ref } from 'vue'
+import { createApp, defineComponent, h, inject, nextTick, onMounted, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { openInFileManagerKey } from '../composables/useFileManagerProvider'
 
 const dock = {
   panels: [
@@ -22,14 +24,16 @@ const workspaceStore = {
   releaseApi: vi.fn(),
   openSessionChat: vi.fn(),
   openDraftChat: vi.fn(),
+  openFilePinned: vi.fn(),
 }
 
 vi.mock('dockview-vue', () => ({
   DockviewVue: defineComponent({
     emits: ['ready'],
     setup(_, { emit }) {
+      const openFile = inject(openInFileManagerKey)!
       onMounted(() => emit('ready', { api: dock }))
-      return () => h('div')
+      return () => h('button', { onClick: () => openFile('/data/a.md') }, 'Open file')
     },
   }),
 }))
@@ -108,6 +112,9 @@ describe('chat workspace initialization', () => {
     expect(workspaceStore.registerApi).toHaveBeenCalledWith(dock)
     expect(workspaceStore.openSessionChat).not.toHaveBeenCalled()
     expect(workspaceStore.openDraftChat).not.toHaveBeenCalled()
+
+    root.querySelector('button')!.click()
+    expect(workspaceStore.openFilePinned).toHaveBeenCalledWith('/data/a.md')
 
     app.unmount()
   })

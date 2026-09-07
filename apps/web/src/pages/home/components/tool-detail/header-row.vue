@@ -24,7 +24,7 @@
     :is="nested ? 'div' : 'button'"
     v-bind="nested ? { role: 'button', tabindex: 0 } : {}"
     :aria-expanded="open"
-    class="group flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px select-none"
+    class="tool-header-row group flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px select-none"
     :class="toneClass"
     v-on="nested ? { keydown: onKeydown } : {}"
     @click="emit('toggle')"
@@ -69,3 +69,15 @@ function onKeydown(event: KeyboardEvent) {
   emit('toggle')
 }
 </script>
+
+<style scoped>
+/* Shimmer uses transparent text over a gradient, so changing inherited color
+   alone cannot highlight it. Hover belongs to the whole interactive row. */
+.tool-header-row:hover :deep(.tool-shimmer-text),
+.tool-header-row:focus-visible :deep(.tool-shimmer-text) {
+  background-image: none;
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+</style>

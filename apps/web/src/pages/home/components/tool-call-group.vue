@@ -4,6 +4,7 @@
     v-if="items.length === 1 && single && single.type === 'tool'"
     :block="(single as ToolCallBlockType)"
     :message-id="messageId"
+    :show-execution-location="showExecutionLocation"
   />
   <ThinkingBlock
     v-else-if="items.length === 1 && single && single.type === 'reasoning'"
@@ -41,14 +42,14 @@
            contrast between "phase" and "progress". -->
       <template v-if="verbLabel">
         <span
-          class="shrink-0 tracking-[0.01em]"
-          :class="(active || anyToolRunning) ? 'tool-shimmer-text' : 'text-muted-foreground'"
+          class="shrink-0"
+          :class="(active || anyToolRunning) ? 'tool-shimmer-text' : 'text-muted-foreground group-hover:text-inherit transition-colors duration-75' /* ui-allow-style: header verb inherits the HeaderRow hover color */"
         >{{ verbLabel }}</span>
         <span class="min-w-0 truncate tabular-nums">{{ detailsLabel }}</span>
       </template>
       <span
         v-else
-        class="min-w-0 truncate tracking-[0.01em]"
+        class="min-w-0 truncate"
         :class="anyToolRunning || active ? 'tool-shimmer-text' : ''"
       >{{ headerLabel }}</span>
       <!-- Segment-level diff totals, revealed only once the segment settles.
@@ -68,56 +69,63 @@
       />
     </HeaderRow>
 
-    <!-- Second layer of the running header: the header names the phase and the
-         live tally, this line rolls the one call happening right now. Only
-         while collapsed — an open capsule's own last row already carries that
-         signal, so the line steps aside instead of double-rendering it. -->
-    <div
-      v-if="active && !open"
-      class="now-line relative h-[1lh] overflow-hidden mt-0.5 text-cop-title"
-    >
-      <Transition name="now-roll">
+    <!-- Both layers share an origin. Preview spacing never displaces the card;
+         only the card's own disclosure controls its expansion. -->
+    <div class="grid min-w-0">
+      <Transition name="preview-layer">
         <div
-          :key="tickerLabel"
-          class="absolute inset-0 truncate"
-          v-text="tickerLabel"
-        />
-      </Transition>
-    </div>
-
-    <CollapseSection :open="open">
-      <!-- Card body sets the in-card type scale (one notch below the root-level
-           cop rows) + tighter leading so nested steps read as a distinct, denser
-           layer; nested rows inherit this instead of re-asserting their own size.
-           Deliberately NO inner scroll here: the process body must flow with the
-           main chat scroll so the mouse wheel is never latched inside the
-           capsule. Individual tool details (diffs, file content, exec output) keep
-           their own small scroll bounds for truly large blobs, but the capsule
-           itself never introduces a second scrollbar. -->
-      <Capsule
-        density="compact"
-        class="mt-1 space-y-0.5 text-[0.84375rem] leading-snug"
-      >
-        <template
-          v-for="(item, i) in items"
-          :key="item.id"
+          v-if="active && !open"
+          class="now-line relative h-[1lh] overflow-hidden mt-[var(--chat-process-gap)] text-cop-title [grid-area:1/1] self-start pointer-events-none"
         >
-          <ToolCallInline
-            v-if="item.type === 'tool'"
-            :block="(item as ToolCallBlockType)"
-            :message-id="messageId"
-            in-group
-          />
-          <ThinkingBlock
-            v-else-if="item.type === 'reasoning'"
-            :block="(item as ThinkingBlockType)"
-            :message-id="messageId"
-            :streaming="active === true && i === items.length - 1"
-            in-group
-          />
-        </template>
-      </Capsule>
-    </CollapseSection>
+          <Transition name="now-roll">
+            <div
+              :key="tickerLabel"
+              class="absolute inset-0 truncate"
+              v-text="tickerLabel"
+            />
+          </Transition>
+        </div>
+      </Transition>
+
+      <CollapseSection
+        :open="open"
+        class="process-card-layer [grid-area:1/1] self-start min-w-0"
+        :inert="!open"
+      >
+        <!-- Card body sets the in-card type scale (one notch below the root-level
+             cop rows) + tighter leading so nested steps read as a distinct, denser
+             layer; nested rows inherit this instead of re-asserting their own size.
+             Deliberately NO inner scroll here: the process body must flow with the
+             main chat scroll so the mouse wheel is never latched inside the
+             capsule. Individual tool details (diffs, file content, exec output) keep
+             their own small scroll bounds for truly large blobs, but the capsule
+             itself never introduces a second scrollbar. -->
+        <Capsule
+          density="compact"
+          class="mt-1 space-y-0.5 text-[0.84375rem] leading-snug"
+        >
+          <template
+            v-for="(item, i) in items"
+            :key="item.id"
+          >
+            <ToolCallInline
+              v-if="item.type === 'tool'"
+              :block="(item as ToolCallBlockType)"
+              :message-id="messageId"
+              :show-execution-location="showExecutionLocation"
+              in-group
+            />
+            <ThinkingBlock
+              v-else-if="item.type === 'reasoning'"
+              :block="(item as ThinkingBlockType)"
+              :message-id="messageId"
+              :streaming="active === true && i === items.length - 1"
+              in-group
+            />
+          </template>
+        </Capsule>
+      </CollapseSection>
+    </div>
   </div>
 </template>
 
@@ -152,6 +160,7 @@ const props = defineProps<{
   messageId: string
   // True when this segment is the last block of a still-streaming assistant turn.
   active?: boolean
+  showExecutionLocation?: boolean
 }>()
 
 const { t } = useI18n()
@@ -214,6 +223,7 @@ function verbOf(tool: ToolCallBlockType): string {
 
 function labelFor(tool: ToolCallBlockType): string {
   const subject = subjectOf(tool)
+  if (getToolDisplay(tool).hideAction) return subject
   const verb = verbOf(tool)
   return subject ? `${verb} ${subject}` : verb
 }
@@ -240,7 +250,7 @@ function navigateHost(tool: ToolCallBlockType): string {
 const phaseKey = computed<ToolBucket | 'gui' | null>(() => {
   const tools = toolItems.value
   if (tools.length === 0) return null
-  if (tools.some(tool => isGuiTool(tool.toolName))) return 'gui'
+  if (tools.every(tool => isGuiTool(tool.toolName))) return 'gui'
   const counts = new Map<ToolBucket, number>()
   for (const tool of tools) {
     const bucket = toolBucket(tool.toolName)
@@ -296,7 +306,7 @@ const detailsLabel = computed(() => {
 })
 
 // Single-span fallback for the two cases without a verb: a thought-only
-// segment ("Thinking…" / "Thought") and a lone settled tool (its own label).
+// segment ("Thinking through the request" / "Thought") and a lone settled tool (its own label).
 const headerLabel = computed(() => {
   const tools = toolItems.value
   if (tools.length === 0) return props.active ? t('chat.thinkingInProgress') : t('chat.process.thought')
@@ -317,7 +327,7 @@ const diffTotals = computed(() => {
 })
 
 // The now line rolls the current (last) item. A reasoning tail reads as
-// "Thinking…"; a tool whose input hasn't streamed yet gets the pending label
+// "Thinking through the request"; a tool whose input hasn't streamed yet gets the pending label
 // (same wording as its in-capsule row) instead of a target-less bare verb.
 const tickerLabel = computed(() => {
   const current = props.items[props.items.length - 1]
@@ -338,6 +348,19 @@ const tickerLabel = computed(() => {
 </script>
 
 <style scoped>
+.preview-layer-enter-active {
+  transition: opacity 90ms ease-out 60ms;
+}
+
+.preview-layer-leave-active {
+  transition: opacity 90ms ease-out;
+}
+
+.preview-layer-enter-from,
+.preview-layer-leave-to {
+  opacity: 0;
+}
+
 /* Roll animation for the now line: incoming row rises from below, outgoing
    exits upward, both absolutely positioned so they overlap mid-swap. 300ms
    matches the house motion palette's gentle end. */
@@ -355,6 +378,8 @@ const tickerLabel = computed(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .preview-layer-enter-active,
+  .preview-layer-leave-active,
   .now-roll-enter-active,
   .now-roll-leave-active {
     transition: none;

@@ -125,28 +125,12 @@
       v-if="expandable"
       :open="open && !isPending"
     >
-      <!-- 'inline' detail (half-embedded key:value list) is not the capsule
-           shape — just indentation, no filled surface. -->
-      <div
-        v-if="display.detailVariant === 'inline'"
-        class="mt-1 pl-3 font-[400]"
-      >
-        <component
-          :is="display.detail"
-          v-if="display.detail"
-          :block="block"
-        />
-        <ToolCallDetailGeneric
-          v-else
-          :block="block"
-        />
-      </div>
       <!-- inGroup: a card nested inside the group's own muted capsule needs a
            visibly different fill (bg-card, not bg-muted) so it reads as one
            layer up — a genuinely different surface, not a padding drift of
            the capsule shape below, so it stays hand-written. -->
       <div
-        v-else-if="inGroup"
+        v-if="inGroup"
         class="mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]"
       >
         <component
@@ -191,13 +175,14 @@ import {
 } from './tool-call-registry'
 import ConnectorLogo from './tool-detail/connector-logo.vue'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
+import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
 import HeaderRow from './tool-detail/header-row.vue'
 import ExpandChevron from './tool-detail/expand-chevron.vue'
 import Capsule from './tool-detail/capsule.vue'
 
-const props = defineProps<{ block: ToolCallBlock, messageId: string, inGroup?: boolean }>()
+const props = defineProps<{ block: ToolCallBlock, messageId: string, inGroup?: boolean, showExecutionLocation?: boolean }>()
 const { t } = useI18n()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
@@ -209,6 +194,7 @@ const display = computed(() => getToolDisplay(props.block))
 const connectorLookup = useConnectorLogos()
 const connector = computed(() => connectorLookup.value(props.block.toolName))
 const executionLocationLabel = computed(() => {
+  if (!props.showExecutionLocation) return ''
   const location = props.block.execution_location
   if (!location) return ''
   if (location.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
@@ -222,9 +208,15 @@ watch(collapseKey, (key) => {
   open.value = getCollapseOpen(key) ?? (display.value.defaultOpen === true)
 })
 
-const expandable = computed(
-  () => Boolean(display.value.detail) || display.value.expandable === true,
-)
+const expandable = computed(() => {
+  if (isPending.value) return false
+  if (display.value.detail === ToolCallDetailWrite) {
+    const input = props.block.input as Record<string, unknown> | undefined
+    return (typeof input?.content === 'string' && input.content.length > 0)
+      || input?.content_truncated === true
+  }
+  return Boolean(display.value.detail) || display.value.expandable === true
+})
 
 // A failed command carries its exit status on the collapsed row; every other
 // failure detail stays in the expanded output.
@@ -251,13 +243,7 @@ const isPending = computed(() => {
   )
 })
 
-const showsBareIconWhenPending = computed(
-  () => display.value.hideAction === true && !display.value.target,
-)
-
-const showPendingLabel = computed(
-  () => isPending.value && showsBareIconWhenPending.value,
-)
+const showPendingLabel = computed(() => isPending.value)
 
 const pendingLabel = computed(
   () => t(`chat.tools.pending.${display.value.actionKey}`, t('chat.tools.pending.generic')),

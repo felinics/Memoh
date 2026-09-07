@@ -32,7 +32,10 @@ watch(
       // Double rAF so the freshly-mounted content is painted at 0fr for one
       // frame before flipping to 1fr — otherwise the height snaps open instead
       // of animating (this is why nested details didn't animate on first open).
-      requestAnimationFrame(() => requestAnimationFrame(() => { expanded.value = true }))
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        // A second click can close the section before these frames run.
+        if (props.open) expanded.value = true
+      }))
     }
     else {
       expanded.value = false
