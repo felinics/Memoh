@@ -125,14 +125,14 @@
               <DropdownMenuItem
                 @select="$emit('rename', session)"
               >
-                <Pencil class="mr-2 size-3.5" />
+                <Pencil />
                 {{ t('common.rename') }}
               </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 @select="$emit('delete', session)"
               >
-                <Trash2 class="mr-2 size-3.5" />
+                <Trash2 />
                 {{ t('common.delete') }}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -149,19 +149,19 @@
         :disabled="isActive"
         @select="$emit('openNewTab', session)"
       >
-        <MessageSquare class="mr-2 size-3.5" />
+        <MessageSquare />
         {{ t('common.open') }}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem @select="$emit('rename', session)">
-        <Pencil class="mr-2 size-3.5" />
+        <Pencil />
         {{ t('common.rename') }}
       </ContextMenuItem>
       <ContextMenuItem
         variant="destructive"
         @select="$emit('delete', session)"
       >
-        <Trash2 class="mr-2 size-3.5" />
+        <Trash2 />
         {{ t('common.delete') }}
       </ContextMenuItem>
     </ContextMenuContent>

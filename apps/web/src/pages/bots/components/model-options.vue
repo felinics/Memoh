@@ -22,11 +22,10 @@
       >
     </div>
 
-    <div
-      :id="listboxId"
-      ref="scrollEl"
-      :class="virtualListboxClass"
-      role="listbox"
+    <MenuScrollArea
+      ref="scrollElArea"
+      layout="virtual"
+      :viewport-attrs="{ id: listboxId, role: 'listbox' }"
     >
       <div
         v-if="rows.length === 0"
@@ -83,7 +82,7 @@
           </ModelDescriptionTooltip>
         </div>
       </div>
-    </div>
+    </MenuScrollArea>
 
     <!-- Reasoning effort lives in the model menu, not beside it: the tiers a model
          offers depend on the model, so picking one without the other is a two-stop
@@ -130,10 +129,7 @@
         :class="menuChromeClass"
         @pointerleave="reasoningHoverValue = null"
       >
-        <div
-          ref="reasoningScrollEl"
-          :class="virtualListboxClass"
-        >
+        <MenuScrollArea ref="reasoningScrollElArea">
           <div class="flex flex-col gap-0.5">
             <ModelDescriptionTooltip
               v-for="option in availableReasoningOptions"
@@ -158,7 +154,7 @@
               </button>
             </ModelDescriptionTooltip>
           </div>
-        </div>
+        </MenuScrollArea>
       </div>
     </PopoverContent>
   </Popover>
@@ -179,7 +175,7 @@ import {
   menuSearchHeaderClass,
   menuSearchInputClass,
   menuSeparatorClass,
-  virtualListboxClass,
+  MenuScrollArea,
 } from '@felinic/ui'
 import type { ModelsGetResponse, ModelsModelType, ProvidersGetResponse } from '@memohai/sdk'
 import { useListboxKeyboard } from '@/composables/useListboxKeyboard'
@@ -265,8 +261,10 @@ const modelValue = defineModel<string>({ default: '' })
 const reasoningEffort = defineModel<string>('reasoningEffort', { default: '' })
 
 const searchTerm = ref('')
-const scrollEl = ref<HTMLElement | null>(null)
-const reasoningScrollEl = ref<HTMLElement | null>(null)
+const scrollElArea = ref<InstanceType<typeof MenuScrollArea> | null>(null)
+const scrollEl = computed(() => scrollElArea.value?.viewportElement ?? null)
+const reasoningScrollElArea = ref<InstanceType<typeof MenuScrollArea> | null>(null)
+const reasoningScrollEl = computed(() => reasoningScrollElArea.value?.viewportElement ?? null)
 const reasoningOpen = ref(false)
 // Pointer-driven highlight state for the effort trigger and the flyout rows.
 // Both are plain buttons wearing menuItemClass, whose highlight only renders

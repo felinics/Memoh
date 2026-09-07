@@ -6,7 +6,7 @@
            borrow SettingsRow's geometry (mx-4/border-b/py-3.5/last:border-b-0)
            only so the real content doesn't reflow once it swaps in. -->
       <template v-if="loadingInitial">
-        <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
+        <SettingsSection>
           <div
             v-for="i in 6"
             :key="i"
@@ -15,7 +15,7 @@
             <Skeleton class="h-4 w-24" />
             <Skeleton class="h-8 w-64" />
           </div>
-        </div>
+        </SettingsSection>
       </template>
 
       <template v-else>

@@ -272,10 +272,11 @@ import {
   SidebarMenu, SidebarMenuItem,
 } from '@felinic/ui'
 import {
-  SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
+  SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, MessageSquare,
   ShieldAlert, Database, Mail, Link, Server, SlidersHorizontal,
   Bot as BotIcon, ChevronLeft, Laptop, Package as App
 } from 'lucide-vue-next'
+import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject, type Ref } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { BadgeCount, NavItem, toast } from '@felinic/ui'

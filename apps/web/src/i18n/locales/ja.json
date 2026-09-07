@@ -782,11 +782,11 @@
     },
     "agent": "エージェント",
     "continueOn": {
-      "label": "続行先",
+      "label": "コンピューター",
       "addComputer": "コンピューターを追加",
       "manageAccess": "アクセス権を管理",
       "manageComputers": "コンピューターを管理",
-      "noAccess": "この Bot にはコンピューターのアクセス権がありません"
+      "noAccess": "他のコンピューターは未承認です"
     },
     "computerLoading": "コンピューターを読み込み中",
     "computerLoadFailed": "コンピューターを読み込めませんでした",
@@ -796,7 +796,8 @@
     "folderUnavailable": "利用できないフォルダ",
     "folderDetachDraft": "フォルダに入れずに開始",
     "folderNewSession": "{name} で新しいセッション",
-    "attachFiles": "ファイルを添付する",
+    "manageConnectors": "コネクターを管理",
+    "attachFiles": "ファイルまたは画像をアップロード",
     "dropToAttach": "ファイルをここにドロップしてチャットに追加",
     "dropFolderUnsupported": "添付にフォルダーは使えません。左のファイルパネルにドロップしてください。",
     "pdfTooLargeForNative": "PDF が 12MB を超えているため、ワークスペースにパスとして保存されます。モデルは内容を直接閲覧できません。",

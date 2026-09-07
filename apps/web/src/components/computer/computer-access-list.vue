@@ -20,17 +20,19 @@
   </div>
 
   <template v-else>
-    <SettingsSection v-if="rows.length || subject === 'bot'">
+    <SettingsSection
+      v-if="rows.length || subject === 'bot'"
+      bordered
+    >
       <!-- Bot direction always lists the native workspace first: it is part
-           of every bot and can never be revoked, so it gets a caption instead
-           of a switch. -->
+           of every bot and can never be revoked, so its switch stays enabled and cannot be edited. -->
       <SettingsRow
         v-if="subject === 'bot'"
         :label="t('bots.remoteRuntime.nativeWorkspace')"
         :description="t('computerAccess.nativeAlwaysOn')"
       >
         <template #leading>
-          <Cloud class="size-4 text-muted-foreground" />
+          <CloudIcon class="size-4 text-muted-foreground" />
         </template>
         <Switch
           :model-value="true"
@@ -58,7 +60,7 @@
               {{ avatarInitials(row.name) }}
             </AvatarFallback>
           </Avatar>
-          <Laptop
+          <ComputerIcon
             v-else
             class="size-4 text-muted-foreground"
           />
@@ -128,7 +130,7 @@ import {
   Switch,
   toast,
 } from '@felinic/ui'
-import { Cloud, Laptop } from 'lucide-vue-next'
+import { CloudIcon, ComputerIcon } from '@memohai/icon/ui'
 import { avatarInitials } from '@/composables/useAvatarInitials'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAccountRuntimes, useComputerAccessActions, useComputerAccessGrants } from './use-computer-access'
@@ -246,6 +248,6 @@ function retry(): void {
 }
 
 function goToRuntimes(): void {
-  void router.push({ name: 'runtimes' })
+  void router.push({ name: 'runtimes', query: { connect: '1' } })
 }
 </script>

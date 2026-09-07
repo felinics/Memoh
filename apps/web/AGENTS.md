@@ -415,6 +415,8 @@ const form = useForm({
 
 ### Icon Usage
 
+Memoh 图标层的目标契约见 [`packages/icons/README.md`](../../packages/icons/README.md)。下述 Lucide / 品牌图标划分描述现有接入方式；新增光学校准或定制图标遵循该契约，在图标层实现，不在页面或菜单调用处补偿。现有直接导入在迁移期间保留。
+
 - **Lucide** (primary): Direct component imports from `lucide-vue-next`. Example: `import { Plus, Search, Bot } from 'lucide-vue-next'` → `<Plus class="size-4" />`. Used for all UI icons (actions, navigation, status indicators, etc.).
 - **`@memohai/icon`** (brand icons): Workspace package (`packages/icons/`) providing AI provider, search engine, and channel platform SVG icons as Vue components. Example: `import { Openai, Claude } from '@memohai/icon'`.
 - **Do NOT use FontAwesome** for new code. Legacy FontAwesome usage remains only in commented-out code blocks. Always use Lucide for UI icons and `@memohai/icon` for brand logos.

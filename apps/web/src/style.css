@@ -209,11 +209,11 @@
 }
 /* Docked (non-welcome) the composer sits under the conversation and should
  * read lighter than the centered welcome card: soften the edge to
- * --border-soft. Ordered before :focus-within so focus still wins. */
+ * --border-soft. Ordered before textarea focus so editing still wins. */
 [data-slot="input-group"].chat-composer-edge.chat-composer-docked:not(:has([aria-invalid="true"])) {
   --field-edge: var(--border-soft);
 }
-[data-slot="input-group"].chat-composer-edge:focus-within:not(:has([aria-invalid="true"])) {
+[data-slot="input-group"].chat-composer-edge:has(> textarea:focus):not(:has([aria-invalid="true"])) {
   --field-edge: var(--composer-edge-focus);
 }
 /* While voice owns the composer the box is a recording surface, not a text

@@ -228,7 +228,8 @@ import {
   Switch,
   toast,
 } from '@felinic/ui'
-import { MoreHorizontal, Plus, Settings, Trash2 } from 'lucide-vue-next'
+import { MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
+import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import {
   deleteBotsByBotIdAgentsById,
   getAcpProfiles,

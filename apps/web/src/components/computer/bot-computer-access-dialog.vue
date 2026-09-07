@@ -1,6 +1,9 @@
 <template>
   <Dialog v-model:open="open">
-    <DialogContent>
+    <DialogPanel
+      width="xl"
+      footer
+    >
       <DialogHeader class="pr-8">
         <DialogTitle class="break-words">
           {{ subjectName }}
@@ -10,27 +13,40 @@
         </DialogDescription>
       </DialogHeader>
 
-      <ComputerAccessList
-        :runtime="runtime"
-        :bot="bot"
-      />
+      <DialogBody>
+        <ComputerAccessList
+          :runtime="runtime"
+          :bot="bot"
+        />
+      </DialogBody>
 
       <DialogFooter>
+        <Button
+          v-if="subject === 'bot'"
+          variant="outline"
+          @click="addComputer"
+        >
+          <Plus />
+          {{ t('chat.continueOn.addComputer') }}
+        </Button>
         <Button @click="open = false">
           {{ t('computerAccess.done') }}
         </Button>
       </DialogFooter>
-    </DialogContent>
+    </DialogPanel>
   </Dialog>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   Button,
   Dialog,
-  DialogContent,
+  DialogPanel,
+  DialogBody,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -49,6 +65,12 @@ const props = defineProps<{
 const open = defineModel<boolean>('open', { default: false })
 
 const { t } = useI18n()
+const router = useRouter()
+
+function addComputer(): void {
+  open.value = false
+  void router.push({ name: 'runtimes', query: { connect: '1' } })
+}
 
 const subject = computed<'runtime' | 'bot'>(() => (props.runtime ? 'runtime' : 'bot'))
 const subjectName = computed(() => (

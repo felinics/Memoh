@@ -229,6 +229,7 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
@@ -254,7 +255,8 @@ import {
   Switch,
   toast,
 } from '@felinic/ui'
-import { Plus, Settings, Trash2 } from 'lucide-vue-next'
+import { Plus, Trash2 } from 'lucide-vue-next'
+import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import BotComputerAccessDialog from '@/components/computer/bot-computer-access-dialog.vue'
 import ConnectComputerDialog from '@/components/computer/connect-computer-dialog.vue'
@@ -479,6 +481,18 @@ async function startConnect(): Promise<void> {
     toast.error(resolveApiErrorMessage(error, t('runtimes.connectDialog.createFailed')))
   }
 }
+
+// Consume the add entry from chat once; reloading the page must not create
+// another credential. The existing dialog owns cancellation cleanup.
+const route = useRoute()
+const router = useRouter()
+watch(() => route.query.connect, async (connect) => {
+  if (route.name !== 'runtimes' || connect !== '1') return
+  const query = { ...route.query }
+  delete query.connect
+  await router.replace({ query })
+  await startConnect()
+}, { immediate: true })
 
 async function revokeRuntime(runtime: UserruntimeRuntime): Promise<void> {
   if (!runtime.id) return

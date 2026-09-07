@@ -100,6 +100,7 @@
 </template>
 
 <script setup lang="ts">
+import { ComputerIcon } from '@memohai/icon/ui'
 import { computed, inject, onBeforeUnmount, ref, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
@@ -115,7 +116,6 @@ import {
   Globe,
   Info,
   Keyboard,
-  Laptop,
   Mail,
   MousePointer2,
   Store,
@@ -247,7 +247,7 @@ const navGroups = computed<NavGroup[]>(() => [
     key: 'workspace',
     items: [
       { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
-      { title: t('sidebar.runtimes'), name: 'runtimes', icon: Laptop },
+      { title: t('sidebar.runtimes'), name: 'runtimes', icon: ComputerIcon },
       { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
     ],
   },

@@ -582,7 +582,6 @@
                   <DropdownMenuContent
                     class="w-56"
                     align="start"
-                    side="top"
                   >
                     <!-- The agent runtime is fixed once a session has any turns,
                        so the switcher only appears while the session is still
@@ -669,9 +668,13 @@
                       :disabled="!currentBotId || activeChatReadOnly || streaming || loadingMessages"
                       @select="fileInput?.click()"
                     >
-                      <Paperclip />
+                      <UploadIcon />
                       <span class="min-w-0 flex-1 truncate">{{ $t('chat.attachFiles') }}</span>
                     </DropdownMenuItem>
+                    <ComposerConnectorsMenu
+                      :bot-id="currentBotId || ''"
+                      :bot-name="currentBot?.name || currentBotId || ''"
+                    />
                   </DropdownMenuContent>
                 </DropdownMenu>
 
@@ -1030,10 +1033,11 @@
 </template>
 
 <script setup lang="ts">
+import { UploadIcon } from '@memohai/icon/ui'
+
 import { ref, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated, type Ref } from 'vue'
 import {
   ImagePlus,
-  Paperclip,
   Plus,
   ChevronDown,
   ArrowDown,
@@ -1066,6 +1070,7 @@ import { registerChatFileDropTarget } from '../composables/chat-file-drop-target
 import { readDroppedFiles } from '@/utils/dropped-files'
 import MessageItem from './message-item.vue'
 import ComposerContinueOn from './composer-continue-on.vue'
+import ComposerConnectorsMenu from './composer-connectors-menu.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
 import { useChatScroll } from '../composables/useChatScroll'
 import { useComposerPlacementMotion } from '../composables/useComposerPlacementMotion'

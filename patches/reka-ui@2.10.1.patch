@@ -1,0 +1,55 @@
+diff --git a/dist/Menu/MenuItemImpl.cjs b/dist/Menu/MenuItemImpl.cjs
+index 7471194c47f1005c088fde9c810f118cc33f063a..627824f6176bc0f3709e0b09f982937117d0e2ee 100644
+--- a/dist/Menu/MenuItemImpl.cjs
++++ b/dist/Menu/MenuItemImpl.cjs
+@@ -72,10 +72,11 @@ var MenuItemImpl_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ (
+ 					onPointermove: handlePointerMove,
+ 					onPointerleave: handlePointerLeave,
+ 					onFocus: _cache[0] || (_cache[0] = async (event) => {
++						const item = event.currentTarget;
+ 						await (0, vue.nextTick)();
+ 						if (event.defaultPrevented || _ctx.disabled) return;
+ 						isFocused.value = true;
+-						(0, vue.unref)(contentContext).highlightedElement.value = event.currentTarget;
++						(0, vue.unref)(contentContext).highlightedElement.value = item;
+ 					}),
+ 					onBlur: _cache[1] || (_cache[1] = async (event) => {
+ 						await (0, vue.nextTick)();
+diff --git a/dist/Menu/MenuItemImpl.js b/dist/Menu/MenuItemImpl.js
+index ecb3d95d837becbb14b3c812504ac58d5da415f1..91b746cbaace196d8fd66b6b5db3ef74a5e636e3 100644
+--- a/dist/Menu/MenuItemImpl.js
++++ b/dist/Menu/MenuItemImpl.js
+@@ -71,10 +71,11 @@ var MenuItemImpl_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ d
+ 					onPointermove: handlePointerMove,
+ 					onPointerleave: handlePointerLeave,
+ 					onFocus: _cache[0] || (_cache[0] = async (event) => {
++						const item = event.currentTarget;
+ 						await nextTick();
+ 						if (event.defaultPrevented || _ctx.disabled) return;
+ 						isFocused.value = true;
+-						unref(contentContext).highlightedElement.value = event.currentTarget;
++						unref(contentContext).highlightedElement.value = item;
+ 					}),
+ 					onBlur: _cache[1] || (_cache[1] = async (event) => {
+ 						await nextTick();
+diff --git a/src/Menu/MenuItemImpl.vue b/src/Menu/MenuItemImpl.vue
+index 2c29112c5cd98c91f32080fe23586f7de3dce34a..ef22a605cb4b96ca0007c1414c7bbccc1f43ba34 100644
+--- a/src/Menu/MenuItemImpl.vue
++++ b/src/Menu/MenuItemImpl.vue
+@@ -88,14 +88,15 @@ async function handlePointerLeave(event: PointerEvent) {
+       @pointerleave="handlePointerLeave"
+       @focus="
+         async (event: FocusEvent) => {
++          const item = event.currentTarget as HTMLElement;
+           await nextTick();
+           if (event.defaultPrevented || disabled) return;
+           isFocused = true;
+-          contentContext.highlightedElement.value = event.currentTarget as HTMLElement
++          contentContext.highlightedElement.value = item
+         }
+       "
+       @blur="
+         async (event: FocusEvent) => {
+           await nextTick();
+           if (event.defaultPrevented) return;
+           isFocused = false;

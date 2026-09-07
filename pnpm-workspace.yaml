@@ -18,3 +18,4 @@ onlyBuiltDependencies:
 patchedDependencies:
   dockview-core@7.0.2: patches/dockview-core@7.0.2.patch
   dockview-vue@7.0.2: patches/dockview-vue@7.0.2.patch
+  reka-ui@2.10.1: patches/reka-ui@2.10.1.patch

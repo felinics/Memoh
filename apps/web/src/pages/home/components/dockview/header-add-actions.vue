@@ -31,21 +31,21 @@
           v-if="canWorkspaceExec"
           @select="store.openTerminalInPanel(props.params.group.id)"
         >
-          <Terminal class="mr-2 size-3.5" />
+          <TerminalIcon />
           {{ t('chat.tabBarToolkit.newTerminal') }}
         </DropdownMenuItem>
         <DropdownMenuItem
           v-if="canSplitExtras"
           @select="store.openBrowser(props.params.group.id)"
         >
-          <Globe class="mr-2 size-3.5" />
+          <BrowserIcon />
           {{ t('chat.tabBarToolkit.openBrowser') }}
         </DropdownMenuItem>
         <DropdownMenuItem
           v-if="canSplitExtras"
           @select="store.openDisplay(props.params.group.id)"
         >
-          <Monitor class="mr-2 size-3.5" />
+          <ComputerIcon />
           {{ t('chat.tabBarToolkit.openDesktop') }}
         </DropdownMenuItem>
         <!-- Splitting is a desktop-only affordance: the mobile shell is a
@@ -53,11 +53,11 @@
         <template v-if="canSplit && !isMobile">
           <DropdownMenuSeparator v-if="canWorkspaceExec || canSplitExtras" />
           <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'right')">
-            <Columns2 class="mr-2 size-3.5" />
+            <SplitRightIcon />
             {{ t('chat.tabBarToolkit.splitRight') }}
           </DropdownMenuItem>
           <DropdownMenuItem @select="store.splitGroup(props.params.group.id, 'below')">
-            <Rows2 class="mr-2 size-3.5" />
+            <SplitDownIcon />
             {{ t('chat.tabBarToolkit.splitDown') }}
           </DropdownMenuItem>
         </template>
@@ -70,7 +70,8 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { Columns2, Globe, Monitor, Plus, Rows2, Terminal } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
+import { TerminalIcon, BrowserIcon, ComputerIcon, SplitRightIcon, SplitDownIcon } from '@memohai/icon/ui'
 import {
   Button,
   DropdownMenu,

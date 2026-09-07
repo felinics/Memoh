@@ -137,7 +137,8 @@ import {
   Switch,
   toast,
 } from '@felinic/ui'
-import { Zap, Settings, Trash2, Binary } from 'lucide-vue-next'
+import { Zap, Trash2, Binary } from 'lucide-vue-next'
+import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import { ConfirmPopover } from '@felinic/ui'
 import ModelDescriptionTooltip from '@/components/model-description-tooltip/index.vue'
 import { postModelsByIdTest, putModelsById } from '@memohai/sdk'

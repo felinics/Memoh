@@ -44,11 +44,10 @@
           >
         </div>
 
-        <div
-          :id="listboxId"
-          ref="scrollEl"
-          :class="virtualListboxClass"
-          role="listbox"
+        <MenuScrollArea
+          ref="scrollElArea"
+          layout="virtual"
+          :viewport-attrs="{ id: listboxId, role: 'listbox' }"
         >
           <div
             v-if="rows.length === 0"
@@ -113,7 +112,7 @@
               </button>
             </div>
           </div>
-        </div>
+        </MenuScrollArea>
       </div>
     </PopoverContent>
   </Popover>
@@ -132,7 +131,7 @@ import {
   PopoverTrigger,
   PopoverContent,
   selectTriggerClass,
-  virtualListboxClass,
+  MenuScrollArea,
 } from '@felinic/ui'
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -202,7 +201,8 @@ const props = withDefaults(defineProps<{
 const selected = defineModel<string>({ default: '' })
 const searchTerm = ref('')
 const open = ref(false)
-const scrollEl = ref<HTMLElement | null>(null)
+const scrollElArea = ref<InstanceType<typeof MenuScrollArea> | null>(null)
+const scrollEl = computed(() => scrollElArea.value?.viewportElement ?? null)
 
 const selectedOption = computed(() =>
   props.options.find((option) => option.value === selected.value),

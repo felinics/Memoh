@@ -17,7 +17,8 @@ import {
   Tabs, TabsContent, TabsList, TabsTrigger,
   TextButton,
 } from '@felinic/ui'
-import { Archive, ChevronDown, FolderOpen, GitFork, Home, Inbox, MoreHorizontal, Settings, SquarePen, Trash2 } from 'lucide-vue-next'
+import { Archive, ChevronDown, FolderOpen, GitFork, Home, Inbox, MoreHorizontal, SquarePen, Trash2 } from 'lucide-vue-next'
+import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
 

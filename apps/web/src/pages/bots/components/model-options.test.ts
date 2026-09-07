@@ -28,7 +28,14 @@ vi.mock('@felinic/ui', () => ({
   menuSearchHeaderClass: 'menu-search-header',
   menuSearchInputClass: 'menu-search-input',
   menuSeparatorClass: 'menu-separator',
-  virtualListboxClass: 'virtual-listbox',
+  MenuScrollArea: defineComponent({
+    props: ['viewportAttrs', 'layout'],
+    setup(props, { slots, expose }) {
+      const viewport = ref<HTMLElement | null>(null)
+      expose({ viewportElement: viewport })
+      return () => h('div', { ...props.viewportAttrs, ref: viewport }, slots.default?.())
+    },
+  }),
 }))
 
 vi.mock('lucide-vue-next', () => ({

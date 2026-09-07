@@ -801,11 +801,11 @@
     "pastedViewerTitle": "Pasted content",
     "agent": "Agent",
     "continueOn": {
-      "label": "Continue on",
-      "addComputer": "Add a computer",
+      "label": "Computers",
+      "addComputer": "Add computer",
       "manageAccess": "Manage access",
       "manageComputers": "Manage computers",
-      "noAccess": "This Bot has no computer access"
+      "noAccess": "No other computers authorized"
     },
     "computerLoading": "Loading computers",
     "computerLoadFailed": "Couldn’t load computers",
@@ -815,7 +815,8 @@
     "folderUnavailable": "Unavailable folder",
     "folderDetachDraft": "Start without a folder",
     "folderNewSession": "New session in {name}",
-    "attachFiles": "Attach files",
+    "manageConnectors": "Manage connectors",
+    "attachFiles": "Upload Files or Images",
     "dropToAttach": "Drop files here to add to chat",
     "dropFolderUnsupported": "Attachments can't be folders. Drop it on the Files panel instead.",
     "pdfTooLargeForNative": "This PDF exceeds 12MB, so it will be saved to the workspace as a path; the model can't view its content directly.",
