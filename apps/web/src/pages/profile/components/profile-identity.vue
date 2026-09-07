@@ -56,7 +56,10 @@
                 {{ $t('common.cancel') }}
               </Button>
             </DialogClose>
-            <Button @click="applyAvatar">
+            <Button
+              :loading="avatarValidating"
+              @click="applyAvatar"
+            >
               {{ $t('common.confirm') }}
             </Button>
           </DialogFooter>
@@ -133,9 +136,12 @@ import {
   DialogTitle,
   DialogTrigger,
   Input,
+  toast,
 } from '@felinic/ui'
 import { Check, Pencil, X } from 'lucide-vue-next'
 import { SettingsRow } from '@felinic/ui'
+import { useI18n } from 'vue-i18n'
+import { ref } from 'vue'
 
 const props = defineProps<{
   avatarUrl: string
@@ -149,6 +155,26 @@ const emit = defineEmits<{
   'update:displayName': [value: string]
   save: []
 }>()
+
+const { t } = useI18n()
+
+function isValidUrl(str: string): boolean {
+  try {
+    const url = new URL(str)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function isImageUrl(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(true)
+    img.onerror = () => resolve(false)
+    img.src = url
+  })
+}
 
 // ── Name inline editor ──
 const editing = ref(false)
@@ -180,13 +206,33 @@ function cancelName() {
 // ── Avatar editor (dialog) ──
 const avatarOpen = ref(false)
 const avatarDraft = ref('')
+const avatarValidating = ref(false)
 
 function onAvatarOpenChange(value: boolean) {
-  if (value) avatarDraft.value = props.avatarUrl
+  if (value) {
+    avatarDraft.value = props.avatarUrl
+    avatarValidating.value = false
+  }
 }
 
-function applyAvatar() {
-  emit('update:avatarUrl', avatarDraft.value.trim())
+async function applyAvatar() {
+  const url = avatarDraft.value.trim()
+
+  if (!isValidUrl(url)) {
+    toast.error(t('settings.avatarUrlInvalid'))
+    return
+  }
+
+  avatarValidating.value = true
+  const valid = await isImageUrl(url)
+  avatarValidating.value = false
+
+  if (!valid) {
+    toast.error(t('settings.avatarUrlNotImage'))
+    return
+  }
+
+  emit('update:avatarUrl', url)
   avatarOpen.value = false
   emit('save')
 }
