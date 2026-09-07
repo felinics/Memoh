@@ -968,6 +968,7 @@ import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, reconcileStoredEffort } from '
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
+import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
 import { useComposerPair } from '../composables/useComposerPair'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
@@ -2654,6 +2655,12 @@ const {
 } = useComposerLayout({
   continueOnVisible: showComputersMenu,
   continueOnExpanded,
+})
+
+useUnfocusedComposerInput({
+  textarea: textareaEl,
+  enabled: () => isActive.value && isVisible.value,
+  onPaste: handlePaste,
 })
 
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)
