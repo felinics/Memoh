@@ -1,5 +1,5 @@
 <template>
-  <ScrollArea class="h-full">
+  <ScrollArea class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
     <div class="px-4 py-3">
       <!-- No session -->
       <div

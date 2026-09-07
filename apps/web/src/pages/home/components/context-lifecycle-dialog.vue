@@ -1,6 +1,6 @@
 <template>
   <Dialog v-model:open="open">
-    <DialogPanel>
+    <DialogPanel @close-auto-focus="emit('closeAutoFocus', $event)">
       <ContextLifecycleContent />
     </DialogPanel>
   </Dialog>
@@ -11,4 +11,5 @@ import { Dialog, DialogPanel } from '@felinic/ui'
 import ContextLifecycleContent from './context-lifecycle-content.vue'
 
 const open = defineModel<boolean>('open', { default: false })
+const emit = defineEmits<{ closeAutoFocus: [event: Event] }>()
 </script>

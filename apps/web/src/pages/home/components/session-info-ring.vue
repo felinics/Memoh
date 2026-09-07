@@ -46,7 +46,7 @@
       </svg>
     </PopoverTrigger>
     <PopoverContent
-      class="w-80 p-0 max-h-[60vh] overflow-hidden"
+      class="flex w-80 flex-col p-0 max-h-[60vh] overflow-hidden"
       align="end"
       side="top"
       :side-offset="8"
@@ -68,11 +68,12 @@
   <ContextLifecycleDialog
     v-if="lifecycleEverOpened"
     v-model:open="lifecycleOpen"
+    @close-auto-focus="restoreTriggerFocus"
   />
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Popover, PopoverContent, PopoverTrigger } from '@felinic/ui'
 import SessionInfoPanel from './session-info-panel.vue'
@@ -102,11 +103,12 @@ function openLifecycle() {
   lifecycleOpen.value = true
 }
 
-// The dialog's previous focus target lives in the closed popover, so hand
-// focus back to the ring instead of letting it fall to the body.
-watch(lifecycleOpen, (isOpen) => {
-  if (!isOpen) triggerRef.value?.$el?.focus?.()
-})
+// The previous focus target lived in the closed popover. Restore focus only
+// after the dialog releases its focus trap, and override its default target.
+function restoreTriggerFocus(event: Event) {
+  event.preventDefault()
+  triggerRef.value?.$el?.focus?.()
+}
 
 // Hover opens without moving focus; a click or Enter on the trigger lets the
 // popover take focus so its actions are reachable from the keyboard.
