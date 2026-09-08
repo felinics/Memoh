@@ -1,11 +1,10 @@
-import { spring } from 'motion'
 import { animate } from 'motion/mini'
 
-// Keep the turn entrance and composer placement on the same non-bouncing spring.
+// Keep the turn entrance and composer placement on the same curve:
+// exponential ease-out — very fast start, extra-soft landing, no overshoot.
 export const CHAT_SEND_MOTION = {
-  type: spring,
-  bounce: 0,
-  duration: 0.5,
+  ease: [0.16, 1, 0.3, 1],
+  duration: 0.4,
 } as const
 
 export function animateTurnEntrance(

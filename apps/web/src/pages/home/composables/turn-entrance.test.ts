@@ -23,7 +23,7 @@ describe('latest-turn entrance', () => {
     expect(outer.style.minHeight).toBe('400px')
     expect(outer.style.overflow).toBe('clip')
     expect(animate).toHaveBeenCalledWith(inner, { transform: ['translateY(240px)', 'translateY(0px)'] }, expect.objectContaining({
-      type: expect.any(Function), bounce: 0, duration: 0.5,
+      ease: [0.16, 1, 0.3, 1], duration: 0.4,
     }))
     cancel()
     cancel()
