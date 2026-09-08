@@ -122,3 +122,29 @@ func TestAgentGenerateTrajectoryKeepsRejectedProviderInput(t *testing.T) {
 		t.Fatal("request metadata is not serializable")
 	}
 }
+
+func TestSpawnTrajectoryStartsWithChildTaskAndOwnRequestIdentity(t *testing.T) {
+	sink := &nativeTrajectorySink{}
+	adapter := NewSpawnAdapter(New(Deps{}))
+	adapter.SetLifecycleHolderFactory(func(context.Context, string) *contextfrag.LifecycleHolder {
+		holder := contextfrag.NewLifecycleHolder()
+		holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
+		return holder
+	})
+	provider := &atomicMockProvider{handler: func(int, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+	}}
+	_, err := adapter.Generate(trajectory.WithRequest(t.Context(), 41), agenttools.SpawnRunConfig{
+		Model: &sdk.Model{ID: "fixture", Provider: provider}, Query: "CHILD_TASK",
+		Identity: agenttools.SpawnIdentity{BotID: "bot", SessionID: "child-session"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.events) == 0 || sink.events[0].Stage != "spawn_trigger" || sink.events[0].Request != 0 {
+		t.Fatal("child trace omitted its trigger or inherited a parent request")
+	}
+	if len(sink.providerInputs()) != 1 {
+		t.Fatal("child provider request was not captured")
+	}
+}

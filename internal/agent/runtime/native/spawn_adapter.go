@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
@@ -101,6 +102,8 @@ func (s *SpawnAdapter) installLifecycleHolder(ctx context.Context, cfg tools.Spa
 	if holder := s.lifecycleHolder(ctx, cfg.Identity.BotID); holder != nil {
 		rc.ContextLifecycle = holder
 	}
+	ctx = rc.TrajectoryContext(ctx)
+	rc.RecordTrajectory(ctx, "spawn_trigger", nil, nil, trajectory.JSONBlock("trigger", "task", cfg.Query))
 }
 
 // installStepCommit resolves the step-commit callback for this run and wires

@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/context/trajectory"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
@@ -82,5 +85,23 @@ func TestPromptTrajectoryFollowsMaterializationThroughProvider(t *testing.T) {
 		if !strings.Contains(sink.stageText(stage), "ORIGINAL_TRIGGER") {
 			t.Fatalf("%s lost original trigger", stage)
 		}
+	}
+}
+
+func TestContinuationTrajectoryPreservesDiscardedPriorInput(t *testing.T) {
+	sink := &applicationTrajectorySink{}
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
+	base := native.RunConfig{RunID: "run", Query: "STALE_CONTINUATION_QUERY", ContextLifecycle: holder,
+		Identity: native.SessionContext{SessionID: "session"}}
+	_, err := (&Service{}).prepareContinuationRunConfig(t.Context(), base, historyfrag.ScopeFallback{}, contextfrag.Scope{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sink.stageText("continuation_input"), "STALE_CONTINUATION_QUERY") {
+		t.Fatal("continuation lost input before history reconstruction")
+	}
+	if strings.Contains(sink.stageText("prompt_built"), "STALE_CONTINUATION_QUERY") {
+		t.Fatal("continuation records stale query as part of rebuilt prompt")
 	}
 }

@@ -154,6 +154,10 @@ func runtimeSessionMeta(sess session.Thread) map[string]any {
 // staging outcome on the result so the round publishes the matching head.
 func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
 	req.RunID = runIDForChatRequest(req.RunID)
+	contextLifecycle := s.newContextLifecycleHolder(ctx, req.BotID)
+	captureConfig := native.RunConfig{RunID: req.RunID, Identity: native.SessionContext{BotID: req.BotID, SessionID: req.ThreadID}, ContextLifecycle: contextLifecycle}
+	ctx = captureConfig.TrajectoryContext(ctx)
+	recordChatTrigger(ctx, req)
 	if s.sessionRuntime != nil {
 		// External drivers block their turn inline on decisions; declare it
 		// before the first prompt so the manager resumes on terminal decision
@@ -197,8 +201,8 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 	req.Query = strings.TrimSpace(req.Query)
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, contextReq, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
+	recordContextStage(ctx, "external_context_sources", contextSections)
 	contextMarkdown, contextURI, contextManifest, contextFrags := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
-	contextLifecycle := s.newContextLifecycleHolder(ctx, req.BotID)
 	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)
@@ -353,6 +357,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 
 	emit(native.StreamEvent{Type: native.EventStart})
 
+	recordContextStage(ctx, "external_handoff", map[string]any{"prompt": req.Query, "context": contextMarkdown, "images": preparedAttachments.Images, "attachments": preparedAttachments.References, "runtime": runtimeType})
 	result, err := driver.Prompt(idleCtx, external.PromptInput{
 		BotID:                     req.BotID,
 		BotAgentID:                sess.BotAgentID,
@@ -591,6 +596,10 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		SessionType:     sessionmode.Schedule,
 	}
 
+	contextLifecycle := s.newContextLifecycleHolder(ctx, botID)
+	captureConfig := native.RunConfig{RunID: runID, Identity: native.SessionContext{BotID: botID, SessionID: payload.SessionID}, ContextLifecycle: contextLifecycle}
+	ctx = captureConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "schedule_trigger", payload)
 	schedulePrompt := native.GenerateSchedulePrompt(native.Schedule{
 		ID:          payload.ID,
 		Name:        payload.Name,
@@ -600,9 +609,9 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		Command:     payload.Command,
 	})
 	contextSections, memoryTrace := s.buildRuntimeContextSections(ctx, req, runtimeContextAgentID(runtimeType, runtimeMeta), projectPath)
+	recordContextStage(ctx, "external_context_sources", contextSections)
 	contextMarkdown, contextURI, contextManifest, contextFrags := runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 	stepTrace := newStepTraceTracker(nil)
-	contextLifecycle := s.newContextLifecycleHolder(ctx, botID)
 	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	if contextManifest != nil {
 		contextLifecycle.SetManifest(*contextManifest)
@@ -633,6 +642,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	reasoningTiming := newReasoningTimingTracker(nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, strings.TrimSpace(payload.ReasoningEffort))
 	defer idleCancel.Stop()
+	recordContextStage(ctx, "external_handoff", map[string]any{"prompt": schedulePrompt, "context": contextMarkdown, "runtime": runtimeType})
 	result, promptErr := driver.Prompt(idleCtx, external.PromptInput{
 		BotID:                     botID,
 		BotAgentID:                sess.BotAgentID,

@@ -382,11 +382,15 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 		return sdk.ToolResultPart{}, err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
-	return s.agent.ExecuteTool(ctx, resolved.RunConfig, sdk.ToolCall{
+	ctx = resolved.RunConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "approval_trigger", map[string]any{"decision": input.Decision, "option_id": input.OptionID, "reason": input.Reason, "tool_call_id": req.ToolCallID, "input": req.ToolInput})
+	result, executeErr := s.agent.ExecuteTool(ctx, resolved.RunConfig, sdk.ToolCall{
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
 		Input:      req.ToolInput,
 	})
+	recordContextStage(ctx, "approved_tool_result", result)
+	return result, executeErr
 }
 
 func (s *Service) storeToolResultAndContinue(
@@ -448,6 +452,8 @@ func (s *Service) continueToolApprovalSession(
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 
+	ctx = resolved.RunConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "approval_continuation", map[string]any{"decision": input.Decision, "tool_call_id": approval.ToolCallID})
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
 		resolved.RunConfig,

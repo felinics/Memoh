@@ -15,16 +15,22 @@ func (s *Service) prepareContinuationRunConfig(
 	summaryScope contextfrag.Scope,
 	eventCh chan<- WSStreamEvent,
 ) (native.RunConfig, error) {
+	ctx = base.TrajectoryContext(ctx)
+	recordContextStage(ctx, "continuation_input", map[string]any{"query": base.Query, "messages": base.Messages})
 	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, defaultMaxContextMinutes, 0)
 	if err != nil {
 		return native.RunConfig{}, err
 	}
+	recordContextStage(ctx, "history_loaded", loaded)
 	loaded = pruneHistoryForGateway(loaded)
+	recordContextStage(ctx, "history_gateway_pruned", loaded)
 	loaded, err = s.replaceCompactedMessages(ctx, summaryScope.SessionID, summaryScope, loaded, compactionArtifactBoundary{})
 	if err != nil {
 		return native.RunConfig{}, err
 	}
+	recordContextStage(ctx, "history_compacted", loaded)
 	loaded = projectInterruptedHistoryReasoning(loaded)
+	recordContextStage(ctx, "history_reasoning_projected", loaded)
 	messages, retained, _ := trimMessagesAndRecordsByTokens(s.logger, loaded, 0)
 	messages = sanitizeMessages(messages)
 	historyEstimates := make([]int, len(messages))
@@ -43,6 +49,7 @@ func (s *Service) prepareContinuationRunConfig(
 	// provider-valid. Applies to every continuation path that resumes after a
 	// deferred tool call.
 	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
+	base.RecordTrajectory(ctx, "continuation_repaired", nil, nil)
 	base.ContextCurrentUserMessageIndex = nil
 	base.ContextMemoryMessageIndex = nil
 	if base.ContextToolExchangePolicy == nil {

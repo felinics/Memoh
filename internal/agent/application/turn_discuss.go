@@ -145,6 +145,14 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		return
 	}
 	resolvedPayload, _ := json.Marshal(turn.DiscussRunResolvedPayload{RuntimeType: resolved.RuntimeType})
+	resolved.RunConfig.RunID = h.id
+	resolved.RunConfig.Identity.BotID = cmd.BotID
+	resolved.RunConfig.Identity.SessionID = cmd.ThreadID
+	if resolved.RunConfig.ContextLifecycle == nil {
+		resolved.RunConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID)
+	}
+	ctx = resolved.RunConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "discuss_trigger", map[string]any{"messages": cmd.DiscussMessages, "images": cmd.DiscussImageRefs, "addressed": cmd.DiscussAddressed})
 	if !h.emit(turn.DiscussEventRunResolved, resolvedPayload) {
 		return
 	}
@@ -236,6 +244,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		budgetTokens = s.contextAbsoluteMaxTokens()
 	}
 	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, budgetTokens)
+	recordContextStage(ctx, "discuss_admitted", map[string]any{"messages": admitted, "selection": admission})
 	if admission.ProtectedOverflow {
 		s.logger.Error("context_admission_rejected",
 			slog.String("path", "discuss_turn"),
@@ -595,6 +604,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 	// ACP resolution carries no model window, so the prompt is budgeted by
 	// the absolute cap before any concatenation (CM-ADM-001).
 	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, s.contextAbsoluteMaxTokens())
+	recordContextStage(ctx, "discuss_admitted", map[string]any{"messages": admitted, "selection": admission})
 	if admission.ProtectedOverflow {
 		s.logger.Error("context_admission_rejected",
 			slog.String("path", "discuss_agent"),

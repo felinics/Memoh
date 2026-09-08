@@ -393,6 +393,8 @@ func (s *Service) continueUserInputSession(
 		return err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
+	ctx = resolved.RunConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "user_input_trigger", map[string]any{"answers": input.Answers, "text": input.TextAnswer, "canceled": input.Canceled, "reason": input.Reason, "tool_call_id": req.ToolCallID, "result": req.Result})
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
