@@ -23,7 +23,7 @@ export function nativeScrollTo(
   const target = Math.min(Math.max(top, 0), Math.max(0, root.scrollHeight - root.clientHeight))
   const stationary = Math.abs(root.scrollTop - target) < 1
   root.addEventListener('scrollend', finish)
-  if (!('onscrollend' in root)) {
+  if (!Reflect.has(root, 'onscrollend')) {
     root.addEventListener('scroll', onScroll, { passive: true })
     onScroll()
   }
