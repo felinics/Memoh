@@ -874,14 +874,14 @@
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="2.75"
+                            stroke-width="2.5"
                             stroke-linecap="round"
                             stroke-linejoin="round"
                             class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
                             :class="streaming ? 'opacity-0' : 'opacity-100'"
                           >
-                            <path d="M12 19.5 V5" />
-                            <path d="M6 10.5 L12 4.5 L18 10.5" />
+                            <path d="M12 19 V5.75" />
+                            <path d="M6.5 10.5 L12 5 L17.5 10.5" />
                           </svg>
                           <svg
                             viewBox="0 0 24 24"
