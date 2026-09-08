@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"regexp"
 	"strconv"
@@ -27,7 +28,7 @@ const (
 )
 
 // LogSink receives script output line by line. Both streams are logs only;
-// the runner never parses them for results (WD-EXEC-002).
+// the runner never parses them for results.
 type LogSink interface {
 	Log(stream, line string)
 }
@@ -59,10 +60,13 @@ type RunSpec struct {
 	Candidate string
 	Platform  Platform
 	Timeout   time.Duration
-	// ExtraEnv entries (NPM_MIRROR=... and friends) are passed through as-is.
+	// ExtraEnv overrides the explicitly allowed mirror settings only.
 	ExtraEnv []string
 	// WorkDir defaults to "/".
 	WorkDir string
+	// Receipt freezes the non-secret publication identity and prior state for
+	// recovery if the bridge stream or Server stops before state is committed.
+	Receipt *OperationReceipt
 }
 
 // Result is what a successful run produced. Version and Entrypoints are
@@ -75,11 +79,17 @@ type Result struct {
 	Version     string
 	Entrypoints map[string]string
 	Raw         json.RawMessage
+	Receipt     *OperationReceipt `json:"-"`
 }
 
 // ErrLocked is returned when another run currently holds the dependency's
 // workspace lock (prelude exit status 75).
 var ErrLocked = errors.New("dependency operation already in progress")
+
+// ErrOperationUncertain means the stream ended before process exit was
+// confirmed. The workspace operation may still be running; retain its state
+// and reconcile owner liveness before retrying.
+var ErrOperationUncertain = errors.New("dependency operation outcome is unknown")
 
 // ExitError reports a script that exited with a non-zero status.
 type ExitError struct {
@@ -96,18 +106,19 @@ func (e *ExitError) Error() string {
 	return "dependency script exited with status " + strconv.Itoa(e.Code) + ": " + tail
 }
 
+// scriptExecCommand is the process the runner starts inside the workspace;
+// the wrapped script arrives on its stdin. ScriptPreview
+// reports it so the UI shows exactly how the script is executed.
+var scriptExecCommand = "exec sh -c " + shellQuote(scriptExecWrapper)
+
 const (
 	// defaultRunTimeout applies when RunSpec.Timeout is unset; callers are
 	// expected to pass the catalog timeout for the action.
 	defaultRunTimeout = time.Duration(catalog.DefaultInstallTimeout) * time.Second
-	// lockStaleGrace is added to the script timeout to derive
-	// MEMOH_DEP_LOCK_STALE_SECONDS: a lock older than that cannot belong to a
-	// run that is still within its own timeout.
-	lockStaleGrace  = 5 * time.Minute
-	stderrTailLimit = 4096
-	cleanupTimeout  = 15 * time.Second
-	defaultTmpDir   = "/tmp"
-	defaultWorkDir  = "/"
+	stderrTailLimit   = 4096
+	cleanupTimeout    = 15 * time.Second
+	defaultTmpDir     = "/tmp"
+	defaultWorkDir    = "/"
 )
 
 // shellLineRef matches the `sh: line N:` (bash) and `sh: N:` (dash, ash)
@@ -115,16 +126,14 @@ const (
 var shellLineRef = regexp.MustCompile(`^((?:\S*/)?sh: (?:line )?)(\d+)(:)`)
 
 // Run executes spec.Script inside the workspace through client. The script is
-// fed over stdin behind the prelude (design §5.1, §5.3), its output is
+// fed over stdin behind the prelude, its output is
 // forwarded to sink line by line, and on success the structured result file
 // is read back and deleted. A nil sink discards the logs.
 //
-// A non-zero exit returns *ExitError, except status 75 which returns
-// ErrLocked. Stream failures and context cancellation return the underlying
-// error. The result file is removed in every case; the lock directory only
-// once the process has exited, because a cancelled stream does not stop the
-// script inside the workspace and the lock must keep protecting it until the
-// prelude's stale rule (timeout plus five minutes) reclaims it.
+// A non-zero exit returns *ExitError; the prelude busy signal returns
+// ErrLocked. Stream failures and cancellation before EXIT wrap both the
+// underlying error and ErrOperationUncertain, retaining the result and lock.
+// A later discovery checks the owner process before recovery or retry.
 func Run(ctx context.Context, client *bridge.Client, spec RunSpec, sink LogSink) (Result, error) {
 	if client == nil {
 		return Result{}, errors.New("workspacedeps: bridge client is nil")
@@ -156,52 +165,78 @@ func Run(ctx context.Context, client *bridge.Client, spec RunSpec, sink LogSink)
 		}
 	}
 
-	resultPath, err := newResultPath(spec.Platform.TmpDir, spec.DepID)
+	var receipt *OperationReceipt
+	var resultPath string
+	var err error
+	if spec.Receipt != nil && spec.Action != catalog.ActionCheckUpdate && spec.Action != catalog.ActionVersion {
+		receipt, err = prepareReceipt(ctx, client, spec)
+		if err == nil {
+			resultPath = path.Join(receipt.Directory, "result.json")
+		}
+	} else {
+		// Read-only checks cannot replace a recoverable mutation's receipt.
+		resultPath, err = newResultPath(spec.Platform.TmpDir, spec.DepID)
+	}
 	if err != nil {
 		return Result{}, err
 	}
-	// The lock is only removed once the process has demonstrably exited. If
-	// the stream breaks first the script may still be running inside the
-	// workspace, and if the prelude reported the lock as taken it belongs to
-	// someone else; in both cases the directory stays and the stale-lock rule
-	// in the prelude reclaims it later.
-	removeLock := false
-	defer func() { cleanupRun(ctx, client, resultPath, lock, removeLock) }()
-
+	spec.Receipt = receipt
+	confirmedExit := false
+	defer func() {
+		if receipt == nil && confirmedExit {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+			defer cancel()
+			_, _ = client.ExecWithOptions(cleanupCtx, "rm -f -- "+shellQuote(resultPath), "", int32(cleanupTimeout/time.Second), nil, bridge.ExecOptions{})
+		}
+	}()
+	uncertain := func(err error) (Result, error) {
+		return Result{Receipt: receipt}, fmt.Errorf("workspacedeps: script for %s: %w: %w", spec.DepID, ErrOperationUncertain, err)
+	}
 	env := buildEnv(spec, resultPath, timeout)
-	stream, err := client.ExecStreamWithOptions(ctx, "exec sh -s", workDir, int32(timeout/time.Second), bridge.ExecOptions{Env: env})
+	stream, err := client.ExecStreamWithOptions(ctx, scriptExecCommand, workDir, int32(timeout/time.Second), bridge.ExecOptions{Env: env})
 	if err != nil {
+		_ = CleanupReceipt(ctx, client, receipt)
 		return Result{}, fmt.Errorf("workspacedeps: start script for %s: %w", spec.DepID, err)
 	}
 	defer func() { _ = stream.Close() }()
 
 	if err := stream.SendStdin([]byte(WrapScript(spec.Script))); err != nil && !errors.Is(err, io.EOF) {
-		return Result{}, fmt.Errorf("workspacedeps: send script for %s: %w", spec.DepID, err)
+		return uncertain(err)
 	}
 	if err := stream.CloseSend(); err != nil && !errors.Is(err, io.EOF) {
-		return Result{}, fmt.Errorf("workspacedeps: close script stdin for %s: %w", spec.DepID, err)
+		return uncertain(err)
 	}
 
 	exitCode, err := forwardOutput(stream, sink)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return Result{}, fmt.Errorf("workspacedeps: script for %s interrupted: %w", spec.DepID, ctxErr)
+			return uncertain(ctxErr)
 		}
-		return Result{}, fmt.Errorf("workspacedeps: script stream for %s: %w", spec.DepID, err)
+		return uncertain(err)
 	}
+	confirmedExit = true
 	switch {
-	case exitCode.code == exitCodeLocked:
+	case exitCode.code == exitCodeLocked && !exitCode.acquired:
+		_ = CleanupReceipt(ctx, client, receipt)
 		return Result{ExitCode: exitCode.code}, ErrLocked
 	case exitCode.code != 0:
-		removeLock = true
-		return Result{ExitCode: exitCode.code}, &ExitError{Code: exitCode.code, StderrTail: exitCode.stderrTail}
+		if receipt != nil {
+			receipt.ExitCode, receipt.Completed = exitCode.code, true
+		}
+		return Result{ExitCode: exitCode.code, Receipt: receipt}, &ExitError{Code: exitCode.code, StderrTail: exitCode.stderrTail}
 	}
-	removeLock = true
+	if receipt != nil {
+		receipt.ExitCode, receipt.Completed = 0, true
+	}
 
 	result, err := readResult(ctx, client, resultPath)
 	if err != nil {
-		return Result{}, fmt.Errorf("workspacedeps: read result for %s: %w", spec.DepID, err)
+		return uncertain(fmt.Errorf("read result: %w", err))
 	}
+	if receipt != nil {
+		receipt.Result = result
+	}
+	result.Receipt = receipt
 	return result, nil
 }
 
@@ -221,7 +256,7 @@ func (s RunSpec) validate() error {
 
 // newResultPath picks a unique result file below the target's temporary
 // directory. It lives outside MEMOH_DEP_HOME on purpose: that tree only holds
-// data (WD-FS-002) and temporary files must not end up in snapshots.
+// data and temporary files must not end up in snapshots.
 func newResultPath(tmpDir, depID string) (string, error) {
 	var nonce [8]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -233,9 +268,8 @@ func newResultPath(tmpDir, depID string) (string, error) {
 	return path.Join(tmpDir, "memoh-dep-"+depID+"-"+hex.EncodeToString(nonce[:])+".json"), nil
 }
 
-// buildEnv assembles the script environment from design §5.4.
+// buildEnv assembles the allowlisted script environment.
 func buildEnv(spec RunSpec, resultPath string, timeout time.Duration) []string {
-	staleSeconds := int64((timeout + lockStaleGrace) / time.Second)
 	env := []string{
 		"MEMOH_DEP_ID=" + spec.DepID,
 		"MEMOH_DEP_ACTION=" + string(spec.Action),
@@ -245,16 +279,33 @@ func buildEnv(spec RunSpec, resultPath string, timeout time.Duration) []string {
 		"MEMOH_DEP_CURRENT_VERSION=" + spec.CurrentVersion,
 		"MEMOH_DEP_RESULT=" + resultPath,
 		"MEMOH_DEP_CANDIDATE=" + spec.Candidate,
-		"MEMOH_DEP_LOCK_STALE_SECONDS=" + strconv.FormatInt(staleSeconds, 10),
+		"MEMOH_DEP_TIMEOUT_SECONDS=" + strconv.FormatInt(int64(timeout/time.Second), 10),
 		"DEBIAN_FRONTEND=noninteractive",
 		"CI=1",
 	}
+	if spec.Receipt != nil {
+		env = append(env, "MEMOH_DEP_OPERATION_DIR="+spec.Receipt.Directory)
+	}
 	env = append(env, spec.Platform.env()...)
-	return append(env, spec.ExtraEnv...)
+	for _, name := range mirrorEnvNames {
+		value, configured := os.LookupEnv(name)
+		for _, item := range spec.ExtraEnv {
+			if key, override, ok := strings.Cut(item, "="); ok && key == name {
+				value, configured = override, true
+			}
+		}
+		if configured {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
 }
+
+var mirrorEnvNames = []string{"NODEJS_MIRROR", "UV_RELEASES_URL", "NPM_MIRROR", "UV_PYTHON_INSTALL_MIRROR"}
 
 // exitStatus is what forwardOutput learns from the EXIT message.
 type exitStatus struct {
+	acquired   bool
 	code       int
 	stderrTail string
 }
@@ -265,7 +316,12 @@ type exitStatus struct {
 func forwardOutput(stream *bridge.ExecStream, sink LogSink) (exitStatus, error) {
 	stdout := newLineSplitter(func(line string) { sink.Log(StreamStdout, line) })
 	var tail tailBuffer
+	acquired := false
 	stderr := newLineSplitter(func(line string) {
+		if line == lockAcquiredMarker {
+			acquired = true
+			return
+		}
 		tail.write(line)
 		sink.Log(StreamStderr, rewriteShellLine(line))
 	})
@@ -282,7 +338,7 @@ func forwardOutput(stream *bridge.ExecStream, sink LogSink) (exitStatus, error) 
 		case pb.ExecOutput_EXIT:
 			stdout.flush()
 			stderr.flush()
-			return exitStatus{code: int(msg.GetExitCode()), stderrTail: tail.String()}, nil
+			return exitStatus{code: int(msg.GetExitCode()), stderrTail: tail.String(), acquired: acquired}, nil
 		}
 	}
 }
@@ -389,18 +445,4 @@ func readResult(ctx context.Context, client *bridge.Client, resultPath string) (
 		Entrypoints: decoded.Entrypoints,
 		Raw:         json.RawMessage(raw),
 	}, nil
-}
-
-// cleanupRun removes the result file and, when removeLock is set, the lock
-// directory. It runs on a detached context so a cancelled run still cleans
-// up, and failures are ignored: leftovers are harmless and reclaimed later.
-func cleanupRun(ctx context.Context, client *bridge.Client, resultPath, lock string, removeLock bool) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-	defer cancel()
-	command := "rm -f -- " + shellQuote(resultPath)
-	if removeLock {
-		command += "; rmdir -- " + shellQuote(lock) + " 2>/dev/null"
-	}
-	command += "; true"
-	_, _ = client.ExecWithOptions(cleanupCtx, command, "", int32(cleanupTimeout/time.Second), nil, bridge.ExecOptions{})
 }

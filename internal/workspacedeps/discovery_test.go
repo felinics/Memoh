@@ -1,9 +1,11 @@
 package workspacedeps
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -253,7 +255,7 @@ func TestDiscoverIgnoresOwnShims(t *testing.T) {
 	}
 }
 
-func TestDiscoverUsesVersionScriptWhenConfigured(t *testing.T) {
+func TestDiscoverNeverRunsUnapprovedVersionScript(t *testing.T) {
 	f := newDiscoveryFixture(t)
 	withPath(t, f.bin)
 	entrypoint := filepath.Join(f.bin, "tool-b")
@@ -264,8 +266,8 @@ func TestDiscoverUsesVersionScriptWhenConfigured(t *testing.T) {
 	if obs.Source != SourceManaged {
 		t.Fatalf("Source = %q, want managed", obs.Source)
 	}
-	if obs.Version != "7.7.7" {
-		t.Errorf("Version = %q, want 7.7.7 from scripts.version (state.json said 0.0.1)", obs.Version)
+	if obs.Version != "0.0.1" {
+		t.Errorf("Version = %q, want recorded version without running scripts.version", obs.Version)
 	}
 	if obs.Err != "" {
 		t.Errorf("Err = %q, want empty", obs.Err)
@@ -277,6 +279,31 @@ func TestDiscoverUsesVersionScriptWhenConfigured(t *testing.T) {
 	// The read-only version probe must not create a home for a dependency.
 	if _, err := os.Stat(VersionsDir(Home(f.dataRoot, "tool-b"))); err == nil {
 		t.Error("version probe created versions/ under the dependency home")
+	}
+}
+
+// TestDiscoverReportsLockDirectory covers the lock probe the service uses to
+// tell an interrupted operation from one another instance is still running:
+// the lock directory is reported per dependency and says nothing about
+// presence.
+func TestDiscoverReportsLockDirectory(t *testing.T) {
+	f := newDiscoveryFixture(t)
+	if err := os.MkdirAll(f.lockDir("tool-a"), 0o750); err != nil {
+		t.Fatalf("mkdir lock: %v", err)
+	}
+
+	observed := f.discover(t, "tool-a", "tool-b")
+	if a := observed["tool-a"]; !a.LockHeld || a.Present {
+		t.Errorf("tool-a = %+v, want the lock reported for an absent dependency", a)
+	}
+	if b := observed["tool-b"]; b.LockHeld {
+		t.Errorf("tool-b = %+v, want no lock", b)
+	}
+	if err := os.Remove(f.lockDir("tool-a")); err != nil {
+		t.Fatalf("rmdir lock: %v", err)
+	}
+	if a := f.discover(t, "tool-a")["tool-a"]; a.LockHeld {
+		t.Errorf("tool-a after the lock is gone = %+v", a)
 	}
 }
 
@@ -299,6 +326,7 @@ func TestParseDiscoveryOutputToolkitPrecedence(t *testing.T) {
 	dep := catalog.Dependency{ID: "codex", Provides: []string{"codex"}}
 	stdout := strings.Join([]string{
 		"__MEMOH_DEP__\tcodex",
+		"__MEMOH_LOCK__\tcodex",
 		"__MEMOH_TOOLKIT__\tcodex\t/opt/memoh/toolkit/bin/codex",
 		"__MEMOH_VERSION_BEGIN__\t/opt/memoh/toolkit/bin/codex",
 		"codex-cli 0.150.0",
@@ -322,6 +350,9 @@ func TestParseDiscoveryOutputToolkitPrecedence(t *testing.T) {
 	}
 	if len(obs.Candidates) != 2 || obs.Candidates[1].Source != SourcePath || obs.Candidates[1].Version != "0.151.0-rc.1" {
 		t.Errorf("Candidates = %+v, want toolkit then PATH with a pre-release version", obs.Candidates)
+	}
+	if !obs.LockHeld {
+		t.Error("LockHeld = false, want the lock marker honoured")
 	}
 
 	// The toolkit bin being first on PATH is the usual case: same path, one
@@ -358,12 +389,37 @@ func TestExtractVersion(t *testing.T) {
 	}
 }
 
-func TestEntrypointSedPattern(t *testing.T) {
-	if _, ok := entrypointSedPattern("has space"); ok {
-		t.Error("pattern accepted a command name with a space")
+func TestDiscoveryManagedEntrypointDoesNotDependOnJSONFieldOrder(t *testing.T) {
+	f := newDiscoveryFixture(t)
+	primary := writeExecutable(t, f.bin, "quoted-path", "echo 2.3.4\n")
+	home := Home(f.dataRoot, "tool-a")
+	if err := os.MkdirAll(home, 0o750); err != nil {
+		t.Fatal(err)
 	}
-	pattern, ok := entrypointSedPattern("python3.12")
-	if !ok || !strings.Contains(pattern, `python3\.12`) {
-		t.Errorf("pattern = %q, ok = %v; want dots escaped", pattern, ok)
+	// A previous installation with the same command key follows the current
+	// entrypoints. A greedy shell regex used to read the previous path.
+	state := `{"entrypoints":{"tool-a":` + strconv.Quote(primary) + `},"version":"2.0.0","previous":{"entrypoints":{"tool-a":"/missing-old-copy"}}}`
+	if err := os.WriteFile(StatePath(home), []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	obs := f.discover(t, "tool-a")["tool-a"]
+	if obs.Source != SourceManaged || obs.Command != primary || obs.Version != "2.3.4" {
+		t.Fatalf("current JSON entrypoint was not validated/probed: %+v", obs)
+	}
+}
+
+func TestVersionProbeTimeoutKeepsPresenceAndOtherCandidates(t *testing.T) {
+	obs := Observed{Present: true, Command: "/managed", Version: "1.0.0", Candidates: []Candidate{
+		{Source: SourceManaged, Path: "/managed", Version: "1.0.0"},
+		{Source: SourcePath, Path: "/working"},
+	}}
+	probeCandidateVersions(context.Background(), &obs, map[string]versionProbeResult{}, func(_ context.Context, command string) (string, error) {
+		if command == "/managed" {
+			return "", context.DeadlineExceeded
+		}
+		return "tool 2.0.0", nil
+	})
+	if !obs.Present || obs.Version != "1.0.0" || obs.Candidates[1].Version != "2.0.0" || !strings.Contains(obs.Err, "deadline exceeded") {
+		t.Fatalf("one timed-out probe discarded usable installations: %+v", obs)
 	}
 }

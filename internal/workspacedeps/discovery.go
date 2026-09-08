@@ -14,7 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
-// State is the on-disk state.json of a managed dependency (design §6). It is
+// State is the on-disk state.json of a managed dependency. It is
 // the source of truth for what the Server installed.
 type State struct {
 	SourceURL          string                `json:"source_url,omitempty"`
@@ -85,13 +85,23 @@ type Observed struct {
 	// Candidates lists every copy found, in precedence order, so callers can
 	// prefer a copy at the pinned version over the default winner.
 	Candidates []Candidate
+	// LockHeld reports a live lock owner, or a recent legacy lock whose
+	// owner cannot be determined safely. An old mtime cannot override a
+	// live process identity.
+	LockHeld bool
+	// LockAbandoned means the lock remains on disk but its recorded owner
+	// is no longer alive. It permits immediate recovery without a time guess.
+	LockAbandoned bool
+	// Receipt is the current workspace operation's durable completion data.
+	Receipt *OperationReceipt
 	// Err records non-fatal problems such as an unreadable state.json or a
 	// failed version probe. It never prevents discovery from returning.
 	Err string
 }
 
 const (
-	discoveryTimeout = 2 * time.Minute
+	discoveryTimeout    = 2 * time.Minute
+	versionProbeTimeout = 5 * time.Second
 
 	markerPrefix       = "__MEMOH_"
 	markerDep          = "__MEMOH_DEP__"
@@ -100,13 +110,15 @@ const (
 	markerManaged      = "__MEMOH_MANAGED__"
 	markerToolkit      = "__MEMOH_TOOLKIT__"
 	markerPath         = "__MEMOH_PATH__"
+	markerLock         = "__MEMOH_LOCK__"
+	markerAbandoned    = "__MEMOH_LOCK_ABANDONED__"
 	markerVersionBegin = "__MEMOH_VERSION_BEGIN__"
 	markerVersionEnd   = "__MEMOH_VERSION_END__"
 	markerEnd          = "__MEMOH_END__"
 )
 
 // versionPattern extracts the first semantic-version-looking token from a
-// `--version` output (WD-CAT-005). An optional pre-release suffix is kept so
+// `--version` output. An optional pre-release suffix is kept so
 // a release candidate never passes for the release it precedes.
 var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?`)
 
@@ -114,19 +126,7 @@ var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?`)
 // runs without `set -e`: a failing probe must not abort discovery of the
 // remaining dependencies. Paths are separated from other fields by tabs so
 // paths with spaces survive.
-const discoveryPreamble = `memoh_probed='
-'
-memoh_version() {
-  case "$memoh_probed" in *"
-$1
-"*) return 0 ;; esac
-  memoh_probed="$memoh_probed$1
-"
-  printf '__MEMOH_VERSION_BEGIN__\t%s\n' "$1"
-  "$1" --version 2>&1 | head -n 3
-  printf '\n__MEMOH_VERSION_END__\n'
-}
-memoh_resolve() {
+const discoveryPreamble = lockProbeHelpers + `memoh_resolve() {
   memoh_p=$(command -v "$1" 2>/dev/null) || memoh_p=''
   case "$memoh_p" in
     /*) printf '%s\n' "$memoh_p" ;;
@@ -136,14 +136,14 @@ memoh_resolve() {
 `
 
 // Discover inspects the workspace for every dependency in depIDs with a
-// single exec (design §8.2): it reads state.json, checks the toolkit fallback
-// path and PATH for each provided command, and probes `--version` on every
-// distinct copy of the primary command. Dependencies whose manifest sets
-// scripts.version are probed afterwards through Run, one call per copy.
+// read-only path scan: it reads state.json, checks the toolkit fallback and
+// PATH, then bounds each distinct primary command's --version probe separately.
+// Definitions with scripts.version use recorded state instead; catalog scripts
+// require a separately authorized operation and never run during discovery.
 //
 // Unknown dependency ids are an error; everything else is reported per
 // dependency through Observed.Err.
-func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, dataRoot string, depIDs []string, platform Platform) (map[string]Observed, error) {
+func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, dataRoot string, depIDs []string, _ Platform) (map[string]Observed, error) {
 	if client == nil {
 		return nil, errors.New("workspacedeps: bridge client is nil")
 	}
@@ -163,6 +163,8 @@ func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, 
 		return observed, nil
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
+	defer cancel()
 	script := buildDiscoveryScript(dataRoot, deps)
 	result, err := client.ExecWithOptions(ctx, "exec sh -s", defaultWorkDir, int32(discoveryTimeout/time.Second), []byte(script), bridge.ExecOptions{})
 	if err != nil {
@@ -173,10 +175,33 @@ func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, 
 		return nil, fmt.Errorf("workspacedeps: discovery script exited %d before finishing: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
 	}
 
+	// Decode state in Go before asking the workspace to validate the exact
+	// entrypoint. JSON field order and escaping never affect path selection.
+	if err := probeManagedEntrypoints(ctx, client, deps, probes); err != nil {
+		return nil, err
+	}
+	versionProbes := map[string]versionProbeResult{}
 	for _, dep := range deps {
 		obs := resolveObserved(dep, probes[dep.ID])
-		if _, scripted := cat.Script(dep.ID, catalog.ActionVersion); scripted {
-			probeVersionsWithScript(ctx, client, cat, dataRoot, dep, platform, &obs)
+		if dep.Scripts.Version == "" {
+			probeCandidateVersions(ctx, &obs, versionProbes, func(ctx context.Context, command string) (string, error) {
+				probeCtx, cancel := context.WithTimeout(ctx, versionProbeTimeout)
+				defer cancel()
+				result, err := client.ExecWithOptions(probeCtx, "exec "+shellQuote(command)+" --version", defaultWorkDir, int32(versionProbeTimeout/time.Second), nil, bridge.ExecOptions{})
+				if err != nil {
+					return "", err
+				}
+				if result.ExitCode != 0 {
+					return "", fmt.Errorf("exit status %d", result.ExitCode)
+				}
+				return result.Stdout + "\n" + result.Stderr, nil
+			})
+		}
+		receipt, receiptErr := readOperationReceipt(ctx, client, Home(dataRoot, dep.ID), dep.ID)
+		obs.Receipt = receipt
+		obs.LockAbandoned = !obs.LockHeld && receipt != nil && !receipt.Completed
+		if receiptErr != nil {
+			obs.Err = strings.Trim(strings.Join([]string{obs.Err, "operation receipt: " + receiptErr.Error()}, "; "), "; ")
 		}
 		observed[dep.ID] = obs
 	}
@@ -189,47 +214,29 @@ func buildDiscoveryScript(dataRoot string, deps []catalog.Dependency) string {
 	b.WriteString(discoveryPreamble)
 	shimDir := ShimDir(dataRoot)
 	for _, dep := range deps {
-		writeDependencyProbe(&b, dep, StatePath(Home(dataRoot, dep.ID)), shimDir)
+		home := Home(dataRoot, dep.ID)
+		writeDependencyProbe(&b, dep, StatePath(home), lockPath(home, dep.ID), shimDir)
 	}
 	b.WriteString("printf '" + markerEnd + "\\n'\n")
 	return b.String()
 }
 
-func writeDependencyProbe(b *strings.Builder, dep catalog.Dependency, statePath, shimDir string) {
-	primary := dep.Provides[0]
-	// Dependencies with scripts.version are probed by Run afterwards; the
-	// inline `--version` probe would be wrong for them (WD-CAT-005).
-	inlineVersion := dep.Scripts.Version == ""
-
+func writeDependencyProbe(b *strings.Builder, dep catalog.Dependency, statePath, lock, shimDir string) {
 	fmt.Fprintf(b, "printf '%s\\t%%s\\n' %s\n", markerDep, shellQuote(dep.ID))
+	// Probe the same stable kernel lock used by execution and finalization;
+	// file presence alone does not imply that an operation is still running.
+	fmt.Fprintf(b, "if memoh_lock_active %s; then printf '%s\\t%%s\\n' %s; elif [ -d %s ]; then printf '%s\\t%%s\\n' %s; fi\n", shellQuote(lock), markerLock, shellQuote(dep.ID), shellQuote(lock), markerAbandoned, shellQuote(dep.ID))
 	fmt.Fprintf(b, "memoh_state=%s\n", shellQuote(statePath))
 	b.WriteString("if [ -f \"$memoh_state\" ]; then\n")
 	b.WriteString("  printf '" + markerStateBegin + "\\n'\n")
 	b.WriteString("  cat \"$memoh_state\"\n")
 	b.WriteString("  printf '\\n" + markerStateEnd + "\\n'\n")
-	if pattern, ok := entrypointSedPattern(primary); ok {
-		// state.json is written by the Server with encoding/json, so a
-		// single-line key/value match is enough to find the primary entrypoint
-		// without a JSON parser in sh. The Go side re-checks the path against
-		// the decoded state before trusting the answer.
-		fmt.Fprintf(b, "  memoh_ep=$(sed -n %s \"$memoh_state\" 2>/dev/null | head -n 1)\n", shellQuote(pattern))
-		b.WriteString("  if [ -n \"$memoh_ep\" ]; then\n")
-		b.WriteString("    if [ -x \"$memoh_ep\" ]; then memoh_ok=yes; else memoh_ok=no; fi\n")
-		fmt.Fprintf(b, "    printf '%s\\t%%s\\t%%s\\t%%s\\n' %s \"$memoh_ep\" \"$memoh_ok\"\n", markerManaged, shellQuote(primary))
-		if inlineVersion {
-			b.WriteString("    if [ \"$memoh_ok\" = yes ]; then memoh_version \"$memoh_ep\"; fi\n")
-		}
-		b.WriteString("  fi\n")
-	}
 	b.WriteString("fi\n")
 
-	for i, command := range dep.Provides {
+	for _, command := range dep.Provides {
 		toolkitPath := path.Join(toolkitBinDir, command)
 		fmt.Fprintf(b, "if [ -x %s ]; then\n", shellQuote(toolkitPath))
 		fmt.Fprintf(b, "  printf '%s\\t%%s\\t%%s\\n' %s %s\n", markerToolkit, shellQuote(command), shellQuote(toolkitPath))
-		if i == 0 && inlineVersion {
-			fmt.Fprintf(b, "  memoh_version %s\n", shellQuote(toolkitPath))
-		}
 		b.WriteString("fi\n")
 		fmt.Fprintf(b, "memoh_p=$(memoh_resolve %s)\n", shellQuote(command))
 		// Our own shims resolve to the managed copy; they are not a third
@@ -237,26 +244,48 @@ func writeDependencyProbe(b *strings.Builder, dep catalog.Dependency, statePath,
 		fmt.Fprintf(b, "case \"$memoh_p\" in %s/*) memoh_p='' ;; esac\n", shellQuote(shimDir))
 		b.WriteString("if [ -n \"$memoh_p\" ]; then\n")
 		fmt.Fprintf(b, "  printf '%s\\t%%s\\t%%s\\n' %s \"$memoh_p\"\n", markerPath, shellQuote(command))
-		if i == 0 && inlineVersion {
-			b.WriteString("  memoh_version \"$memoh_p\"\n")
-		}
 		b.WriteString("fi\n")
 	}
 }
 
-// entrypointSedPattern returns a sed expression printing the string value of
-// key command from a JSON line. Command names are catalog controlled; anything
-// outside a conservative character set disables the in-script lookup.
-func entrypointSedPattern(command string) (string, bool) {
-	for _, r := range command {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-', r == '+', r == '.':
-		default:
-			return "", false
+// probeManagedEntrypoints checks paths from decoded state without requiring
+// a JSON parser or trusting a best-effort shell regex.
+func probeManagedEntrypoints(ctx context.Context, client *bridge.Client, deps []catalog.Dependency, probes map[string]*rawProbe) error {
+	var script strings.Builder
+	for _, dep := range deps {
+		probe := probes[dep.ID]
+		if probe == nil || !probe.hasState {
+			continue
 		}
+		var state State
+		if json.Unmarshal([]byte(probe.stateText), &state) != nil {
+			continue
+		}
+		command := dep.Provides[0]
+		entrypoint := strings.TrimSpace(state.Entrypoints[command])
+		if entrypoint == "" || !path.IsAbs(entrypoint) || strings.ContainsAny(entrypoint, "\t\r\n") {
+			continue
+		}
+		fmt.Fprintf(&script, "printf '%s\\t%%s\\n' %s\n", markerDep, shellQuote(dep.ID))
+		fmt.Fprintf(&script, "if [ -x %s ]; then memoh_ok=yes; else memoh_ok=no; fi\n", shellQuote(entrypoint))
+		fmt.Fprintf(&script, "printf '%s\\t%%s\\t%%s\\t%%s\\n' %s %s \"$memoh_ok\"\n", markerManaged, shellQuote(command), shellQuote(entrypoint))
 	}
-	escaped := strings.ReplaceAll(command, ".", `\.`)
-	return `s/.*"` + escaped + `"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p`, true
+	if script.Len() == 0 {
+		return nil
+	}
+	script.WriteString("printf '" + markerEnd + "\\n'\n")
+	result, err := client.ExecWithOptions(ctx, "exec sh -s", defaultWorkDir, int32(discoveryTimeout/time.Second), []byte(script.String()), bridge.ExecOptions{})
+	if err != nil {
+		return fmt.Errorf("workspacedeps: check managed entrypoints: %w", err)
+	}
+	checked, complete := parseDiscoveryOutput(result.Stdout)
+	if result.ExitCode != 0 || !complete {
+		return errors.New("workspacedeps: managed entrypoint check did not finish")
+	}
+	for id, probe := range checked {
+		probes[id].managed = probe.managed
+	}
+	return nil
 }
 
 // rawProbe is the per-dependency output of the discovery script before
@@ -271,6 +300,9 @@ type rawProbe struct {
 	path    map[string]string
 	// versions maps a probed path to the raw `--version` output.
 	versions map[string]string
+	// lockHeld is set when the script saw the dependency's lock directory.
+	lockHeld      bool
+	lockAbandoned bool
 }
 
 type managedProbe struct {
@@ -357,6 +389,14 @@ func parseDiscoveryOutput(stdout string) (probes map[string]*rawProbe, complete 
 			if current != nil && len(fields) >= 3 {
 				current.path[fields[1]] = fields[2]
 			}
+		case markerLock:
+			if current != nil {
+				current.lockHeld = true
+			}
+		case markerAbandoned:
+			if current != nil {
+				current.lockAbandoned = true
+			}
 		case markerEnd:
 			complete = true
 		}
@@ -377,6 +417,8 @@ func resolveObserved(dep catalog.Dependency, probe *rawProbe) Observed {
 		obs.Err = "discovery produced no output for this dependency"
 		return obs
 	}
+	obs.LockHeld = probe.lockHeld
+	obs.LockAbandoned = probe.lockAbandoned
 	primary := dep.Provides[0]
 	var problems []string
 
@@ -420,16 +462,10 @@ func resolveObserved(dep catalog.Dependency, probe *rawProbe) Observed {
 	return obs
 }
 
-// managedUsable reports whether the entrypoint the Go side decoded from
-// state.json was confirmed executable by the script. When the script could
-// not locate the same path the copy is trusted as-is: the sed lookup is a
-// convenience, state.json is the truth.
+// managedUsable requires an executable check for the decoded state path.
 func managedUsable(probe *rawProbe, primary, entrypoint string) bool {
 	found, ok := probe.managed[primary]
-	if !ok || found.path != entrypoint {
-		return true
-	}
-	return found.executable
+	return ok && found.path == entrypoint && found.executable
 }
 
 // appendCandidate drops copies whose path is already claimed by a higher
@@ -480,49 +516,36 @@ func cloneStringMap(values map[string]string) map[string]string {
 	return cloned
 }
 
-// extractVersion applies WD-CAT-005 to a `--version` output.
+// extractVersion extracts a semantic version from command output.
 func extractVersion(output string) string {
 	return versionPattern.FindString(output)
 }
 
-// probeVersionsWithScript runs the manifest's scripts.version once per
-// candidate and stores the reported version. Failures are recorded in
-// Observed.Err and leave the candidate's version empty (managed copies fall
-// back to state.json).
-func probeVersionsWithScript(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, dataRoot string, dep catalog.Dependency, platform Platform, obs *Observed) {
-	script, ok := cat.Script(dep.ID, catalog.ActionVersion)
-	if !ok {
-		return
-	}
+type versionProbeResult struct {
+	version string
+	err     error
+}
+
+// Discovery never executes scripts.version from a newly fetched definition.
+// A normal --version command has its own deadline and cannot abort discovery
+// of other installed tools. Managed copies retain their recorded version.
+func probeCandidateVersions(ctx context.Context, obs *Observed, cache map[string]versionProbeResult, probe func(context.Context, string) (string, error)) {
 	var problems []string
 	if obs.Err != "" {
 		problems = append(problems, obs.Err)
 	}
-	home := Home(dataRoot, dep.ID)
 	for i := range obs.Candidates {
 		candidate := &obs.Candidates[i]
-		result, err := Run(ctx, client, RunSpec{
-			DepID:     dep.ID,
-			Action:    catalog.ActionVersion,
-			Script:    script,
-			Home:      home,
-			ShimDir:   ShimDir(dataRoot),
-			Candidate: candidate.Path,
-			Platform:  platform,
-			Timeout:   dep.Timeouts.Duration(catalog.ActionVersion),
-		}, nil)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("version probe of %s: %v", candidate.Path, err))
-			if candidate.Source == SourceManaged && obs.State != nil {
-				candidate.Version = strings.TrimSpace(obs.State.Version)
-			} else {
-				candidate.Version = ""
-			}
-			continue
+		result, known := cache[candidate.Path]
+		if !known {
+			output, err := probe(ctx, candidate.Path)
+			result = versionProbeResult{version: extractVersion(output), err: err}
+			cache[candidate.Path] = result
 		}
-		candidate.Version = result.Version
-		if candidate.Version == "" && candidate.Source == SourceManaged && obs.State != nil {
-			candidate.Version = strings.TrimSpace(obs.State.Version)
+		if result.err != nil {
+			problems = append(problems, fmt.Sprintf("version probe of %s: %v", candidate.Path, result.err))
+		} else if result.version != "" {
+			candidate.Version = result.version
 		}
 	}
 	if len(obs.Candidates) > 0 {

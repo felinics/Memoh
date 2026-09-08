@@ -20,7 +20,7 @@ const (
 	MaxArtifactBytes = 1024 * 1024
 	MaxArtifactFiles = 32
 	MaxCatalogBytes  = 4 * 1024 * 1024
-	MaxDependencies  = 256
+	MaxDependencies  = 4096
 )
 
 var (
@@ -107,6 +107,9 @@ func New(definitions []Definition) (*Catalog, error) {
 // Using freezes a prepared revision while retaining prerequisite definitions
 // from this snapshot. Other requests keep their own immutable snapshot.
 func (c *Catalog) Using(definition Definition) (*Catalog, error) {
+	if definition.loaded == nil {
+		return nil, errors.New("catalog: empty definition")
+	}
 	definitions := make([]Definition, 0, len(c.entries)+1)
 	for _, loaded := range c.entries {
 		if loaded.dep.ID != definition.loaded.dep.ID {
@@ -160,7 +163,7 @@ func DecodeIndex(data []byte) (Index, error) {
 	if err := strictJSON(data, &index); err != nil {
 		return index, err
 	}
-	if index.Total < 0 || index.Total > MaxDependencies || index.Page != 1 || index.Total != len(index.Data) || index.Limit < index.Total || index.Limit > MaxDependencies {
+	if index.Total < 0 || index.Total > MaxDependencies || index.Page < 1 || index.Limit < 1 || index.Limit > MaxDependencies || index.Page > max(1, (index.Total+index.Limit-1)/index.Limit) || len(index.Data) != min(index.Limit, max(0, index.Total-(index.Page-1)*index.Limit)) {
 		return index, errors.New("catalog: incomplete or oversized dependency index")
 	}
 	if index.Revision != "" && !ValidRevision(index.Revision) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -46,6 +47,7 @@ func (f *runFixture) spec(depID, script string) RunSpec {
 		Version:  "1.2.3",
 		Platform: f.platform,
 		Timeout:  30 * time.Second,
+		Receipt:  &OperationReceipt{},
 	}
 }
 
@@ -64,8 +66,13 @@ func (f *runFixture) assertNoLeftovers(t *testing.T, depID string) {
 			t.Errorf("result file %s was not removed", entry.Name())
 		}
 	}
-	if _, err := os.Stat(f.lockDir(depID)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("lock dir still present after run (stat err = %v)", err)
+	info, err := os.Stat(f.lockDir(depID))
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("stable kernel lock file must remain: %v", err)
+	}
+	result, err := f.client.Exec(testContext(t), lockProbeHelpers+"\nif memoh_lock_active "+shellQuote(f.lockDir(depID))+"; then exit 1; fi", "", 5)
+	if err != nil || result.ExitCode != 0 {
+		t.Errorf("kernel lock remained held after exit: %v", err)
 	}
 }
 
@@ -157,7 +164,7 @@ func TestRunNonZeroExitReturnsExitError(t *testing.T) {
 	f.assertNoLeftovers(t, "fail")
 }
 
-func TestRunReturnsErrLockedAndKeepsForeignLock(t *testing.T) {
+func TestRunRefusesLegacyDirectoryLock(t *testing.T) {
 	f := newRunFixture(t)
 	lock := f.lockDir("busy")
 	if err := os.MkdirAll(lock, 0o750); err != nil {
@@ -165,8 +172,9 @@ func TestRunReturnsErrLockedAndKeepsForeignLock(t *testing.T) {
 	}
 
 	_, err := Run(testContext(t), f.client, f.spec("busy", "dep_log should-not-run\n"), nil)
-	if !errors.Is(err, ErrLocked) {
-		t.Fatalf("Run error = %v, want ErrLocked", err)
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 73 {
+		t.Fatalf("legacy directory lock must require operator recovery: %v", err)
 	}
 	if _, err := os.Stat(lock); err != nil {
 		t.Errorf("foreign lock must survive a locked run: %v", err)
@@ -180,25 +188,29 @@ func TestRunReturnsErrLockedAndKeepsForeignLock(t *testing.T) {
 	}
 }
 
-func TestRunReclaimsStaleLock(t *testing.T) {
+func TestRunReusesUnlockedKernelFileRegardlessOfAge(t *testing.T) {
 	f := newRunFixture(t)
 	lock := f.lockDir("stale")
-	if err := os.MkdirAll(lock, 0o750); err != nil {
-		t.Fatalf("mkdir lock: %v", err)
+	if err := os.MkdirAll(filepath.Dir(lock), 0o750); err != nil {
+		t.Fatal(err)
 	}
-	old := time.Now().Add(-24 * time.Hour)
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
 	if err := os.Chtimes(lock, old, old); err != nil {
-		t.Fatalf("chtimes lock: %v", err)
+		t.Fatal(err)
 	}
-	sink := newRecordingSink()
-
-	spec := f.spec("stale", "dep_log reclaimed\n")
-	spec.Timeout = 10 * time.Second // stale threshold = 10s + 5min, far below 24h
-	if _, err := Run(testContext(t), f.client, spec, sink); err != nil {
-		t.Fatalf("Run: %v", err)
+	before, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !sink.has(StreamStderr, "reclaimed") {
-		t.Errorf("stderr lines = %q, want reclaimed", sink.get(StreamStderr))
+	if _, err := Run(testContext(t), f.client, f.spec("stale", "true\n"), nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(lock)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("runner replaced the kernel lock inode: %v", err)
 	}
 	f.assertNoLeftovers(t, "stale")
 }
@@ -259,19 +271,18 @@ func TestRunDepSwitchReplacesCurrentAndKeepsOldVersion(t *testing.T) {
 	}
 }
 
-func TestRunTimeoutKillsScript(t *testing.T) {
+func TestRunTimeoutKillsScriptAndReleasesKernelLock(t *testing.T) {
 	f := newRunFixture(t)
-	spec := f.spec("slow", "sleep 30\n")
+	fifo := filepath.Join(t.TempDir(), "never-release")
+	if err := exec.CommandContext(testContext(t), "mkfifo", fifo).Run(); err != nil { //nolint:gosec // G204: fixed command creates a synthetic FIFO under t.TempDir.
+		t.Fatal(err)
+	}
+	spec := f.spec("slow", "read release < "+shellQuote(fifo)+"\nexit 99\n")
 	spec.Timeout = time.Second
-
-	start := time.Now()
 	_, err := Run(testContext(t), f.client, spec, nil)
 	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("Run error = %v, want *ExitError", err)
-	}
-	if elapsed := time.Since(start); elapsed > 20*time.Second {
-		t.Errorf("timeout took %s, want the bridge to kill the script promptly", elapsed)
+	if !errors.As(err, &exitErr) || exitErr.Code != 137 {
+		t.Fatalf("blocked process must be killed by the bridge: %v", err)
 	}
 	f.assertNoLeftovers(t, "slow")
 }
@@ -285,21 +296,48 @@ func TestRunCancelledContextReportsContextError(t *testing.T) {
 		}
 	})
 
-	_, err := Run(ctx, f.client, f.spec("cancel", "dep_log started\nsleep 30\n"), sink)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Run error = %v, want context.Canceled", err)
+	fifo := filepath.Join(t.TempDir(), "release")
+	if err := exec.CommandContext(testContext(t), "mkfifo", fifo).Run(); err != nil { //nolint:gosec // G204: fixed command creates a synthetic FIFO under t.TempDir.
+		t.Fatal(err)
+	}
+	body := "dep_result '{\"version\":\"1.0.0\"}'\ndep_log started\nread release < " + shellQuote(fifo) + "\n"
+	result, err := Run(ctx, f.client, f.spec("cancel", body), sink)
+	// Positive-timeout bridge execs outlive the stream. Release the actual
+	// child explicitly after cancellation instead of leaving a timed sleep.
+	file, openErr := os.OpenFile(fifo, os.O_WRONLY, 0) //nolint:gosec // G304: synthetic FIFO created under t.TempDir.
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	_, _ = file.WriteString("done\n")
+	_ = file.Close()
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrOperationUncertain) {
+		t.Fatalf("Run error = %v, want uncertain outcome wrapping context.Canceled", err)
 	}
 	// The script may still be running inside the workspace, so the lock must
-	// stay until the stale rule reclaims it; only the result file goes.
+	// stay until the owner's liveness is checked, together with its result.
 	if _, err := os.Stat(f.lockDir("cancel")); err != nil {
 		t.Errorf("lock must survive a cancelled run: %v", err)
 	}
-	entries, err := os.ReadDir(f.tmpDir)
-	if err != nil {
-		t.Fatalf("read tmp dir: %v", err)
+	if result.Receipt == nil {
+		t.Fatal("uncertain operation lost its receipt identity")
 	}
-	if len(entries) != 0 {
-		t.Errorf("tmp dir has leftovers after cancelled run: %v", entries)
+	retained, err := os.ReadFile(filepath.Join(result.Receipt.Directory, "result.json"))
+	if err != nil || string(retained) != `{"version":"1.0.0"}` {
+		t.Fatalf("retained operation result = %q, %v", retained, err)
+	}
+	// Blocking acquisition is an explicit process-completion barrier: no
+	// polling or sleep guesses whether the detached child finished.
+	lockCommand := "flock " + shellQuote(f.lockDir("cancel")) + " true"
+	if f.platform.OS == "darwin" {
+		lockCommand = "lockf -k -t 5 " + shellQuote(f.lockDir("cancel")) + " true"
+	}
+	barrier, err := f.client.Exec(testContext(t), lockCommand, "", 5)
+	if err != nil || barrier.ExitCode != 0 {
+		t.Fatalf("detached child failed to release its kernel lock: %v", err)
+	}
+	receipt, err := readOperationReceipt(testContext(t), f.client, Home(f.dataRoot, "cancel"), "cancel")
+	if err != nil || receipt == nil || !receipt.Completed || receipt.ExitCode != 0 || receipt.Result.Version != "1.0.0" {
+		t.Fatalf("successful detached operation cannot be recovered: %+v, %v", receipt, err)
 	}
 }
 
@@ -365,7 +403,7 @@ func TestBuildEnvIncludesDesignVariables(t *testing.T) {
 		"MEMOH_DEP_CURRENT_VERSION=0.147.0",
 		"MEMOH_DEP_RESULT=/tmp/memoh-dep-codex-abc.json",
 		"MEMOH_DEP_CANDIDATE=/usr/bin/codex",
-		"MEMOH_DEP_LOCK_STALE_SECONDS=900",
+		"MEMOH_DEP_TIMEOUT_SECONDS=600",
 		"MEMOH_DEP_OS=linux",
 		"MEMOH_DEP_ARCH=amd64",
 		"MEMOH_DEP_LIBC=glibc",
@@ -376,5 +414,211 @@ func TestBuildEnvIncludesDesignVariables(t *testing.T) {
 		if !strings.Contains(env, want+"\n") && !strings.HasSuffix(env, want) {
 			t.Errorf("env missing %q:\n%s", want, env)
 		}
+	}
+}
+
+func TestShortProbeCannotReclaimLiveLongInstall(t *testing.T) {
+	f := newRunFixture(t)
+	fifo := filepath.Join(t.TempDir(), "release")
+	if err := exec.CommandContext(testContext(t), "mkfifo", fifo).Run(); err != nil { //nolint:gosec // G204: fixed command creates a synthetic FIFO under t.TempDir.
+		t.Fatal(err)
+	}
+	ready := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	spec := f.spec("long-install", "dep_log ready\nread release < "+shellQuote(fifo)+"\n")
+	spec.Timeout = 20 * time.Minute
+	ctx := testContext(t)
+	oldReceipt, err := prepareReceipt(ctx, f.client, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, err := Run(ctx, f.client, spec, LogFunc(func(_ string, line string) {
+			if line == "ready" {
+				ready <- struct{}{}
+			}
+		}))
+		done <- err
+	}()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("install exited before synchronization: %v", err)
+	case <-testContext(t).Done():
+		t.Fatal("install did not reach the synchronization point")
+	}
+	// A previous Server may finish bookkeeping while the next operation
+	// already holds the kernel lock. Its receipt cleanup must not unlock it.
+	if err := CleanupReceipt(ctx, f.client, oldReceipt); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-6 * time.Minute)
+	if err := os.Chtimes(f.lockDir(spec.DepID), old, old); err != nil {
+		t.Fatal(err)
+	}
+	contender := f.spec(spec.DepID, "exit 99\n")
+	contender.Action = catalog.ActionVersion
+	contender.Timeout = 30 * time.Second
+	_, blocked := Run(testContext(t), f.client, contender, nil)
+	// Release the real owner before asserting, including failure paths.
+	file, err := os.OpenFile(fifo, os.O_WRONLY, 0) //nolint:gosec // G304: synthetic FIFO created under t.TempDir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.WriteString("done\n")
+	_ = file.Close()
+	if err := <-done; err != nil {
+		t.Fatalf("owner install: %v", err)
+	}
+	if !errors.Is(blocked, ErrLocked) {
+		t.Fatalf("short contender stole live install lock: %v", blocked)
+	}
+	f.assertNoLeftovers(t, spec.DepID)
+}
+
+func TestScriptExit75IsNotLockContention(t *testing.T) {
+	f := newRunFixture(t)
+	_, err := Run(testContext(t), f.client, f.spec("exit75", "exit 75\n"), nil)
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 75 || errors.Is(err, ErrLocked) {
+		t.Fatalf("script exit 75 lost its actual failure: %v", err)
+	}
+	f.assertNoLeftovers(t, "exit75")
+}
+
+func TestMirrorEnvironmentIsExplicitlyAllowlisted(t *testing.T) {
+	t.Setenv("NODEJS_MIRROR", "https://node.example")
+	t.Setenv("UV_RELEASES_URL", "https://uv.example")
+	t.Setenv("NPM_MIRROR", "https://npm.example")
+	t.Setenv("UV_PYTHON_INSTALL_MIRROR", "https://python.example")
+	t.Setenv("UNRELATED_SERVER_SECRET", "must-not-forward")
+	env := buildEnv(RunSpec{DepID: "tool", ExtraEnv: []string{
+		"NPM_MIRROR=https://override.example", "MEMOH_DEP_HOME=/attacker", "UNRELATED_SERVER_SECRET=override",
+	}}, "/tmp/result", time.Minute)
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{"NODEJS_MIRROR=https://node.example", "UV_RELEASES_URL=https://uv.example", "NPM_MIRROR=https://override.example", "UV_PYTHON_INSTALL_MIRROR=https://python.example"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing configured mirror %s", want)
+		}
+	}
+	if strings.Contains(joined, "SECRET") || strings.Contains(joined, "/attacker") || strings.Contains(joined, "NPM_MIRROR=https://npm.example") {
+		t.Fatalf("environment escaped allowlist or override precedence: %s", joined)
+	}
+}
+
+func TestRunReceiptSurvivesRemovingDependencyHome(t *testing.T) {
+	f := newRunFixture(t)
+	spec := f.spec("remove-receipt", "rm -rf \"$MEMOH_DEP_HOME\"\ndep_result '{}'\n")
+	spec.Action = catalog.ActionRemove
+	spec.Receipt = &OperationReceipt{
+		ID:                 strings.Repeat("c", 32),
+		StartedAt:          time.Date(2026, 9, 8, 0, 0, 0, 123, time.UTC),
+		DefinitionRevision: strings.Repeat("a", 64),
+		ManifestDigest:     "sha256:" + strings.Repeat("b", 64),
+		Previous:           &State{Version: "1.0.0", Entrypoints: map[string]string{"tool": "/old/tool"}},
+	}
+	result, err := Run(testContext(t), f.client, spec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(spec.Home); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove did not delete its home: %v", err)
+	}
+	receipt, err := readOperationReceipt(testContext(t), f.client, spec.Home, spec.DepID)
+	if err != nil || receipt == nil {
+		t.Fatalf("remove lost its durable receipt: %+v, %v", receipt, err)
+	}
+	if !receipt.Completed || receipt.ExitCode != 0 || receipt.Action != catalog.ActionRemove || receipt.ID != spec.Receipt.ID || !receipt.StartedAt.Equal(spec.Receipt.StartedAt) || receipt.Previous.Version != "1.0.0" {
+		t.Fatalf("frozen metadata or result changed: %+v", receipt)
+	}
+	if err := CleanupReceipt(testContext(t), f.client, result.Receipt); err != nil {
+		t.Fatal(err)
+	}
+	acknowledged, err := readOperationReceipt(testContext(t), f.client, spec.Home, spec.DepID)
+	if err != nil || acknowledged != nil {
+		t.Fatalf("acknowledged receipt still discoverable: %+v, %v", acknowledged, err)
+	}
+}
+
+func TestReadOnlyCheckCannotReplaceMutationReceipt(t *testing.T) {
+	f := newRunFixture(t)
+	spec := f.spec("receipt-check", "dep_result '{\"version\":\"1.0.0\"}'\n")
+	installed, err := Run(testContext(t), f.client, spec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := f.spec(spec.DepID, "dep_result '{\"version\":\"2.0.0\"}'\n")
+	check.Action = catalog.ActionCheckUpdate
+	checked, err := Run(testContext(t), f.client, check, nil)
+	if err != nil || checked.Receipt != nil || checked.Version != "2.0.0" {
+		t.Fatalf("read-only check result: %+v, %v", checked, err)
+	}
+	current, err := ReadOperationReceipt(testContext(t), f.client, spec.Home, spec.DepID)
+	if err != nil || current == nil || current.ID != installed.Receipt.ID || current.Result.Version != "1.0.0" {
+		t.Fatalf("read-only check overwrote the pending mutation: %+v, %v", current, err)
+	}
+}
+
+func TestDuplicateOperationCannotOverwriteItsReceipt(t *testing.T) {
+	f := newRunFixture(t)
+	spec := f.spec("duplicate", "dep_result '{\"version\":\"1.0.0\"}'\n")
+	spec.Receipt.ID = strings.Repeat("a", 32)
+	first, err := Run(testContext(t), f.client, spec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Script = "exit 7\n"
+	if _, err := Run(testContext(t), f.client, spec, nil); err == nil {
+		t.Fatal("duplicate accepted operation replaced its receipt")
+	}
+	current, err := ReadOperationReceipt(testContext(t), f.client, spec.Home, spec.DepID)
+	if err != nil || current == nil || current.ID != first.Receipt.ID || !current.Completed || current.ExitCode != 0 || current.Result.Version != "1.0.0" {
+		t.Fatalf("duplicate operation changed the accepted result: %+v, %v", current, err)
+	}
+}
+
+func TestCancelledClaimCannotExecuteAfterNewOperation(t *testing.T) {
+	f := newRunFixture(t)
+	ctx := testContext(t)
+	effect := filepath.Join(t.TempDir(), "execution")
+	old := f.spec("claim-fence", "printf stale > "+shellQuote(effect)+"\n")
+	old.Receipt.ID = strings.Repeat("a", 32)
+	root := operationRoot(old.Home, old.DepID)
+	marker := filepath.Join(root, ".cancelled-"+old.Receipt.ID)
+	// The old Server has claimed its ID but has not started Run. The reaper
+	// fences that ID under the kernel lock before making room for a new claim.
+	fenceScript := "mkdir -p " + shellQuote(root) + "\n: > " + shellQuote(marker) + "\n"
+	fenced, err := f.client.ExecWithOptions(ctx, scriptExecCommand, defaultWorkDir, 5, []byte(fenceScript), bridge.ExecOptions{Env: []string{
+		"MEMOH_DEP_HOME=" + old.Home, "MEMOH_DEP_ID=" + old.DepID,
+	}})
+	if err != nil || fenced.ExitCode != 0 {
+		t.Fatalf("reaper did not establish its fence: %v", err)
+	}
+	current := f.spec(old.DepID, "printf new > "+shellQuote(effect)+"\ndep_result '{\"version\":\"2.0.0\"}'\n")
+	current.Receipt.ID = strings.Repeat("b", 32)
+	installed, err := Run(ctx, f.client, current, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := range 2 {
+		stale, err := Run(ctx, f.client, old, nil)
+		var exitErr *ExitError
+		if !errors.As(err, &exitErr) || exitErr.Code != 76 {
+			t.Fatalf("cancelled claim resumed on attempt %d: %v", attempt, err)
+		}
+		if err := CleanupReceipt(ctx, f.client, stale.Receipt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observed, err := ReadOperationReceipt(ctx, f.client, old.Home, old.DepID)
+	if err != nil || observed == nil || observed.ID != installed.Receipt.ID || observed.Result.Version != "2.0.0" {
+		t.Fatalf("cancelled claim replaced current publication: %+v, %v", observed, err)
+	}
+	body, err := os.ReadFile(effect) //nolint:gosec // G304: synthetic output under t.TempDir records whether the recipe ran.
+	if err != nil || string(body) != "new" {
+		t.Fatalf("cancelled recipe executed: %q, %v", body, err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("receipt cleanup removed the permanent cancellation fence: %v", err)
 	}
 }

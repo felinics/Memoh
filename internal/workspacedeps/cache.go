@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// Snapshot is one cached discovery pass for a (bot, target) pair (design
-// §8.5): the probed platform plus every observed dependency.
+// Snapshot caches the probed platform and observed dependencies for a
+// (bot, target) pair.
 type Snapshot struct {
 	CatalogDigest string
 	Platform      Platform
@@ -59,6 +59,7 @@ func (c *Cache) Get(botID, targetID string) (Snapshot, bool) {
 		c.mu.Unlock()
 		return Snapshot{}, false
 	}
+	snap.Observed = cloneObserved(snap.Observed)
 	return snap, true
 }
 
@@ -115,6 +116,47 @@ func (c *Cache) ObserveVersion(botID, targetID, depID, version string) {
 	c.entries[key] = snap
 }
 
+// ObserveVersionAt is ObserveVersion for one specific copy: it overwrites
+// the version of the candidate at path and, when that candidate is the
+// winning copy, the dependency's version as well. Callers that know which
+// copy actually ran (the launcher resolver) use it so a handshake-reported
+// version is never attributed to a different copy. It is a no-op when
+// nothing is cached or no candidate has that path.
+func (c *Cache) ObserveVersionAt(botID, targetID, depID, path, version string) {
+	key := cacheKey{botID: botID, targetID: targetID}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snap, ok := c.entries[key]
+	if !ok {
+		return
+	}
+	obs, ok := snap.Observed[depID]
+	if !ok {
+		return
+	}
+	index := -1
+	for i, candidate := range obs.Candidates {
+		if candidate.Path == path {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return
+	}
+	candidates := make([]Candidate, len(obs.Candidates))
+	copy(candidates, obs.Candidates)
+	candidates[index].Version = version
+	obs.Candidates = candidates
+	if obs.Command == path {
+		obs.Version = version
+	}
+	observed := cloneObserved(snap.Observed)
+	observed[depID] = obs
+	snap.Observed = observed
+	c.entries[key] = snap
+}
+
 func (c *Cache) expired(snap Snapshot) bool {
 	return c.ttl > 0 && c.now().Sub(snap.At) >= c.ttl
 }
@@ -125,18 +167,32 @@ func cloneObserved(observed map[string]Observed) map[string]Observed {
 	}
 	cloned := make(map[string]Observed, len(observed))
 	for id, obs := range observed {
+		obs.Entrypoints = cloneStringMap(obs.Entrypoints)
 		obs.Candidates = append([]Candidate(nil), obs.Candidates...)
-		if obs.State != nil {
-			state := *obs.State
-			state.Entrypoints = cloneStringMap(state.Entrypoints)
-			if state.Previous != nil {
-				previous := *state.Previous
-				previous.Entrypoints = cloneStringMap(previous.Entrypoints)
-				state.Previous = &previous
-			}
-			obs.State = &state
+		obs.State = cloneState(obs.State)
+		if obs.Receipt != nil {
+			receipt := *obs.Receipt
+			receipt.Previous = cloneState(receipt.Previous)
+			receipt.Result.Entrypoints = cloneStringMap(receipt.Result.Entrypoints)
+			receipt.Result.Raw = append([]byte(nil), receipt.Result.Raw...)
+			receipt.Result.Receipt = nil
+			obs.Receipt = &receipt
 		}
 		cloned[id] = obs
 	}
 	return cloned
+}
+
+func cloneState(original *State) *State {
+	if original == nil {
+		return nil
+	}
+	state := *original
+	state.Entrypoints = cloneStringMap(state.Entrypoints)
+	if state.Previous != nil {
+		previous := *state.Previous
+		previous.Entrypoints = cloneStringMap(previous.Entrypoints)
+		state.Previous = &previous
+	}
+	return &state
 }

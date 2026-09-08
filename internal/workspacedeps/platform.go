@@ -9,7 +9,7 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-// Platform is the probed identity of a workspace target (design §12.4). It
+// Platform is the probed identity of a workspace target. It
 // is exported to scripts as MEMOH_DEP_OS, MEMOH_DEP_ARCH, and MEMOH_DEP_LIBC
 // and matched against catalog platform entries.
 type Platform struct {
@@ -31,8 +31,8 @@ const platformProbeScript = `uname -s; uname -m; ls /lib/ld-musl-*.so.1 2>/dev/n
 const platformProbeTimeoutSeconds = 15
 
 // ProbePlatform runs the probe inside the workspace and normalises its
-// output. It never consults the image's own contract declaration
-// (WD-PLAT-004).
+// output. It never trusts a platform the image declares about itself; the
+// probe is the only source.
 func ProbePlatform(ctx context.Context, client *bridge.Client) (Platform, error) {
 	if client == nil {
 		return Platform{}, errors.New("workspacedeps: bridge client is nil")

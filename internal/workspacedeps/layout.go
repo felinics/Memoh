@@ -21,7 +21,7 @@ const (
 )
 
 // DepsRoot returns the directory holding every managed dependency:
-// <dataRoot>/.memoh/deps (design §6).
+// <dataRoot>/.memoh/deps.
 func DepsRoot(dataRoot string) string {
 	return path.Join(dataRoot, ".memoh", "deps")
 }
@@ -38,8 +38,8 @@ func ShimDir(dataRoot string) string {
 	return path.Join(DepsRoot(dataRoot), shimDirName)
 }
 
-// LocksDir returns the directory of per-dependency lock directories that
-// guard against concurrent Server instances (design §8.4).
+// LocksDir holds stable per-dependency kernel lock files. Their inodes are
+// never replaced or unlinked; the OS releases ownership on process exit.
 func LocksDir(dataRoot string) string {
 	return path.Join(DepsRoot(dataRoot), locksDirName)
 }
@@ -61,9 +61,9 @@ func CurrentDir(home string) string {
 	return path.Join(home, currentLinkName)
 }
 
-// lockPath mirrors the prelude's lock computation,
+// lockPath mirrors the kernel wrapper's stable lock file computation,
 // "$(dirname "$MEMOH_DEP_HOME")/.locks/$MEMOH_DEP_ID.lock", so the runner can
-// clean up exactly the directory the script created.
+// acquire the same lock while finalizing an operation.
 func lockPath(home, depID string) string {
 	return path.Join(path.Dir(home), locksDirName, depID+lockFileSuffix)
 }

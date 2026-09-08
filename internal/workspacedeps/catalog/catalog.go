@@ -121,7 +121,7 @@ func isPlainFileName(name string) bool {
 	return name != "" && name != "." && name != ".." && path.Base(name) == name
 }
 
-// Validate checks every structural rule from design §4.2 and returns all
+// Validate checks the manifest structure and returns all
 // violations joined into one error, each naming the offending dependency.
 // Load and LoadFS already call it; it is exported for start-up checks.
 func (c *Catalog) Validate() error {

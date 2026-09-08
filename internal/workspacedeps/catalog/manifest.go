@@ -73,7 +73,7 @@ func (s Source) valid() bool {
 type Action string
 
 // Scripted actions. Rollback is intentionally absent: it is a pure data
-// operation performed by the runner and never backed by a script (§4.3).
+// operation performed by the runner and never backed by a script.
 const (
 	ActionInstall     Action = "install"
 	ActionUpdate      Action = "update"
