@@ -56,6 +56,7 @@ export interface ContextEntries {
 
 export type TrajectoryDetail =
   | { kind: 'capture', event: HandlersContextTrajectoryEntry, previousEventId: string | null | undefined }
+  | { kind: 'request_trace', turn: ChatAssistantTurn, trace: UIStepTrace }
   | { kind: 'user', turn: ChatUserTurn }
   // previous is the run before this one in the session: null for the first
   // run, undefined when the older run is not loaded.
@@ -369,6 +370,12 @@ function assistantRows(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecy
   const runId = lifecycle?.run_id ?? turnId
   let openStep: number | null = null
   const seenSteps = new Set<number>()
+  const requestTraces = new Set(turn.stepTraces ?? [])
+  for (const block of turn.messages) {
+    if (block.type !== 'text' && block.type !== 'reasoning') continue
+    const trace = traceForBlock(turn.stepTraces, block.id)
+    if (trace) requestTraces.delete(trace)
+  }
   for (const block of turn.messages) {
     const row = blockRow(turn, block, turnLabel)
     if (!row) continue
@@ -382,9 +389,39 @@ function assistantRows(turn: ChatAssistantTurn, lifecycle: HandlersContextLifecy
         })
       }
     }
+    if (row.detail.kind === 'block' && row.detail.trace && requestTraces.delete(row.detail.trace)) {
+      turnRows.push(requestTraceRow(turn, row.detail.trace, turnLabel))
+    }
     turnRows.push(row)
   }
+  for (const trace of requestTraces) {
+    if (lifecycle && !seenSteps.has(trace.step_index)) {
+      seenSteps.add(trace.step_index)
+      for (const [index, entry] of (perStep.get(trace.step_index) ?? []).entries()) {
+        turnRows.push(contextRow(lifecycle, entry, `${runId}:step:${trace.step_index}:${index}`, turnId, turnLabel, trace.step_index))
+      }
+    }
+    turnRows.push(requestTraceRow(turn, trace, turnLabel))
+  }
   return turnRows
+}
+
+function requestTraceRow(turn: ChatAssistantTurn, trace: UIStepTrace, turnLabel: string): TrajectoryRow {
+  return {
+    key: `${turn.id}:request:${turn.stepTraces?.indexOf(trace) ?? 0}`,
+    kind: 'request',
+    turnId: turn.turnId ?? '',
+    turnLabel,
+    turnStart: false,
+    stepIndex: trace.step_index,
+    label: '',
+    preview: trace.finish_reason ?? '',
+    output: null,
+    startedAtMs: trace.started_at_ms || null,
+    endedAtMs: trace.ended_at_ms || null,
+    running: false,
+    detail: { kind: 'request_trace', turn, trace },
+  }
 }
 
 // The signature captures everything a settled turn's rows depend on. Every
@@ -533,6 +570,7 @@ export function buildTrajectoryRows(
 export function buildRowMap(rows: TrajectoryRow[]): RowMapSegment[] {
   const segments: RowMapSegment[] = []
   let open: RowMapSegment | null = null
+  let openTrace: UIStepTrace | null = null
   for (const row of rows) {
     if (row.kind === 'compaction') {
       open = null
@@ -551,9 +589,9 @@ export function buildRowMap(rows: TrajectoryRow[]): RowMapSegment[] {
       })
       continue
     }
-    if ((row.kind === 'reasoning' || row.kind === 'assistant') && row.detail.kind === 'block') {
+    if (((row.kind === 'reasoning' || row.kind === 'assistant') && row.detail.kind === 'block') || row.detail.kind === 'request_trace') {
       const trace = row.detail.trace
-      if (trace && open && open.turnId === row.turnId && open.stepIndex === trace.step_index) continue
+      if (trace && open && openTrace === trace && open.turnId === row.turnId) continue
       const duration = trace ? Math.max(trace.ended_at_ms - trace.started_at_ms, 0) : 0
       const sampled = trace?.first_token_at_ms != null && trace.first_token_at_ms >= trace.started_at_ms && trace.first_token_at_ms <= trace.ended_at_ms
       const segment: RowMapSegment = {
@@ -571,6 +609,7 @@ export function buildRowMap(rows: TrajectoryRow[]): RowMapSegment[] {
       }
       segments.push(segment)
       open = trace ? segment : null
+      openTrace = trace
       continue
     }
     open = null

@@ -184,7 +184,7 @@
         >{{ row.detail.turn.text }}</pre>
       </template>
 
-      <template v-else-if="row.detail.kind === 'block'">
+      <template v-else-if="row.detail.kind === 'block' || row.detail.kind === 'request_trace'">
         <div
           v-if="timingRows.length"
           class="divide-y divide-border"
@@ -205,7 +205,16 @@
           {{ $t('chat.trajectory.usageNotReported') }}
         </p>
 
-        <template v-if="row.detail.block.type === 'tool'">
+        <template v-if="row.detail.kind === 'request_trace'">
+          <p class="text-caption text-muted-foreground">
+            {{ $t('chat.trajectory.requestTraceOnly') }}
+          </p>
+          <pre
+            class="whitespace-pre-wrap break-words rounded-md bg-accent p-2 font-mono text-body"
+            data-testid="trajectory-inspector-request-trace"
+          >{{ pretty(row.detail.trace) }}</pre>
+        </template>
+        <template v-else-if="row.detail.block.type === 'tool'">
           <p class="text-caption text-muted-foreground">
             {{ $t('chat.trajectory.inspectorInput') }}
           </p>
@@ -537,9 +546,9 @@ const hiddenDecisions = computed(() => Math.max(scopedDecisions.value.length - D
 
 const timingRows = computed(() => {
   const detail = props.row.detail
-  if (detail.kind !== 'block') return []
+  if (detail.kind !== 'block' && detail.kind !== 'request_trace') return []
   const entries: { key: string, label: string, value: string }[] = []
-  if (detail.block.type === 'tool') {
+  if (detail.kind === 'block' && detail.block.type === 'tool') {
     const timing = detail.block.execution_timing
     if (timing) {
       entries.push({ key: 'started', label: t('chat.trajectory.inspectorStarted'), value: clock(timing.started_at_ms) })

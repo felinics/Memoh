@@ -93,6 +93,17 @@ afterEach(() => {
 })
 
 describe('trajectory inspector', () => {
+  it('opens timing and usage for a request with only tool output', () => {
+    const tool = rows.find(row => row.kind === 'tool')!
+    if (tool.detail.kind !== 'block') throw new Error('missing tool fixture')
+    const turn = { ...tool.detail.turn, messages: [tool.detail.block] }
+    const request = buildTrajectoryRows([turn], new Map()).find(row => row.kind === 'request')
+    expect(request).toBeDefined()
+    const root = mount({ row: request! })
+    expect(root.querySelector('[data-testid="trajectory-inspector-request-trace"]')?.textContent).toContain('"step_index": 0')
+    expect(root.textContent).toContain(en.chat.trajectory.requestTraceOnly)
+  })
+
   it('shows both occurrence names even when full text is shared', () => {
     fragmentData.items = [
       { content_hash: 'same', text_hash: 'shared', label: 'first.rules', text: 'shared rules', available: true },

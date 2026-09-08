@@ -671,15 +671,42 @@
       "thoughtBriefly": "Thought for a couple of seconds",
       "thoughtSeconds": "Thought for {seconds}s",
       "phase": {
-        "browse": { "ing": "Exploring", "done": "Explored" },
-        "edit": { "ing": "Editing", "done": "Edited" },
-        "run": { "ing": "Running", "done": "Ran" },
-        "message": { "ing": "Messaging", "done": "Sent" },
-        "schedule": { "ing": "Scheduling", "done": "Scheduled" },
-        "media": { "ing": "Generating", "done": "Generated" },
-        "agent": { "ing": "Delegating", "done": "Delegated" },
-        "gui": { "ing": "Browsing", "done": "Browsed" },
-        "other": { "ing": "Working", "done": "Worked" }
+        "browse": {
+          "ing": "Exploring",
+          "done": "Explored"
+        },
+        "edit": {
+          "ing": "Editing",
+          "done": "Edited"
+        },
+        "run": {
+          "ing": "Running",
+          "done": "Ran"
+        },
+        "message": {
+          "ing": "Messaging",
+          "done": "Sent"
+        },
+        "schedule": {
+          "ing": "Scheduling",
+          "done": "Scheduled"
+        },
+        "media": {
+          "ing": "Generating",
+          "done": "Generated"
+        },
+        "agent": {
+          "ing": "Delegating",
+          "done": "Delegated"
+        },
+        "gui": {
+          "ing": "Browsing",
+          "done": "Browsed"
+        },
+        "other": {
+          "ing": "Working",
+          "done": "Worked"
+        }
       },
       "frag": {
         "fileOperations": "{count} file operation | {count} file operations",
@@ -1260,7 +1287,17 @@
         "discuss_admitted": "Discussion message selection",
         "external_context_sources": "External runtime context sources",
         "external_handoff": "External runtime handoff",
-        "spawn_trigger": "Subagent task"
+        "spawn_trigger": "Subagent task",
+        "tool_output_limit": "Tool output limits",
+        "before_model_hook": "Before-model hook",
+        "retry_reconstructed": "Retry input reconstruction",
+        "read_media_loaded": "Media loaded",
+        "read_media_normalized": "Media conversion",
+        "read_media_injected": "Media injection",
+        "steering_trigger": "Steering received",
+        "steering_prepared": "Steering preparation",
+        "steering_applied": "Steering application",
+        "background_summary_updated": "Background summary replacement"
       },
       "kindAssistant": "ASSISTANT",
       "kindReasoning": "REASONING",
@@ -1391,7 +1428,9 @@
         "changed": "changed"
       },
       "inspectorTextsForbidden": "Reading the injected texts needs workspace access on this bot",
-      "inspectorTextUnavailable": "Text was not stored for this fragment"
+      "inspectorTextUnavailable": "Text was not stored for this fragment",
+      "requestTrace": "Request record",
+      "requestTraceOnly": "Timing and usage for this request. Full inputs appear in captured request stages when available."
     },
     "infoCacheHitRate": "Cache Hit Rate",
     "infoCacheRead": "Cache Read",

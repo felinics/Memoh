@@ -655,15 +655,42 @@
       "thoughtBriefly": "少し考えた",
       "thoughtSeconds": "{seconds}秒考えました",
       "phase": {
-        "browse": { "ing": "探索中", "done": "探索しました" },
-        "edit": { "ing": "編集中", "done": "編集しました" },
-        "run": { "ing": "実行中", "done": "実行しました" },
-        "message": { "ing": "送信中", "done": "送信しました" },
-        "schedule": { "ing": "変更中", "done": "変更しました" },
-        "media": { "ing": "生成中", "done": "生成しました" },
-        "agent": { "ing": "委譲中", "done": "委譲しました" },
-        "gui": { "ing": "閲覧中", "done": "閲覧しました" },
-        "other": { "ing": "作業中", "done": "作業しました" }
+        "browse": {
+          "ing": "探索中",
+          "done": "探索しました"
+        },
+        "edit": {
+          "ing": "編集中",
+          "done": "編集しました"
+        },
+        "run": {
+          "ing": "実行中",
+          "done": "実行しました"
+        },
+        "message": {
+          "ing": "送信中",
+          "done": "送信しました"
+        },
+        "schedule": {
+          "ing": "変更中",
+          "done": "変更しました"
+        },
+        "media": {
+          "ing": "生成中",
+          "done": "生成しました"
+        },
+        "agent": {
+          "ing": "委譲中",
+          "done": "委譲しました"
+        },
+        "gui": {
+          "ing": "閲覧中",
+          "done": "閲覧しました"
+        },
+        "other": {
+          "ing": "作業中",
+          "done": "作業しました"
+        }
       },
       "frag": {
         "fileOperations": "ファイル操作 {count} 件",
@@ -1238,7 +1265,17 @@
         "discuss_admitted": "ディスカッションのメッセージ選択",
         "external_context_sources": "外部ランタイムのコンテキスト入力",
         "external_handoff": "外部ランタイムへ渡した内容",
-        "spawn_trigger": "サブエージェントのタスク"
+        "spawn_trigger": "サブエージェントのタスク",
+        "tool_output_limit": "ツール出力の制限",
+        "before_model_hook": "モデル呼び出し前フック",
+        "retry_reconstructed": "再試行入力の再構成",
+        "read_media_loaded": "メディアの読み込み",
+        "read_media_normalized": "メディア形式の変換",
+        "read_media_injected": "メディアの挿入",
+        "steering_trigger": "追加指示の受信",
+        "steering_prepared": "追加指示の準備",
+        "steering_applied": "追加指示の適用",
+        "background_summary_updated": "バックグラウンド処理の要約更新"
       },
       "kindAssistant": "ASSISTANT",
       "kindReasoning": "REASONING",
@@ -1369,7 +1406,9 @@
         "changed": "変更"
       },
       "inspectorTextsForbidden": "注入テキストの閲覧にはこの Bot の Workspace 読み取り権限が必要です",
-      "inspectorTextUnavailable": "このフラグメントの本文は保存されていません"
+      "inspectorTextUnavailable": "このフラグメントの本文は保存されていません",
+      "requestTrace": "リクエストの記録",
+      "requestTraceOnly": "この記録にはリクエストの所要時間と使用量が含まれます。入力全文が記録されている場合は、対応するリクエスト段階で確認できます。"
     },
     "infoCacheHitRate": "キャッシュヒット率",
     "infoCacheRead": "キャッシュ読み取り",

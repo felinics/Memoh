@@ -95,6 +95,34 @@ const lifecycleTurn: HandlersContextLifecycleTurn = {
 }
 
 describe('continued legacy runs', () => {
+  it('keeps a request row when the provider only called tools', () => {
+    const turn = assistantTurn()
+    turn.messages = [turn.messages[1]!]
+    turn.stepTraces = [turn.stepTraces![0]!]
+    const rows = buildTrajectoryRows([turn], new Map())
+    expect(rows.map(row => row.kind)).toEqual(['request', 'tool'])
+    expect(buildRowMap(rows).filter(segment => segment.lane === 'model').map(segment => segment.durationMs)).toEqual([500])
+  })
+
+  it('keeps recorded requests even when there are no output blocks', () => {
+    const turn = assistantTurn()
+    turn.messages = []
+    expect(buildTrajectoryRows([turn], new Map()).map(row => row.kind)).toEqual(['request', 'request'])
+    const withContext = buildTrajectoryRows([turn], lifecycleByTurnId([lifecycleTurn]))
+    expect(withContext.filter(row => row.detail.kind === 'context' && row.detail.entry.kind === 'step')).toHaveLength(1)
+  })
+
+  it('does not fold separate requests that restart the same step index', () => {
+    const turn = assistantTurn()
+    turn.messages = [{ id: 0, type: 'text', content: 'first run' }, { id: 1, type: 'text', content: 'continued run' }]
+    turn.stepTraces = [
+      { ...turn.stepTraces![0]!, first_message_id: 0, last_message_id: 0 },
+      { ...turn.stepTraces![1]!, first_message_id: 1, last_message_id: 1, step_index: 0 },
+    ]
+    const segments = buildRowMap(buildTrajectoryRows([turn], new Map()))
+    expect(segments.filter(segment => segment.lane === 'model').map(segment => segment.durationMs)).toEqual([500, 1_100])
+  })
+
   it.each([false, true])('uses one timing source for a mixed turn, reversed=%s', (reversed) => {
     const traced = assistantTurn()
     traced.stepTraces = [traced.stepTraces![0]!]

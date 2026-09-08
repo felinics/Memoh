@@ -246,6 +246,8 @@ function rowLabel(row: TrajectoryRow): string {
 
 function rowPreview(row: TrajectoryRow): string {
   switch (row.detail.kind) {
+    case 'request_trace':
+      return t('chat.trajectory.requestTrace')
     case 'capture':
       return t('chat.trajectory.captureBlocks', { n: row.detail.event.block_count ?? 0 })
     case 'system':
