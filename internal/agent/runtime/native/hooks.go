@@ -11,6 +11,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -199,6 +200,9 @@ func (a *Agent) applyBeforeModelCallHook(ctx context.Context, cfg RunConfig, ste
 	req := a.baseHookRequest(ctx, cfg, hooks.EventBeforeModelCall)
 	req.Turn = modelCallHookPayload(cfg, step, 0)
 	res, err := a.hookService.Run(ctx, req, nil)
+	defer func() {
+		cfg.RecordTrajectory(ctx, "before_model_hook", &step, nil, modelHookCapture(res, err))
+	}()
 	if err != nil {
 		if errors.Is(err, hooks.ErrDenied) || res.Decision == hooks.DecisionDeny {
 			return cfg, fmt.Errorf("%w: %s", hooks.ErrDenied, firstHookText(res.Reason, err.Error()))
@@ -239,6 +243,9 @@ func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig,
 		req.Turn = modelCallHookPayload(cfg, currentStep, len(p.Messages))
 		step++
 		res, err := a.hookService.Run(ctx, req, nil)
+		defer func() {
+			cfg.RecordTrajectory(ctx, "before_model_hook", &currentStep, p, modelHookCapture(res, err))
+		}()
 		if err != nil {
 			if a.logger != nil {
 				a.logger.Warn("before model call hook failed",
@@ -249,8 +256,21 @@ func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig,
 			}
 			return p
 		}
-		return applyStepHookAppendContext(p, cfg.ContextMutations, currentStep, res.AppendContext)
+		p = applyStepHookAppendContext(p, cfg.ContextMutations, currentStep, res.AppendContext)
+		return p
 	}
+}
+
+func modelHookCapture(result hooks.Result, err error) trajectory.Block {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	return trajectory.JSONBlock("hook", "result", map[string]any{
+		"append_context": result.AppendContext, "append_system_sections": result.AppendSystemSections,
+		"decision": result.Decision, "reason": result.Reason, "warnings": result.Warnings,
+		"error": message, "applied": err == nil && strings.TrimSpace(result.AppendContext) != "",
+	})
 }
 
 func applyStepHookAppendContext(p *sdk.GenerateParams, ledger *contextfrag.MutationLedger, step int, appendContext string) *sdk.GenerateParams {

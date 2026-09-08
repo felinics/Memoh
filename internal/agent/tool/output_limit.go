@@ -6,6 +6,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 )
 
 type ToolOutputLimit = contextlimit.ToolOutputLimit
@@ -36,11 +37,35 @@ func WrapToolOutputLimits(sdkTools []sdk.Tool, limit ToolOutputLimit) []sdk.Tool
 		}
 		wrapped[i].Execute = func(ctx *sdk.ToolExecContext, input any) (any, error) {
 			output, err := execute(ctx, input)
-			if err != nil {
-				return output, LimitToolError(err, label, limit)
+			var recorder *trajectory.Recorder
+			var original trajectory.Block
+			if ctx != nil && ctx.Context != nil {
+				recorder = trajectory.FromContext(ctx.Context)
+				if recorder != nil {
+					original = toolResultCapture("original", output, err)
+				}
 			}
-			return LimitToolOutput(output, label, limit), nil
+			if err != nil {
+				err = LimitToolError(err, label, limit)
+			} else {
+				output = LimitToolOutput(output, label, limit)
+			}
+			if recorder != nil {
+				recorder.Record(ctx.Context, "tool_output_limit", nil,
+					trajectory.JSONBlock("tool_call", toolName, map[string]any{"tool_call_id": ctx.ToolCallID, "tool_name": toolName, "input": input, "limit": limit}),
+					original, toolResultCapture("limited", output, err),
+				)
+			}
+			return output, err
 		}
 	}
 	return wrapped
+}
+
+func toolResultCapture(label string, output any, err error) trajectory.Block {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	return trajectory.JSONBlock("tool_result", label, map[string]any{"output": output, "error": message})
 }

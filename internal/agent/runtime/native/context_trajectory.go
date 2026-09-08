@@ -48,6 +48,10 @@ func (cfg RunConfig) RecordTrajectory(ctx context.Context, stage string, stepInd
 		}),
 	)
 	blocks = append(blocks, extra...)
+	if stepIndex != nil {
+		step := *stepIndex + cfg.trajectoryStepOffset
+		stepIndex = &step
+	}
 	return recorder.Record(ctx, stage, stepIndex, blocks...)
 }
 

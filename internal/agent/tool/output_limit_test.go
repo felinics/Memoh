@@ -9,7 +9,46 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 )
+
+type outputLimitCaptureSink struct {
+	events   []trajectory.Event
+	contents map[string]string
+}
+
+func (s *outputLimitCaptureSink) Append(_ context.Context, event trajectory.Event, contents []trajectory.Content) error {
+	s.events = append(s.events, event)
+	for _, content := range contents {
+		s.contents[content.Hash] = string(content.Data)
+	}
+	return nil
+}
+
+func TestToolErrorTrajectoryPreservesOriginalAndLimitedError(t *testing.T) {
+	sink := &outputLimitCaptureSink{contents: make(map[string]string)}
+	recorder := trajectory.NewRecorder(sink)
+	recorder.Bind("run", "session")
+	marker := "ORIGINAL_ERROR_MIDDLE"
+	wrapped := WrapToolOutputLimits([]sdk.Tool{{
+		Name: "failure",
+		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+			return nil, errors.New(strings.Repeat("left ", 500) + marker + strings.Repeat(" right", 500))
+		},
+	}}, ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
+	_, err := wrapped[0].Execute(&sdk.ToolExecContext{Context: trajectory.WithRecorder(t.Context(), recorder), ToolCallID: "error-call"}, nil)
+	if err == nil || strings.Contains(err.Error(), marker) {
+		t.Fatal("fixture did not limit the tool error")
+	}
+	if len(sink.events) != 1 || len(sink.events[0].Blocks) != 3 {
+		t.Fatalf("missing transformation capture: %#v", sink.events)
+	}
+	original, limited := sink.events[0].Blocks[1], sink.events[0].Blocks[2]
+	if !strings.Contains(sink.contents[original.Chunks[0]], marker) || strings.Contains(sink.contents[limited.Chunks[0]], marker) {
+		t.Fatal("original and limited errors cannot be compared")
+	}
+}
 
 func TestLimitToolOutputPrunesLargeStringLeaves(t *testing.T) {
 	t.Parallel()

@@ -16,6 +16,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	tools "github.com/felinics/memoh/internal/agent/tool"
@@ -2045,6 +2046,11 @@ func (a *Agent) runMidStreamRetry(
 			retryInput.provenance,
 			accumulatedCount,
 			errMsg,
+		)
+		retryCfgCopy.trajectoryStepOffset = stepOffset
+		localStep := 0
+		retryCfgCopy.RecordTrajectory(streamCtx, "retry_reconstructed", &localStep, nil,
+			trajectory.JSONBlock("retry", "source", map[string]any{"attempt": attempt + 1, "step_offset": stepOffset, "previous_messages": lastAttempt.Messages, "committed_steps": len(lastAttempt.Steps), "error": errMsg}),
 		)
 		if a == nil || a.contextViewApplier == nil {
 			retryCfgCopy = retryCfgCopy.RefreshContextFrag()
