@@ -331,6 +331,18 @@ invalidated_sessions AS (
     AND session.id = target.id
   RETURNING session.id
 ),
+deleted_trajectory_events AS (
+  DELETE FROM context_trajectory_events event
+  USING invalidated_sessions invalidated
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.session_id = invalidated.id
+),
+deleted_trajectory_contents AS (
+  DELETE FROM context_trajectory_contents content
+  USING invalidated_sessions invalidated
+  WHERE content.team_id = public.memoh_current_team_id()
+    AND content.session_id = invalidated.id
+),
 deleted_acp_states AS (
   DELETE FROM agent_session_states state
   USING invalidated_sessions invalidated
@@ -415,6 +427,18 @@ invalidated_session AS (
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
+),
+deleted_trajectory_events AS (
+  DELETE FROM context_trajectory_events event
+  USING invalidated_session invalidated
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.session_id = invalidated.id
+),
+deleted_trajectory_contents AS (
+  DELETE FROM context_trajectory_contents content
+  USING invalidated_session invalidated
+  WHERE content.team_id = public.memoh_current_team_id()
+    AND content.session_id = invalidated.id
 ),
 deleted_acp_state AS (
   DELETE FROM agent_session_states state
