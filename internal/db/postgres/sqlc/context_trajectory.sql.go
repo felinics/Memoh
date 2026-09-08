@@ -17,10 +17,10 @@ WITH owner AS (
     WHERE s.team_id = public.memoh_current_team_id()
       AND s.bot_id = $1 AND s.id = $2
 ), inserted AS (
-    INSERT INTO context_trajectory_events (bot_id, session_id, run_id, sequence, event)
-    SELECT $1, owner.id, $3, $4, $5::jsonb
+    INSERT INTO context_trajectory_events (bot_id, session_id, run_id, capture_id, sequence, event)
+    SELECT $1, owner.id, $3, $4, $5, $6::jsonb
     FROM owner
-    ON CONFLICT (team_id, run_id, sequence) DO NOTHING
+    ON CONFLICT (team_id, run_id, capture_id, sequence) DO NOTHING
     RETURNING sequence
 ), accepted AS (
     SELECT sequence FROM inserted
@@ -28,12 +28,13 @@ WITH owner AS (
     SELECT e.sequence FROM context_trajectory_events AS e
     WHERE e.team_id = public.memoh_current_team_id()
       AND e.bot_id = $1 AND e.session_id = $2
-      AND e.run_id = $3 AND e.sequence = $4
-      AND e.event = $5::jsonb
+      AND e.run_id = $3 AND e.sequence = $5
+      AND e.capture_id = $4
+      AND e.event = $6::jsonb
       AND NOT EXISTS (SELECT 1 FROM inserted)
 ), contents AS (
     INSERT INTO context_trajectory_contents (bot_id, content_hash, content)
-    SELECT $1::uuid, unnest($6::text[]), unnest($7::bytea[])
+    SELECT $1::uuid, unnest($7::text[]), unnest($8::bytea[])
     FROM accepted
     ON CONFLICT (team_id, bot_id, content_hash) DO NOTHING
 )
@@ -44,6 +45,7 @@ type AppendContextTrajectoryEventParams struct {
 	BotID         pgtype.UUID `json:"bot_id"`
 	SessionID     pgtype.UUID `json:"session_id"`
 	RunID         pgtype.UUID `json:"run_id"`
+	CaptureID     pgtype.UUID `json:"capture_id"`
 	Sequence      int64       `json:"sequence"`
 	Event         []byte      `json:"event"`
 	ContentHashes []string    `json:"content_hashes"`
@@ -55,6 +57,7 @@ func (q *Queries) AppendContextTrajectoryEvent(ctx context.Context, arg AppendCo
 		arg.BotID,
 		arg.SessionID,
 		arg.RunID,
+		arg.CaptureID,
 		arg.Sequence,
 		arg.Event,
 		arg.ContentHashes,
@@ -70,23 +73,17 @@ SELECT event
 FROM context_trajectory_events
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1 AND session_id = $2
-  AND run_id = $3 AND sequence = $4
+  AND id = $3
 `
 
 type GetContextTrajectoryEventParams struct {
 	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
-	RunID     pgtype.UUID `json:"run_id"`
-	Sequence  int64       `json:"sequence"`
+	ID        int64       `json:"id"`
 }
 
 func (q *Queries) GetContextTrajectoryEvent(ctx context.Context, arg GetContextTrajectoryEventParams) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getContextTrajectoryEvent,
-		arg.BotID,
-		arg.SessionID,
-		arg.RunID,
-		arg.Sequence,
-	)
+	row := q.db.QueryRow(ctx, getContextTrajectoryEvent, arg.BotID, arg.SessionID, arg.ID)
 	var event []byte
 	err := row.Scan(&event)
 	return event, err
@@ -101,14 +98,13 @@ JOIN context_trajectory_contents AS c
   ON c.team_id = e.team_id AND c.bot_id = e.bot_id AND c.content_hash = ref.hash
 WHERE e.team_id = public.memoh_current_team_id()
   AND e.bot_id = $1 AND e.session_id = $2
-  AND e.run_id = $3 AND e.sequence = $4
+  AND e.id = $3
 `
 
 type GetContextTrajectoryEventContentsParams struct {
 	BotID     pgtype.UUID `json:"bot_id"`
 	SessionID pgtype.UUID `json:"session_id"`
-	RunID     pgtype.UUID `json:"run_id"`
-	Sequence  int64       `json:"sequence"`
+	ID        int64       `json:"id"`
 }
 
 type GetContextTrajectoryEventContentsRow struct {
@@ -117,12 +113,7 @@ type GetContextTrajectoryEventContentsRow struct {
 }
 
 func (q *Queries) GetContextTrajectoryEventContents(ctx context.Context, arg GetContextTrajectoryEventContentsParams) ([]GetContextTrajectoryEventContentsRow, error) {
-	rows, err := q.db.Query(ctx, getContextTrajectoryEventContents,
-		arg.BotID,
-		arg.SessionID,
-		arg.RunID,
-		arg.Sequence,
-	)
+	rows, err := q.db.Query(ctx, getContextTrajectoryEventContents, arg.BotID, arg.SessionID, arg.ID)
 	if err != nil {
 		return nil, err
 	}

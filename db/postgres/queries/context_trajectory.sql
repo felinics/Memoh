@@ -4,10 +4,10 @@ WITH owner AS (
     WHERE s.team_id = public.memoh_current_team_id()
       AND s.bot_id = sqlc.arg(bot_id) AND s.id = sqlc.arg(session_id)
 ), inserted AS (
-    INSERT INTO context_trajectory_events (bot_id, session_id, run_id, sequence, event)
-    SELECT sqlc.arg(bot_id), owner.id, sqlc.arg(run_id), sqlc.arg(sequence), sqlc.arg(event)::jsonb
+    INSERT INTO context_trajectory_events (bot_id, session_id, run_id, capture_id, sequence, event)
+    SELECT sqlc.arg(bot_id), owner.id, sqlc.arg(run_id), sqlc.arg(capture_id), sqlc.arg(sequence), sqlc.arg(event)::jsonb
     FROM owner
-    ON CONFLICT (team_id, run_id, sequence) DO NOTHING
+    ON CONFLICT (team_id, run_id, capture_id, sequence) DO NOTHING
     RETURNING sequence
 ), accepted AS (
     SELECT sequence FROM inserted
@@ -16,6 +16,7 @@ WITH owner AS (
     WHERE e.team_id = public.memoh_current_team_id()
       AND e.bot_id = sqlc.arg(bot_id) AND e.session_id = sqlc.arg(session_id)
       AND e.run_id = sqlc.arg(run_id) AND e.sequence = sqlc.arg(sequence)
+      AND e.capture_id = sqlc.arg(capture_id)
       AND e.event = sqlc.arg(event)::jsonb
       AND NOT EXISTS (SELECT 1 FROM inserted)
 ), contents AS (
@@ -43,7 +44,7 @@ SELECT event
 FROM context_trajectory_events
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
-  AND run_id = sqlc.arg(run_id) AND sequence = sqlc.arg(sequence);
+  AND id = sqlc.arg(id);
 
 -- name: GetContextTrajectoryEventContents :many
 SELECT DISTINCT c.content_hash, c.content
@@ -54,4 +55,4 @@ JOIN context_trajectory_contents AS c
   ON c.team_id = e.team_id AND c.bot_id = e.bot_id AND c.content_hash = ref.hash
 WHERE e.team_id = public.memoh_current_team_id()
   AND e.bot_id = sqlc.arg(bot_id) AND e.session_id = sqlc.arg(session_id)
-  AND e.run_id = sqlc.arg(run_id) AND e.sequence = sqlc.arg(sequence);
+  AND e.id = sqlc.arg(id);

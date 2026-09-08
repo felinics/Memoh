@@ -27,6 +27,7 @@ type Content struct {
 }
 
 type Event struct {
+	CaptureID     string     `json:"capture_id"`
 	RunID         string     `json:"run_id"`
 	SessionID     string     `json:"session_id"`
 	Sequence      int64      `json:"sequence"`

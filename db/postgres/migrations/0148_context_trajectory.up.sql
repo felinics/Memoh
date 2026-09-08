@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS public.context_trajectory_events (
     bot_id UUID NOT NULL,
     session_id UUID NOT NULL,
     run_id UUID NOT NULL,
+    capture_id UUID NOT NULL,
     sequence BIGINT NOT NULL CHECK (sequence > 0),
     event JSONB NOT NULL CHECK (
         jsonb_typeof(event) = 'object'
@@ -25,7 +26,7 @@ CREATE TABLE IF NOT EXISTS public.context_trajectory_events (
         AND jsonb_typeof(event->'stage') = 'string'
     ),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (team_id, run_id, sequence),
+    UNIQUE (team_id, run_id, capture_id, sequence),
     FOREIGN KEY (team_id, bot_id) REFERENCES public.bots(team_id, id) ON DELETE CASCADE,
     FOREIGN KEY (team_id, session_id) REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE
 );

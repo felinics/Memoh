@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const contentChunkBytes = 64 << 10
@@ -15,13 +17,14 @@ type Recorder struct {
 	recordMu  sync.Mutex
 	mu        sync.Mutex
 	sink      Sink
+	captureID string
 	runID     string
 	sessionID string
 	stats     Stats
 }
 
 func NewRecorder(sink Sink) *Recorder {
-	return &Recorder{sink: sink}
+	return &Recorder{sink: sink, captureID: uuid.NewString()}
 }
 
 func (r *Recorder) Bind(runID, sessionID string) {
@@ -48,7 +51,8 @@ func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blo
 	}
 	r.stats.Events++
 	event := Event{
-		RunID: r.runID, SessionID: r.sessionID, Sequence: r.stats.Events,
+		CaptureID: r.captureID,
+		RunID:     r.runID, SessionID: r.sessionID, Sequence: r.stats.Events,
 		Stage: stage, RecordedAt: time.Now().UTC(), CaptureErrors: r.stats.Errors,
 		Blocks: make([]BlockRef, 0, len(blocks)), Request: requestFromContext(ctx),
 	}

@@ -545,6 +545,7 @@ type ContextTrajectoryEvent struct {
 	BotID     pgtype.UUID        `json:"bot_id"`
 	SessionID pgtype.UUID        `json:"session_id"`
 	RunID     pgtype.UUID        `json:"run_id"`
+	CaptureID pgtype.UUID        `json:"capture_id"`
 	Sequence  int64              `json:"sequence"`
 	Event     []byte             `json:"event"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`

@@ -45,6 +45,7 @@ SELECT session.id, bot.id, $1 FROM bot, (VALUES ($3::uuid), ($4::uuid)) AS sessi
 	pgBot, pgSession, pgRun := mustParseLifecycleUUID(t, bot), mustParseLifecycleUUID(t, session), mustParseLifecycleUUID(t, run)
 	input := sqlc.AppendContextTrajectoryEventParams{
 		BotID: pgBot, SessionID: pgSession, RunID: pgRun, Sequence: 1,
+		CaptureID:     mustParseLifecycleUUID(t, "00000000-0000-0000-0000-00000000c705"),
 		ContentHashes: []string{"payload"}, Contents: [][]byte{[]byte("full\x00正文")},
 		Event: []byte(`{"stage":"trigger","blocks":[{"chunks":["payload"]}]}`),
 	}
@@ -68,13 +69,13 @@ SELECT session.id, bot.id, $1 FROM bot, (VALUES ($3::uuid), ($4::uuid)) AS sessi
 		t.Fatal("list includes unbounded block references")
 	}
 	contents, err := queries.GetContextTrajectoryEventContents(ctx, sqlc.GetContextTrajectoryEventContentsParams{
-		BotID: pgBot, SessionID: pgSession, RunID: pgRun, Sequence: 1,
+		BotID: pgBot, SessionID: pgSession, ID: rows[0].ID,
 	})
 	if err != nil || len(contents) != 1 || string(contents[0].Content) != "full\x00正文" {
 		t.Fatalf("contents = %#v, err = %v", contents, err)
 	}
 	contents, err = queries.GetContextTrajectoryEventContents(ctx, sqlc.GetContextTrajectoryEventContentsParams{
-		BotID: pgBot, SessionID: mustParseLifecycleUUID(t, otherSession), RunID: pgRun, Sequence: 1,
+		BotID: pgBot, SessionID: mustParseLifecycleUUID(t, otherSession), ID: rows[0].ID,
 	})
 	if err != nil || len(contents) != 0 {
 		t.Fatalf("cross-session contents = %#v, err = %v", contents, err)
@@ -101,6 +102,12 @@ SELECT session.id, bot.id, $1 FROM bot, (VALUES ($3::uuid), ($4::uuid)) AS sessi
 	page, err = queries.ListContextTrajectoryEvents(ctx, sqlc.ListContextTrajectoryEventsParams{BotID: pgBot, SessionID: pgSession, BeforeID: page[0].ID, RowLimit: 1})
 	if err != nil || len(page) != 1 || page[0].Sequence != 1 {
 		t.Fatalf("older page = %#v, %v", page, err)
+	}
+	input.CaptureID = mustParseLifecycleUUID(t, "00000000-0000-0000-0000-00000000c706")
+	input.Sequence = 1
+	input.Event = []byte(`{"stage":"continuation","blocks":[]}`)
+	if _, err := queries.AppendContextTrajectoryEvent(ctx, input); err != nil {
+		t.Fatalf("same-run continuation overwrote the previous capture: %v", err)
 	}
 	input.Sequence = 3
 	input.ContentHashes, input.Contents = []string{"rollback"}, [][]byte{[]byte("must roll back")}
