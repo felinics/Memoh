@@ -3,7 +3,7 @@ import type { App, Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, h, nextTick, ref } from 'vue'
 import type { ChatMessage } from '@/store/chat-list'
-import { animateScrollTo, useChatScroll } from './useChatScroll'
+import { useChatScroll } from './useChatScroll'
 
 vi.mock('@vueuse/core', async () => {
   const vue = await import('vue')
@@ -196,81 +196,6 @@ afterEach(() => {
   for (const timer of animationFrameTimers.values()) clearTimeout(timer)
   animationFrameTimers.clear()
   vi.unstubAllGlobals()
-})
-
-describe('animateScrollTo', () => {
-  function manualClock() {
-    let now = 0
-    let nextId = 1
-    const frames = new Map<number, FrameRequestCallback>()
-    return {
-      now: () => now,
-      raf: (callback: FrameRequestCallback) => {
-        const id = nextId++
-        frames.set(id, callback)
-        return id
-      },
-      caf: (id: number) => frames.delete(id),
-      step: (elapsed: number) => {
-        now += elapsed
-        const current = [...frames.values()]
-        frames.clear()
-        for (const callback of current) callback(now)
-      },
-      pending: () => frames.size,
-    }
-  }
-
-  it('lands exactly on the target', () => {
-    const clock = manualClock()
-    const el = { scrollTop: 20 }
-
-    animateScrollTo(el, () => 220, {
-      duration: 400,
-      now: clock.now,
-      raf: clock.raf,
-      caf: clock.caf,
-    })
-    clock.step(400)
-
-    expect(el.scrollTop).toBe(220)
-    expect(clock.pending()).toBe(0)
-  })
-
-  it('re-reads a moving target during the tween', () => {
-    const clock = manualClock()
-    const el = { scrollTop: 0 }
-    let target = 100
-
-    animateScrollTo(el, () => target, {
-      duration: 400,
-      now: clock.now,
-      raf: clock.raf,
-      caf: clock.caf,
-    })
-    clock.step(200)
-    target = 240
-    clock.step(200)
-
-    expect(el.scrollTop).toBe(240)
-  })
-
-  it('stops writing after cancellation', () => {
-    const clock = manualClock()
-    const el = { scrollTop: 0 }
-    const cancel = animateScrollTo(el, () => 100, {
-      duration: 400,
-      now: clock.now,
-      raf: clock.raf,
-      caf: clock.caf,
-    })
-
-    cancel()
-    clock.step(400)
-
-    expect(el.scrollTop).toBe(0)
-    expect(clock.pending()).toBe(0)
-  })
 })
 
 describe('useChatScroll gesture and layout handling', () => {

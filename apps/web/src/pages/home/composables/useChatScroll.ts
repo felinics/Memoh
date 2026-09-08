@@ -9,47 +9,8 @@ import {
 import { useScroll } from '@vueuse/core'
 import type { ChatMessage } from '@/store/chat-list'
 import { animateTurnEntrance } from './turn-entrance'
+import { nativeScrollTo } from './native-scroll'
 
-export interface ScrollTweenOptions {
-  duration?: number
-  now?: () => number
-  raf?: (cb: FrameRequestCallback) => number
-  caf?: (handle: number) => void
-}
-
-// The tween re-reads its target every frame, so positions shifted by
-// late layout settles (markdown re-render, code highlighting, image
-// loads, KaTeX/Mermaid resolves) still land exactly.
-export function animateScrollTo(
-  el: { scrollTop: number },
-  getTarget: () => number,
-  options: ScrollTweenOptions = {},
-): () => void {
-  const duration = options.duration ?? 450
-  const now = options.now ?? (() => performance.now())
-  const raf = options.raf ?? (cb => requestAnimationFrame(cb))
-  const caf = options.caf ?? (handle => cancelAnimationFrame(handle))
-  const start = el.scrollTop
-  const startedAt = now()
-  let cancelled = false
-  let handle = 0
-  const frame = () => {
-    if (cancelled) return
-    const progress = duration > 0 ? Math.min(1, (now() - startedAt) / duration) : 1
-    const eased = 1 - (1 - progress) ** 5
-    el.scrollTop = start + (getTarget() - start) * eased
-    if (progress < 1) handle = raf(frame)
-  }
-  handle = raf(frame)
-  return () => {
-    if (cancelled) return
-    cancelled = true
-    caf(handle)
-  }
-}
-
-const TWEEN_DURATION_MS = 450
-const PIN_TWEEN_DURATION_MS = 700
 const TURN_ENTRANCE_MAX_DISTANCE_PX = 80
 
 // "At the bottom" is a threshold, not a pixel-perfect landing: sub-pixel
@@ -60,12 +21,8 @@ const TURN_ENTRANCE_MAX_DISTANCE_PX = 80
 // content-end geometry section for the business semantic.
 const NEAR_BOTTOM_THRESHOLD_PX = 30
 
-// When a turn is pinned, the user prompt lands this far below the viewport
-// top. Sized to leave a visible sliver of the previous turn above the prompt —
-// context that the page "turned", not teleported: the top 40px sit under the
-// fade overlay (h-10), so roughly the remainder is readable tail. TUNE ME with
-// the user against the real layout. Measured, so it is width-agnostic — no
-// narrow-screen special case needed.
+// Keep the pinned prompt below the viewport top so the previous turn
+// remains visible above it. The offset is independent of pane width.
 const PIN_TOP_OFFSET_PX = 140
 
 export interface UseChatScrollOptions {
@@ -89,7 +46,7 @@ export interface UseChatScrollOptions {
  * A send retires the previous reserve, parks the viewport at the new prompt,
  * then translates only the latest turn's contents upward. The outer reserve
  * stays untransformed so its geometry cannot compete with the animation.
- * History/reply/rail jumps retain the ordinary scroll tween.
+ * History/reply/rail jumps use browser-owned smooth scrolling.
  * Reserves survive completion and KeepAlive; only a subsequent send or a real
  * session switch clears them. Follow is re-armed by physical downward scrolling
  * at the bottom, never by a stream update alone.
@@ -212,9 +169,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   let highlightTimer: ReturnType<typeof setTimeout> | null = null
-  let cancelScrollTween: (() => void) | null = null
+  let cancelSmoothScroll: (() => void) | null = null
   let cancelTurnEntrance: (() => void) | null = null
-  let tweenFlagTimer: ReturnType<typeof setTimeout> | null = null
   let mutationObserver: MutationObserver | null = null
   let contentResizeObserver: ResizeObserver | null = null
   let pinAttemptId = 0
@@ -293,7 +249,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
       active = false
       const pinWasApplied = appliedPinAttemptId === attemptId
       if (pinWasApplied) {
-        cancelScrollTween?.()
+        cancelSmoothScroll?.()
         pinScrollActive = false
         appliedPinAttemptId = 0
       }
@@ -323,47 +279,36 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
   }
 
-  function startScrollTween(
-    root: HTMLElement,
-    getTarget: () => number,
-    duration: number = TWEEN_DURATION_MS,
-  ) {
-    cancelScrollTween?.()
-    // A tween is a programmatic scroll; flag it for its whole run so its
-    // per-frame scrollTop moves are never latched as a user escape.
+  function startSmoothScroll(root: HTMLElement, getTarget: () => number) {
+    cancelSmoothScroll?.()
     isProgrammaticScroll = true
-    if (tweenFlagTimer) {
-      clearTimeout(tweenFlagTimer)
-      tweenFlagTimer = null
+    const release = () => {
+      pinScrollActive = false
+      isProgrammaticScroll = false
+      root.removeEventListener('wheel', cancel)
+      root.removeEventListener('touchstart', cancel)
+      root.removeEventListener('pointerdown', cancel)
+      window.removeEventListener('keydown', cancelOnKey)
+      scheduleAtBottomRefresh()
     }
-    const stop = animateScrollTo(root, () => {
-      const max = Math.max(root.scrollHeight - root.clientHeight, 0)
-      return Math.min(Math.max(getTarget(), 0), max)
-    }, { duration })
     const cancel = () => {
       stop()
       cancelTurnEntrance?.()
-      pinScrollActive = false
-      isProgrammaticScroll = false
-      if (tweenFlagTimer) {
-        clearTimeout(tweenFlagTimer)
-        tweenFlagTimer = null
-      }
-      root.removeEventListener('wheel', cancel)
-      root.removeEventListener('touchstart', cancel)
-      cancelScrollTween = null
+      cancelSmoothScroll = null
+    }
+    const cancelOnKey = (event: KeyboardEvent) => {
+      if (KEY_NAV.has(event.key) && !(event.target instanceof HTMLElement && (
+        event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
+      ))) cancel()
     }
     root.addEventListener('wheel', cancel, { passive: true })
     root.addEventListener('touchstart', cancel, { passive: true })
-    cancelScrollTween = cancel
-    // animateScrollTo has no completion callback; drop the flag once the tween
-    // can no longer be running.
-    tweenFlagTimer = setTimeout(() => {
-      cancel()
-      // A zero-distance tween (already at the target) fires no scroll event;
-      // refresh the mirror here or a stale arrow survives the click.
-      scheduleAtBottomRefresh()
-    }, duration + 100)
+    root.addEventListener('pointerdown', cancel, { passive: true })
+    window.addEventListener('keydown', cancelOnKey)
+    const stop = nativeScrollTo(root, getTarget(), release)
+    // Retain cancellation after scrolling ends: the turn's separate animation
+    // may still be running when a new send or navigation arrives.
+    cancelSmoothScroll = cancel
   }
 
   function getElementAbsoluteTop(target: HTMLElement, root: HTMLElement) {
@@ -427,14 +372,14 @@ export function useChatScroll(options: UseChatScrollOptions) {
     turnReserves.value = new Map(turnReserves.value).set(prompt.id, reservePx)
     appliedPinAttemptId = pinAttemptId
     // Immediate projection of the same value: the reactive binding lands on
-    // Vue's next flush, but the tween below needs this frame's geometry.
+    // Vue's next flush, but the scroll below needs this frame's geometry.
     // The binding renders the identical value and owns it from the next
     // patch on — including across every future remount.
     container.style.minHeight = `${reservePx}px`
     lastScrollTop = el.scrollTop
 
     // Read the untransformed turn so scrolling never chases the entrance y.
-    // Re-read its layout each frame to accommodate streaming and ID migration.
+    // Resolve the landing once; the browser owns the scroll trajectory.
     const pinTarget = () => getElementAbsoluteTop(lastTurnEl.value ?? container, el)
       + promptOffsetInTurn - PIN_TOP_OFFSET_PX
     const target = Math.min(Math.max(pinTarget(), 0), Math.max(0, bottomTarget(el)))
@@ -446,12 +391,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
       container.offsetHeight - promptEl.offsetHeight,
     ))
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      cancelScrollTween?.()
+      cancelSmoothScroll?.()
       el.scrollTop = target
       isProgrammaticScroll = false
       scheduleAtBottomRefresh()
     } else {
-      startScrollTween(el, pinTarget, PIN_TWEEN_DURATION_MS)
+      startSmoothScroll(el, pinTarget)
       pinScrollActive = true
       startTurnEntrance(el, container, fromY)
     }
@@ -461,10 +406,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
   function startTurnEntrance(root: HTMLElement, container: HTMLElement, fromY: number) {
     const finish = () => {
       root.removeEventListener('pointerdown', cancel)
+      root.removeEventListener('wheel', cancel)
+      root.removeEventListener('touchstart', cancel)
       window.removeEventListener('keydown', cancelOnKey)
       cancelTurnEntrance = null
     }
-    const cancel = () => { cancelScrollTween?.() }
+    const cancel = () => { cancelSmoothScroll?.() }
     const cancelOnKey = (event: KeyboardEvent) => {
       if (KEY_NAV.has(event.key) && !(event.target instanceof HTMLElement && (
         event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
@@ -472,7 +419,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
     root.addEventListener('pointerdown', cancel, { passive: true })
     window.addEventListener('keydown', cancelOnKey)
-    // Entrance completion must not clear the longer viewport tween's guard.
+    root.addEventListener('wheel', cancel, { passive: true })
+    root.addEventListener('touchstart', cancel, { passive: true })
+    // Entrance completion must not clear an ongoing native scroll's guard.
     let finished = false
     const stop = animateTurnEntrance(container, fromY, () => {
       finished = true
@@ -509,7 +458,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const root = scrollEl.value
     if (!root) return
     followBottom()
-    startScrollTween(root, () => bottomTarget(root))
+    startSmoothScroll(root, () => bottomTarget(root))
   }
 
   // The persistent per-turn container that holds a message — the element the
@@ -533,7 +482,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (!root || !target) return false
     // Landing on a specific message parks the reader there — stop following.
     markEscaped()
-    startScrollTween(root, () => messageJumpTarget(root, messageId))
+    startSmoothScroll(root, () => messageJumpTarget(root, messageId))
     highlightedMessageId.value = messageId
     if (highlightTimer) clearTimeout(highlightTimer)
     highlightTimer = setTimeout(() => {
@@ -577,7 +526,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const wasDraft = !prev || prev.startsWith('draft:')
     const isSession = !!next && !next.startsWith('draft:')
     if (wasDraft && isSession && (pinPending || pinnedTurnId)) return
-    cancelScrollTween?.()
+    cancelSmoothScroll?.()
     elId.clear()
     followBottom()
     // A send pin armed in the previous session must not fire against the new
@@ -665,7 +614,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   function onDeactivatedResetScroll() {
-    cancelScrollTween?.()
+    cancelSmoothScroll?.()
     lockScroll.value = true
     followBottom()
     // The pin reserve (last-turn min-height) intentionally SURVIVES tab
@@ -917,8 +866,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   onBeforeUnmount(() => {
     if (atBottomRefreshRaf) cancelAnimationFrame(atBottomRefreshRaf)
     if (highlightTimer) clearTimeout(highlightTimer)
-    if (tweenFlagTimer) clearTimeout(tweenFlagTimer)
-    cancelScrollTween?.()
+    cancelSmoothScroll?.()
     contentResizeObserver?.disconnect()
     contentResizeObserver = null
     detach(scrollEl.value)
@@ -951,7 +899,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
     // low-level primitives kept public for the scroll rail (the rail's own
     // trigger logic still calls these directly)
-    startScrollTween,
+    startSmoothScroll,
     findMessageElement,
     getElementAbsoluteTop,
     messageJumpTarget,

@@ -16,10 +16,6 @@
     <template v-else>
       <section class="flex-1 relative w-full px-3 sm:px-5 lg:px-8">
         <section class="absolute inset-0">
-          <div
-            aria-hidden="true"
-            class="pointer-events-none absolute inset-x-0 top-0 z-(--z-raised) h-10 bg-gradient-to-b from-surface-editor to-transparent"
-          />
           <ScrollArea
             ref="scrollContainer"
             class="h-full"
@@ -3039,7 +3035,7 @@ const {
   onActivatedRestoreScroll,
   onDeactivatedResetScroll,
   onMessageActive,
-  startScrollTween,
+  startSmoothScroll,
   findMessageElement,
   messageJumpTarget,
   turnReserveStyle,
@@ -3064,7 +3060,7 @@ function handleRailJump(seg: ScrollRailSegment) {
     const target = findMessageElement(seg.id)
     if (!root || !target) return
     markEscaped()
-    startScrollTween(root, () => messageJumpTarget(root, seg.id))
+    startSmoothScroll(root, () => messageJumpTarget(root, seg.id))
   })
 }
 
