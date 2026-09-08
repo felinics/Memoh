@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 )
 
 const MetadataContextLifecycleKey = "context_lifecycle"
@@ -104,7 +106,8 @@ type LifecycleSnapshot struct {
 	RunTrace                  *RunTrace           `json:"run_trace,omitempty"`
 	// Fragments lists the injected fragments of the run, bounded by the prompt
 	// rather than the conversation; their texts live in the content store.
-	Fragments []FragmentRef `json:"fragments,omitempty"`
+	Fragments  []FragmentRef     `json:"fragments,omitempty"`
+	Trajectory *trajectory.Stats `json:"trajectory,omitempty"`
 }
 
 // RunTrace is the fixed-size timing and usage rollup of one run: request
@@ -162,6 +165,7 @@ type LifecycleHolder struct {
 	// textHashes maps a fragment's content hash to the store key of the text
 	// this run recorded for it.
 	textHashes map[string]string
+	trajectory *trajectory.Recorder
 }
 
 func NewLifecycleHolder() *LifecycleHolder {
@@ -226,11 +230,17 @@ func (h *LifecycleHolder) Snapshot() (LifecycleSnapshot, bool) {
 	snapshot := cloneLifecycleSnapshot(h.snapshot)
 	ledger := h.ledger
 	runTrace := h.runTrace
+	recorder := h.trajectory
 	ok := h.set
 	for i := range snapshot.Fragments {
 		snapshot.Fragments[i].TextHash = h.textHashes[snapshot.Fragments[i].ContentHash]
 	}
 	h.mu.RUnlock()
+	if stats := recorder.Stats(); stats.Events > 0 {
+		snapshot.Trajectory = &stats
+		snapshot.Version = LifecycleSnapshotVersion
+		ok = true
+	}
 	if !ok {
 		return LifecycleSnapshot{}, false
 	}
@@ -325,6 +335,7 @@ func (s LifecycleSnapshot) Summary() LifecycleSnapshot {
 func (s LifecycleSnapshot) RowCopy() LifecycleSnapshot {
 	s = s.Summary()
 	s.RunTrace = nil
+	s.Trajectory = nil
 	s.Fragments = nil
 	if len(s.ToolDefs) > 0 {
 		defs := make([]ToolDefAccounting, len(s.ToolDefs))

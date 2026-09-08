@@ -93,7 +93,9 @@ func (r *Recorder) Stats() Stats {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.stats
+	stats := r.stats
+	stats.CaptureID = r.captureID
+	return stats
 }
 
 func Hash(data []byte) string {

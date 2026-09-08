@@ -40,8 +40,9 @@ type Event struct {
 }
 
 type Stats struct {
-	Events int64 `json:"events"`
-	Errors int64 `json:"errors"`
+	CaptureID string `json:"capture_id"`
+	Events    int64  `json:"events"`
+	Errors    int64  `json:"errors"`
 }
 
 type Sink interface {

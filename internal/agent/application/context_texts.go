@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
@@ -217,5 +218,6 @@ func (s *Service) newContextLifecycleHolder(ctx context.Context, botID string) *
 		return holder
 	}
 	holder.SetTextSink(runTextSink{ctx: context.WithoutCancel(ctx), store: store, botID: pgBotID})
+	holder.SetTrajectoryRecorder(trajectory.NewRecorder(contextTrajectorySink{queries: s.queries, botID: pgBotID}))
 	return holder
 }

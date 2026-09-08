@@ -26,6 +26,10 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	AppendContextTrajectoryEvent(context.Context, dbsqlc.AppendContextTrajectoryEventParams) (int64, error)
+	ListContextTrajectoryEvents(context.Context, dbsqlc.ListContextTrajectoryEventsParams) ([]dbsqlc.ListContextTrajectoryEventsRow, error)
+	GetContextTrajectoryEvent(context.Context, dbsqlc.GetContextTrajectoryEventParams) ([]byte, error)
+	GetContextTrajectoryEventContents(context.Context, dbsqlc.GetContextTrajectoryEventContentsParams) ([]dbsqlc.GetContextTrajectoryEventContentsRow, error)
 	CreateAgentCredential(ctx context.Context, arg dbsqlc.CreateAgentCredentialParams) (dbsqlc.AgentCredential, error)
 	GetAgentCredential(ctx context.Context, id pgtype.UUID) (dbsqlc.AgentCredential, error)
 	GetBotAgentCredential(ctx context.Context, arg dbsqlc.GetBotAgentCredentialParams) (dbsqlc.GetBotAgentCredentialRow, error)
