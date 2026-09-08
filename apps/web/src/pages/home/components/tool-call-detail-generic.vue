@@ -31,6 +31,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import EmptyRow from './tool-detail/empty-row.vue'
+import { hasToolResultError, toolResultErrorText } from './tool-result-error'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
@@ -55,10 +56,7 @@ const inputEntries = computed(() => {
     .map(([k, v]) => ({ k, v: stringify(v) }))
 })
 
-const isError = computed(() => {
-  const r = props.block.result as Record<string, unknown> | null
-  return Boolean(r && r.isError === true)
-})
+const isError = computed(() => hasToolResultError(props.block))
 
 function extractText(): string {
   const r = props.block.result
@@ -77,6 +75,8 @@ function extractText(): string {
   return sc ? stringify(sc) : ''
 }
 
-const errorText = computed(() => (isError.value ? extractText() : ''))
+const errorText = computed(() => isError.value
+  ? toolResultErrorText(props.block.result) || t('chat.tools.detail.failed')
+  : '')
 const resultText = computed(() => (isError.value ? '' : extractText()))
 </script>

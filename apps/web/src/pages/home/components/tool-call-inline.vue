@@ -125,8 +125,8 @@
         class="mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]"
       >
         <component
-          :is="display.detail"
-          v-if="display.detail"
+          :is="detailComponent"
+          v-if="detailComponent"
           :block="block"
         />
         <ToolCallDetailGeneric
@@ -140,8 +140,8 @@
         class="mt-1.5 font-[400]"
       >
         <component
-          :is="display.detail"
-          v-if="display.detail"
+          :is="detailComponent"
+          v-if="detailComponent"
           :block="block"
         />
         <ToolCallDetailGeneric
@@ -166,6 +166,7 @@ import {
 } from './tool-call-registry'
 import ConnectorLogo from './tool-detail/connector-logo.vue'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
+import { hasToolResultError } from './tool-result-error'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
@@ -180,6 +181,10 @@ const openInFileManager = inject(openInFileManagerKey, undefined)
 
 const title = computed(() => getToolTitle(props.block, t))
 const display = computed(() => title.value.display)
+// Specialized panels describe successful results or attempted inputs. Failed
+// results use the shared diagnostic detail, without changing the neutral title.
+const resultFailed = computed(() => hasToolResultError(props.block))
+const detailComponent = computed(() => resultFailed.value ? ToolCallDetailGeneric : display.value.detail)
 
 // A Connect-It tool carries its binding's alias in the tool name; when that
 // alias resolves to one of the bot's connectors the row leads with its logo.
@@ -202,6 +207,7 @@ watch(collapseKey, (key) => {
 
 const expandable = computed(() => {
   if (isPending.value) return false
+  if (resultFailed.value) return true
   if (display.value.detail === ToolCallDetailWrite) {
     const input = props.block.input as Record<string, unknown> | undefined
     return (typeof input?.content === 'string' && input.content.length > 0)

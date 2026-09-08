@@ -972,6 +972,7 @@
         "apply_patch": "正在应用补丁"
       },
       "detail": {
+        "failed": "工具执行失败。",
         "openInFiles": "在文件中打开",
         "input": "输入",
         "result": "结果",

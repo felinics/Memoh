@@ -972,6 +972,7 @@
         "apply_patch": "Applying patch"
       },
       "detail": {
+        "failed": "Tool execution failed.",
         "openInFiles": "Open in files",
         "input": "Input",
         "result": "Result",

@@ -953,6 +953,7 @@
         "apply_patch": "パッチを適用中"
       },
       "detail": {
+        "failed": "ツールの実行に失敗しました。",
         "openInFiles": "ファイルで開く",
         "input": "入力",
         "result": "結果",
