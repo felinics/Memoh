@@ -382,14 +382,14 @@
  * weight and lose their emphasis. */
 [data-chat-content] :is(.strong-node, strong, b) .chat-latin { font-weight: var(--chat-latin-strong); }
 [data-chat-content] :is(.strong-node, strong, b) .chat-cjk { font-weight: var(--chat-cjk-strong); }
-[data-chat-content] .heading-1 .chat-latin { font-weight: var(--chat-latin-h1); }
-[data-chat-content] .heading-1 .chat-cjk { font-weight: var(--chat-cjk-h1); }
-[data-chat-content] .heading-2 .chat-latin { font-weight: var(--chat-latin-h2); }
-[data-chat-content] .heading-2 .chat-cjk { font-weight: var(--chat-cjk-h2); }
-[data-chat-content] .heading-3 .chat-latin { font-weight: var(--chat-latin-h3); }
-[data-chat-content] .heading-3 .chat-cjk { font-weight: var(--chat-cjk-h3); }
-[data-chat-content] :is(.heading-4, .heading-5) .chat-latin { font-weight: var(--chat-latin-h4); }
-[data-chat-content] :is(.heading-4, .heading-5) .chat-cjk { font-weight: var(--chat-cjk-h4); }
+[data-chat-content] :is(.heading-1, h1) .chat-latin { font-weight: var(--chat-latin-h1); }
+[data-chat-content] :is(.heading-1, h1) .chat-cjk { font-weight: var(--chat-cjk-h1); }
+[data-chat-content] :is(.heading-2, h2) .chat-latin { font-weight: var(--chat-latin-h2); }
+[data-chat-content] :is(.heading-2, h2) .chat-cjk { font-weight: var(--chat-cjk-h2); }
+[data-chat-content] :is(.heading-3, h3) .chat-latin { font-weight: var(--chat-latin-h3); }
+[data-chat-content] :is(.heading-3, h3) .chat-cjk { font-weight: var(--chat-cjk-h3); }
+[data-chat-content] :is(.heading-4, .heading-5, h4, h5) .chat-latin { font-weight: var(--chat-latin-h4); }
+[data-chat-content] :is(.heading-4, .heading-5, h4, h5) .chat-cjk { font-weight: var(--chat-cjk-h4); }
 
 /* Sidebar session-title runs (session-item.vue) reuse the chat body-tier
  * per-script treatment verbatim — same --chat-*-body weight, same Latin size shave
@@ -593,6 +593,7 @@
   --ms-weight-h2: 560;
   --ms-weight-h3: 520;
   --ms-weight-h4: 500;
+  --ms-leading-small: 1.3;
   /* h5/h6 weights are NOT read from vars by markstream (.heading-5/.heading-6
    * only consume --ms-text-*), so they're set directly below. */
 
@@ -675,7 +676,7 @@
 .markstream-vue .heading-4,
 .markstream-vue .heading-5,
 .markstream-vue .heading-6 {
-  line-height: 1.3;
+  line-height: var(--ms-leading-small);
 }
 
 /* Tables — restore the previous clean look: rounded outer frame, tinted header,
@@ -690,13 +691,13 @@
   margin: 0;
 }
 
-.markstream-vue .table-node {
+.markstream-vue :is(.table-node, .ProseMirror table) {
   box-shadow: none;
   background-color: var(--color-card);
   font-size: 0.9375rem;
 }
 
-.dark .markstream-vue .table-node {
+.dark .markstream-vue :is(.table-node, .ProseMirror table) {
   background-color: var(--color-card);
 }
 
@@ -717,8 +718,8 @@
 
 /* Full grid (Excel feel): both vertical + horizontal cell lines, but a finer/
  * lighter hairline than the outer frame so the grid is calm, not heavy. */
-.markstream-vue .table-node th,
-.markstream-vue .table-node td {
+.markstream-vue :is(.table-node, .ProseMirror table) th,
+.markstream-vue :is(.table-node, .ProseMirror table) td {
   border-right: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
   border-bottom: 1px solid color-mix(in oklch, var(--color-border) 55%, transparent);
   /* Compact cell metrics: 8px/12px padding + tight 1.5 line-height keeps rows
@@ -727,8 +728,8 @@
   line-height: 1.5;
 }
 
-.markstream-vue .table-node th:last-child,
-.markstream-vue .table-node td:last-child {
+.markstream-vue :is(.table-node, .ProseMirror table) th:last-child,
+.markstream-vue :is(.table-node, .ProseMirror table) td:last-child {
   border-right: 0;
 }
 
@@ -737,7 +738,7 @@
  * column's `:---`/`:--:`/`--:` spec, so the header must inherit the column's
  * alignment instead of being pinned left (pinning it left made a centered or
  * right-aligned column read with a mismatched left-aligned title). */
-.markstream-vue .table-node thead th {
+.markstream-vue :is(.table-node, .ProseMirror table) thead th {
   font-weight: 500;
   border-bottom-width: 1px;
   /* One step below the body cells (14px vs 15px). */
@@ -745,17 +746,17 @@
 }
 
 /* Remove 1.x zebra striping */
-.markstream-vue .table-node tbody tr:nth-child(2n) {
+.markstream-vue :is(.table-node, .ProseMirror table) tbody tr:nth-child(2n) {
   background-color: transparent;
 }
 
 /* Last row sits flush with the rounded bottom edge */
-.markstream-vue .table-node tbody tr:last-child td {
+.markstream-vue :is(.table-node, .ProseMirror table) tbody tr:last-child td {
   border-bottom: 0;
 }
 
 /* No row hover on markdown tables — they're content, not an interactive list */
-.markstream-vue .table-node tbody tr:hover td {
+.markstream-vue :is(.table-node, .ProseMirror table) tbody tr:hover td {
   background-color: transparent;
 }
 
@@ -763,7 +764,9 @@
  * (480), clearly heavier than the light reading body (350); inheriting the body
  * weight made the mono run look too thin to read as code. A direct font-weight
  * (not a `font-*` utility) so the CJK weight-clamp table can't pull it back. */
-.markstream-vue .inline-code {
+.markstream-vue :is(.inline-code, .ProseMirror :not(pre) > code) {
+  background: var(--inline-code-bg);
+  color: var(--inline-code-fg);
   border-radius: 0.3125rem;
   padding: 0.125rem 0.375rem;
   font-size: 0.875em;
@@ -782,7 +785,7 @@
 /* markstream-vue 1.0.7 renamed .code-block-content to .code-block-shell-content
  * (folding now uses a --collapsed modifier instead of max-height); retargeted
  * so the line-height override keeps applying. */
-.markstream-vue .code-block-container .code-block-shell-content {
+.markstream-vue :is(.code-block-container .code-block-shell-content, .ProseMirror pre) {
   font-size: var(--memoh-code-font-size, 13px);
   font-family: var(--memoh-code-font-family, var(--memoh-code-font-family-default));
   line-height: 1.5;
@@ -794,7 +797,7 @@
  * highlight: drop the fill entirely and mark it with one pill bar drawn as a
  * ::before, so nesting just adds another thin bar at the next indent — never a
  * darker block. The bar is a token gray (`--color-border`); copy stays muted. */
-.markstream-vue .blockquote {
+.markstream-vue :is(.blockquote, .ProseMirror blockquote) {
   font-style: normal;
   font-weight: 400;
   background-color: transparent;
@@ -805,7 +808,7 @@
   color: var(--color-muted-foreground);
 }
 
-.markstream-vue .blockquote::before {
+.markstream-vue :is(.blockquote, .ProseMirror blockquote)::before {
   content: "";
   position: absolute;
   left: 0;
@@ -823,7 +826,7 @@
  * overflow stop a glyph tail (the "p" in https) from being clipped. The floating
  * URL tooltip is disabled at the renderer (showTooltips=false) — it was an
  * off-language popover, not the @felinic/ui Tooltip. */
-.markstream-vue .link-node {
+.markstream-vue :is(.link-node, .ProseMirror a) {
   color: var(--color-foreground);
   text-decoration-line: underline;
   text-decoration-style: dotted;
@@ -835,7 +838,7 @@
   transition: none;
 }
 
-.markstream-vue .link-node:hover {
+.markstream-vue :is(.link-node, .ProseMirror a):hover {
   /* Hover tints to the scarce brand purple (the app's "special" accent) — the
    * same hue the footnote markers use, so every inline jump speaks one color. */
   color: var(--brand);
@@ -1114,4 +1117,46 @@
       border-top-width: 0;
     }
   }
+}
+
+/* Milkdown owns editing behavior; the chat composer owns its typography/theme. */
+.composer-markdown-input .milkdown {
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-on-surface-variant: var(--field-placeholder);
+}
+/* Renderer DOM and editor DOM share these rules and the --ms-* variables above.
+ * Keep only editing geometry (viewport and blank-field edges) composer-specific. */
+.markstream-vue :is(.heading-1, .ProseMirror h1) { font-size: var(--ms-text-h1); margin-block: var(--ms-flow-heading-1-mt) var(--ms-flow-heading-1-mb); line-height: var(--ms-leading-h1); }
+.markstream-vue :is(.heading-2, .ProseMirror h2) { font-size: var(--ms-text-h2); margin-block: var(--ms-flow-heading-2-mt) var(--ms-flow-heading-2-mb); line-height: var(--ms-leading-h2); }
+.markstream-vue :is(.heading-3, .ProseMirror h3) { font-size: var(--ms-text-h3); margin-block: var(--ms-flow-heading-3-mt) var(--ms-flow-heading-3-mb); line-height: var(--ms-leading-h3); }
+.markstream-vue :is(.heading-4, .ProseMirror h4) { font-size: var(--ms-text-h4); margin-block: var(--ms-flow-heading-4-mt) var(--ms-flow-heading-4-mb); line-height: var(--ms-leading-small); }
+.markstream-vue :is(.heading-5, .ProseMirror h5) { font-size: var(--ms-text-h5); margin-block: var(--ms-flow-heading-5-mt) var(--ms-flow-heading-5-mb); line-height: var(--ms-leading-small); }
+.markstream-vue :is(.heading-6, .ProseMirror h6) { font-size: var(--ms-text-h6); margin-block: var(--ms-flow-heading-6-mt) var(--ms-flow-heading-6-mb); line-height: var(--ms-leading-small); }
+.markstream-vue :is(.paragraph-node, .ProseMirror p) { margin-block: var(--ms-flow-paragraph-y); }
+.markstream-vue :is(.list-node, .ProseMirror ul, .ProseMirror ol) { margin-block: var(--ms-flow-list-y); }
+.markstream-vue :is(.list-item, .ProseMirror li) { margin-block: var(--ms-flow-list-item-y); }
+.markstream-vue :is(.list-item > .paragraph-node, .ProseMirror li > p) { margin-block: 0; }
+.markstream-vue :is(.hr-node, .ProseMirror hr) { margin-block: var(--ms-flow-hr-y); border-color: var(--hr-border); }
+.markstream-vue :is(.blockquote, .ProseMirror blockquote) { margin-block: var(--ms-flow-blockquote-y); }
+.markstream-vue :is(.table-node-wrapper, .ProseMirror table) { margin-block: var(--ms-flow-table-y); }
+.composer-markdown-input .ProseMirror { outline: none; min-height: 1lh; line-height: var(--chat-leading); }
+.composer-markdown-input .ProseMirror:has(.chat-cjk) { line-height: var(--chat-leading-cjk); }
+.composer-markdown-input .ProseMirror ul { list-style: disc; padding-inline-start: var(--ms-flow-list-indent); }
+.composer-markdown-input .ProseMirror ol { list-style: decimal; padding-inline-start: var(--ms-flow-list-indent); }
+.composer-markdown-input .ProseMirror pre { background: var(--code-bg); color: var(--code-fg); white-space: pre-wrap; margin-block: var(--ms-flow-codeblock-y); font-family: var(--ms-font-mono); font-size: var(--memoh-code-font-size, 13px); }
+.composer-markdown-input .ProseMirror pre code { background: transparent; color: inherit; font: inherit; }
+.composer-markdown-input .ProseMirror table { border-collapse: collapse; }
+.composer-markdown-input .ProseMirror th { background: var(--table-header-bg); }
+.composer-markdown-input .ProseMirror > :first-child { margin-block-start: 0; }
+.composer-markdown-input .ProseMirror > :last-child { margin-block-end: 0; }
+
+/* The compact composer uses half of DialogBody's animated fade distance. */
+.composer-scroll-fade.dialog-body[data-slot="dialog-body"] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black calc(var(--dialog-body-fade-top) / 2),
+    black calc(100% - var(--dialog-body-fade-bottom) / 2),
+    transparent
+  );
 }

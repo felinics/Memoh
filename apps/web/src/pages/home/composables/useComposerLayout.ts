@@ -1,3 +1,4 @@
+import type { ComposerInputTarget } from './composer-input-target'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from 'vue'
 
 // Composer layout: element refs, textarea focus, and the width clamp for the
@@ -39,7 +40,7 @@ const CLUSTER_GAP = 8 // gap-2 between controls-row children
 export function useComposerLayout(deps: ComposerLayoutDeps) {
   const { continueOnVisible, continueOnExpanded } = deps
 
-  const textareaEl = ref<HTMLTextAreaElement | null>(null)
+  const textareaEl = ref<ComposerInputTarget | null>(null)
   const composerEl = ref<HTMLElement | null>(null)
 
   const composerInnerWidth = ref(0)

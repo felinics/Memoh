@@ -484,13 +484,11 @@
                   </div>
                 </Transition>
 
-                <textarea
+                <ComposerMarkdownInput
                   ref="textareaEl"
                   v-model="inputText"
-                  rows="1"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
                   :disabled="!currentBotId || activeChatReadOnly || loadingMessages || voiceInputState !== 'idle'"
-                  class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isWelcome ? 'min-h-12' : 'min-h-10'"
                   @keydown="handleComposerKeydown"
                   @paste="handlePaste"
@@ -958,6 +956,7 @@ import { registerChatFileDropTarget } from '../composables/chat-file-drop-target
 import { readDroppedFiles } from '@/utils/dropped-files'
 import MessageItem from './message-item.vue'
 import ComposerContinueOn from './composer-continue-on.vue'
+import ComposerMarkdownInput from './composer-markdown-input.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
 import { useChatScroll } from '../composables/useChatScroll'
 import BgTaskPill from './bg-task-pill.vue'
@@ -1001,6 +1000,8 @@ import {
   visibleACPSlashCommands,
   type ACPAvailableCommand,
 } from '@/utils/acp-slash-commands'
+
+const inputText = ref('')
 
 const props = withDefaults(defineProps<{
   // Stable dockview panel id (e.g. `chat:3`). Used for per-tab composer drafts and
@@ -2638,7 +2639,6 @@ const {
   openBySrc: galleryOpenBySrc,
 } = useMediaGallery(messages)
 
-const inputText = ref('')
 watch(inputText, (text) => {
   const prefix = slashPanelSuppressedPrefix.value
   if (!prefix || text === prefix || text.startsWith(`${prefix} `)) return

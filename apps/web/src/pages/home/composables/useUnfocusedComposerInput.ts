@@ -1,3 +1,4 @@
+import type { ComposerInputTarget } from './composer-input-target'
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
 import { detectPlatform } from '@/lib/keyboard-bindings'
 
@@ -6,14 +7,15 @@ const OPEN_OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"], [rol
 
 /** Only the active chat pane may recover text that otherwise has no input owner. */
 export function useUnfocusedComposerInput(options: {
-  textarea: Ref<HTMLTextAreaElement | null>
+  textarea: Ref<ComposerInputTarget | null>
   enabled: () => boolean
   onPaste: (event: ClipboardEvent) => void
 }) {
   function destination(event: Event) {
     const textarea = options.textarea.value
-    if (event.defaultPrevented || !options.enabled() || !textarea?.isConnected
-      || textarea.disabled || textarea.readOnly || !textarea.getClientRects().length) return null
+    const element = textarea instanceof HTMLTextAreaElement ? textarea : textarea?.element
+    if (event.defaultPrevented || !options.enabled() || !element?.isConnected || !textarea
+      || textarea.disabled || (textarea instanceof HTMLTextAreaElement && textarea.readOnly) || !element.getClientRects().length) return null
     if (document.activeElement?.closest(INPUT_OWNER)) return null
     const path = event.composedPath()
     if (path.some(node => node instanceof Element && node.closest(INPUT_OWNER))) return null
@@ -23,8 +25,9 @@ export function useUnfocusedComposerInput(options: {
     return textarea
   }
 
-  function insert(textarea: HTMLTextAreaElement, text: string) {
+  function insert(textarea: ComposerInputTarget, text: string) {
     textarea.focus({ preventScroll: true })
+    if (!(textarea instanceof HTMLTextAreaElement)) { textarea.insertText(text); return }
     textarea.setRangeText(text, textarea.selectionStart, textarea.selectionEnd, 'end')
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
   }
@@ -55,7 +58,8 @@ export function useUnfocusedComposerInput(options: {
     options.onPaste(event)
     if (event.defaultPrevented) return
     event.preventDefault()
-    insert(textarea, text)
+    if (textarea instanceof HTMLTextAreaElement) insert(textarea, text)
+    else textarea.paste(event)
   }
 
   function onBeforeInput(event: InputEvent) {

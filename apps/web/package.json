@@ -33,6 +33,8 @@
     "@lisse/vue": "^0.4.0",
     "@memohai/icon": "workspace:*",
     "@memohai/sdk": "workspace:*",
+    "@milkdown/crepe": "7.22.1",
+    "@milkdown/kit": "7.22.1",
     "@pinia/colada": "^0.21.2",
     "@shikijs/transformers": "^4.0.1",
     "@tailwindcss/vite": "^4.3.3",
