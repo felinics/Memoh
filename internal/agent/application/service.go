@@ -748,6 +748,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		agentInjectCh := make(chan native.InjectMessage, cap(req.InjectCh))
 		go func() {
 			for msg := range req.InjectCh {
+				recordContextStage(ctx, "steering_trigger", map[string]any{"text": msg.Text, "headerified_text": msg.HeaderifiedText, "attachments": msg.Attachments})
 				agentMsg := native.InjectMessage{
 					Text:            msg.Text,
 					HeaderifiedText: msg.HeaderifiedText,
@@ -757,6 +758,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 				if runCfg.SupportsImageInput && len(msg.Attachments) > 0 {
 					agentMsg.ImageParts = s.inlineInjectAttachments(ctx, req.BotID, msg.Attachments)
 				}
+				recordContextStage(ctx, "steering_prepared", agentMsg)
 				agentInjectCh <- agentMsg
 			}
 			close(agentInjectCh)

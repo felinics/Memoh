@@ -12,6 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/background"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -130,7 +131,11 @@ func TestAgentGenerateBackgroundSummaryMessageRoundtrip(t *testing.T) {
 	})
 
 	ledger := contextfrag.NewMutationLedger()
+	sink := &nativeTrajectorySink{}
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
 	_, err := a.Generate(context.Background(), RunConfig{
+		RunID: "run", ContextLifecycle: holder,
 		Model:             &sdk.Model{ID: "mock-model", Provider: modelProvider},
 		Messages:          []sdk.Message{sdk.UserMessage("start")},
 		System:            "You are a bot.",
@@ -170,6 +175,18 @@ func TestAgentGenerateBackgroundSummaryMessageRoundtrip(t *testing.T) {
 	}
 	if got := backgroundSummaryCount(calls[3].Messages); got != 0 {
 		t.Fatalf("call 4 summary messages = %d, want 0 after task completion", got)
+	}
+	removed := false
+	for _, event := range sink.events {
+		if event.Stage == "background_summary_updated" {
+			body := capturedStageBody(sink, event)
+			if strings.Contains(body, `"summary":""`) && strings.Contains(body, "Long build task") {
+				removed = true
+			}
+		}
+	}
+	if !removed {
+		t.Fatal("completed background summary disappeared without a removal capture")
 	}
 	for _, record := range ledger.Records() {
 		if record.Kind == contextfrag.MutationBackgroundSummary {

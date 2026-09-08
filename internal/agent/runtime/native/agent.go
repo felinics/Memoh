@@ -401,6 +401,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	cfg = captureProviderAttemptPrefix(cfg)
 	if readMediaState != nil {
 		readMediaState.ledger = cfg.ContextMutations
+		readMediaState.capture = func(step int, params *sdk.GenerateParams, source trajectory.Block) {
+			cfg.RecordTrajectory(streamCtx, "read_media_injected", &step, params, source)
+		}
 	}
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
@@ -464,6 +467,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						break
 					}
 					text := injectedMessageText(injected)
+					messageIndex := len(p.Messages)
+					applied := false
 					if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
 						var extra []sdk.MessagePart
 						if cfg.SupportsImageInput {
@@ -473,8 +478,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 								}
 							}
 						}
-						messageIndex := len(p.Messages)
 						p.Messages = append(p.Messages, StampContextInjection(sdk.UserMessage(text, extra...), event.ContextInjectionSteering))
+						applied = true
 						cfg.ContextMutations.Record(contextfrag.MutationInjectedMessage, fmt.Sprintf("bytes=%d", len(text)))
 						injectedMessages.record(step, messageIndex, text)
 						a.logger.Info("injected user message into agent stream",
@@ -483,6 +488,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 							slog.Int("image_parts", len(extra)),
 						)
 					}
+					cfg.RecordTrajectory(ctx, "steering_applied", &step, p,
+						trajectory.JSONBlock("injection", "source", map[string]any{"input": injected, "message_index": messageIndex, "applied": applied}),
+					)
 					continue
 				default:
 				}
@@ -1067,6 +1075,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	cfg = captureProviderAttemptPrefix(cfg)
 	if readMediaState != nil {
 		readMediaState.ledger = cfg.ContextMutations
+		readMediaState.capture = func(step int, params *sdk.GenerateParams, source trajectory.Block) {
+			cfg.RecordTrajectory(genCtx, "read_media_injected", &step, params, source)
+		}
 	}
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
@@ -1240,15 +1251,27 @@ func (a *Agent) buildGenerateOptions(ctx context.Context, cfg RunConfig, tools [
 			if p == nil {
 				return nil
 			}
+			var previous []sdk.Message
+			for _, message := range p.Messages[min(initialProviderMessageCount, len(p.Messages)):] {
+				if contextfrag.IsBackgroundSummaryCarrier(message) {
+					previous = append(previous, message)
+				}
+			}
 			p.Messages = removeBackgroundSummaryMessages(p.Messages, initialProviderMessageCount)
 			if basePrepare != nil {
 				if override := basePrepare(p); override != nil {
 					p = override
 				}
 			}
-			if summary := strings.TrimSpace(cfg.BackgroundManager.RunningTasksSummary(cfg.Identity.BotID, cfg.Identity.SessionID)); summary != "" {
-				cfg.ContextMutations.Record(contextfrag.MutationBackgroundSummary, fmt.Sprintf("bytes=%d", len(summary)))
+			summary := strings.TrimSpace(cfg.BackgroundManager.RunningTasksSummary(cfg.Identity.BotID, cfg.Identity.SessionID))
+			if summary != "" {
 				p.Messages = append(p.Messages, backgroundSummaryMessage(summary))
+			}
+			if len(previous) > 0 || summary != "" {
+				cfg.ContextMutations.Record(contextfrag.MutationBackgroundSummary, fmt.Sprintf("removed=%d bytes=%d", len(previous), len(summary)))
+				cfg.RecordTrajectory(ctx, "background_summary_updated", nil, p,
+					trajectory.JSONBlock("background", "replacement", map[string]any{"previous": previous, "summary": summary}),
+				)
 			}
 			return p
 		}
