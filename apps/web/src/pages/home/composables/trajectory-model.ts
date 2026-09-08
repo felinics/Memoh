@@ -117,11 +117,16 @@ export interface TrajectoryStats {
   outputTokens: number
 }
 
-export function lifecycleByTurnId(turns: HandlersContextLifecycleTurn[]): Map<string, HandlersContextLifecycleTurn> {
-  const byTurn = new Map<string, HandlersContextLifecycleTurn>()
+export function lifecycleByTurnId(turns: HandlersContextLifecycleTurn[]): Map<string, HandlersContextLifecycleTurn[]> {
+  const byTurn = new Map<string, HandlersContextLifecycleTurn[]>()
+  const seen = new Set<string>()
   for (const turn of turns) {
     const turnId = turn.turn_id?.trim()
-    if (turnId && !byTurn.has(turnId)) byTurn.set(turnId, turn)
+    if (!turnId || (turn.run_id && seen.has(turn.run_id))) continue
+    if (turn.run_id) seen.add(turn.run_id)
+    const runs = byTurn.get(turnId) ?? []
+    runs.unshift(turn)
+    byTurn.set(turnId, runs)
   }
   return byTurn
 }
@@ -401,7 +406,7 @@ function assistantSignature(turn: ChatAssistantTurn, lifecycle: HandlersContextL
 
 export type TrajectoryRowBuilder = (
   messages: ChatMessage[],
-  lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
+  lifecycleByTurn: ReadonlyMap<string, readonly HandlersContextLifecycleTurn[]>,
   previousByRun?: ReadonlyMap<string, HandlersContextLifecycleTurn | null | undefined>,
   compactions?: readonly CompactionLog[],
 ) => TrajectoryRow[]
@@ -437,7 +442,7 @@ function compactionStartMs(compaction: CompactionLog): number {
 // context rows are built once per persisted lifecycle and lead the turn
 // whether its user message or only its assistant output is loaded.
 export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
-  const assistantCache = new WeakMap<ChatAssistantTurn, { signature: string, rows: TrajectoryRow[] }>()
+  const assistantCache = new WeakMap<ChatAssistantTurn, { signature: string, lifecycle: HandlersContextLifecycleTurn | undefined, rows: TrajectoryRow[] }>()
   const contextCache = new WeakMap<HandlersContextLifecycleTurn, { turnLabel: string, previous: HandlersContextLifecycleTurn | null | undefined, entries: ContextEntries, system: TrajectoryRow | null, before: TrajectoryRow[] }>()
   const contextOf = (lifecycle: HandlersContextLifecycleTurn, turnId: string, turnLabel: string, previous: HandlersContextLifecycleTurn | null | undefined) => {
     const cached = contextCache.get(lifecycle)
@@ -473,24 +478,30 @@ export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
       const turnLabel = String(turn.turnPosition ?? position)
       lastTurnId = turn.turnId ?? ''
       lastTurnLabel = turnLabel
-      const lifecycle = turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined
+      const runs = (turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined) ?? []
+      const lifecycle = runs.length === 1 ? runs[0] : undefined
       const previous = lifecycle?.run_id ? previousByRun?.get(lifecycle.run_id) : undefined
       const context = lifecycle && turnStart ? contextOf(lifecycle, turn.turnId ?? '', turnLabel, previous) : null
+      const runRows = turnStart && runs.length > 1 ? runs.flatMap((run) => {
+        const captured = contextOf(run, turn.turnId ?? '', turnLabel, run.run_id ? previousByRun?.get(run.run_id) : undefined)
+        const steps = [...captured.entries.perStep].flatMap(([step, entries]) => entries.map((entry, index) => contextRow(run, entry, `${run.run_id}:step:${step}:${index}`, turn.turnId ?? '', turnLabel, step)))
+        return [...(captured.system ? [captured.system] : []), ...captured.before, ...steps]
+      }) : []
       let turnRows: TrajectoryRow[]
       if (turn.role === 'user') {
-        turnRows = context ? [...(context.system ? [context.system] : []), userRow(turn, turnLabel), ...context.before] : [userRow(turn, turnLabel)]
+        turnRows = context ? [...(context.system ? [context.system] : []), userRow(turn, turnLabel), ...context.before] : [userRow(turn, turnLabel), ...runRows]
       } else {
         const perStep = lifecycle ? contextOf(lifecycle, turn.turnId ?? '', turnLabel, previous).entries.perStep : new Map<number, ContextEntry[]>()
         const signature = assistantSignature(turn, lifecycle, turnLabel)
         const cached = assistantCache.get(turn)
         let blocks: TrajectoryRow[]
-        if (cached && cached.signature === signature) {
+        if (cached && cached.signature === signature && cached.lifecycle === lifecycle) {
           blocks = cached.rows
         } else {
           blocks = assistantRows(turn, lifecycle, perStep, turnLabel)
-          assistantCache.set(turn, { signature, rows: blocks })
+          assistantCache.set(turn, { signature, lifecycle, rows: blocks })
         }
-        turnRows = context ? [...(context.system ? [context.system] : []), ...context.before, ...blocks] : blocks
+        turnRows = context ? [...(context.system ? [context.system] : []), ...context.before, ...blocks] : [...runRows, ...blocks]
       }
       if (turnRows.length === 0) continue
       const first = turnRows[0]!
@@ -510,7 +521,7 @@ export function createTrajectoryRowBuilder(): TrajectoryRowBuilder {
 
 export function buildTrajectoryRows(
   messages: ChatMessage[],
-  lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
+  lifecycleByTurn: ReadonlyMap<string, readonly HandlersContextLifecycleTurn[]>,
   previousByRun?: ReadonlyMap<string, HandlersContextLifecycleTurn | null | undefined>,
   compactions?: readonly CompactionLog[],
 ): TrajectoryRow[] {
@@ -594,14 +605,18 @@ function emptyStats(): TrajectoryStats {
 // trace when one was persisted.
 export function foldTrajectoryStats(
   messages: ChatMessage[],
-  lifecycleByTurn: ReadonlyMap<string, HandlersContextLifecycleTurn>,
+  lifecycleByTurn: ReadonlyMap<string, readonly HandlersContextLifecycleTurn[]>,
 ): TrajectoryStats {
   const stats = emptyStats()
   let ttftSum = 0
   let ttftCount = 0
+  const countedRuns = new Set<string>()
+  const countedTurns = new Set<string>()
   for (const turn of messages) {
     if (turn.role !== 'assistant') continue
-    stats.turns += 1
+    const turnKey = turn.turnId || turn.id
+    if (!countedTurns.has(turnKey)) stats.turns += 1
+    countedTurns.add(turnKey)
     const traces = turn.stepTraces ?? []
     if (traces.length > 0) {
       let firstSampled: UIStepTrace | null = null
@@ -634,20 +649,24 @@ export function foldTrajectoryStats(
       }
       continue
     }
-    const runTrace = turn.turnId ? lifecycleByTurn.get(turn.turnId)?.snapshot?.run_trace : undefined
-    if (!runTrace) continue
-    stats.steps += runTrace.steps ?? 0
-    stats.toolCalls += runTrace.tool_calls ?? 0
-    stats.llmMs += runTrace.llm_ms ?? 0
-    stats.toolMs += runTrace.tool_ms ?? 0
-    stats.decodeMs += runTrace.decode_ms ?? 0
-    stats.decodeTokens += runTrace.decode_output_tokens ?? 0
-    stats.inputTokens += runTrace.input_tokens ?? 0
-    stats.cachedInputTokens += runTrace.cached_input_tokens ?? 0
-    stats.outputTokens += runTrace.output_tokens ?? 0
-    if ((runTrace.ttft_ms ?? 0) > 0) {
-      ttftSum += runTrace.ttft_ms!
-      ttftCount += 1
+    for (const run of (turn.turnId ? lifecycleByTurn.get(turn.turnId) : undefined) ?? []) {
+      const runKey = run.run_id || turnKey
+      const runTrace = run.snapshot?.run_trace
+      if (!runTrace || countedRuns.has(runKey)) continue
+      countedRuns.add(runKey)
+      stats.steps += runTrace.steps ?? 0
+      stats.toolCalls += runTrace.tool_calls ?? 0
+      stats.llmMs += runTrace.llm_ms ?? 0
+      stats.toolMs += runTrace.tool_ms ?? 0
+      stats.decodeMs += runTrace.decode_ms ?? 0
+      stats.decodeTokens += runTrace.decode_output_tokens ?? 0
+      stats.inputTokens += runTrace.input_tokens ?? 0
+      stats.cachedInputTokens += runTrace.cached_input_tokens ?? 0
+      stats.outputTokens += runTrace.output_tokens ?? 0
+      if ((runTrace.ttft_ms ?? 0) > 0) {
+        ttftSum += runTrace.ttft_ms!
+        ttftCount += 1
+      }
     }
   }
   // Only the turn's first request carried a TTFT above; one reading per turn.

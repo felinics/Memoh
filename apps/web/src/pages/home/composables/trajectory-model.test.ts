@@ -94,6 +94,44 @@ const lifecycleTurn: HandlersContextLifecycleTurn = {
   },
 }
 
+describe('continued legacy runs', () => {
+  it('refreshes step context when the same run publishes a new snapshot', () => {
+    const build = createTrajectoryRowBuilder()
+    const assistant = assistantTurn()
+    build([assistant], lifecycleByTurnId([lifecycleTurn]))
+    const updated = { ...lifecycleTurn, snapshot: { ...lifecycleTurn.snapshot, steps: [{ step_index: 1, dropped: 8 }] } }
+    const rows = build([assistant], lifecycleByTurnId([updated]))
+    const step = rows.find(row => row.detail.kind === 'context' && row.detail.entry.kind === 'step')
+    expect(step?.detail.kind === 'context' && step.detail.entry.kind === 'step' && step.detail.entry.step.dropped).toBe(8)
+  })
+
+  it('retains each run and its step context when older runs arrive', () => {
+    const earlier = { ...lifecycleTurn, run_id: 'earlier-run', created_at: '2026-09-02T23:59:00Z' }
+    const build = createTrajectoryRowBuilder()
+    const assistant = assistantTurn()
+    const messages = [user('user-1', 'task'), assistant]
+    build(messages, lifecycleByTurnId([lifecycleTurn]))
+    const rows = build(messages, lifecycleByTurnId([lifecycleTurn, earlier, earlier]))
+    const systems = rows.filter(row => row.detail.kind === 'system')
+    expect(systems.map(row => row.detail.kind === 'system' && row.detail.lifecycle.run_id)).toEqual(['earlier-run', 'run-1'])
+    expect(rows.filter(row => row.detail.kind === 'block')).toHaveLength(3)
+    expect(rows.filter(row => row.detail.kind === 'context' && row.detail.entry.kind === 'step').map(row => row.detail.kind === 'context' && row.detail.lifecycle.run_id)).toEqual(['earlier-run', 'run-1'])
+    expect(new Set(rows.map(row => row.key)).size).toBe(rows.length)
+    const rebuilt = build(messages, lifecycleByTurnId([lifecycleTurn, earlier]))
+    expect(rebuilt.filter(row => row.detail.kind === 'block')).toEqual(rows.filter(row => row.detail.kind === 'block'))
+  })
+
+  it('counts legacy run fallbacks once across repeated assistant rows', () => {
+    const first = assistantTurn()
+    const second = { ...first, id: 'continued-output' }
+    first.stepTraces = second.stepTraces = []
+    const stats = foldTrajectoryStats([first, second], lifecycleByTurnId([lifecycleTurn, { ...lifecycleTurn, run_id: 'earlier-run', snapshot: { run_trace: { steps: 3, llm_ms: 1_700, tool_calls: 2 } } }]))
+    expect(stats.steps).toBe(5)
+    expect(stats.llmMs).toBe(3_300)
+    expect(stats.toolCalls).toBe(3)
+  })
+})
+
 describe('context entries', () => {
   it('splits the manifest into the system prompt and one entry per injected kind', () => {
     const entries = contextEntries(lifecycleTurn.snapshot!)
