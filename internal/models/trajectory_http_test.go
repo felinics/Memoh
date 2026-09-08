@@ -113,7 +113,11 @@ func TestTrajectoryWireCaptureProviderMatrix(t *testing.T) {
 				ctx := trajectory.WithRecorder(t.Context(), recorder)
 				params := sdk.GenerateParams{Model: model, System: "ORIGINAL_SYSTEM", Messages: []sdk.Message{sdk.UserMessage("LAST_USER_PART")}}
 				if stream {
-					_, _ = model.Provider.DoStream(ctx, params)
+					result, _ := model.Provider.DoStream(ctx, params)
+					if result != nil && result.Stream != nil {
+						for range result.Stream {
+						}
+					}
 				} else {
 					_, _ = model.Provider.DoGenerate(ctx, params)
 				}
