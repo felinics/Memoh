@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -50,6 +51,11 @@ func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blo
 		return 0
 	}
 	r.stats.Events++
+	for _, block := range blocks {
+		if block.Kind == "capture_error" {
+			r.stats.Errors++
+		}
+	}
 	event := Event{
 		CaptureID: r.captureID,
 		RunID:     r.runID, SessionID: r.sessionID, Sequence: r.stats.Events,
@@ -78,13 +84,22 @@ func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blo
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := r.sink.Append(writeCtx, event, contents); err != nil {
+	if err := appendCapture(writeCtx, r.sink, event, contents); err != nil {
 		r.mu.Lock()
 		r.stats.Errors++
 		r.mu.Unlock()
 		slog.Warn("context trajectory capture failed", "run_id", event.RunID, "stage", stage, "sequence", event.Sequence, "error", err)
 	}
 	return event.Sequence
+}
+
+func appendCapture(ctx context.Context, sink Sink, event Event, contents []Content) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("context trajectory sink panicked: %v", recovered)
+		}
+	}()
+	return sink.Append(ctx, event, contents)
 }
 
 func (r *Recorder) Stats() Stats {

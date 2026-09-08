@@ -125,3 +125,21 @@ func TestChildRecorderCannotInheritParentRequest(t *testing.T) {
 		t.Fatal("child capture references a request in another run")
 	}
 }
+
+func TestRecorderMakesEncodingAndSinkFailuresObservable(t *testing.T) {
+	sink := &memorySink{}
+	recorder := NewRecorder(sink)
+	recorder.Bind("run", "session")
+	recorder.Record(t.Context(), "context", nil, JSONBlock("input", "unencodable", make(chan int)))
+	if len(sink.events) != 1 || sink.events[0].CaptureErrors != 1 || sink.events[0].Blocks[0].Kind != "capture_error" {
+		t.Fatal("JSON encoding failure was hidden")
+	}
+	panicking := NewRecorder(callbackSink(func(context.Context, Event, []Content) error {
+		panic("fixture store panic")
+	}))
+	panicking.Bind("run", "session")
+	panicking.Record(t.Context(), "trigger", nil)
+	if stats := panicking.Stats(); stats.Events != 1 || stats.Errors != 1 {
+		t.Fatal("sink panic was not reported as a capture error")
+	}
+}
