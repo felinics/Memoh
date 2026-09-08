@@ -34,6 +34,7 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 	trs := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
 	artifacts := s.loadTimelineArtifacts(ctx, req.BotID, sessionID)
 
+	recordContextStage(ctx, "history_loaded", map[string]any{"events": rc, "responses": trs, "compactions": artifacts})
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
 		return nil, 0
@@ -63,9 +64,11 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 	}
 
 	// Apply context token budget trimming to pipeline path as well.
+	recordContextStage(ctx, "history_composed", messages)
 	if contextTokenBudget > 0 && len(messages) > 0 {
 		messages = trimPipelineMessagesByTokens(s.logger, messages, pinned, contextTokenBudget)
 	}
+	recordContextStage(ctx, "history_trimmed", map[string]any{"messages": messages, "token_budget": contextTokenBudget})
 
 	return messages, compactable
 }

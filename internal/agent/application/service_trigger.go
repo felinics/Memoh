@@ -99,6 +99,8 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	req.TurnPosition = &admission.TurnPosition
 
 	cfg := rc.runConfig
+	ctx = cfg.TrajectoryContext(ctx)
+	recordContextStage(ctx, "schedule_trigger", payload)
 	cfg.SessionType = sessionmode.Schedule
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
@@ -112,6 +114,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		Command:     payload.Command,
 	})
 	cfg = attachCurrentTurnPrompt(cfg, schedulePrompt)
+	recordContextStage(ctx, "schedule_prompt", schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error

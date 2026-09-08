@@ -53,6 +53,7 @@ func (s *Service) resolveMemoryProviderWithID(ctx context.Context, botID string)
 
 func (s *Service) loadMemoryContext(ctx context.Context, req ChatRequest) memoryContextLoad {
 	builtQuery := s.buildMemoryQuery(ctx, req)
+	recordContextStage(ctx, "memory_query", builtQuery)
 	if strings.TrimSpace(builtQuery.Query) == "" {
 		return memoryContextLoad{}
 	}
@@ -136,6 +137,7 @@ func (s *Service) loadMemoryContext(ctx context.Context, req ChatRequest) memory
 }
 
 func (s *Service) memoryContextFromResult(ctx context.Context, req ChatRequest, builtQuery memoryQuery, cacheKey memprovider.MemoryContextCacheKey, result *memprovider.BeforeChatResult, cacheState, fallbackReason string) memoryContextLoad {
+	recordContextStage(ctx, "memory_result", map[string]any{"result": result, "cache_state": cacheState, "fallback_reason": fallbackReason})
 	contextText := ""
 	if result != nil {
 		contextText = strings.TrimSpace(result.ContextText)
@@ -163,6 +165,8 @@ func (s *Service) memoryContextFromResult(ctx context.Context, req ChatRequest, 
 	}
 
 	load := materializeMemoryContext(contextText, after.AppendContext)
+	recordHookContextStage(ctx, "memory_hook", after)
+	recordContextStage(ctx, "memory_materialized", load.Message)
 	load.Trace = trace
 	return load
 }

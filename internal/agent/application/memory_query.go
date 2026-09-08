@@ -61,6 +61,7 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 		}
 		return builder.Build(req, nil)
 	}
+	recordContextStage(ctx, "memory_history_loaded", loaded)
 	loaded = pruneHistoryForGateway(loaded)
 	artifactBoundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
 	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
@@ -72,6 +73,7 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 		return builder.Build(req, nil)
 	}
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
+	recordContextStage(ctx, "memory_query_sources", map[string]any{"query": req.Query, "history": loaded, "policy": builder})
 	return builder.Build(req, loaded)
 }
 
