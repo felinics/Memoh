@@ -41,7 +41,7 @@ func (r *Recorder) record(ctx context.Context, stage string, stepIndex *int, blo
 	r.mu.Unlock()
 	r.recordMu.Unlock()
 	if start {
-		go r.drain()
+		go r.drain(ctx)
 	}
 	if wait {
 		<-job.done
@@ -49,7 +49,7 @@ func (r *Recorder) record(ctx context.Context, stage string, stepIndex *int, blo
 	return job.event.Sequence
 }
 
-func (r *Recorder) drain() {
+func (r *Recorder) drain(ctx context.Context) {
 	for {
 		r.mu.Lock()
 		if len(r.jobs) == 0 {
@@ -64,8 +64,8 @@ func (r *Recorder) drain() {
 		r.stats.Errors += job.encodingErrors
 		job.event.CaptureErrors = r.stats.Errors
 		r.mu.Unlock()
-		ctx, cancel := context.WithTimeout(job.ctx, 5*time.Second)
-		err := appendCapture(ctx, r.sink, job.event, job.contents)
+		writeCtx, cancel := context.WithTimeout(job.ctx, 5*time.Second)
+		err := appendCapture(writeCtx, r.sink, job.event, job.contents) //nolint:contextcheck // Each queued capture retains its own request context.
 		cancel()
 		r.mu.Lock()
 		if err != nil {
@@ -74,7 +74,7 @@ func (r *Recorder) drain() {
 		r.stats.Pending--
 		r.mu.Unlock()
 		if err != nil {
-			slog.Warn("context trajectory capture failed", "run_id", job.event.RunID, "stage", job.event.Stage, "sequence", job.event.Sequence, "error", err)
+			r.logger.WarnContext(ctx, "context trajectory capture failed", slog.String("run_id", job.event.RunID), slog.String("stage", job.event.Stage), slog.Int64("sequence", job.event.Sequence), slog.Any("error", err))
 		}
 		close(job.done)
 	}

@@ -63,7 +63,10 @@ func TestTrajectoryBodyReadRespectsCancellation(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := clientWithTrajectory(&http.Client{Timeout: 25 * time.Millisecond}).Do(req)
+		response, err := clientWithTrajectory(&http.Client{Timeout: 25 * time.Millisecond}).Do(req) //nolint:gosec // G704: fixed loopback fixture endpoint.
+		if response != nil {
+			_ = response.Body.Close()
+		}
 		done <- err
 	}()
 	select {
@@ -112,7 +115,7 @@ func TestTrajectoryCapturesActualProviderBodyBeforeEndpointReceivesIt(t *testing
 	defer server.Close()
 	model := NewSDKChatModel(SDKModelConfig{
 		ClientType: "openai-completions", BaseURL: server.URL, ModelID: "fixture",
-		APIKey: "synthetic-auth-must-not-be-captured", HTTPClient: server.Client(),
+		APIKey: "test-api-key", HTTPClient: server.Client(),
 	})
 	ctx := trajectory.WithRequest(trajectory.WithRecorder(t.Context(), recorder), 23)
 	_, err := model.Provider.DoGenerate(ctx, sdk.GenerateParams{
@@ -140,7 +143,7 @@ func TestTrajectoryCapturesActualProviderBodyBeforeEndpointReceivesIt(t *testing
 		t.Fatal("captured body differs from the bytes received by the endpoint")
 	}
 	for _, text := range sink.texts {
-		if strings.Contains(text, "synthetic-auth-must-not-be-captured") {
+		if strings.Contains(text, "test-api-key") {
 			t.Fatal("capture contains authentication configuration")
 		}
 	}

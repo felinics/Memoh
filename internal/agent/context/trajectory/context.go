@@ -3,6 +3,7 @@ package trajectory
 import "context"
 
 type recorderKey struct{}
+
 type requestKey struct{}
 
 func WithRecorder(ctx context.Context, recorder *Recorder) context.Context {

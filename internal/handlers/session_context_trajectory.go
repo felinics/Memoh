@@ -165,9 +165,11 @@ func (h *SessionInfoHandler) GetSessionContextTrajectoryEvent(c echo.Context) er
 		}
 	}
 	response := ContextTrajectoryEventResponse{
-		Event: ContextTrajectoryEntry{ID: strconv.FormatInt(id, 10), RunID: event.RunID, CaptureID: event.CaptureID,
+		Event: ContextTrajectoryEntry{
+			ID: strconv.FormatInt(id, 10), RunID: event.RunID, CaptureID: event.CaptureID,
 			Sequence: event.Sequence, Stage: event.Stage, StepIndex: event.StepIndex, Request: event.Request,
-			RecordedAt: event.RecordedAt, CaptureErrors: event.CaptureErrors, BlockCount: len(event.Blocks)},
+			RecordedAt: event.RecordedAt, CaptureErrors: event.CaptureErrors, BlockCount: len(event.Blocks),
+		},
 		Blocks: []ContextTrajectoryBlock{}, Complete: true,
 	}
 	for _, ref := range event.Blocks {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ type Recorder struct {
 	recordMu  sync.Mutex
 	mu        sync.Mutex
 	sink      Sink
+	logger    *slog.Logger
 	captureID string
 	runID     string
 	sessionID string
@@ -27,7 +29,7 @@ type Recorder struct {
 }
 
 func NewRecorder(sink Sink) *Recorder {
-	return &Recorder{sink: sink, captureID: uuid.NewString()}
+	return &Recorder{sink: sink, captureID: uuid.NewString(), logger: slog.Default()}
 }
 
 func (r *Recorder) Bind(runID, sessionID string) {

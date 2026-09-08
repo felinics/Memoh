@@ -92,8 +92,10 @@ func TestContinuationTrajectoryPreservesDiscardedPriorInput(t *testing.T) {
 	sink := &applicationTrajectorySink{}
 	holder := contextfrag.NewLifecycleHolder()
 	holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
-	base := native.RunConfig{RunID: "run", Query: "STALE_CONTINUATION_QUERY", ContextLifecycle: holder,
-		Identity: native.SessionContext{SessionID: "session"}}
+	base := native.RunConfig{
+		RunID: "run", Query: "STALE_CONTINUATION_QUERY", ContextLifecycle: holder,
+		Identity: native.SessionContext{SessionID: "session"},
+	}
 	_, err := (&Service{}).prepareContinuationRunConfig(t.Context(), base, historyfrag.ScopeFallback{}, contextfrag.Scope{}, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -34,7 +34,7 @@ func (s *contextTrajectoryQueryStub) GetContextTrajectoryEvent(_ context.Context
 	return s.event, nil
 }
 
-func (s *contextTrajectoryQueryStub) GetContextTrajectoryEventContents(_ context.Context, params sqlc.GetContextTrajectoryEventContentsParams) ([]sqlc.GetContextTrajectoryEventContentsRow, error) {
+func (s *contextTrajectoryQueryStub) GetContextTrajectoryEventContents(context.Context, sqlc.GetContextTrajectoryEventContentsParams) ([]sqlc.GetContextTrajectoryEventContentsRow, error) {
 	return s.contents, nil
 }
 

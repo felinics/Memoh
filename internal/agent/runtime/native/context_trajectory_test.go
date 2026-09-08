@@ -52,7 +52,7 @@ func TestAgentTrajectoryRecordsToolOnlyRequestAndNextInput(t *testing.T) {
 	holder := contextfrag.NewLifecycleHolder()
 	holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
 	calls := 0
-	provider := agentStreamTestProvider(func(_ context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
 		calls++
 		inputs := sink.providerInputs()
 		if len(inputs) != calls {
