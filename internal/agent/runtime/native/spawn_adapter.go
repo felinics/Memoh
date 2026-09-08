@@ -59,7 +59,7 @@ type SpawnRunObserverFactory func(ctx context.Context) SpawnRunObserver
 // SpawnLifecycleHolderFactory builds the lifecycle holder of one spawned run
 // for the bot it belongs to, wired to the same fragment text store the
 // parent run uses. A nil return leaves the run with a plain holder.
-type SpawnLifecycleHolderFactory func(ctx context.Context, botID string) *contextfrag.LifecycleHolder
+type SpawnLifecycleHolderFactory func(ctx context.Context, botID, sessionID string) *contextfrag.LifecycleHolder
 
 var errSpawnAgentAborted = errors.New("agent run aborted")
 
@@ -99,11 +99,22 @@ func (s *SpawnAdapter) installLifecycleHolder(ctx context.Context, cfg tools.Spa
 	if s.lifecycleHolder == nil {
 		return
 	}
-	if holder := s.lifecycleHolder(ctx, cfg.Identity.BotID); holder != nil {
+	if holder := s.lifecycleHolder(ctx, cfg.Identity.BotID, cfg.Identity.SessionID); holder != nil {
 		rc.ContextLifecycle = holder
 	}
 	ctx = rc.TrajectoryContext(ctx)
-	rc.RecordTrajectory(ctx, "spawn_trigger", nil, nil, trajectory.JSONBlock("trigger", "task", cfg.Query))
+	taskIndex := -1
+	if cfg.Query != "" {
+		taskIndex = len(rc.Messages) - 1
+	}
+	rc.RecordTrajectory(ctx, "spawn_trigger", nil, nil,
+		trajectory.JSONBlock("trigger", "task", cfg.Query),
+		trajectory.JSONBlock("context", "sources", map[string]any{
+			"parent_session_id": cfg.ParentSessionID, "source_message_ids": cfg.ForkSourceMessageIDs,
+			"inherited_message_count": len(cfg.ForkSourceMessageIDs), "child_history_message_count": len(cfg.Messages) - len(cfg.ForkSourceMessageIDs),
+			"task_message_index": taskIndex, "attempt": cfg.Attempt,
+		}),
+	)
 }
 
 // installStepCommit resolves the step-commit callback for this run and wires

@@ -674,7 +674,7 @@ func TestForkedSubagentKeepsInvisibleParentSnapshotAcrossFollowUps(t *testing.T)
 	session := SessionContext{
 		BotID:       "bot1",
 		SessionID:   "parent1",
-		ForkContext: NewMessageSnapshot(parentMessages),
+		ForkContext: NewMessageSnapshotWithSources(parentMessages, []string{"source-user", "source-assistant"}),
 	}
 
 	first := asMap(t, mustExecuteAgentTool(t, p, session, ToolSpawnAgent().String(), map[string]any{
@@ -688,6 +688,9 @@ func TestForkedSubagentKeepsInvisibleParentSnapshotAcrossFollowUps(t *testing.T)
 	firstCall, ok := agent.callAt(0)
 	if !ok || !reflect.DeepEqual(firstCall.Messages, parentMessages) {
 		t.Fatalf("expected only invisible parent prefix before first child query, got %+v", firstCall.Messages)
+	}
+	if firstCall.ParentSessionID != "parent1" || !reflect.DeepEqual(firstCall.ForkSourceMessageIDs, []string{"source-user", "source-assistant"}) {
+		t.Fatalf("fork source identities lost: %#v", firstCall.ForkSourceMessageIDs)
 	}
 	stored, _ := messages.ListBySession(context.Background(), first["session_id"].(string))
 	if len(stored) != 2 {
@@ -705,6 +708,9 @@ func TestForkedSubagentKeepsInvisibleParentSnapshotAcrossFollowUps(t *testing.T)
 	if !reflect.DeepEqual(secondCall.Messages[:2], parentMessages) {
 		t.Fatalf("follow-up lost immutable parent prefix: %+v", secondCall.Messages)
 	}
+	if !reflect.DeepEqual(secondCall.ForkSourceMessageIDs, firstCall.ForkSourceMessageIDs) {
+		t.Fatal("follow-up changed inherited source boundary")
+	}
 }
 
 func TestNonForkedSubagentDoesNotInheritAvailableParentSnapshot(t *testing.T) {
@@ -721,7 +727,7 @@ func TestNonForkedSubagentDoesNotInheritAvailableParentSnapshot(t *testing.T) {
 		"task": "isolated child task",
 	})
 	call, ok := agent.callAt(0)
-	if !ok || len(call.Messages) != 0 {
+	if !ok || len(call.Messages) != 0 || len(call.ForkSourceMessageIDs) != 0 {
 		t.Fatalf("fork=false should not inherit parent context, got %+v", call.Messages)
 	}
 }

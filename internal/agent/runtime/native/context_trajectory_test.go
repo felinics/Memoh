@@ -127,7 +127,7 @@ func TestAgentGenerateTrajectoryKeepsRejectedProviderInput(t *testing.T) {
 func TestSpawnTrajectoryStartsWithChildTaskAndOwnRequestIdentity(t *testing.T) {
 	sink := &nativeTrajectorySink{}
 	adapter := NewSpawnAdapter(New(Deps{}))
-	adapter.SetLifecycleHolderFactory(func(context.Context, string) *contextfrag.LifecycleHolder {
+	adapter.SetLifecycleHolderFactory(func(context.Context, string, string) *contextfrag.LifecycleHolder {
 		holder := contextfrag.NewLifecycleHolder()
 		holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
 		return holder
@@ -137,7 +137,9 @@ func TestSpawnTrajectoryStartsWithChildTaskAndOwnRequestIdentity(t *testing.T) {
 	}}
 	_, err := adapter.Generate(trajectory.WithRequest(t.Context(), 41), agenttools.SpawnRunConfig{
 		Model: &sdk.Model{ID: "fixture", Provider: provider}, Query: "CHILD_TASK",
-		Identity: agenttools.SpawnIdentity{BotID: "bot", SessionID: "child-session"},
+		Identity:        agenttools.SpawnIdentity{BotID: "bot", SessionID: "child-session"},
+		Messages:        []sdk.Message{sdk.UserMessage("PARENT_SOURCE"), sdk.AssistantMessage("CHILD_HISTORY")},
+		ParentSessionID: "parent-session", ForkSourceMessageIDs: []string{"parent-message"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,6 +149,12 @@ func TestSpawnTrajectoryStartsWithChildTaskAndOwnRequestIdentity(t *testing.T) {
 	}
 	if len(sink.providerInputs()) != 1 {
 		t.Fatal("child provider request was not captured")
+	}
+	body := capturedStageBody(sink, sink.events[0])
+	for _, source := range []string{"parent-session", "parent-message", `"inherited_message_count":1`, `"child_history_message_count":1`, `"task_message_index":2`} {
+		if !strings.Contains(body, source) {
+			t.Errorf("child capture lost source %q", source)
+		}
 	}
 }
 

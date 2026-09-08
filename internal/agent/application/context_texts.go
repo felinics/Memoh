@@ -15,7 +15,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
-	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 // maxFragmentTextBytes bounds one stored fragment text; longer texts keep
@@ -201,9 +200,8 @@ func (s runTextSink) PersistFragmentTexts(texts []contextfrag.FragmentText) {
 
 // SubagentLifecycleHolder builds the lifecycle holder of a spawned run so
 // its injected fragment texts reach the store like the parent run's.
-func (s *Service) SubagentLifecycleHolder(ctx context.Context, botID string) *contextfrag.LifecycleHolder {
-	fence, _ := runtimefence.FromContext(ctx)
-	return s.newContextLifecycleHolder(ctx, botID, fence.SessionID)
+func (s *Service) SubagentLifecycleHolder(ctx context.Context, botID, sessionID string) *contextfrag.LifecycleHolder {
+	return s.newContextLifecycleHolder(ctx, botID, sessionID)
 }
 
 // newContextLifecycleHolder creates a run's lifecycle holder wired to the

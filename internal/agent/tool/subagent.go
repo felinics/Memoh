@@ -52,17 +52,19 @@ const (
 
 // SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
-	RunID         string
-	Model         *sdk.Model
-	ModelUUID     string
-	ModelID       string
-	ModelProvider string
-	System        string
-	Query         string
-	SessionType   string
-	Identity      SpawnIdentity
-	LoopDetection SpawnLoopConfig
-	Messages      []sdk.Message
+	RunID                string
+	Model                *sdk.Model
+	ModelUUID            string
+	ModelID              string
+	ModelProvider        string
+	System               string
+	Query                string
+	SessionType          string
+	Identity             SpawnIdentity
+	LoopDetection        SpawnLoopConfig
+	Messages             []sdk.Message
+	ParentSessionID      string
+	ForkSourceMessageIDs []string
 	// ReasoningConfig is the thinking decision resolved for the subagent's own
 	// model. It replaces a lone effort string that was never assigned, which is
 	// how subagents came to run with no reasoning configuration at all (#983).
@@ -991,11 +993,12 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		}
 	}()
 	history := p.loadAgentMessages(context.WithoutCancel(ctx), req.agentSessionID)
+	var forkSourceMessageIDs []string
 	if req.messagePersisted {
 		history = dropLatestMatchingUserMessage(history, req.message)
 	}
 	if req.config.Forked {
-		parentMessages, loadErr := p.loadAgentForkContext(context.WithoutCancel(ctx), req.agentSessionID)
+		parentMessages, sourceIDs, loadErr := p.loadAgentForkContext(context.WithoutCancel(ctx), req.agentSessionID)
 		if loadErr != nil {
 			res.Error = fmt.Sprintf("load fork context: %v", loadErr)
 			res.Cause = loadErr
@@ -1003,6 +1006,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			return res
 		}
 		combined := make([]sdk.Message, 0, len(parentMessages)+len(history))
+		forkSourceMessageIDs = sourceIDs
 		combined = append(combined, parentMessages...)
 		combined = append(combined, history...)
 		history = combined
@@ -1029,6 +1033,8 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		SupportsFileInput:         req.runtime.SupportsFileInput,
 		SupportsToolCall:          req.runtime.SupportsToolCall,
 		Messages:                  history,
+		ParentSessionID:           req.parentSession.SessionID,
+		ForkSourceMessageIDs:      forkSourceMessageIDs,
 		Skills:                    req.parentSession.Skills,
 		BackgroundManager:         p.bgManager,
 		ContextBudgetMaxTokens:    contextBudgetMaxTokens,
@@ -1400,23 +1406,25 @@ func (p *SpawnProvider) listAgentRecords(ctx context.Context, session SessionCon
 	return records, nil
 }
 
-func (p *SpawnProvider) loadAgentForkContext(ctx context.Context, sessionID string) ([]sdk.Message, error) {
+func (p *SpawnProvider) loadAgentForkContext(ctx context.Context, sessionID string) ([]sdk.Message, []string, error) {
 	if p.sessionService == nil {
-		return nil, errors.New("session service not available")
+		return nil, nil, errors.New("session service not available")
 	}
 	rows, err := p.sessionService.ListSubagentForkContext(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	messages := make([]sdk.Message, 0, len(rows))
+	sourceIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
 		converted, ok := sdkMessageFromPersisted(messagepkg.Message{Role: row.Role, Content: row.Message})
 		if !ok {
-			return nil, fmt.Errorf("invalid fork context message role %q", row.Role)
+			return nil, nil, fmt.Errorf("invalid fork context message role %q", row.Role)
 		}
 		messages = append(messages, converted)
+		sourceIDs = append(sourceIDs, row.SourceMessageID)
 	}
-	return messages, nil
+	return messages, sourceIDs, nil
 }
 
 func (p *SpawnProvider) loadAgentMessages(ctx context.Context, sessionID string) []sdk.Message {

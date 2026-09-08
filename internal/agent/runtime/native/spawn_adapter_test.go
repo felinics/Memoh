@@ -163,7 +163,7 @@ func TestSpawnAdapterInstallsTheLifecycleHolderFromItsFactory(t *testing.T) {
 	t.Parallel()
 
 	adapter := NewSpawnAdapter(New(Deps{}))
-	cfg := tools.SpawnRunConfig{Identity: tools.SpawnIdentity{BotID: "bot-7"}, Query: "do the task"}
+	cfg := tools.SpawnRunConfig{Identity: tools.SpawnIdentity{BotID: "bot-7", SessionID: "session-7"}, Query: "do the task"}
 	plain := runConfigFromSpawnRunConfig(cfg)
 	adapter.installLifecycleHolder(context.Background(), cfg, &plain)
 	if plain.ContextLifecycle == nil {
@@ -171,14 +171,14 @@ func TestSpawnAdapterInstallsTheLifecycleHolderFromItsFactory(t *testing.T) {
 	}
 
 	wired := contextfrag.NewLifecycleHolder()
-	var gotBot string
-	adapter.SetLifecycleHolderFactory(func(_ context.Context, botID string) *contextfrag.LifecycleHolder {
-		gotBot = botID
+	var gotBot, gotSession string
+	adapter.SetLifecycleHolderFactory(func(_ context.Context, botID, sessionID string) *contextfrag.LifecycleHolder {
+		gotBot, gotSession = botID, sessionID
 		return wired
 	})
 	rc := runConfigFromSpawnRunConfig(cfg)
 	adapter.installLifecycleHolder(context.Background(), cfg, &rc)
-	if rc.ContextLifecycle != wired || gotBot != "bot-7" {
+	if rc.ContextLifecycle != wired || gotBot != "bot-7" || gotSession != "session-7" {
 		t.Fatalf("holder = %p (bot %q), want the factory's holder for the spawn's bot", rc.ContextLifecycle, gotBot)
 	}
 }
