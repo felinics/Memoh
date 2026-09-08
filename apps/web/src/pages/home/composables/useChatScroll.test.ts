@@ -23,6 +23,7 @@ interface Harness {
   app: App
   host: HTMLElement
   viewport: HTMLElement
+  scrollEl: Ref<HTMLElement | null>
   content: HTMLElement
   geometry: ScrollGeometry
   scrollTo: ReturnType<typeof vi.fn>
@@ -122,13 +123,14 @@ function mountHarness(initialMessages: ChatMessage[] = []): Harness {
   })
 
   const sessionId = ref('session-1')
+  const scrollEl = ref<HTMLElement | null>(viewport)
   const messages = ref<ChatMessage[]>(initialMessages)
   const lastTurnEl = ref<HTMLElement | null>(null)
   let scroll!: ChatScroll
   const app = createApp(defineComponent({
     setup() {
       scroll = useChatScroll({
-        scrollEl: ref(viewport),
+        scrollEl,
         contentEl: ref(content),
         lastTurnEl,
         messages,
@@ -145,6 +147,7 @@ function mountHarness(initialMessages: ChatMessage[] = []): Harness {
     app,
     host,
     viewport,
+    scrollEl,
     content,
     geometry,
     scrollTo,
@@ -467,5 +470,109 @@ describe('native bottom jump during streaming', () => {
 
     expect(harness.viewport.scrollTop).toBe(600)
     expect(harness.scrollTo.mock.calls.every(([options]) => typeof options !== 'number' && options.behavior === 'instant')).toBe(true)
+  })
+})
+
+describe('message destination during native scrolling', () => {
+  it('excludes the entrance translation from message coordinates', () => {
+    const harness = mountHarness([userMessage('target')])
+    const motion = document.createElement('div')
+    motion.dataset.turnMotion = ''
+    motion.style.transform = 'matrix(1, 0, 0, 1, 0, 80)'
+    const target = document.createElement('div')
+    target.dataset.messageId = 'target'
+    target.getBoundingClientRect = () => rect(600 + 80 - harness.viewport.scrollTop, 40)
+    motion.append(target)
+    harness.content.append(motion)
+    vi.stubGlobal('DOMMatrixReadOnly', class { m42 = 80 })
+    expect(harness.scroll.messageJumpTarget(harness.viewport, 'target')).toBe(460)
+    motion.style.transform = ''
+    target.getBoundingClientRect = () => rect(600 - harness.viewport.scrollTop, 40)
+    expect(harness.scroll.messageJumpTarget(harness.viewport, 'target')).toBe(460)
+  })
+
+  it.each(['wheel', 'touch', 'keyboard', 'session', 'deactivate', 'viewport'] as const)('corrects reflow and relinquishes the target on %s interruption', async (interruption) => {
+    const harness = mountHarness([userMessage('target')])
+    harness.scroll.markEscaped()
+    harness.viewport.scrollTop = 100
+    Object.defineProperty(harness.viewport, 'onscrollend', { configurable: true, value: null })
+    let targetTop = 600
+    const target = document.createElement('div')
+    target.dataset.messageId = 'target'
+    target.getBoundingClientRect = () => rect(targetTop - harness.viewport.scrollTop, 40)
+    harness.content.append(target)
+    harness.scrollTo.mockImplementation(() => {})
+    await harness.scroll.scrollToMessage('target')
+    expect(harness.scrollTo).toHaveBeenLastCalledWith({ top: 460, behavior: 'smooth' })
+
+    targetTop += 320
+    harness.geometry.scrollHeight += 320
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    // Reflow must not restart the flight on every content update.
+    expect(harness.scrollTo).toHaveBeenCalledTimes(1)
+    harness.viewport.scrollTop = 460
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    expect(harness.scrollTo).toHaveBeenLastCalledWith({ top: 780, behavior: 'smooth' })
+
+    // Cancelling the correction relinquishes the destination as well.
+    harness.viewport.scrollTop = 550
+    if (interruption === 'wheel') {
+      harness.viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }))
+    } else if (interruption === 'touch') {
+      harness.viewport.dispatchEvent(new Event('touchstart'))
+    } else if (interruption === 'keyboard') {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }))
+    } else if (interruption === 'session') {
+      harness.sessionId.value = 'other-session'
+      await nextTick()
+    } else if (interruption === 'deactivate') {
+      harness.scroll.onDeactivatedResetScroll()
+    } else {
+      harness.scrollEl.value = document.createElement('div')
+      await nextTick()
+    }
+    const callsAfterCancel = harness.scrollTo.mock.calls.length
+    targetTop += 100
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    // A new session may follow its own content; a late old scrollend must
+    // never issue another leg toward the old message.
+    expect(harness.scrollTo).toHaveBeenCalledTimes(callsAfterCancel)
+  })
+
+  it('re-resolves a send pin after its optimistic prompt is replaced', async () => {
+    const harness = mountHarness([userMessage('previous')])
+    harness.scroll.markEscaped()
+    harness.geometry.clientHeight = 600
+    harness.geometry.scrollHeight = 1600
+    harness.viewport.scrollTop = 0
+    Object.defineProperty(harness.viewport, 'onscrollend', { configurable: true, value: null })
+    harness.scrollTo.mockImplementation(() => {})
+    const makeTurn = (id: string, top: number, promptOffset: number) => {
+      const turn = document.createElement('div')
+      turn.dataset.chatTurn = ''
+      turn.getBoundingClientRect = () => rect(top - harness.viewport.scrollTop, 500)
+      const prompt = document.createElement('div')
+      prompt.dataset.messageId = id
+      prompt.getBoundingClientRect = () => rect(top + promptOffset - harness.viewport.scrollTop, 40)
+      turn.append(prompt)
+      return turn
+    }
+    harness.scroll.pinAfterSend()
+    const optimistic = makeTurn('optimistic', 500, 0)
+    harness.messages.value.push(userMessage('optimistic'))
+    harness.lastTurnEl.value = optimistic
+    harness.content.append(optimistic)
+    await flushDom()
+    expect(harness.scrollTo).toHaveBeenLastCalledWith({ top: 360, behavior: 'smooth' })
+
+    const persisted = makeTurn('persisted', 820, 24)
+    harness.messages.value.splice(1, 1, userMessage('persisted'))
+    harness.lastTurnEl.value = persisted
+    optimistic.replaceWith(persisted)
+    await flushDom()
+    harness.viewport.scrollTop = 360
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    expect(harness.scrollTo).toHaveBeenLastCalledWith({ top: 704, behavior: 'smooth' })
+    expect(harness.scroll.turnReserveStyle('persisted')).toBeDefined()
   })
 })

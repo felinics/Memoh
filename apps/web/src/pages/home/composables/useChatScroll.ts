@@ -207,7 +207,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // reproduces the same geometry the user saw right after sending it.
   function messageJumpTarget(root: HTMLElement, messageId: string): number {
     const el = findMessageElement(messageId)
-    return el ? getElementAbsoluteTop(el, root) - PIN_TOP_OFFSET_PX : root.scrollTop
+    if (!el) return root.scrollTop
+    // Measure layout, not the latest turn's temporary visual translation.
+    const motion = el.closest<HTMLElement>('[data-turn-motion]')
+    const transform = motion && getComputedStyle(motion).transform
+    const entranceY = transform && transform !== 'none' ? new DOMMatrixReadOnly(transform).m42 : 0
+    return getElementAbsoluteTop(el, root) - entranceY - PIN_TOP_OFFSET_PX
   }
 
   // Stop following, immediately. Called for any deliberate move away from the
@@ -331,7 +336,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     root.addEventListener('touchstart', interrupt, { passive: true })
     root.addEventListener('pointerdown', interrupt, { passive: true })
     window.addEventListener('keydown', cancelOnKey)
-    const stop = nativeScrollTo(root, getTarget(), release)
+    const stop = nativeScrollTo(root, getTarget, release)
     // Retain cancellation after scrolling ends: the turn's separate animation
     // may still be running when a new send or navigation arrives.
     cancelSmoothScroll = cancel
@@ -404,10 +409,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
     container.style.minHeight = `${reservePx}px`
     lastScrollTop = el.scrollTop
 
-    // Read the untransformed turn so scrolling never chases the entrance y.
-    // Resolve the landing once; the browser owns the scroll trajectory.
-    const pinTarget = () => getElementAbsoluteTop(lastTurnEl.value ?? container, el)
-      + promptOffsetInTurn - PIN_TOP_OFFSET_PX
+    // Resolve the live prompt, including its offset inside a replacement turn.
+    // pinnedTurnId follows optimistic → persisted identity migration.
+    const pinTarget = () => messageJumpTarget(el, pinnedTurnId ?? prompt.id)
     const target = Math.min(Math.max(pinTarget(), 0), Math.max(0, bottomTarget(el)))
     const promptTop = containerTop + promptOffsetInTurn - target
     // The viewport already covers the travel distance; keep the turn entrance local.
@@ -486,7 +490,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const root = scrollEl.value
     if (!root) return
     followBottom()
-    startSmoothScroll(root, () => bottomTarget(root))
+    // Streaming moves the bottom continuously. Let this flight finish before
+    // release catches up and resumes follow; message jumps use live targets.
+    const target = bottomTarget(root)
+    startSmoothScroll(root, () => target)
   }
 
   // The persistent per-turn container that holds a message — the element the
@@ -871,6 +878,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   watch(scrollEl, (el, old) => {
+    if (old) cancelSmoothScroll?.()
     detach(old ?? null)
     if (el) attach(el)
   }, { immediate: true })
