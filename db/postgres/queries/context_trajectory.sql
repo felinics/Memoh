@@ -1,0 +1,57 @@
+-- name: AppendContextTrajectoryEvent :one
+WITH owner AS (
+    SELECT s.id FROM bot_sessions AS s
+    WHERE s.team_id = public.memoh_current_team_id()
+      AND s.bot_id = sqlc.arg(bot_id) AND s.id = sqlc.arg(session_id)
+), inserted AS (
+    INSERT INTO context_trajectory_events (bot_id, session_id, run_id, sequence, event)
+    SELECT sqlc.arg(bot_id), owner.id, sqlc.arg(run_id), sqlc.arg(sequence), sqlc.arg(event)::jsonb
+    FROM owner
+    ON CONFLICT (team_id, run_id, sequence) DO NOTHING
+    RETURNING sequence
+), accepted AS (
+    SELECT sequence FROM inserted
+    UNION ALL
+    SELECT e.sequence FROM context_trajectory_events AS e
+    WHERE e.team_id = public.memoh_current_team_id()
+      AND e.bot_id = sqlc.arg(bot_id) AND e.session_id = sqlc.arg(session_id)
+      AND e.run_id = sqlc.arg(run_id) AND e.sequence = sqlc.arg(sequence)
+      AND e.event = sqlc.arg(event)::jsonb
+      AND NOT EXISTS (SELECT 1 FROM inserted)
+), contents AS (
+    INSERT INTO context_trajectory_contents (bot_id, content_hash, content)
+    SELECT sqlc.arg(bot_id)::uuid, unnest(sqlc.arg(content_hashes)::text[]), unnest(sqlc.arg(contents)::bytea[])
+    FROM accepted
+    ON CONFLICT (team_id, bot_id, content_hash) DO NOTHING
+)
+SELECT sequence FROM accepted LIMIT 1;
+
+-- name: ListContextTrajectoryEvents :many
+SELECT id, run_id, sequence, created_at,
+       ((event - 'blocks') || jsonb_build_object(
+           'block_count', jsonb_array_length(event->'blocks')
+       ))::jsonb AS summary
+FROM context_trajectory_events
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND (sqlc.arg(before_id)::bigint = 0 OR id < sqlc.arg(before_id)::bigint)
+ORDER BY id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: GetContextTrajectoryEvent :one
+SELECT event
+FROM context_trajectory_events
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id) AND sequence = sqlc.arg(sequence);
+
+-- name: GetContextTrajectoryEventContents :many
+SELECT DISTINCT c.content_hash, c.content
+FROM context_trajectory_events AS e
+CROSS JOIN LATERAL jsonb_array_elements(e.event->'blocks') AS block
+CROSS JOIN LATERAL jsonb_array_elements_text(block->'chunks') AS ref(hash)
+JOIN context_trajectory_contents AS c
+  ON c.team_id = e.team_id AND c.bot_id = e.bot_id AND c.content_hash = ref.hash
+WHERE e.team_id = public.memoh_current_team_id()
+  AND e.bot_id = sqlc.arg(bot_id) AND e.session_id = sqlc.arg(session_id)
+  AND e.run_id = sqlc.arg(run_id) AND e.sequence = sqlc.arg(sequence);

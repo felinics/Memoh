@@ -532,6 +532,24 @@ type ContextLifecycle struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
+type ContextTrajectoryContent struct {
+	TeamID      pgtype.UUID `json:"team_id"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	ContentHash string      `json:"content_hash"`
+	Content     []byte      `json:"content"`
+}
+
+type ContextTrajectoryEvent struct {
+	ID        int64              `json:"id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	RunID     pgtype.UUID        `json:"run_id"`
+	Sequence  int64              `json:"sequence"`
+	Event     []byte             `json:"event"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type EmailOauthToken struct {
 	ID              pgtype.UUID        `json:"id"`
 	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
