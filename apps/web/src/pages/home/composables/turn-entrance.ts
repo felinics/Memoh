@@ -1,10 +1,7 @@
 import { spring } from 'motion'
 import { animate } from 'motion/mini'
 
-// Codex 26.901.51231, local-conversation-thread-40db5af470f5.js:
-// GE applies y to the latest turn; UE animates it to zero with sD.
-// Memoh retains its own geometry; turn and composer share Codex's
-// original 500ms non-bouncing spring.
+// Keep the turn entrance and composer placement on the same non-bouncing spring.
 export const CHAT_SEND_MOTION = {
   type: spring,
   bounce: 0,
