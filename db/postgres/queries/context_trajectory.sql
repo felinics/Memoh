@@ -13,10 +13,10 @@ WITH owner AS (
       AND stored.event = EXCLUDED.event
     RETURNING sequence
 ), contents AS (
-    INSERT INTO context_trajectory_contents (bot_id, content_hash, content)
-    SELECT sqlc.arg(bot_id)::uuid, unnest(sqlc.arg(content_hashes)::text[]), unnest(sqlc.arg(contents)::bytea[])
+    INSERT INTO context_trajectory_contents (bot_id, session_id, content_hash, content)
+    SELECT sqlc.arg(bot_id)::uuid, sqlc.arg(session_id)::uuid, unnest(sqlc.arg(content_hashes)::text[]), unnest(sqlc.arg(contents)::bytea[])
     FROM inserted
-    ON CONFLICT (team_id, bot_id, content_hash) DO NOTHING
+    ON CONFLICT (team_id, bot_id, session_id, content_hash) DO NOTHING
 )
 SELECT sequence FROM inserted;
 
@@ -45,7 +45,7 @@ FROM context_trajectory_events AS e
 CROSS JOIN LATERAL jsonb_array_elements(e.event->'blocks') AS block
 CROSS JOIN LATERAL jsonb_array_elements_text(block->'chunks') AS ref(hash)
 JOIN context_trajectory_contents AS c
-  ON c.team_id = e.team_id AND c.bot_id = e.bot_id AND c.content_hash = ref.hash
+  ON c.team_id = e.team_id AND c.bot_id = e.bot_id AND c.session_id = e.session_id AND c.content_hash = ref.hash
 WHERE e.team_id = public.memoh_current_team_id()
   AND e.bot_id = sqlc.arg(bot_id) AND e.session_id = sqlc.arg(session_id)
   AND e.id = sqlc.arg(id);

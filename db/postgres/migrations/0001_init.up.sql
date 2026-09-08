@@ -2962,11 +2962,16 @@ CREATE TABLE IF NOT EXISTS public.context_trajectory_contents (
     team_id UUID NOT NULL DEFAULT public.memoh_current_team_id()
         REFERENCES public.teams(id) ON DELETE RESTRICT,
     bot_id UUID NOT NULL,
+    session_id UUID NOT NULL,
     content_hash TEXT NOT NULL,
     content BYTEA NOT NULL,
-    PRIMARY KEY (team_id, bot_id, content_hash),
-    FOREIGN KEY (team_id, bot_id) REFERENCES public.bots(team_id, id) ON DELETE CASCADE
+    PRIMARY KEY (team_id, bot_id, session_id, content_hash),
+    FOREIGN KEY (team_id, bot_id) REFERENCES public.bots(team_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id, session_id) REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_context_trajectory_contents_session
+    ON public.context_trajectory_contents (team_id, session_id);
 
 CREATE TABLE IF NOT EXISTS public.context_trajectory_events (
     id BIGSERIAL PRIMARY KEY,

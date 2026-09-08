@@ -170,6 +170,30 @@ SELECT session.id, bot.id, $1 FROM bot, (VALUES ($3::uuid), ($4::uuid)) AS sessi
 	if err := secondTx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	input.SessionID = mustParseLifecycleUUID(t, otherSession)
+	input.CaptureID = mustParseLifecycleUUID(t, "00000000-0000-0000-0000-00000000c707")
+	input.Event = []byte(`{"stage":"trigger","blocks":[{"chunks":["payload"]}]}`)
+	input.ContentHashes, input.Contents = []string{"payload"}, [][]byte{[]byte("full\x00正文")}
+	if _, err := queries.AppendContextTrajectoryEvent(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, "SELECT count(*) FROM context_trajectory_contents").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("content must belong to each session: %d, %v", count, err)
+	}
+	if _, err := conn.Exec(ctx, "DELETE FROM bot_sessions WHERE id = $1", pgSession); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, "SELECT count(*) FROM context_trajectory_contents").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("session deletion retained content or deleted another session's content: %d, %v", count, err)
+	}
+	page, err = queries.ListContextTrajectoryEvents(ctx, sqlc.ListContextTrajectoryEventsParams{BotID: pgBot, SessionID: input.SessionID, RowLimit: 1})
+	if err != nil || len(page) != 1 {
+		t.Fatalf("surviving session event: %#v, %v", page, err)
+	}
+	contents, err = queries.GetContextTrajectoryEventContents(ctx, sqlc.GetContextTrajectoryEventContentsParams{BotID: pgBot, SessionID: input.SessionID, ID: page[0].ID})
+	if err != nil || len(contents) != 1 || string(contents[0].Content) != "full\x00正文" {
+		t.Fatalf("surviving session body: %#v, %v", contents, err)
+	}
 	if _, err := conn.Exec(ctx, "DELETE FROM bots WHERE id = $1", pgBot); err != nil {
 		t.Fatal(err)
 	}

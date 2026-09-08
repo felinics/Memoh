@@ -26,10 +26,10 @@ WITH owner AS (
       AND stored.event = EXCLUDED.event
     RETURNING sequence
 ), contents AS (
-    INSERT INTO context_trajectory_contents (bot_id, content_hash, content)
-    SELECT $1::uuid, unnest($7::text[]), unnest($8::bytea[])
+    INSERT INTO context_trajectory_contents (bot_id, session_id, content_hash, content)
+    SELECT $1::uuid, $2::uuid, unnest($7::text[]), unnest($8::bytea[])
     FROM inserted
-    ON CONFLICT (team_id, bot_id, content_hash) DO NOTHING
+    ON CONFLICT (team_id, bot_id, session_id, content_hash) DO NOTHING
 )
 SELECT sequence FROM inserted
 `
@@ -88,7 +88,7 @@ FROM context_trajectory_events AS e
 CROSS JOIN LATERAL jsonb_array_elements(e.event->'blocks') AS block
 CROSS JOIN LATERAL jsonb_array_elements_text(block->'chunks') AS ref(hash)
 JOIN context_trajectory_contents AS c
-  ON c.team_id = e.team_id AND c.bot_id = e.bot_id AND c.content_hash = ref.hash
+  ON c.team_id = e.team_id AND c.bot_id = e.bot_id AND c.session_id = e.session_id AND c.content_hash = ref.hash
 WHERE e.team_id = public.memoh_current_team_id()
   AND e.bot_id = $1 AND e.session_id = $2
   AND e.id = $3
