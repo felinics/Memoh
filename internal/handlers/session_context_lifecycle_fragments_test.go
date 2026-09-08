@@ -38,7 +38,7 @@ func fragmentSnapshotJSON(t *testing.T) []byte {
 	raw, err := json.Marshal(contextfrag.LifecycleSnapshot{
 		Version: contextfrag.LifecycleSnapshotVersion,
 		Fragments: []contextfrag.FragmentRef{
-			{Kind: contextfrag.KindSystemPrompt, Slot: contextfrag.SlotSystem, ContentHash: "canon-sys", TextHash: "sys", TokenEstimate: 40, TextBytes: 160},
+			{Label: "system.prompt.body", Kind: contextfrag.KindSystemPrompt, Slot: contextfrag.SlotSystem, ContentHash: "canon-sys", TextHash: "sys", TokenEstimate: 40, TextBytes: 160},
 			{Kind: contextfrag.KindWorkspaceInstruction, Slot: contextfrag.SlotSystem, ContentHash: "canon-rules", TextHash: "rules", TokenEstimate: 120, TextBytes: 480},
 			{Kind: contextfrag.KindBotIdentity, Slot: contextfrag.SlotSystem, ContentHash: "canon-only", TokenEstimate: 8, TextBytes: 30},
 		},
@@ -100,6 +100,47 @@ func TestLoadContextLifecycleFragmentsHidesForeignRuns(t *testing.T) {
 	}
 	if len(stub.requested) != 0 {
 		t.Fatalf("texts were read for a foreign run")
+	}
+}
+
+func TestContextFragmentLabelsBelongToEachOccurrence(t *testing.T) {
+	sessionID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	runID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	stub := &contextFragmentTextStub{
+		contextLifecycleDecisionStub: contextLifecycleDecisionStub{run: sqlc.GetContextLifecycleByRunIDRow{SessionID: sessionID, Snapshot: []byte(`{"version":2,"fragments":[
+{"kind":"workspace_instruction","label":"first.rules","content_hash":"same","text_hash":"shared"},
+{"kind":"workspace_instruction","label":"second.rules","content_hash":"same","text_hash":"shared"}
+]}`)}},
+		texts: map[string]sqlc.ListContextFragmentTextsRow{"shared": {ContentHash: "shared", Label: "unrelated.old.label", Text: "full shared rules"}},
+	}
+	fragments, err := loadContextLifecycleFragments(t.Context(), stub, sessionID, runID)
+	if err != nil || len(fragments) != 2 || fragments[0].Label != "first.rules" || fragments[1].Label != "second.rules" || fragments[0].Text != fragments[1].Text {
+		t.Fatalf("content deduplication renamed occurrences: %#v, %v", fragments, err)
+	}
+}
+
+func TestLegacyFragmentLabelsRequireUnambiguousSelectedSources(t *testing.T) {
+	sessionID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	runID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	stub := &contextFragmentTextStub{
+		contextLifecycleDecisionStub: contextLifecycleDecisionStub{
+			run: sqlc.GetContextLifecycleByRunIDRow{SessionID: sessionID, Snapshot: []byte(`{"version":2,"fragments":[
+{"kind":"workspace_instruction","content_hash":"unique","text_hash":"shared"},
+{"kind":"workspace_instruction","content_hash":"ambiguous","text_hash":"shared"},
+{"kind":"workspace_instruction","content_hash":"dropped","text_hash":"shared"}
+]}`)},
+			decisions: []byte(`[
+{"id":"unique.rules","decision":"selected","ref":{"content_hash":"unique"}},
+{"id":"first.rules","decision":"selected","ref":{"content_hash":"ambiguous"}},
+{"id":"second.rules","decision":"trimmed","ref":{"content_hash":"ambiguous"}},
+{"id":"dropped.rules","decision":"dropped","ref":{"content_hash":"dropped"}}
+]`),
+		},
+		texts: map[string]sqlc.ListContextFragmentTextsRow{"shared": {ContentHash: "shared", Label: "unrelated.old.label", Text: "shared rules"}},
+	}
+	fragments, err := loadContextLifecycleFragments(t.Context(), stub, sessionID, runID)
+	if err != nil || len(fragments) != 3 || fragments[0].Label != "unique.rules" || fragments[1].Label != "" || fragments[2].Label != "" {
+		t.Fatalf("legacy source identity was guessed: %#v, %v", fragments, err)
 	}
 }
 

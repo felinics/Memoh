@@ -23,10 +23,8 @@ type FragmentText struct {
 	ContentHash string
 	TextHash    string
 	Kind        Kind
-	// Label names the fragment as the assembler did (system.prompt.body,
-	// workspace/exec); it travels with the text, never with the snapshot.
-	Label string
-	Text  string
+	Label       string
+	Text        string
 }
 
 // FragmentTextSink receives rendered fragment texts to persist. Implementations
@@ -39,10 +37,11 @@ type FragmentTextSink interface {
 
 // FragmentRef is the bounded per-run record of one injected fragment: enough to
 // find its text in the content-addressed store and account for it. Neither the
-// text nor the fragment's own name is part of it; the snapshot stays
-// content-light. TextHash is the store key of the text this run recorded;
+// text is part of it; each occurrence keeps its name independently of the
+// shared text. TextHash is the store key of the text this run recorded;
 // it is empty when the run stored no text for the fragment.
 type FragmentRef struct {
+	Label         string `json:"label,omitempty"`
 	Kind          Kind   `json:"kind"`
 	Slot          Slot   `json:"slot"`
 	ContentHash   string `json:"content_hash,omitempty"`
@@ -56,6 +55,9 @@ type FragmentRef struct {
 // keeps. Recalled memory is injected wherever it lands: the history slot
 // only positions it, and no persisted message holds its text.
 func injectedFragment(kind Kind, slot Slot) bool {
+	if kind == "" {
+		return false
+	}
 	if kind == KindMemoryRecall {
 		return true
 	}
@@ -159,6 +161,7 @@ func fragmentRefs(items []ManifestItem) []FragmentRef {
 			continue
 		}
 		refs = append(refs, FragmentRef{
+			Label:         item.ID,
 			Kind:          item.Kind,
 			Slot:          item.Slot,
 			ContentHash:   item.Ref.ContentHash,

@@ -49,7 +49,7 @@ func newContextLifecycleAccessStub(t *testing.T, permissions ...string) *context
 	base.session.CreatedByUserID = testUUID(lifecycleTestGranteeID)
 	snapshot := lifecycleSnapshotJSON(t, contextfrag.LifecycleSnapshot{
 		Version:   contextfrag.LifecycleSnapshotVersion,
-		Fragments: []contextfrag.FragmentRef{{Kind: contextfrag.KindSystemPrompt, Slot: contextfrag.SlotSystem, ContentHash: "canon-sys", TextHash: "sys", TokenEstimate: 40}},
+		Fragments: []contextfrag.FragmentRef{{Label: "system.prompt.body", Kind: contextfrag.KindSystemPrompt, Slot: contextfrag.SlotSystem, ContentHash: "canon-sys", TextHash: "sys", TokenEstimate: 40}},
 	})
 	base.lifecycleRows = []sqlc.ListRecentContextLifecyclesBySessionRow{{
 		RunID:     testUUID(runID),
@@ -108,6 +108,10 @@ func TestContextLifecycleTextsRequireWorkspaceRead(t *testing.T) {
 	if _, ok := page["fragment_previews"]; ok || len(queries.previewParams) != 0 {
 		t.Fatalf("fragment previews must not reach a chat-only grantee: %s", page["fragment_previews"])
 	}
+	var turns []ContextLifecycleTurn
+	if err := json.Unmarshal(page["turns"], &turns); err != nil || len(turns) != 1 || len(turns[0].Snapshot.Fragments) != 1 || turns[0].Snapshot.Fragments[0].Label != "" {
+		t.Fatalf("fragment occurrence names reached a chat-only grantee: %#v, %v", turns, err)
+	}
 
 	err := handler.GetSessionContextLifecycleFragments(newContextLifecycleGranteeContext(t, "/66666666-6666-6666-6666-666666666666/fragments", true))
 	problem, ok := apperror.ProblemFrom(err, "request-1")
@@ -135,6 +139,9 @@ func TestContextLifecycleTextsOpenToWorkspaceReaders(t *testing.T) {
 	}
 	if page.FragmentPreviews["sys"].Preview != "You are Memoh." || len(queries.previewParams) != 1 || queries.previewParams[0].BotID != testUUID(lifecycleTestBotID) {
 		t.Fatalf("previews = %#v (params %#v)", page.FragmentPreviews, queries.previewParams)
+	}
+	if page.Turns[0].Snapshot.Fragments[0].Label != "system.prompt.body" {
+		t.Fatal("workspace reader lost the occurrence name")
 	}
 
 	fragCtx := newContextLifecycleGranteeContext(t, "/66666666-6666-6666-6666-666666666666/fragments", true)

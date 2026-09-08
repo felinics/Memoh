@@ -136,6 +136,12 @@ func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 		if err != nil {
 			return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)
 		}
+	} else {
+		for i := range load.Turns {
+			for j := range load.Turns[i].Snapshot.Fragments {
+				load.Turns[i].Snapshot.Fragments[j].Label = ""
+			}
+		}
 	}
 	return c.JSON(http.StatusOK, ContextLifecycleResponse{
 		Turns:                 load.Turns,
@@ -267,6 +273,7 @@ func (h *SessionInfoHandler) GetSessionContextLifecycleFragments(c echo.Context)
 
 type contextLifecycleFragmentQueries interface {
 	GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (sqlc.GetContextLifecycleByRunIDRow, error)
+	GetContextLifecycleSelectionDecisionsByRunID(ctx context.Context, runID pgtype.UUID) ([]byte, error)
 	ListContextFragmentTexts(ctx context.Context, arg sqlc.ListContextFragmentTextsParams) ([]sqlc.ListContextFragmentTextsRow, error)
 }
 
@@ -290,9 +297,17 @@ func loadContextLifecycleFragments(
 	if err != nil {
 		return nil, fmt.Errorf("decode lifecycle snapshot for run %s: %w", runID.String(), err)
 	}
+	labels, err := contextFragmentSourceLabels(ctx, queries, runID, snapshot.Fragments)
+	if err != nil {
+		return nil, err
+	}
 	fragments := make([]ContextFragmentText, 0, len(snapshot.Fragments)+len(snapshot.ToolDefs))
 	for _, ref := range snapshot.Fragments {
-		fragments = append(fragments, ContextFragmentText{Kind: ref.Kind, Slot: ref.Slot, ContentHash: ref.ContentHash, TextHash: ref.TextHash, TokenEstimate: ref.TokenEstimate, TextBytes: ref.TextBytes})
+		label := ref.Label
+		if label == "" {
+			label = labels[ref.ContentHash]
+		}
+		fragments = append(fragments, ContextFragmentText{Label: label, Kind: ref.Kind, Slot: ref.Slot, ContentHash: ref.ContentHash, TextHash: ref.TextHash, TokenEstimate: ref.TokenEstimate, TextBytes: ref.TextBytes})
 	}
 	for _, def := range snapshot.ToolDefs {
 		fragments = append(fragments, ContextFragmentText{Label: def.Provider + "/" + def.Name, Kind: contextfrag.KindToolDefinition, ContentHash: def.ContentHash, TextHash: def.ContentHash, TokenEstimate: def.TokenEstimate, TextBytes: def.Bytes})
@@ -317,14 +332,47 @@ func loadContextLifecycleFragments(
 		fragments[i].Text = row.Text
 		fragments[i].Truncated = row.Truncated
 		fragments[i].Available = true
-		if fragments[i].Label == "" {
-			fragments[i].Label = row.Label
-		}
 		if fragments[i].TextBytes == 0 {
 			fragments[i].TextBytes = int(row.TextBytes)
 		}
 	}
 	return fragments, nil
+}
+
+func contextFragmentSourceLabels(ctx context.Context, queries contextLifecycleFragmentQueries, runID pgtype.UUID, refs []contextfrag.FragmentRef) (map[string]string, error) {
+	needsLabels := false
+	for _, ref := range refs {
+		needsLabels = needsLabels || ref.Label == ""
+	}
+	if !needsLabels {
+		return nil, nil
+	}
+	raw, err := queries.GetContextLifecycleSelectionDecisionsByRunID(ctx, runID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("get fragment source labels: %w", err)
+	}
+	var decisions []contextfrag.SelectionDecision
+	if len(raw) > 0 && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &decisions); err != nil {
+			return nil, fmt.Errorf("decode fragment source labels: %w", err)
+		}
+	}
+	labels := make(map[string]string)
+	ambiguous := make(map[string]bool)
+	for _, decision := range decisions {
+		hash := decision.Ref.ContentHash
+		if hash == "" || decision.ID == "" || (decision.Decision != contextfrag.DecisionSelected && decision.Decision != contextfrag.DecisionTrimmed) {
+			continue
+		}
+		if label, exists := labels[hash]; exists && label != decision.ID {
+			ambiguous[hash] = true
+		}
+		labels[hash] = decision.ID
+	}
+	for hash := range ambiguous {
+		delete(labels, hash)
+	}
+	return labels, nil
 }
 
 // contextLifecycleAccess is what a lifecycle request resolved to: the

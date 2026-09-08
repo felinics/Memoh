@@ -18563,6 +18563,9 @@ const docTemplate = `{
                 "kind": {
                     "$ref": "#/definitions/contextfrag.Kind"
                 },
+                "label": {
+                    "type": "string"
+                },
                 "slot": {
                     "$ref": "#/definitions/contextfrag.Slot"
                 },

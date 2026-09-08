@@ -42,6 +42,21 @@ func TestFragmentTextsKeepsInjectedContextAndSkipsTheConversation(t *testing.T) 
 	}
 }
 
+func TestFragmentRefsPreserveOccurrenceNamesForIdenticalContent(t *testing.T) {
+	fragments := []ContextFrag{
+		{ID: "rules.first", Kind: KindWorkspaceInstruction, Slot: SlotSystem, Parts: []Part{{Type: PartText, Text: "shared rules"}}},
+		{ID: "rules.second", Kind: KindWorkspaceInstruction, Slot: SlotSystem, Parts: []Part{{Type: PartText, Text: "shared rules"}}},
+	}
+	snapshot := BuildLifecycleSnapshot(BuildManifest(fragments))
+	raw, err := json.Marshal(snapshot.Fragments)
+	if err != nil || !strings.Contains(string(raw), "rules.first") || !strings.Contains(string(raw), "rules.second") {
+		t.Fatalf("equal content lost occurrence identity: %s, %v", raw, err)
+	}
+	if snapshot.Fragments[0].ContentHash != snapshot.Fragments[1].ContentHash {
+		t.Fatal("fixture must exercise distinct names sharing a canonical hash")
+	}
+}
+
 func TestToolDefinitionTextHashesTheSerializedTool(t *testing.T) {
 	t.Parallel()
 
@@ -76,7 +91,7 @@ func TestLifecycleSnapshotListsInjectedFragmentRefs(t *testing.T) {
 		t.Fatalf("ref must carry the fragment's content hash: %#v", snapshot.Fragments[1])
 	}
 	raw, _ := json.Marshal(snapshot)
-	if strings.Contains(string(raw), "rules.agents") || strings.Contains(string(raw), "You are Memoh") {
+	if strings.Contains(string(raw), "Follow AGENTS.md") || strings.Contains(string(raw), "You are Memoh") {
 		t.Fatalf("snapshot must stay content-light: %s", raw)
 	}
 }

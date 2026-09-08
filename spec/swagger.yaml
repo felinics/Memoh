@@ -2057,6 +2057,8 @@ definitions:
         type: string
       kind:
         $ref: '#/definitions/contextfrag.Kind'
+      label:
+        type: string
       slot:
         $ref: '#/definitions/contextfrag.Slot'
       text_bytes:
