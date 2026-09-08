@@ -164,6 +164,27 @@ async function flushDom() {
   await nextTick()
 }
 
+function startBottomJump(): Harness {
+  const reply = assistantMessage('assistant-1')
+  reply.streaming = true
+  const harness = mountHarness([userMessage('user-1'), reply])
+  harness.scroll.markEscaped()
+  harness.viewport.scrollTop = 400
+  harness.viewport.dispatchEvent(new Event('scroll'))
+  Object.defineProperty(harness.viewport, 'onscrollend', { configurable: true, value: null })
+  // A native smooth scroll remains in flight until the browser reports its
+  // completion; unlike instant writes, it does not synchronously reach top.
+  harness.scrollTo.mockImplementation((options: ScrollToOptions | number) => {
+    if (typeof options !== 'number' && options.behavior === 'smooth') return
+    harness.viewport.scrollTop = typeof options === 'number' ? options : (options.top ?? harness.viewport.scrollTop)
+    harness.viewport.dispatchEvent(new Event('scroll'))
+  })
+  harness.scrollTo.mockClear()
+  harness.scroll.scrollToBottom()
+  expect(harness.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 800, behavior: 'smooth' })
+  return harness
+}
+
 beforeEach(() => {
   ResizeObserverMock.instances = []
   vi.stubGlobal('ResizeObserver', ResizeObserverMock)
@@ -337,5 +358,114 @@ describe('useChatScroll gesture and layout handling', () => {
 
     expect(harness.scroll.turnReserveStyle('optimistic-user-2')).toBeUndefined()
     expect(harness.scroll.turnReserveStyle('server-user-2')).toEqual(reserve)
+  })
+})
+
+describe('native bottom jump during streaming', () => {
+  it('keeps the smooth flight intact through token mutations and layout growth', async () => {
+    const harness = startBottomJump()
+    harness.viewport.scrollTop = 600
+    harness.viewport.dispatchEvent(new Event('scroll'))
+
+    harness.content.append(document.createTextNode('next streamed token'))
+    await flushDom()
+    harness.geometry.scrollHeight = 1_200
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+
+    expect(harness.viewport.scrollTop).toBe(600)
+    expect(harness.scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 800, behavior: 'smooth' })
+  })
+
+  it('catches up to content added during the flight only after scrollend and keeps following', async () => {
+    const harness = startBottomJump()
+    harness.geometry.scrollHeight = 1_200
+    harness.content.append(document.createTextNode('stream growth'))
+    await flushDom()
+    harness.viewport.scrollTop = 800
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    await flushDom()
+
+    expect(harness.viewport.scrollTop).toBe(1_000)
+    harness.scrollTo.mockClear()
+    harness.geometry.scrollHeight = 1_300
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    expect(harness.viewport.scrollTop).toBe(1_100)
+    expect(harness.scrollTo).toHaveBeenCalledWith({ top: 1_100, behavior: 'auto' })
+  })
+
+  it.each(['wheel', 'touch', 'keyboard'] as const)('does not resume following after %s interruption', async (gesture) => {
+    const harness = startBottomJump()
+    harness.viewport.scrollTop = 600
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    harness.geometry.scrollHeight = 1_200
+    harness.scrollTo.mockClear()
+
+    if (gesture === 'wheel') {
+      harness.viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
+    } else if (gesture === 'touch') {
+      harness.viewport.dispatchEvent(new Event('touchstart', { bubbles: true }))
+    } else {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }))
+    }
+    expect(harness.viewport.scrollTop).toBe(600)
+    harness.viewport.scrollTop = 500
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    harness.content.append(document.createTextNode('later token'))
+    ResizeObserverMock.instances[0]?.trigger(harness.content)
+    await flushDom()
+
+    expect(harness.viewport.scrollTop).toBe(500)
+    expect(harness.scrollTo.mock.calls.every(([options]) => typeof options !== 'number' && options.behavior === 'instant')).toBe(true)
+  })
+
+  it('hands a new send to its prompt without catching up the cancelled bottom jump', async () => {
+    const harness = startBottomJump()
+    harness.viewport.scrollTop = 600
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    harness.geometry.scrollHeight = 2_400
+    harness.scrollTo.mockClear()
+    harness.scroll.pinAfterSend()
+
+    const turn = document.createElement('div')
+    turn.dataset.chatTurn = ''
+    const prompt = document.createElement('div')
+    prompt.dataset.messageId = 'user-2'
+    turn.append(prompt)
+    turn.getBoundingClientRect = () => rect(1_200 - harness.viewport.scrollTop, 100)
+    prompt.getBoundingClientRect = () => rect(1_200 - harness.viewport.scrollTop, 40)
+    Object.defineProperty(turn, 'offsetHeight', { get: () => Math.max(100, Number.parseFloat(turn.style.minHeight) || 0) })
+    Object.defineProperty(prompt, 'offsetHeight', { value: 40 })
+    harness.messages.value.push(userMessage('user-2'))
+    harness.lastTurnEl.value = turn
+    harness.content.append(turn)
+    await flushDom()
+
+    expect(harness.scrollTo.mock.calls.some(([options]) => typeof options !== 'number' && options.behavior === 'auto')).toBe(false)
+    expect(harness.scrollTo).toHaveBeenLastCalledWith({ top: 1_060, behavior: 'smooth' })
+    harness.viewport.scrollTop = 1_060
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    harness.geometry.scrollHeight = 2_500
+    harness.content.append(document.createTextNode('new reply'))
+    await flushDom()
+    expect(harness.viewport.scrollTop).toBe(1_060)
+  })
+
+  it('does not catch up the old conversation when a session switch cancels its scroll', async () => {
+    const harness = startBottomJump()
+    harness.viewport.scrollTop = 600
+    harness.viewport.dispatchEvent(new Event('scroll'))
+    harness.geometry.scrollHeight = 1_200
+    harness.scrollTo.mockClear()
+
+    harness.sessionId.value = 'session-2'
+    await nextTick()
+    harness.viewport.dispatchEvent(new Event('scrollend'))
+    await flushDom()
+
+    expect(harness.viewport.scrollTop).toBe(600)
+    expect(harness.scrollTo.mock.calls.every(([options]) => typeof options !== 'number' && options.behavior === 'instant')).toBe(true)
   })
 })

@@ -169,6 +169,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   let highlightTimer: ReturnType<typeof setTimeout> | null = null
+  let smoothScrollActive = false
   let cancelSmoothScroll: (() => void) | null = null
   let cancelTurnEntrance: (() => void) | null = null
   let mutationObserver: MutationObserver | null = null
@@ -281,29 +282,44 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
   function startSmoothScroll(root: HTMLElement, getTarget: () => number) {
     cancelSmoothScroll?.()
+    let cancelled = false
+    smoothScrollActive = true
     isProgrammaticScroll = true
     const release = () => {
+      smoothScrollActive = false
       pinScrollActive = false
       isProgrammaticScroll = false
-      root.removeEventListener('wheel', cancel)
-      root.removeEventListener('touchstart', cancel)
-      root.removeEventListener('pointerdown', cancel)
+      root.removeEventListener('wheel', interrupt)
+      root.removeEventListener('touchstart', interrupt)
+      root.removeEventListener('pointerdown', interrupt)
       window.removeEventListener('keydown', cancelOnKey)
+      lastScrollTop = root.scrollTop
+      // The stream may have grown while the browser was scrolling to its
+      // initial target. Catch up only after natural completion, never on cancel.
+      if (!cancelled && followEnabled && isActive.value && !lockScroll.value
+        && scrollEl.value === root && !isNearBottom(root)) {
+        stickToBottomNow()
+      }
       scheduleAtBottomRefresh()
     }
     const cancel = () => {
+      cancelled = true
       stop()
       cancelTurnEntrance?.()
       cancelSmoothScroll = null
     }
+    const interrupt = () => {
+      markEscaped()
+      cancel()
+    }
     const cancelOnKey = (event: KeyboardEvent) => {
       if (KEY_NAV.has(event.key) && !(event.target instanceof HTMLElement && (
         event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)
-      ))) cancel()
+      ))) interrupt()
     }
-    root.addEventListener('wheel', cancel, { passive: true })
-    root.addEventListener('touchstart', cancel, { passive: true })
-    root.addEventListener('pointerdown', cancel, { passive: true })
+    root.addEventListener('wheel', interrupt, { passive: true })
+    root.addEventListener('touchstart', interrupt, { passive: true })
+    root.addEventListener('pointerdown', interrupt, { passive: true })
     window.addEventListener('keydown', cancelOnKey)
     const stop = nativeScrollTo(root, getTarget(), release)
     // Retain cancellation after scrolling ends: the turn's separate animation
@@ -440,10 +456,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // the scroll event would then be read as a user gesture.
   function stickToBottomNow() {
     const el = scrollEl.value
-    if (!el) return
+    // A content update must not replace an in-flight native smooth scroll.
+    if (!el || smoothScrollActive) return
     isProgrammaticScroll = true
     el.scrollTo({ top: bottomTarget(el), behavior: 'auto' })
     requestAnimationFrame(() => {
+      if (smoothScrollActive) return
       isProgrammaticScroll = false
       const cur = scrollEl.value
       if (!cur) return
@@ -864,9 +882,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   onBeforeUnmount(() => {
+    cancelSmoothScroll?.()
     if (atBottomRefreshRaf) cancelAnimationFrame(atBottomRefreshRaf)
     if (highlightTimer) clearTimeout(highlightTimer)
-    cancelSmoothScroll?.()
     contentResizeObserver?.disconnect()
     contentResizeObserver = null
     detach(scrollEl.value)
