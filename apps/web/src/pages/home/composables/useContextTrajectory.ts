@@ -3,7 +3,7 @@ import { useQuery } from '@pinia/colada'
 import { useIntervalFn } from '@vueuse/core'
 import { getBotsByBotIdSessionsBySessionIdContextTrajectory } from '@memohai/sdk'
 import { useChatViewTarget } from './useChatViewContext'
-import { mergeContextCapturePages } from './context-trajectory-view'
+import { mergeContextCapturePages, prependContextCapturePage } from './context-trajectory-view'
 import type { ContextCapturePage } from './context-trajectory.types'
 
 export function useContextTrajectory(active: Ref<boolean>) {
@@ -36,13 +36,20 @@ export function useContextTrajectory(active: Ref<boolean>) {
     const { data } = await getBotsByBotIdSessionsBySessionIdContextTrajectory({
       path: { bot_id: botId!, session_id: sessionId! }, query: { limit: 200, before }, signal, throwOnError: true,
     })
-    if (!data) throw new Error('Missing context trajectory response')
+    if (!data || !Array.isArray(data.events) || typeof data.has_more !== 'boolean') throw new Error('Missing context trajectory response')
     return { scope: requestedScope, page: { before, data } }
   }
 
   function addPage(page: ContextCapturePage) {
-    const first = page.data.events?.[0]?.id
-    pages.value = [page, ...pages.value.filter(existing => existing.before !== page.before || existing.data.events?.[0]?.id !== first)]
+    if (!page.before && !page.data.has_more) {
+      generation += 1
+      controller?.abort()
+      loadingOlder.value = false
+      fillingGap.value = false
+      loadError.value = null
+      failedCursor.value = null
+    }
+    pages.value = prependContextCapturePage(pages.value, page)
   }
 
   const query = useQuery({

@@ -1,8 +1,37 @@
 import { describe, expect, it } from 'vitest'
-import { mergeContextCapturePages, mergeTrajectoryCaptures } from './context-trajectory-view'
+import { mergeContextCapturePages, mergeTrajectoryCaptures, prependContextCapturePage } from './context-trajectory-view'
+import type { ContextCapturePage } from './context-trajectory.types'
 import { buildRowMap, buildTrajectoryRows, lifecycleByTurnId } from './trajectory-model'
 
 describe('captured context trajectory', () => {
+  it('keeps the original head coverage when global IDs are sparse', () => {
+    const pages = prependContextCapturePage([{ data: { events: [{ id: '100' }, { id: '50' }], has_more: true, next_cursor: '50' } }], {
+      data: { events: [{ id: '110' }, { id: '100' }], has_more: true, next_cursor: '100' },
+    })
+    expect(mergeContextCapturePages(pages).gapCursor).toBeNull()
+    expect(mergeContextCapturePages(pages).events.map(event => event.id)).toEqual(['50', '100', '110'])
+  })
+
+  it('retains coverage of empty intervals after event copies are replaced', () => {
+    let pages: ContextCapturePage[] = [{ before: '200', data: { events: [{ id: '190' }, { id: '100' }], has_more: true, next_cursor: '100' } }]
+    pages = prependContextCapturePage(pages, { before: '200', data: { events: [{ id: '190' }], has_more: true, next_cursor: '190' } })
+    pages = prependContextCapturePage(pages, { before: '150', data: { events: [{ id: '100' }], has_more: true, next_cursor: '100' } })
+    expect(mergeContextCapturePages(pages).gapCursor).toBeNull()
+    expect(mergeContextCapturePages(pages).events.map(event => event.id)).toEqual(['100', '190'])
+  })
+
+  it('retains older captures without storing repeated polling copies', () => {
+    let pages: ContextCapturePage[] = []
+    for (let head = 100; head <= 120; head++) {
+      pages = prependContextCapturePage(pages, { data: { events: [head, head - 1, head - 2].map(id => ({ id: String(id) })), has_more: true, next_cursor: String(head - 2) } })
+    }
+    const all = pages.flatMap(page => page.data.events ?? [])
+    expect(all).toHaveLength(23)
+    expect(new Set(all.map(event => event.id)).size).toBe(all.length)
+    expect(mergeContextCapturePages(pages).events.map(event => event.id)).toEqual(Array.from({ length: 23 }, (_, index) => String(98 + index)))
+    expect(mergeContextCapturePages(pages).gapCursor).toBeNull()
+  })
+
   it('keeps readable lifecycle context when captured stages are partial', () => {
     const lifecycles = [{ run_id: 'run', turn_id: 'turn', snapshot: { breakdown: [
       { kind: 'system_prompt' as const, fragments: 1, token_estimate: 10 },

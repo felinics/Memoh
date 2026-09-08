@@ -12,6 +12,30 @@ function compareIds(a: string | undefined, b: string | undefined): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
 
+function capturePageCoverage(page: ContextCapturePage): { high: bigint, low: bigint } {
+  if (page.coverage) return page.coverage
+  const first = numericId(page.data.events?.[0]?.id)
+  return {
+    high: numericId(page.before) ?? (first == null ? 0n : first + 1n),
+    low: page.data.has_more ? numericId(page.data.next_cursor) ?? numericId(page.data.events?.at(-1)?.id) ?? 0n : 0n,
+  }
+}
+
+export function prependContextCapturePage(pages: readonly ContextCapturePage[], page: ContextCapturePage): ContextCapturePage[] {
+  if (!page.before && !page.data.has_more) return [page]
+  const high = numericId(page.before)
+  const low = page.data.has_more ? numericId(page.data.next_cursor) ?? numericId(page.data.events?.at(-1)?.id) : 0n
+  return [page, ...pages.flatMap((previous) => {
+    const coverage = capturePageCoverage(previous)
+    const events = (previous.data.events ?? []).filter((event) => {
+      const id = numericId(event.id)
+      return id == null || low == null || id < low || (high != null && id >= high)
+    })
+    const covered = low != null && low <= coverage.low && (high == null || high >= coverage.high)
+    return events.length || !covered ? [{ ...previous, coverage, data: { ...previous.data, events } }] : []
+  })]
+}
+
 export function mergeContextCapturePages(pages: readonly ContextCapturePage[]): ContextCaptureWindow {
   const byId = new Map<string, HandlersContextTrajectoryEntry>()
   const ranges: { high: bigint, low: bigint }[] = []
@@ -25,9 +49,7 @@ export function mergeContextCapturePages(pages: readonly ContextCapturePage[]): 
       }
       if (!byId.has(event.id)) byId.set(event.id, event)
     }
-    const first = numericId(events[0]?.id)
-    const high = numericId(page.before) ?? (first == null ? 0n : first + 1n)
-    const low = page.data.has_more ? numericId(page.data.next_cursor) ?? numericId(events.at(-1)?.id) ?? 0n : 0n
+    const { high, low } = capturePageCoverage(page)
     if (high >= low) ranges.push({ high, low })
   }
   ranges.sort((a, b) => a.high > b.high ? -1 : a.high < b.high ? 1 : 0)

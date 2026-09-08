@@ -12,6 +12,7 @@ export interface ContextBlockComparison {
 export interface ContextCapturePage {
   before?: string
   data: HandlersContextTrajectoryResponse
+  coverage?: { high: bigint, low: bigint }
 }
 
 export interface ContextCaptureWindow {

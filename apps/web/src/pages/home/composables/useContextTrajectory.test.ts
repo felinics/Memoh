@@ -44,6 +44,56 @@ beforeEach(() => {
 afterEach(() => { unmount?.(); vi.useRealTimers() })
 
 describe('context trajectory pages', () => {
+  it('removes cached captures when a refreshed session has been cleared', async () => {
+    let cleared = false
+    fetchPage.mockImplementation(({ query }) => Promise.resolve({ data: cleared
+      ? { events: [], has_more: false }
+      : query.before ? { events: [{ id: '8' }], has_more: false } : { events: [{ id: '10' }, { id: '9' }], has_more: true, next_cursor: '9' },
+    }))
+    const result = setup()
+    await flushPromises()
+    await result.loadOlder()
+    expect(result.events.value.map(event => event.id)).toEqual(['8', '9', '10'])
+    cleared = true
+    await result.refresh()
+    await flushPromises()
+    expect(result.events.value).toEqual([])
+    expect(result.canLoadOlder.value).toBe(false)
+  })
+
+  it('does not restore a cleared session from a late older-page response', async () => {
+    let cleared = false
+    let resolveOlder!: (value: unknown) => void
+    const older = new Promise(resolve => { resolveOlder = resolve })
+    fetchPage.mockImplementation(({ query }) => query.before ? older : Promise.resolve({ data: cleared
+      ? { events: [], has_more: false }
+      : { events: [{ id: '10' }], has_more: true, next_cursor: '10' },
+    }))
+    const result = setup()
+    await flushPromises()
+    const loading = result.loadOlder()
+    cleared = true
+    await result.refresh()
+    await flushPromises()
+    expect(result.events.value).toEqual([])
+    resolveOlder({ data: { events: [{ id: '9' }], has_more: false } })
+    await loading
+    await flushPromises()
+    expect(result.events.value).toEqual([])
+    expect(result.loadingOlder.value).toBe(false)
+  })
+
+  it('reports a malformed response instead of treating it as an empty session', async () => {
+    fetchPage.mockResolvedValue({ data: { events: [{ id: '10' }], has_more: false } })
+    const result = setup()
+    await flushPromises()
+    fetchPage.mockResolvedValue({ data: {} })
+    await result.refresh()
+    await flushPromises()
+    expect(result.error.value).toBeTruthy()
+    expect(result.events.value.map(event => event.id)).toEqual(['10'])
+  })
+
   it('does not fetch detail for a hidden KeepAlive pane when its target changes', async () => {
     fetchEvent.mockResolvedValue({ data: { event: { id: '2' }, blocks: [], complete: true } })
     const visible = shallowRef(true)
