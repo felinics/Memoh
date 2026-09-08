@@ -2184,6 +2184,8 @@ definitions:
         items:
           $ref: '#/definitions/contextfrag.ToolDefAccounting'
         type: array
+      trajectory:
+        $ref: '#/definitions/trajectory.Stats'
       trust_breakdown:
         items:
           $ref: '#/definitions/contextfrag.TrustBreakdown'
@@ -3525,6 +3527,70 @@ definitions:
         description: |-
           TurnID is the durable turn the run wrote into, joined from the run
           ledger; absent for runs the ledger never recorded.
+        type: string
+    type: object
+  handlers.ContextTrajectoryBlock:
+    properties:
+      available:
+        type: boolean
+      bytes:
+        type: integer
+      content:
+        type: string
+      encoding:
+        type: string
+      format:
+        type: string
+      hash:
+        type: string
+      kind:
+        type: string
+      label:
+        type: string
+    type: object
+  handlers.ContextTrajectoryEntry:
+    properties:
+      block_count:
+        type: integer
+      capture_errors:
+        type: integer
+      capture_id:
+        type: string
+      id:
+        type: string
+      recorded_at:
+        type: string
+      request:
+        type: integer
+      run_id:
+        type: string
+      sequence:
+        type: integer
+      stage:
+        type: string
+      step_index:
+        type: integer
+    type: object
+  handlers.ContextTrajectoryEventResponse:
+    properties:
+      blocks:
+        items:
+          $ref: '#/definitions/handlers.ContextTrajectoryBlock'
+        type: array
+      complete:
+        type: boolean
+      event:
+        $ref: '#/definitions/handlers.ContextTrajectoryEntry'
+    type: object
+  handlers.ContextTrajectoryResponse:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/handlers.ContextTrajectoryEntry'
+        type: array
+      has_more:
+        type: boolean
+      next_cursor:
         type: string
     type: object
   handlers.ContextUsage:
@@ -6371,6 +6437,17 @@ definitions:
     required:
     - installation
     - ok
+    type: object
+  trajectory.Stats:
+    properties:
+      capture_id:
+        type: string
+      errors:
+        type: integer
+      events:
+        type: integer
+      pending:
+        type: integer
     type: object
   userinput.UIAnswer:
     properties:
@@ -11867,6 +11944,109 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Get the injected context texts of a run
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/context-trajectory:
+    get:
+      description: Read ordered, content-light capture metadata independently of conversation
+        messages. Full captured content is available on demand with workspace_read.
+        A capture_id distinguishes continuations that reuse a run_id; capture_errors
+        reports preceding capture failures
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Continue before this event ID
+        in: query
+        name: before
+        type: string
+      - description: Page size (default 200, max 200)
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextTrajectoryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List context assembly stages and provider requests
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/context-trajectory/{event_id}:
+    get:
+      description: Reassemble full captured blocks in their original order, verifying
+        byte counts and hashes. Requires workspace_read in addition to session access.
+        Missing or corrupt blocks are explicitly unavailable; complete is false when
+        any block cannot be restored. Non-UTF-8 bytes use base64 encoding
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Event ID
+        in: path
+        name: event_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ContextTrajectoryEventResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Read the complete content of a context assembly stage
       tags:
       - sessions
   /bots/{bot_id}/sessions/{session_id}/fork:

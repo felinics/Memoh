@@ -8007,6 +8007,151 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/context-trajectory": {
+            "get": {
+                "description": "Read ordered, content-light capture metadata independently of conversation messages. Full captured content is available on demand with workspace_read. A capture_id distinguishes continuations that reuse a run_id; capture_errors reports preceding capture failures",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List context assembly stages and provider requests",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Continue before this event ID",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 200, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextTrajectoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/context-trajectory/{event_id}": {
+            "get": {
+                "description": "Reassemble full captured blocks in their original order, verifying byte counts and hashes. Requires workspace_read in addition to session access. Missing or corrupt blocks are explicitly unavailable; complete is false when any block cannot be restored. Non-UTF-8 bytes use base64 encoding",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Read the complete content of a context assembly stage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Event ID",
+                        "name": "event_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextTrajectoryEventResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/fork": {
             "post": {
                 "tags": [
@@ -18589,6 +18734,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/contextfrag.ToolDefAccounting"
                     }
                 },
+                "trajectory": {
+                    "$ref": "#/definitions/trajectory.Stats"
+                },
                 "trust_breakdown": {
                     "type": "array",
                     "items": {
@@ -20536,6 +20684,104 @@ const docTemplate = `{
                 },
                 "turn_id": {
                     "description": "TurnID is the durable turn the run wrote into, joined from the run\nledger; absent for runs the ledger never recorded.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryBlock": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "bytes": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "encoding": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryEntry": {
+            "type": "object",
+            "properties": {
+                "block_count": {
+                    "type": "integer"
+                },
+                "capture_errors": {
+                    "type": "integer"
+                },
+                "capture_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "recorded_at": {
+                    "type": "string"
+                },
+                "request": {
+                    "type": "integer"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "stage": {
+                    "type": "string"
+                },
+                "step_index": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryEventResponse": {
+            "type": "object",
+            "properties": {
+                "blocks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextTrajectoryBlock"
+                    }
+                },
+                "complete": {
+                    "type": "boolean"
+                },
+                "event": {
+                    "$ref": "#/definitions/handlers.ContextTrajectoryEntry"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryResponse": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextTrajectoryEntry"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "next_cursor": {
                     "type": "string"
                 }
             }
@@ -24616,6 +24862,23 @@ const docTemplate = `{
                 },
                 "ok": {
                     "type": "boolean"
+                }
+            }
+        },
+        "trajectory.Stats": {
+            "type": "object",
+            "properties": {
+                "capture_id": {
+                    "type": "string"
+                },
+                "errors": {
+                    "type": "integer"
+                },
+                "events": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
                 }
             }
         },
