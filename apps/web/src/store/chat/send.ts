@@ -305,7 +305,7 @@ export function createChatSend(deps: ChatSendDeps) {
 
       assistantTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
       turnAppendStarted = true
-      options.onBeforeTurnAppend?.()
+      options.onBeforeTurnAppend?.({ ...viewTarget })
       if (!serverSkillActivation) {
         userTurn = transcript.createOptimisticUserTurn(
           trimmed,

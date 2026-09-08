@@ -182,7 +182,7 @@ export interface SendMessageOptions {
   /** The server has finished this turn's preference write, before generation ends. */
   onModelPreferenceSettled?: () => void
   /** Called immediately before a real chat turn is appended or dispatched. */
-  onBeforeTurnAppend?: () => void
+  onBeforeTurnAppend?: (target: ChatViewTarget) => void
   /** Called when that turn is rolled back after a startup-stage failure. */
   onTurnAppendAborted?: () => void
 }

@@ -79,54 +79,59 @@
                 :key="turn.id"
                 :ref="turnIndex === messageTurns.length - 1 ? setLastTurnEl : undefined"
                 :style="turnReserveStyle(turn.id)"
-                class="space-y-6"
+                data-chat-turn
               >
-                <template
-                  v-for="(msg, msgIndex) in turn.messages"
-                  :key="msg.id"
+                <div
+                  data-turn-motion
+                  class="space-y-6"
                 >
-                  <ForkSourceDivider
-                    v-if="showForkSourceDividerBefore(turn.start + msgIndex)"
-                    :title="forkSourceTitle"
-                    :disabled="openingForkSource"
-                    @open-source="handleForkSourceClick"
-                  />
-
-                  <div
-                    :data-message-id="msg.id"
-                    :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
-                    class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
-                    :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
-                    :data-anchor="msg.id"
+                  <template
+                    v-for="(msg, msgIndex) in turn.messages"
+                    :key="msg.id"
                   >
-                    <MessageItem
-                      :message="msg"
-                      :bot-id="currentBotId"
-                      :channel-thread="isChannelThread"
-                      :channel-platform="channelPlatform"
-                      :bot-name="currentBot?.name"
-                      :bot-avatar-url="currentBot?.avatar_url"
-                      :on-open-media="galleryOpenBySrc"
-                      :on-reply-click="handleReplyJump"
-                      :on-retry-message="handleRetryMessage"
-                      :can-retry-latest-assistant="isRetryableTurn(msg)"
-                      :can-edit-latest-user="isEditableTurn(msg)"
-                      :can-fork-assistant="canForkAssistant"
-                      :is-scrolling="isScrolling"
-                      :is-last-message="msg.id === lastMessageId"
-                      @active="onMessageActive"
-                      @edit-message="handleEditMessage"
-                      @fork-message="handleForkMessage"
+                    <ForkSourceDivider
+                      v-if="showForkSourceDividerBefore(turn.start + msgIndex)"
+                      :title="forkSourceTitle"
+                      :disabled="openingForkSource"
+                      @open-source="handleForkSourceClick"
                     />
-                  </div>
 
-                  <ForkSourceDivider
-                    v-if="showForkSourceDividerAfter(msg, turn.start + msgIndex)"
-                    :title="forkSourceTitle"
-                    :disabled="openingForkSource"
-                    @open-source="handleForkSourceClick"
-                  />
-                </template>
+                    <div
+                      :data-message-id="msg.id"
+                      :data-external-message-id="(msg.role === 'user' || msg.role === 'assistant') ? msg.externalMessageId : undefined"
+                      class="transition-[background-color] duration-500 scroll-mt-2 px-2 -mx-2"
+                      :class="highlightedMessageId === msg.id ? 'bg-muted/45' : ''"
+                      :data-anchor="msg.id"
+                    >
+                      <MessageItem
+                        :message="msg"
+                        :bot-id="currentBotId"
+                        :channel-thread="isChannelThread"
+                        :channel-platform="channelPlatform"
+                        :bot-name="currentBot?.name"
+                        :bot-avatar-url="currentBot?.avatar_url"
+                        :on-open-media="galleryOpenBySrc"
+                        :on-reply-click="handleReplyJump"
+                        :on-retry-message="handleRetryMessage"
+                        :can-retry-latest-assistant="isRetryableTurn(msg)"
+                        :can-edit-latest-user="isEditableTurn(msg)"
+                        :can-fork-assistant="canForkAssistant"
+                        :is-scrolling="isScrolling"
+                        :is-last-message="msg.id === lastMessageId"
+                        @active="onMessageActive"
+                        @edit-message="handleEditMessage"
+                        @fork-message="handleForkMessage"
+                      />
+                    </div>
+
+                    <ForkSourceDivider
+                      v-if="showForkSourceDividerAfter(msg, turn.start + msgIndex)"
+                      :title="forkSourceTitle"
+                      :disabled="openingForkSource"
+                      @open-source="handleForkSourceClick"
+                    />
+                  </template>
+                </div>
               </div>
             </div>
           </ScrollArea>
@@ -229,6 +234,7 @@
                centered. Desktop only — mobile has no scroll rail, so there the
                nudge would just push the composer off centre. -->
           <div
+            ref="composerPlacementEl"
             class="pointer-events-auto relative mx-auto w-full px-4 sm:px-6 lg:px-10 md:-translate-x-0.5"
             :class="isWelcome ? 'max-w-[44rem]' : 'max-w-[840px]'"
           >
@@ -960,6 +966,7 @@ import MessageItem from './message-item.vue'
 import ComposerContinueOn from './composer-continue-on.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
 import { useChatScroll } from '../composables/useChatScroll'
+import { useComposerPlacementMotion } from '../composables/useComposerPlacementMotion'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import ChatForkDialog from './chat-fork-dialog.vue'
@@ -1144,6 +1151,8 @@ const isWelcome = computed(() =>
 // where v-if would unmount them. A session panel carries its sessionId
 // from the first frame, so this gate never engages on session routes.
 const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
+const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
+useComposerPlacementMotion(composerPlacementEl, isWelcome)
 
 // Rotate the greeting per fresh chat so the entry point feels alive rather than
 // a fixed banner; the pick stays stable while a single welcome screen is shown
@@ -3319,13 +3328,13 @@ async function handleSend() {
     composerScope: sentContext.composerScope,
     onBeforeMessageSend: () => pairSend.begin(),
     onModelPreferenceSettled: () => pairSend.finish(false),
-    onBeforeTurnAppend: () => {
+    onBeforeTurnAppend: (target) => {
       if (preserveDirectDraftSelection) {
         void nextTick(() => { directDraftPromotionPending = false })
       }
       if (!matchesChatPaneSendContext(
-        sentContext,
-        paneTarget.value,
+        { ...sentContext, target },
+        { ...paneTarget.value, sessionId: paneView.value.sessionId },
         inputDraftKey.value || 'chat',
       )) return
       rollbackPin = pinAfterSend()

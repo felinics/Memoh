@@ -750,7 +750,10 @@ describe('chat-list store', () => {
         error: 'model failed',
         restoreInput: 'hello',
       })
-      expect(onBeforeTurnAppend).toHaveBeenCalledOnce()
+      expect(onBeforeTurnAppend).toHaveBeenCalledWith(expect.objectContaining({
+        botId: 'bot-1',
+        sessionId: expect.any(String),
+      }))
       expect(onBeforeMessageSend).toHaveBeenCalledOnce()
       expect(onTurnAppendAborted).toHaveBeenCalledOnce()
       expect(h.sentWSMessages.at(-1)).toMatchObject({

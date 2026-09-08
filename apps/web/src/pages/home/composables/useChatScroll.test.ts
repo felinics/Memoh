@@ -27,6 +27,7 @@ interface Harness {
   geometry: ScrollGeometry
   scrollTo: ReturnType<typeof vi.fn>
   messages: Ref<ChatMessage[]>
+  sessionId: Ref<string>
   lastTurnEl: Ref<HTMLElement | null>
   scroll: ChatScroll
 }
@@ -120,6 +121,7 @@ function mountHarness(initialMessages: ChatMessage[] = []): Harness {
     value: scrollTo,
   })
 
+  const sessionId = ref('session-1')
   const messages = ref<ChatMessage[]>(initialMessages)
   const lastTurnEl = ref<HTMLElement | null>(null)
   let scroll!: ChatScroll
@@ -131,7 +133,7 @@ function mountHarness(initialMessages: ChatMessage[] = []): Harness {
         lastTurnEl,
         messages,
         isActive: ref(true),
-        sessionId: ref('session-1'),
+        sessionId,
       })
       return () => h('div')
     },
@@ -147,6 +149,7 @@ function mountHarness(initialMessages: ChatMessage[] = []): Harness {
     geometry,
     scrollTo,
     messages,
+    sessionId,
     lastTurnEl,
     scroll,
   }
@@ -329,6 +332,35 @@ describe('useChatScroll gesture and layout handling', () => {
     ResizeObserverMock.instances[0]?.trigger(harness.content)
 
     expect(harness.scrollTo).toHaveBeenCalledWith({ top: 1_000, behavior: 'auto' })
+  })
+
+  it.each(['before render', 'after render'])('preserves the first send across draft promotion %s', async (timing) => {
+    const harness = mountHarness()
+    harness.sessionId.value = 'draft:chat:1'
+    await flushDom()
+    harness.scroll.pinAfterSend()
+    if (timing === 'before render') {
+      harness.sessionId.value = 'created-session'
+      await nextTick()
+    }
+    const turn = document.createElement('div')
+    const prompt = document.createElement('div')
+    prompt.dataset.messageId = 'first-user'
+    turn.append(prompt)
+    harness.messages.value.push(userMessage('first-user'))
+    harness.lastTurnEl.value = turn
+    harness.content.append(turn)
+    await flushDom()
+    const reserve = harness.scroll.turnReserveStyle('first-user')
+    expect(reserve?.minHeight).toMatch(/^\d+px$/)
+    if (timing === 'after render') {
+      harness.sessionId.value = 'created-session'
+      await nextTick()
+    }
+    expect(harness.scroll.turnReserveStyle('first-user')).toEqual(reserve)
+    harness.sessionId.value = 'other-session'
+    await nextTick()
+    expect(harness.scroll.turnReserveStyle('first-user')).toBeUndefined()
   })
 
   it('migrates a pinned reserve when messages are replaced in place', async () => {
