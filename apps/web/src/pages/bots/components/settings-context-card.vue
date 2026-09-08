@@ -8,6 +8,7 @@
       <div class="w-full sm:w-52">
         <SearchProviderSelect
           v-model="form.search_provider_id"
+          popover-align="end"
           :providers="searchProviders"
           :placeholder="$t('bots.settings.searchProviderPlaceholder')"
         />
@@ -21,6 +22,7 @@
       <div class="w-full sm:w-52">
         <FetchProviderSelect
           v-model="form.fetch_provider_id"
+          popover-align="end"
           :providers="fetchProviders"
           :placeholder="$t('bots.settings.fetchProviderPlaceholder')"
         />
@@ -34,6 +36,7 @@
       <div class="w-full sm:w-52">
         <MemoryProviderSelect
           v-model="form.memory_provider_id"
+          popover-align="end"
           :providers="memoryProviders"
           :placeholder="$t('bots.settings.memoryProviderPlaceholder')"
         />

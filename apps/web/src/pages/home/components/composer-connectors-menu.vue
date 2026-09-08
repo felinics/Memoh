@@ -7,14 +7,14 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, Spinner } from '@felinic/ui'
 import { getBotsByBotIdConnectors, getConnectorsCatalog } from '@memohai/sdk'
-import { connectorPreviewCatalog } from '../fixtures/connectors-preview'
+import { connectorPreviewCatalog, connectorPreviewEnabled } from '../fixtures/connectors-preview'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
 const props = defineProps<{ botId: string, botName: string }>()
 const { t } = useI18n()
 const router = useRouter()
 const open = ref(false)
-const preview = import.meta.env.DEV && import.meta.env.VITE_MOCK_CONNECTORS === '1'
+const preview = connectorPreviewEnabled
 const catalog = useQuery({
   key: [preview ? 'preview-connectors-catalog' : 'connectors-catalog'],
   query: async () => preview ? connectorPreviewCatalog : (await getConnectorsCatalog({ throwOnError: true })).data,

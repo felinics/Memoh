@@ -565,16 +565,15 @@
                       shape="circle"
                       :disabled="!currentBotId || activeChatReadOnly || composerConfigPending || voiceInputState !== 'idle'"
                       :title="$t('chat.composerActions')"
-                      class="order-1 self-end text-muted-foreground max-md:size-11"
+                      class="order-1 self-end max-md:size-11"
                       :aria-label="$t('chat.composerActions')"
                     >
                       <Spinner
                         v-if="agentChanging"
                         class="size-4 max-md:size-5"
                       />
-                      <Plus
+                      <AddIcon
                         v-else
-                        :stroke-width="1.5"
                         class="size-4 max-md:size-5"
                       />
                     </Button>
@@ -1033,12 +1032,11 @@
 </template>
 
 <script setup lang="ts">
-import { UploadIcon } from '@memohai/icon/ui'
+import { AddIcon, UploadIcon } from '@memohai/icon/ui'
 
 import { ref, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated, type Ref } from 'vue'
 import {
   ImagePlus,
-  Plus,
   ChevronDown,
   ArrowDown,
   Check,

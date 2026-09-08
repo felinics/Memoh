@@ -33,7 +33,7 @@
             </div>
           </SelectValue>
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent align="end">
           <SelectItem :value="MEMOH_AGENT_VALUE">
             <div class="flex min-w-0 items-center gap-2">
               <img

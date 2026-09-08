@@ -10,7 +10,7 @@
       :aria-label="t('chat.tabBarToolkit.newTerminal')"
       @click="store.openTerminalInPanel(props.params.group.id)"
     >
-      <Plus class="size-3.5" />
+      <AddIcon class="size-3.5" />
     </Button>
     <!-- Editor groups: unified "+" menu for new panels and splits. -->
     <DropdownMenu v-else-if="hasAnyAction">
@@ -23,7 +23,7 @@
           :title="t('chat.tabBarToolkit.openMenu')"
           :aria-label="t('chat.tabBarToolkit.openMenu')"
         >
-          <Plus class="size-3.5" />
+          <AddIcon class="size-3.5" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -70,8 +70,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { Plus } from 'lucide-vue-next'
-import { TerminalIcon, BrowserIcon, ComputerIcon, SplitRightIcon, SplitDownIcon } from '@memohai/icon/ui'
+import { AddIcon, TerminalIcon, BrowserIcon, ComputerIcon, SplitRightIcon, SplitDownIcon } from '@memohai/icon/ui'
 import {
   Button,
   DropdownMenu,
