@@ -148,14 +148,22 @@ describe('tool call registry', () => {
       .toBe('browserAction.scroll')
   })
 
-  it('marks failed calls, including a non-zero exec exit', () => {
-    expect(getToolDisplay(toolBlock('exec', { command: 'false' })).isError).toBeUndefined()
+  it.each([
+    { exit_code: -1 },
+    { exit_code: 1 },
+    { structuredContent: { exitCode: 127 } },
+    { isError: true },
+    { structuredContent: { isError: true, exit_code: -1 } },
+  ])('keeps recoverable execution failures out of the title: %j', (result) => {
+    const block = toolBlock('exec', { command: 'false', description: 'Check environment' })
+    const failed = { ...block, result } as ToolCallBlock
+    expect(getToolDisplay(failed)).toEqual(getToolDisplay(block))
+    expect(failed.result).toBe(result)
+  })
 
-    const failedExec = { ...toolBlock('exec', { command: 'false' }), result: { exit_code: 1 } } as ToolCallBlock
-    expect(getToolDisplay(failedExec).isError).toBe(true)
-    expect(getToolDisplay(failedExec).exitCode).toBe(1)
-
-    const failedTool = { ...toolBlock('web_search', { query: 'x' }), result: { isError: true } } as ToolCallBlock
-    expect(getToolDisplay(failedTool).isError).toBe(true)
+  it('keeps other tool failures in their details', () => {
+    const block = toolBlock('web_search', { query: 'x' })
+    expect(getToolDisplay({ ...block, result: { isError: true } } as ToolCallBlock))
+      .toEqual(getToolDisplay(block))
   })
 })

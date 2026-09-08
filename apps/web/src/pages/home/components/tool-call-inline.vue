@@ -7,7 +7,6 @@
       v-if="expandable"
       :open="open"
       nested
-      :tone="display.isError ? 'error' : 'cop'"
       @toggle="toggleOpen"
     >
       <ConnectorLogo
@@ -47,10 +46,6 @@
         v-if="display.diffRemove"
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
-      <span
-        v-if="exitLabel"
-        class="font-mono shrink-0"
-      >{{ exitLabel }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -107,10 +102,6 @@
         v-if="display.diffRemove"
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
-      <span
-        v-if="exitLabel"
-        class="font-mono shrink-0"
-      >{{ exitLabel }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -219,25 +210,16 @@ const expandable = computed(() => {
   return Boolean(display.value.detail) || display.value.expandable === true
 })
 
-// A failed command carries its exit status on the collapsed row; every other
-// failure detail stays in the expanded output.
-const exitLabel = computed(() => (
-  display.value.exitCode ? t('chat.tools.exitCode', { code: display.value.exitCode }) : ''
-))
-
 const isPending = computed(() => title.value.pending)
 const showPendingLabel = computed(() => title.value.pending)
 const showActionLabel = computed(() => title.value.showAction)
 const renderedActionLabel = computed(() => title.value.action)
 
-// Every row is gray at rest and animates to near-black (foreground) on hover:
-// one neutral material, with color expressing interaction. Rest ink matches the
-// process/thinking headers (--cop-title) so a lone tool row and a collapsed
-// group read at the same weight.
-const rowClass = computed(() => {
-  if (display.value.isError) return 'text-destructive transition-colors duration-75'
-  return 'text-cop-title hover:text-foreground transition-colors duration-75'
-})
+// 工具标题是执行过程摘要。Agent 在虚拟机中试错、检查并修复命令是正常的
+// 长任务行为；非零退出码（包括 -1）或工具 isError 不等于用户任务失败。
+// 标题保持中性色，不附加退出码或错误染色；诊断留在展开详情中，真正的
+// 任务失败由回合级错误反馈表达，不能从某一次工具调用推导。
+const rowClass = 'text-cop-title hover:text-foreground transition-colors duration-75'
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running
 // shimmer for them flickers, so we only display it after a short delay.
@@ -272,7 +254,6 @@ onBeforeUnmount(clearRunningTimer)
 
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
-  if (display.value.isError) return 'text-destructive'
   return '' // inherit the row's gray→black hover color
 })
 

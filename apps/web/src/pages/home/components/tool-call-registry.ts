@@ -109,9 +109,6 @@ export interface ToolDisplay {
   // is the channel for full content. Consumers bind `title` only when this is set.
   fullTarget?: string
   detail?: Component
-  isError?: boolean
-  // Non-zero exit of a finished exec; the row renders it through i18n.
-  exitCode?: number
   expandable?: boolean
   defaultOpen?: boolean
   diffAdd?: number
@@ -615,30 +612,9 @@ function guiActionVariant(action: string, input: Record<string, unknown>): strin
   return ''
 }
 
-// A result the runtime marked as failed. Kept separate from the per-tool
-// display so every tool — including ones with no dedicated case — renders its
-// failures in destructive ink instead of looking like a clean call.
-function isErrorResult(block: ToolCallBlock): boolean {
-  const result = asObject(block.result)
-  if (result.isError === true) return true
-  return asObject(result.structuredContent).isError === true
-}
-
-// A non-zero exit is the one machine-readable failure detail worth carrying on
-// the collapsed row; everything else stays in the expanded output.
-function execExitCode(block: ToolCallBlock): number {
-  return pickNumber(resultObject(block), 'exit_code', 'exitCode')
-}
-
+// 工具结果中的错误供 Agent 自行检查和恢复，不代表用户任务失败。
+// 不把 isError / 非零退出码提升成标题状态；原始结果仍交给详情组件展示。
 export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
-  const display = resolveToolDisplay(block)
-  if (!block.done) return display
-  const exitCode = block.toolName === 'exec' ? execExitCode(block) : 0
-  if (!exitCode && !isErrorResult(block)) return display
-  return { ...display, isError: true, exitCode: exitCode || undefined }
-}
-
-function resolveToolDisplay(block: ToolCallBlock): ToolDisplay {
   const input = asObject(block.input)
 
   switch (block.toolName) {
