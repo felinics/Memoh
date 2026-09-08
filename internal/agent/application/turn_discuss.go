@@ -149,7 +149,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 	resolved.RunConfig.Identity.BotID = cmd.BotID
 	resolved.RunConfig.Identity.SessionID = cmd.ThreadID
 	if resolved.RunConfig.ContextLifecycle == nil {
-		resolved.RunConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID)
+		resolved.RunConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID, cmd.ThreadID)
 	}
 	ctx = resolved.RunConfig.TrajectoryContext(ctx)
 	recordContextStage(ctx, "discuss_trigger", map[string]any{"messages": cmd.DiscussMessages, "images": cmd.DiscussImageRefs, "addressed": cmd.DiscussAddressed})
@@ -254,7 +254,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			slog.Int("budget_tokens", admission.BudgetTokens))
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
 		if runConfig.ContextLifecycle == nil {
-			runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID)
+			runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID, cmd.ThreadID)
 		}
 		runConfig.ContextLifecycle.SetManifest(contextfrag.BuildManifest(nil))
 		s.contextLifecycleTerminal(ctx, runConfig)(cause)
@@ -277,7 +277,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.ContextCurrentUserMessageIndex = nil
 	runConfig.ContextMemoryMessageIndex = nil
 	if runConfig.ContextLifecycle == nil {
-		runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID)
+		runConfig.ContextLifecycle = s.newContextLifecycleHolder(ctx, cmd.BotID, cmd.ThreadID)
 	}
 	runConfig.ContextBudgetMaxTokens = resolved.ContextBudgetMaxTokens
 	if runConfig.ContextToolExchangePolicy == nil {
@@ -613,7 +613,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 			slog.Int("estimated_tokens", admission.EstimatedTokens),
 			slog.Int("budget_tokens", admission.BudgetTokens))
 		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
-		lifecycle := s.newContextLifecycleHolder(ctx, cmd.BotID)
+		lifecycle := s.newContextLifecycleHolder(ctx, cmd.BotID, cmd.ThreadID)
 		lifecycle.SetManifest(contextfrag.BuildManifest(nil))
 		s.contextLifecycleTerminal(ctx, native.RunConfig{
 			RunID: h.id,

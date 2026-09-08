@@ -154,7 +154,7 @@ func runtimeSessionMeta(sess session.Thread) map[string]any {
 // staging outcome on the result so the round publishes the matching head.
 func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
 	req.RunID = runIDForChatRequest(req.RunID)
-	contextLifecycle := s.newContextLifecycleHolder(ctx, req.BotID)
+	contextLifecycle := s.newContextLifecycleHolder(ctx, req.BotID, req.ThreadID)
 	captureConfig := native.RunConfig{RunID: req.RunID, Identity: native.SessionContext{BotID: req.BotID, SessionID: req.ThreadID}, ContextLifecycle: contextLifecycle}
 	ctx = captureConfig.TrajectoryContext(ctx)
 	recordChatTrigger(ctx, req)
@@ -596,7 +596,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		SessionType:     sessionmode.Schedule,
 	}
 
-	contextLifecycle := s.newContextLifecycleHolder(ctx, botID)
+	contextLifecycle := s.newContextLifecycleHolder(ctx, botID, payload.SessionID)
 	captureConfig := native.RunConfig{RunID: runID, Identity: native.SessionContext{BotID: botID, SessionID: payload.SessionID}, ContextLifecycle: contextLifecycle}
 	ctx = captureConfig.TrajectoryContext(ctx)
 	recordContextStage(ctx, "schedule_trigger", payload)

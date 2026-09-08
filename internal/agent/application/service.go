@@ -918,6 +918,7 @@ type baseRunConfigParams struct {
 // identity and system prompt — everything except Messages/Query/InlineImages.
 // Both resolve() and ResolveRunConfig() delegate to this shared builder.
 func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (native.RunConfig, models.GetResponse, sqlc.Provider, error) {
+	contextLifecycle := s.newContextLifecycleHolder(ctx, p.BotID, p.SessionID)
 	botSettings, err := s.loadBotSettings(ctx, p.BotID)
 	if err != nil {
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
@@ -1021,7 +1022,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		Skills:            agentSkills,
 		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: s.bgManager,
-		ContextLifecycle:  s.newContextLifecycleHolder(ctx, p.BotID),
+		ContextLifecycle:  contextLifecycle,
 		ContextScope: contextfrag.Scope{
 			BotID:             p.BotID,
 			ChatID:            chatID,
