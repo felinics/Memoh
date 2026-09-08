@@ -38,6 +38,7 @@ function mount(event = reactive({ id: '2', run_id: 'run', capture_id: 'capture',
   return root
 }
 beforeEach(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn()
   copyText.mockClear()
   status.value = 'success'
   error.value = null
@@ -82,7 +83,7 @@ describe('captured context inspector', () => {
     expect(root.textContent).toContain('Cannot compare')
     expect(root.textContent).not.toContain('Changed')
   })
-  it('copies the full input and lets the reader expand beyond the preview', async () => {
+  it('copies the full input and reads every page beyond the preview', async () => {
     const content = `${'context '.repeat(2000)}FINAL_TAIL`
     current.value.blocks = [{ kind: 'request_body', label: 'request', content, hash: 'full', bytes: content.length, available: true }]
     const root = mount()
@@ -92,7 +93,64 @@ describe('captured context inspector', () => {
     expect(copyText).toHaveBeenCalledWith(content)
     root.querySelector<HTMLButtonElement>('[data-testid="capture-expand"]')!.click()
     await nextTick()
+    const page = root.querySelector<HTMLInputElement>('[data-testid="capture-page"]')!
+    expect(page).not.toBeNull()
+    let restored = ''
+    for (let index = 1; index <= Number(page.max); index++) {
+      page.value = String(index)
+      page.dispatchEvent(new Event('change', { bubbles: true }))
+      await nextTick()
+      const visible = root.querySelector('pre')!.textContent!
+      expect(visible.length).toBeLessThanOrEqual(8192)
+      restored += visible
+    }
+    expect(restored).toBe(content)
     expect(root.textContent).toContain('FINAL_TAIL')
+    root.querySelector<HTMLButtonElement>('[data-testid="capture-copy"]')!.click()
+    await nextTick()
+    expect(copyText).toHaveBeenLastCalledWith(content)
+  })
+
+  it('finds a literal across page boundaries and makes the final page reachable', async () => {
+    const content = `${'a'.repeat(8190)}跨页🙂${'b'.repeat(18000)}FINAL_TAIL`
+    current.value.blocks = [{ kind: 'request_body', label: 'request', content, available: true }]
+    const root = mount()
+    root.querySelector<HTMLButtonElement>('[data-testid="capture-expand"]')!.click()
+    await nextTick()
+    const search = root.querySelector<HTMLInputElement>('[data-testid="capture-search"]')!
+    search.value = '跨页🙂'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+    expect(root.querySelector('mark')?.textContent).toBe('跨页')
+    root.querySelector<HTMLButtonElement>('[data-testid="capture-next-page"]')!.click()
+    await nextTick()
+    expect(root.querySelector('mark')?.textContent).toBe('🙂')
+    search.value = 'FINAL_TAIL'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+    expect(root.querySelector('mark')?.textContent).toBe('FINAL_TAIL')
+    const page = root.querySelector<HTMLInputElement>('[data-testid="capture-page"]')!
+    expect(page.value).toBe(page.max)
+  })
+
+  it('keeps a cross-page search match scrolled into view', async () => {
+    HTMLElement.prototype.scrollIntoView = function () { this.closest('pre')!.scrollTop = 100 }
+    current.value.blocks = [{ kind: 'request_body', label: 'request', content: `${'a'.repeat(12500)}SEARCH_NEEDLE${'b'.repeat(10000)}`, available: true }]
+    const root = mount()
+    root.querySelector<HTMLButtonElement>('[data-testid="capture-expand"]')!.click()
+    await nextTick()
+    const search = root.querySelector<HTMLInputElement>('[data-testid="capture-search"]')!
+    search.value = 'SEARCH_NEEDLE'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await nextTick()
+    await nextTick()
+    expect(root.querySelector('pre')!.scrollTop).toBe(100)
   })
 
   it('shows changed and removed content when comparing the preceding stage', async () => {
