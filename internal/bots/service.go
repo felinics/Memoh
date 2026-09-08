@@ -289,10 +289,14 @@ func (s *Service) nameTaken(ctx context.Context, normalized, excludeBotID string
 }
 
 // resolveName validates and (when empty) derives a bot name from displayName,
-// then ensures it is unique. excludeBotID is ignored during uniqueness checks.
+// then ensures it is unique. A derived name that collides gets a numeric
+// suffix (neko-2, neko-3, ...) instead of failing: the caller never picked a
+// slug, so a slug collision is not theirs to fix. An explicitly requested
+// name still fails with ErrBotNameTaken when taken.
 func (s *Service) resolveName(ctx context.Context, rawName, displayName, excludeBotID string) (string, error) {
 	normalized := normalizeName(rawName)
-	if normalized == "" {
+	derived := normalized == ""
+	if derived {
 		normalized = slugify(displayName)
 	}
 	switch validateNameFormat(normalized) {
@@ -305,10 +309,24 @@ func (s *Service) resolveName(ctx context.Context, rawName, displayName, exclude
 	if err != nil {
 		return "", err
 	}
-	if taken {
+	if !taken {
+		return normalized, nil
+	}
+	if !derived {
 		return "", ErrBotNameTaken
 	}
-	return normalized, nil
+	// slugify clamps to 48 chars, so any suffix keeps the candidate within
+	// the 63-char format limit.
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", normalized, i)
+		taken, err := s.nameTaken(ctx, candidate, excludeBotID)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
 }
 
 // ListByOwner returns bots owned by the given user.

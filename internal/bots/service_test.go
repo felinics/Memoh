@@ -543,3 +543,45 @@ func decodePersistedMetadata(t *testing.T, payload []byte) map[string]any {
 	}
 	return metadata
 }
+
+func TestResolveNameSuffixesDerivedNameCollisions(t *testing.T) {
+	taken := map[string]bool{"neko": true, "neko-2": true}
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+
+	dbtx := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "FROM bots") && strings.Contains(sql, "name = $1") {
+				name, _ := args[0].(string)
+				if taken[name] {
+					return makeBotRow(mustParseUUID("00000000-0000-0000-0000-0000000000aa"), ownerUUID)
+				}
+			}
+			return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		},
+	}
+
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(dbtx)))
+
+	// Derived names walk suffixes until free.
+	got, err := svc.resolveName(context.Background(), "", "Neko", "")
+	if err != nil {
+		t.Fatalf("resolveName derived: %v", err)
+	}
+	if got != "neko-3" {
+		t.Fatalf("expected neko-3, got %q", got)
+	}
+
+	// Free derived names stay unsuffixed.
+	got, err = svc.resolveName(context.Background(), "", "Mimi", "")
+	if err != nil {
+		t.Fatalf("resolveName free derived: %v", err)
+	}
+	if got != "mimi" {
+		t.Fatalf("expected mimi, got %q", got)
+	}
+
+	// Explicitly requested names still fail when taken.
+	if _, err := svc.resolveName(context.Background(), "neko", "", ""); !errors.Is(err, ErrBotNameTaken) {
+		t.Fatalf("expected ErrBotNameTaken, got %v", err)
+	}
+}
