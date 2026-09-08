@@ -1176,6 +1176,7 @@
       "captureLegacy": "较早的运行可能只有片段摘要和请求计时。",
       "captureTimingScope": "计时与用量仅统计已有测量记录的请求。",
       "captureUnknownStage": "上下文阶段",
+      "captureNoLongerAvailable": "此阶段已不存在或不可见。",
       "captureRunLabel": "Run",
       "captureSegment": "采集段",
       "captureSequence": "阶段序号",
@@ -1202,6 +1203,7 @@
       "captureBytes": "{n} 字节",
       "captureExternalBoundary": "这是 Memoh 交给外部运行时的内容，其内部 LLM 请求在此不可见。",
       "captureChange": {
+        "unavailable": "无法比较",
         "added": "新增",
         "removed": "移除",
         "changed": "变动",

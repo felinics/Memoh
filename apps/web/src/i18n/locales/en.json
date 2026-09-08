@@ -1176,6 +1176,7 @@
       "captureLegacy": "Earlier runs may only contain fragment summaries and request timing.",
       "captureTimingScope": "Timing and usage cover requests with recorded measurements.",
       "captureUnknownStage": "Context stage",
+      "captureNoLongerAvailable": "This stage is no longer available.",
       "captureRunLabel": "Run",
       "captureSegment": "Capture",
       "captureSequence": "Sequence",
@@ -1202,6 +1203,7 @@
       "captureBytes": "{n} bytes",
       "captureExternalBoundary": "This is what Memoh handed to the external runtime. Its internal LLM requests are not visible here.",
       "captureChange": {
+        "unavailable": "Cannot compare",
         "added": "Added",
         "removed": "Removed",
         "changed": "Changed",

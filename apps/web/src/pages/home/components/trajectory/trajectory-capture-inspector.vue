@@ -17,16 +17,18 @@ const comparing = shallowRef(false)
 const current = useContextTrajectoryEvent(computed(() => props.event.id))
 const previous = useContextTrajectoryEvent(computed(() => comparing.value ? props.previousEventId : null))
 const forbidden = shallowRef(false)
+const unavailable = shallowRef(false)
 watch([current.error, previous.error], (errors) => {
   if (errors.some(error => isApiErrorCode(error, 'context_lifecycle.access_denied'))) forbidden.value = true
+  if (errors.some(error => isApiErrorCode(error, 'context_lifecycle.not_found') || isApiErrorCode(error, 'context_lifecycle.authentication_required'))) unavailable.value = true
 }, { immediate: true })
 const comparisonReady = computed(() => comparing.value && previous.status.value === 'success' && !!previous.data.value)
 const title = computed(() => captureStageLabel(props.event.stage, t, te))
-watch(() => props.event.id, () => { comparing.value = false }, { flush: 'sync' })
+watch(() => props.event.id, () => { comparing.value = false; forbidden.value = false; unavailable.value = false }, { flush: 'sync' })
 
 async function refreshCurrent() {
   await current.refresh()
-  if (current.status.value === 'success') forbidden.value = false
+  if (current.status.value === 'success') { forbidden.value = false; unavailable.value = false }
 }
 
 function keyed(blocks: readonly HandlersContextTrajectoryBlock[]) {
@@ -44,7 +46,7 @@ const blockRows = computed<ContextBlockComparison[]>(() => {
   const rows: ContextBlockComparison[] = keyed(current.data.value?.blocks ?? []).map(({ key, block }) => {
     const prior = before.get(key)
     before.delete(key)
-    return { key, before: prior, after: block, change: !prior ? 'added' : prior.available && block.available && prior.hash && prior.hash === block.hash ? 'unchanged' : 'changed' }
+    return { key, before: prior, after: block, change: !prior ? 'added' : !prior.available || !block.available ? 'unavailable' : prior.hash && prior.hash === block.hash ? 'unchanged' : 'changed' }
   })
   for (const [key, block] of before) rows.push({ key, before: block, change: 'removed' })
   return rows
@@ -140,6 +142,22 @@ const blockRows = computed<ContextBlockComparison[]>(() => {
     >
       <p class="text-caption text-muted-foreground">
         {{ $t('chat.trajectory.inspectorTextsForbidden') }}
+      </p>
+      <Button
+        variant="ghost"
+        size="sm"
+        @click="refreshCurrent"
+      >
+        {{ $t('common.retry') }}
+      </Button>
+    </div>
+    <div
+      v-else-if="unavailable"
+      class="space-y-1"
+      role="status"
+    >
+      <p class="text-caption text-muted-foreground">
+        {{ $t('chat.trajectory.captureNoLongerAvailable') }}
       </p>
       <Button
         variant="ghost"

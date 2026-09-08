@@ -6,7 +6,7 @@ export interface ContextBlockComparison {
   key: string
   before?: HandlersContextTrajectoryBlock
   after?: HandlersContextTrajectoryBlock
-  change: 'added' | 'removed' | 'changed' | 'unchanged'
+  change: 'added' | 'removed' | 'changed' | 'unchanged' | 'unavailable'
 }
 
 export interface ContextCapturePage {

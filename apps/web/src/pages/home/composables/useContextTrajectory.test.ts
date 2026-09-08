@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, defineComponent, h, nextTick, shallowRef } from 'vue'
+import { computed, createApp, defineComponent, h, KeepAlive, nextTick, shallowRef } from 'vue'
 import { createPinia } from 'pinia'
 import { PiniaColada } from '@pinia/colada'
 import { useContextTrajectory } from './useContextTrajectory'
+import { useContextTrajectoryEvent } from './useContextTrajectoryEvent'
 
-const { fetchPage } = vi.hoisted(() => ({ fetchPage: vi.fn() }))
+const { fetchPage, fetchEvent } = vi.hoisted(() => ({ fetchPage: vi.fn(), fetchEvent: vi.fn() }))
 const target = shallowRef({ botId: 'bot', sessionId: 'a', viewId: 'view' })
 const active = shallowRef(true)
-vi.mock('@memohai/sdk', () => ({ getBotsByBotIdSessionsBySessionIdContextTrajectory: fetchPage }))
+vi.mock('@memohai/sdk', () => ({ getBotsByBotIdSessionsBySessionIdContextTrajectory: fetchPage, getBotsByBotIdSessionsBySessionIdContextTrajectoryByEventId: fetchEvent }))
 vi.mock('./useChatViewContext', () => ({ useChatViewTarget: () => target }))
 
 let unmount: (() => void) | undefined
@@ -38,10 +39,29 @@ beforeEach(() => {
   target.value = { botId: 'bot', sessionId: 'a', viewId: 'view' }
   active.value = true
   fetchPage.mockReset()
+  fetchEvent.mockReset()
 })
 afterEach(() => { unmount?.(); vi.useRealTimers() })
 
 describe('context trajectory pages', () => {
+  it('does not fetch detail for a hidden KeepAlive pane when its target changes', async () => {
+    fetchEvent.mockResolvedValue({ data: { event: { id: '2' }, blocks: [], complete: true } })
+    const visible = shallowRef(true)
+    const reader = { setup: () => { useContextTrajectoryEvent(computed(() => '2')); return () => h('div') } }
+    const app = createApp({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(reader) : h('div') }) })
+    app.use(createPinia())
+    app.use(PiniaColada)
+    const container = document.createElement('div')
+    app.mount(container)
+    unmount = () => app.unmount()
+    await flushPromises()
+    expect(fetchEvent).toHaveBeenCalledOnce()
+    visible.value = false
+    await flushPromises()
+    target.value = { ...target.value, sessionId: 'b' }
+    await flushPromises()
+    expect(fetchEvent).toHaveBeenCalledOnce()
+  })
   it('keeps an older-page failure visible and retries that cursor', async () => {
     let failed = true
     fetchPage.mockImplementation(({ query }) => query.before

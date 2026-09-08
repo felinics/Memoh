@@ -2,13 +2,15 @@ import { computed, type Ref } from 'vue'
 import { useQuery } from '@pinia/colada'
 import { getBotsByBotIdSessionsBySessionIdContextTrajectoryByEventId } from '@memohai/sdk'
 import { useChatViewTarget } from './useChatViewContext'
+import { useActiveGate } from './useActiveGate'
 
 export function useContextTrajectoryEvent(eventId: Ref<string | null | undefined>) {
   const target = useChatViewTarget()
+  const active = useActiveGate()
   const scope = computed(() => `${target.value.botId}/${target.value.sessionId}/${eventId.value ?? ''}`)
   const query = useQuery({
     key: () => ['context-trajectory-event', target.value.botId ?? '', target.value.sessionId ?? '', eventId.value ?? ''],
-    enabled: () => !!target.value.botId && !!target.value.sessionId && !!eventId.value,
+    enabled: () => active.value && !!target.value.botId && !!target.value.sessionId && !!eventId.value,
     query: async ({ signal }) => {
       const requestedScope = scope.value
       const { data } = await getBotsByBotIdSessionsBySessionIdContextTrajectoryByEventId({

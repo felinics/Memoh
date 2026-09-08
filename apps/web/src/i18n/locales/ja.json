@@ -1154,6 +1154,7 @@
       "captureLegacy": "以前の実行には断片の概要とリクエスト時間のみが残っている場合があります。",
       "captureTimingScope": "時間と使用量は測定記録があるリクエストのみを対象とします。",
       "captureUnknownStage": "コンテキストの段階",
+      "captureNoLongerAvailable": "この段階は存在しないか、閲覧できません。",
       "captureRunLabel": "Run",
       "captureSegment": "記録区間",
       "captureSequence": "記録順序",
@@ -1180,6 +1181,7 @@
       "captureBytes": "{n} バイト",
       "captureExternalBoundary": "Memoh が外部ランタイムへ渡した内容です。内部の LLM リクエストはここでは確認できません。",
       "captureChange": {
+        "unavailable": "比較できません",
         "added": "追加",
         "removed": "削除",
         "changed": "変更",

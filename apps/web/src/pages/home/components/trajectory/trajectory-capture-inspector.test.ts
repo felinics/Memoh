@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable vue/one-component-per-file */
-import { computed, createApp, defineComponent, h, nextTick, shallowRef } from 'vue'
+import { computed, createApp, defineComponent, h, nextTick, reactive, shallowRef } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HandlersContextTrajectoryEventResponse } from '@memohai/sdk'
@@ -26,11 +26,11 @@ vi.mock('../../composables/useContextTrajectoryEvent', () => ({
 }))
 
 const mounted: { app: ReturnType<typeof createApp>, root: HTMLElement }[] = []
-function mount() {
+function mount(event = reactive({ id: '2', run_id: 'run', capture_id: 'capture', sequence: 2, stage: 'wire_request' })) {
   const root = document.createElement('div')
   document.body.append(root)
   const app = createApp(defineComponent({ setup: () => () => h(TrajectoryCaptureInspector, {
-    event: { id: '2', run_id: 'run', capture_id: 'capture', sequence: 2, stage: 'wire_request' }, previousEventId: '1',
+    event, previousEventId: '1',
   }) }))
   app.use(createI18n({ legacy: false, locale: 'en', messages: { en } }))
   app.mount(root)
@@ -49,6 +49,39 @@ afterEach(() => {
 })
 
 describe('captured context inspector', () => {
+  it('hides cached content when the session becomes unavailable', () => {
+    current.value.blocks = [{ kind: 'system', content: 'PRIVATE_BODY', available: true }]
+    status.value = 'error'
+    error.value = { code: 'context_lifecycle.not_found', status: 404 }
+    const root = mount()
+    expect(root.textContent).not.toContain('PRIVATE_BODY')
+    expect(root.querySelector('[data-testid="capture-copy"]')).toBeNull()
+  })
+
+  it('recovers from a denied event when a new event loads successfully', async () => {
+    const event = reactive({ id: '2', run_id: 'run', capture_id: 'capture', sequence: 2, stage: 'wire_request' })
+    status.value = 'error'
+    error.value = { code: 'context_lifecycle.access_denied', status: 403 }
+    const root = mount(event)
+    expect(root.querySelector('[data-testid="capture-forbidden"]')).not.toBeNull()
+    status.value = 'success'
+    error.value = null
+    current.value = { event: { id: '3' }, complete: true, blocks: [{ kind: 'system', content: 'NEW_AUTHORIZED_BODY', available: true }] }
+    event.id = '3'
+    await nextTick()
+    expect(root.querySelector('[data-testid="capture-forbidden"]')).toBeNull()
+    expect(root.textContent).toContain('NEW_AUTHORIZED_BODY')
+  })
+
+  it('does not claim a content change when either side is unavailable', async () => {
+    previous.value.blocks = [{ kind: 'system', label: 'system', hash: 'same', available: false }]
+    current.value.blocks = [{ kind: 'system', label: 'system', hash: 'same', available: false }]
+    const root = mount()
+    root.querySelector<HTMLButtonElement>('[data-testid="capture-compare"]')!.click()
+    await nextTick()
+    expect(root.textContent).toContain('Cannot compare')
+    expect(root.textContent).not.toContain('Changed')
+  })
   it('copies the full input and lets the reader expand beyond the preview', async () => {
     const content = `${'context '.repeat(2000)}FINAL_TAIL`
     current.value.blocks = [{ kind: 'request_body', label: 'request', content, hash: 'full', bytes: content.length, available: true }]
