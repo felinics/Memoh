@@ -73,8 +73,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
   let lastScrollTop = 0
   // THE mode switch: while true, content growth pulls the viewport to the
   // bottom; while false the view is parked (user scrolled up, or a just-sent
-  // turn is pinned). Flipped only by explicit actions — see "Follow on / off"
-  // in the header.
+  // turn is pinned). Flipped only by explicit actions: a physical downward
+  // scroll reaching the bottom or the jump button arms it; an upward scroll,
+  // a jump-to-message, a prepend, or a send parks it.
   let followEnabled = true
   // One-shot pin: armed by pinAfterSend, applied by the content heartbeat on
   // the first DOM/geometry change where the target prompt is actually present.
@@ -120,6 +121,15 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // Retire only the previous send's unused reply room. Compensate the portion
   // above the viewport so the handover does not move the reader before placing
   // the new turn. Ordinary history reflow remains browser-anchor owned.
+  //
+  // Two alternatives were tried and rejected (both moved content the user was
+  // looking at):
+  //   • Always subtract the full delta — anchors content BELOW the blank, so
+  //     anyone parked on previous-turn content or history above it gets yanked
+  //     before the entrance starts.
+  //   • Defer the clear until the scroll settles — the flight then runs
+  //     through the empty band, and the previous turn looks unmounted until
+  //     the settle removes the spacing and it reappears.
   function collapseReserveKeepingView(el: HTMLElement, turnId: string) {
     const container = turnContainerOf(turnId)
     // Drop the reserve from render state FIRST; if its container is gone the
@@ -759,8 +769,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
       // (re-)arms follow. Parked at the pin the viewport already IS the
       // bottom, and follow-to-bottom there is a no-op until content outgrows
       // the reserve — so arming is harmless by construction. Deliberately NO
-      // optimistic "relock shortly after a downward pause" timer — see the
-      // header's "Follow on / off" section.
+      // "relock shortly after a downward pause" timer: it would re-arm follow
+      // on any small downward nudge while a turn is parked, and the next
+      // streamed token would yank the parked view to the bottom.
       followEnabled = true
     }
   }
@@ -875,8 +886,11 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // Prepend of older history is a deliberate move away from the bottom, so it
   // escapes: the browser's native `overflow-anchor` keeps the visible content
   // stationary across the insert — continuously, including through the async
-  // layout settles that follow it. No manual scrollTop compensation (see the
-  // header's Prepend section for the failed attempt).
+  // layout settles that follow it. No manual scrollTop compensation: a one-shot
+  // adjustment cannot track the async reflow (Shiki, KaTeX, images, fonts) that
+  // keeps resizing rows after the DOM lands — it was tried, and each prepend
+  // batch twitched while the pin drifted off its offset. Never set
+  // `overflow-anchor: none` on the viewport either.
   function suppressAutoScrollForPrepend() {
     markEscaped()
   }
