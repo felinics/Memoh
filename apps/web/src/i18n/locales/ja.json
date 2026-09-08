@@ -1140,6 +1140,7 @@
       "kindSystem": "SYSTEM",
       "kindUser": "USER",
       "kindContext": "CONTEXT",
+      "kindRequest": "REQUEST",
       "kindAssistant": "ASSISTANT",
       "kindReasoning": "REASONING",
       "kindTool": "TOOL",

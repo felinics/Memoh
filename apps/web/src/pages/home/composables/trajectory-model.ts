@@ -7,6 +7,7 @@ import type {
   ContextfragSelectionTrace,
   ContextfragStepSnapshot,
   HandlersContextLifecycleTurn,
+  HandlersContextTrajectoryEntry,
 } from '@memohai/sdk'
 import type { UIStepTrace } from '@/composables/api/useChat.types'
 import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ContentBlock, ToolCallBlock } from '@/store/chat/types'
@@ -14,7 +15,7 @@ import type { ChatAssistantTurn, ChatMessage, ChatUserTurn, ContentBlock, ToolCa
 export const PREVIEW_SOURCE_CHARACTERS = 2048
 export const PREVIEW_OUTPUT_CHARACTERS = 512
 
-export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'notice' | 'compaction'
+export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'request' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'notice' | 'compaction'
 
 // What the turn's context was assembled from, read off the persisted
 // lifecycle manifest: counts and token estimates per fragment kind, never
@@ -57,6 +58,7 @@ export interface ContextEntries {
 }
 
 export type TrajectoryDetail =
+  | { kind: 'capture', event: HandlersContextTrajectoryEntry, previousEventId: string | null | undefined }
   | { kind: 'user', turn: ChatUserTurn }
   // previous is the run before this one in the session: null for the first
   // run, undefined when the older run is not loaded.
@@ -567,7 +569,7 @@ export function buildRowMap(rows: TrajectoryRow[]): RowMapSegment[] {
     segments.push({
       key: `map:${row.key}`,
       rowKey: row.key,
-      lane: row.kind === 'tool' ? 'tools' : 'input',
+      lane: row.kind === 'request' ? 'model' : row.kind === 'tool' ? 'tools' : 'input',
       kind: row.kind,
       turnId: row.turnId,
       turnStart: row.turnStart,
