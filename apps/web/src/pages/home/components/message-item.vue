@@ -109,7 +109,7 @@
         <div
           v-else-if="isSkillActivationMessage || userBubbleText || message.forward || message.reply"
           :lang="contentLang(userBubbleText || skillActivationNames || skillActivationTitle)"
-          class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg whitespace-pre-wrap break-words"
+          class="chat-user-bubble w-fit max-w-full bg-chat-user-bubble px-4 py-3 text-chat-user-bubble-fg break-words"
           :class="userBubbleRadiusClass"
         >
           <div
@@ -182,7 +182,24 @@
             v-if="userBubbleText"
             :class="isSkillActivationMessage ? 'mt-2' : ''"
             :text="userBubbleText"
-          />
+          >
+            <MarkdownRender
+              :content="userBubbleText"
+              :is-dark="isDark"
+              mode="chat"
+              :final="true"
+              :smooth-streaming="false"
+              :typewriter="false"
+              :fade="false"
+              :batch-rendering="false"
+              :show-tooltips="false"
+              :mermaid-props="{ showTooltips: false }"
+              :code-block-dark-theme="codeBlockTheme.dark"
+              :code-block-light-theme="codeBlockTheme.light"
+              custom-id="chat-msg"
+              class="max-w-full whitespace-normal text-chat-user-bubble-fg! [&_.blockquote]:text-inherit! [&_.link-node]:text-inherit! [&_.link-node]:decoration-current! [&_p]:my-0! [&_p+p]:mt-2! [&>div:first-child>*:first-child]:mt-0! [&>div:last-child>*:last-child]:mb-0!"
+            />
+          </CollapsibleUserText>
         </div>
         <MessageActions
           v-if="!isEditingUserMessage"
