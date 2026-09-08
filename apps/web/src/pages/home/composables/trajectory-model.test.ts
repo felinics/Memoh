@@ -95,6 +95,30 @@ const lifecycleTurn: HandlersContextLifecycleTurn = {
 }
 
 describe('continued legacy runs', () => {
+  it.each([false, true])('uses one timing source for a mixed turn, reversed=%s', (reversed) => {
+    const traced = assistantTurn()
+    traced.stepTraces = [traced.stepTraces![0]!]
+    const untraced = { ...assistantTurn(), id: 'continued-output', stepTraces: [], messages: [] }
+    const messages = reversed ? [untraced, traced] : [traced, untraced]
+    const stats = foldTrajectoryStats(messages, lifecycleByTurnId([lifecycleTurn, { ...lifecycleTurn, run_id: 'other-run' }]))
+    expect(stats.turns).toBe(1)
+    expect(stats.steps).toBe(1)
+    expect(stats.llmMs).toBe(500)
+    expect(stats.inputTokens).toBe(100)
+    expect(stats.ttftAvgMs).toBe(200)
+  })
+
+  it('samples TTFT once per turn when a continued run restarts step zero', () => {
+    const first = assistantTurn()
+    first.stepTraces = [first.stepTraces![0]!]
+    const second = assistantTurn()
+    second.id = 'continued-output'
+    second.stepTraces = [{ ...second.stepTraces![1]!, step_index: 0 }]
+    const stats = foldTrajectoryStats([second, first], new Map())
+    expect(stats.steps).toBe(2)
+    expect(stats.ttftAvgMs).toBe(200)
+  })
+
   it('refreshes step context when the same run publishes a new snapshot', () => {
     const build = createTrajectoryRowBuilder()
     const assistant = assistantTurn()

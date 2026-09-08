@@ -609,14 +609,24 @@ export function foldTrajectoryStats(
   let ttftCount = 0
   const countedRuns = new Set<string>()
   const countedTurns = new Set<string>()
+  const tracedTurns = new Map<string, UIStepTrace | null>()
+  for (const turn of messages) {
+    if (turn.role !== 'assistant' || !turn.stepTraces?.length) continue
+    const key = turn.turnId || turn.id
+    let first = tracedTurns.get(key) ?? null
+    for (const trace of turn.stepTraces) {
+      if (trace.first_token_at_ms && trace.first_token_at_ms >= trace.started_at_ms
+        && (!first || trace.started_at_ms < first.started_at_ms)) first = trace
+    }
+    tracedTurns.set(key, first)
+  }
   for (const turn of messages) {
     if (turn.role !== 'assistant') continue
     const turnKey = turn.turnId || turn.id
     if (!countedTurns.has(turnKey)) stats.turns += 1
     countedTurns.add(turnKey)
     const traces = turn.stepTraces ?? []
-    if (traces.length > 0) {
-      let firstSampled: UIStepTrace | null = null
+    if (tracedTurns.has(turnKey)) {
       for (const trace of traces) {
         stats.steps += 1
         stats.llmMs += Math.max(trace.ended_at_ms - trace.started_at_ms, 0)
@@ -625,17 +635,12 @@ export function foldTrajectoryStats(
         stats.cachedInputTokens += usage?.cached_input_tokens ?? 0
         stats.outputTokens += usage?.output_tokens ?? 0
         if (trace.first_token_at_ms && trace.first_token_at_ms >= trace.started_at_ms) {
-          if (!firstSampled || trace.step_index < firstSampled.step_index) firstSampled = trace
           const decode = trace.ended_at_ms - trace.first_token_at_ms
           if (decode > 0 && (usage?.output_tokens ?? 0) > 0) {
             stats.decodeMs += decode
             stats.decodeTokens += usage!.output_tokens!
           }
         }
-      }
-      if (firstSampled) {
-        ttftSum += firstSampled.first_token_at_ms! - firstSampled.started_at_ms
-        ttftCount += 1
       }
       for (const block of turn.messages) {
         if (block.type !== 'tool') continue
@@ -666,7 +671,11 @@ export function foldTrajectoryStats(
       }
     }
   }
-  // Only the turn's first request carried a TTFT above; one reading per turn.
+  for (const first of tracedTurns.values()) {
+    if (!first) continue
+    ttftSum += first.first_token_at_ms! - first.started_at_ms
+    ttftCount += 1
+  }
   stats.ttftAvgMs = ttftCount > 0 ? Math.round(ttftSum / ttftCount) : null
   return stats
 }
