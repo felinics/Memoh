@@ -6,6 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/team"
@@ -118,6 +121,54 @@ SELECT session.id, bot.id, $1 FROM bot, (VALUES ($3::uuid), ($4::uuid)) AS sessi
 	var count int
 	if err := conn.QueryRow(ctx, "SELECT count(*) FROM context_trajectory_contents WHERE content_hash = 'rollback'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("content escaped failed event transaction: %d, %v", count, err)
+	}
+	firstTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = firstTx.Rollback(ctx) }()
+	secondTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = secondTx.Rollback(ctx) }()
+	for _, tx := range []pgx.Tx{firstTx, secondTx} {
+		if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", team.DefaultTeamID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	input.Sequence = 4
+	input.Event = []byte(`{"stage":"concurrent","blocks":[]}`)
+	input.ContentHashes, input.Contents = nil, nil
+	if _, err := sqlc.New(firstTx).AppendContextTrajectoryEvent(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	replayed := make(chan error, 1)
+	go func() {
+		_, err := sqlc.New(secondTx).AppendContextTrajectoryEvent(ctx, input)
+		replayed <- err
+	}()
+	waiting := false
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		if err := conn.QueryRow(ctx, "SELECT coalesce(wait_event_type = 'Lock', false) FROM pg_stat_activity WHERE pid = $1", secondTx.Conn().PgConn().PID()).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !waiting {
+		t.Fatal("duplicate capture never waited on the original transaction")
+	}
+	if err := firstTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-replayed; err != nil {
+		t.Fatalf("concurrent replay of committed capture: %v", err)
+	}
+	if err := secondTx.Commit(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := conn.Exec(ctx, "DELETE FROM bots WHERE id = $1", pgBot); err != nil {
 		t.Fatal(err)

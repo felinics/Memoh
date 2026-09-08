@@ -4,28 +4,21 @@ WITH owner AS (
     WHERE s.team_id = public.memoh_current_team_id()
       AND s.bot_id = sqlc.arg(bot_id) AND s.id = sqlc.arg(session_id)
 ), inserted AS (
-    INSERT INTO context_trajectory_events (bot_id, session_id, run_id, capture_id, sequence, event)
+    INSERT INTO context_trajectory_events AS stored (bot_id, session_id, run_id, capture_id, sequence, event)
     SELECT sqlc.arg(bot_id), owner.id, sqlc.arg(run_id), sqlc.arg(capture_id), sqlc.arg(sequence), sqlc.arg(event)::jsonb
     FROM owner
-    ON CONFLICT (team_id, run_id, capture_id, sequence) DO NOTHING
+    ON CONFLICT (team_id, run_id, capture_id, sequence) DO UPDATE
+    SET event = stored.event
+    WHERE stored.bot_id = EXCLUDED.bot_id AND stored.session_id = EXCLUDED.session_id
+      AND stored.event = EXCLUDED.event
     RETURNING sequence
-), accepted AS (
-    SELECT sequence FROM inserted
-    UNION ALL
-    SELECT e.sequence FROM context_trajectory_events AS e
-    WHERE e.team_id = public.memoh_current_team_id()
-      AND e.bot_id = sqlc.arg(bot_id) AND e.session_id = sqlc.arg(session_id)
-      AND e.run_id = sqlc.arg(run_id) AND e.sequence = sqlc.arg(sequence)
-      AND e.capture_id = sqlc.arg(capture_id)
-      AND e.event = sqlc.arg(event)::jsonb
-      AND NOT EXISTS (SELECT 1 FROM inserted)
 ), contents AS (
     INSERT INTO context_trajectory_contents (bot_id, content_hash, content)
     SELECT sqlc.arg(bot_id)::uuid, unnest(sqlc.arg(content_hashes)::text[]), unnest(sqlc.arg(contents)::bytea[])
-    FROM accepted
+    FROM inserted
     ON CONFLICT (team_id, bot_id, content_hash) DO NOTHING
 )
-SELECT sequence FROM accepted LIMIT 1;
+SELECT sequence FROM inserted;
 
 -- name: ListContextTrajectoryEvents :many
 SELECT id, run_id, sequence, created_at,

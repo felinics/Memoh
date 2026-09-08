@@ -17,28 +17,21 @@ WITH owner AS (
     WHERE s.team_id = public.memoh_current_team_id()
       AND s.bot_id = $1 AND s.id = $2
 ), inserted AS (
-    INSERT INTO context_trajectory_events (bot_id, session_id, run_id, capture_id, sequence, event)
+    INSERT INTO context_trajectory_events AS stored (bot_id, session_id, run_id, capture_id, sequence, event)
     SELECT $1, owner.id, $3, $4, $5, $6::jsonb
     FROM owner
-    ON CONFLICT (team_id, run_id, capture_id, sequence) DO NOTHING
+    ON CONFLICT (team_id, run_id, capture_id, sequence) DO UPDATE
+    SET event = stored.event
+    WHERE stored.bot_id = EXCLUDED.bot_id AND stored.session_id = EXCLUDED.session_id
+      AND stored.event = EXCLUDED.event
     RETURNING sequence
-), accepted AS (
-    SELECT sequence FROM inserted
-    UNION ALL
-    SELECT e.sequence FROM context_trajectory_events AS e
-    WHERE e.team_id = public.memoh_current_team_id()
-      AND e.bot_id = $1 AND e.session_id = $2
-      AND e.run_id = $3 AND e.sequence = $5
-      AND e.capture_id = $4
-      AND e.event = $6::jsonb
-      AND NOT EXISTS (SELECT 1 FROM inserted)
 ), contents AS (
     INSERT INTO context_trajectory_contents (bot_id, content_hash, content)
     SELECT $1::uuid, unnest($7::text[]), unnest($8::bytea[])
-    FROM accepted
+    FROM inserted
     ON CONFLICT (team_id, bot_id, content_hash) DO NOTHING
 )
-SELECT sequence FROM accepted LIMIT 1
+SELECT sequence FROM inserted
 `
 
 type AppendContextTrajectoryEventParams struct {
