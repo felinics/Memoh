@@ -3563,6 +3563,7 @@
       "title": "最初のBotを作成する",
       "placeholder": "Botの作成は近日開始予定です。",
       "preparingEnvironment": "環境を準備しています...",
+      "randomName": "ランダムに名前をつける",
       "model": {
         "selectPlaceholder": "モデルを選択してください",
         "hint": "Bot が応答に使用するモデルを選択します。推奨項目ですが、設定でいつでも変更できます。",

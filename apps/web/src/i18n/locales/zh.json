@@ -3568,6 +3568,7 @@
       "title": "创建你的第一个 Bot",
       "placeholder": "Bot 创建即将推出。",
       "preparingEnvironment": "正在准备环境...",
+      "randomName": "随机取个名字",
       "model": {
         "selectPlaceholder": "选择模型",
         "hint": "选择 Bot 回复时使用的模型。建议现在选择，之后也可随时在设置中更改。",

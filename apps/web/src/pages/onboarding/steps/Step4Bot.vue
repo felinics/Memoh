@@ -4,7 +4,10 @@ import {
   AvatarImage,
   AvatarFallback,
   Button,
-  Input,
+  InputGroup,
+  InputGroupInput,
+  InputGroupAddon,
+  InputGroupButton,
   Label,
   Separator,
   Spinner,
@@ -13,7 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@felinic/ui'
-import { SquarePen, CircleHelp, Bot } from 'lucide-vue-next'
+import { SquarePen, CircleHelp, Bot, Dices } from 'lucide-vue-next'
 import { ref, reactive, computed, watch } from 'vue'
 import { FieldStack, InlineLoadingRow, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
@@ -24,6 +27,7 @@ import { storeToRefs } from 'pinia'
 import { useOnboarding } from '@/composables/useOnboarding'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
+import { randomCatName } from '@/constants/bot-name-presets'
 import { acpAgentDisplayName, normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
@@ -81,7 +85,9 @@ const selectedAcpProfile = computed<AcpprofilePublicProfile | null>(() => {
 const onboardingProviderId = readOnboardingProviderId()
 
 const form = reactive({
-  display_name: '',
+  // Prefill with a random cat-name preset so naming isn't a blocker; the dice
+  // button re-rolls. Runs once per mount — a user-cleared field stays empty.
+  display_name: randomCatName(),
   avatar_url: '',
   chat_model_id: '',
   memory_provider_id: '',
@@ -89,6 +95,10 @@ const form = reactive({
 
 const avatarDialogOpen = ref(false)
 const avatarFallback = useAvatarInitials(() => form.display_name || '')
+
+function rollRandomName() {
+  form.display_name = randomCatName(form.display_name)
+}
 
 const { data: memoryProviderData } = useQuery({
   key: ['memory-providers'],
@@ -361,11 +371,25 @@ async function handleSubmit() {
                         >*</span>
                       </Label>
                     </template>
-                    <Input
-                      v-model="form.display_name"
-                      type="text"
-                      :placeholder="$t('bots.displayNamePlaceholder')"
-                    />
+                    <InputGroup class="overflow-hidden">
+                      <InputGroupInput
+                        v-model="form.display_name"
+                        type="text"
+                        :placeholder="$t('bots.displayNamePlaceholder')"
+                      />
+                      <InputGroupAddon align="inline-end">
+                        <InputGroupButton
+                          size="icon-xs"
+                          variant="quiet"
+                          type="button"
+                          :aria-label="$t('onboarding.bot.randomName')"
+                          :title="$t('onboarding.bot.randomName')"
+                          @click="rollRandomName"
+                        >
+                          <Dices />
+                        </InputGroupButton>
+                      </InputGroupAddon>
+                    </InputGroup>
                   </FieldStack>
                 </div>
               </div>
