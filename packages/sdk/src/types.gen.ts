@@ -1248,6 +1248,7 @@ export type ContextfragLifecycleSnapshot = {
     stable_prefix_token_estimate?: number;
     steps?: Array<ContextfragStepSnapshot>;
     tool_defs?: Array<ContextfragToolDefAccounting>;
+    trajectory?: TrajectoryStats;
     trust_breakdown?: Array<ContextfragTrustBreakdown>;
     version?: number;
     view?: ContextfragManifestView;
@@ -2022,6 +2023,42 @@ export type HandlersContextLifecycleTurn = {
      * ledger; absent for runs the ledger never recorded.
      */
     turn_id?: string;
+};
+
+export type HandlersContextTrajectoryBlock = {
+    available?: boolean;
+    bytes?: number;
+    content?: string;
+    encoding?: string;
+    format?: string;
+    hash?: string;
+    kind?: string;
+    label?: string;
+};
+
+export type HandlersContextTrajectoryEntry = {
+    block_count?: number;
+    capture_errors?: number;
+    capture_id?: string;
+    id?: string;
+    recorded_at?: string;
+    request?: number;
+    run_id?: string;
+    sequence?: number;
+    stage?: string;
+    step_index?: number;
+};
+
+export type HandlersContextTrajectoryEventResponse = {
+    blocks?: Array<HandlersContextTrajectoryBlock>;
+    complete?: boolean;
+    event?: HandlersContextTrajectoryEntry;
+};
+
+export type HandlersContextTrajectoryResponse = {
+    events?: Array<HandlersContextTrajectoryEntry>;
+    has_more?: boolean;
+    next_cursor?: string;
 };
 
 export type HandlersContextUsage = {
@@ -3739,6 +3776,13 @@ export type SkillsSafeCatalogItem = {
 export type SupermarketUninstallPackageResponse = {
     installation: SkillpackagesInstallation;
     ok: boolean;
+};
+
+export type TrajectoryStats = {
+    capture_id?: string;
+    errors?: number;
+    events?: number;
+    pending?: number;
 };
 
 export type UserinputUiAnswer = {
@@ -10351,6 +10395,119 @@ export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsRes
 };
 
 export type GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleByRunIdFragmentsResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: {
+        /**
+         * Continue before this event ID
+         */
+        before?: string;
+        /**
+         * Page size (default 200, max 200)
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/sessions/{session_id}/context-trajectory';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryError = GetBotsByBotIdSessionsBySessionIdContextTrajectoryErrors[keyof GetBotsByBotIdSessionsBySessionIdContextTrajectoryErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryResponses = {
+    /**
+     * OK
+     */
+    200: HandlersContextTrajectoryResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryResponse = GetBotsByBotIdSessionsBySessionIdContextTrajectoryResponses[keyof GetBotsByBotIdSessionsBySessionIdContextTrajectoryResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Event ID
+         */
+        event_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/context-trajectory/{event_id}';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdError = GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdErrors[keyof GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersContextTrajectoryEventResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdResponse = GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdResponses[keyof GetBotsByBotIdSessionsBySessionIdContextTrajectoryByEventIdResponses];
 
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**
