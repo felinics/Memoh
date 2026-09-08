@@ -3,6 +3,9 @@ WITH owner AS (
     SELECT s.id FROM bot_sessions AS s
     WHERE s.team_id = public.memoh_current_team_id()
       AND s.bot_id = sqlc.arg(bot_id) AND s.id = sqlc.arg(session_id)
+      AND s.runtime_fencing_token = sqlc.arg(runtime_fencing_token)
+      AND s.deleted_at IS NULL
+    FOR NO KEY UPDATE
 ), inserted AS (
     INSERT INTO context_trajectory_events AS stored (bot_id, session_id, run_id, capture_id, sequence, event)
     SELECT sqlc.arg(bot_id), owner.id, sqlc.arg(run_id), sqlc.arg(capture_id), sqlc.arg(sequence), sqlc.arg(event)::jsonb

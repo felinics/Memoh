@@ -83,6 +83,15 @@ SELECT session.id, bot.id, $1 FROM bot, (VALUES ($3::uuid), ($4::uuid)) AS sessi
 					}
 				}
 			}
+			_, err = queries.AppendContextTrajectoryEvent(ctx, sqlc.AppendContextTrajectoryEventParams{
+				BotID: bot, SessionID: session, RunID: mustParseLifecycleUUID(t, uuid.NewString()),
+				CaptureID: mustParseLifecycleUUID(t, uuid.NewString()), Sequence: 1,
+				Event:         []byte(`{"stage":"late_request","blocks":[{"chunks":["late"]}]}`),
+				ContentHashes: []string{"late"}, Contents: [][]byte{[]byte("stale body")},
+			})
+			if err == nil {
+				t.Fatal("request started before history reset restored deleted content")
+			}
 		})
 	}
 }

@@ -16,9 +16,12 @@ WITH owner AS (
     SELECT s.id FROM bot_sessions AS s
     WHERE s.team_id = public.memoh_current_team_id()
       AND s.bot_id = $1 AND s.id = $2
+      AND s.runtime_fencing_token = $3
+      AND s.deleted_at IS NULL
+    FOR NO KEY UPDATE
 ), inserted AS (
     INSERT INTO context_trajectory_events AS stored (bot_id, session_id, run_id, capture_id, sequence, event)
-    SELECT $1, owner.id, $3, $4, $5, $6::jsonb
+    SELECT $1, owner.id, $4, $5, $6, $7::jsonb
     FROM owner
     ON CONFLICT (team_id, run_id, capture_id, sequence) DO UPDATE
     SET event = stored.event
@@ -27,7 +30,7 @@ WITH owner AS (
     RETURNING sequence
 ), contents AS (
     INSERT INTO context_trajectory_contents (bot_id, session_id, content_hash, content)
-    SELECT $1::uuid, $2::uuid, unnest($7::text[]), unnest($8::bytea[])
+    SELECT $1::uuid, $2::uuid, unnest($8::text[]), unnest($9::bytea[])
     FROM inserted
     ON CONFLICT (team_id, bot_id, session_id, content_hash) DO NOTHING
 )
@@ -35,20 +38,22 @@ SELECT sequence FROM inserted
 `
 
 type AppendContextTrajectoryEventParams struct {
-	BotID         pgtype.UUID `json:"bot_id"`
-	SessionID     pgtype.UUID `json:"session_id"`
-	RunID         pgtype.UUID `json:"run_id"`
-	CaptureID     pgtype.UUID `json:"capture_id"`
-	Sequence      int64       `json:"sequence"`
-	Event         []byte      `json:"event"`
-	ContentHashes []string    `json:"content_hashes"`
-	Contents      [][]byte    `json:"contents"`
+	BotID               pgtype.UUID `json:"bot_id"`
+	SessionID           pgtype.UUID `json:"session_id"`
+	RuntimeFencingToken int64       `json:"runtime_fencing_token"`
+	RunID               pgtype.UUID `json:"run_id"`
+	CaptureID           pgtype.UUID `json:"capture_id"`
+	Sequence            int64       `json:"sequence"`
+	Event               []byte      `json:"event"`
+	ContentHashes       []string    `json:"content_hashes"`
+	Contents            [][]byte    `json:"contents"`
 }
 
 func (q *Queries) AppendContextTrajectoryEvent(ctx context.Context, arg AppendContextTrajectoryEventParams) (int64, error) {
 	row := q.db.QueryRow(ctx, appendContextTrajectoryEvent,
 		arg.BotID,
 		arg.SessionID,
+		arg.RuntimeFencingToken,
 		arg.RunID,
 		arg.CaptureID,
 		arg.Sequence,
