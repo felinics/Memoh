@@ -2,9 +2,11 @@ package models
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/context/trajectory"
@@ -36,19 +38,25 @@ func (t *trajectoryHTTPTransport) RoundTrip(req *http.Request) (*http.Response, 
 	if req.GetBody != nil {
 		copyBody, err := req.GetBody()
 		if err != nil {
-			recorder.Record(req.Context(), "capture_error", nil, trajectory.Block{Kind: "capture_error", Content: "request_body_unavailable"})
+			recorder.RecordAsync(req.Context(), "capture_error", nil, trajectory.Block{Kind: "capture_error", Content: "request_body_unavailable"})
 			return t.base.RoundTrip(req)
 		}
 		body = copyBody
-		defer func() { _ = body.Close() }()
 	}
+	var closed sync.Once
+	closeBody := func() { closed.Do(func() { _ = body.Close() }) }
+	if req.GetBody != nil {
+		defer closeBody()
+	}
+	stop := context.AfterFunc(req.Context(), closeBody)
 	data, err := io.ReadAll(body)
+	stop()
 	if err != nil {
-		recorder.Record(req.Context(), "capture_error", nil, trajectory.Block{Kind: "capture_error", Content: "request_body_read_failed"})
+		recorder.RecordAsync(req.Context(), "capture_error", nil, trajectory.Block{Kind: "capture_error", Content: "request_body_read_failed"})
 		if req.GetBody != nil {
 			return t.base.RoundTrip(req)
 		}
-		_ = body.Close()
+		closeBody()
 		return nil, err
 	}
 	if req.GetBody == nil {
@@ -56,10 +64,10 @@ func (t *trajectoryHTTPTransport) RoundTrip(req *http.Request) (*http.Response, 
 		copied.Body = struct {
 			io.Reader
 			io.Closer
-		}{bytes.NewReader(data), body}
+		}{bytes.NewReader(data), trajectoryBodyCloser(closeBody)}
 		req = copied
 	}
-	sequence := recorder.Record(req.Context(), "wire_request", nil,
+	sequence := recorder.RecordAsync(req.Context(), "wire_request", nil,
 		trajectory.JSONBlock("endpoint", "endpoint", map[string]string{
 			"method": req.Method, "url": req.URL.Scheme + "://" + req.URL.Host + req.URL.EscapedPath(),
 		}),
@@ -74,7 +82,7 @@ func (t *trajectoryHTTPTransport) RoundTrip(req *http.Request) (*http.Response, 
 	if err != nil {
 		outcome["outcome"] = "transport_error"
 	}
-	recorder.Record(req.Context(), "wire_result", nil, trajectory.JSONBlock("transport", "response_headers_received", outcome))
+	recorder.RecordAsync(req.Context(), "wire_result", nil, trajectory.JSONBlock("transport", "response_headers_received", outcome))
 	return response, err
 }
 
@@ -83,3 +91,7 @@ func generationRequestPath(path string) bool {
 		strings.HasSuffix(path, "/messages") || strings.HasSuffix(path, ":generateContent") ||
 		strings.HasSuffix(path, ":streamGenerateContent")
 }
+
+type trajectoryBodyCloser func()
+
+func (closeBody trajectoryBodyCloser) Close() error { closeBody(); return nil }

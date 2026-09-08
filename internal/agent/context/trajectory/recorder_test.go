@@ -143,3 +143,40 @@ func TestRecorderMakesEncodingAndSinkFailuresObservable(t *testing.T) {
 		t.Fatal("sink panic was not reported as a capture error")
 	}
 }
+
+func TestAsyncCaptureFreezesInputAndFlushesInSequence(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	sink := &memorySink{}
+	recorder := NewRecorder(callbackSink(func(ctx context.Context, event Event, contents []Content) error {
+		if event.Sequence == 1 {
+			close(entered)
+			<-release
+		}
+		return sink.Append(ctx, event, contents)
+	}))
+	recorder.Bind("run", "session")
+	input := map[string]string{"text": "original"}
+	recorder.RecordAsync(t.Context(), "wire_request", nil, JSONBlock("body", "request", input))
+	<-entered
+	input["text"] = "changed"
+	recorder.RecordAsync(t.Context(), "wire_result", nil)
+	if stats := recorder.Stats(); stats.Pending != 2 || stats.Events != 2 {
+		t.Fatalf("pending capture status = %#v", stats)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if recorder.Flush(ctx) == nil {
+		t.Fatal("unfinished capture was reported flushed")
+	}
+	close(release)
+	if err := recorder.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.events) != 2 || sink.events[0].Sequence != 1 || sink.events[1].Sequence != 2 {
+		t.Fatal("asynchronous capture lost request order")
+	}
+	hash := sink.events[0].Blocks[0].Chunks[0]
+	if sink.contents[hash] != `{"text":"original"}` || recorder.Stats().Pending != 0 {
+		t.Fatal("capture did not retain the frozen input through flush")
+	}
+}

@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"fmt"
+	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -14,6 +15,12 @@ func (cfg RunConfig) TrajectoryContext(ctx context.Context) context.Context {
 	recorder := cfg.ContextLifecycle.TrajectoryRecorder()
 	recorder.Bind(cfg.RunID, cfg.Identity.SessionID)
 	return trajectory.WithRecorder(ctx, recorder)
+}
+
+func (cfg RunConfig) flushTrajectory(ctx context.Context) {
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	_ = cfg.ContextLifecycle.TrajectoryRecorder().Flush(flushCtx)
 }
 
 func (cfg RunConfig) RecordTrajectory(ctx context.Context, stage string, stepIndex *int, params *sdk.GenerateParams, extra ...trajectory.Block) int64 {

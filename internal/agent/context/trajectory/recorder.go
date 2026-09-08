@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -22,6 +21,9 @@ type Recorder struct {
 	runID     string
 	sessionID string
 	stats     Stats
+	jobs      []*captureJob
+	working   bool
+	last      <-chan struct{}
 }
 
 func NewRecorder(sink Sink) *Recorder {
@@ -39,21 +41,17 @@ func (r *Recorder) Bind(runID, sessionID string) {
 	}
 }
 
-func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blocks ...Block) int64 {
-	if r == nil || r.sink == nil {
-		return 0
-	}
-	r.recordMu.Lock()
-	defer r.recordMu.Unlock()
+func (r *Recorder) prepareCapture(ctx context.Context, stage string, stepIndex *int, blocks []Block) *captureJob {
 	r.mu.Lock()
 	if r.runID == "" || r.sessionID == "" {
 		r.mu.Unlock()
-		return 0
+		return nil
 	}
 	r.stats.Events++
+	var encodingErrors int64
 	for _, block := range blocks {
 		if block.Kind == "capture_error" {
-			r.stats.Errors++
+			encodingErrors++
 		}
 	}
 	event := Event{
@@ -82,15 +80,7 @@ func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blo
 		}
 		event.Blocks = append(event.Blocks, ref)
 	}
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := appendCapture(writeCtx, r.sink, event, contents); err != nil {
-		r.mu.Lock()
-		r.stats.Errors++
-		r.mu.Unlock()
-		slog.Warn("context trajectory capture failed", "run_id", event.RunID, "stage", stage, "sequence", event.Sequence, "error", err)
-	}
-	return event.Sequence
+	return &captureJob{ctx: context.WithoutCancel(ctx), event: event, contents: contents, encodingErrors: encodingErrors, done: make(chan struct{})}
 }
 
 func appendCapture(ctx context.Context, sink Sink, event Event, contents []Content) (err error) {

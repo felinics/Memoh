@@ -331,6 +331,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
 	ctx = cfg.TrajectoryContext(ctx)
+	defer cfg.flushTrajectory(ctx)
 	cfg.RecordTrajectory(ctx, "runtime_input", nil, nil)
 	streamCtx, cancel := context.WithCancelCause(ctx)
 	eventGate := newStreamEmitterGate(streamCtx, ch)
@@ -1005,6 +1006,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
 	ctx = cfg.TrajectoryContext(ctx)
+	defer cfg.flushTrajectory(ctx)
 	cfg.RecordTrajectory(ctx, "runtime_input", nil, nil)
 	genCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)

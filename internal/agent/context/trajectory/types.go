@@ -43,6 +43,7 @@ type Stats struct {
 	CaptureID string `json:"capture_id"`
 	Events    int64  `json:"events"`
 	Errors    int64  `json:"errors"`
+	Pending   int64  `json:"pending,omitempty"`
 }
 
 type Sink interface {
