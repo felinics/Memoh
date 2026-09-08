@@ -12,6 +12,7 @@ import (
 const contentChunkBytes = 64 << 10
 
 type Recorder struct {
+	recordMu  sync.Mutex
 	mu        sync.Mutex
 	sink      Sink
 	runID     string
@@ -38,9 +39,11 @@ func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blo
 	if r == nil || r.sink == nil {
 		return 0
 	}
+	r.recordMu.Lock()
+	defer r.recordMu.Unlock()
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.runID == "" || r.sessionID == "" {
+		r.mu.Unlock()
 		return 0
 	}
 	r.stats.Events++
@@ -49,6 +52,7 @@ func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blo
 		Stage: stage, RecordedAt: time.Now().UTC(), CaptureErrors: r.stats.Errors,
 		Blocks: make([]BlockRef, 0, len(blocks)), Request: requestFromContext(ctx),
 	}
+	r.mu.Unlock()
 	if stepIndex != nil {
 		index := *stepIndex
 		event.StepIndex = &index
@@ -71,8 +75,10 @@ func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blo
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := r.sink.Append(writeCtx, event, contents); err != nil {
+		r.mu.Lock()
 		r.stats.Errors++
-		slog.Warn("context trajectory capture failed", "run_id", r.runID, "stage", stage, "sequence", event.Sequence, "error", err)
+		r.mu.Unlock()
+		slog.Warn("context trajectory capture failed", "run_id", event.RunID, "stage", stage, "sequence", event.Sequence, "error", err)
 	}
 	return event.Sequence
 }

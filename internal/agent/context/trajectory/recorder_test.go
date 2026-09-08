@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type memorySink struct {
@@ -85,5 +86,42 @@ func TestRecorderDoesNotChangeRunOwnership(t *testing.T) {
 	recorder.Record(context.Background(), "trigger", nil)
 	if len(sink.events) != 1 || sink.events[0].RunID != "run-a" || sink.events[0].SessionID != "session-a" {
 		t.Fatal("recorder changed ownership")
+	}
+}
+
+type callbackSink func(context.Context, Event, []Content) error
+
+func (s callbackSink) Append(ctx context.Context, event Event, contents []Content) error {
+	return s(ctx, event, contents)
+}
+
+func TestRecorderSinkCanReadCaptureStats(t *testing.T) {
+	var recorder *Recorder
+	recorder = NewRecorder(callbackSink(func(context.Context, Event, []Content) error {
+		_ = recorder.Stats()
+		return nil
+	}))
+	recorder.Bind("run", "session")
+	done := make(chan struct{})
+	go func() {
+		recorder.Record(context.Background(), "trigger", nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sink deadlocked while reading capture status")
+	}
+}
+
+func TestChildRecorderCannotInheritParentRequest(t *testing.T) {
+	parent := WithRequest(context.Background(), 41)
+	sink := &memorySink{}
+	child := NewRecorder(sink)
+	child.Bind("child", "child-session")
+	ctx := WithRecorder(parent, child)
+	child.Record(ctx, "trigger", nil)
+	if sink.events[0].Request != 0 {
+		t.Fatal("child capture references a request in another run")
 	}
 }

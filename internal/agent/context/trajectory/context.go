@@ -6,7 +6,7 @@ type recorderKey struct{}
 type requestKey struct{}
 
 func WithRecorder(ctx context.Context, recorder *Recorder) context.Context {
-	return context.WithValue(ctx, recorderKey{}, recorder)
+	return WithRequest(context.WithValue(ctx, recorderKey{}, recorder), 0)
 }
 
 func FromContext(ctx context.Context) *Recorder {
