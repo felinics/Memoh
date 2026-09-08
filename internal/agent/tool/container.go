@@ -321,7 +321,7 @@ Delete a file:
 				"required": []string{"command"},
 			},
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execExec(ctx.Context, sess, inputAsMap(input))
+				return p.execExec(ctx.Context, sess, ctx.ToolCallID, inputAsMap(input))
 			},
 		},
 	}
@@ -1030,7 +1030,7 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	return map[string]any{"ok": true}, nil
 }
 
-func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, toolCallID string, args map[string]any) (any, error) {
 	target, err := p.resolveToolTarget(ctx, session, args)
 	if err != nil {
 		return nil, err
@@ -1089,7 +1089,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
 		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
-			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout)
+			return p.execExecWithFlip(ctx, session, client, toolCallID, command, workDir, description, backgroundOutputDir, timeout)
 		})
 	}
 
@@ -1099,9 +1099,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 		if err != nil {
 			return nil, err
 		}
-		stdout := pruneToolOutputText(result.Stdout, "tool result (exec stdout)")
-		stderr := pruneToolOutputText(result.Stderr, "tool result (exec stderr)")
-		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": result.ExitCode}, nil
+		return pruneExecOutput(ctx, toolCallID, command, workDir, result.Stdout, result.Stderr, result.ExitCode), nil
 	})
 	if err != nil {
 		return nil, err
@@ -1268,7 +1266,7 @@ func tailText(value string, maxBytes int) string {
 // agent gets an immediate "auto_backgrounded" response.
 func (p *ContainerProvider) execExecWithFlip(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description, outputDir string, softTimeout int32,
+	toolCallID, command, workDir, description, outputDir string, softTimeout int32,
 ) (any, error) {
 	// Start streaming exec with a large container-side timeout so the process
 	// keeps running even after we stop reading in the foreground.
@@ -1292,9 +1290,7 @@ func (p *ContainerProvider) execExecWithFlip(
 		if r.Err != nil {
 			return nil, r.Err
 		}
-		stdout := pruneToolOutputText(r.Stdout, "tool result (exec stdout)")
-		stderr := pruneToolOutputText(r.Stderr, "tool result (exec stderr)")
-		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": r.ExitCode}, nil
+		return pruneExecOutput(ctx, toolCallID, command, workDir, r.Stdout, r.Stderr, r.ExitCode), nil
 
 	case <-timer.C:
 		// Soft timeout fired — flip the running stream to background.
