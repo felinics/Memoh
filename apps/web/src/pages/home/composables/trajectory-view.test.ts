@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ContextfragKind, ContextfragLifecycleSnapshot, HandlersContextFragmentPreview } from '@memohai/sdk'
+import type { ContextfragKind, ContextfragLifecycleSnapshot } from '@memohai/sdk'
 import en from '@/i18n/locales/en.json'
 import ja from '@/i18n/locales/ja.json'
 import zh from '@/i18n/locales/zh.json'
 import type { RowMapSegment, TrajectoryStats } from './trajectory-model'
-import { compactionDetailRows, contextPreview, formatDurationMs, fragmentRowPreview, lineDiff, MAX_STRIP_BARS, promptFragmentChanges, rowMapGeometry, statsSegments } from './trajectory-view'
+import { compactionDetailRows, contextPreview, formatDurationMs, fragmentName, fragmentRowPreview, lineDiff, MAX_STRIP_BARS, promptFragmentChanges, rowMapGeometry, statsSegments } from './trajectory-view'
 
 function segment(overrides: Partial<RowMapSegment>): RowMapSegment {
   return {
@@ -207,22 +207,38 @@ describe('context kind labels', () => {
 })
 
 describe('promptFragmentChanges', () => {
+  it('uses only unambiguous canonical matches for legacy source names', () => {
+    const ref = { id: '', kind: 'workspace_instruction', contentHash: 'canonical', textHash: 'shared', tokens: 0, bytes: 0 }
+    const fragments = [{ content_hash: 'canonical', text_hash: 'shared', label: 'known.rules' }]
+    expect(fragmentName(ref, fragments)).toBe('known.rules')
+    expect(fragmentName({ ...ref, contentHash: 'other-source' }, fragments)).toBe('')
+    expect(fragmentName(ref, [...fragments, { ...fragments[0], label: 'another.rules' }])).toBe('')
+    expect(fragmentName({ ...ref, id: 'current.rules' }, fragments)).toBe('current.rules')
+  })
+
+  it('compares occurrences independently when their text hash is shared', () => {
+    const previous: ContextfragLifecycleSnapshot = { fragments: [
+      { kind: 'workspace_instruction', label: 'first.rules', text_hash: 'shared' },
+      { kind: 'workspace_instruction', label: 'second.rules', text_hash: 'shared' },
+    ] }
+    const current: ContextfragLifecycleSnapshot = { fragments: [
+      { kind: 'workspace_instruction', label: 'second.rules', text_hash: 'changed' },
+      { kind: 'workspace_instruction', label: 'first.rules', text_hash: 'shared' },
+    ] }
+    const changes = promptFragmentChanges(current, previous)
+    expect(changes.map(change => [change.change, change.label])).toEqual([['changed', 'second.rules']])
+  })
+
   it('lists what a run added, rewrote, or dropped against the run before it', () => {
-    const previews: Record<string, HandlersContextFragmentPreview> = {
-      'h-sys-1': { kind: 'system_prompt', label: 'system.prompt.body', preview: '', text_bytes: 1 },
-      'h-sys-2': { kind: 'system_prompt', label: 'system.prompt.body', preview: '', text_bytes: 1 },
-      'h-rules': { kind: 'workspace_instruction', label: 'system.workspace_file.AGENTS.md', preview: '', text_bytes: 1 },
-      'h-skill': { kind: 'skills_catalog', label: 'system.skill.hooks-setup', preview: '', text_bytes: 1 },
-    }
     const previous: ContextfragLifecycleSnapshot = {
-      fragments: [{ kind: 'system_prompt', text_hash: 'h-sys-1' }, { kind: 'workspace_instruction', text_hash: 'h-rules' }],
+      fragments: [{ kind: 'system_prompt', label: 'system.prompt.body', text_hash: 'h-sys-1' }, { kind: 'workspace_instruction', label: 'system.workspace_file.AGENTS.md', text_hash: 'h-rules' }],
       tool_defs: [{ provider: 'workspace', name: 'exec', content_hash: 't-exec' }, { provider: 'workspace', name: 'write', content_hash: 't-write' }],
     }
     const current: ContextfragLifecycleSnapshot = {
-      fragments: [{ kind: 'system_prompt', text_hash: 'h-sys-2' }, { kind: 'workspace_instruction', text_hash: 'h-rules' }, { kind: 'skills_catalog', text_hash: 'h-skill' }],
+      fragments: [{ kind: 'system_prompt', label: 'system.prompt.body', text_hash: 'h-sys-2' }, { kind: 'workspace_instruction', label: 'system.workspace_file.AGENTS.md', text_hash: 'h-rules' }, { kind: 'skills_catalog', label: 'system.skill.hooks-setup', text_hash: 'h-skill' }],
       tool_defs: [{ provider: 'workspace', name: 'exec', content_hash: 't-exec-2' }],
     }
-    const changes = promptFragmentChanges(current, previous, previews)
+    const changes = promptFragmentChanges(current, previous)
     expect(changes.map(change => `${change.change}:${change.label}`)).toEqual([
       'changed:system.prompt.body',
       'added:system.skill.hooks-setup',
@@ -230,8 +246,8 @@ describe('promptFragmentChanges', () => {
       'removed:workspace/write',
     ])
     expect(changes[0]).toMatchObject({ kind: 'system_prompt', currentHash: 'h-sys-2', previousHash: 'h-sys-1' })
-    expect(promptFragmentChanges(current, current, previews)).toEqual([])
-    expect(promptFragmentChanges({ fragments: [{ kind: 'bot_identity', text_hash: 'h-x' }] }, undefined, null)[0]!.label).toBe('bot_identity#0')
+    expect(promptFragmentChanges(current, current)).toEqual([])
+    expect(promptFragmentChanges({ fragments: [{ kind: 'bot_identity', text_hash: 'h-x' }] }, undefined)[0]!.label).toBe('bot_identity#0')
   })
 })
 

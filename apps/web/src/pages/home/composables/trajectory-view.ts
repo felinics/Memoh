@@ -1,4 +1,4 @@
-import type { CompactionLog, ContextfragLifecycleSnapshot, HandlersContextFragmentPreview } from '@memohai/sdk'
+import type { CompactionLog, ContextfragLifecycleSnapshot, HandlersContextFragmentText, HandlersContextFragmentPreview } from '@memohai/sdk'
 import { formatTokenCount } from './context-categories'
 import { dropReasonRows } from './context-lifecycle-view'
 import type { ContextEntry, FragmentRef, RowMapSegment, TimelineLane, TrajectoryRow, TrajectoryRowKind, TrajectoryStats } from './trajectory-model'
@@ -393,6 +393,19 @@ export const LANE_TTFT_CLASS = 'bg-accent-purple-soft-active'
 
 export type PromptChangeKind = 'added' | 'removed' | 'changed'
 
+export function fragmentName(ref: FragmentRef, fragments: readonly HandlersContextFragmentText[]): string {
+  if (ref.id) return ref.id
+  if (!ref.contentHash) return ''
+  let label: string | undefined
+  for (const fragment of fragments) {
+    if (fragment.content_hash !== ref.contentHash || fragment.text_hash !== ref.textHash) continue
+    const candidate = fragment.label ?? ''
+    if (label !== undefined && label !== candidate) return ''
+    label = candidate
+  }
+  return label ?? ''
+}
+
 export interface PromptChange {
   key: string
   label: string
@@ -409,7 +422,7 @@ interface PromptPart {
   hash: string
 }
 
-function promptParts(snapshot: ContextfragLifecycleSnapshot | undefined, previews: FragmentPreviews | null | undefined): PromptPart[] {
+function promptParts(snapshot: ContextfragLifecycleSnapshot | undefined): PromptPart[] {
   const parts: PromptPart[] = []
   const seen = new Map<string, number>()
   const push = (kind: string, label: string, hash: string) => {
@@ -420,7 +433,7 @@ function promptParts(snapshot: ContextfragLifecycleSnapshot | undefined, preview
   }
   ;(snapshot?.fragments ?? []).forEach((ref, index) => {
     const hash = ref.text_hash ?? ''
-    push(ref.kind ?? '', previews?.[hash]?.label || `${ref.kind ?? ''}#${index}`, hash || ref.content_hash || '')
+    push(ref.kind ?? '', ref.label || `${ref.kind ?? ''}#${index}`, hash || ref.content_hash || '')
   })
   for (const def of snapshot?.tool_defs ?? []) {
     push('tool_definition', `${def.provider ?? ''}/${def.name ?? ''}`, def.content_hash ?? '')
@@ -433,11 +446,10 @@ function promptParts(snapshot: ContextfragLifecycleSnapshot | undefined, preview
 export function promptFragmentChanges(
   current: ContextfragLifecycleSnapshot | undefined,
   previous: ContextfragLifecycleSnapshot | undefined,
-  previews: FragmentPreviews | null | undefined,
 ): PromptChange[] {
-  const before = new Map(promptParts(previous, previews).map(part => [part.key, part]))
+  const before = new Map(promptParts(previous).map(part => [part.key, part]))
   const changes: PromptChange[] = []
-  for (const part of promptParts(current, previews)) {
+  for (const part of promptParts(current)) {
     const prior = before.get(part.key)
     before.delete(part.key)
     if (!prior) {

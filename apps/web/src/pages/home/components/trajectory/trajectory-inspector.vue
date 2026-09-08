@@ -347,7 +347,7 @@ import { X } from 'lucide-vue-next'
 import { Button, ScrollArea, Skeleton } from '@felinic/ui'
 import type { ContextfragSelectionDecision } from '@memohai/sdk'
 import { entryRefs, type TrajectoryRow } from '../../composables/trajectory-model'
-import { compactionDetailRows, contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, KIND_LABEL_KEY, KIND_TONE_CLASS, lineDiff, promptFragmentChanges, type DecisionScope, type DiffLine, type FragmentPreviews, type PromptChange, type PromptChangeKind } from '../../composables/trajectory-view'
+import { compactionDetailRows, contextDetailRows, contextListRows, decisionScopeOf, formatDurationMs, fragmentName, KIND_LABEL_KEY, KIND_TONE_CLASS, lineDiff, promptFragmentChanges, type DecisionScope, type DiffLine, type FragmentPreviews, type PromptChange, type PromptChangeKind } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 import { useContextLifecycleDecisions } from '../../composables/useContextLifecycleDecisions'
 import { useContextLifecycleFragments } from '../../composables/useContextLifecycleFragments'
@@ -430,7 +430,7 @@ const textRows = computed(() => {
     const stored = ref.textHash ? byHash.get(ref.textHash) : undefined
     return {
       key: `${ref.textHash || ref.id}/${index}`,
-      id: stored?.label || ref.id || t(`chat.trajectory.contextKind.${ref.kind}`),
+      id: fragmentName(ref, fragments.value) || `${t(`chat.trajectory.contextKind.${ref.kind}`)} #${index + 1}`,
       tokens: ref.tokens ? formatTokenCount(ref.tokens) : '',
       text: stored?.text ?? '',
       truncated: stored?.truncated === true,
@@ -450,7 +450,7 @@ const systemTurns = computed(() => {
 const promptChanges = computed<PromptChange[]>(() => {
   const detail = props.row.detail
   if (detail.kind !== 'system' || !detail.previous) return []
-  return promptFragmentChanges(detail.lifecycle.snapshot, detail.previous.snapshot, props.previews)
+  return promptFragmentChanges(detail.lifecycle.snapshot, detail.previous.snapshot)
 })
 const previousRunId = computed(() => {
   const detail = props.row.detail

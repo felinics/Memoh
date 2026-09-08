@@ -20,14 +20,11 @@ export type TrajectoryRowKind = 'system' | 'user' | 'context' | 'request' | 'ass
 // What the turn's context was assembled from, read off the persisted
 // lifecycle manifest: counts and token estimates per fragment kind, never
 // prompt text.
-// One injected fragment as the run recorded it; its text and name live in the
-// content-addressed store under textHash, which is empty when the run stored
-// no text for it. Only tool definitions carry a name of their own, from the
-// accounting the snapshot keeps.
 export interface FragmentRef {
   id: string
   kind: string
   textHash: string
+  contentHash?: string
   tokens: number
   bytes: number
 }
@@ -175,7 +172,7 @@ export function contextEntries(snapshot: ContextfragLifecycleSnapshot | null | u
     const kind = ref.kind ?? ''
     if (!kind) continue
     const list = refsByKind.get(kind) ?? []
-    list.push({ id: '', kind, textHash: ref.text_hash ?? '', tokens: ref.token_estimate ?? 0, bytes: ref.text_bytes ?? 0 })
+    list.push({ id: ref.label ?? '', kind, contentHash: ref.content_hash ?? '', textHash: ref.text_hash ?? '', tokens: ref.token_estimate ?? 0, bytes: ref.text_bytes ?? 0 })
     refsByKind.set(kind, list)
   }
   let system: SystemEntry | null = null

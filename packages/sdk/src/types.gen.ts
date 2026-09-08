@@ -1204,6 +1204,7 @@ export type ContextfragContextRef = {
 export type ContextfragFragmentRef = {
     content_hash?: string;
     kind?: ContextfragKind;
+    label?: string;
     slot?: ContextfragSlot;
     text_bytes?: number;
     text_hash?: string;

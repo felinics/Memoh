@@ -133,11 +133,23 @@ describe('continued legacy runs', () => {
 })
 
 describe('context entries', () => {
+  it('keeps the name and canonical identity of each equal-text occurrence', () => {
+    const entries = contextEntries({
+      breakdown: [{ kind: 'workspace_instruction', fragments: 2 }],
+      fragments: [
+        { kind: 'workspace_instruction', label: 'first.rules', content_hash: 'same', text_hash: 'shared' },
+        { kind: 'workspace_instruction', label: 'second.rules', content_hash: 'same', text_hash: 'shared' },
+      ],
+    })
+    const entry = entries.before[0]!
+    expect(entry.kind === 'fragments' && entry.refs.map(ref => ref.id)).toEqual(['first.rules', 'second.rules'])
+  })
+
   it('splits the manifest into the system prompt and one entry per injected kind', () => {
     const entries = contextEntries(lifecycleTurn.snapshot!)
     expect(entries.system).toEqual({ fragments: 2, tokens: 1_500, refs: [
-      { id: '', kind: 'system_prompt', textHash: 'h-sys', tokens: 1_300, bytes: 5_200 },
-      { id: '', kind: 'bot_identity', textHash: 'h-bot', tokens: 200, bytes: 800 },
+      { id: '', kind: 'system_prompt', contentHash: 'c-sys', textHash: 'h-sys', tokens: 1_300, bytes: 5_200 },
+      { id: '', kind: 'bot_identity', contentHash: 'c-bot', textHash: 'h-bot', tokens: 200, bytes: 800 },
     ] })
     const rules = entries.before[0]!
     expect(rules.kind === 'fragments' && rules.refs.map(ref => ref.textHash)).toEqual(['h-rules'])

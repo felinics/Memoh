@@ -5,8 +5,9 @@ import { computed, createApp, defineComponent, h, nextTick, reactive, ref } from
 import { createI18n } from 'vue-i18n'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import en from '@/i18n/locales/en.json'
+import type { HandlersContextFragmentText } from '@memohai/sdk'
 import type { ChatAssistantTurn, ChatUserTurn } from '@/store/chat/types'
-import { buildTrajectoryRows, type TrajectoryRow } from '../../composables/trajectory-model'
+import { buildTrajectoryRows, lifecycleByTurnId, type TrajectoryRow } from '../../composables/trajectory-model'
 import { mergeTrajectoryCaptures } from '../../composables/context-trajectory-view'
 
 vi.mock('@felinic/ui', () => {
@@ -22,8 +23,9 @@ vi.mock('@felinic/ui', () => {
     CollapsibleContent: box(),
   }
 })
+const fragmentData = vi.hoisted((): { items: HandlersContextFragmentText[] } => ({ items: [] }))
 vi.mock('../../composables/useContextLifecycleFragments', () => ({
-  useContextLifecycleFragments: () => ({ fragments: computed(() => []), status: ref('pending'), error: ref(null) }),
+  useContextLifecycleFragments: () => ({ fragments: computed(() => fragmentData.items), status: ref(fragmentData.items.length ? 'success' : 'pending'), error: ref(null) }),
 }))
 vi.mock('../../composables/useContextLifecycleDecisions', () => ({
   useContextLifecycleDecisions: () => ({ decisions: computed(() => []), status: ref('pending') }),
@@ -83,6 +85,7 @@ function mount(props: { row: TrajectoryRow, onSelectEvent?: (id: string) => void
 }
 
 afterEach(() => {
+  fragmentData.items = []
   for (const { app, root } of mounted.splice(0)) {
     app.unmount()
     root.remove()
@@ -90,6 +93,27 @@ afterEach(() => {
 })
 
 describe('trajectory inspector', () => {
+  it('shows both occurrence names even when full text is shared', () => {
+    fragmentData.items = [
+      { content_hash: 'same', text_hash: 'shared', label: 'first.rules', text: 'shared rules', available: true },
+      { content_hash: 'same', text_hash: 'shared', label: 'second.rules', text: 'shared rules', available: true },
+    ]
+    const row = buildTrajectoryRows([{
+      id: 'u', role: 'user', text: 'task', attachments: [], timestamp: '', streaming: false, isSelf: true, turnId: 'turn',
+    }], lifecycleByTurnId([{
+      run_id: 'run', turn_id: 'turn', snapshot: {
+        breakdown: [{ kind: 'workspace_instruction', fragments: 2 }],
+        fragments: [
+          { kind: 'workspace_instruction', label: 'first.rules', content_hash: 'same', text_hash: 'shared' },
+          { kind: 'workspace_instruction', label: 'second.rules', content_hash: 'same', text_hash: 'shared' },
+        ],
+      },
+    }])).find(row => row.detail.kind === 'context')!
+    const root = mount({ row })
+    expect(root.textContent).toContain('first.rules')
+    expect(root.textContent).toContain('second.rules')
+  })
+
   it('opens a captured request and relays navigation to the preceding stage', () => {
     const row = mergeTrajectoryCaptures([], [{ id: '2', run_id: 'run', capture_id: 'capture', sequence: 2, stage: 'wire_request' }], [])[0]!
     const selectEvent = vi.fn()
