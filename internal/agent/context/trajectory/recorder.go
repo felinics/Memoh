@@ -15,17 +15,18 @@ import (
 const contentChunkBytes = 64 << 10
 
 type Recorder struct {
-	recordMu  sync.Mutex
-	mu        sync.Mutex
-	sink      Sink
-	logger    *slog.Logger
-	captureID string
-	runID     string
-	sessionID string
-	stats     Stats
-	jobs      []*captureJob
-	working   bool
-	last      <-chan struct{}
+	recordMu     sync.Mutex
+	mu           sync.Mutex
+	sink         Sink
+	logger       *slog.Logger
+	captureID    string
+	runID        string
+	sessionID    string
+	stats        Stats
+	jobs         []*captureJob
+	working      bool
+	last         <-chan struct{}
+	pendingBytes int64
 }
 
 func NewRecorder(sink Sink) *Recorder {

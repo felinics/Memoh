@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
@@ -146,5 +147,48 @@ func TestSpawnTrajectoryStartsWithChildTaskAndOwnRequestIdentity(t *testing.T) {
 	}
 	if len(sink.providerInputs()) != 1 {
 		t.Fatal("child provider request was not captured")
+	}
+}
+
+type delayedNativeTrajectorySink struct {
+	nativeTrajectorySink
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *delayedNativeTrajectorySink) Append(ctx context.Context, event trajectory.Event, contents []trajectory.Content) error {
+	if event.Stage == "wire_result" {
+		close(s.entered)
+		<-s.release
+	}
+	return s.nativeTrajectorySink.Append(ctx, event, contents)
+}
+
+func TestTrajectoryFlushesBeforeTerminalObservation(t *testing.T) {
+	sink := &delayedNativeTrajectorySink{entered: make(chan struct{}), release: make(chan struct{})}
+	recorder := trajectory.NewRecorder(sink)
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetTrajectoryRecorder(recorder)
+	provider := agentStreamTestProvider(func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		recorder.RecordAsync(ctx, "wire_result", nil)
+		return closedAgentTestStream(&sdk.StartStepPart{}, &sdk.TextDeltaPart{ID: "answer", Text: "done"},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}), nil
+	})
+	go func() {
+		<-sink.entered
+		time.Sleep(40 * time.Millisecond)
+		close(sink.release)
+	}()
+	for range New(Deps{}).Stream(t.Context(), RunConfig{
+		RunID: "run", ContextLifecycle: holder,
+		Identity: SessionContext{BotID: "bot", SessionID: "session"},
+		Model:    &sdk.Model{ID: "fixture", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("input")},
+		OnAgentEventObserved: func(event StreamEvent) {
+			if event.Type == EventAgentEnd && recorder.Stats().Pending != 0 {
+				t.Error("terminal observer can release ownership before wire capture is stored")
+			}
+		},
+	}) {
 	}
 }

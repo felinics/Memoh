@@ -180,3 +180,31 @@ func TestAsyncCaptureFreezesInputAndFlushesInSequence(t *testing.T) {
 		t.Fatal("capture did not retain the frozen input through flush")
 	}
 }
+
+func TestAsyncCaptureBoundsBacklogAndReportsSkippedStages(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	sink := &memorySink{}
+	recorder := NewRecorder(callbackSink(func(ctx context.Context, event Event, contents []Content) error {
+		if event.Sequence == 1 {
+			close(entered)
+			<-release
+		}
+		return sink.Append(ctx, event, contents)
+	}))
+	recorder.Bind("run", "session")
+	recorder.RecordAsync(t.Context(), "wire_request", nil, Block{Content: "first"})
+	<-entered
+	for i := 0; i < 64; i++ {
+		recorder.RecordAsync(t.Context(), "wire_request", nil, Block{Content: strings.Repeat("input", 1<<18)})
+	}
+	stats := recorder.Stats()
+	close(release)
+	if stats.Pending > 8 || stats.Events != 65 || stats.Errors == 0 {
+		t.Fatalf("unbounded or silently missing backlog: %#v", stats)
+	}
+	recorder.Record(t.Context(), "context_resumed", nil, Block{Content: "FINAL_COMPLETE_CONTENT"})
+	last := sink.events[len(sink.events)-1]
+	if last.Sequence != 66 || last.CaptureErrors != stats.Errors || sink.contents[last.Blocks[0].Chunks[0]] != "FINAL_COMPLETE_CONTENT" {
+		t.Fatalf("capture pressure was not reported at the next complete stage: %#v", last)
+	}
+}

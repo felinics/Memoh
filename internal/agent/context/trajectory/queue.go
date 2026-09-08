@@ -6,12 +6,18 @@ import (
 	"time"
 )
 
+const (
+	maxPendingCaptures     = 8
+	maxPendingCaptureBytes = 16 << 20
+)
+
 type captureJob struct {
 	ctx            context.Context
 	event          Event
 	contents       []Content
 	encodingErrors int64
 	done           chan struct{}
+	bytes          int64
 }
 
 func (r *Recorder) Record(ctx context.Context, stage string, stepIndex *int, blocks ...Block) int64 {
@@ -27,6 +33,29 @@ func (r *Recorder) record(ctx context.Context, stage string, stepIndex *int, blo
 		return 0
 	}
 	r.recordMu.Lock()
+	var bytes int64
+	for _, block := range blocks {
+		bytes += int64(len(block.Content))
+	}
+	for {
+		r.mu.Lock()
+		full := r.stats.Pending >= maxPendingCaptures || (r.stats.Pending > 0 && r.pendingBytes+bytes > maxPendingCaptureBytes)
+		if !full {
+			r.mu.Unlock()
+			break
+		}
+		if !wait {
+			r.stats.Events++
+			r.stats.Errors++
+			sequence := r.stats.Events
+			r.mu.Unlock()
+			r.recordMu.Unlock()
+			return sequence
+		}
+		last := r.last
+		r.mu.Unlock()
+		<-last
+	}
 	job := r.prepareCapture(ctx, stage, stepIndex, blocks)
 	if job == nil {
 		r.recordMu.Unlock()
@@ -34,6 +63,8 @@ func (r *Recorder) record(ctx context.Context, stage string, stepIndex *int, blo
 	}
 	r.mu.Lock()
 	r.jobs = append(r.jobs, job)
+	job.bytes = bytes
+	r.pendingBytes += bytes
 	r.stats.Pending++
 	r.last = job.done
 	start := !r.working
@@ -72,6 +103,7 @@ func (r *Recorder) drain(ctx context.Context) {
 			r.stats.Errors++
 		}
 		r.stats.Pending--
+		r.pendingBytes -= job.bytes
 		r.mu.Unlock()
 		if err != nil {
 			r.logger.WarnContext(ctx, "context trajectory capture failed", slog.String("run_id", job.event.RunID), slog.String("stage", job.event.Stage), slog.Int64("sequence", job.event.Sequence), slog.Any("error", err))

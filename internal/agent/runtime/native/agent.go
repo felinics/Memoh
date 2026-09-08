@@ -933,6 +933,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	// context cancellation also unblocks an emitter already waiting on ch.
 	cancel(context.Canceled)
 	eventGate.close()
+	cfg.flushTrajectory(ctx)
 
 	// Deliver the terminal event using a context that is NOT cancelled when
 	// the parent ctx is cancelled (user abort / idle timeout / loop-detect).
