@@ -69,7 +69,7 @@
                    turns' DOM is never re-parented (see messageTurns for why
                    that is load-bearing). The send pin reserves viewport space
                    by setting an inline min-height on the LAST turn's container
-                   (see useChatScroll's Pin section). -->
+                   (see tryApplyPin in useChatScroll). -->
               <div
                 v-for="(turn, turnIndex) in messageTurns"
                 :key="turn.id"
@@ -807,8 +807,8 @@
                          stays hidden, while a VISIBLE disabled button still
                          dims as designed. -->
                     <div
-                      class="absolute inset-0 transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
-                      :class="micVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
+                      class="absolute inset-0 transition-[opacity,scale] duration-[188ms] ease motion-reduce:transition-none"
+                      :class="micVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-70 opacity-0'"
                     >
                       <Button
                         type="button"
@@ -854,7 +854,7 @@
                          (arrow ⇄ stop square), so the button can't blink color or
                          shape mid-turn. While streaming it stays clickable to abort. -->
                     <div
-                      class="absolute inset-0 transition-[opacity,scale] duration-200 ease-[cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
+                      class="absolute inset-0 [transition:opacity_150ms_ease,scale_281ms_cubic-bezier(0.34,1.56,0.64,1)] motion-reduce:transition-none"
                       :class="sendButtonVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-0 opacity-0'"
                     >
                       <Button
