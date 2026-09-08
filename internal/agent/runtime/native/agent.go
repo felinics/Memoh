@@ -164,7 +164,7 @@ func (p contextBudgetGuardProvider) DoGenerate(ctx context.Context, params sdk.G
 			return nil, err
 		}
 	}
-	return p.Provider.DoGenerate(ctx, params)
+	return p.Provider.DoGenerate(p.trajectoryRequest(ctx, params), params)
 }
 
 func (p contextBudgetGuardProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
@@ -185,7 +185,7 @@ func (p contextBudgetGuardProvider) DoStream(ctx context.Context, params sdk.Gen
 			return nil, err
 		}
 	}
-	return p.Provider.DoStream(ctx, params)
+	return p.Provider.DoStream(p.trajectoryRequest(ctx, params), params)
 }
 
 func contextBudgetGuardedModel(model *sdk.Model, handoff *providerAttemptHandoff) *sdk.Model {
@@ -330,6 +330,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
+	ctx = cfg.TrajectoryContext(ctx)
+	cfg.RecordTrajectory(ctx, "runtime_input", nil, nil)
 	streamCtx, cancel := context.WithCancelCause(ctx)
 	eventGate := newStreamEmitterGate(streamCtx, ch)
 	defer func() {
@@ -1002,6 +1004,8 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
+	ctx = cfg.TrajectoryContext(ctx)
+	cfg.RecordTrajectory(ctx, "runtime_input", nil, nil)
 	genCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	defer func() {
@@ -1317,6 +1321,7 @@ func prepareProviderAttempt(
 	if params == nil {
 		return nil
 	}
+	cfg.RecordTrajectory(ctx, "before_selection", &stepIndex, params)
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
 	snapshot := contextfrag.StepSnapshot{StepIndex: stepIndex}
 	reselector := cfg.ContextStepReselector
@@ -1389,6 +1394,7 @@ func prepareProviderAttempt(
 		))
 	}
 	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, reselectionDetail, protectedPruned, provenance)
+	cfg.RecordTrajectory(ctx, "after_selection", &stepIndex, params)
 	return params
 }
 

@@ -1,0 +1,124 @@
+package native
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+
+	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/jsonschema-go/jsonschema"
+
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+)
+
+type nativeTrajectorySink struct {
+	mu       sync.Mutex
+	events   []trajectory.Event
+	contents map[string]string
+}
+
+func (s *nativeTrajectorySink) Append(_ context.Context, event trajectory.Event, contents []trajectory.Content) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.contents == nil {
+		s.contents = make(map[string]string)
+	}
+	for _, content := range contents {
+		s.contents[content.Hash] = string(content.Data)
+	}
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (s *nativeTrajectorySink) providerInputs() []trajectory.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var events []trajectory.Event
+	for _, event := range s.events {
+		if event.Stage == "provider_request" {
+			events = append(events, event)
+		}
+	}
+	return events
+}
+
+func TestAgentTrajectoryRecordsToolOnlyRequestAndNextInput(t *testing.T) {
+	sink := &nativeTrajectorySink{}
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
+	calls := 0
+	provider := agentStreamTestProvider(func(_ context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+		calls++
+		inputs := sink.providerInputs()
+		if len(inputs) != calls {
+			t.Errorf("provider call %d has %d captured inputs", calls, len(inputs))
+		}
+		if calls == 1 {
+			return closedAgentTestStream(&sdk.StartStepPart{},
+				&sdk.StreamToolCallPart{ToolCallID: "call", ToolName: "echo", Input: map[string]any{}},
+				&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls}), nil
+		}
+		return closedAgentTestStream(&sdk.StartStepPart{}, &sdk.TextDeltaPart{ID: "answer", Text: "done"},
+			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}), nil
+	})
+	agent := New(Deps{})
+	agent.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+		Name: "echo", Parameters: &jsonschema.Schema{Type: "object"},
+		Execute: func(*sdk.ToolExecContext, any) (any, error) { return "UNIQUE_TOOL_OUTPUT", nil },
+	}}}})
+	for event := range agent.Stream(t.Context(), RunConfig{
+		RunID: "run", ContextLifecycle: holder, SupportsToolCall: true,
+		Identity: SessionContext{BotID: "bot", SessionID: "session"},
+		Model:    &sdk.Model{ID: "fixture", Provider: provider}, System: "ORIGINAL_SYSTEM",
+		Messages: []sdk.Message{sdk.UserMessage("ORIGINAL_USER")},
+	}) {
+		if event.Type == EventError {
+			t.Fatalf("stream error: %s", event.Error)
+		}
+	}
+	inputs := sink.providerInputs()
+	if len(inputs) != 2 {
+		t.Fatalf("captured requests = %d", len(inputs))
+	}
+	for i, input := range inputs {
+		if input.StepIndex == nil || *input.StepIndex != i {
+			t.Fatalf("request %d = %#v", i, input)
+		}
+		var texts strings.Builder
+		for _, block := range input.Blocks {
+			for _, hash := range block.Chunks {
+				texts.WriteString(sink.contents[hash])
+			}
+		}
+		if !strings.Contains(texts.String(), "ORIGINAL_USER") || (i == 1 && !strings.Contains(texts.String(), "UNIQUE_TOOL_OUTPUT")) {
+			t.Fatalf("request %d lost its user input or tool result", i)
+		}
+	}
+}
+
+func TestAgentGenerateTrajectoryKeepsRejectedProviderInput(t *testing.T) {
+	sink := &nativeTrajectorySink{}
+	holder := contextfrag.NewLifecycleHolder()
+	holder.SetTrajectoryRecorder(trajectory.NewRecorder(sink))
+	provider := &atomicMockProvider{handler: func(int, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		return nil, errors.New("fixture provider rejected input")
+	}}
+	_, err := New(Deps{}).Generate(t.Context(), RunConfig{
+		RunID: "run", ContextLifecycle: holder,
+		Identity: SessionContext{BotID: "bot", SessionID: "session"},
+		Model:    &sdk.Model{ID: "fixture", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("REJECTED_INPUT")},
+	})
+	if err == nil || len(sink.providerInputs()) == 0 {
+		t.Fatal("failed non-streaming request disappeared from trajectory")
+	}
+	encoded, err := json.Marshal(sink.providerInputs())
+	if err != nil || len(encoded) == 0 {
+		t.Fatal("request metadata is not serializable")
+	}
+}
