@@ -31,7 +31,14 @@ func runShellcheck(t *testing.T, label, script string) {
 }
 
 func TestPreludeShellcheck(t *testing.T) {
-	runShellcheck(t, "prelude", WrapScript("true\n"))
+	// Exercise the public helpers as a recipe does. Checking an empty body
+	// makes ShellCheck 0.9 report the unused helpers as unreachable (SC2317).
+	const recipe = `dep_log "installing fixture"
+dep_switch "versions/fixture"
+dep_result '{"version":"fixture"}'
+`
+	runShellcheck(t, "prelude", WrapScript(recipe))
+	runShellcheck(t, "kernel lock wrapper", scriptExecWrapper)
 }
 
 func TestDiscoveryScriptShellcheck(t *testing.T) {
@@ -65,7 +72,7 @@ func TestPreludeLinesMatchesWrappedScript(t *testing.T) {
 	if index != PreludeLines() {
 		t.Errorf("PreludeLines() = %d, body starts at zero-based line %d", PreludeLines(), index)
 	}
-	if !strings.HasSuffix(WrapScript(marker), "}\nmemoh_dep_main < /dev/null\n") {
+	if !strings.HasSuffix(WrapScript(marker), preludeEpilogue) {
 		t.Errorf("wrapped script does not end with the function call")
 	}
 }
