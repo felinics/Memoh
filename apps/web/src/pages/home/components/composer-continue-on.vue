@@ -21,6 +21,7 @@
       <Button
         type="button"
         variant="ghost"
+        tone="muted"
         size="sm"
         shape="circle"
         :disabled="locked"
@@ -33,7 +34,7 @@
       >
         <span class="composer-pill-content inline-flex min-w-0 items-center">
           <ComputerIcon
-            class="size-4 max-md:size-5 shrink-0 text-muted-foreground"
+            class="size-4 max-md:size-5 shrink-0"
           />
           <!-- Spacing lives on the slot's children (ml-2), not the slot itself:
                a gap/padding on the collapsing container would survive the
@@ -44,9 +45,8 @@
             :aria-hidden="!rendersAsPill"
           >
             <span class="ml-2 min-w-0 truncate text-label text-composer-control-label">{{ currentName }}</span>
-            <ChevronDown
-              class="ml-2 size-3.5 shrink-0 text-muted-foreground"
-              :stroke-width="1.5"
+            <ExpandIcon
+              class="ml-2 size-3.5 shrink-0"
             />
           </span>
         </span>
@@ -133,12 +133,12 @@
 </template>
 
 <script setup lang="ts">
-import { SettingsIcon, CloudIcon, ComputerIcon } from '@memohai/icon/ui'
+import { SettingsIcon, CloudIcon, ComputerIcon, ExpandIcon } from '@memohai/icon/ui'
 import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Spinner } from '@felinic/ui'
-import { Check, ChevronDown } from 'lucide-vue-next'
+import { Check } from 'lucide-vue-next'
 import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,

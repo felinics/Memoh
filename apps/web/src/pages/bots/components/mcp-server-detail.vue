@@ -5,95 +5,94 @@
          ever about editing the draft. Mirrors the provider detail's header card.
          Rendered ONLY for a saved server: before creation there is no entity to
          badge, toggle, or delete, so the whole card (and its Switch) stays out. -->
-    <section
-      v-if="serverId"
-      class="group/header flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3"
-    >
-      <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <component
-          :is="connectionType === 'stdio' ? Terminal : Globe"
-          class="size-4"
-        />
-      </span>
-
-      <!-- Name: read-only text with a hover pencil (the profile-row pattern).
-           Edits land in the form draft — the footer Save is what commits them. -->
-      <div class="min-w-0 flex-1">
-        <div class="flex h-8 items-center gap-1.5">
-          <Input
-            v-if="nameEditing"
-            ref="nameInputRef"
-            v-model="nameDraft"
-            class="h-8 max-w-[20rem]"
-            :aria-label="$t('common.name')"
-            @keydown.enter="commitNameEdit"
-            @keydown.esc="cancelNameEdit"
-            @blur="commitNameEdit"
+    <SettingsSection v-if="serverId">
+      <div class="group/header flex items-center gap-3 px-4 py-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <component
+            :is="connectionType === 'stdio' ? Terminal : Globe"
+            class="size-4"
           />
-          <template v-else>
-            <span class="truncate text-sm font-medium">
-              {{ form.name || $t('mcp.unnamedServer') }}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/header:opacity-100 focus-visible:opacity-100"
-              :aria-label="$t('common.edit')"
-              @click="startNameEdit"
-            >
-              <Pencil class="size-3.5" />
-            </Button>
-          </template>
+        </span>
+
+        <!-- Name: read-only text with a hover pencil (the profile-row pattern).
+             Edits land in the form draft — the footer Save is what commits them. -->
+        <div class="min-w-0 flex-1">
+          <div class="flex h-8 items-center gap-1.5">
+            <Input
+              v-if="nameEditing"
+              ref="nameInputRef"
+              v-model="nameDraft"
+              class="h-8 max-w-[20rem]"
+              :aria-label="$t('common.name')"
+              @keydown.enter="commitNameEdit"
+              @keydown.esc="cancelNameEdit"
+              @blur="commitNameEdit"
+            />
+            <template v-else>
+              <span class="truncate text-sm font-medium">
+                {{ form.name || $t('mcp.unnamedServer') }}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/header:opacity-100 focus-visible:opacity-100"
+                :aria-label="$t('common.edit')"
+                @click="startNameEdit"
+              >
+                <Pencil class="size-3.5" />
+              </Button>
+            </template>
+          </div>
+        </div>
+
+        <div class="ml-auto flex shrink-0 items-center gap-2">
+          <!-- The badge reports the last KNOWN result and holds still while a new
+               probe runs — progress already has a home (the test button's
+               spinner), so the badge only flips when a real result lands.
+               Semantic variants, never hand-injected colors. -->
+          <Badge
+            v-if="status === 'connected'"
+            variant="success"
+            size="sm"
+          >
+            {{ $t('mcp.statusConnected') }}
+          </Badge>
+          <Badge
+            v-else-if="status === 'error'"
+            variant="destructive"
+            size="sm"
+          >
+            {{ $t('mcp.statusError') }}
+          </Badge>
+          <ConfirmPopover
+            :message="$t('mcp.deleteConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('common.confirm')"
+            :loading="deleting"
+            variant="destructive"
+            @confirm="handleDelete"
+          >
+            <template #trigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                class="text-muted-foreground hover:text-destructive"
+                :aria-label="$t('common.delete')"
+              >
+                <Trash2 class="size-4" />
+              </Button>
+            </template>
+          </ConfirmPopover>
+          <Switch
+            :model-value="form.active"
+            :disabled="saving || activeSaving"
+            :aria-label="$t('common.enabled')"
+            @update:model-value="(v) => handleToggleActive(!!v)"
+          />
         </div>
       </div>
-
-      <div class="ml-auto flex shrink-0 items-center gap-2">
-        <!-- The badge reports the last KNOWN result and holds still while a new
-             probe runs — progress already has a home (the test button's
-             spinner), so the badge only flips when a real result lands.
-             Semantic variants, never hand-injected colors. -->
-        <Badge
-          v-if="status === 'connected'"
-          variant="success"
-          size="sm"
-        >
-          {{ $t('mcp.statusConnected') }}
-        </Badge>
-        <Badge
-          v-else-if="status === 'error'"
-          variant="destructive"
-          size="sm"
-        >
-          {{ $t('mcp.statusError') }}
-        </Badge>
-        <ConfirmPopover
-          :message="$t('mcp.deleteConfirm')"
-          :cancel-text="$t('common.cancel')"
-          :confirm-text="$t('common.confirm')"
-          :loading="deleting"
-          variant="destructive"
-          @confirm="handleDelete"
-        >
-          <template #trigger>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              class="text-muted-foreground hover:text-destructive"
-              :aria-label="$t('common.delete')"
-            >
-              <Trash2 class="size-4" />
-            </Button>
-          </template>
-        </ConfirmPopover>
-        <Switch
-          :model-value="form.active"
-          :disabled="saving || activeSaving"
-          :aria-label="$t('common.enabled')"
-          @update:model-value="(v) => handleToggleActive(!!v)"
-        />
-      </div>
-    </section>
+    </SettingsSection>
 
     <!-- Connection: the form's only concern. No section title — on a saved
          server the header card above already names the entity, so a heading

@@ -565,6 +565,7 @@
                       shape="circle"
                       :disabled="!currentBotId || activeChatReadOnly || composerConfigPending || voiceInputState !== 'idle'"
                       :title="$t('chat.composerActions')"
+                      tone="muted"
                       class="order-1 self-end max-md:size-11"
                       :aria-label="$t('chat.composerActions')"
                     >

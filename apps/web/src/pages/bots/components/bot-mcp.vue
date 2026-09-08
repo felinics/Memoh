@@ -100,22 +100,21 @@
         </button>
       </div>
 
-      <Empty
-        v-else
-        class="rounded-[var(--radius-menu-shell)] border border-border py-16"
-      >
-        <EmptyTitle>{{ $t('mcp.emptyTitle') }}</EmptyTitle>
-        <EmptyDescription>{{ $t('mcp.emptyDescription') }}</EmptyDescription>
-        <EmptyContent>
-          <Button
-            variant="outline"
-            @click="openCreate"
-          >
-            <Plus class="size-4" />
-            {{ $t('mcp.addNew') }}
-          </Button>
-        </EmptyContent>
-      </Empty>
+      <SettingsSection v-else>
+        <Empty class="py-16">
+          <EmptyTitle>{{ $t('mcp.emptyTitle') }}</EmptyTitle>
+          <EmptyDescription>{{ $t('mcp.emptyDescription') }}</EmptyDescription>
+          <EmptyContent>
+            <Button
+              variant="outline"
+              @click="openCreate"
+            >
+              <Plus class="size-4" />
+              {{ $t('mcp.addNew') }}
+            </Button>
+          </EmptyContent>
+        </Empty>
+      </SettingsSection>
     </PageShell>
 
     <!-- Setup: the selected server only. Padding mirrors the list's PageShell tab
@@ -252,6 +251,7 @@
 </template>
 
 <script setup lang="ts">
+import { SettingsSection } from '@felinic/ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {

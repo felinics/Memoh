@@ -984,15 +984,17 @@ watch([activeTab, botId], ([tab]) => {
     <!-- ────────────── EMPTY STATE (no workspace) ────────────── -->
     <template v-else-if="containerMissing">
       <!-- Bot lifecycle pending -->
-      <div
+      <SettingsSection
         v-if="botLifecyclePending"
-        class="mb-8 flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3"
+        class="mb-8"
       >
-        <AlertCircle class="size-4 shrink-0 text-muted-foreground" />
-        <p class="text-sm text-muted-foreground">
-          {{ $t('bots.container.botNotReady') }}
-        </p>
-      </div>
+        <div class="flex items-center gap-3 px-4 py-3">
+          <AlertCircle class="size-4 shrink-0 text-muted-foreground" />
+          <p class="text-sm text-muted-foreground">
+            {{ $t('bots.container.botNotReady') }}
+          </p>
+        </div>
+      </SettingsSection>
 
       <!-- The empty surface keeps the populated frame (solid card) and carries the
            single guiding action — creating is a deliberate step, so it opens a
@@ -1139,16 +1141,13 @@ watch([activeTab, botId], ([tab]) => {
               :sub="m.sub"
             />
           </div>
-          <!-- ui-allow-shape: a standalone note card (its own rounded border + bg-card
-               surface, px-4 not the section's mx-4), shown when runtime metrics are
-               unavailable. Not a section-child SettingsRow: it's a self-contained
-               card, a different surface relationship. Row height only for rhythm. -->
-          <div
-            v-else
-            class="flex min-h-[3.75rem] items-center rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
-          >
-            {{ runtimeMetricsNote || $t('bots.container.refactored.runtimeUnavailable') }}
-          </div>
+          <SettingsSection v-else>
+            <!-- ui-allow-shape: single empty-state message, not a label/control row;
+                 SettingsSection owns the surface in both themes. -->
+            <div class="flex min-h-[3.75rem] items-center px-4 py-3 text-sm text-muted-foreground">
+              {{ runtimeMetricsNote || $t('bots.container.refactored.runtimeUnavailable') }}
+            </div>
+          </SettingsSection>
         </section>
 
         <!-- ─── Manage: quiet entry points; each opens its own focused form ─── -->

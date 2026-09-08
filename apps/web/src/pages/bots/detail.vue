@@ -45,108 +45,104 @@
                 <span class="min-w-0 truncate">{{ backLabel }}</span>
               </NavItem>
 
-              <!-- Identity floats as a card — same recipe as the bots-list persona
-                   cards (bg-card + border + menu-shell radius), just tighter padding.
-                   Wrapping it gives the header a real visual anchor: the round avatar
-                   no longer sits bare against the nav-hover edge, so back + name read
-                   as one settled block instead of two misaligned centers. The card
-                   border replaces the old hairline, so no divider above or below. -->
-              <div class="mt-3 flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-3">
-                <!-- Avatar -->
-                <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
-                  <Avatar class="size-12 rounded-full">
-                    <AvatarImage
-                      v-if="bot?.avatar_url"
-                      :src="bot.avatar_url"
-                      :alt="bot.display_name"
-                    />
-                    <AvatarFallback class="text-lg">
-                      {{ avatarFallback }}
-                    </AvatarFallback>
-                  </Avatar>
-                  <!-- Edit Overlay -->
-                  <button
-                    type="button"
-                    class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
-                    :title="$t('common.edit')"
-                    :aria-label="$t('common.edit')"
-                    :disabled="!bot || botLifecyclePending"
-                    @click="handleEditAvatar"
-                  >
-                    <SquarePen class="size-4 text-white" />
-                  </button>
-                </div>
-              
-                <!-- Info Block -->
-                <div class="min-w-0 flex-1 flex flex-col justify-center">
-                  <div class="group/name flex items-center gap-1 relative min-w-0">
-                    <template v-if="isEditingBotName && bot">
-                      <Input
-                        ref="editNameInputRef"
-                        v-model="botNameDraft"
-                        class="h-7 w-full text-xs px-2 pr-6 shadow-none"
-                        :placeholder="$t('bots.displayNamePlaceholder')"
-                        :disabled="isSavingBotName"
-                        @keydown.enter.prevent="handleConfirmBotName"
-                        @keydown.esc.prevent="handleCancelBotName"
-                        @blur="handleConfirmBotName"
+              <SettingsSection class="mt-3">
+                <div class="flex items-center gap-3 p-3">
+                  <!-- Avatar -->
+                  <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
+                    <Avatar class="size-12 rounded-full">
+                      <AvatarImage
+                        v-if="bot?.avatar_url"
+                        :src="bot.avatar_url"
+                        :alt="bot.display_name"
                       />
-                      <div class="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none">
-                        <Check class="size-3" />
-                      </div>
-                    </template>
-                    <template v-else>
-                      <h2 class="truncate text-sm font-semibold text-foreground">
-                        {{ botNameDraft.trim() || bot?.display_name || botId }}
-                      </h2>
-                      <button
-                        v-if="bot"
-                        type="button"
-                        class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
-                        :disabled="botLifecyclePending"
-                        @click="handleStartEditBotName"
-                      >
-                        <SquarePen class="size-3 text-muted-foreground" />
-                      </button>
-                    </template>
+                      <AvatarFallback class="text-lg">
+                        {{ avatarFallback }}
+                      </AvatarFallback>
+                    </Avatar>
+                    <!-- Edit Overlay -->
+                    <button
+                      type="button"
+                      class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                      :title="$t('common.edit')"
+                      :aria-label="$t('common.edit')"
+                      :disabled="!bot || botLifecyclePending"
+                      @click="handleEditAvatar"
+                    >
+                      <SquarePen class="size-4 text-white" />
+                    </button>
                   </div>
-                
-                  <!-- Status: an inline dot + label living inside the white identity
-                       card — no filled pill, so it never reads as a black blob on
-                       white. A success dot for a healthy/active bot echoes the right
-                       pane's green "Healthy"; an issue turns dot + label destructive;
-                       a healthy-but-inactive bot dims to a muted dot; lifecycle shows
-                       a spinner. Bot type trails as a muted footnote. All semantic
-                       tokens, so light and dark stay in sync. -->
-                  <div class="mt-1 flex items-center gap-1.5 text-[11px]">
-                    <template v-if="bot">
-                      <LoaderCircle
-                        v-if="bot.status === 'creating' || bot.status === 'deleting'"
-                        class="size-2.5 shrink-0 animate-spin text-muted-foreground"
-                      />
-                      <span
-                        v-else
-                        class="size-1.5 shrink-0 rounded-full"
-                        :class="statusVariant === 'destructive'
-                          ? 'bg-destructive'
-                          : statusVariant === 'secondary'
-                            ? 'bg-muted-foreground/40'
-                            : 'bg-success'"
-                      />
-                      <span
-                        class="font-medium"
-                        :class="statusVariant === 'destructive' ? 'text-destructive' : 'text-muted-foreground'"
-                        :title="hasIssue ? issueTitle : undefined"
-                      >{{ statusLabel }}</span>
-                      <span
-                        v-if="bot.type"
-                        class="text-muted-foreground/60"
-                      >· {{ botTypeLabel }}</span>
-                    </template>
+
+                  <!-- Info Block -->
+                  <div class="min-w-0 flex-1 flex flex-col justify-center">
+                    <div class="group/name flex items-center gap-1 relative min-w-0">
+                      <template v-if="isEditingBotName && bot">
+                        <Input
+                          ref="editNameInputRef"
+                          v-model="botNameDraft"
+                          class="h-7 w-full text-xs px-2 pr-6 shadow-none"
+                          :placeholder="$t('bots.displayNamePlaceholder')"
+                          :disabled="isSavingBotName"
+                          @keydown.enter.prevent="handleConfirmBotName"
+                          @keydown.esc.prevent="handleCancelBotName"
+                          @blur="handleConfirmBotName"
+                        />
+                        <div class="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-50 pointer-events-none">
+                          <Check class="size-3" />
+                        </div>
+                      </template>
+                      <template v-else>
+                        <h2 class="truncate text-sm font-semibold text-foreground">
+                          {{ botNameDraft.trim() || bot?.display_name || botId }}
+                        </h2>
+                        <button
+                          v-if="bot"
+                          type="button"
+                          class="opacity-0 group-hover/name:opacity-100 p-1 shrink-0"
+                          :disabled="botLifecyclePending"
+                          @click="handleStartEditBotName"
+                        >
+                          <SquarePen class="size-3 text-muted-foreground" />
+                        </button>
+                      </template>
+                    </div>
+
+                    <!-- Status: an inline dot + label living inside the white identity
+                         card — no filled pill, so it never reads as a black blob on
+                         white. A success dot for a healthy/active bot echoes the right
+                         pane's green "Healthy"; an issue turns dot + label destructive;
+                         a healthy-but-inactive bot dims to a muted dot; lifecycle shows
+                         a spinner. Bot type trails as a muted footnote. All semantic
+                         tokens, so light and dark stay in sync. -->
+                    <div class="mt-1 flex items-center gap-1.5 text-[11px]">
+                      <template v-if="bot">
+                        <LoaderCircle
+                          v-if="bot.status === 'creating' || bot.status === 'deleting'"
+                          class="size-2.5 shrink-0 animate-spin text-muted-foreground"
+                        />
+                        <span
+                          v-else
+                          class="size-1.5 shrink-0 rounded-full"
+                          :class="statusVariant === 'destructive'
+                            ? 'bg-destructive'
+                            : statusVariant === 'secondary'
+                              ? 'bg-muted-foreground/40'
+                              : 'bg-success'"
+                        />
+                        <span
+                          class="font-medium"
+                          :class="statusVariant === 'destructive' ? 'text-destructive' : 'text-muted-foreground'"
+                          :title="hasIssue ? issueTitle : undefined"
+                        >{{ statusLabel }}</span>
+                        <span
+                          v-if="bot.type"
+                          class="text-muted-foreground/60"
+                        >· {{ botTypeLabel }}</span>
+                      </template>
+                    </div>
                   </div>
                 </div>
-              </div>
-            
+              </SettingsSection>
+
               <!-- Search Input -->
               <div class="mt-3 relative">
                 <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
@@ -269,7 +265,7 @@
 <script setup lang="ts">
 import {
   Avatar, AvatarImage, AvatarFallback, Input,
-  SidebarMenu, SidebarMenuItem,
+  SidebarMenu, SidebarMenuItem, SettingsSection,
 } from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, MessageSquare,

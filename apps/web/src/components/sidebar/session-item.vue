@@ -149,7 +149,7 @@
         :disabled="isActive"
         @select="$emit('openNewTab', session)"
       >
-        <MessageSquare />
+        <OpenInTabIcon />
         {{ t('common.open') }}
       </ContextMenuItem>
       <ContextMenuSeparator />
@@ -170,8 +170,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Clock, LoaderCircle, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
+import { Clock, LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { OpenInTabIcon } from '@memohai/icon/ui'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
   ContextMenu,

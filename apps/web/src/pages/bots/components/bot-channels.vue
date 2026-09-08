@@ -63,22 +63,21 @@
         </div>
 
         <!-- Empty: a framed box that guides with one line + the add action, no decorative icon -->
-        <Empty
-          v-else
-          class="rounded-[var(--radius-menu-shell)] border border-dashed border-border py-16"
-        >
-          <EmptyTitle>{{ t('bots.channels.emptyTitle') }}</EmptyTitle>
-          <EmptyDescription>{{ t('bots.channels.emptyDescription') }}</EmptyDescription>
-          <EmptyContent>
-            <Button
-              variant="outline"
-              @click="addOpen = true"
-            >
-              <Plus class="size-4" />
-              {{ t('bots.channels.addChannel') }}
-            </Button>
-          </EmptyContent>
-        </Empty>
+        <SettingsSection v-else>
+          <Empty class="py-16">
+            <EmptyTitle>{{ t('bots.channels.emptyTitle') }}</EmptyTitle>
+            <EmptyDescription>{{ t('bots.channels.emptyDescription') }}</EmptyDescription>
+            <EmptyContent>
+              <Button
+                variant="outline"
+                @click="addOpen = true"
+              >
+                <Plus class="size-4" />
+                {{ t('bots.channels.addChannel') }}
+              </Button>
+            </EmptyContent>
+          </Empty>
+        </SettingsSection>
       </PageShell>
 
       <!-- Platform detail -->
@@ -135,6 +134,7 @@
 </template>
 
 <script setup lang="ts">
+import { SettingsSection } from '@felinic/ui'
 import { Plus, ChevronLeft } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'

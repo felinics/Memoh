@@ -10,50 +10,49 @@
   >
     <Button
       variant="ghost"
+      tone="muted"
       size="icon-sm"
       shape="circle"
-      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      class="size-7 [-webkit-app-region:no-drag]"
       :title="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
       :aria-label="workbenchOpen ? t('chat.topBar.hideWorkbench') : t('chat.topBar.showWorkbench')"
       :aria-pressed="workbenchOpen"
       @click="workspaceTabs.toggleWorkbench()"
     >
-      <PanelLeftClose
+      <SidebarCloseIcon
         v-if="workbenchOpen"
-        :stroke-width="1.75"
         class="size-4"
       />
-      <PanelLeftOpen
+      <SidebarOpenIcon
         v-else
-        :stroke-width="1.75"
         class="size-4"
       />
     </Button>
     <Button
       variant="ghost"
+      tone="muted"
       size="icon-sm"
       shape="circle"
-      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      class="size-7 [-webkit-app-region:no-drag]"
       :title="t('chat.topBar.goBack')"
       :aria-label="t('chat.topBar.goBack')"
       @click="router.go(-1)"
     >
-      <ChevronLeft
-        :stroke-width="1.75"
+      <BackIcon
         class="size-4"
       />
     </Button>
     <Button
       variant="ghost"
+      tone="muted"
       size="icon-sm"
       shape="circle"
-      class="size-7 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+      class="size-7 [-webkit-app-region:no-drag]"
       :title="t('chat.topBar.goForward')"
       :aria-label="t('chat.topBar.goForward')"
       @click="router.go(1)"
     >
-      <ChevronRight
-        :stroke-width="1.75"
+      <ForwardIcon
         class="size-4"
       />
     </Button>
@@ -67,7 +66,7 @@ import { computed, inject, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import { BackIcon, ForwardIcon, SidebarCloseIcon, SidebarOpenIcon } from '@memohai/icon/ui'
 import { Button } from '@felinic/ui'
 import type { DockviewApi, DockviewGroupPanelApi, IDockviewGroupPanel } from 'dockview-vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'

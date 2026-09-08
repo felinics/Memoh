@@ -1,6 +1,6 @@
 import { h } from 'vue'
 import type { LucideIcon } from 'lucide-vue-next'
-import { createLucideIcon, Paperclip, Plus, Terminal, Globe, Columns2, Rows2 } from 'lucide-vue-next'
+import { createLucideIcon, Paperclip, SquareArrowOutUpRight, Plus, ChevronDown, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, Terminal, Globe, Columns2, Rows2 } from 'lucide-vue-next'
 
 // Keep the default visual weight consistent across authored and Lucide glyphs.
 function withUiStroke(icon: LucideIcon): LucideIcon {
@@ -41,5 +41,13 @@ export const BrowserIcon = withUiStroke(Globe)
 export const SplitRightIcon = withUiStroke(Columns2)
 export const SplitDownIcon = withUiStroke(Rows2)
 
-// The sparse add glyph keeps Lucide's 2-unit stroke for a clear action target.
-export const AddIcon = Plus
+export const AddIcon = withUiStroke(Plus)
+export const ExpandIcon = withUiStroke(ChevronDown)
+
+export const BackIcon = withUiStroke(ChevronLeft)
+export const ForwardIcon = withUiStroke(ChevronRight)
+export const SidebarOpenIcon = withUiStroke(PanelLeftOpen)
+export const SidebarCloseIcon = withUiStroke(PanelLeftClose)
+
+// The window outline anchors the opening gesture at small control sizes.
+export const OpenInTabIcon = withUiStroke(SquareArrowOutUpRight)

@@ -2,53 +2,55 @@
   <div class="space-y-8">
     <!-- Identity card: the platform this connection belongs to, with the
          committing actions (enable/disable, save) on the right. -->
-    <div class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card p-4">
-      <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted">
-        <ChannelIcon
-          :channel="platformType"
-          size="1.5em"
-        />
-      </span>
-      <div class="min-w-0 flex-1">
-        <h2 class="truncate text-sm font-semibold text-foreground">
-          {{ channelTitle }}
-        </h2>
-        <p
-          v-if="isEditMode"
-          class="mt-0.5 flex items-center gap-1.5 text-xs"
-          :class="form.disabled ? 'text-muted-foreground' : 'text-success'"
-        >
-          <span class="size-1.5 rounded-full bg-current" />
-          {{ form.disabled ? $t('bots.channels.statusInactive') : $t('bots.channels.statusActive') }}
-        </p>
-      </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <span
-          v-if="isFormDirty"
-          class="hidden text-xs text-muted-foreground sm:inline"
-        >
-          {{ $t('common.unsaved') }}
+    <SettingsSection>
+      <div class="flex items-center gap-3 p-4">
+        <span class="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted">
+          <ChannelIcon
+            :channel="platformType"
+            size="1.5em"
+          />
         </span>
-        <Button
-          v-if="isEditMode"
-          variant="outline"
-          size="sm"
-          :disabled="isBusy"
-          :loading="action === 'toggle'"
-          @click="handleToggleDisabled"
-        >
-          {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
-        </Button>
-        <Button
-          size="sm"
-          :disabled="(!isFormDirty && isEditMode) || isBusy"
-          :loading="action === 'save'"
-          @click="handleSave"
-        >
-          {{ action === 'save' ? $t('bots.channels.verifying') : $t('bots.settings.save') }}
-        </Button>
+        <div class="min-w-0 flex-1">
+          <h2 class="truncate text-sm font-semibold text-foreground">
+            {{ channelTitle }}
+          </h2>
+          <p
+            v-if="isEditMode"
+            class="mt-0.5 flex items-center gap-1.5 text-xs"
+            :class="form.disabled ? 'text-muted-foreground' : 'text-success'"
+          >
+            <span class="size-1.5 rounded-full bg-current" />
+            {{ form.disabled ? $t('bots.channels.statusInactive') : $t('bots.channels.statusActive') }}
+          </p>
+        </div>
+        <div class="flex shrink-0 items-center gap-2">
+          <span
+            v-if="isFormDirty"
+            class="hidden text-xs text-muted-foreground sm:inline"
+          >
+            {{ $t('common.unsaved') }}
+          </span>
+          <Button
+            v-if="isEditMode"
+            variant="outline"
+            size="sm"
+            :disabled="isBusy"
+            :loading="action === 'toggle'"
+            @click="handleToggleDisabled"
+          >
+            {{ form.disabled ? $t('bots.channels.actionEnable') : $t('bots.channels.actionDisable') }}
+          </Button>
+          <Button
+            size="sm"
+            :disabled="(!isFormDirty && isEditMode) || isBusy"
+            :loading="action === 'save'"
+            @click="handleSave"
+          >
+            {{ action === 'save' ? $t('bots.channels.verifying') : $t('bots.settings.save') }}
+          </Button>
+        </div>
       </div>
-    </div>
+    </SettingsSection>
 
     <!-- WeChat pairs by scanning a QR rather than entering credentials. -->
     <div v-if="channelItem.meta.type === 'weixin'">

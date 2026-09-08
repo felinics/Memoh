@@ -4,26 +4,28 @@
     <Button
       v-if="isTerminalGroup && canWorkspaceExec"
       variant="ghost"
+      tone="muted"
       size="icon-sm"
-      class="size-[1.6875rem] shrink-0 rounded-sm p-0 text-muted-foreground/70 hover:bg-[color:var(--sidebar-hover)] hover:text-foreground"
+      class="size-[1.6875rem] shrink-0 rounded-sm p-0"
       :title="t('chat.tabBarToolkit.newTerminal')"
       :aria-label="t('chat.tabBarToolkit.newTerminal')"
       @click="store.openTerminalInPanel(props.params.group.id)"
     >
-      <AddIcon class="size-3.5" />
+      <AddIcon />
     </Button>
     <!-- Editor groups: unified "+" menu for new panels and splits. -->
     <DropdownMenu v-else-if="hasAnyAction">
       <DropdownMenuTrigger as-child>
         <Button
           variant="ghost"
+          tone="muted"
           size="icon-sm"
           shape="circle"
-          class="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground data-[state=open]:text-foreground"
+          class="size-7 shrink-0 p-0"
           :title="t('chat.tabBarToolkit.openMenu')"
           :aria-label="t('chat.tabBarToolkit.openMenu')"
         >
-          <AddIcon class="size-3.5" />
+          <AddIcon />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
