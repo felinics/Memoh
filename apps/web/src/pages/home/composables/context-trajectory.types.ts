@@ -1,5 +1,7 @@
 import type { HandlersContextTrajectoryEntry, HandlersContextTrajectoryResponse } from '@memohai/sdk'
 
+export type ContextTrajectoryFilter = 'all' | 'context' | 'requests'
+
 export interface ContextCapturePage {
   before?: string
   data: HandlersContextTrajectoryResponse

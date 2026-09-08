@@ -48,7 +48,7 @@ export function useContextLifecycle() {
     return data as HandlersContextLifecycleResponse
   }
 
-  const { data, status } = useQuery({
+  const { data, status, error, refetch } = useQuery({
     key: () => ['context-lifecycle', botId.value ?? '', sessionId.value ?? ''],
     query: ({ signal }) => fetchPage(undefined, PAGE_LIMIT, signal),
     enabled: () => !!botId.value && !!sessionId.value,
@@ -113,5 +113,5 @@ export function useContextLifecycle() {
     }
   }
 
-  return { data, status, hasTarget, turns, fragmentPreviews, hasOlder, canLoadOlder, loadingOlder, loadOlder }
+  return { data, status, error, refresh: refetch, hasTarget, turns, fragmentPreviews, hasOlder, canLoadOlder, loadingOlder, loadOlder }
 }

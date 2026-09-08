@@ -50,6 +50,8 @@ const EXCLUDED_QUERY_KEY_HEADS: ReadonlySet<string> = new Set([
   // not rest on disk.
   'context-lifecycle-decisions',
   'context-lifecycle-fragments',
+  'context-trajectory',
+  'context-trajectory-event',
   'session-compactions',
   // Computer ACL state (which bot may use which runtime). Volatile and
   // cross-surface: writes land via the access dialog / bot page / API, so a
