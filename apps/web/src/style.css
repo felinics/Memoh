@@ -708,6 +708,13 @@
   --inline-code-bg: oklch(0.24 0 0);
 }
 
+/* Inline code in a user bubble overlays that bubble's themed surface instead
+ * of introducing the neutral page surface used by assistant Markdown. */
+.chat-user-bubble .markstream-vue {
+  --inline-code-bg: var(--ui-hover);
+  --inline-code-fg: var(--chat-user-bubble-fg);
+}
+
 /* Full grid (Excel feel): both vertical + horizontal cell lines, but a finer/
  * lighter hairline than the outer frame so the grid is calm, not heavy. */
 .markstream-vue .table-node th,
