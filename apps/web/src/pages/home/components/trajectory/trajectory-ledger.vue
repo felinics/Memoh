@@ -40,7 +40,7 @@
           @keydown.space.prevent="emit('select', row.key)"
         >
           <span class="truncate text-caption text-muted-foreground">
-            <template v-if="row.turnStart">{{ $t('chat.trajectory.turn', { n: row.turnLabel }) }}</template>
+            <template v-if="row.turnStart">{{ row.turnId.startsWith('run:') ? $t('chat.trajectory.captureRun', { id: row.turnLabel }) : $t('chat.trajectory.turn', { n: row.turnLabel }) }}</template>
           </span>
           <span
             class="truncate text-caption font-medium"
@@ -82,6 +82,7 @@ import { entryRefs, type TrajectoryRow } from '../../composables/trajectory-mode
 import { contextLabelKey, contextPreview, formatDurationMs, fragmentRowPreview, KIND_LABEL_KEY, KIND_TONE_CLASS, type FragmentPreviews } from '../../composables/trajectory-view'
 import { formatTokenCount } from '../../composables/context-categories'
 import { useVirtualRows } from '../../composables/useVirtualRows'
+import { captureStageLabel } from '../../composables/context-trajectory-labels'
 
 const props = defineProps<{
   rows: TrajectoryRow[]
@@ -93,7 +94,7 @@ const props = defineProps<{
 // so the pane decides whether the inspector follows it.
 const emit = defineEmits<{ select: [key: string], navigate: [key: string] }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const viewport = useTemplateRef<HTMLElement>('viewport')
 const count = computed(() => props.rows.length)
 const { range, rowHeight, keepAnchored, scrollRowIntoView, pageRows } = useVirtualRows(viewport, count)
@@ -228,6 +229,7 @@ watch(() => props.selectedKey, (key) => {
 })
 
 function rowLabel(row: TrajectoryRow): string {
+  if (row.detail.kind === 'capture') return captureStageLabel(row.detail.event.stage, t, te)
   if (row.detail.kind === 'context') {
     const key = contextLabelKey(row.detail.entry)
     return key ? t(key) : row.label
@@ -244,6 +246,8 @@ function rowLabel(row: TrajectoryRow): string {
 
 function rowPreview(row: TrajectoryRow): string {
   switch (row.detail.kind) {
+    case 'capture':
+      return t('chat.trajectory.captureBlocks', { n: row.detail.event.block_count ?? 0 })
     case 'system':
       return fragmentRowPreview(row.detail.entry.refs, props.previews)
         ?? t('chat.trajectory.systemPreview', { fragments: row.detail.entry.fragments, tokens: formatTokenCount(row.detail.entry.tokens) })

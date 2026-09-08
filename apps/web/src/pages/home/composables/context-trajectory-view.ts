@@ -63,7 +63,7 @@ export function mergeTrajectoryCaptures(
     captures.push({
       key: `capture:${event.id}`,
       kind: event.stage === 'provider_request' || event.stage === 'wire_request' ? 'request' : 'context',
-      turnId, turnLabel: turnLabels.get(turnId) ?? event.run_id.slice(0, 8), turnStart: false,
+      turnId, turnLabel: turnLabels.get(turnId) ?? (turnId.startsWith('run:') ? event.run_id.slice(0, 8) : '?'), turnStart: false,
       stepIndex: event.step_index ?? null, label: event.stage ?? '', preview: '', output: null,
       startedAtMs: Number.isFinite(at) ? at : null, endedAtMs: null, running: false,
       detail: {

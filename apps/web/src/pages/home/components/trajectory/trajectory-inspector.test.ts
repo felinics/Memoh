@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import en from '@/i18n/locales/en.json'
 import type { ChatAssistantTurn, ChatUserTurn } from '@/store/chat/types'
 import { buildTrajectoryRows, type TrajectoryRow } from '../../composables/trajectory-model'
+import { mergeTrajectoryCaptures } from '../../composables/context-trajectory-view'
 
 vi.mock('@felinic/ui', () => {
   const box = (tag = 'div') => defineComponent({ setup: (_, { slots, attrs }) => () => h(tag, attrs, slots.default?.()) })
@@ -26,6 +27,15 @@ vi.mock('../../composables/useContextLifecycleFragments', () => ({
 }))
 vi.mock('../../composables/useContextLifecycleDecisions', () => ({
   useContextLifecycleDecisions: () => ({ decisions: computed(() => []), status: ref('pending') }),
+}))
+vi.mock('./trajectory-capture-inspector.vue', () => ({
+  default: defineComponent({
+    props: { event: { type: Object, required: true } },
+    emits: ['selectEvent'],
+    setup: (props, { emit }) => () => h('div', { 'data-testid': 'capture-detail' }, [
+      String(props.event?.id), h('button', { onClick: () => emit('selectEvent', '1') }, 'previous'),
+    ]),
+  }),
 }))
 
 import TrajectoryInspector from './trajectory-inspector.vue'
@@ -62,7 +72,7 @@ const rows = buildTrajectoryRows([
 
 const mounted: { app: ReturnType<typeof createApp>, root: HTMLDivElement }[] = []
 
-function mount(props: { row: TrajectoryRow }) {
+function mount(props: { row: TrajectoryRow, onSelectEvent?: (id: string) => void }) {
   const root = document.createElement('div')
   document.body.appendChild(root)
   const app = createApp(defineComponent({ setup: () => () => h(TrajectoryInspector, props) }))
@@ -80,6 +90,15 @@ afterEach(() => {
 })
 
 describe('trajectory inspector', () => {
+  it('opens a captured request and relays navigation to the preceding stage', () => {
+    const row = mergeTrajectoryCaptures([], [{ id: '2', run_id: 'run', capture_id: 'capture', sequence: 2, stage: 'wire_request' }], [])[0]!
+    const selectEvent = vi.fn()
+    const root = mount({ row, onSelectEvent: selectEvent })
+    const detail = root.querySelector('[data-testid="capture-detail"]')
+    expect(detail?.textContent).toContain('2')
+    detail?.querySelector<HTMLButtonElement>('button')?.click()
+    expect(selectEvent).toHaveBeenCalledWith('1')
+  })
   it('keeps the title and close out of the scrolling body and names the tool', () => {
     const root = mount({ row: rows[1]! })
     const viewport = root.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement

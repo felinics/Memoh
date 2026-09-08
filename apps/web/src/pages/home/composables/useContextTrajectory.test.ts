@@ -42,6 +42,32 @@ beforeEach(() => {
 afterEach(() => { unmount?.(); vi.useRealTimers() })
 
 describe('context trajectory pages', () => {
+  it('keeps an older-page failure visible and retries that cursor', async () => {
+    let failed = true
+    fetchPage.mockImplementation(({ query }) => query.before
+      ? failed ? Promise.reject(new Error('older unavailable')) : Promise.resolve({ data: { events: [{ id: '9' }], has_more: false } })
+      : Promise.resolve({ data: { events: [{ id: '10' }], has_more: true, next_cursor: '10' } }))
+    const result = setup()
+    await flushPromises()
+    await result.loadOlder()
+    expect(result.error.value).toBeTruthy()
+    await result.refresh()
+    await flushPromises()
+    expect(result.error.value).toBeTruthy()
+    failed = false
+    await result.refresh()
+    await flushPromises()
+    expect(result.error.value).toBeNull()
+    expect(result.events.value.map(event => event.id)).toEqual(['9', '10'])
+  })
+
+  it('never polls without a session target', async () => {
+    target.value = { ...target.value, sessionId: '' }
+    vi.useFakeTimers()
+    setup()
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(fetchPage).not.toHaveBeenCalled()
+  })
   it('exposes initial failure and retries it', async () => {
     fetchPage.mockRejectedValueOnce(new Error('offline'))
     const result = setup()

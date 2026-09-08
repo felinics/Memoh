@@ -10,6 +10,8 @@ import { buildRowMap, buildTrajectoryRows, foldTrajectoryStats } from '../../com
 import { rowMapGeometry } from '../../composables/trajectory-view'
 
 const selectedKey = ref<string | null>(null)
+const hasLoadError = ref(false)
+const refreshContext = vi.fn()
 const select = vi.fn((key: string | null) => {
   selectedKey.value = selectedKey.value === key ? null : key
 })
@@ -54,6 +56,13 @@ vi.mock('../../composables/useTrajectory', () => ({
     stats: computed(() => foldTrajectoryStats([], new Map())),
     fragmentPreviews: computed(() => null),
     loadingMessages: computed(() => false),
+    loadingContext: computed(() => false),
+    filter: ref('all'),
+    captureCount: computed(() => 0),
+    hasLoadError,
+    hasCaptureGap: computed(() => false),
+    hasCaptureErrors: computed(() => false),
+    refreshContext,
     selectedKey,
     selectedRow: computed(() => rows.find(row => row.key === selectedKey.value) ?? null),
     bars: computed(() => rowMapGeometry(buildRowMap(rows), 'duration')),
@@ -70,6 +79,9 @@ vi.mock('../../composables/useContextLifecycleFragments', () => ({
 }))
 vi.mock('../../composables/useContextLifecycleDecisions', () => ({
   useContextLifecycleDecisions: () => ({ decisions: computed(() => []), status: ref('pending') }),
+}))
+vi.mock('../../composables/useContextTrajectoryEvent', () => ({
+  useContextTrajectoryEvent: () => ({ data: ref(undefined), status: ref('pending'), error: ref(null), refresh: vi.fn() }),
 }))
 
 import TrajectoryPane from './trajectory-pane.vue'
@@ -121,6 +133,8 @@ afterEach(() => {
   selectedKey.value = null
   select.mockClear()
   focus.mockClear()
+  hasLoadError.value = false
+  refreshContext.mockClear()
 })
 
 function caret(): HTMLElement | null {
@@ -138,6 +152,15 @@ async function settle() {
 }
 
 describe('trajectory pane', () => {
+  it('keeps the ledger visible while reporting and retrying missing context', async () => {
+    hasLoadError.value = true
+    const root = mount()
+    await settle()
+    expect(root.querySelector('[data-testid="trajectory-load-error"]')).not.toBeNull()
+    expect(root.querySelector('[data-testid="trajectory-ledger"]')).not.toBeNull()
+    root.querySelector<HTMLButtonElement>('[data-testid="trajectory-retry"]')!.click()
+    expect(refreshContext).toHaveBeenCalledOnce()
+  })
   it('lets selection follow the caret while the inspector sits beside the list', async () => {
     layout = 'beside'
     const root = mount()

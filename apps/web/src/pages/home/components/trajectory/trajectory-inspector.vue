@@ -5,7 +5,7 @@
     data-testid="trajectory-inspector-header"
   >
     <span class="min-w-0 truncate text-caption">
-      <span class="text-muted-foreground">{{ $t('chat.trajectory.turn', { n: row.turnLabel }) }} · </span>
+      <span class="text-muted-foreground">{{ row.detail.kind === 'capture' ? $t('chat.trajectory.captureRun', { id: row.detail.event.run_id?.slice(0, 8) }) : $t('chat.trajectory.turn', { n: row.turnLabel }) }} · </span>
       <span
         class="font-medium"
         :class="KIND_TONE_CLASS[row.kind]"
@@ -31,7 +31,15 @@
     class="min-h-0 flex-1"
   >
     <div class="space-y-3 px-3 py-2 text-body">
-      <template v-if="row.detail.kind === 'system'">
+      <TrajectoryCaptureInspector
+        v-if="row.detail.kind === 'capture'"
+        :event="row.detail.event"
+        :previous-event-id="row.detail.previousEventId"
+        :can-load-older="canLoadOlder"
+        @select-event="emit('selectEvent', $event)"
+        @load-older="emit('loadOlder')"
+      />
+      <template v-else-if="row.detail.kind === 'system'">
         <ContextLifecycleTurns
           :turns="systemTurns"
           :has-older="row.detail.previous === undefined"
@@ -176,7 +184,7 @@
         >{{ row.detail.turn.text }}</pre>
       </template>
 
-      <template v-else>
+      <template v-else-if="row.detail.kind === 'block'">
         <div
           v-if="timingRows.length"
           class="divide-y divide-border"
@@ -345,11 +353,12 @@ import { useContextLifecycleDecisions } from '../../composables/useContextLifecy
 import { useContextLifecycleFragments } from '../../composables/useContextLifecycleFragments'
 import { apiErrorStatus } from '@/utils/api-error'
 import ContextLifecycleTurns from '../context-lifecycle-turns.vue'
+import TrajectoryCaptureInspector from './trajectory-capture-inspector.vue'
 
 const DECISION_ROW_LIMIT = 200
 
-const props = defineProps<{ row: TrajectoryRow, previews?: FragmentPreviews | null }>()
-const emit = defineEmits<{ close: [] }>()
+const props = defineProps<{ row: TrajectoryRow, previews?: FragmentPreviews | null, canLoadOlder?: boolean }>()
+const emit = defineEmits<{ close: [], selectEvent: [id: string], loadOlder: [] }>()
 const { t } = useI18n()
 const header = useTemplateRef<HTMLElement>('header')
 const body = useTemplateRef<InstanceType<typeof ScrollArea>>('body')

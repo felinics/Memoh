@@ -21,6 +21,63 @@
     </Empty>
 
     <template v-else>
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-1.5">
+        <SegmentedControl
+          v-model="filter"
+          :items="filterItems"
+          :aria-label="$t('chat.trajectory.captureFilterAria')"
+          data-testid="trajectory-filters"
+        />
+        <span class="text-caption text-muted-foreground">{{ $t('chat.trajectory.captureStagesLoaded', { n: captureCount }) }}</span>
+      </div>
+      <div
+        v-if="hasLoadError"
+        class="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5"
+        role="status"
+        data-testid="trajectory-load-error"
+      >
+        <p class="text-caption text-destructive">
+          {{ $t('chat.trajectory.captureLoadFailed') }}
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          data-testid="trajectory-retry"
+          @click="refreshContext"
+        >
+          {{ $t('common.retry') }}
+        </Button>
+      </div>
+      <div
+        v-else-if="hasCaptureGap"
+        class="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5"
+        role="status"
+      >
+        <p class="text-caption text-warning">
+          {{ $t('chat.trajectory.capturePageGap') }}
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          :loading="loadingOlder"
+          @click="loadOlder"
+        >
+          {{ $t('chat.trajectory.loadOlder') }}
+        </Button>
+      </div>
+      <p
+        v-if="hasCaptureErrors"
+        class="border-b border-border px-3 py-1.5 text-caption text-warning"
+        role="status"
+      >
+        {{ $t('chat.trajectory.captureGaps') }}
+      </p>
+      <p
+        v-if="!loadingContext && !hasLoadError && captureCount === 0"
+        class="border-b border-border px-3 py-1.5 text-caption text-muted-foreground"
+      >
+        {{ $t('chat.trajectory.captureLegacy') }}
+      </p>
       <TrajectoryOverview
         :bars="bars"
         :selected-key="selectedKey"
@@ -52,7 +109,7 @@
             </Button>
           </div>
           <div
-            v-if="loadingMessages && rows.length === 0"
+            v-if="(loadingMessages || loadingContext) && rows.length === 0"
             class="space-y-1.5 px-3 py-2"
           >
             <Skeleton
@@ -87,11 +144,23 @@
             ref="inspector"
             :row="selectedRow"
             :previews="fragmentPreviews"
+            :can-load-older="hasOlder"
             @close="closeInspector"
+            @select-event="focusCapture"
+            @load-older="loadOlder"
           />
         </div>
       </div>
-      <TrajectoryStats :stats="stats" />
+      <TrajectoryStats
+        v-if="stats.steps > 0 || stats.toolCalls > 0"
+        :stats="stats"
+      />
+      <p
+        v-if="stats.steps > 0"
+        class="px-3 pb-1 text-caption text-muted-foreground"
+      >
+        {{ $t('chat.trajectory.captureTimingScope') }}
+      </p>
     </template>
   </div>
 </template>
@@ -103,13 +172,14 @@ import { Button, Empty, EmptyDescription, SegmentedControl, Skeleton } from '@fe
 import type { SegmentedItem } from '@felinic/ui'
 import { useTrajectory } from '../../composables/useTrajectory'
 import type { TimelineMode } from '../../composables/trajectory-view'
+import type { ContextTrajectoryFilter } from '../../composables/context-trajectory.types'
 import TrajectoryOverview from './trajectory-overview.vue'
 import TrajectoryLedger from './trajectory-ledger.vue'
 import TrajectoryInspector from './trajectory-inspector.vue'
 import TrajectoryStats from './trajectory-stats.vue'
 
 const { t } = useI18n()
-const { hasTarget, rows, stats, fragmentPreviews, loadingMessages, selectedKey, selectedRow, bars, mode, hasOlder, loadingOlder, loadOlder, select, focus } = useTrajectory()
+const { hasTarget, rows, stats, fragmentPreviews, loadingMessages, loadingContext, selectedKey, selectedRow, bars, mode, hasOlder, loadingOlder, loadOlder, select, focus, filter, captureCount, hasLoadError, hasCaptureGap, hasCaptureErrors, refreshContext } = useTrajectory()
 
 const split = useTemplateRef<HTMLElement>('split')
 const column = useTemplateRef<HTMLElement>('column')
@@ -148,6 +218,10 @@ function navigate(key: string) {
   if (!covers.value) focus(key)
 }
 
+function focusCapture(id: string) {
+  focus(`capture:${id}`)
+}
+
 function closeInspector() {
   const key = selectedKey.value
   if (!key) return
@@ -172,5 +246,11 @@ watch(listCovered, async (covered) => {
 const modeItems = computed<SegmentedItem<TimelineMode>[]>(() => [
   { value: 'duration', label: t('chat.trajectory.modeDuration') },
   { value: 'sequence', label: t('chat.trajectory.modeSequence') },
+])
+
+const filterItems = computed<SegmentedItem<ContextTrajectoryFilter>[]>(() => [
+  { value: 'all', label: t('chat.trajectory.captureAll') },
+  { value: 'context', label: t('chat.trajectory.captureContext') },
+  { value: 'requests', label: t('chat.trajectory.captureRequests') },
 ])
 </script>

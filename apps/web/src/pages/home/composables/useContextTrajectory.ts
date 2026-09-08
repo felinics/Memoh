@@ -9,10 +9,12 @@ import type { ContextCapturePage } from './context-trajectory.types'
 export function useContextTrajectory(active: Ref<boolean>) {
   const target = useChatViewTarget()
   const scope = computed(() => `${target.value.botId}/${target.value.sessionId}`)
+  const enabled = computed(() => active.value && !!target.value.botId && !!target.value.sessionId)
   const pages = shallowRef<ContextCapturePage[]>([])
   const loadingOlder = shallowRef(false)
   const fillingGap = shallowRef(false)
   const loadError = shallowRef<unknown>(null)
+  const failedCursor = shallowRef<string | null>(null)
   const merged = computed(() => mergeContextCapturePages(pages.value))
   let generation = 0
   let controller: AbortController | undefined
@@ -24,6 +26,7 @@ export function useContextTrajectory(active: Ref<boolean>) {
     loadingOlder.value = false
     fillingGap.value = false
     loadError.value = null
+    failedCursor.value = null
   }, { flush: 'sync' })
   onScopeDispose(() => { generation += 1; controller?.abort() })
 
@@ -45,13 +48,13 @@ export function useContextTrajectory(active: Ref<boolean>) {
   const query = useQuery({
     key: () => ['context-trajectory', target.value.botId ?? '', target.value.sessionId ?? ''],
     query: ({ signal }) => fetchPage(undefined, signal),
-    enabled: () => active.value && !!target.value.botId && !!target.value.sessionId,
+    enabled,
     gcTime: 60_000,
     refetchOnWindowFocus: false,
   })
 
   async function loadOlder() {
-    const before = merged.value.gapCursor ?? merged.value.nextCursor
+    const before = failedCursor.value ?? merged.value.gapCursor ?? merged.value.nextCursor
     if (!before || loadingOlder.value) return
     const expected = generation
     controller = new AbortController()
@@ -59,9 +62,15 @@ export function useContextTrajectory(active: Ref<boolean>) {
     loadError.value = null
     try {
       const result = await fetchPage(before, controller.signal)
-      if (expected === generation && result.scope === scope.value) addPage(result.page)
+      if (expected === generation && result.scope === scope.value) {
+        addPage(result.page)
+        failedCursor.value = null
+      }
     } catch (error) {
-      if (expected === generation) loadError.value = error
+      if (expected === generation) {
+        loadError.value = error
+        failedCursor.value = before
+      }
     } finally {
       if (expected === generation) loadingOlder.value = false
     }
@@ -88,16 +97,17 @@ export function useContextTrajectory(active: Ref<boolean>) {
   }, { immediate: true })
 
   async function refresh() {
-    loadError.value = null
+    if (!enabled.value) return
     await query.refetch()
+    if (failedCursor.value) await loadOlder()
     await fillGap()
   }
 
   const polling = useIntervalFn(() => {
     if (query.asyncStatus.value !== 'loading' && !loadingOlder.value) void refresh()
-  }, 2000, { immediate: active.value })
-  watch(active, (enabled) => {
-    if (enabled) { polling.resume(); void refresh() }
+  }, 2000, { immediate: enabled.value })
+  watch(enabled, (visible) => {
+    if (visible) { polling.resume(); void refresh() }
     else polling.pause()
   })
 
