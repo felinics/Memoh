@@ -2861,6 +2861,10 @@ function startVoiceMeters(stream: MediaStream) {
   voiceBars.value = Array(voiceBarCount.value).fill(0)
   voiceSeconds.value = 0
   const audioCtx = new AudioContext()
+  // The mic-permission prompt can outlast transient activation (and Safari
+  // starts suspended regardless) — without resume() the bars stay flat dots
+  // for the whole session. Everything else works either way.
+  void audioCtx.resume().catch(() => {})
   const analyser = audioCtx.createAnalyser()
   analyser.fftSize = 1024
   analyser.smoothingTimeConstant = 0.5
@@ -2963,6 +2967,10 @@ async function transcribeVoiceInput(
     }
     const draft = inputText.value.trimEnd()
     inputText.value = draft ? `${draft} ${transcript}` : transcript
+    // Leave the voice surface BEFORE focusing: the textarea only remounts
+    // once the state is idle — focusing first hits a null ref and silently
+    // does nothing (the finally would clear the state one tick too late).
+    voiceInputState.value = 'idle'
     await nextTick()
     focusTextarea()
   } catch (error) {
@@ -3021,11 +3029,14 @@ async function startVoiceInput() {
       return
     }
     const mimeType = preferredVoiceMimeType()
+    // Publish the stream BEFORE constructing the recorder: if the
+    // MediaRecorder constructor throws (Safari isTypeSupported/constructor
+    // disagree), the catch can only stop tracks through voiceStream.
+    voiceStream = stream
     const recorder = mimeType
       ? new MediaRecorder(stream, { mimeType })
       : new MediaRecorder(stream)
 
-    voiceStream = stream
     voiceRecorder = recorder
     voiceChunks = []
     discardVoiceRecording = false
@@ -3069,9 +3080,18 @@ async function startVoiceInput() {
     voiceInputState.value = 'recording'
   } catch (error) {
     if (voiceRequestVersion !== requestVersion) return
+    // recorder.start() succeeded but the meter setup threw right after: the
+    // recorder is still capturing. Route it through onstop (flagged discard)
+    // so it cleans up instead of transcribing behind the error toast.
+    if (voiceRecorder?.state === 'recording') {
+      discardVoiceRecording = true
+      voiceRecorder.stop()
+    } else {
+      voiceRecorder = null
+      voiceChunks = []
+    }
     releaseVoiceStream()
     stopVoiceMeters()
-    voiceRecorder = null
     voiceInputState.value = 'idle'
     const denied = error instanceof DOMException
       && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
