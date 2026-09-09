@@ -1,4 +1,4 @@
--- 0147_context_fragment_texts
+-- 0148_context_fragment_texts
 -- Content-addressed store of the rendered context fragments a run sent
 -- (system prompt pieces, workspace rules, tool usage, skills, tool
 -- definitions). content_hash is the hash of the kind and the text alone, so

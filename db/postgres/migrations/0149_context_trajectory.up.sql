@@ -1,4 +1,4 @@
--- 0148_context_trajectory
+-- 0149_context_trajectory
 -- Persist ordered context stages and full content atomically, outside lifecycle summaries.
 
 CREATE TABLE IF NOT EXISTS public.context_trajectory_contents (

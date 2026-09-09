@@ -2955,7 +2955,7 @@ CREATE INDEX IF NOT EXISTS idx_bot_agents_agent_credential
     ON public.bot_agents (team_id, agent_credential_id)
     WHERE agent_credential_id IS NOT NULL;
 
--- 0148_context_trajectory
+-- 0149_context_trajectory
 -- Persist ordered context stages and full content atomically, outside lifecycle summaries.
 
 CREATE TABLE IF NOT EXISTS public.context_trajectory_contents (

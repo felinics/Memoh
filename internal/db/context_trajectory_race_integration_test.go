@@ -25,9 +25,9 @@ func TestContextTrajectoryResetRaces(t *testing.T) {
 				name = action + "/writer_first"
 			}
 			t.Run(name, func(t *testing.T) {
+				pool := freshMigratedDB(t)
 				ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 				defer cancel()
-				pool := freshMigratedDB(t)
 				cfg := pool.Config()
 				cfg.ConnConfig.RuntimeParams["application_name"] = "trajectory-race-" + uuid.NewString()
 				cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
