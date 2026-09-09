@@ -19,6 +19,17 @@ describe('resolveApiErrorMessage', () => {
     })
   })
 
+  it.each([
+    ['en', 'The transcription provider\'s rate limit or quota was reached. Check your quota or try again later.'],
+    ['zh', '语音识别请求已达到频率或额度限制，请检查额度或稍后重试。'],
+    ['ja', '音声認識のリクエスト頻度または利用上限に達しました。利用枠を確認するか、しばらく待ってからお試しください。'],
+  ])('localizes transcription errors for %s using the stable code', (language, expected) => {
+    locale = language
+    const error = { code: 'transcription.rate_limited', status: 429, detail: 'private upstream diagnostic' }
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
+    expect(isApiErrorCode(error, 'transcription.rate_limited')).toBe(true)
+  })
+
   it('renders ACP feedback i18n keys before raw backend messages', () => {
     locale = 'zh'
 

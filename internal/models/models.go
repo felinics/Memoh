@@ -500,6 +500,7 @@ func IsValidClientType(clientType ClientType) bool {
 		ClientTypeMiniMaxSpeech,
 		ClientTypeVolcengineSpeech,
 		ClientTypeAlibabaSpeech,
+		ClientTypeAlibabaTranscription,
 		ClientTypeMicrosoftSpeech,
 		ClientTypeGoogleSpeech,
 		ClientTypeGoogleTranscription,

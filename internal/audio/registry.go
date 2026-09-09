@@ -60,6 +60,7 @@ func isTranscriptionClientType(clientType models.ClientType) bool {
 		models.ClientTypeOpenRouterTranscription,
 		models.ClientTypeElevenLabsTranscription,
 		models.ClientTypeDeepgramTranscription,
+		models.ClientTypeAlibabaTranscription,
 		models.ClientTypeGoogleTranscription:
 		return true
 	default:
@@ -223,6 +224,10 @@ func (r *Registry) ListTranscriptionMeta() []ProviderMetaResponse {
 func transcriptionProviderDefinitions(base []ProviderDefinition) []ProviderDefinition {
 	out := make([]ProviderDefinition, 0, len(base))
 	for _, def := range base {
+		if isTranscriptionClientType(def.ClientType) && def.TranscriptionFactory != nil {
+			out = append(out, def)
+			continue
+		}
 		clientType := speechToTranscriptionClientType(def.ClientType)
 		if clientType == "" || def.TranscriptionFactory == nil {
 			continue
@@ -264,6 +269,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 	})
 
 	return []ProviderDefinition{
+		alibabaTranscriptionDefinition(),
 		{
 			ClientType:   models.ClientTypeEdgeSpeech,
 			DisplayName:  "Microsoft Edge",

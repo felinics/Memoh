@@ -337,6 +337,15 @@ export const providerPresets: ProviderPreset[] = [
   },
   // Transcription (STT) — created via the generic provider API, filtered by client_type.
   {
+    id: 'alibabacloud-transcription',
+    name: 'Alibaba Cloud Transcription',
+    clientType: 'alibabacloud-transcription',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    icon: 'bailian-color',
+    source: 'alibabacloud-transcription.yaml',
+    domain: 'transcription',
+  },
+  {
     id: 'openai-transcription',
     name: 'OpenAI Transcription',
     clientType: 'openai-transcription',

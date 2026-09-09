@@ -4,7 +4,29 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/memohai/memoh/internal/providertemplates"
 )
+
+func TestAlibabaASRTemplate(t *testing.T) {
+	definitions, err := Load(slog.New(slog.DiscardHandler), filepath.Join("..", "..", "conf", "providers"))
+	require.NoError(t, err)
+	for _, definition := range ProviderTemplateDefinitions(definitions) {
+		if definition.Key != "alibabacloud-transcription" {
+			continue
+		}
+		require.Equal(t, providertemplates.DomainTranscription, definition.Domain)
+		require.Equal(t, "alibabacloud-transcription", definition.Driver)
+		require.Equal(t, "https://dashscope.aliyuncs.com/compatible-mode/v1", definition.DefaultConfig["base_url"])
+		require.Len(t, definition.Models, 1)
+		require.Equal(t, "qwen3-asr-flash", definition.Models[0].ModelID)
+		require.Equal(t, "transcription", definition.Models[0].Type)
+		return
+	}
+	t.Fatal("Alibaba ASR provider template missing")
+}
 
 func TestProviderTemplateDefinitionsKeepLastDuplicateModel(t *testing.T) {
 	t.Parallel()

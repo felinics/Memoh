@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	sdk "github.com/memohai/twilight-ai/sdk"
 
+	"github.com/memohai/memoh/internal/audio/adapter"
 	"github.com/memohai/memoh/internal/db"
 	"github.com/memohai/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/memohai/memoh/internal/db/store"
@@ -502,10 +503,16 @@ func (s *Service) resolveTranscriptionParams(ctx context.Context, modelID string
 	if err != nil {
 		return nil, fmt.Errorf("get speech provider: %w", err)
 	}
+	if !providerRow.Enable {
+		return nil, fmt.Errorf("%w: transcription provider is disabled", adapter.ErrInvalidInput)
+	}
 
 	def, err := s.registry.Get(models.ClientType(providerRow.ClientType))
 	if err != nil {
 		return nil, err
+	}
+	if def.TranscriptionFactory == nil {
+		return nil, fmt.Errorf("%w: provider does not support transcription", adapter.ErrInvalidInput)
 	}
 	provider, err := def.TranscriptionFactory(parseConfig(providerRow.Config))
 	if err != nil {

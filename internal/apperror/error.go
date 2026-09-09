@@ -47,6 +47,12 @@ const (
 	CodeSessionBusy                      Code = "session_runtime.session_busy"
 	CodeSessionInvocationConflict        Code = "session_runtime.invocation_conflict"
 	CodeSessionHistoryInconsistent       Code = "session_runtime.history_inconsistent"
+	CodeTranscriptionRequestInvalid      Code = "transcription.request_invalid"
+	CodeTranscriptionAudioTooLarge       Code = "transcription.audio_too_large"
+	CodeTranscriptionRequestRejected     Code = "transcription.request_rejected"
+	CodeTranscriptionRateLimited         Code = "transcription.rate_limited"
+	CodeTranscriptionUnavailable         Code = "transcription.unavailable"
+	CodeTranscriptionFailed              Code = "transcription.failed"
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -61,6 +67,30 @@ type Definition struct {
 // clients; the localized copies live under errors.* in
 // apps/web/src/i18n/locales/{en,zh,ja}.json. Keep both sides in sync.
 var catalog = map[Code]Definition{
+	CodeTranscriptionRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "Check the audio file and transcription configuration, then try again.",
+	},
+	CodeTranscriptionAudioTooLarge: {
+		HTTPStatus: http.StatusRequestEntityTooLarge,
+		Detail:     "The audio file exceeds the provider's size limit. Use a smaller file.",
+	},
+	CodeTranscriptionRequestRejected: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The transcription provider rejected the request. Check the API key, region, model and audio format.",
+	},
+	CodeTranscriptionRateLimited: {
+		HTTPStatus: http.StatusTooManyRequests,
+		Detail:     "The transcription provider's rate limit or quota was reached. Check your quota or try again later.",
+	},
+	CodeTranscriptionUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The transcription provider is unavailable. Please try again shortly.",
+	},
+	CodeTranscriptionFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "Transcription failed. Check that the model is enabled and try again.",
+	},
 	CodeBotNameTaken: {
 		HTTPStatus:  http.StatusConflict,
 		Detail:      "This name is already taken.",

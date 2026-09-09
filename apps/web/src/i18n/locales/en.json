@@ -94,6 +94,14 @@
     "preview": "Preview"
   },
   "errors": {
+    "transcription": {
+      "request_invalid": "Check the audio file and transcription configuration, then try again.",
+      "audio_too_large": "The audio file exceeds the provider's size limit. Use a smaller file.",
+      "request_rejected": "The transcription provider rejected the request. Check the API key, region, model and audio format.",
+      "rate_limited": "The transcription provider's rate limit or quota was reached. Check your quota or try again later.",
+      "unavailable": "The transcription provider is unavailable. Please try again shortly.",
+      "failed": "Transcription failed. Check that the model is enabled and try again."
+    },
     "bot": {
       "name_taken": "This name is already taken."
     },

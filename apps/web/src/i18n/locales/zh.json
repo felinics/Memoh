@@ -94,6 +94,14 @@
     "preview": "预览"
   },
   "errors": {
+    "transcription": {
+      "request_invalid": "请检查音频文件和语音识别配置后重试。",
+      "audio_too_large": "音频文件超出服务商的大小限制，请换用较小的文件。",
+      "request_rejected": "语音识别服务商拒绝了请求，请检查 API Key、地域、模型和音频格式。",
+      "rate_limited": "语音识别请求已达到频率或额度限制，请检查额度或稍后重试。",
+      "unavailable": "语音识别服务暂时不可用，请稍后重试。",
+      "failed": "语音识别失败，请确认模型已启用后重试。"
+    },
     "bot": {
       "name_taken": "该名称已被占用。"
     },
