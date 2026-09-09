@@ -707,7 +707,10 @@
       "unsupported": "Voice input is not supported in this browser.",
       "permissionDenied": "Microphone access was denied.",
       "empty": "No speech was detected.",
-      "failed": "Voice input failed."
+      "failed": "Voice input failed.",
+      "barLabel": "Voice recording",
+      "cancel": "Cancel voice input",
+      "confirm": "Finish and transcribe"
     },
     "attachmentLines": "{count} lines",
     "pastedBadge": "Pasted",

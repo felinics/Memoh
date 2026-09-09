@@ -216,6 +216,17 @@
 [data-slot="input-group"].chat-composer-edge:focus-within:not(:has([aria-invalid="true"])) {
   --field-edge: var(--composer-edge-focus);
 }
+/* While voice owns the composer the box is a recording surface, not a text
+ * field: the ✗/✓ buttons taking DOM focus must not engage the edge, or the
+ * hairline flickers rest↔focus on every voice click (and dims when the
+ * textarea unmounts at start). Pin the edge to rest for the whole voice
+ * session — both tiers redeclared so docked keeps its softer --border-soft. */
+[data-slot="input-group"].chat-composer-edge.chat-composer-voice:focus-within:not(:has([aria-invalid="true"])) {
+  --field-edge: var(--field-edge-rest);
+}
+[data-slot="input-group"].chat-composer-edge.chat-composer-docked.chat-composer-voice:focus-within:not(:has([aria-invalid="true"])) {
+  --field-edge: var(--border-soft);
+}
 
 
 /* Composer pill press — the squish is split OFF the anchor box: the ghost

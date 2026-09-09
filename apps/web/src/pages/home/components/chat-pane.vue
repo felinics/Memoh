@@ -405,7 +405,10 @@
                 data-slot="input-group"
                 role="group"
                 class="chat-composer-edge relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text max-md:rounded-3xl max-md:p-2.5"
-                :class="isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked'"
+                :class="[
+                  isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked',
+                  voiceInputState !== 'idle' ? 'chat-composer-voice' : '',
+                ]"
                 @click="handleComposerClick"
               >
                 <!-- The attachment row reveals via a grid 0fr↔1fr track so a card
@@ -484,12 +487,45 @@
                   </div>
                 </Transition>
 
+                <!-- While a voice recording/transcription is in flight the
+                     composer's input row IS the voice surface: live level
+                     bars + elapsed time take the textarea's place (same
+                     min-height, so the box never jumps), and the controls row
+                     below sheds everything except the voice pair. -->
+                <div
+                  v-if="voiceInputState !== 'idle'"
+                  role="status"
+                  :aria-label="$t('chat.voiceInput.barLabel')"
+                  class="order-none flex w-full basis-full items-center gap-2 pl-2 pr-1"
+                  :class="isWelcome ? 'min-h-12' : 'min-h-10'"
+                >
+                  <!-- Level history fills the whole row and pushes in from
+                       the RIGHT: the window length tracks the strip's pixel
+                       width, newest sample lands on the right edge, quiet
+                       history fades to dots on the left. Bar count derives
+                       from measured width (2px bar + 3px gap); heights are
+                       runtime audio data, so both stay inline px. -->
+                  <div
+                    ref="voiceStripEl"
+                    class="flex h-8 min-w-0 flex-1 items-center gap-[3px] overflow-hidden"
+                  >
+                    <div
+                      v-for="(level, index) in voiceBars"
+                      :key="index"
+                      class="w-0.5 shrink-0 rounded-full motion-safe:transition-[height] motion-safe:duration-75"
+                      :class="level > VOICE_BAR_ACTIVE_LEVEL ? 'bg-foreground' : 'bg-muted-foreground'"
+                      :style="{ height: `${Math.max(2, Math.round(level * VOICE_BAR_MAX_PX))}px` }"
+                    />
+                  </div>
+                  <span class="shrink-0 text-control tabular-nums text-muted-foreground">{{ formattedVoiceSeconds }}</span>
+                </div>
                 <textarea
+                  v-else
                   ref="textareaEl"
                   v-model="inputText"
                   rows="1"
                   :placeholder="activeChatReadOnly ? $t('chat.readonlyHint') : $t('chat.inputPlaceholder')"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || voiceInputState !== 'idle'"
+                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isWelcome ? 'min-h-12' : 'min-h-10'"
                   @keydown="handleComposerKeydown"
@@ -507,7 +543,7 @@
                       variant="ghost"
                       size="icon-sm"
                       shape="circle"
-                      :disabled="!currentBotId || activeChatReadOnly || composerConfigPending"
+                      :disabled="!currentBotId || activeChatReadOnly || composerConfigPending || voiceInputState !== 'idle'"
                       :title="$t('chat.composerActions')"
                       class="order-1 self-end text-muted-foreground max-md:size-11"
                       :aria-label="$t('chat.composerActions')"
@@ -637,20 +673,28 @@
                 />
 
                 <!-- The controls row owns the remaining width and right-aligns,
-                     so a long model name truncates instead of overflowing. -->
-                <div class="order-3 flex min-w-0 flex-1 items-center justify-end gap-2 self-end">
+                     so a long model name truncates instead of overflowing.
+                     min-h-9 during voice: the session ring (size-9) is the row's
+                     tallest child and v-if's off while recording; without the pin
+                     the row shrinks 36→32 and the welcome card's content-between
+                     drops the freed 4px between the rows — the voice buttons
+                     visibly sink. Coupled to the ring's size-9 by design. -->
+                <div
+                  class="order-3 flex min-w-0 flex-1 items-center justify-end gap-2 self-end"
+                  :class="showSessionInfoRing && voiceInputState !== 'idle' ? 'min-h-9' : undefined"
+                >
                   <!-- shrink-0 keeps the model name the one that truncates.
                        Native and ACP turns persist a context lifecycle; direct
                        runtimes own their own context, so the ring stays off. -->
                   <SessionInfoRing
-                    v-if="showSessionInfoRing"
+                    v-if="showSessionInfoRing && voiceInputState === 'idle'"
                     class="shrink-0"
                     :visible="isVisible"
                     :override-model-id="overrideModelId"
                     :fallback-context-window="sessionFallbackContextWindow"
                   />
                   <Popover
-                    v-if="!activeUsesExternalAgentComposer || activeUsesACPRuntime || activeUsesDirectRuntime"
+                    v-if="(!activeUsesExternalAgentComposer || activeUsesACPRuntime || activeUsesDirectRuntime) && voiceInputState === 'idle'"
                     v-model:open="modelPopoverOpen"
                   >
                     <PopoverTrigger as-child>
@@ -783,7 +827,51 @@
                     </PopoverContent>
                   </Popover>
 
-                  <div class="relative size-8 max-md:size-11 shrink-0">
+                  <!-- While voice owns the composer the trailing slot holds
+                       the voice pair instead of mic/send: ✗ cancels (also
+                       aborts an in-flight transcription), ✓ stops and
+                       transcribes — the ✓ keeps the mic's filled-primary
+                       circle language so the control the user started with is
+                       the one they commit with. -->
+                  <div
+                    v-if="voiceInputState !== 'idle'"
+                    class="flex shrink-0 items-center gap-2"
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      shape="circle"
+                      :aria-label="$t('chat.voiceInput.cancel')"
+                      class="text-muted-foreground max-md:size-11"
+                      @click="cancelVoiceInput"
+                    >
+                      <X class="size-4 max-md:size-5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="icon-sm"
+                      shape="circle"
+                      :disabled="voiceInputState === 'transcribing'"
+                      :aria-label="$t('chat.voiceInput.confirm')"
+                      class="max-md:size-11"
+                      @click="stopVoiceInput"
+                    >
+                      <Spinner
+                        v-if="voiceInputState === 'transcribing'"
+                        class="size-4 max-md:size-5"
+                      />
+                      <Check
+                        v-else
+                        class="size-4 max-md:size-5"
+                      />
+                    </Button>
+                  </div>
+                  <div
+                    v-else
+                    class="relative size-8 max-md:size-11 shrink-0"
+                  >
                     <!-- Mic and send share this one slot (never both visible):
                          with nothing to send, voice input IS the affordance
                          here; typing (or attaching) hands it to send. Mic is a
@@ -2695,6 +2783,11 @@ const micVisible = computed(() => !sendButtonVisible.value)
 // never be proxied. voiceRequestVersion + voiceSourceBotId guard the async
 // edges: a bot switch or cancel mid-record/mid-transcribe invalidates the
 // in-flight request so a late transcript can't land in the wrong pane.
+//
+// While recording/transcribing the composer itself becomes the voice
+// surface: the input row swaps to live level bars + elapsed time, and the
+// trailing slot swaps mic/send for a ✗/✓ pair. Cancel also aborts an
+// in-flight transcription, so a hung upstream can never strand the pane.
 type VoiceInputState = 'idle' | 'recording' | 'transcribing'
 
 const voiceInputState = ref<VoiceInputState>('idle')
@@ -2718,6 +2811,79 @@ let voiceChunks: Blob[] = []
 let discardVoiceRecording = false
 let voiceSourceBotId = ''
 let voiceRequestVersion = 0
+let voiceTranscribeAbort: AbortController | null = null
+
+// Live meters for the voice surface: an AnalyserNode samples mic RMS into a
+// window of bars (~80ms cadence), a 1s timer tracks elapsed time. The window
+// length follows the strip's measured width so the history always fills the
+// row exactly. AudioContext / rAF ids are plain lets — never proxied.
+const VOICE_BAR_STRIDE_PX = 5 // one 2px bar + its 3px gap
+// Keep in sync with the h-8 strip: 32px track minus a hair of headroom.
+const VOICE_BAR_MAX_PX = 30
+// Below this level a bar reads as quiet history (muted dot), not live voice.
+const VOICE_BAR_ACTIVE_LEVEL = 0.06
+const voiceStripEl = ref<HTMLElement | null>(null)
+const { width: voiceStripWidth } = useElementSize(voiceStripEl)
+const voiceBarCount = computed(() => Math.max(1, Math.floor(voiceStripWidth.value / VOICE_BAR_STRIDE_PX)))
+const voiceBars = ref<number[]>([])
+const voiceSeconds = ref(0)
+let voiceAudioCtx: AudioContext | null = null
+let voiceMeterFrame = 0
+let voiceTimer: ReturnType<typeof setInterval> | null = null
+
+// Resize the history window in place when the strip changes width: keep the
+// newest samples, pad quiet dots on the left when the row grows.
+watch(voiceBarCount, (count) => {
+  const bars = voiceBars.value
+  if (bars.length === count) return
+  voiceBars.value = bars.length > count
+    ? bars.slice(bars.length - count)
+    : [...Array(count - bars.length).fill(0), ...bars]
+})
+
+const formattedVoiceSeconds = computed(() => {
+  const minutes = Math.floor(voiceSeconds.value / 60)
+  const rest = voiceSeconds.value % 60
+  return `${minutes}:${String(rest).padStart(2, '0')}`
+})
+
+function startVoiceMeters(stream: MediaStream) {
+  voiceBars.value = Array(voiceBarCount.value).fill(0)
+  voiceSeconds.value = 0
+  const audioCtx = new AudioContext()
+  const analyser = audioCtx.createAnalyser()
+  analyser.fftSize = 1024
+  analyser.smoothingTimeConstant = 0.5
+  audioCtx.createMediaStreamSource(stream).connect(analyser)
+  voiceAudioCtx = audioCtx
+  const dataArray = new Float32Array(analyser.fftSize)
+  let lastSample = 0
+  const tick = (now: number) => {
+    if (voiceAudioCtx !== audioCtx) return
+    analyser.getFloatTimeDomainData(dataArray)
+    if (now - lastSample >= 80) {
+      lastSample = now
+      let sum = 0
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i] ** 2
+      const rms = Math.sqrt(sum / dataArray.length)
+      voiceBars.value = [...voiceBars.value.slice(1), Math.min(1, rms * 8)]
+    }
+    voiceMeterFrame = requestAnimationFrame(tick)
+  }
+  voiceMeterFrame = requestAnimationFrame(tick)
+  voiceTimer = setInterval(() => { voiceSeconds.value += 1 }, 1000)
+}
+
+function stopVoiceMeters() {
+  cancelAnimationFrame(voiceMeterFrame)
+  if (voiceTimer) {
+    clearInterval(voiceTimer)
+    voiceTimer = null
+  }
+  const audioCtx = voiceAudioCtx
+  voiceAudioCtx = null
+  if (audioCtx) void audioCtx.close().catch(() => {})
+}
 
 function releaseVoiceStream() {
   voiceStream?.getTracks().forEach(track => track.stop())
@@ -2768,10 +2934,15 @@ async function transcribeVoiceInput(
     { type: mimeType || 'audio/webm' },
   )
 
+  // Cancellable: ✗ aborts this request — without it a hung upstream would
+  // hold the transcribing state until the edge times out.
+  const controller = new AbortController()
+  voiceTranscribeAbort = controller
   try {
     const { data } = await postTranscriptionModelsByIdTest({
       path: { id: modelId },
       body: { file },
+      signal: controller.signal,
       throwOnError: true,
     })
     if (voiceRequestVersion !== requestVersion || currentBotId.value !== sourceBotId) return
@@ -2788,6 +2959,7 @@ async function transcribeVoiceInput(
     if (voiceRequestVersion !== requestVersion) return
     toast.error(resolveApiErrorMessage(error, t('chat.voiceInput.failed')))
   } finally {
+    if (voiceTranscribeAbort === controller) voiceTranscribeAbort = null
     if (voiceRequestVersion === requestVersion) voiceInputState.value = 'idle'
   }
 }
@@ -2800,12 +2972,15 @@ function stopVoiceInput() {
 function cancelVoiceInput() {
   voiceRequestVersion += 1
   discardVoiceRecording = true
+  voiceTranscribeAbort?.abort()
+  voiceTranscribeAbort = null
   if (voiceRecorder?.state === 'recording') {
     voiceRecorder.stop()
   } else {
     voiceRecorder = null
     voiceChunks = []
     releaseVoiceStream()
+    stopVoiceMeters()
     voiceInputState.value = 'idle'
   }
 }
@@ -2858,6 +3033,7 @@ async function startVoiceInput() {
         voiceRecorder = null
         voiceChunks = []
         releaseVoiceStream()
+        stopVoiceMeters()
         voiceInputState.value = 'idle'
       }
     }
@@ -2869,6 +3045,7 @@ async function startVoiceInput() {
       voiceRecorder = null
       voiceChunks = []
       releaseVoiceStream()
+      stopVoiceMeters()
       if (shouldDiscard || !chunks.length) {
         voiceInputState.value = 'idle'
         return
@@ -2878,10 +3055,12 @@ async function startVoiceInput() {
     }
 
     recorder.start()
+    startVoiceMeters(stream)
     voiceInputState.value = 'recording'
   } catch (error) {
     if (voiceRequestVersion !== requestVersion) return
     releaseVoiceStream()
+    stopVoiceMeters()
     voiceRecorder = null
     voiceInputState.value = 'idle'
     const denied = error instanceof DOMException

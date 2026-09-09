@@ -707,7 +707,10 @@
       "unsupported": "当前浏览器不支持语音输入。",
       "permissionDenied": "麦克风权限已被拒绝。",
       "empty": "没有识别到语音内容。",
-      "failed": "语音输入失败。"
+      "failed": "语音输入失败。",
+      "barLabel": "语音录制",
+      "cancel": "取消语音输入",
+      "confirm": "完成并转写"
     },
     "attachmentLines": "{count} 行",
     "pastedBadge": "粘贴",
