@@ -4810,43 +4810,6 @@ definitions:
         - remote_offline
         type: string
     type: object
-  handlers.WorkspaceDependencyScriptEnv:
-    properties:
-      key:
-        type: string
-      secret:
-        type: boolean
-      value:
-        description: Value is empty when Secret is set.
-        type: string
-    type: object
-  handlers.WorkspaceDependencyScriptResponse:
-    properties:
-      action:
-        enum:
-        - install
-        - update
-        - remove
-        - reinstall
-        - rollback
-        type: string
-      definition_revision:
-        type: string
-      dependency_id:
-        type: string
-      digest:
-        type: string
-      env:
-        items:
-          $ref: '#/definitions/handlers.WorkspaceDependencyScriptEnv'
-        type: array
-      exec:
-        type: string
-      script:
-        type: string
-      timeout_seconds:
-        type: integer
-    type: object
   handlers.WorkspaceDependencyStreamEvent:
     properties:
       args:
@@ -10033,71 +9996,6 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Roll a workspace dependency back to its previous version
-      tags:
-      - containerd
-  /bots/{bot_id}/dependencies/{dep_id}/script:
-    get:
-      description: The exact stdin text the workspace shell receives, prelude included,
-        with the command, time budget, and environment the runner uses. Scripts never
-        touch the workspace disk, so this is the only way to inspect them.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Dependency ID
-        in: path
-        name: dep_id
-        required: true
-        type: string
-      - default: install
-        description: Action
-        enum:
-        - install
-        - update
-        - remove
-        - reinstall
-        - rollback
-        in: query
-        name: action
-        type: string
-      - description: Workspace target ID (defaults to the bot's current target)
-        in: query
-        name: workspace_target_id
-        type: string
-      - description: Keep a previously prepared definition revision
-        in: query
-        name: definition_revision
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.WorkspaceDependencyScriptResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "422":
-          description: Unprocessable Entity
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Show the script a dependency action would run
       tags:
       - containerd
   /bots/{bot_id}/dependencies/{dep_id}/update:

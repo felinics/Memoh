@@ -924,50 +924,6 @@ func TestCheckWorkspaceDependencyUpdatesReturnsList(t *testing.T) {
 	}
 }
 
-func TestGetWorkspaceDependencyScript(t *testing.T) {
-	svc := &fakeWorkspaceDependencyService{
-		deps: depsTestCatalog(),
-		preview: workspacedeps.ScriptPreview{
-			DependencyID: "codex", Action: catalog.ActionUpdate, Digest: "sha256:abc", Exec: "exec sh -s", TimeoutSeconds: 1200,
-			Env:    []workspacedeps.ScriptEnvEntry{{Key: "MEMOH_DEP_HOME", Value: "/data/.memoh/deps/codex"}, {Key: "NPM_TOKEN", Secret: true}},
-			Script: "#!/bin/sh\n",
-		},
-	}
-	h := newDepsTestHandler("admin", svc)
-	rec, err := depsCall{method: http.MethodGet, target: "/bots/x/dependencies/codex/script?action=update", depID: "codex"}.invoke(t, h.GetWorkspaceDependencyScript)
-	if err != nil {
-		t.Fatalf("GetWorkspaceDependencyScript: %v", err)
-	}
-	resp := decodeJSON[WorkspaceDependencyScriptResponse](t, rec)
-	if resp.Action != "update" || resp.Digest != "sha256:abc" || resp.Exec != "exec sh -s" || resp.TimeoutSeconds != 1200 || resp.Script != "#!/bin/sh\n" {
-		t.Errorf("response = %+v", resp)
-	}
-	if len(resp.Env) != 2 || resp.Env[0].Key != "MEMOH_DEP_HOME" || !resp.Env[1].Secret || resp.Env[1].Value != "" {
-		t.Errorf("env = %+v", resp.Env)
-	}
-	if svc.actions[0] != catalog.ActionUpdate {
-		t.Errorf("action passed = %q", svc.actions[0])
-	}
-
-	// Default action is install; unknown actions are rejected before the
-	// service is asked.
-	if _, err := (depsCall{method: http.MethodGet, target: "/bots/x/dependencies/codex/script", depID: "codex"}).invoke(t, h.GetWorkspaceDependencyScript); err != nil {
-		t.Fatalf("default action: %v", err)
-	}
-	if svc.actions[1] != catalog.ActionInstall {
-		t.Errorf("default action = %q", svc.actions[1])
-	}
-	_, err = depsCall{method: http.MethodGet, target: "/bots/x/dependencies/codex/script?action=check_update", depID: "codex"}.invoke(t, h.GetWorkspaceDependencyScript)
-	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyRequestInvalid)
-	if len(svc.actions) != 2 {
-		t.Errorf("service asked for an invalid action: %v", svc.actions)
-	}
-
-	svc.previewErr = workspacedeps.ErrActionUnsupported
-	_, err = depsCall{method: http.MethodGet, target: "/bots/x/dependencies/codex/script?action=rollback", depID: "codex"}.invoke(t, h.GetWorkspaceDependencyScript)
-	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyActionUnsupported)
-}
-
 func TestWorkspaceDependencyStreamHeartbeatIsComment(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ticks := make(chan time.Time)

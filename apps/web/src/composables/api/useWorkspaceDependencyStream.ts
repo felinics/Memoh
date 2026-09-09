@@ -27,7 +27,7 @@ export type WorkspaceDependencyStreamEvent =
 export interface WorkspaceDependencyStreamRequestOptions {
   /** Conversation that requested this manager-confirmed operation. */
   sessionId?: string
-  /** Revision returned by this operation's script preview. Omit to resolve latest. */
+  /** Definition revision from the list row. Omit to let the Server resolve latest. */
   definitionRevision?: string
   /**
    * Version to install / update / reinstall to. Empty means the latest the

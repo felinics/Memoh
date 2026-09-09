@@ -241,26 +241,6 @@ type WorkspaceDependencyOperationResponse struct {
 	Status             string            `json:"status,omitempty"`
 }
 
-// WorkspaceDependencyScriptEnv is one environment variable the script sees.
-type WorkspaceDependencyScriptEnv struct {
-	Key string `json:"key"`
-	// Value is empty when Secret is set.
-	Value  string `json:"value"`
-	Secret bool   `json:"secret"`
-}
-
-// WorkspaceDependencyScriptResponse is the exact script an action would run.
-type WorkspaceDependencyScriptResponse struct {
-	DefinitionRevision string                         `json:"definition_revision,omitempty"`
-	DependencyID       string                         `json:"dependency_id"`
-	Action             string                         `json:"action" enums:"install,update,remove,reinstall,rollback"`
-	Digest             string                         `json:"digest"`
-	Exec               string                         `json:"exec"`
-	TimeoutSeconds     int                            `json:"timeout_seconds"`
-	Env                []WorkspaceDependencyScriptEnv `json:"env"`
-	Script             string                         `json:"script"`
-}
-
 // WorkspaceDependencyStreamEvent documents the SSE frames of install, update,
 // reinstall, and remove. Type selects which fields are present: started
 // carries dependency_id and the requested version (absent for latest); log
@@ -596,65 +576,6 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 	})
 }
 
-// GetWorkspaceDependencyScript godoc
-// @Summary Show the script a dependency action would run
-// @Description The exact stdin text the workspace shell receives, prelude included, with the command, time budget, and environment the runner uses. Scripts never touch the workspace disk, so this is the only way to inspect them.
-// @Tags containerd
-// @Produce json
-// @Param bot_id path string true "Bot ID"
-// @Param dep_id path string true "Dependency ID"
-// @Param action query string false "Action" Enums(install, update, remove, reinstall, rollback) default(install)
-// @Param workspace_target_id query string false "Workspace target ID (defaults to the bot's current target)"
-// @Success 200 {object} WorkspaceDependencyScriptResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
-// @Param definition_revision query string false "Keep a previously prepared definition revision"
-// @Router /bots/{bot_id}/dependencies/{dep_id}/script [get].
-func (h *ContainerdHandler) GetWorkspaceDependencyScript(c echo.Context) error {
-	botID, svc, err := h.workspaceDependencyRequest(c)
-	if err != nil {
-		return err
-	}
-	depID, err := workspaceDependencyParam(c)
-	if err != nil {
-		return err
-	}
-	action, err := workspaceDependencyScriptAction(c.QueryParam("action"))
-	if err != nil {
-		return err
-	}
-	ctx, targetID, err := h.workspaceDependencyTarget(c, botID, "")
-	if err != nil {
-		return err
-	}
-	revision := strings.TrimSpace(c.QueryParam("definition_revision"))
-	if revision != "" && !catalog.ValidRevision(revision) {
-		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
-	}
-	ctx = workspacedeps.WithDefinitionRevision(ctx, revision)
-	preview, err := svc.ScriptPreviewDetails(ctx, botID, targetID, depID, action)
-	if err != nil {
-		return workspaceDependencyError(err)
-	}
-	env := make([]WorkspaceDependencyScriptEnv, 0, len(preview.Env))
-	for _, entry := range preview.Env {
-		env = append(env, WorkspaceDependencyScriptEnv{Key: entry.Key, Value: entry.Value, Secret: entry.Secret})
-	}
-	return c.JSON(http.StatusOK, WorkspaceDependencyScriptResponse{
-		DependencyID:       preview.DependencyID,
-		DefinitionRevision: preview.Revision,
-		Action:             string(preview.Action),
-		Digest:             preview.Digest,
-		Exec:               preview.Exec,
-		TimeoutSeconds:     preview.TimeoutSeconds,
-		Env:                env,
-		Script:             preview.Script,
-	})
-}
-
 // workspaceDependencyOperation is the shape shared by the four streamed
 // service methods. version is the requested version for install-like
 // actions and ignored by remove.
@@ -920,19 +841,6 @@ func workspaceDependencyParam(c echo.Context) (string, error) {
 		return "", apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
 	return id, nil
-}
-
-// workspaceDependencyScriptAction parses the script endpoint's action query;
-// install is the default.
-func workspaceDependencyScriptAction(raw string) (catalog.Action, error) {
-	switch action := catalog.Action(strings.TrimSpace(raw)); action {
-	case "", catalog.ActionInstall:
-		return catalog.ActionInstall, nil
-	case catalog.ActionUpdate, catalog.ActionRemove, catalog.ActionReinstall, workspacedeps.ActionRollback:
-		return action, nil
-	default:
-		return "", apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, errors.New("unsupported script action "+string(action)), nil)
-	}
 }
 
 // workspaceDependencyError maps service sentinels to stable public codes.

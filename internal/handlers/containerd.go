@@ -347,7 +347,6 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	deps.GET("", h.ListWorkspaceDependencies)
 	deps.POST("/preflight", h.PreflightWorkspaceDependencies)
 	deps.POST("/check-updates", h.CheckWorkspaceDependencyUpdates)
-	deps.GET("/:dep_id/script", h.GetWorkspaceDependencyScript)
 	deps.POST("/:dep_id/install", h.InstallWorkspaceDependency)
 	deps.POST("/:dep_id/update", h.UpdateWorkspaceDependency)
 	deps.POST("/:dep_id/reinstall", h.ReinstallWorkspaceDependency)

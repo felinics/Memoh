@@ -516,7 +516,7 @@ Live conversation turns are read over the **WebSocket**. SSE carries identifiers
 
 ## Dependency Operations
 
-- Installation, update, reinstall, and removal require script preview followed by explicit confirmation. Carry the preview's `definition_revision` into the request and retain it on retry; a retry must not silently resolve a new script.
+- Installation, update, reinstall, and removal require explicit confirmation. Carry the row's `definition_revision` into the request when present and retain it on retry; a retry must not silently resolve a new revision. The Server still resolves and pins the revision itself.
 - Missing-agent feedback never starts installation. Its management link carries the requested dependency and source session; only a confirmed operation for that dependency forwards `session_id` for notifications. Other dependencies must not inherit the conversation association.
 - Shared operation stores use the host application's injected router, including Desktop's memory history. Never import the standalone Web router into a shared store.
 - A disconnected operation or `workspace_dependency_operation_unknown` has an unknown outcome. Display it without Retry until server reconciliation establishes the result. Full logs are manually readable regions; only concise phase changes are live announcements.

@@ -104,7 +104,8 @@ operations remain available in the persistent cache.
   empty. Existing managed, image-provided and PATH copies do not require registry
   access. A missing CLI produces actionable feedback; chat messages and device-code
   login never authorize a script execution. Installation requires Manage permission
-  and confirmation of a revision-bound script preview.
+  and explicit confirmation. The Server resolves and pins a definition revision
+  before running the script.
 - Script caching is not binary caching. Reinstalling software may still require npm,
   GitHub or the relevant upstream download service.
 

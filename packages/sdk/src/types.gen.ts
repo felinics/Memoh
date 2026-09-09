@@ -2730,26 +2730,6 @@ export type HandlersWorkspaceDependencyPreflightResponse = {
     workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
 };
 
-export type HandlersWorkspaceDependencyScriptEnv = {
-    key?: string;
-    secret?: boolean;
-    /**
-     * Value is empty when Secret is set.
-     */
-    value?: string;
-};
-
-export type HandlersWorkspaceDependencyScriptResponse = {
-    action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
-    definition_revision?: string;
-    dependency_id?: string;
-    digest?: string;
-    env?: Array<HandlersWorkspaceDependencyScriptEnv>;
-    exec?: string;
-    script?: string;
-    timeout_seconds?: number;
-};
-
 export type HandlersWorkspaceDependencyStreamEvent = {
     args?: {
         [key: string]: string;
@@ -8092,69 +8072,6 @@ export type PostBotsByBotIdDependenciesByDepIdRollbackResponses = {
 };
 
 export type PostBotsByBotIdDependenciesByDepIdRollbackResponse = PostBotsByBotIdDependenciesByDepIdRollbackResponses[keyof PostBotsByBotIdDependenciesByDepIdRollbackResponses];
-
-export type GetBotsByBotIdDependenciesByDepIdScriptData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Dependency ID
-         */
-        dep_id: string;
-    };
-    query?: {
-        /**
-         * Action
-         */
-        action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
-        /**
-         * Workspace target ID (defaults to the bot's current target)
-         */
-        workspace_target_id?: string;
-        /**
-         * Keep a previously prepared definition revision
-         */
-        definition_revision?: string;
-    };
-    url: '/bots/{bot_id}/dependencies/{dep_id}/script';
-};
-
-export type GetBotsByBotIdDependenciesByDepIdScriptErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Unprocessable Entity
-     */
-    422: ApperrorProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ApperrorProblem;
-};
-
-export type GetBotsByBotIdDependenciesByDepIdScriptError = GetBotsByBotIdDependenciesByDepIdScriptErrors[keyof GetBotsByBotIdDependenciesByDepIdScriptErrors];
-
-export type GetBotsByBotIdDependenciesByDepIdScriptResponses = {
-    /**
-     * OK
-     */
-    200: HandlersWorkspaceDependencyScriptResponse;
-};
-
-export type GetBotsByBotIdDependenciesByDepIdScriptResponse = GetBotsByBotIdDependenciesByDepIdScriptResponses[keyof GetBotsByBotIdDependenciesByDepIdScriptResponses];
 
 export type PostBotsByBotIdDependenciesByDepIdUpdateData = {
     /**
