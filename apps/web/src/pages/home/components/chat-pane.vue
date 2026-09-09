@@ -913,7 +913,7 @@
                          stays hidden, while a VISIBLE disabled button still
                          dims as designed. -->
                     <div
-                      class="absolute inset-0 transition-[opacity,scale] duration-[188ms] ease motion-reduce:transition-none"
+                      class="absolute inset-0 transition-[opacity,scale] duration-[188ms] ease-[ease] motion-reduce:transition-none"
                       :class="micVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-70 opacity-0'"
                     >
                       <Button
