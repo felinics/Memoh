@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Working Language
+
+The primary working language for this repository is **Chinese (中文)**, including issue and PR titles and bodies, review comments, and commit/PR discussion. Other languages (e.g. English) are not rejected — quoted code, error logs, and upstream English material stay as-is — but default to Chinese whenever you author new content.
+
 ## Project Overview
 
 Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
