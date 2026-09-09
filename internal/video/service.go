@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 type Service struct {
@@ -250,11 +251,11 @@ func maskProviderConfig(cfg map[string]any, schema ConfigSchema) map[string]any 
 	return out
 }
 
+// The mask shape is the providers package's single contract: the settings UI
+// round-trips what we return here through PUT /providers/:id, whose masked-
+// secret preservation only recognizes that one shape.
 func maskSecret(value string) string {
-	if len(value) <= 8 {
-		return "********"
-	}
-	return value[:4] + "****" + value[len(value)-4:]
+	return providers.MaskAPIKey(value)
 }
 
 func toModelFromListRow(row sqlc.ListVideoModelsRow) ModelResponse {

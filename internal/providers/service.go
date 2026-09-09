@@ -213,7 +213,9 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	existingConfig := providerConfig(existing.Config)
 	if req.Config != nil {
 		mergedConfig := mergeProviderConfig(existingConfig, req.Config)
-		preserveMaskedConfigSecret(mergedConfig, existingConfig, req.Config, "api_key")
+		for _, key := range SecretConfigKeys {
+			preserveMaskedConfigSecret(mergedConfig, existingConfig, req.Config, key)
+		}
 		existingConfig = normalizeProviderConfig(clientType, mergedConfig)
 	} else {
 		existingConfig = normalizeProviderConfig(clientType, existingConfig)
@@ -721,7 +723,7 @@ func preserveMaskedConfigSecret(merged, existing, incoming map[string]any, key s
 	if existingValue == "" || newValue == "" {
 		return
 	}
-	if newValue == maskAPIKey(existingValue) {
+	if newValue == MaskAPIKey(existingValue) {
 		merged[key] = existingValue
 	}
 }
@@ -740,16 +742,24 @@ func normalizeProviderConfig(clientType string, cfg map[string]any) map[string]a
 // maskConfigSecrets returns a copy of config with all known secret fields masked.
 func maskConfigSecrets(clientType string, cfg map[string]any) map[string]any {
 	result := normalizeProviderConfig(clientType, cfg)
-	for _, key := range []string{"api_key", configOAuthClientSecretKey} {
+	for _, key := range SecretConfigKeys {
 		if value, _ := result[key].(string); value != "" {
-			result[key] = maskAPIKey(value)
+			result[key] = MaskAPIKey(value)
 		}
 	}
 	return result
 }
 
-// maskAPIKey masks an API key for security.
-func maskAPIKey(apiKey string) string {
+// SecretConfigKeys is the single registry of provider-config fields that hold
+// secrets. Every read surface that masks (here and the audio speech/
+// transcription endpoints) and every write surface that preserves masked
+// round-trips must draw from THIS list and mask with MaskAPIKey — the speech
+// endpoints once masked with their own shape, and any voice-settings save
+// then wrote the masked literal back over the real key.
+var SecretConfigKeys = []string{"api_key", configOAuthClientSecretKey, "access_key", "secret_key", "app_key"}
+
+// MaskAPIKey masks an API key for security.
+func MaskAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""
 	}

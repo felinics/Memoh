@@ -24,7 +24,7 @@ func TestMaskAPIKey(t *testing.T) {
 
 	t.Run("short key is fully masked", func(t *testing.T) {
 		t.Parallel()
-		if got := maskAPIKey("sk-12"); got != "*****" {
+		if got := MaskAPIKey("sk-12"); got != "*****" {
 			t.Fatalf("expected fully masked, got %q", got)
 		}
 	})
@@ -32,7 +32,7 @@ func TestMaskAPIKey(t *testing.T) {
 	t.Run("long key preserves prefix", func(t *testing.T) {
 		t.Parallel()
 		key := "sk-1234567890abcdef"
-		masked := maskAPIKey(key)
+		masked := MaskAPIKey(key)
 		if masked == key {
 			t.Fatal("masked key should differ from original")
 		}
@@ -46,7 +46,7 @@ func TestMaskAPIKey(t *testing.T) {
 
 	t.Run("empty key returns empty", func(t *testing.T) {
 		t.Parallel()
-		if got := maskAPIKey(""); got != "" {
+		if got := MaskAPIKey(""); got != "" {
 			t.Fatalf("expected empty, got %q", got)
 		}
 	})
@@ -311,13 +311,34 @@ func TestPreserveMaskedConfigSecret(t *testing.T) {
 		configOAuthClientSecretKey: "gh-secret-1234",
 	}
 	incoming := map[string]any{
-		configOAuthClientSecretKey: maskAPIKey("gh-secret-1234"),
+		configOAuthClientSecretKey: MaskAPIKey("gh-secret-1234"),
 	}
 
 	preserveMaskedConfigSecret(merged, existing, incoming, configOAuthClientSecretKey)
 
 	if got, _ := merged[configOAuthClientSecretKey].(string); got != "gh-secret-1234" {
 		t.Fatalf("expected masked value to be restored to original secret, got %q", got)
+	}
+}
+
+// The voice/speech settings pages read provider configs through the audio
+// endpoints and PUT them back unchanged: every key those surfaces mask must
+// survive that round-trip instead of overwriting the stored secret with the
+// masked literal.
+func TestPreserveMaskedConfigSecret_AllRegisteredKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range SecretConfigKeys {
+		secret := "real-secret-value-123456"
+		merged := map[string]any{key: MaskAPIKey(secret)}
+		existing := map[string]any{key: secret}
+		incoming := map[string]any{key: MaskAPIKey(secret)}
+
+		preserveMaskedConfigSecret(merged, existing, incoming, key)
+
+		if got, _ := merged[key].(string); got != secret {
+			t.Fatalf("key %s: masked round-trip corrupted the secret, got %q", key, got)
+		}
 	}
 }
 
