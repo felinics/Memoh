@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/audio/adapter"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -565,4 +567,21 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+func transcriptionHTTPError(err error) error {
+	code := apperror.CodeTranscriptionFailed
+	switch {
+	case errors.Is(err, adapter.ErrInvalidInput):
+		code = apperror.CodeTranscriptionRequestInvalid
+	case errors.Is(err, adapter.ErrAudioTooLarge):
+		code = apperror.CodeTranscriptionAudioTooLarge
+	case errors.Is(err, adapter.ErrRequestRejected):
+		code = apperror.CodeTranscriptionRequestRejected
+	case errors.Is(err, adapter.ErrRateLimited):
+		code = apperror.CodeTranscriptionRateLimited
+	case errors.Is(err, adapter.ErrUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		code = apperror.CodeTranscriptionUnavailable
+	}
+	return apperror.Wrap(code, err, nil)
 }

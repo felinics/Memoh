@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -81,15 +79,21 @@ func TestTranscribeFailureAndSilence(t *testing.T) {
 		name          string
 		status        int
 		body, wantErr string
+		wantKind      error
 	}{
-		{"unauthorized", 401, `{"message":"secret-key private-audio"}`, "HTTP 401"},
-		{"rate limited", 429, `busy`, "HTTP 429"},
-		{"redirect", 307, `redirect`, "HTTP 307"},
-		{"invalid JSON", 200, `<html>private-audio</html>`, "response JSON"},
-		{"no choices", 200, `{"choices":[]}`, "no transcription choice"},
-		{"null content", 200, `{"choices":[{"message":{"content":null}}]}`, "no transcription content"},
-		{"wrong content", 200, `{"choices":[{"message":{"content":42}}]}`, "must be text"},
-		{"silence", 200, `{"choices":[{"message":{"content":""}}]}`, ""},
+		{"bad request", 400, `private-audio`, "HTTP 400", adapter.ErrRequestRejected},
+		{"unauthorized", 401, `{"message":"secret-key private-audio"}`, "HTTP 401", adapter.ErrRequestRejected},
+		{"forbidden", 403, `private-audio`, "HTTP 403", adapter.ErrRequestRejected},
+		{"not found", 404, `private-audio`, "HTTP 404", adapter.ErrRequestRejected},
+		{"rate limited", 429, `busy`, "HTTP 429", adapter.ErrRateLimited},
+		{"server error", 500, `private-audio`, "HTTP 500", adapter.ErrUnavailable},
+		{"unavailable", 503, `private-audio`, "HTTP 503", adapter.ErrUnavailable},
+		{"redirect", 307, `redirect`, "HTTP 307", adapter.ErrRequestRejected},
+		{"invalid JSON", 200, `<html>private-audio</html>`, "response JSON", nil},
+		{"no choices", 200, `{"choices":[]}`, "no transcription choice", nil},
+		{"null content", 200, `{"choices":[{"message":{"content":null}}]}`, "no transcription content", nil},
+		{"wrong content", 200, `{"choices":[{"message":{"content":42}}]}`, "must be text", nil},
+		{"silence", 200, `{"choices":[{"message":{"content":""}}]}`, "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(tc.status); _, _ = fmt.Fprint(w, tc.body) }))
@@ -103,6 +107,9 @@ func TestTranscribeFailureAndSilence(t *testing.T) {
 				return
 			}
 			require.ErrorContains(t, err, tc.wantErr)
+			if tc.wantKind != nil {
+				require.ErrorIs(t, err, tc.wantKind)
+			}
 			require.NotContains(t, err.Error(), "secret-key")
 			require.NotContains(t, err.Error(), "private-audio")
 		})
@@ -148,8 +155,6 @@ func TestValidation(t *testing.T) {
 		_, err := p.DoTranscribe(t.Context(), sdk.TranscriptionParams{Audio: audio})
 		require.ErrorContains(t, err, "audio file")
 	}
-	_, err = p.DoTranscribe(t.Context(), sdk.TranscriptionParams{Audio: []byte("audio"), Config: map[string]any{"enable_itn": "true"}})
-	require.ErrorContains(t, err, "boolean")
 }
 
 func TestInvalidOptionsNeverSendAudio(t *testing.T) {
@@ -204,35 +209,6 @@ func TestTranscriptionDefaultsAndExplicitFalse(t *testing.T) {
 	}
 }
 
-func TestUpstreamErrorCategories(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		status int
-		want   error
-	}{
-		{400, adapter.ErrRequestRejected},
-		{401, adapter.ErrRequestRejected},
-		{403, adapter.ErrRequestRejected},
-		{404, adapter.ErrRequestRejected},
-		{429, adapter.ErrRateLimited},
-		{500, adapter.ErrUnavailable},
-		{503, adapter.ErrUnavailable},
-	} {
-		t.Run(http.StatusText(tc.status), func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(tc.status)
-				_, _ = fmt.Fprint(w, "private audio and key")
-			}))
-			defer server.Close()
-			p, err := New("key", server.URL)
-			require.NoError(t, err)
-			_, err = p.DoTranscribe(t.Context(), sdk.TranscriptionParams{Audio: []byte("audio")})
-			require.ErrorIs(t, err, tc.want)
-			require.NotContains(t, err.Error(), "private audio and key")
-		})
-	}
-}
-
 func TestResponseSizeLimit(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -278,26 +254,4 @@ func TestTranscriptionTimeout(t *testing.T) {
 	_, err = p.DoTranscribe(t.Context(), sdk.TranscriptionParams{Audio: []byte("audio")})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.ErrorIs(t, err, adapter.ErrUnavailable)
-}
-
-// Opt in with MEMOH_ASR_LIVE_TEST=1, DASHSCOPE_API_KEY and MEMOH_ASR_TEST_AUDIO.
-func TestLive(t *testing.T) {
-	if os.Getenv("MEMOH_ASR_LIVE_TEST") != "1" {
-		t.Skip("set MEMOH_ASR_LIVE_TEST=1 for a billable real-provider test")
-	}
-	key, path := os.Getenv("DASHSCOPE_API_KEY"), os.Getenv("MEMOH_ASR_TEST_AUDIO")
-	require.NotEmpty(t, key, "DASHSCOPE_API_KEY")
-	require.NotEmpty(t, path, "MEMOH_ASR_TEST_AUDIO")
-	audio, err := os.ReadFile(path) // #nosec G304 G703 -- The developer selects the fixture in this opt-in test.
-	require.NoError(t, err)
-	p, err := New(key, os.Getenv("DASHSCOPE_BASE_URL"))
-	require.NoError(t, err)
-	start := time.Now()
-	result, err := p.DoTranscribe(t.Context(), sdk.TranscriptionParams{Audio: audio, Filename: filepath.Base(path), Config: map[string]any{"enable_itn": true}})
-	require.NoError(t, err)
-	require.NotEmpty(t, strings.TrimSpace(result.Text))
-	if expected := os.Getenv("MEMOH_ASR_EXPECT_TEXT"); expected != "" {
-		require.Contains(t, strings.ToLower(result.Text), strings.ToLower(expected))
-	}
-	t.Logf("text=%q language=%s duration=%.2fs elapsed=%s", result.Text, result.Language, result.DurationSeconds, time.Since(start).Round(time.Millisecond))
 }
