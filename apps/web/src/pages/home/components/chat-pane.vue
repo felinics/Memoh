@@ -64,6 +64,35 @@
                 </p>
               </div>
 
+              <!-- Cold-open placeholder while a session's first page is on the
+                   wire — Arkloop's ChatSkeleton shape, re-derived on Memoh
+                   geometry: chat text is 16px at --chat-leading 1.48 ≈ 24px
+                   line pitch, so a real one-line user bubble is py-3 + 24px =
+                   48px tall and ~10 CJK chars + px-4 ≈ 192px wide; each reply
+                   bar (12px + 12px gap) occupies one text line's 24px pitch.
+                   Bars use element opacity (not color alpha) so the parent's
+                   animate-pulse compounds with the per-bar fade. -->
+              <div
+                v-if="messages.length === 0 && loadingMessages"
+                class="animate-pulse flex flex-col gap-6"
+                aria-hidden="true"
+              >
+                <div class="flex justify-end">
+                  <div
+                    class="h-12 w-48 rounded-2xl bg-foreground"
+                    style="opacity: 0.08"
+                  />
+                </div>
+                <div class="flex flex-col gap-3">
+                  <div
+                    v-for="(w, i) in CHAT_SKELETON_BAR_WIDTHS"
+                    :key="i"
+                    class="h-3 rounded bg-foreground"
+                    :style="{ width: w, opacity: 0.15 - i * 0.013 }"
+                  />
+                </div>
+              </div>
+
               <!-- One persistent container per turn, keyed by the turn's
                    opening message id — a send APPENDS a container; previous
                    turns' DOM is never re-parented (see messageTurns for why
@@ -1276,6 +1305,11 @@ const WELCOME_GREETING_KEYS = [
   'chat.welcome.g5', 'chat.welcome.g6', 'chat.welcome.g7', 'chat.welcome.g8',
   'chat.welcome.g9', 'chat.welcome.g10', 'chat.welcome.g11', 'chat.welcome.g12',
 ] as const
+
+// Arkloop ChatSkeleton's width sequence, verbatim — percentages of the column,
+// so they scale with Memoh's layout; heights/pitches above are derived from
+// Memoh's own chat metrics, not copied.
+const CHAT_SKELETON_BAR_WIDTHS = ['85%', '65%', '90%', '55%', '75%', '60%', '80%', '50%', '70%', '40%'] as const
 function pickWelcomeGreetingIndex() {
   return Math.floor(Math.random() * WELCOME_GREETING_KEYS.length)
 }
