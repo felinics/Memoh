@@ -8,7 +8,7 @@
 // streaming.
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Download, FileCode, MoreHorizontal, Package, RotateCw, Trash2, Undo2 } from 'lucide-vue-next'
+import { ChevronRight, Download, MoreHorizontal, Package, RotateCw, Trash2, Undo2 } from 'lucide-vue-next'
 import {
   Badge,
   Button,
@@ -79,13 +79,11 @@ const menu = computed(() => dependencyMenuActions(props.item, props.workspaceSta
 // start button waits so two scripts never race inside one workspace.
 const primaryDisabled = computed(() => !!primary.value && (primary.value.disabled || (props.busy && primary.value.kind !== 'viewProgress')))
 function menuDisabled(action: DependencyMenuAction): boolean {
-  return action.disabled || (props.busy && action.kind !== 'viewScript')
+  return action.disabled || props.busy
 }
 
 function menuIcon(kind: DependencyMenuActionKind) {
   switch (kind) {
-    case 'install':
-      return Download
     case 'reinstall':
       return RotateCw
     case 'rollback':
@@ -93,7 +91,7 @@ function menuIcon(kind: DependencyMenuActionKind) {
     case 'remove':
       return Trash2
     default:
-      return FileCode
+      return Download
   }
 }
 

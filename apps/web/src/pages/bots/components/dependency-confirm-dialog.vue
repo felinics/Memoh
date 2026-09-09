@@ -24,7 +24,6 @@ import {
   FormField,
   FormControl,
   Input,
-  TextButton,
 } from '@felinic/ui'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import {
@@ -43,14 +42,11 @@ const props = withDefaults(defineProps<{
   /** Display name identifying the computer where the script will run. */
   targetName?: string
   loading?: boolean
-  /** The exact script revision has been loaded for review before confirmation. */
-  scriptReady?: boolean
   /** Overrides the confirm label (the enable flow says "Install and enable"). */
   confirmLabel?: string
 }>(), {
   targetName: '',
   loading: false,
-  scriptReady: false,
   confirmLabel: '',
 })
 
@@ -58,7 +54,6 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
   /** The trimmed version the user typed; empty means the latest. */
   confirm: [version: string]
-  viewScript: []
 }>()
 
 const { t } = useI18n()
@@ -127,8 +122,7 @@ function onOpenChange(value: boolean) {
 
 const submit = form.handleSubmit(({ version }) => {
   if (props.loading) return
-  if (!props.scriptReady) emit('viewScript')
-  else emit('confirm', version)
+  emit('confirm', version)
 })
 </script>
 
@@ -187,30 +181,21 @@ const submit = form.handleSubmit(({ version }) => {
         />
       </DialogBody>
 
-      <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">
-        <TextButton
-          v-if="scriptReady"
+      <DialogFooter class="min-w-0 items-center gap-2">
+        <Button
+          variant="outline"
           :disabled="loading"
-          @click="emit('viewScript')"
+          @click="emit('update:open', false)"
         >
-          {{ t('bots.dependencies.action.viewScript') }}
-        </TextButton>
-        <div class="flex items-center gap-2">
-          <Button
-            variant="outline"
-            :disabled="loading"
-            @click="emit('update:open', false)"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            form="dependency-confirm-form"
-            type="submit"
-            :loading="loading"
-          >
-            {{ scriptReady ? confirmText : t('bots.dependencies.action.viewScript') }}
-          </Button>
-        </div>
+          {{ t('common.cancel') }}
+        </Button>
+        <Button
+          form="dependency-confirm-form"
+          type="submit"
+          :loading="loading"
+        >
+          {{ confirmText }}
+        </Button>
       </DialogFooter>
     </DialogPanel>
   </Dialog>

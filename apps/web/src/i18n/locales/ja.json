@@ -2378,7 +2378,6 @@
         "rollback": "{version} にロールバック",
         "rollbackPlain": "ロールバック",
         "remove": "削除",
-        "viewScript": "スクリプトを表示",
         "viewProgress": "進行状況を表示"
       },
       "workspace": {
@@ -2422,16 +2421,6 @@
         "runInBackground": "バックグラウンドで実行",
         "version": "バージョン",
         "entrypoint": "エントリーポイント"
-      },
-      "script": {
-        "title": "Workspace で実行されるスクリプト",
-        "description": "{name} · {action} · 実際に実行される内容と同一",
-        "digest": "ダイジェスト",
-        "exec": "実行方法",
-        "timeout": "タイムアウト",
-        "timeoutValue": "{seconds} 秒",
-        "env": "環境変数（{count}）",
-        "revision": "定義リビジョン"
       },
       "remove": {
         "title": "{name} を削除しますか？",

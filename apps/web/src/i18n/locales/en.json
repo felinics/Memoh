@@ -2379,7 +2379,6 @@
         "rollback": "Roll back to {version}",
         "rollbackPlain": "Roll back",
         "remove": "Remove",
-        "viewScript": "View script",
         "viewProgress": "View progress"
       },
       "workspace": {
@@ -2423,16 +2422,6 @@
         "runInBackground": "Run in background",
         "version": "Version",
         "entrypoint": "Entrypoint"
-      },
-      "script": {
-        "title": "Script that will run in the workspace",
-        "description": "{name} · {action} · identical to what runs",
-        "digest": "Digest",
-        "exec": "Executed as",
-        "timeout": "Timeout",
-        "timeoutValue": "{seconds}s",
-        "env": "Environment ({count})",
-        "revision": "Definition revision"
       },
       "remove": {
         "title": "Remove {name}?",

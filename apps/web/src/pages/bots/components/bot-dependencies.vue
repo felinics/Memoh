@@ -207,11 +207,8 @@
       :item="confirm.item"
       :target-kind="targetKind"
       :target-name="targetName"
-      :loading="script.forConfirmation && script.loading"
-      :script-ready="script.forConfirmation && !!script.data?.definition_revision && !script.error"
       @update:open="(value) => { confirm.open = value }"
       @confirm="onConfirmed"
-      @view-script="openScriptFromConfirm"
     />
 
     <DependencyProgressDialog
@@ -227,20 +224,8 @@
       @retry="retry"
     />
 
-    <DependencyScriptDialog
-      :open="script.open"
-      :script="script.data"
-      :loading="script.loading"
-      :error="script.error"
-      :dependency-name="script.item ? dependencyName(script.item) : ''"
-      :action="script.action"
-      :actions="script.actions"
-      @update:open="(value) => { script.open = value }"
-      @update:action="switchScriptAction"
-    />
-
     <ConfirmDeleteDialog
-      :open="!!removeTarget && !script.open && !script.loading && !!script.data?.definition_revision && script.item?.id === removeTarget.id && script.action === 'remove'"
+      :open="!!removeTarget"
       :title="t('bots.dependencies.remove.title', { name: removeTarget ? dependencyName(removeTarget) : '' })"
       :description="removeDescription"
       :cancel-label="t('common.cancel')"
@@ -293,26 +278,21 @@ import DependencyConfirmDialog from './dependency-confirm-dialog.vue'
 import DependencyProgressDialog from './dependency-progress-dialog.vue'
 import DependencyRollbackDialog from './dependency-rollback-dialog.vue'
 import DependencyRow from './dependency-row.vue'
-import DependencyScriptDialog from './dependency-script-dialog.vue'
 import { useDependencyOperation } from '../composables/useDependencyOperation'
 import {
   checkDependencyUpdates,
-  fetchDependencyScript,
   invalidateBotDependencies,
   rollbackDependency,
   useBotDependenciesQuery,
   type DependencyItem,
   type DependencyOperationAction,
   type DependencyWorkspaceState,
-  type ScriptAction,
-  type ScriptResponse,
 } from '@/composables/api/useWorkspaceDependencies'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import { formatRelativeTime } from '@/utils/date-time'
 import {
-  dependencyAllows,
   dependencyInProgress,
   dependencyIsInstalled,
   formatDependencyVersion,
@@ -483,11 +463,6 @@ const confirm = reactive<{
 function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operation: DependencyOperationAction) {
   confirm.item = item
   confirm.definitionRevision = item.definition_revision ?? ''
-  scriptSequence++
-  script.open = false
-  script.loading = false
-  script.forConfirmation = false
-  script.data = null
   confirm.mode = mode
   confirm.operation = operation
   confirm.open = true
@@ -556,19 +531,14 @@ function onMenu(item: DependencyItem, action: DependencyMenuAction) {
       return
     case 'remove':
       removeTarget.value = item
-      void openScript(item, 'remove')
-      return
-    default:
-      void openScript(item, defaultScriptAction(item))
   }
 }
 
 function onRemoveConfirmed() {
   const item = removeTarget.value
-  const revision = script.data?.definition_revision
-  if (!item || script.item?.id !== item.id || script.action !== 'remove' || !revision) return
+  if (!item) return
   removeTarget.value = null
-  start(item, 'remove', { definitionRevision: revision })
+  start(item, 'remove', { definitionRevision: item.definition_revision })
 }
 
 async function onRollbackConfirmed() {
@@ -591,85 +561,10 @@ async function onRollbackConfirmed() {
   }
 }
 
-// ---- Script preview ---------------------------------------------------------
-
-const script = reactive<{
-  definitionRevision: string
-  forConfirmation: boolean
-  open: boolean
-  item: DependencyItem | null
-  action: ScriptAction
-  actions: ScriptAction[]
-  data: ScriptResponse | null
-  loading: boolean
-  error: string
-}>({ open: false, item: null, action: 'install', actions: [], data: null, loading: false, error: '', definitionRevision: '', forConfirmation: false })
-let scriptSequence = 0
 watch([botIdRef, selectedTargetId], () => {
   confirm.open = false
   confirm.definitionRevision = ''
-  script.open = false
-  scriptSequence++
 })
-
-// Which scripts make sense to read for this row: the ones the Server would
-// run now, plus install (always previewable — it is what a fresh row gets).
-function scriptActionsFor(item: DependencyItem): ScriptAction[] {
-  const actions: ScriptAction[] = ['install']
-  if (dependencyAllows(item, 'update')) actions.push('update')
-  if (dependencyAllows(item, 'remove')) actions.push('remove')
-  return actions
-}
-
-function defaultScriptAction(item: DependencyItem): ScriptAction {
-  return dependencyAllows(item, 'update') ? 'update' : 'install'
-}
-
-async function openScript(item: DependencyItem, action: ScriptAction, forConfirmation = false) {
-  script.forConfirmation = forConfirmation
-  script.definitionRevision = forConfirmation ? confirm.definitionRevision : ''
-  script.item = item
-  script.actions = (forConfirmation || (action === 'remove' && removeTarget.value?.id === item.id))
-    ? [action]
-    : scriptActionsFor(item)
-  script.open = true
-  await loadScript(action)
-}
-
-async function loadScript(action: ScriptAction) {
-  const item = script.item
-  if (!item?.id) return
-  const sequence = ++scriptSequence
-  script.action = action
-  script.loading = true
-  script.error = ''
-  script.data = null
-  try {
-    const response = await fetchDependencyScript(props.botId, selectedTargetId.value, item.id, action, script.definitionRevision)
-    if (sequence === scriptSequence) {
-      script.data = response
-      script.definitionRevision = response.definition_revision ?? ''
-      if (script.forConfirmation && confirm.open && confirm.item?.id === item.id) confirm.definitionRevision = script.definitionRevision
-    }
-  } catch (err) {
-    if (sequence === scriptSequence) script.error = resolveApiErrorMessage(err, t('common.loadFailed'))
-  } finally {
-    if (sequence === scriptSequence) script.loading = false
-  }
-}
-
-function switchScriptAction(action: ScriptAction) {
-  void loadScript(action)
-}
-
-// The confirm dialog's "View script" shows the script the confirmed button
-// would run; a reinstall reads as the install script since nothing else is
-// left to inspect once the current copy is gone.
-function openScriptFromConfirm() {
-  const item = confirm.item
-  if (!item) return
-  void openScript(item, confirm.operation, true)
-}
 
 // ---- Manual refresh, workspace start & navigation ---------------------------
 

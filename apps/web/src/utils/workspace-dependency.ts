@@ -36,7 +36,7 @@ export interface DependencyPrimaryAction {
   disabled: boolean
 }
 
-export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'viewScript' | 'remove'
+export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'remove'
 
 export interface DependencyMenuAction {
   kind: DependencyMenuActionKind
@@ -251,26 +251,12 @@ export function dependencyUpdateOperation(item: Pick<DependencyItem, 'actions'>)
   return null
 }
 
-const SCRIPTED_ACTIONS: DependencyAvailableAction[] = ['install', 'update', 'reinstall', 'remove']
-
 export function dependencyMenuActions(
   item: DependencyItem,
   workspaceState: DependencyWorkspaceState | undefined,
 ): DependencyMenuAction[] {
-  // A row the Server can run a script for can always show that script —
-  // including while an operation runs and `actions` is momentarily empty.
-  const scripted = dependencyInProgress(item) || SCRIPTED_ACTIONS.some(action => dependencyAllows(item, action))
-  // Script preview is rendered by the Server from the catalog; it needs no
-  // workspace, so it stays clickable while everything else is read-only.
-  const viewScript: DependencyMenuAction = {
-    kind: 'viewScript',
-    labelKey: `${ACTION_KEY}.viewScript`,
-    destructive: false,
-    disabled: false,
-    separatorBefore: false,
-  }
   if (dependencyPlatformUnsupported(item)) {
-    return scripted ? [viewScript] : []
+    return []
   }
 
   const readonly = workspaceState !== 'running' || dependencyInProgress(item)
@@ -307,14 +293,13 @@ export function dependencyMenuActions(
       separatorBefore: false,
     })
   }
-  if (scripted) items.push({ ...viewScript, separatorBefore: items.length > 0 })
   if (dependencyAllows(item, 'remove')) {
     items.push({
       kind: 'remove',
       labelKey: `${ACTION_KEY}.remove`,
       destructive: true,
       disabled: readonly,
-      separatorBefore: false,
+      separatorBefore: items.length > 0,
     })
   }
   return items

@@ -3,7 +3,6 @@ import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getBotsByBotIdDependencies,
   getWorkspaceDependenciesCatalog,
-  getBotsByBotIdDependenciesByDepIdScript,
   postBotsByBotIdDependenciesByDepIdRollback,
   postBotsByBotIdDependenciesCheckUpdates,
   postBotsByBotIdDependenciesPreflight,
@@ -13,8 +12,6 @@ import {
   type HandlersWorkspaceDependencyPlatform,
   type HandlersWorkspaceDependencyPreflightItem,
   type HandlersWorkspaceDependencyPreflightResponse,
-  type HandlersWorkspaceDependencyScriptEnv,
-  type HandlersWorkspaceDependencyScriptResponse,
 } from '@memohai/sdk'
 
 // Domain aliases over the generated SDK types. The generated names carry the
@@ -33,9 +30,6 @@ export type DependencyAvailableAction = NonNullable<DependencyItem['actions']>[n
 export type PreflightResponse = HandlersWorkspaceDependencyPreflightResponse
 export type PreflightItem = HandlersWorkspaceDependencyPreflightItem
 export type PreflightState = NonNullable<PreflightItem['state']>
-export type ScriptResponse = HandlersWorkspaceDependencyScriptResponse
-export type ScriptEnv = HandlersWorkspaceDependencyScriptEnv
-export type ScriptAction = NonNullable<ScriptResponse['action']>
 export type DependencyOperationResponse = HandlersWorkspaceDependencyOperationResponse
 /** The operations that stream a log. Rollback is synchronous. */
 export type DependencyOperationAction = 'install' | 'update' | 'reinstall' | 'remove'
@@ -122,26 +116,6 @@ export async function checkDependencyUpdates(
   const { data } = await postBotsByBotIdDependenciesCheckUpdates({
     path: { bot_id: botId },
     query: workspaceTargetQuery(targetId),
-    throwOnError: true,
-  })
-  return data
-}
-
-/**
- * The exact script text a dependency action would feed the workspace shell,
- * prelude included. Scripts never touch the workspace disk, so
- * this is the only way to inspect them.
- */
-export async function fetchDependencyScript(
-  botId: string,
-  targetId: string,
-  depId: string,
-  action: ScriptAction,
-  definitionRevision?: string,
-): Promise<ScriptResponse> {
-  const { data } = await getBotsByBotIdDependenciesByDepIdScript({
-    path: { bot_id: botId, dep_id: depId },
-    query: { action, definition_revision: definitionRevision || undefined, ...workspaceTargetQuery(targetId) },
     throwOnError: true,
   })
   return data

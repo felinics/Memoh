@@ -186,50 +186,49 @@ describe('dependencyPrimaryAction', () => {
 })
 
 describe('dependencyMenuActions', () => {
-  it('lists reinstall, rollback, script, and remove for an installed managed row', () => {
+  it('lists reinstall, rollback, and remove for an installed managed row', () => {
     const actions = dependencyMenuActions(item({
       status: 'installed',
       previous_version: 'v0.147.0',
       actions: ['update', 'reinstall', 'remove', 'rollback'],
     }), 'running')
-    expect(actions.map(action => action.kind)).toEqual(['reinstall', 'rollback', 'viewScript', 'remove'])
+    expect(actions.map(action => action.kind)).toEqual(['reinstall', 'rollback', 'remove'])
     expect(actions[1]).toMatchObject({ args: { version: '0.147.0' }, disabled: false })
-    expect(actions[2]).toMatchObject({ separatorBefore: true, disabled: false })
-    expect(actions[3]).toMatchObject({ destructive: true, disabled: false })
+    expect(actions[2]).toMatchObject({ destructive: true, separatorBefore: true, disabled: false })
   })
 
-  it('offers install and script for an up-to-date image copy the Server lets you lay a version over', () => {
+  it('offers install for an up-to-date image copy the Server lets you lay a version over', () => {
     const actions = dependencyMenuActions(imageCopy(), 'running')
-    expect(actions.map(action => action.kind)).toEqual(['install', 'viewScript'])
+    expect(actions.map(action => action.kind)).toEqual(['install'])
     expect(actions[0]).toMatchObject({ labelKey: 'bots.dependencies.action.install', disabled: false })
     // Once install doubles as the row's Update button, the menu does not repeat it.
-    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running')).toEqual([])
   })
 
-  it('keeps only the script preview clickable while the workspace is read-only', () => {
+  it('disables everything while the workspace is read-only', () => {
     const actions = dependencyMenuActions(item({
       status: 'installed',
       previous_version: '0.1.0',
       actions: ['update', 'reinstall', 'remove', 'rollback'],
     }), 'not_running')
-    expect(actions.filter(action => !action.disabled).map(action => action.kind)).toEqual(['viewScript'])
-    expect(dependencyMenuActions(imageCopy(), 'not_running').filter(action => !action.disabled).map(action => action.kind)).toEqual(['viewScript'])
+    expect(actions.filter(action => !action.disabled)).toEqual([])
+    expect(dependencyMenuActions(imageCopy(), 'not_running').filter(action => !action.disabled)).toEqual([])
   })
 
-  it('offers script and remove for a missing row, script only for an uninstalled one', () => {
+  it('offers remove for a missing row, nothing for an uninstalled one', () => {
     expect(dependencyMenuActions(item({ status: 'missing', actions: ['install', 'remove'] }), 'running').map(action => action.kind))
-      .toEqual(['viewScript', 'remove'])
-    expect(dependencyMenuActions(item({ actions: ['install'] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+      .toEqual(['remove'])
+    expect(dependencyMenuActions(item({ actions: ['install'] }), 'running')).toEqual([])
   })
 
-  it('keeps the script preview while an operation empties the action list', () => {
-    expect(dependencyMenuActions(item({ status: 'installing', actions: [] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+  it('has no menu while an operation empties the action list', () => {
+    expect(dependencyMenuActions(item({ status: 'installing', actions: [] }), 'running')).toEqual([])
   })
 
   it('hides rollback until the Server lists it, even with a previous version recorded', () => {
     const kinds = dependencyMenuActions(item({ status: 'installed', previous_version: '0.1.0', actions: ['update', 'reinstall', 'remove'] }), 'running')
       .map(action => action.kind)
-    expect(kinds).toEqual(['reinstall', 'viewScript', 'remove'])
+    expect(kinds).toEqual(['reinstall', 'remove'])
   })
 
   it('has no menu at all when the Server lists no scripted action', () => {
@@ -237,8 +236,8 @@ describe('dependencyMenuActions', () => {
     expect(dependencyMenuActions(item({ status: 'installed', actions: [] }), 'running')).toEqual([])
   })
 
-  it('leaves only the script preview on an unsupported platform', () => {
-    expect(dependencyMenuActions(item({ platform_supported: false, status: 'installed', actions: ['update'] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+  it('has no menu on an unsupported platform', () => {
+    expect(dependencyMenuActions(item({ platform_supported: false, status: 'installed', actions: ['update'] }), 'running')).toEqual([])
     expect(dependencyMenuActions(item({ platform_supported: false }), 'running')).toEqual([])
   })
 })

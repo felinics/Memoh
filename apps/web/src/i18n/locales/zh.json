@@ -2379,7 +2379,6 @@
         "rollback": "回滚到 {version}",
         "rollbackPlain": "回滚",
         "remove": "卸载",
-        "viewScript": "查看脚本",
         "viewProgress": "查看进度"
       },
       "workspace": {
@@ -2423,16 +2422,6 @@
         "runInBackground": "后台运行",
         "version": "版本",
         "entrypoint": "入口"
-      },
-      "script": {
-        "title": "将在工作区执行的脚本",
-        "description": "{name} · {action} · 与实际执行的内容一致",
-        "digest": "摘要",
-        "exec": "执行方式",
-        "timeout": "超时",
-        "timeoutValue": "{seconds} 秒",
-        "env": "环境变量（{count}）",
-        "revision": "定义版本"
       },
       "remove": {
         "title": "卸载 {name}？",
