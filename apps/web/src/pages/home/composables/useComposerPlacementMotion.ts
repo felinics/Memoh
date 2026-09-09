@@ -5,6 +5,11 @@ import { CHAT_SEND_MOTION } from './turn-entrance'
 export function useComposerPlacementMotion(
   element: Ref<HTMLElement | null>,
   isWelcome: Ref<boolean>,
+  // The FLIP is only honest on the send path, where the pane's layout is
+  // otherwise stable. Navigation (welcome → sidebar session) swaps the whole
+  // pane in the same flush; gliding the composer over the already-arrived
+  // content reads as a stray ghost, so callers gate those flips out.
+  allow: () => boolean = () => true,
 ) {
   let cancel: (() => void) | undefined
   let revision = 0
@@ -16,7 +21,7 @@ export function useComposerPlacementMotion(
   watch(isWelcome, async (welcome, wasWelcome) => {
     reset()
     const el = element.value
-    if (welcome || !wasWelcome || !el
+    if (welcome || !wasWelcome || !el || !allow()
       || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
     const attempt = revision
     // Measure before Vue changes the welcome layout, then invert the movement.

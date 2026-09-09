@@ -38,3 +38,19 @@ describe('motion accessibility', () => {
     scope.stop()
   })
 })
+
+describe('navigation gate', () => {
+  it('lands without animating when the flip is not send-initiated', async () => {
+    const el = document.createElement('div')
+    const welcome = ref(true)
+    el.getBoundingClientRect = () => ({ left: 0, top: 300 }) as DOMRect
+    const scope = effectScope()
+    scope.run(() => useComposerPlacementMotion(ref(el), welcome, () => false))
+    welcome.value = false
+    await nextTick()
+    await nextTick()
+    expect(animate).not.toHaveBeenCalled()
+    expect(el.style.transform).toBe('')
+    scope.stop()
+  })
+})

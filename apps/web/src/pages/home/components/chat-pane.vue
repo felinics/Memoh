@@ -1258,7 +1258,15 @@ const isWelcome = computed(() =>
 // from the first frame, so this gate never engages on session routes.
 const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
-useComposerPlacementMotion(composerPlacementEl, isWelcome)
+// Armed by handleSend when the send leaves from welcome; consumed on the
+// welcome→chat flip. Without an armed send the flip is navigation, and the
+// composer just lands docked with the rest of the pane.
+const welcomeSendMotionArmed = ref(false)
+useComposerPlacementMotion(composerPlacementEl, isWelcome, () => {
+  const armed = welcomeSendMotionArmed.value
+  welcomeSendMotionArmed.value = false
+  return armed
+})
 
 // Rotate the greeting per fresh chat so the entry point feels alive rather than
 // a fixed banner; the pick stays stable while a single welcome screen is shown
@@ -3590,6 +3598,7 @@ async function handleSend() {
   const sentReasoningEffort = pairSend.pair.reasoningEffort
   const sentWorkspaceTargetId = sendWorkspaceTargetId.value
   const preserveDirectDraftSelection = activeUsesDirectRuntime.value && !sentContext.target.sessionId
+  welcomeSendMotionArmed.value = isWelcome.value
   composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')
@@ -3650,6 +3659,11 @@ async function handleSend() {
     pairSend.releaseReads()
   })
   rollbackPin = null
+  // A send that never promoted the draft (command-only, or failed before the
+  // turn) leaves the motion armed; disarm so a later navigation can't inherit it.
+  void nextTick(() => {
+    if (isWelcome.value) welcomeSendMotionArmed.value = false
+  })
   pairSend.finish(result.messageSent === true || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.stage === 'startup') {
