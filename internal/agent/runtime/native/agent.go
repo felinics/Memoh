@@ -16,7 +16,9 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/hooks"
@@ -163,7 +165,7 @@ func (p contextBudgetGuardProvider) DoGenerate(ctx context.Context, params sdk.G
 			return nil, err
 		}
 	}
-	return p.Provider.DoGenerate(ctx, params)
+	return p.Provider.DoGenerate(p.trajectoryRequest(ctx, params), params)
 }
 
 func (p contextBudgetGuardProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
@@ -184,7 +186,7 @@ func (p contextBudgetGuardProvider) DoStream(ctx context.Context, params sdk.Gen
 			return nil, err
 		}
 	}
-	return p.Provider.DoStream(ctx, params)
+	return p.Provider.DoStream(p.trajectoryRequest(ctx, params), params)
 }
 
 func contextBudgetGuardedModel(model *sdk.Model, handoff *providerAttemptHandoff) *sdk.Model {
@@ -221,7 +223,49 @@ func (a *Agent) Stream(ctx context.Context, cfg RunConfig) <-chan StreamEvent {
 		defer close(ch)
 		a.runStream(ctx, cfg, ch)
 	}()
-	return ch
+	if cfg.OnAgentEventObserved == nil {
+		return ch
+	}
+	// The relay reads ch to the end whatever the consumer does, so the run
+	// never waits on the consumer directly: ordinary events go out while the
+	// run context lives and are dropped once it is cancelled, exactly as the
+	// direct channel behaved, and the terminal event gets the same bounded
+	// window it had on the direct channel.
+	observed := make(chan StreamEvent)
+	go func() {
+		defer close(observed)
+		delivering := true
+		for ev := range ch {
+			cfg.OnAgentEventObserved(ev)
+			if !delivering {
+				continue
+			}
+			if ev.IsTerminal() {
+				delivering = deliverTerminalObservedEvent(observed, ev)
+				continue
+			}
+			select {
+			case observed <- ev:
+			case <-ctx.Done():
+			}
+		}
+	}()
+	return observed
+}
+
+// streamTerminalDeliveryGrace bounds how long the terminal event waits for a
+// consumer, so a disconnected consumer cannot hang the run's goroutines.
+var streamTerminalDeliveryGrace = 5 * time.Second
+
+func deliverTerminalObservedEvent(observed chan<- StreamEvent, ev StreamEvent) bool {
+	timer := time.NewTimer(streamTerminalDeliveryGrace)
+	defer timer.Stop()
+	select {
+	case observed <- ev:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // Generate runs the agent in non-streaming mode, returning the complete result.
@@ -281,10 +325,15 @@ func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
-	cfg.Model = modelWithProviderStreamEventObserver(cfg.Model, cfg.OnProviderStreamEventObserved)
+	stepClock := newStepClock(time.Now)
+	stepBoundary := &stepBoundaryEmitter{clock: stepClock}
+	cfg.Model = modelWithProviderStreamObserver(cfg.Model, cfg.OnProviderStreamEventObserved, stepClock)
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
+	ctx = cfg.TrajectoryContext(ctx)
+	defer cfg.flushTrajectory(ctx)
+	cfg.RecordTrajectory(ctx, "runtime_input", nil, nil)
 	streamCtx, cancel := context.WithCancelCause(ctx)
 	eventGate := newStreamEmitterGate(streamCtx, ch)
 	defer func() {
@@ -352,6 +401,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	cfg = captureProviderAttemptPrefix(cfg)
 	if readMediaState != nil {
 		readMediaState.ledger = cfg.ContextMutations
+		readMediaState.capture = func(step int, params *sdk.GenerateParams, source trajectory.Block) {
+			cfg.RecordTrajectory(streamCtx, "read_media_injected", &step, params, source)
+		}
 	}
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
@@ -367,6 +419,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		})
 	})
 	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
+	sdkTools = toolExecutionMetadata.wrapExecute(sdkTools)
 
 	// Loop detection setup
 	var textLoopGuard *TextLoopGuard
@@ -414,6 +467,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						break
 					}
 					text := injectedMessageText(injected)
+					messageIndex := len(p.Messages)
+					applied := false
 					if text != "" || (cfg.SupportsImageInput && len(injected.ImageParts) > 0) {
 						var extra []sdk.MessagePart
 						if cfg.SupportsImageInput {
@@ -423,8 +478,8 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 								}
 							}
 						}
-						messageIndex := len(p.Messages)
-						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
+						p.Messages = append(p.Messages, StampContextInjection(sdk.UserMessage(text, extra...), event.ContextInjectionSteering))
+						applied = true
 						cfg.ContextMutations.Record(contextfrag.MutationInjectedMessage, fmt.Sprintf("bytes=%d", len(text)))
 						injectedMessages.record(step, messageIndex, text)
 						a.logger.Info("injected user message into agent stream",
@@ -433,6 +488,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 							slog.Int("image_parts", len(extra)),
 						)
 					}
+					cfg.RecordTrajectory(ctx, "steering_applied", &step, p,
+						trajectory.JSONBlock("injection", "source", map[string]any{"input": injected, "message_index": messageIndex, "applied": applied}),
+					)
 					continue
 				default:
 				}
@@ -552,6 +610,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		switch p := part.(type) {
 		case *sdk.StartPart:
 			_ = p // stream start already emitted
+
+		case *sdk.StartStepPart, *sdk.FinishStepPart:
+			if boundary, ok := stepBoundary.observe(part); ok && !sendEvent(ctx, ch, boundary) {
+				aborted = true
+			}
 
 		case *sdk.TextStartPart:
 			if !sendEvent(ctx, ch, StreamEvent{Type: EventTextStart}) {
@@ -744,7 +807,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				streamResult, aborted = a.runMidStreamRetry(
 					ctx, streamCtx, cancel, toolLoopAbortCallIDs,
 					ch, cfg, sdkTools, approvalTools, prepareStep, streamResult,
-					committedStepMessages, onStepCommitted, &interruptedStep,
+					committedStepMessages, onStepCommitted, &interruptedStep, stepBoundary, toolExecutionMetadata,
 					stepNumber, errMsg, &allText, textLoopProbeBuffer,
 				)
 				if !aborted {
@@ -825,7 +888,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			finalMessages = annotateDeferredApproval(finalMessages, *streamResult.DeferredToolApproval)
 		}
 		finalMessages = toolExecutionMetadata.annotate(finalMessages)
-		totalUsage = aggregateStepUsage(streamResult.Steps)
+		totalUsage = normalizeProviderUsage(providerNameOf(cfg.Model), aggregateStepUsage(streamResult.Steps))
 	}
 	finalMessages = append(finalMessages, interruptedMessages...)
 	usageJSON, _ := json.Marshal(totalUsage)
@@ -879,15 +942,23 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	// context cancellation also unblocks an emitter already waiting on ch.
 	cancel(context.Canceled)
 	eventGate.close()
+	cfg.flushTrajectory(ctx)
 
 	// Deliver the terminal event using a context that is NOT cancelled when
 	// the parent ctx is cancelled (user abort / idle timeout / loop-detect).
 	// Otherwise sendEvent would short-circuit on <-ctx.Done() and the consumer
 	// would never receive the partial messages accumulated so far, forcing it
-	// to fall back to a synthetic placeholder. A 5s deadline guards against
-	// a fully-disconnected consumer hanging this goroutine forever.
-	deliveryCtx, deliveryCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer deliveryCancel()
+	// to fall back to a synthetic placeholder. A deadline guards against a
+	// fully-disconnected consumer hanging this goroutine forever; with an
+	// observer relay the relay always drains ch and applies that deadline on
+	// the consumer's side, so the send here must not time out while the relay
+	// still holds the previous event.
+	deliveryCtx := context.WithoutCancel(ctx)
+	if cfg.OnAgentEventObserved == nil {
+		var deliveryCancel context.CancelFunc
+		deliveryCtx, deliveryCancel = context.WithTimeout(deliveryCtx, streamTerminalDeliveryGrace)
+		defer deliveryCancel()
+	}
 	sendEvent(deliveryCtx, ch, termEvent)
 }
 
@@ -944,6 +1015,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
+	ctx = cfg.TrajectoryContext(ctx)
+	defer cfg.flushTrajectory(ctx)
+	cfg.RecordTrajectory(ctx, "runtime_input", nil, nil)
 	genCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	defer func() {
@@ -1001,6 +1075,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	cfg = captureProviderAttemptPrefix(cfg)
 	if readMediaState != nil {
 		readMediaState.ledger = cfg.ContextMutations
+		readMediaState.capture = func(step int, params *sdk.GenerateParams, source trajectory.Block) {
+			cfg.RecordTrajectory(genCtx, "read_media_injected", &step, params, source)
+		}
 	}
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
@@ -1008,6 +1085,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	toolExecutionMetadata := newToolExecutionMetadataRegistry(nil)
 	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
+	sdkTools = toolExecutionMetadata.wrapExecute(sdkTools)
 
 	var toolLoopGuard *ToolLoopGuard
 	var textLoopGuard *TextLoopGuard
@@ -1173,15 +1251,27 @@ func (a *Agent) buildGenerateOptions(ctx context.Context, cfg RunConfig, tools [
 			if p == nil {
 				return nil
 			}
+			var previous []sdk.Message
+			for _, message := range p.Messages[min(initialProviderMessageCount, len(p.Messages)):] {
+				if contextfrag.IsBackgroundSummaryCarrier(message) {
+					previous = append(previous, message)
+				}
+			}
 			p.Messages = removeBackgroundSummaryMessages(p.Messages, initialProviderMessageCount)
 			if basePrepare != nil {
 				if override := basePrepare(p); override != nil {
 					p = override
 				}
 			}
-			if summary := strings.TrimSpace(cfg.BackgroundManager.RunningTasksSummary(cfg.Identity.BotID, cfg.Identity.SessionID)); summary != "" {
-				cfg.ContextMutations.Record(contextfrag.MutationBackgroundSummary, fmt.Sprintf("bytes=%d", len(summary)))
+			summary := strings.TrimSpace(cfg.BackgroundManager.RunningTasksSummary(cfg.Identity.BotID, cfg.Identity.SessionID))
+			if summary != "" {
 				p.Messages = append(p.Messages, backgroundSummaryMessage(summary))
+			}
+			if len(previous) > 0 || summary != "" {
+				cfg.ContextMutations.Record(contextfrag.MutationBackgroundSummary, fmt.Sprintf("removed=%d bytes=%d", len(previous), len(summary)))
+				cfg.RecordTrajectory(ctx, "background_summary_updated", nil, p,
+					trajectory.JSONBlock("background", "replacement", map[string]any{"previous": previous, "summary": summary}),
+				)
 			}
 			return p
 		}
@@ -1258,6 +1348,7 @@ func prepareProviderAttempt(
 	if params == nil {
 		return nil
 	}
+	cfg.RecordTrajectory(ctx, "before_selection", &stepIndex, params)
 	prefixCount = clampStableMessageCount(prefixCount, len(params.Messages))
 	snapshot := contextfrag.StepSnapshot{StepIndex: stepIndex}
 	reselector := cfg.ContextStepReselector
@@ -1330,6 +1421,7 @@ func prepareProviderAttempt(
 		))
 	}
 	stagePreparedProviderAttempt(ctx, handoff, snapshot, systemPrepended, reselectionDetail, protectedPruned, provenance)
+	cfg.RecordTrajectory(ctx, "after_selection", &stepIndex, params)
 	return params
 }
 
@@ -1560,6 +1652,7 @@ func (a *Agent) assembleTools(
 
 	var allTools []sdk.Tool
 	var toolDefs []contextfrag.ToolDefAccounting
+	var toolTexts []contextfrag.FragmentText
 	type usageRegistration struct {
 		provider   tools.ToolUsage
 		capability string
@@ -1600,7 +1693,9 @@ func (a *Agent) assembleTools(
 			}
 		}
 		for _, tool := range providerTools {
-			toolDefs = append(toolDefs, contextfrag.ToolDefAccountingFor(label, tool))
+			accounting, text := contextfrag.ToolDefinitionText(label, tool)
+			toolDefs = append(toolDefs, accounting)
+			toolTexts = append(toolTexts, text)
 		}
 		allTools = append(allTools, providerTools...)
 		// Collect group-level usage guidance only from providers that actually
@@ -1634,6 +1729,7 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
+	cfg.ContextLifecycle.RecordToolDefinitions(toolTexts)
 	return allTools, usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }
 
@@ -1897,13 +1993,18 @@ func (a *Agent) runMidStreamRetry(
 	_ *stepMessageCapture,
 	onStepCommitted func(context.Context, int, *sdk.StepResult) error,
 	interruptedStep *interruptedStepCapture,
+	stepBoundary *stepBoundaryEmitter,
+	toolExecutionMetadata *toolExecutionMetadataRegistry,
 	stepNumber int,
 	errMsg string,
 	allText *strings.Builder,
 	textLoopProbeBuffer *TextLoopProbeBuffer,
 ) (*sdk.StreamResult, bool) {
 	// Drain the previous stream before reading prevResult.Messages.
-	// This avoids racing with the SDK's final StreamResult write.
+	// This avoids racing with the SDK's final StreamResult write. The failed
+	// attempt is over: a finish-step still in its stream must not complete a
+	// request the retry is about to make again.
+	stepBoundary.abandon()
 	if prevResult.Stream != nil {
 		for range prevResult.Stream {
 		}
@@ -1913,6 +2014,7 @@ func (a *Agent) runMidStreamRetry(
 	// committed boundary, so it must not survive as a checkpoint. Retried
 	// steps are numbered from the offset the commit barrier already uses.
 	interruptedStep.rebase(stepOffset)
+	stepBoundary.reset(stepOffset)
 	// lastAttempt stays the latest failed attempt's own (unmerged) result:
 	// providerAttemptState.retryInput indexes Steps by the call-local step
 	// index, so handing it a merged result would append the wrong step's tail.
@@ -1968,6 +2070,11 @@ func (a *Agent) runMidStreamRetry(
 			accumulatedCount,
 			errMsg,
 		)
+		retryCfgCopy.trajectoryStepOffset = stepOffset
+		localStep := 0
+		retryCfgCopy.RecordTrajectory(streamCtx, "retry_reconstructed", &localStep, nil,
+			trajectory.JSONBlock("retry", "source", map[string]any{"attempt": attempt + 1, "step_offset": stepOffset, "previous_messages": lastAttempt.Messages, "committed_steps": len(lastAttempt.Steps), "error": errMsg}),
+		)
 		if a == nil || a.contextViewApplier == nil {
 			retryCfgCopy = retryCfgCopy.RefreshContextFrag()
 		}
@@ -2003,6 +2110,10 @@ func (a *Agent) runMidStreamRetry(
 			}
 			interruptedStep.observe(retryPart)
 			switch rp := retryPart.(type) {
+			case *sdk.StartStepPart, *sdk.FinishStepPart:
+				if boundary, ok := stepBoundary.observe(retryPart); ok && !sendEvent(sendCtx, ch, boundary) {
+					aborted = true
+				}
 			case *sdk.TextStartPart:
 				if !sendEvent(sendCtx, ch, StreamEvent{Type: EventTextStart}) {
 					aborted = true
@@ -2060,6 +2171,7 @@ func (a *Agent) runMidStreamRetry(
 					ToolCallID: rp.ToolCallID,
 					Input:      rp.Input,
 					Result:     rp.Output,
+					Metadata:   toolExecutionMetadata.metadata(rp.ToolCallID),
 				}) || !sendEvent(sendCtx, ch, StreamEvent{
 					Type:           EventProgress,
 					StepNumber:     stepNumber,
@@ -2081,6 +2193,7 @@ func (a *Agent) runMidStreamRetry(
 					ToolName:   rp.ToolName,
 					ToolCallID: rp.ToolCallID,
 					Error:      rp.Error.Error(),
+					Metadata:   toolExecutionMetadata.metadata(rp.ToolCallID),
 				}) {
 					aborted = true
 				}

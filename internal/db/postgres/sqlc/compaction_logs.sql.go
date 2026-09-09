@@ -653,3 +653,128 @@ func (q *Queries) ListCompactionLogsByBot(ctx context.Context, arg ListCompactio
 	}
 	return items, nil
 }
+
+const listCompactionLogsBySession = `-- name: ListCompactionLogsBySession :many
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
+       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+       superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
+FROM bot_history_message_compacts
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND session_id = $2
+ORDER BY started_at DESC, id DESC
+LIMIT $3
+`
+
+type ListCompactionLogsBySessionParams struct {
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+	Limit     int32       `json:"limit"`
+}
+
+func (q *Queries) ListCompactionLogsBySession(ctx context.Context, arg ListCompactionLogsBySessionParams) ([]BotHistoryMessageCompact, error) {
+	rows, err := q.db.Query(ctx, listCompactionLogsBySession, arg.BotID, arg.SessionID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotHistoryMessageCompact
+	for rows.Next() {
+		var i BotHistoryMessageCompact
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.Status,
+			&i.Summary,
+			&i.MessageCount,
+			&i.ErrorMessage,
+			&i.Usage,
+			&i.ModelID,
+			&i.ArtifactVersion,
+			&i.Coverage,
+			&i.AnchorStartMs,
+			&i.AnchorEndMs,
+			&i.ArtifactLevel,
+			&i.ParentIds,
+			&i.SupersededBy,
+			&i.SupersededAt,
+			&i.CompactionEpoch,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCompactionLogsBySessionBefore = `-- name: ListCompactionLogsBySessionBefore :many
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
+       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+       superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
+FROM bot_history_message_compacts
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND session_id = $2
+  AND (started_at, id) < ($4::timestamptz, $5::uuid)
+ORDER BY started_at DESC, id DESC
+LIMIT $3
+`
+
+type ListCompactionLogsBySessionBeforeParams struct {
+	BotID           pgtype.UUID        `json:"bot_id"`
+	SessionID       pgtype.UUID        `json:"session_id"`
+	Limit           int32              `json:"limit"`
+	BeforeStartedAt pgtype.Timestamptz `json:"before_started_at"`
+	BeforeID        pgtype.UUID        `json:"before_id"`
+}
+
+func (q *Queries) ListCompactionLogsBySessionBefore(ctx context.Context, arg ListCompactionLogsBySessionBeforeParams) ([]BotHistoryMessageCompact, error) {
+	rows, err := q.db.Query(ctx, listCompactionLogsBySessionBefore,
+		arg.BotID,
+		arg.SessionID,
+		arg.Limit,
+		arg.BeforeStartedAt,
+		arg.BeforeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BotHistoryMessageCompact
+	for rows.Next() {
+		var i BotHistoryMessageCompact
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.Status,
+			&i.Summary,
+			&i.MessageCount,
+			&i.ErrorMessage,
+			&i.Usage,
+			&i.ModelID,
+			&i.ArtifactVersion,
+			&i.Coverage,
+			&i.AnchorStartMs,
+			&i.AnchorEndMs,
+			&i.ArtifactLevel,
+			&i.ParentIds,
+			&i.SupersededBy,
+			&i.SupersededAt,
+			&i.CompactionEpoch,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.TeamID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

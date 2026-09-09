@@ -103,16 +103,16 @@
           {{ $t('chat.compactNow') }}
         </Button>
 
-        <!-- Context Inspector -->
+        <!-- Trajectory -->
         <Button
           variant="ghost"
           size="sm"
           class="mt-1 w-full"
           :disabled="!sessionId"
-          @click="emit('openLifecycle')"
+          @click="emit('openTrajectory')"
         >
-          <ScanSearch class="size-3.5" />
-          {{ $t('chat.lifecycle.title') }}
+          <Route class="size-3.5" />
+          {{ $t('chat.trajectory.open') }}
         </Button>
 
         <!-- Subagents -->
@@ -153,13 +153,13 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import { ScrollArea, Button } from '@felinic/ui'
-import { Sparkles, Minimize2, ScanSearch } from 'lucide-vue-next'
+import { Sparkles, Minimize2, Route } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass, formatTokenCount } from '../composables/context-categories'
 import SubagentList from './subagent-list.vue'
 import ContextUsageBreakdown from './context-usage-breakdown.vue'
 
-const emit = defineEmits<{ openLifecycle: [] }>()
+const emit = defineEmits<{ openTrajectory: [] }>()
 
 const props = defineProps<{
   visible: boolean

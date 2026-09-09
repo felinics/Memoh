@@ -6,6 +6,10 @@ import {
   dropReasonRows,
   lifecycleStatusLabelKey,
   lifecycleStatusToneClass,
+  compactLifecyclePages,
+  lifecycleGapBefore,
+  lifecycleGapJoins,
+  mergeLifecyclePages,
 } from './context-lifecycle-view'
 import type { ContextfragLifecycleSnapshot, ContextfragSelectionTrace, HandlersContextLifecycleTurn } from '@memohai/sdk'
 
@@ -177,5 +181,84 @@ describe('buildTurnRow', () => {
   it('carries the prompt-diff label key, or none at an unknown boundary', () => {
     expect(buildTurnRow(turn, { previous: null, t, formatTime: () => '' }).diffKey).toBe('chat.lifecycle.diffInitial')
     expect(buildTurnRow(turn, { t, formatTime: () => '' }).diffKey).toBeNull()
+  })
+})
+
+describe('mergeLifecyclePages fragment previews', () => {
+  it('unions the previews of every joined page', () => {
+    const first = { turns: [{ run_id: 'run-2' }], has_more: true, next_cursor: 'c1', fragment_previews: { h1: { preview: 'one' } } }
+    const older = { turns: [{ run_id: 'run-1' }], has_more: false, fragment_previews: { h2: { preview: 'two' } } }
+    const merged = mergeLifecyclePages(first, [older])
+    expect(Object.keys(merged.fragmentPreviews).sort()).toEqual(['h1', 'h2'])
+    expect(mergeLifecyclePages(null, []).fragmentPreviews).toEqual({})
+  })
+})
+
+describe('mergeLifecyclePages', () => {
+  it('concatenates newest-first pages and drops runs repeated across page boundaries', () => {
+    const turn = (runId: string): HandlersContextLifecycleTurn => ({ run_id: runId, created_at: '2026-09-03T00:00:00.000Z', snapshot: {} })
+    const merged = mergeLifecyclePages(
+      { turns: [turn('r9'), turn('r8')], has_more: true, next_cursor: 'c1', limit: 2 },
+      [
+        { turns: [turn('r8'), turn('r7')], has_more: true, next_cursor: 'c2', limit: 2 },
+        { turns: [turn('r6')], has_more: false, limit: 2 },
+      ],
+    )
+    expect(merged.turns.map(item => item.run_id)).toEqual(['r9', 'r8', 'r7', 'r6'])
+    expect(merged.hasMore).toBe(false)
+    expect(merged.nextCursor).toBeNull()
+    expect(mergeLifecyclePages(null, []).turns).toEqual([])
+    // Older pages are immutable keyset slices: a first page that moved on
+    // keeps them, and only the runs between the two are missing.
+    expect(mergeLifecyclePages(
+      { turns: [turn('r10'), turn('r9')], has_more: true, next_cursor: 'c-new', limit: 2 },
+      [{ turns: [turn('r8')], has_more: false, limit: 2 }],
+    ).turns.map(item => item.run_id)).toEqual(['r10', 'r9', 'r8'])
+    expect(mergeLifecyclePages({ turns: [turn('r1')], has_more: true, next_cursor: 'c', limit: 1 }, []).nextCursor).toBe('c')
+    expect(mergeLifecyclePages({ turns: [turn('r1')], has_more: true, limit: 1 }, []).nextCursor).toBeNull()
+  })
+})
+
+describe('compactLifecyclePages', () => {
+  it('folds pages into one immutable slice keyed newest first', () => {
+    const turn = (runId: string): HandlersContextLifecycleTurn => ({ run_id: runId, created_at: '2026-09-03T00:00:00.000Z', snapshot: {} })
+    const compact = compactLifecyclePages([
+      { turns: [turn('r8'), turn('r7')], has_more: true, next_cursor: 'c-gap', limit: 8, fragment_previews: { h8: { preview: 'eight' } } },
+      { turns: [turn('r7'), turn('r6')], has_more: true, next_cursor: 'c2', limit: 50, fragment_previews: { h6: { preview: 'six' } } },
+      { turns: [turn('r5')], has_more: false, limit: 50 },
+    ])
+    expect(compact.turns?.map(item => item.run_id)).toEqual(['r8', 'r7', 'r6', 'r5'])
+    expect(compact.has_more).toBe(false)
+    expect(compact.next_cursor).toBeUndefined()
+    expect(Object.keys(compact.fragment_previews ?? {}).sort()).toEqual(['h6', 'h8'])
+    expect(compactLifecyclePages([]).turns).toEqual([])
+  })
+})
+
+describe('lifecycleGapBefore', () => {
+  it('names the cursor to fill only when loaded older pages no longer join the first page', () => {
+    expect(lifecycleGapBefore('c-new', 'c-old', true)).toBe('c-new')
+    expect(lifecycleGapBefore('c-old', 'c-old', true)).toBeNull()
+    expect(lifecycleGapBefore('c-new', 'c-old', false)).toBeNull()
+    expect(lifecycleGapBefore(undefined, 'c-old', true)).toBeNull()
+    expect(lifecycleGapBefore('c-new', null, true)).toBeNull()
+  })
+})
+
+describe('lifecycleGapJoins', () => {
+  const seq = (hi: number, lo: number): HandlersContextLifecycleTurn[] => Array.from({ length: hi - lo + 1 }, (_, i) => ({ run_id: `r${hi - i}`, created_at: '', snapshot: {} }))
+
+  it('continues past a gap page that reaches neither the window nor the end, and stops once it does', () => {
+    const older = [{ turns: seq(50, 1), has_more: false, limit: 50, aggregate_scope: '', aggregates: { turns: 50, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }]
+    const first = { turns: seq(62, 55), has_more: true, next_cursor: 'c55', limit: 8, aggregate_scope: '', aggregates: { turns: 8, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }
+    const second = { turns: seq(54, 47), has_more: true, next_cursor: 'c47', limit: 8, aggregate_scope: '', aggregates: { turns: 8, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }
+    expect(lifecycleGapJoins(first, older)).toBe(false)
+    expect(lifecycleGapJoins(second, older)).toBe(true)
+    expect(lifecycleGapJoins({ ...first, has_more: false }, older)).toBe(true)
+    // Twelve runs finished between refetches: two gap pages bridge them all.
+    const fresh = { turns: seq(112, 63), has_more: true, next_cursor: 'c63', limit: 50, aggregate_scope: '', aggregates: { turns: 50, total_cache_read_tokens: 0, total_cache_write_tokens: 0 } }
+    const merged = mergeLifecyclePages(fresh, [compactLifecyclePages([first, second, ...older])])
+    expect(merged.turns.length).toBe(112)
+    expect(merged.hasMore).toBe(false)
   })
 })

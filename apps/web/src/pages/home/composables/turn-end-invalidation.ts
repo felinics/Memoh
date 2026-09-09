@@ -17,7 +17,7 @@ export function installTurnEndInvalidation(streamingSessionIds: Ref<readonly str
   if (installed.has(queryCache)) return
   installed.add(queryCache)
   const invalidate = (sessionId: string) => queryCache.invalidateQueries({
-    predicate: entry => (entry.key[0] === 'session-status' || entry.key[0] === 'context-lifecycle') && entry.key[2] === sessionId,
+    predicate: entry => (entry.key[0] === 'session-status' || entry.key[0] === 'context-lifecycle' || entry.key[0] === 'session-compactions') && entry.key[2] === sessionId,
   })
   effectScope(true).run(() => {
     watch(streamingSessionIds, (now, prev) => {

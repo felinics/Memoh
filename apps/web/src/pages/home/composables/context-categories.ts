@@ -32,6 +32,7 @@ const KIND_CATEGORY: Record<ContextfragKind, ContextCategoryId> = {
   platform_identity: 'system',
   workspace_instruction: 'rules',
   tool_usage: 'tools',
+  tool_definition: 'tools',
   skills_catalog: 'skills',
   memory_recall: 'memory',
   conversation_summary: 'summary',

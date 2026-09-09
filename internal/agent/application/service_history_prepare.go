@@ -26,7 +26,9 @@ func (s *Service) prepareHistoryContext(
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	recordContextStage(ctx, "history_loaded", loaded)
 	loaded = pruneHistoryForGateway(loaded)
+	recordContextStage(ctx, "history_gateway_pruned", loaded)
 	loaded = dropEmptyHistoryFailures(loaded)
 	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
 	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
@@ -35,6 +37,7 @@ func (s *Service) prepareHistoryContext(
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	recordContextStage(ctx, "history_filtered", loaded)
 	loaded, err = s.replaceCompactedMessages(
 		ctx,
 		req.ThreadID,
@@ -45,9 +48,12 @@ func (s *Service) prepareHistoryContext(
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
+	recordContextStage(ctx, "history_compacted", loaded)
 	loaded = projectInterruptedHistoryReasoning(loaded)
+	recordContextStage(ctx, "history_reasoning_projected", loaded)
 	compactableTokens := totalCompactableHistoryTokens(loaded)
 	messages, records, estimatedTokens := trimMessagesAndRecordsByTokens(s.logger, loaded, contextTokenBudget)
+	recordContextStage(ctx, "history_trimmed", map[string]any{"messages": messages, "sources": records, "token_budget": contextTokenBudget})
 	return preparedHistoryContext{
 		messages:          messages,
 		records:           records,

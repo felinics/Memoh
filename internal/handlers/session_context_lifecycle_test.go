@@ -29,16 +29,19 @@ const (
 
 type contextLifecycleQueryStub struct {
 	dbstore.Queries
-	bot             sqlc.GetBotByIDRow
-	session         sqlc.BotSession
-	lifecycleRows   []sqlc.ListRecentContextLifecyclesBySessionRow
-	lifecycleErr    error
-	lifecycleParams []sqlc.ListRecentContextLifecyclesBySessionParams
-	legacyRows      []sqlc.ListRecentAssistantMessagesBySessionRow
-	legacyErr       error
-	unmaterialized  bool
-	probeCalls      int
-	legacyParams    []sqlc.ListRecentAssistantMessagesBySessionParams
+	bot                   sqlc.GetBotByIDRow
+	session               sqlc.BotSession
+	lifecycleRows         []sqlc.ListRecentContextLifecyclesBySessionRow
+	lifecycleErr          error
+	lifecycleParams       []sqlc.ListRecentContextLifecyclesBySessionParams
+	legacyRows            []sqlc.ListRecentAssistantMessagesBySessionRow
+	legacyErr             error
+	unmaterialized        bool
+	probeCalls            int
+	legacyParams          []sqlc.ListRecentAssistantMessagesBySessionParams
+	lifecycleBeforeParams []sqlc.ListRecentContextLifecyclesBySessionBeforeParams
+	previewRows           []sqlc.ListContextFragmentPreviewsRow
+	previewParams         []sqlc.ListContextFragmentPreviewsParams
 }
 
 func (q *contextLifecycleQueryStub) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -55,6 +58,26 @@ func (q *contextLifecycleQueryStub) ListRecentContextLifecyclesBySession(
 ) ([]sqlc.ListRecentContextLifecyclesBySessionRow, error) {
 	q.lifecycleParams = append(q.lifecycleParams, arg)
 	return q.lifecycleRows, q.lifecycleErr
+}
+
+func (q *contextLifecycleQueryStub) ListRecentContextLifecyclesBySessionBefore(
+	_ context.Context,
+	arg sqlc.ListRecentContextLifecyclesBySessionBeforeParams,
+) ([]sqlc.ListRecentContextLifecyclesBySessionBeforeRow, error) {
+	q.lifecycleBeforeParams = append(q.lifecycleBeforeParams, arg)
+	rows := make([]sqlc.ListRecentContextLifecyclesBySessionBeforeRow, len(q.lifecycleRows))
+	for i, row := range q.lifecycleRows {
+		rows[i] = sqlc.ListRecentContextLifecyclesBySessionBeforeRow(row)
+	}
+	return rows, q.lifecycleErr
+}
+
+func (q *contextLifecycleQueryStub) ListContextFragmentPreviews(
+	_ context.Context,
+	arg sqlc.ListContextFragmentPreviewsParams,
+) ([]sqlc.ListContextFragmentPreviewsRow, error) {
+	q.previewParams = append(q.previewParams, arg)
+	return q.previewRows, nil
 }
 
 func (q *contextLifecycleQueryStub) ListRecentAssistantMessagesBySession(
@@ -225,6 +248,7 @@ func TestLoadContextLifecycleTurnsPrefersRunRowsWithoutAssistantMessage(t *testi
 		queries,
 		pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
 		7,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
@@ -275,6 +299,7 @@ func TestLoadContextLifecycleTurnsPreservesRunOrderingAndLimit(t *testing.T) {
 		queries,
 		pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
 		2,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
@@ -313,6 +338,7 @@ func TestLoadContextLifecycleTurnsFallsBackOnlyWhenRunRowsDoNotExist(t *testing.
 		queries,
 		pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
 		1,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("load context lifecycle turns: %v", err)
@@ -349,6 +375,7 @@ func TestLoadContextLifecycleTurnsDoesNotMaskRunQueryFailure(t *testing.T) {
 				queries,
 				pgtype.UUID{Bytes: [16]byte{7}, Valid: true},
 				1,
+				nil,
 			)
 			if err == nil {
 				t.Fatal("expected run-table failure")

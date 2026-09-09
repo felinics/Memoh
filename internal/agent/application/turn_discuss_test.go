@@ -299,6 +299,7 @@ func TestStoreDiscussRoundPersistsAdmittedRunIDAndLifecycleAssociation(t *testin
 			DurationMS: 2000,
 			State:      "completed",
 		}},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("storeDiscussRound() error = %v", err)

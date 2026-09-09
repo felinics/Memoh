@@ -777,8 +777,7 @@ SELECT $3, $1, bot.id, 'local', 'lifecycle split', '{}' FROM bot
 		t.Fatalf("seed lifecycle split owner: %v", err)
 	}
 
-	// Roll back only 0147 so a row can be written in the pre-split shape.
-	stepDown(t, dsn, 1)
+	migrateTo(t, dsn, 146)
 	legacySnapshot := `{
   "version": 2,
   "counts": {"fragments": 4, "token_estimate": 400},
@@ -798,7 +797,7 @@ VALUES ($1, $2, $3, $4, 'completed', $5::jsonb)
 		t.Fatalf("seed pre-split lifecycle row: %v", err)
 	}
 
-	stepUp(t, dsn, 1)
+	migrateTo(t, dsn, 147)
 	var (
 		embedded  bool
 		decisions int
@@ -832,13 +831,13 @@ FROM context_lifecycles WHERE run_id = $1
 	}
 
 	// Rolling back folds the audit into the snapshot again and removes the rollup.
-	stepDown(t, dsn, 1)
+	migrateTo(t, dsn, 146)
 	var folded []byte
 	if err := conn.QueryRow(ctx, `SELECT snapshot FROM context_lifecycles WHERE run_id = $1`, runID).Scan(&folded); err != nil {
 		t.Fatalf("inspect rolled-back lifecycle row: %v", err)
 	}
 	assertJSONSemanticallyEqual(t, folded, []byte(legacySnapshot))
-	stepUp(t, dsn, 1)
+	migrateTo(t, dsn, 147)
 }
 
 func mustSelectionDecisions(t *testing.T, ctx context.Context, queries *sqlc.Queries, runID pgtype.UUID) []byte {

@@ -382,11 +382,15 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 		return sdk.ToolResultPart{}, err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
-	return s.agent.ExecuteTool(ctx, resolved.RunConfig, sdk.ToolCall{
+	ctx = resolved.RunConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "approval_trigger", map[string]any{"decision": input.Decision, "option_id": input.OptionID, "reason": input.Reason, "tool_call_id": req.ToolCallID, "input": req.ToolInput})
+	result, executeErr := s.agent.ExecuteTool(ctx, resolved.RunConfig, sdk.ToolCall{
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
 		Input:      req.ToolInput,
 	})
+	recordContextStage(ctx, "approved_tool_result", result)
+	return result, executeErr
 }
 
 func (s *Service) storeToolResultAndContinue(
@@ -448,6 +452,8 @@ func (s *Service) continueToolApprovalSession(
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 
+	ctx = resolved.RunConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "approval_continuation", map[string]any{"decision": input.Decision, "tool_call_id": approval.ToolCallID})
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
 		resolved.RunConfig,
@@ -491,7 +497,9 @@ func (s *Service) continueToolApprovalSession(
 	}
 
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
+	configureNativeStepTrace(&cfg, stepTrace, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
 	defer idleCancel.Stop()
 	stream := s.agent.Stream(idleCtx, cfg)
@@ -543,6 +551,7 @@ func (s *Service) continueToolApprovalSession(
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				snap.stepTraces = stepTrace.take()
 				snap.visibleOutput = hasVisibleOutput
 				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""

@@ -25,9 +25,10 @@ type preparedProviderAttempt struct {
 // before that boundary, so it stages content-light metadata here instead of
 // advancing hash, fork, retry, or durable-input state early.
 type providerAttemptHandoff struct {
-	mu      sync.Mutex
-	cfg     RunConfig
-	pending *preparedProviderAttempt
+	mu            sync.Mutex
+	cfg           RunConfig
+	pending       *preparedProviderAttempt
+	publishedStep int
 }
 
 func newProviderAttemptHandoff(cfg RunConfig) *providerAttemptHandoff {
@@ -106,6 +107,7 @@ func (h *providerAttemptHandoff) publish(params sdk.GenerateParams) error {
 	h.cfg.ContextMutations.SetFinalInputHash(hash)
 	pending.snapshot.PostPrepareInputHash = hash
 	h.cfg.ContextMutations.AppendStepSnapshot(pending.snapshot)
+	h.publishedStep = pending.snapshot.StepIndex
 	if pending.reselectionDetail != "" {
 		h.cfg.ContextMutations.Record(contextfrag.MutationLoopStepReselection, pending.reselectionDetail)
 	}

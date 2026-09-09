@@ -1418,6 +1418,30 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 
+  it('closes the trajectory panel of a deleted session', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Deleted session' },
+      { id: 's2', title: 'Next session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    expect(store.openTrajectory('s1')).toBe(true)
+    expect(store.openTrajectory('s2')).toBe(true)
+
+    emitDeletedSession('s1')
+    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length, { id: 's2', title: 'Next session' })
+    selection.setSession('s2')
+    await nextTick()
+
+    expect(dock.getPanel('trajectory:s1')).toBeUndefined()
+    expect(dock.getPanel('trajectory:s2')).toBeDefined()
+  })
+
   it('resets a failed deferred-session chat panel to draft when its composer scope matches', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')
@@ -2050,6 +2074,58 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.focusChatView).toHaveBeenLastCalledWith('chat:1')
   })
 
+  it('restores a trajectory panel alongside its session chat', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          grid: {
+            root: {
+              type: 'branch',
+              data: [
+                {
+                  type: 'leaf',
+                  size: 1200,
+                  data: { id: 'main', views: ['chat:1', 'trajectory:session-a'], activeView: 'trajectory:session-a' },
+                },
+              ],
+            },
+            width: 1200,
+            height: 800,
+            orientation: 'HORIZONTAL',
+          },
+          panels: {
+            'chat:1': {
+              id: 'chat:1',
+              contentComponent: 'chat',
+              title: 'A',
+              params: { sessionId: 'session-a', explicitSelection: true },
+            },
+            'trajectory:session-a': {
+              id: 'trajectory:session-a',
+              contentComponent: 'trajectory',
+              title: 'Trajectory',
+              params: { sessionId: 'session-a' },
+            },
+          },
+          activeGroup: 'main',
+        },
+        chatCounter: 1,
+        ephemeralIds: [],
+      },
+    }))
+    chatStoreMock.sessionId = 'session-a'
+    chatStoreMock.hasExplicitSessionSelection = true
+    useChatSelectionStore().setSession('session-a')
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.getPanel('chat:1')?.params.sessionId).toBe('session-a')
+    expect(dock.getPanel('trajectory:session-a')?.params.sessionId).toBe('session-a')
+  })
+
   it('opens multiple schedule panels and focuses an existing schedule', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
@@ -2432,5 +2508,20 @@ describe('workspace layout store', () => {
       expect(dock.activePanel?.id).not.toBe('display:1')
       expect(dock.activePanel?.id).toBe(chatPanelId)
     })
+  })
+  it('opens one trajectory panel per session and focuses it again', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    expect(store.openTrajectory('session-9')).toBe(true)
+    const panel = dock.getPanel('trajectory:session-9')
+    expect(panel?.component).toBe('trajectory')
+    expect(panel?.params.sessionId).toBe('session-9')
+    expect(panel?.title).toBe('Trajectory')
+
+    expect(store.openTrajectory('session-9')).toBe(true)
+    expect(dock.panels.filter(item => item.id.startsWith('trajectory:'))).toHaveLength(1)
+    expect(store.openTrajectory('')).toBe(false)
   })
 })

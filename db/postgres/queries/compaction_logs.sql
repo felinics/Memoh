@@ -269,6 +269,25 @@ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: ListCompactionLogsBySession :many
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
+       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+       superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
+FROM bot_history_message_compacts
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND session_id = $2
+ORDER BY started_at DESC, id DESC
+LIMIT $3;
+
+-- name: ListCompactionLogsBySessionBefore :many
+SELECT id, bot_id, session_id, status, summary, message_count, error_message, usage, model_id,
+       artifact_version, coverage, anchor_start_ms, anchor_end_ms, artifact_level, parent_ids,
+       superseded_by, superseded_at, compaction_epoch, started_at, completed_at, team_id
+FROM bot_history_message_compacts
+WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND session_id = $2
+  AND (started_at, id) < (sqlc.arg(before_started_at)::timestamptz, sqlc.arg(before_id)::uuid)
+ORDER BY started_at DESC, id DESC
+LIMIT $3;
+
 -- name: CountCompactionLogsByBot :one
 SELECT count(*) FROM bot_history_message_compacts WHERE team_id = public.memoh_current_team_id() AND bot_id = $1;
 

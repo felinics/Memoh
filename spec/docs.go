@@ -7717,6 +7717,81 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/compactions": {
+            "get": {
+                "description": "Return the compaction runs recorded for a chat session, newest first: status, the summary that replaced the covered messages, how many messages it covered and the conversation time it spans, the summarizer's usage and model, and when it ran. Pages by an opaque keyset cursor. Session access suffices: the summary is conversation the reader already sees",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List a session's compactions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of compactions to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque next_cursor from a previous page; returns compactions older than it",
+                        "name": "before",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SessionCompactionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
             "get": {
                 "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs",
@@ -7744,6 +7819,12 @@ const docTemplate = `{
                         "description": "Maximum number of turns to return (default 50, max 200)",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque next_cursor from a previous page; returns run-keyed turns older than it",
+                        "name": "before",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -7751,6 +7832,291 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.ContextLifecycleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/decisions": {
+            "get": {
+                "description": "Return the content-light selection audit persisted for one run of a chat session: each fragment the context selector considered with its slot, source, token cost and decision. The list is read on demand because it grows with the history the run considered",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get per-fragment selection decisions of a run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextLifecycleDecisionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/context-lifecycle/{run_id}/fragments": {
+            "get": {
+                "description": "Return every fragment the run put in front of the model outside the conversation (system prompt pieces, workspace rules, tool usage, skills, recalled memory, tool definitions) with the text that was stored for it. Conversation messages are not included; the history holds them. The texts include workspace files and hook output, so the caller needs workspace_read on the bot besides access to the session",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get the injected context texts of a run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "run_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextLifecycleFragmentsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/context-trajectory": {
+            "get": {
+                "description": "Read ordered, content-light capture metadata independently of conversation messages. Full captured content is available on demand with workspace_read. A capture_id distinguishes continuations that reuse a run_id; capture_errors reports preceding capture failures",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "List context assembly stages and provider requests",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Continue before this event ID",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 200, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextTrajectoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/context-trajectory/{event_id}": {
+            "get": {
+                "description": "Reassemble full captured blocks in their original order, verifying byte counts and hashes. Requires workspace_read in addition to session access. Missing or corrupt blocks are explicitly unavailable; complete is false when any block cannot be restored. Non-UTF-8 bytes use base64 encoding",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Read the complete content of a context assembly stage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Event ID",
+                        "name": "event_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextTrajectoryEventResponse"
                         }
                     },
                     "400": {
@@ -17873,6 +18239,13 @@ const docTemplate = `{
         "compaction.Log": {
             "type": "object",
             "properties": {
+                "anchor_end_ms": {
+                    "type": "integer"
+                },
+                "anchor_start_ms": {
+                    "description": "AnchorStartMS and AnchorEndMS bound the conversation time the summary\ncovers; Level is the rollup depth and SupersededAt is set once a later\ncompaction folded this one in.",
+                    "type": "integer"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -17884,6 +18257,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "level": {
+                    "type": "integer"
                 },
                 "message_count": {
                     "type": "integer"
@@ -17901,6 +18277,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "summary": {
+                    "type": "string"
+                },
+                "superseded_at": {
                     "type": "string"
                 },
                 "usage": {}
@@ -18175,6 +18554,32 @@ const docTemplate = `{
                 }
             }
         },
+        "contextfrag.FragmentRef": {
+            "type": "object",
+            "properties": {
+                "content_hash": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.Kind"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "slot": {
+                    "$ref": "#/definitions/contextfrag.Slot"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "text_hash": {
+                    "type": "string"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
         "contextfrag.Kind": {
             "type": "string",
             "enum": [
@@ -18194,7 +18599,8 @@ const docTemplate = `{
                 "background_summary",
                 "runtime_context",
                 "memory_recall",
-                "conversation_summary"
+                "conversation_summary",
+                "tool_definition"
             ],
             "x-enum-varnames": [
                 "KindSystemPrompt",
@@ -18213,7 +18619,8 @@ const docTemplate = `{
                 "KindBackgroundSummary",
                 "KindRuntimeContext",
                 "KindMemoryRecall",
-                "KindConversationSummary"
+                "KindConversationSummary",
+                "KindToolDefinition"
             ]
         },
         "contextfrag.KindBreakdown": {
@@ -18275,6 +18682,13 @@ const docTemplate = `{
                 "final_input_hash": {
                     "type": "string"
                 },
+                "fragments": {
+                    "description": "Fragments lists the injected fragments of the run, bounded by the prompt\nrather than the conversation; their texts live in the content store.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.FragmentRef"
+                    }
+                },
                 "loop_selection_mode": {
                     "type": "string"
                 },
@@ -18289,6 +18703,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/contextfrag.MutationRecord"
                     }
+                },
+                "run_trace": {
+                    "$ref": "#/definitions/contextfrag.RunTrace"
                 },
                 "selection": {
                     "$ref": "#/definitions/contextfrag.SelectionTrace"
@@ -18319,6 +18736,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/contextfrag.ToolDefAccounting"
                     }
+                },
+                "trajectory": {
+                    "$ref": "#/definitions/trajectory.Stats"
                 },
                 "trust_breakdown": {
                     "type": "array",
@@ -18494,6 +18914,53 @@ const docTemplate = `{
                 "RetentionOptional"
             ]
         },
+        "contextfrag.RunTrace": {
+            "type": "object",
+            "properties": {
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "decode_ms": {
+                    "type": "integer"
+                },
+                "decode_output_tokens": {
+                    "type": "integer"
+                },
+                "ended_at_ms": {
+                    "type": "integer"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "llm_ms": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "reasoning_tokens": {
+                    "type": "integer"
+                },
+                "started_at_ms": {
+                    "type": "integer"
+                },
+                "steps": {
+                    "type": "integer"
+                },
+                "tool_calls": {
+                    "type": "integer"
+                },
+                "tool_ms": {
+                    "type": "integer"
+                },
+                "ttft_ms": {
+                    "type": "integer"
+                }
+            }
+        },
         "contextfrag.SelectionDecision": {
             "type": "object",
             "properties": {
@@ -18631,6 +19098,9 @@ const docTemplate = `{
             "properties": {
                 "bytes": {
                     "type": "integer"
+                },
+                "content_hash": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -18795,6 +19265,18 @@ const docTemplate = `{
                 }
             }
         },
+        "conversation.UIContextInjection": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "steering",
+                        "prepared"
+                    ]
+                }
+            }
+        },
         "conversation.UIExecutionLocation": {
             "type": "object",
             "properties": {
@@ -18803,6 +19285,17 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "conversation.UIExecutionTiming": {
+            "type": "object",
+            "properties": {
+                "ended_at_ms": {
+                    "type": "integer"
+                },
+                "started_at_ms": {
+                    "type": "integer"
                 }
             }
         },
@@ -18849,6 +19342,9 @@ const docTemplate = `{
                 },
                 "execution_location": {
                     "$ref": "#/definitions/conversation.UIExecutionLocation"
+                },
+                "execution_timing": {
+                    "$ref": "#/definitions/conversation.UIExecutionTiming"
                 },
                 "id": {
                     "type": "integer"
@@ -18926,6 +19422,35 @@ const docTemplate = `{
                 }
             }
         },
+        "conversation.UIStepTrace": {
+            "type": "object",
+            "properties": {
+                "ended_at_ms": {
+                    "type": "integer"
+                },
+                "finish_reason": {
+                    "type": "string"
+                },
+                "first_message_id": {
+                    "type": "integer"
+                },
+                "first_token_at_ms": {
+                    "type": "integer"
+                },
+                "last_message_id": {
+                    "type": "integer"
+                },
+                "started_at_ms": {
+                    "type": "integer"
+                },
+                "step_index": {
+                    "type": "integer"
+                },
+                "usage": {
+                    "$ref": "#/definitions/message.StepTraceUsage"
+                }
+            }
+        },
         "conversation.UIToolApproval": {
             "type": "object",
             "properties": {
@@ -18987,6 +19512,9 @@ const docTemplate = `{
                 "background_task": {
                     "$ref": "#/definitions/conversation.UIBackgroundTask"
                 },
+                "context_injection": {
+                    "$ref": "#/definitions/conversation.UIContextInjection"
+                },
                 "external_message_id": {
                     "type": "string"
                 },
@@ -19030,6 +19558,12 @@ const docTemplate = `{
                 },
                 "skill_activation": {
                     "$ref": "#/definitions/conversation.SkillActivation"
+                },
+                "step_traces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIStepTrace"
+                    }
                 },
                 "text": {
                     "type": "string"
@@ -19973,6 +20507,64 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.ContextFragmentPreview": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.Kind"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "preview": {
+                    "type": "string"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "truncated": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.ContextFragmentText": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "description": "Available is false when the text was never stored for this fragment,\nsuch as runs older than the text store.",
+                    "type": "boolean"
+                },
+                "content_hash": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.Kind"
+                },
+                "label": {
+                    "description": "Label names the fragment as the assembler did; empty when no text was\nstored, because the snapshot itself never carries names.",
+                    "type": "string"
+                },
+                "slot": {
+                    "$ref": "#/definitions/contextfrag.Slot"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "text_hash": {
+                    "description": "TextHash is the store key of the fragment's text; tool definitions use\ntheir serialized hash for both.",
+                    "type": "string"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                },
+                "truncated": {
+                    "type": "boolean"
+                }
+            }
+        },
         "handlers.ContextLifecycleAggregates": {
             "type": "object",
             "properties": {
@@ -19999,6 +20591,34 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.ContextLifecycleDecisionsResponse": {
+            "type": "object",
+            "properties": {
+                "decisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.SelectionDecision"
+                    }
+                },
+                "run_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ContextLifecycleFragmentsResponse": {
+            "type": "object",
+            "properties": {
+                "fragments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextFragmentText"
+                    }
+                },
+                "run_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.ContextLifecycleResponse": {
             "type": "object",
             "properties": {
@@ -20008,6 +20628,13 @@ const docTemplate = `{
                 },
                 "aggregates": {
                     "$ref": "#/definitions/handlers.ContextLifecycleAggregates"
+                },
+                "fragment_previews": {
+                    "description": "FragmentPreviews maps a text hash referenced by the page's fragment\nrefs and tool definitions to the head of its stored text. Present only\nfor callers who may read the bot's workspace, because the texts include\nworkspace files and hook output.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.ContextFragmentPreview"
+                    }
                 },
                 "has_more": {
                     "description": "HasMore reports whether older lifecycle turns exist beyond this page.",
@@ -20024,6 +20651,10 @@ const docTemplate = `{
                 "limit": {
                     "description": "Limit is the page bound the turns and aggregates were computed over.",
                     "type": "integer"
+                },
+                "next_cursor": {
+                    "description": "NextCursor is the opaque ` + "`" + `before` + "`" + ` value that continues past this page's\noldest run; absent when the page is complete or served from legacy rows.",
+                    "type": "string"
                 },
                 "turns": {
                     "type": "array",
@@ -20052,6 +20683,108 @@ const docTemplate = `{
                     "$ref": "#/definitions/contextfrag.LifecycleSnapshot"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "turn_id": {
+                    "description": "TurnID is the durable turn the run wrote into, joined from the run\nledger; absent for runs the ledger never recorded.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryBlock": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "bytes": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "encoding": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryEntry": {
+            "type": "object",
+            "properties": {
+                "block_count": {
+                    "type": "integer"
+                },
+                "capture_errors": {
+                    "type": "integer"
+                },
+                "capture_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "recorded_at": {
+                    "type": "string"
+                },
+                "request": {
+                    "type": "integer"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "sequence": {
+                    "type": "integer"
+                },
+                "stage": {
+                    "type": "string"
+                },
+                "step_index": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryEventResponse": {
+            "type": "object",
+            "properties": {
+                "blocks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextTrajectoryBlock"
+                    }
+                },
+                "complete": {
+                    "type": "boolean"
+                },
+                "event": {
+                    "$ref": "#/definitions/handlers.ContextTrajectoryEntry"
+                }
+            }
+        },
+        "handlers.ContextTrajectoryResponse": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextTrajectoryEntry"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "next_cursor": {
                     "type": "string"
                 }
             }
@@ -20888,6 +21621,25 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/skills.SafeCatalogItem"
                     }
+                }
+            }
+        },
+        "handlers.SessionCompactionsResponse": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "description": "HasMore reports whether older compactions exist beyond this page.",
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/compaction.Log"
+                    }
+                },
+                "next_cursor": {
+                    "description": "NextCursor is the opaque ` + "`" + `before` + "`" + ` value that continues past this\npage's oldest compaction; absent when the page is complete.",
+                    "type": "string"
                 }
             }
         },
@@ -22674,6 +23426,26 @@ const docTemplate = `{
                 }
             }
         },
+        "message.StepTraceUsage": {
+            "type": "object",
+            "properties": {
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "reasoning_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.AddRequest": {
             "type": "object",
             "properties": {
@@ -24093,6 +24865,23 @@ const docTemplate = `{
                 },
                 "ok": {
                     "type": "boolean"
+                }
+            }
+        },
+        "trajectory.Stats": {
+            "type": "object",
+            "properties": {
+                "capture_id": {
+                    "type": "string"
+                },
+                "errors": {
+                    "type": "integer"
+                },
+                "events": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
                 }
             }
         },

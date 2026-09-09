@@ -99,6 +99,8 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	req.TurnPosition = &admission.TurnPosition
 
 	cfg := rc.runConfig
+	ctx = cfg.TrajectoryContext(ctx)
+	recordContextStage(ctx, "schedule_trigger", payload)
 	cfg.SessionType = sessionmode.Schedule
 	cfg.Identity.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
 	cfg.ContextScope.ChannelIdentityID = strings.TrimSpace(payload.OwnerUserID)
@@ -112,6 +114,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		Command:     payload.Command,
 	})
 	cfg = attachCurrentTurnPrompt(cfg, schedulePrompt)
+	recordContextStage(ctx, "schedule_prompt", schedulePrompt)
 	cfg = s.prepareRunConfig(ctx, cfg)
 	terminal := s.contextLifecycleTerminal(ctx, cfg)
 	var lifecycleCause error
@@ -122,10 +125,12 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 	// the run is visible while it executes. The previous Generate-based path
 	// emitted nothing until storeRound wrote the whole round at the end.
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, stepCommitter)
+	configureNativeStepTrace(&cfg, stepTrace, stepCommitter)
 
-	result, streamErr := s.runTriggeredNativeStream(ctx, cfg, req, rc, admission.Handle, stepCommitter, reasoningTiming)
+	result, streamErr := s.runTriggeredNativeStream(ctx, cfg, req, rc, admission.Handle, stepCommitter, reasoningTiming, stepTrace)
 	lifecycleCause = streamErr
 	return result, streamErr
 }
@@ -138,6 +143,7 @@ func (s *Service) runTriggeredNativeStream(
 	handle sessionruntime.RunHandle,
 	stepCommitter *agentStepCommitter,
 	reasoningTiming *reasoningTimingTracker,
+	stepTrace *stepTraceTracker,
 ) (schedule.TriggerResult, error) {
 	// cancelStream remains the consumption brake: if the consumer stops early
 	// (projection refused, terminal handled), cancelling unwinds the Stream
@@ -158,6 +164,7 @@ func (s *Service) runTriggeredNativeStream(
 		handle,
 		stepCommitter,
 		reasoningTiming,
+		stepTrace,
 		idleCancel,
 	)
 }
@@ -178,11 +185,11 @@ func (s *Service) runTriggeredNativeStream(
 // agent.Stream itself) so tests can drive the loop directly; the caller owns
 // the stream context and must cancel it to unwind a still-running Stream
 // goroutine when this returns early.
-func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter, reasoningTiming *reasoningTimingTracker) (schedule.TriggerResult, error) {
-	return s.consumeTriggeredStreamWithIdle(ctx, events, req, rc, handle, stepCommitter, reasoningTiming, nil)
+func (s *Service) consumeTriggeredStream(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter, reasoningTiming *reasoningTimingTracker, stepTrace *stepTraceTracker) (schedule.TriggerResult, error) {
+	return s.consumeTriggeredStreamWithIdle(ctx, events, req, rc, handle, stepCommitter, reasoningTiming, stepTrace, nil)
 }
 
-func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter, reasoningTiming *reasoningTimingTracker, idle *idleCancel) (schedule.TriggerResult, error) {
+func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-chan native.StreamEvent, req ChatRequest, rc resolvedContext, handle sessionruntime.RunHandle, stepCommitter *agentStepCommitter, reasoningTiming *reasoningTimingTracker, stepTrace *stepTraceTracker, idle *idleCancel) (schedule.TriggerResult, error) {
 	publishEvent := s.turnAgentEventPublisher(handle)
 	if reasoningTiming == nil {
 		reasoningTiming = newReasoningTimingTracker(nil)
@@ -258,6 +265,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			}
 			if stepCommitter == nil {
 				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				snap.stepTraces = stepTrace.take()
 			}
 			snap.visibleOutput = hasVisibleOutput
 			snap.failureCode = snapshotFailureCode(idle != nil && idle.DidFire(), streamErr)

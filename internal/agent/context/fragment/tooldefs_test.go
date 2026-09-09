@@ -27,6 +27,10 @@ func TestToolDefAccountingForMeasuresSerializedDefinition(t *testing.T) {
 		Bytes:         len(data),
 		TokenEstimate: TokensFromBytes(len(data)),
 	}
+	if got.ContentHash == "" {
+		t.Fatalf("ToolDefAccountingFor must hash the definition: %+v", got)
+	}
+	want.ContentHash = got.ContentHash
 	if got != want {
 		t.Fatalf("ToolDefAccountingFor = %+v, want %+v", got, want)
 	}

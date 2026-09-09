@@ -153,7 +153,7 @@ func TestRunMidStreamRetryLoopsOnRetryableStreamError(t *testing.T) {
 		context.Background(), streamCtx, cancel, newToolAbortRegistry(), ch,
 		cfg, nil, nil, nil,
 		&sdk.StreamResult{}, &stepMessageCapture{}, nil,
-		&interruptedStepCapture{}, 0, "api error 429: initial failure",
+		&interruptedStepCapture{}, nil, nil, 0, "api error 429: initial failure",
 		&strings.Builder{}, nil,
 	)
 	events := drainStreamEvents(ch)
@@ -208,7 +208,7 @@ func TestRunMidStreamRetryExhaustsAttemptsOnPersistent429(t *testing.T) {
 		context.Background(), streamCtx, cancel, newToolAbortRegistry(), ch,
 		cfg, nil, nil, nil,
 		prevResult, &stepMessageCapture{}, nil,
-		&interruptedStepCapture{}, 0, "api error 429: initial failure",
+		&interruptedStepCapture{}, nil, nil, 0, "api error 429: initial failure",
 		&strings.Builder{}, nil,
 	)
 	events := drainStreamEvents(ch)
@@ -251,7 +251,7 @@ func TestRunMidStreamRetryStopsOnNonRetryableStreamError(t *testing.T) {
 		context.Background(), streamCtx, cancel, newToolAbortRegistry(), ch,
 		cfg, nil, nil, nil,
 		&sdk.StreamResult{}, &stepMessageCapture{}, nil,
-		&interruptedStepCapture{}, 0, "api error 429: initial failure",
+		&interruptedStepCapture{}, nil, nil, 0, "api error 429: initial failure",
 		&strings.Builder{}, nil,
 	)
 	events := drainStreamEvents(ch)
@@ -305,7 +305,7 @@ func TestRunMidStreamRetryFoldsCommittedStepIntoNextAttempt(t *testing.T) {
 		context.Background(), streamCtx, cancel, newToolAbortRegistry(), ch,
 		cfg, tools, nil, nil,
 		&sdk.StreamResult{}, &stepMessageCapture{}, onStepCommitted,
-		&interruptedStepCapture{}, 0, "api error 429: initial failure",
+		&interruptedStepCapture{}, nil, nil, 0, "api error 429: initial failure",
 		&strings.Builder{}, nil,
 	)
 	events := drainStreamEvents(ch)
@@ -359,7 +359,7 @@ func TestRunMidStreamRetryBackoffHonorsContextCancel(t *testing.T) {
 			context.Background(), streamCtx, cancel, newToolAbortRegistry(), ch,
 			cfg, nil, nil, nil,
 			&sdk.StreamResult{}, &stepMessageCapture{}, nil,
-			&interruptedStepCapture{}, 0, "api error 429: initial failure",
+			&interruptedStepCapture{}, nil, nil, 0, "api error 429: initial failure",
 			&strings.Builder{}, nil,
 		)
 		done <- outcome{aborted: aborted}

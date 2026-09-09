@@ -18,7 +18,7 @@ import (
 // the caller. The returned manifest lets the caller record a context
 // lifecycle snapshot alongside the persisted round. Legacy assembly fallback
 // returns a content-light manifest that records why the view was not used.
-func runtimeContextViaContextView(ctx context.Context, logger *slog.Logger, sections []contextview.RuntimeSection, query string) (string, string, *contextfrag.Manifest) {
+func runtimeContextViaContextView(ctx context.Context, logger *slog.Logger, sections []contextview.RuntimeSection, query string) (string, string, *contextfrag.Manifest, []contextfrag.ContextFrag) {
 	ledger := contextfrag.NewMutationLedger()
 	builder := contextview.NewBuilder(
 		contextview.NewMapCollectorRegistry(&contextview.RuntimeSectionsCollector{}, &contextview.CurrentUserCollector{}),
@@ -42,7 +42,7 @@ func runtimeContextViaContextView(ctx context.Context, logger *slog.Logger, sect
 		if logger != nil {
 			logger.Error("runtime context view build failed; assembling sections directly", slog.Any("error", err))
 		}
-		return finalizeRuntimeSectionsWithAudit(sections, ledger), runtimeContextURI, runtimeContextFallbackManifest("build_error", ledger)
+		return finalizeRuntimeSectionsWithAudit(sections, ledger), runtimeContextURI, runtimeContextFallbackManifest("build_error", ledger), nil
 	}
 	rendered := view.Rendered[contextfrag.RenderRuntimeFullContext]
 	payload, ok := rendered.Data.(*contextview.RuntimeRenderedPayload)
@@ -50,10 +50,10 @@ func runtimeContextViaContextView(ctx context.Context, logger *slog.Logger, sect
 		if logger != nil {
 			logger.Error("runtime context view rendered unexpected payload; assembling sections directly")
 		}
-		return finalizeRuntimeSectionsWithAudit(sections, ledger), runtimeContextURI, runtimeContextFallbackManifest("render_payload_mismatch", ledger)
+		return finalizeRuntimeSectionsWithAudit(sections, ledger), runtimeContextURI, runtimeContextFallbackManifest("render_payload_mismatch", ledger), nil
 	}
 	manifest := view.Manifest
-	return payload.ContextMarkdown, payload.ContextURI, &manifest
+	return payload.ContextMarkdown, payload.ContextURI, &manifest, view.Selected
 }
 
 func runtimeContextFallbackManifest(reason string, ledger *contextfrag.MutationLedger) *contextfrag.Manifest {

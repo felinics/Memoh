@@ -393,6 +393,8 @@ func (s *Service) continueUserInputSession(
 		return err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
+	ctx = resolved.RunConfig.TrajectoryContext(ctx)
+	recordContextStage(ctx, "user_input_trigger", map[string]any{"answers": input.Answers, "text": input.TextAnswer, "canceled": input.Canceled, "reason": input.Reason, "tool_call_id": req.ToolCallID, "result": req.Result})
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -437,7 +439,9 @@ func (s *Service) continueUserInputSession(
 	}
 
 	reasoningTiming := newReasoningTimingTracker(nil)
+	stepTrace := newStepTraceTracker(nil)
 	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
+	configureNativeStepTrace(&cfg, stepTrace, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
 	defer idleCancel.Stop()
 	stream := s.agent.Stream(idleCtx, cfg)
@@ -489,6 +493,7 @@ func (s *Service) continueUserInputSession(
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				snap.stepTraces = stepTrace.take()
 				snap.visibleOutput = hasVisibleOutput
 				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
 				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""

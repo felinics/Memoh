@@ -2,6 +2,8 @@ import type {
   ContextfragLifecycleSnapshot,
   ContextfragSelectionTrace,
   ContextfragToolDefAccounting,
+  HandlersContextFragmentPreview,
+  HandlersContextLifecycleResponse,
   HandlersContextLifecycleTurn,
 } from '@memohai/sdk'
 import { computeContextComposition, formatTokenCount, positive, type ContextComposition } from './context-categories'
@@ -203,4 +205,72 @@ export function buildTurnRow(turn: HandlersContextLifecycleTurn, options: BuildT
       ...section('steps', 'step', 'chat.lifecycle.steps', stepRows(snapshot, t)),
     ],
   }
+}
+
+export interface MergedLifecyclePages {
+  turns: HandlersContextLifecycleTurn[]
+  hasMore: boolean
+  nextCursor: string | null
+  fragmentPreviews: Record<string, HandlersContextFragmentPreview>
+}
+
+// Pages are keyset slices ordered newest first; a run can repeat only across
+// a page boundary, so the first occurrence wins. Older pages are immutable
+// slices below a cursor, so they always join the first page; when a finished
+// turn moves the first page on, the runs between the two are the only hole,
+// and the composable fills it with a small page rather than dropping what
+// the reader already loaded.
+export function mergeLifecyclePages(
+  first: HandlersContextLifecycleResponse | null | undefined,
+  older: HandlersContextLifecycleResponse[],
+): MergedLifecyclePages {
+  const pages = first ? [first, ...older] : []
+  const seen = new Set<string>()
+  const turns: HandlersContextLifecycleTurn[] = []
+  const fragmentPreviews: Record<string, HandlersContextFragmentPreview> = {}
+  for (const page of pages) {
+    Object.assign(fragmentPreviews, page.fragment_previews ?? {})
+    for (const turn of page.turns ?? []) {
+      const key = turn.run_id || turn.assistant_message_id || ''
+      if (key && seen.has(key)) continue
+      if (key) seen.add(key)
+      turns.push(turn)
+    }
+  }
+  const last = pages[pages.length - 1]
+  const hasMore = last?.has_more === true
+  return { turns, hasMore, nextCursor: hasMore && last?.next_cursor ? last.next_cursor : null, fragmentPreviews }
+}
+
+// Folds newest-first pages into one page so the older window stays a single
+// slice however many gap fills and load-older pages produced it.
+export function compactLifecyclePages(pages: HandlersContextLifecycleResponse[]): HandlersContextLifecycleResponse {
+  const merged = mergeLifecyclePages(pages[0], pages.slice(1))
+  const last = pages[pages.length - 1]
+  return {
+    turns: merged.turns,
+    fragment_previews: merged.fragmentPreviews,
+    has_more: merged.hasMore,
+    next_cursor: merged.nextCursor ?? undefined,
+    limit: last?.limit ?? 0,
+    aggregate_scope: last?.aggregate_scope ?? '',
+    aggregates: last?.aggregates ?? { turns: merged.turns.length, total_cache_read_tokens: 0, total_cache_write_tokens: 0 },
+  }
+}
+
+// The cursor whose page joins the first page to the loaded older window, or
+// null when nothing is loaded below the first page or it already joins.
+export function lifecycleGapBefore(firstCursor: string | undefined, olderAnchor: string | null, hasOlder: boolean): string | null {
+  if (!hasOlder || !firstCursor || !olderAnchor || firstCursor === olderAnchor) return null
+  return firstCursor
+}
+
+// Whether a gap page reached the loaded older window: it repeats a run the
+// window already holds, or nothing older exists. A page that does neither
+// leaves runs between itself and the window, so the fill continues from its
+// cursor.
+export function lifecycleGapJoins(page: HandlersContextLifecycleResponse, older: HandlersContextLifecycleResponse[]): boolean {
+  if (!page.has_more || !page.next_cursor) return true
+  const known = new Set(older.flatMap(item => (item.turns ?? []).map(turn => turn.run_id ?? '')).filter(Boolean))
+  return (page.turns ?? []).some(turn => turn.run_id && known.has(turn.run_id))
 }

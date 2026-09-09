@@ -146,6 +146,8 @@ type Service struct {
 	syncCompactionMode                string
 	clockLocation                     *time.Location
 	logger                            *slog.Logger
+	contextTextsOnce                  sync.Once
+	contextTexts                      *contextTextStore
 	allowedTeam                       string
 	sessionRuntime                    turnAdmitter
 	decisionRuntime                   *sessionruntime.Manager
@@ -524,12 +526,15 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		runCfg.Identity.IsSubagent = true
 	}
 	runCfg.RunID = runIDForChatRequest(req.RunID)
+	ctx = runCfg.TrajectoryContext(ctx)
+	recordChatTrigger(ctx, req)
 	memoryContext := s.loadMemoryContext(ctx, req)
 	if memoryContext.Trace != nil && runCfg.ContextLifecycle != nil {
 		runCfg.ContextLifecycle.SetMemoryRecall(*memoryContext.Trace)
 	}
 	memoryMsg := memoryContext.Message
 	reqMessages := pruneMessagesForGateway(nonNilModelMessages(req.Messages))
+	recordContextStage(ctx, "request_messages_prepared", reqMessages)
 	if memoryMsg != nil {
 		pruned, _ := pruneMessageForGateway(*memoryMsg)
 		memoryMsg = &pruned
@@ -651,29 +656,35 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		// The inherited parent snapshot precedes the thread's own transcript,
 		// exactly as parent-driven subagent tasks assemble it.
 		messages, currentMessageIndex = prependContextMessages(forkContext, messages, currentMessageIndex)
+		recordContextStage(ctx, "fork_context", messages)
 	}
 	historyMessageCount := len(messages)
 	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
 		messages = append(messages, *notice)
+		recordContextStage(ctx, "workspace_notice", messages)
 	}
 	var memoryMessageIndex *int
 	if memoryMsg != nil {
 		messages = append(messages, *memoryMsg)
+		recordContextStage(ctx, "memory_injected", messages)
 		memoryMessageIndex = intPointer(len(messages) - 1)
 	}
 	if requestedSkillMsg := buildRequestedSkillContextMessage(req.RequestedSkills); requestedSkillMsg != nil {
 		messages = append(messages, *requestedSkillMsg)
+		recordContextStage(ctx, "skills_injected", messages)
 	}
 	if !usePipeline && !req.ReusePersistedUserMessage {
 		messages = append(messages, reqMessages...)
 	}
 	trimmableMessages := normalizedContextPrefixLength(messages, historyMessageCount)
+	recordContextStage(ctx, "before_normalization", messages)
 	messages, currentMessageIndex, memoryMessageIndex = normalizeContextMessages(
 		messages,
 		currentMessageIndex,
 		memoryMessageIndex,
 	)
 	runCfg.ContextHistoryTokenEstimates = make([]int, len(messages))
+	recordContextStage(ctx, "after_normalization", messages)
 	for index := range messages {
 		runCfg.ContextHistoryTokenEstimates[index] = estimateMessageTokens(messages[index])
 	}
@@ -684,6 +695,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 
 	displayName := s.resolveDisplayName(ctx, req)
 	mergedAttachments := s.routeAndMergeAttachments(ctx, chatModel, req)
+	recordContextStage(ctx, "attachments_routed", mergedAttachments)
 
 	tz := runCfg.Identity.TimezoneLocation
 	if tz == nil {
@@ -710,6 +722,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		headerifiedModelQuery = turnpkg.FormatUserHeader(headerInput, modelQuery)
 	}
 	runCfg.ContextFrags = historyContextFragsForMessages(messages, historyRecords)
+	recordContextStage(ctx, "trigger_formatted", map[string]string{"query": headerifiedQuery, "model_query": headerifiedModelQuery})
 	forkMessages := nonNilModelMessages(messages)
 	runCfg.ForkContextSourceMessageIDs = historySourceMessageIDsForMessages(forkMessages, historyRecords)
 	runCfg.Messages = modelMessagesToSDKMessages(forkMessages)
@@ -735,6 +748,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		agentInjectCh := make(chan native.InjectMessage, cap(req.InjectCh))
 		go func() {
 			for msg := range req.InjectCh {
+				recordContextStage(ctx, "steering_trigger", map[string]any{"text": msg.Text, "headerified_text": msg.HeaderifiedText, "attachments": msg.Attachments})
 				agentMsg := native.InjectMessage{
 					Text:            msg.Text,
 					HeaderifiedText: msg.HeaderifiedText,
@@ -744,6 +758,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 				if runCfg.SupportsImageInput && len(msg.Attachments) > 0 {
 					agentMsg.ImageParts = s.inlineInjectAttachments(ctx, req.BotID, msg.Attachments)
 				}
+				recordContextStage(ctx, "steering_prepared", agentMsg)
 				agentInjectCh <- agentMsg
 			}
 			close(agentInjectCh)
@@ -905,6 +920,7 @@ type baseRunConfigParams struct {
 // identity and system prompt — everything except Messages/Query/InlineImages.
 // Both resolve() and ResolveRunConfig() delegate to this shared builder.
 func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (native.RunConfig, models.GetResponse, sqlc.Provider, error) {
+	contextLifecycle := s.newContextLifecycleHolder(ctx, p.BotID, p.SessionID)
 	botSettings, err := s.loadBotSettings(ctx, p.BotID)
 	if err != nil {
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
@@ -1008,7 +1024,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		Skills:            agentSkills,
 		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
 		BackgroundManager: s.bgManager,
-		ContextLifecycle:  contextfrag.NewLifecycleHolder(),
+		ContextLifecycle:  contextLifecycle,
 		ContextScope: contextfrag.Scope{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -1396,6 +1412,8 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 
 // prepareRunConfig generates the system prompt and appends the user message.
 func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) native.RunConfig {
+	ctx = cfg.TrajectoryContext(ctx)
+	recordContextStage(ctx, "prompt_input", map[string]any{"query": cfg.Query, "messages": cfg.Messages, "images": cfg.InlineImages, "attachments": cfg.InlineAttachments})
 	cfg.ContextHookText = ""
 	beforePromptResult := s.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
@@ -1405,6 +1423,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		MessageCount: len(cfg.Messages),
 	}, hooks.EventBeforePromptBuild)
 	beforePromptContext := beforePromptResult.AppendContext
+	recordHookContextStage(ctx, "before_prompt_hook", beforePromptResult)
 	var files []native.SystemFile
 	limits := native.DefaultLimits()
 	if s.agent != nil {
@@ -1442,6 +1461,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		PlatformIdentities:        platformIdentityItems,
 	}
 	cfg.System = native.GenerateSystemPrompt(systemParams)
+	recordContextStage(ctx, "system_sources", map[string]any{"files": files, "skills": cfg.Skills, "identities": platformIdentityItems, "max_files_bytes": limits.SystemFilesMaxBytes})
 	var promptHookTexts []string
 	if beforePromptContext != "" {
 		text := formatServiceHookContext(hooks.EventBeforePromptBuild, beforePromptContext)
@@ -1458,6 +1478,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		SystemBytes:  afterPromptHookSystemBytes(cfg.System, beforePromptObservedTexts),
 	}, hooks.EventAfterPromptBuild)
 	afterPromptContext := afterPromptResult.AppendContext
+	recordHookContextStage(ctx, "after_prompt_hook", afterPromptResult)
 	if afterPromptContext != "" {
 		text := formatServiceHookContext(hooks.EventAfterPromptBuild, afterPromptContext)
 		promptHookTexts = append(promptHookTexts, text)
@@ -1527,6 +1548,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		hookBuild.Frags,
 	)
 	cfg.ContextSourceWarnings = hookBuild.Warnings
+	cfg.RecordTrajectory(ctx, "prompt_built", nil, nil)
 	return cfg.RefreshContextFrag()
 }
 

@@ -26,6 +26,10 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	AppendContextTrajectoryEvent(context.Context, dbsqlc.AppendContextTrajectoryEventParams) (int64, error)
+	ListContextTrajectoryEvents(context.Context, dbsqlc.ListContextTrajectoryEventsParams) ([]dbsqlc.ListContextTrajectoryEventsRow, error)
+	GetContextTrajectoryEvent(context.Context, dbsqlc.GetContextTrajectoryEventParams) ([]byte, error)
+	GetContextTrajectoryEventContents(context.Context, dbsqlc.GetContextTrajectoryEventContentsParams) ([]dbsqlc.GetContextTrajectoryEventContentsRow, error)
 	CreateAgentCredential(ctx context.Context, arg dbsqlc.CreateAgentCredentialParams) (dbsqlc.AgentCredential, error)
 	GetAgentCredential(ctx context.Context, id pgtype.UUID) (dbsqlc.AgentCredential, error)
 	GetBotAgentCredential(ctx context.Context, arg dbsqlc.GetBotAgentCredentialParams) (dbsqlc.GetBotAgentCredentialRow, error)
@@ -296,6 +300,8 @@ type Queries interface {
 	ListChatRouteThreadProjectionsByIDs(ctx context.Context, arg dbsqlc.ListChatRouteThreadProjectionsByIDsParams) ([]dbsqlc.ListChatRouteThreadProjectionsByIDsRow, error)
 	ListChatRoutes(ctx context.Context, chatID pgtype.UUID) ([]dbsqlc.ListChatRoutesRow, error)
 	ListCompactionLogsByBot(ctx context.Context, arg dbsqlc.ListCompactionLogsByBotParams) ([]dbsqlc.BotHistoryMessageCompact, error)
+	ListCompactionLogsBySession(ctx context.Context, arg dbsqlc.ListCompactionLogsBySessionParams) ([]dbsqlc.BotHistoryMessageCompact, error)
+	ListCompactionLogsBySessionBefore(ctx context.Context, arg dbsqlc.ListCompactionLogsBySessionBeforeParams) ([]dbsqlc.BotHistoryMessageCompact, error)
 	ListEmailOutboxByBot(ctx context.Context, arg dbsqlc.ListEmailOutboxByBotParams) ([]dbsqlc.EmailOutbox, error)
 	ListEmailProviders(ctx context.Context) ([]dbsqlc.EmailProvider, error)
 	ListEmailProvidersByProvider(ctx context.Context, provider string) ([]dbsqlc.EmailProvider, error)
@@ -365,6 +371,10 @@ type Queries interface {
 	ListRecentAssistantMessagesBySession(ctx context.Context, arg dbsqlc.ListRecentAssistantMessagesBySessionParams) ([]dbsqlc.ListRecentAssistantMessagesBySessionRow, error)
 	HasUnmaterializedContextLifecycleMetadataBySession(ctx context.Context, sessionID pgtype.UUID) (bool, error)
 	ListRecentContextLifecyclesBySession(ctx context.Context, arg dbsqlc.ListRecentContextLifecyclesBySessionParams) ([]dbsqlc.ListRecentContextLifecyclesBySessionRow, error)
+	ListRecentContextLifecyclesBySessionBefore(ctx context.Context, arg dbsqlc.ListRecentContextLifecyclesBySessionBeforeParams) ([]dbsqlc.ListRecentContextLifecyclesBySessionBeforeRow, error)
+	UpsertContextFragmentTexts(ctx context.Context, arg dbsqlc.UpsertContextFragmentTextsParams) error
+	ListContextFragmentPreviews(ctx context.Context, arg dbsqlc.ListContextFragmentPreviewsParams) ([]dbsqlc.ListContextFragmentPreviewsRow, error)
+	ListContextFragmentTexts(ctx context.Context, arg dbsqlc.ListContextFragmentTextsParams) ([]dbsqlc.ListContextFragmentTextsRow, error)
 	ListScheduleLogsByBot(ctx context.Context, arg dbsqlc.ListScheduleLogsByBotParams) ([]dbsqlc.ListScheduleLogsByBotRow, error)
 	ListScheduleLogsBySchedule(ctx context.Context, arg dbsqlc.ListScheduleLogsByScheduleParams) ([]dbsqlc.ListScheduleLogsByScheduleRow, error)
 	ListSchedulesByBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.Schedule, error)

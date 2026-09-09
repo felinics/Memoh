@@ -42,23 +42,25 @@ func (s *Service) SubagentStepCommit(
 ) (
 	func(context.Context, int, *sdk.StepResult) error,
 	func(context.Context, int, *sdk.StepResult) error,
+	native.SpawnStepObservers,
 ) {
+	none := native.SpawnStepObservers{}
 	if s == nil || s.messageService == nil {
-		return nil, nil
+		return nil, nil, none
 	}
 	persister, ok := s.messageService.(messagepkg.AgentStepPersister)
 	if !ok {
-		return nil, nil
+		return nil, nil, none
 	}
 	handle, ok := SubagentRunHandleFromContext(ctx)
 	if !ok || strings.TrimSpace(handle.RunID) == "" || handle.FencingToken <= 0 {
-		return nil, nil
+		return nil, nil, none
 	}
 	if _, ok := runtimefence.FromContext(ctx); !ok {
-		return nil, nil
+		return nil, nil, none
 	}
 	if strings.TrimSpace(botID) == "" || strings.TrimSpace(sessionID) == "" {
-		return nil, nil
+		return nil, nil, none
 	}
 	// No request row means the pre-run user message write failed. Committing
 	// steps anyway would file them under no turn and — because the spawn path
@@ -66,8 +68,13 @@ func (s *Service) SubagentStepCommit(
 	// Decline instead: terminal persistence still writes the user message and
 	// the whole run behind it.
 	if strings.TrimSpace(turnRequestMessageID) == "" {
-		return nil, nil
+		return nil, nil, none
 	}
+	// The spawned run's request traces follow the chat run's path: sampled on
+	// the provider seam, taken inside the commit barrier, rolled up on the
+	// lifecycle snapshot.
+	stepTrace := newStepTraceTracker(nil)
+	contextLifecycle.SetRunTraceSource(stepTrace.runTrace)
 	committer := &subagentStepCommitter{
 		persister:            persister,
 		runID:                handle.RunID,
@@ -76,9 +83,10 @@ func (s *Service) SubagentStepCommit(
 		modelID:              modelID,
 		turnRequestMessageID: strings.TrimSpace(turnRequestMessageID),
 		contextLifecycle:     contextLifecycle,
+		stepTrace:            stepTrace,
 		onPersisted:          onPersisted,
 	}
-	return committer.commit, committer.interrupt
+	return committer.commit, committer.interrupt, native.SpawnStepObservers{Provider: stepTrace.observeProvider, Agent: stepTrace.observe}
 }
 
 // subagentStepCommitter appends a spawned agent's complete steps and safe
@@ -96,6 +104,7 @@ type subagentStepCommitter struct {
 	// instead of splitting into history-minted turns.
 	turnRequestMessageID string
 	contextLifecycle     *contextfrag.LifecycleHolder
+	stepTrace            *stepTraceTracker
 	onPersisted          func()
 
 	mu       sync.Mutex
@@ -119,6 +128,8 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 	if stepIndex != c.nextStep {
 		return fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep)
 	}
+	traces := c.stepTrace.take()
+	assistantOrdinal := 0
 	inputs := make([]messagepkg.PersistInput, 0, len(step.Messages))
 	for _, msg := range step.Messages {
 		if msg.Role == sdk.MessageRoleUser {
@@ -133,8 +144,14 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 			usage, _ = json.Marshal(msg.Usage)
 		}
 		var metadata map[string]any
-		if interrupted && msg.Role == sdk.MessageRoleAssistant {
-			metadata = map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true}
+		if msg.Role == sdk.MessageRoleAssistant {
+			if interrupted {
+				metadata = mergeMetadata(metadata, map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true})
+			}
+			if assistantOrdinal < len(traces) {
+				metadata = mergeMetadata(metadata, map[string]any{messagepkg.StepTraceMetadataKey: traces[assistantOrdinal]})
+			}
+			assistantOrdinal++
 		}
 		inputs = append(inputs, messagepkg.PersistInput{
 			BotID:                c.botID,
@@ -160,7 +177,7 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 			if inputs[i].Metadata == nil {
 				inputs[i].Metadata = make(map[string]any, 1)
 			}
-			inputs[i].Metadata[contextfrag.MetadataContextLifecycleKey] = snapshot.Summary()
+			inputs[i].Metadata[contextfrag.MetadataContextLifecycleKey] = snapshot.RowCopy()
 			break
 		}
 	}

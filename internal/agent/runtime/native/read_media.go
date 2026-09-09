@@ -8,6 +8,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/context/trajectory"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/models"
 )
@@ -35,6 +36,20 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 		toolCopy := tool
 		toolCopy.Execute = func(ctx *sdk.ToolExecContext, input any) (any, error) {
 			output, err := originalExecute(ctx, input)
+			var recorder *trajectory.Recorder
+			if ctx != nil {
+				recorder = trajectory.FromContext(ctx.Context)
+				if recorder != nil {
+					message := ""
+					if err != nil {
+						message = err.Error()
+					}
+					recorder.Record(ctx.Context, "read_media_loaded", nil,
+						trajectory.JSONBlock("tool_call", "source", map[string]any{"tool_call_id": ctx.ToolCallID, "input": input, "error": message}),
+						trajectory.JSONBlock("media", "raw", output),
+					)
+				}
+			}
 			if err != nil {
 				return output, err
 			}
@@ -42,6 +57,11 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 			publicResult, media, ok := normalizeReadMediaOutput(output, clientType)
 			if !ok {
 				return output, nil
+			}
+			if recorder != nil {
+				recorder.Record(ctx.Context, "read_media_normalized", nil,
+					trajectory.JSONBlock("media", "normalized", map[string]any{"tool_call_id": ctx.ToolCallID, "public": publicResult, "media": media}),
+				)
 			}
 			if ctx != nil && strings.TrimSpace(ctx.ToolCallID) != "" && mediaPartHasContent(media) {
 				state.mu.Lock()
@@ -70,6 +90,7 @@ type readMediaDecorationState struct {
 	prepareCalls int
 	injections   []readMediaInjection
 	ledger       *contextfrag.MutationLedger
+	capture      func(int, *sdk.GenerateParams, trajectory.Block)
 }
 
 type readMediaInjection struct {
@@ -88,12 +109,13 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 	s.prepareCalls++
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if len(s.pendingOrder) == 0 {
+		s.mu.Unlock()
 		return nil
 	}
 
 	parts := make([]sdk.MessagePart, 0, len(s.pendingOrder))
+	callIDs := make([]string, 0, len(s.pendingOrder))
 	for _, toolCallID := range s.pendingOrder {
 		media, ok := s.pendingMedia[toolCallID]
 		delete(s.pendingMedia, toolCallID)
@@ -101,10 +123,12 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 			continue
 		}
 		parts = append(parts, media)
+		callIDs = append(callIDs, toolCallID)
 	}
 	s.pendingOrder = s.pendingOrder[:0]
 
 	if len(parts) == 0 {
+		s.mu.Unlock()
 		return nil
 	}
 
@@ -122,6 +146,10 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 
 	next := *params
 	next.Messages = append(append([]sdk.Message(nil), params.Messages...), message)
+	s.mu.Unlock()
+	if s.capture != nil {
+		s.capture(afterStep+1, &next, trajectory.JSONBlock("media", "sources", map[string]any{"tool_call_ids": callIDs, "message_index": len(params.Messages)}))
+	}
 	return &next
 }
 

@@ -18,12 +18,13 @@ function entryWith(
 }
 
 function memoryStorage(initial?: Record<string, string>) {
-  return {
+  const storage = {
     data: new Map<string, string>(Object.entries(initial ?? {})),
     setItem(k: string, v: string) { this.data.set(k, v) },
     removeItem(k: string) { this.data.delete(k) },
     getItem(k: string) { return this.data.get(k) ?? null },
-  } as unknown as Storage
+  }
+  return storage as unknown as Storage
 }
 
 function cacheWith(entries: UseQueryEntry[]) {
@@ -194,7 +195,14 @@ describe('cancelPendingQueryCacheSave', () => {
 
 describe('context lifecycle queries stay off disk', () => {
   it('excludes the per-turn audit payloads, which grow with conversation length', () => {
-    for (const key of [['context-lifecycle', 'b', 's', 50]]) {
+    for (const key of [
+      ['context-lifecycle', 'b', 's', 50],
+      ['context-lifecycle-decisions', 'b', 's', 'run'],
+      ['context-lifecycle-fragments', 'b', 's', 'run'],
+      ['context-trajectory', 'b', 's'],
+      ['context-trajectory-event', 'b', 's', 'event'],
+      ['session-compactions', 'b', 's'],
+    ]) {
       expect(predicate(entryWith(key)), `expected ${String(key[0])} to be excluded`).toBe(false)
     }
   })

@@ -9,7 +9,9 @@ import type {
   UIReasoningMessage,
   UINoticeMessage,
   UIReplyRef,
+  UIContextInjection,
   UISkillActivation,
+  UIStepTrace,
   UITextMessage,
   UIToolApproval,
   UIToolMessage,
@@ -97,6 +99,7 @@ export interface ChatUserTurn {
   role: 'user'
   text: string
   userMessageKind?: string
+  contextInjection?: UIContextInjection
   skillActivation?: UISkillActivation
   attachments: AttachmentItem[]
   reply?: UIReplyRef
@@ -128,6 +131,7 @@ export interface ChatAssistantTurn {
   serverId?: string
   role: 'assistant'
   messages: ContentBlock[]
+  stepTraces?: UIStepTrace[]
   timestamp: string
   platform?: string
   externalMessageId?: string

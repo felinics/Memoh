@@ -508,6 +508,18 @@ type ContainerVersion struct {
 	TeamID      pgtype.UUID        `json:"team_id"`
 }
 
+type ContextFragmentText struct {
+	TeamID      pgtype.UUID        `json:"team_id"`
+	BotID       pgtype.UUID        `json:"bot_id"`
+	ContentHash string             `json:"content_hash"`
+	Kind        string             `json:"kind"`
+	Label       string             `json:"label"`
+	Text        string             `json:"text"`
+	TextBytes   int32              `json:"text_bytes"`
+	Truncated   bool               `json:"truncated"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ContextLifecycle struct {
 	RunID              pgtype.UUID        `json:"run_id"`
 	TeamID             pgtype.UUID        `json:"team_id"`
@@ -518,6 +530,26 @@ type ContextLifecycle struct {
 	Snapshot           []byte             `json:"snapshot"`
 	SelectionDecisions []byte             `json:"selection_decisions"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type ContextTrajectoryContent struct {
+	TeamID      pgtype.UUID `json:"team_id"`
+	BotID       pgtype.UUID `json:"bot_id"`
+	SessionID   pgtype.UUID `json:"session_id"`
+	ContentHash string      `json:"content_hash"`
+	Content     []byte      `json:"content"`
+}
+
+type ContextTrajectoryEvent struct {
+	ID        int64              `json:"id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	SessionID pgtype.UUID        `json:"session_id"`
+	RunID     pgtype.UUID        `json:"run_id"`
+	CaptureID pgtype.UUID        `json:"capture_id"`
+	Sequence  int64              `json:"sequence"`
+	Event     []byte             `json:"event"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type EmailOauthToken struct {

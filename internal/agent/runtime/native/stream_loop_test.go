@@ -445,6 +445,8 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 		&stepMessageCapture{},
 		nil,
 		&interruptedStepCapture{},
+		nil,
+		nil,
 		0,
 		"api error 500",
 		&strings.Builder{},

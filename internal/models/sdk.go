@@ -58,6 +58,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = NewProviderHTTPClient(0)
 	}
+	cfg.HTTPClient = clientWithTrajectory(cfg.HTTPClient)
 	chatCompletionsCompat := ResolveChatCompletionsCompat(cfg.BaseURL, cfg.ChatCompletionsCompat)
 
 	switch ClientType(cfg.ClientType) {

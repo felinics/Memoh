@@ -78,6 +78,7 @@ function cloneRunView(run: RuntimeCurrentRunView): RuntimeCurrentRunView {
   return {
     ...run,
     messages: messages.map(cloneUIMessage),
+    step_traces: run.step_traces?.map(trace => ({ ...trace })),
     request_user_turn: run.request_user_turn
       ? {
           ...run.request_user_turn,
@@ -142,6 +143,7 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
       // their own view blocks without mutating UIMessage input, so re-cloning
       // every message per projection was pure O(all-content) waste.
       messages: [...run.messages],
+      step_traces: run.step_traces?.length ? run.step_traces : undefined,
     })
     if ((run.error_code || run.error) && !run.messages.some(message => message.type === 'error')) {
       turns[turns.length - 1] = {
@@ -243,7 +245,11 @@ function applyRunPatch(
     else messages[index] = { ...cloned, id: messages[index]!.id }
   }
   messages.sort((left, right) => left.id - right.id)
-  return { ...next, messages }
+  const stepTraces = delta.reset_messages ? [] : [...(next.step_traces ?? [])]
+  for (const trace of delta.step_trace_appends ?? []) {
+    stepTraces.push({ ...trace })
+  }
+  return { ...next, messages, step_traces: stepTraces.length ? stepTraces : undefined }
 }
 
 // Delta-only patch step, exported for the batching runtime client: accumulate

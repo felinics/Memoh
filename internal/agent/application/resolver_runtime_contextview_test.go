@@ -18,7 +18,7 @@ func TestRuntimeContextViaContextViewAssemblesSections(t *testing.T) {
 		{ID: "runtime.preamble", Text: "# Memoh Runtime Context\n\npreamble body"},
 		{ID: "runtime.section.current-runtime", Text: "## Current Runtime\n\n- Bot ID: bot-1"},
 	}
-	markdown, uri, manifest := runtimeContextViaContextView(context.Background(), nil, sections, "")
+	markdown, uri, manifest, _ := runtimeContextViaContextView(context.Background(), nil, sections, "")
 
 	const want = "# Memoh Runtime Context\n\npreamble body\n\n## Current Runtime\n\n- Bot ID: bot-1\n\n"
 	if markdown != want {
@@ -44,7 +44,7 @@ func TestRuntimeContextViaContextViewFallbackCarriesContentLightManifest(t *test
 		{ID: "duplicate", Text: "## Current Runtime\n\nkeep fallback output"},
 	}
 
-	markdown, uri, manifest := runtimeContextViaContextView(context.Background(), nil, sections, "")
+	markdown, uri, manifest, _ := runtimeContextViaContextView(context.Background(), nil, sections, "")
 
 	if !strings.Contains(markdown, privateText) || !strings.Contains(markdown, "keep fallback output") {
 		t.Fatalf("legacy fallback markdown = %q, want both source sections", markdown)
@@ -81,7 +81,7 @@ func TestRuntimeContextSectionsSafeWithHeadingInsideFileExcerpt(t *testing.T) {
 		{ID: "runtime.preamble", Text: "# Memoh Runtime Context\n\npreamble"},
 		{ID: "runtime.section.file.000", Text: fileBlock},
 	}
-	markdown, _, _ := runtimeContextViaContextView(context.Background(), nil, sections, "")
+	markdown, _, _, _ := runtimeContextViaContextView(context.Background(), nil, sections, "")
 
 	if !strings.Contains(markdown, "line before heading\n## Preferences\nprefers small patches") {
 		t.Fatalf("fence content must survive byte-for-byte:\n%s", markdown)

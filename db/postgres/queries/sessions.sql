@@ -490,9 +490,21 @@ WITH invalidated_session AS MATERIALIZED (
       runtime_config_epoch = runtime_config_epoch + 1,
       runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
   WHERE team_id = public.memoh_current_team_id()
-    AND id = sqlc.arg(id)
+    AND bot_sessions.id = sqlc.arg(id)
     AND deleted_at IS NULL
-  RETURNING id
+  RETURNING bot_sessions.id
+),
+deleted_trajectory_events AS (
+  DELETE FROM context_trajectory_events event
+  USING invalidated_session invalidated
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.session_id = invalidated.id
+),
+deleted_trajectory_contents AS (
+  DELETE FROM context_trajectory_contents content
+  USING invalidated_session invalidated
+  WHERE content.team_id = public.memoh_current_team_id()
+    AND content.session_id = invalidated.id
 ),
 deleted_acp_states AS (
   DELETE FROM agent_session_states state
@@ -606,6 +618,18 @@ invalidated_sessions AS MATERIALIZED (
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
+),
+deleted_trajectory_events AS (
+  DELETE FROM context_trajectory_events event
+  USING invalidated_sessions invalidated
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.session_id = invalidated.id
+),
+deleted_trajectory_contents AS (
+  DELETE FROM context_trajectory_contents content
+  USING invalidated_sessions invalidated
+  WHERE content.team_id = public.memoh_current_team_id()
+    AND content.session_id = invalidated.id
 ),
 deleted_acp_states AS (
   DELETE FROM agent_session_states state

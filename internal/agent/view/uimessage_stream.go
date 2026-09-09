@@ -3,6 +3,8 @@ package view
 import (
 	"encoding/json"
 	"strings"
+
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 type uiTextStreamState struct {
@@ -36,13 +38,84 @@ type UIMessageStreamConverter struct {
 	reasoning *uiTextStreamState
 	tools     map[string]*uiToolStreamState
 	emitted   []uiEmittedBlock
+	// stepFirstBlockID is the first block allocated since the current model
+	// request opened, or -1 when the request has produced none yet.
+	stepFirstBlockID int
 }
 
 // NewUIMessageStreamConverter creates a new UI stream converter.
 func NewUIMessageStreamConverter() *UIMessageStreamConverter {
 	return &UIMessageStreamConverter{
-		tools: map[string]*uiToolStreamState{},
+		tools:            map[string]*uiToolStreamState{},
+		stepFirstBlockID: -1,
 	}
+}
+
+// HandleStepStart opens a model request: the next allocated block anchors the
+// request's trace.
+func (c *UIMessageStreamConverter) HandleStepStart() {
+	c.stepFirstBlockID = -1
+}
+
+// HandleStepEnd closes a model request and returns its trace anchored to the
+// request's first block, or nil when the request produced no block.
+func (c *UIMessageStreamConverter) HandleStepEnd(event UIMessageStreamEvent) *UIStepTrace {
+	anchor := c.stepFirstBlockID
+	c.stepFirstBlockID = -1
+	if anchor < 0 || event.Timing == nil {
+		return nil
+	}
+	return &UIStepTrace{
+		FirstMessageID: anchor,
+		LastMessageID:  c.nextID - 1,
+		StepIndex:      event.StepIndex,
+		StartedAtMS:    event.Timing.StartedAtMS,
+		FirstTokenAtMS: event.Timing.FirstTokenAtMS,
+		EndedAtMS:      event.Timing.EndedAtMS,
+		FinishReason:   strings.TrimSpace(event.FinishReason),
+		Usage:          uiStepTraceUsageFromRaw(event.Usage),
+	}
+}
+
+func uiStepTraceUsageFromRaw(raw json.RawMessage) *messagepkg.StepTraceUsage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var usage struct {
+		InputTokens       int `json:"inputTokens"`
+		OutputTokens      int `json:"outputTokens"`
+		ReasoningTokens   int `json:"reasoningTokens"`
+		CachedInputTokens int `json:"cachedInputTokens"`
+		InputTokenDetails struct {
+			CacheReadTokens  int `json:"cacheReadTokens"`
+			CacheWriteTokens int `json:"cacheWriteTokens"`
+		} `json:"inputTokenDetails"`
+		OutputTokenDetails struct {
+			ReasoningTokens int `json:"reasoningTokens"`
+		} `json:"outputTokenDetails"`
+	}
+	if err := json.Unmarshal(raw, &usage); err != nil {
+		return nil
+	}
+	cached := usage.InputTokenDetails.CacheReadTokens
+	if cached == 0 {
+		cached = usage.CachedInputTokens
+	}
+	reasoning := usage.ReasoningTokens
+	if reasoning == 0 {
+		reasoning = usage.OutputTokenDetails.ReasoningTokens
+	}
+	out := messagepkg.StepTraceUsage{
+		InputTokens:       usage.InputTokens,
+		CachedInputTokens: cached,
+		CacheWriteTokens:  usage.InputTokenDetails.CacheWriteTokens,
+		OutputTokens:      usage.OutputTokens,
+		ReasoningTokens:   reasoning,
+	}
+	if out == (messagepkg.StepTraceUsage{}) {
+		return nil
+	}
+	return &out
 }
 
 // HandleEvent updates converter state and returns zero or one complete UI messages.
@@ -60,6 +133,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		c.reasoning = nil
 		c.tools = map[string]*uiToolStreamState{}
 		c.emitted = nil
+		c.stepFirstBlockID = -1
 		return nil
 
 	case "text_start":
@@ -134,6 +208,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			state.Message.Input = event.Input
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyExecutionTimingMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolCallID); trimmed != "" {
 			state.Message.ToolCallID = trimmed
 			c.tools[trimmed] = state
@@ -164,6 +239,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			state.Message.Input = event.Input
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyExecutionTimingMetadata(&state.Message, event.Metadata)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_approval_request":
@@ -186,6 +262,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			state.Message.Input = event.Input
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyExecutionTimingMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
 			state.Message.Name = trimmed
 		}
@@ -235,6 +312,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			state.Message.Input = event.Input
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyExecutionTimingMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
 			state.Message.Name = trimmed
 		}
@@ -278,6 +356,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			state.Message.Input = event.Input
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyExecutionTimingMetadata(&state.Message, event.Metadata)
 		applyToolResultToUIMessage(&state.Message, event.Output)
 		if state.Message.ToolCallID != "" && !isBackgroundToolStillRunning(state.Message) {
 			delete(c.tools, state.Message.ToolCallID)
@@ -310,6 +389,9 @@ func (c *UIMessageStreamConverter) nextMessageID() int {
 func (c *UIMessageStreamConverter) allocBlockID(kind UIMessageType, toolCallID string) int {
 	id := c.nextMessageID()
 	c.emitted = append(c.emitted, uiEmittedBlock{Kind: kind, ToolCallID: toolCallID, ID: id})
+	if c.stepFirstBlockID < 0 {
+		c.stepFirstBlockID = id
+	}
 	return id
 }
 
@@ -422,5 +504,14 @@ func applyExecutionLocationMetadata(message *UIMessage, metadata map[string]any)
 	}
 	if location := extractExecutionLocationMetadata(metadata); location != nil {
 		message.ExecutionLocation = location
+	}
+}
+
+func applyExecutionTimingMetadata(message *UIMessage, metadata map[string]any) {
+	if message == nil {
+		return
+	}
+	if timing := extractExecutionTimingMetadata(metadata); timing != nil {
+		message.ExecutionTiming = timing
 	}
 }

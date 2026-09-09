@@ -311,7 +311,14 @@ func ApplyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 	return out
 }
 
-func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentpkg.RunConfig) (agentpkg.RunConfig, error) {
+func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentpkg.RunConfig) (out agentpkg.RunConfig, resultErr error) {
+	defer func() {
+		stage := "context_selected"
+		if resultErr != nil {
+			stage = "context_rejected"
+		}
+		recordProviderContextTrajectory(ctx, out, stage, out.ContextFrags)
+	}()
 	ledger := cfg.ContextMutations
 	if ledger == nil {
 		ledger = contextfrag.NewMutationLedger()
@@ -342,6 +349,7 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		}
 		cfg = materializeLegacyQuery(cfg, false)
 	}
+	recordProviderContextTrajectory(ctx, cfg, "context_collected", frags)
 	budgetPlan, budgetErr := providerContextBudgetPlan(ctx, cfg)
 	if cfg.ContextBudgetMaxTokens == 0 {
 		recordMutationOnce(ledger, contextfrag.MutationContextBudgetDisabled, "missing_context_window")
@@ -431,6 +439,7 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
+		cfg.ContextLifecycle.RecordFragmentTexts(view.Selected)
 	}
 	return cfg, nil
 }
@@ -495,6 +504,7 @@ func providerBudgetAuditConfig(
 	cfg.ContextMutations = ledger
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
+		cfg.ContextLifecycle.RecordFragmentTexts(view.Selected)
 	}
 	return cfg
 }
@@ -537,6 +547,7 @@ func providerViewFallback(
 	cfg.ContextStepReselector = SelectProviderStepMessages
 	if cfg.ContextLifecycle != nil {
 		cfg.ContextLifecycle.SetManifest(manifest)
+		cfg.ContextLifecycle.RecordFragmentTexts(cfg.ContextFrags)
 	}
 	return cfg
 }
