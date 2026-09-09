@@ -100,14 +100,15 @@ func (s *Service) ScriptPreviewDetails(ctx context.Context, botID, targetID, dep
 	timeout := previewTimeout(dep, action)
 
 	spec := RunSpec{
-		DepID:          dep.ID,
-		Action:         action,
-		Home:           Home(dataRoot, dep.ID),
-		ShimDir:        ShimDir(dataRoot),
-		Version:        previewVersion(dep, action),
-		CurrentVersion: previewCurrentVersion(action),
-		Platform:       platform,
-		Timeout:        timeout,
+		DepID:             dep.ID,
+		Action:            action,
+		WorkspaceTargetID: targetID,
+		Home:              Home(dataRoot, dep.ID),
+		ShimDir:           ShimDir(dataRoot),
+		Version:           previewVersion(dep, action),
+		CurrentVersion:    previewCurrentVersion(action),
+		Platform:          platform,
+		Timeout:           timeout,
 	}
 	if s.scriptEnv != nil {
 		spec.ExtraEnv = s.scriptEnv(ctx)

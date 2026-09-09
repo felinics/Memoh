@@ -95,9 +95,8 @@ type WorkspaceDependencyItem struct {
 	// runtime launches and the one first on PATH (managed, then image, then
 	// PATH).
 	InstalledVersion string `json:"installed_version,omitempty"`
-	// ImageVersion is the version of the copy the workspace image ships,
-	// omitted when the image has none. It is the baseline a managed overlay
-	// sits on and what remove returns to.
+	// ImageVersion is the version of the workspace's toolkit copy, omitted
+	// when no toolkit copy remains. Native removal clears it as well.
 	ImageVersion string `json:"image_version,omitempty"`
 	// Overlay is set when the copy in effect is a managed one installed over
 	// an image copy.
@@ -702,7 +701,7 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
 	// A browser disconnect must not cancel a download already admitted by Manage
-	// authorization and pinned to the reviewed definition revision.
+	// authorization and pinned to the prepared definition revision.
 	ctx = context.WithoutCancel(ctx)
 	version := request.Version
 	writer, flusher, err := beginSSEResponse(c)
@@ -900,7 +899,9 @@ func workspaceDependencyOperationRequest(c echo.Context, action catalog.Action) 
 	req.Version = strings.TrimSpace(req.Version)
 	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.DefinitionRevision = strings.TrimSpace(req.DefinitionRevision)
-	if !catalog.ValidRevision(req.DefinitionRevision) {
+	// A normal confirmation need not open the script viewer. The handler
+	// prepares and pins the current definition before it admits the operation.
+	if req.DefinitionRevision != "" && !catalog.ValidRevision(req.DefinitionRevision) {
 		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
 	if action == catalog.ActionRemove {

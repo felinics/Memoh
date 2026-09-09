@@ -89,28 +89,19 @@
         </form>
       </DialogBody>
 
-      <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">
-        <TextButton
-          v-if="script?.definition_revision"
-          :disabled="!botId || resumable"
-          @click="openScript"
-        >
-          {{ t('bots.dependencies.action.viewScript') }}
-        </TextButton>
-        <div class="flex items-center gap-2">
-          <DialogClose as-child>
-            <Button variant="outline">
-              {{ t('common.cancel') }}
-            </Button>
-          </DialogClose>
-          <Button
-            form="install-dependency-form"
-            type="submit"
-            :disabled="!botId || scriptLoading"
-          >
-            {{ resumable ? t('bots.dependencies.action.viewProgress') : script?.definition_revision ? t('supermarket.install') : t('bots.dependencies.action.viewScript') }}
+      <DialogFooter class="min-w-0 items-center gap-2">
+        <DialogClose as-child>
+          <Button variant="outline">
+            {{ t('common.cancel') }}
           </Button>
-        </div>
+        </DialogClose>
+        <Button
+          form="install-dependency-form"
+          type="submit"
+          :disabled="!botId"
+        >
+          {{ resumable ? t('bots.dependencies.action.viewProgress') : t('supermarket.install') }}
+        </Button>
       </DialogFooter>
     </DialogPanel>
   </Dialog>
@@ -130,14 +121,6 @@
     @update:open="onProgressOpenChange"
     @retry="retry"
     @done="onDone"
-  />
-  <DependencyScriptDialog
-    v-model:open="scriptOpen"
-    :script="script"
-    :loading="scriptLoading"
-    :error="scriptError"
-    :dependency-name="name"
-    action="install"
   />
 </template>
 
@@ -168,7 +151,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  TextButton,
   toast,
 } from '@felinic/ui'
 import {
@@ -177,12 +159,9 @@ import {
   type WorkspaceWorkspaceTarget,
 } from '@memohai/sdk'
 import { validDependencyVersion } from '@/utils/workspace-dependency'
-import { resolveApiErrorMessage } from '@/utils/api-error'
-import { fetchDependencyScript, type ScriptResponse } from '@/composables/api/useWorkspaceDependencies'
 import BotSelect from '@/components/bot-select/index.vue'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import DependencyProgressDialog from '@/pages/bots/components/dependency-progress-dialog.vue'
-import DependencyScriptDialog from '@/pages/bots/components/dependency-script-dialog.vue'
 import { useDependencyOperationsStore, type DependencyOperation } from '@/store/dependency-operations'
 import {
   workspaceTargetAvailable,
@@ -225,38 +204,6 @@ const form = useForm({
 // '' means the bot's current target: the Server resolves it, the same way the
 // bot's Dependencies tab does when nothing is picked.
 const selectedTargetId = ref('')
-const scriptOpen = ref(false)
-const scriptLoading = ref(false)
-const scriptError = ref('')
-const script = shallowRef<ScriptResponse | null>(null)
-let scriptSequence = 0
-
-watch([botId, selectedTargetId, () => props.item, () => props.open], () => {
-  scriptSequence++
-  script.value = null
-  scriptOpen.value = false
-  scriptLoading.value = false
-})
-
-async function openScript() {
-  if (!botId.value || !depId.value) return
-  const sequence = ++scriptSequence
-  scriptOpen.value = true
-  scriptLoading.value = true
-  scriptError.value = ''
-  try {
-    const response = await fetchDependencyScript(
-      botId.value, selectedTargetId.value, depId.value, 'install',
-      script.value?.definition_revision || props.item?.definition_revision,
-    )
-    if (sequence === scriptSequence) script.value = response
-  } catch (error) {
-    if (sequence === scriptSequence) scriptError.value = resolveApiErrorMessage(error, t('common.loadFailed'))
-  } finally {
-    if (sequence === scriptSequence) scriptLoading.value = false
-  }
-}
-
 const { data: targetsResponse } = useQuery({
   key: () => ['bot-workspace-targets', botId.value],
   query: async () => {
@@ -320,20 +267,16 @@ function show(operation: DependencyOperation) {
   store.view(operation.key, VIEWER_ID)
 }
 
-const startInstall = form.handleSubmit(async ({ version }) => {
+const startInstall = form.handleSubmit(({ version }) => {
   const item = props.item
-  if (!item || !botId.value || !depId.value || scriptLoading.value) return
-  if (!resumable.value && !script.value?.definition_revision) {
-    await openScript()
-    return
-  }
+  if (!item || !botId.value || !depId.value) return
   const result = store.start({
     botId: botId.value,
     targetId: selectedTargetId.value,
     item,
     action: 'install',
     version,
-    definitionRevision: script.value?.definition_revision || item.definition_revision,
+    definitionRevision: item.definition_revision,
   })
   switch (result.kind) {
     case 'started':

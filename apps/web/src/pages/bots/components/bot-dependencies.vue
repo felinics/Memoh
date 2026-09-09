@@ -207,11 +207,8 @@
       :item="confirm.item"
       :target-kind="targetKind"
       :target-name="targetName"
-      :loading="script.forConfirmation && script.loading"
-      :script-ready="script.forConfirmation && !!script.data?.definition_revision && !script.error"
       @update:open="(value) => { confirm.open = value }"
       @confirm="onConfirmed"
-      @view-script="openScriptFromConfirm"
     />
 
     <DependencyProgressDialog
@@ -240,7 +237,7 @@
     />
 
     <ConfirmDeleteDialog
-      :open="!!removeTarget && !script.open && !script.loading && !!script.data?.definition_revision && script.item?.id === removeTarget.id && script.action === 'remove'"
+      :open="!!removeTarget"
       :title="t('bots.dependencies.remove.title', { name: removeTarget ? dependencyName(removeTarget) : '' })"
       :description="removeDescription"
       :cancel-label="t('common.cancel')"
@@ -486,7 +483,6 @@ function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operatio
   scriptSequence++
   script.open = false
   script.loading = false
-  script.forConfirmation = false
   script.data = null
   confirm.mode = mode
   confirm.operation = operation
@@ -528,19 +524,11 @@ const removeTarget = ref<DependencyItem | null>(null)
 const rollbackTarget = ref<DependencyItem | null>(null)
 const rollingBack = ref(false)
 
-// Removing an overlay uncovers the image copy; removing anything else leaves
-// nothing behind. The dialog states the result and nothing more.
+// Removal clears the dependency from this workspace, including image copies.
 const removeDescription = computed(() => {
   const item = removeTarget.value
   if (!item) return ''
-  const imageVersion = formatDependencyVersion(item.image_version)
-  if (item.overlay && imageVersion) {
-    return t('bots.dependencies.remove.overlayDescription', {
-      installed: formatDependencyVersion(item.installed_version),
-      image_version: imageVersion,
-    })
-  }
-  return t('bots.dependencies.remove.description', { path: item.install_path ?? '' })
+  return t('bots.dependencies.remove.description', { name: dependencyName(item) })
 })
 
 function onMenu(item: DependencyItem, action: DependencyMenuAction) {
@@ -549,14 +537,13 @@ function onMenu(item: DependencyItem, action: DependencyMenuAction) {
       openConfirm(item, 'install', 'install')
       return
     case 'reinstall':
-      openConfirm(item, 'reinstall', 'reinstall')
+      openConfirm(item, 'reinstall', action.operation ?? 'reinstall')
       return
     case 'rollback':
       rollbackTarget.value = item
       return
     case 'remove':
       removeTarget.value = item
-      void openScript(item, 'remove')
       return
     default:
       void openScript(item, defaultScriptAction(item))
@@ -565,10 +552,9 @@ function onMenu(item: DependencyItem, action: DependencyMenuAction) {
 
 function onRemoveConfirmed() {
   const item = removeTarget.value
-  const revision = script.data?.definition_revision
-  if (!item || script.item?.id !== item.id || script.action !== 'remove' || !revision) return
+  if (!item) return
   removeTarget.value = null
-  start(item, 'remove', { definitionRevision: revision })
+  start(item, 'remove', { definitionRevision: item.definition_revision })
 }
 
 async function onRollbackConfirmed() {
@@ -595,7 +581,6 @@ async function onRollbackConfirmed() {
 
 const script = reactive<{
   definitionRevision: string
-  forConfirmation: boolean
   open: boolean
   item: DependencyItem | null
   action: ScriptAction
@@ -603,11 +588,12 @@ const script = reactive<{
   data: ScriptResponse | null
   loading: boolean
   error: string
-}>({ open: false, item: null, action: 'install', actions: [], data: null, loading: false, error: '', definitionRevision: '', forConfirmation: false })
+}>({ open: false, item: null, action: 'install', actions: [], data: null, loading: false, error: '', definitionRevision: '' })
 let scriptSequence = 0
 watch([botIdRef, selectedTargetId], () => {
   confirm.open = false
   confirm.definitionRevision = ''
+  removeTarget.value = null
   script.open = false
   scriptSequence++
 })
@@ -625,13 +611,10 @@ function defaultScriptAction(item: DependencyItem): ScriptAction {
   return dependencyAllows(item, 'update') ? 'update' : 'install'
 }
 
-async function openScript(item: DependencyItem, action: ScriptAction, forConfirmation = false) {
-  script.forConfirmation = forConfirmation
-  script.definitionRevision = forConfirmation ? confirm.definitionRevision : ''
+async function openScript(item: DependencyItem, action: ScriptAction) {
+  script.definitionRevision = item.definition_revision ?? ''
   script.item = item
-  script.actions = (forConfirmation || (action === 'remove' && removeTarget.value?.id === item.id))
-    ? [action]
-    : scriptActionsFor(item)
+  script.actions = scriptActionsFor(item)
   script.open = true
   await loadScript(action)
 }
@@ -649,7 +632,6 @@ async function loadScript(action: ScriptAction) {
     if (sequence === scriptSequence) {
       script.data = response
       script.definitionRevision = response.definition_revision ?? ''
-      if (script.forConfirmation && confirm.open && confirm.item?.id === item.id) confirm.definitionRevision = script.definitionRevision
     }
   } catch (err) {
     if (sequence === scriptSequence) script.error = resolveApiErrorMessage(err, t('common.loadFailed'))
@@ -660,15 +642,6 @@ async function loadScript(action: ScriptAction) {
 
 function switchScriptAction(action: ScriptAction) {
   void loadScript(action)
-}
-
-// The confirm dialog's "View script" shows the script the confirmed button
-// would run; a reinstall reads as the install script since nothing else is
-// left to inspect once the current copy is gone.
-function openScriptFromConfirm() {
-  const item = confirm.item
-  if (!item) return
-  void openScript(item, confirm.operation, true)
 }
 
 // ---- Manual refresh, workspace start & navigation ---------------------------

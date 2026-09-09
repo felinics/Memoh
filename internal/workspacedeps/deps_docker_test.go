@@ -74,6 +74,49 @@ func TestDockerCatalogScripts(t *testing.T) {
 	}
 }
 
+// Uses disposable containers and no network: removal must clear the actual
+// image binaries, not just make the database row disappear.
+func TestDockerRemoveImageDependencies(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not installed")
+	}
+	image := os.Getenv("MEMOH_DEPS_TEST_IMAGE")
+	if image == "" {
+		image = dockerTestDefaultImage
+	}
+	for _, dep := range []catalog.Dependency{
+		{ID: "node", Provides: []string{"node", "npm", "npx"}},
+		{ID: "python", Provides: []string{"python3", "python", "pip", "pip3"}},
+		{ID: "uv", Provides: []string{"uv", "uvx"}},
+	} {
+		t.Run(dep.ID, func(t *testing.T) {
+			home := Home("/data", dep.ID)
+			script := "set -eu\nexport MEMOH_DEP_OS=linux\nexport MEMOH_DEP_WORKSPACE_TARGET=native\nexport MEMOH_DEP_HOME=" + shellQuote(home) + "\nexport MEMOH_DEP_BIN=" + shellQuote(ShimDir("/data")) + "\n"
+			script += "command -v " + shellQuote(dep.Provides[0]) + " >/dev/null\n"
+			script += "mkdir -p \"$MEMOH_DEP_HOME\"\nprintf '{}' > \"$MEMOH_DEP_HOME/state.json\"\n"
+			script += "(\n" + WrapScript(actionScript(dep, catalog.ActionRemove, "exit 0")) + ")\nhash -r\n"
+			for _, command := range dep.Provides {
+				script += "if command -v " + shellQuote(command) + "; then exit 1; fi\n"
+			}
+			script += "[ ! -e \"$MEMOH_DEP_HOME\" ]\n"
+			script += buildDiscoveryScript("/data", []catalog.Dependency{dep})
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-i", "--network", "none", "--entrypoint", "sh", image, "-s")
+			cmd.Stdin = strings.NewReader(script)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("remove from image: %v\n%s", err, out)
+			}
+			probes, complete := parseDiscoveryOutput(string(out))
+			probe := probes[dep.ID]
+			if !complete || probe == nil || probe.hasState || len(probe.toolkit) != 0 || len(probe.path) != 0 {
+				t.Fatalf("removed dependency was rediscovered: %s", out)
+			}
+		})
+	}
+}
+
 const (
 	dockerTestDefaultImage = "memohai/workspace:debian"
 	// dockerTestDepsRoot is where the per-dependency volume is mounted inside

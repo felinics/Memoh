@@ -773,7 +773,7 @@ func TestListLeavesInProgressAndFailedRecordsAlone(t *testing.T) {
 // TestListImageBaselineAndOverlay covers the two shapes an installable
 // dependency the image also ships can take: image copy only (a baseline the
 // panel offers to install over) and a managed overlay on top of it (what
-// remove returns to the baseline).
+// remove clears along with the managed copy).
 func TestListImageBaselineAndOverlay(t *testing.T) {
 	f := newServiceFixture(t)
 	f.present("agent-x", SourceToolkit, "1.9.0", nil)
@@ -790,8 +790,8 @@ func TestListImageBaselineAndOverlay(t *testing.T) {
 	if agent.InstalledVersion != "1.9.0" || agent.ImageVersion != "1.9.0" || agent.Overlay || agent.Installation.Source != InstallationSourceImage {
 		t.Errorf("agent-x entry = %+v, want the image copy as baseline", agent)
 	}
-	if got := actionsOf(agent); got != "install" {
-		t.Errorf("agent-x actions = %s, want install of an overlay only", got)
+	if got := actionsOf(agent); got != "install,remove" {
+		t.Errorf("agent-x actions = %s, want install and remove", got)
 	}
 	tool := f.entry(t, result, "tool-y")
 	if !tool.Overlay || tool.InstalledVersion != "1.0.0" || tool.ImageVersion != "0.9.0" || tool.Installation.Source != InstallationSourceManaged {
@@ -804,22 +804,22 @@ func TestListImageBaselineAndOverlay(t *testing.T) {
 		t.Errorf("tool-y actions = %s", got)
 	}
 
-	// Removing the overlay uncovers the image copy, which the next discovery
-	// adopts as installed from the image.
+	// Removing the dependency clears both copies; discovery has nothing left
+	// to adopt and the installed list must drop the row.
 	f.writeState(t, "tool-y", State{Version: "1.0.0", Entrypoints: map[string]string{"tool-y": managedTool.Path}})
 	if _, err := f.svc.Remove(f.ctx(), testBot, testTarget, "tool-y", nil); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	f.presentCandidates("tool-y", nil, imageTool)
+	f.absent("tool-y")
 	result, err = f.svc.List(f.ctx(), testBot, testTarget)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	tool = f.entry(t, result, "tool-y")
-	if tool.Status != StatusInstalled || tool.Overlay || tool.InstalledVersion != "0.9.0" || tool.ImageVersion != "0.9.0" || tool.Installation.Source != InstallationSourceImage {
-		t.Errorf("tool-y entry after remove = %+v, want the image baseline adopted", tool)
+	if tool.Status != "" || tool.InstalledVersion != "" || tool.Installation != nil || tool.Observed.Present {
+		t.Errorf("tool-y entry after remove = %+v, want an absent dependency", tool)
 	}
-	if got := actionsOf(tool); got != "install,check_update" {
+	if got := actionsOf(tool); got != "install" {
 		t.Errorf("tool-y actions after remove = %s", got)
 	}
 }
@@ -1574,6 +1574,13 @@ func TestRemoveDeletesShimsAndRecord(t *testing.T) {
 	}
 	if spec := f.runSpecs()[0]; spec.Action != catalog.ActionRemove || spec.Timeout != time.Duration(catalog.DefaultRemoveTimeout)*time.Second {
 		t.Errorf("spec = %+v", spec)
+	}
+	preview, err := f.svc.ScriptPreviewDetails(f.ctx(), testBot, testTarget, "tool-y", catalog.ActionRemove)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec := f.runSpecs()[0]; preview.Script != WrapScript(spec.Script) || previewEnv(t, preview, "MEMOH_DEP_WORKSPACE_TARGET").Value != spec.WorkspaceTargetID {
+		t.Fatal("remove preview differs from execution")
 	}
 	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusRemoving) {
 		t.Errorf("status history = %v", got)

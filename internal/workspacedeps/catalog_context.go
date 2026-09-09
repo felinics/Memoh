@@ -12,8 +12,9 @@ type (
 )
 
 // WithDefinitionRevision binds a user's prepared operation to the immutable
-// revision returned by its script preview. Empty means resolve latest when
-// the operation begins; it never changes halfway through a running script.
+// revision returned by catalog metadata or an optional script preview. Empty
+// means resolve latest when the operation begins; it never changes halfway
+// through a running script.
 func WithDefinitionRevision(ctx context.Context, revision string) context.Context {
 	return context.WithValue(ctx, revisionContextKey{}, revision)
 }

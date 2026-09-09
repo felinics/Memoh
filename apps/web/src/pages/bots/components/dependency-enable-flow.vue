@@ -24,11 +24,8 @@ import {
 } from '@felinic/ui'
 import { postBotsByBotIdContainerStart, type BotagentsBotAgent } from '@memohai/sdk'
 import {
-  fetchDependencyScript,
   preflightDependencies,
   type DependencyItem,
-  type ScriptAction,
-  type ScriptResponse,
 } from '@/composables/api/useWorkspaceDependencies'
 import { useDependencyOperationsStore, type DependencyOperation } from '@/store/dependency-operations'
 import { resolveApiErrorMessage } from '@/utils/api-error'
@@ -36,7 +33,6 @@ import { dependencyDisplayName } from '@/utils/workspace-dependency'
 import DependencyConfirmDialog from './dependency-confirm-dialog.vue'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
 import DependencyProgressDialog from './dependency-progress-dialog.vue'
-import DependencyScriptDialog from './dependency-script-dialog.vue'
 import {
   agentDependencyRequirement,
   dependencyItemFromPreflight,
@@ -75,12 +71,6 @@ const progressOpen = ref(false)
 // after the store dropped the record.
 const displayed = shallowRef<DependencyOperation | null>(null)
 
-const scriptOpen = ref(false)
-const scriptLoading = ref(false)
-const scriptError = ref('')
-const script = ref<ScriptResponse | null>(null)
-let scriptSequence = 0
-
 const workspaceRows = computed<DependencyKvRow[]>(() => [
   { label: t('bots.dependencies.confirm.dependency'), value: item.value?.id, mono: true },
 ])
@@ -103,9 +93,6 @@ function finish(ok: boolean) {
   workspaceOpen.value = false
   confirmOpen.value = false
   hideProgress()
-  scriptOpen.value = false
-  script.value = null
-  scriptSequence++
   resolve?.(ok)
 }
 
@@ -197,7 +184,6 @@ function onConfirmed(version: string) {
     item: current,
     action: OPERATION,
     version,
-    definitionRevision: script.value?.definition_revision,
     onBackgroundDone: onBackgroundDone,
   })
   switch (result.kind) {
@@ -240,25 +226,6 @@ function retryOperation() {
 function onProgressOpenChange(value: boolean) {
   if (value) return
   finish(displayed.value?.status === 'done')
-}
-
-async function openScript() {
-  const depId = item.value?.id ?? ''
-  const action: ScriptAction = OPERATION
-  const sequence = ++scriptSequence
-  scriptOpen.value = true
-  scriptLoading.value = true
-  scriptError.value = ''
-  const revision = script.value?.definition_revision
-  script.value = null
-  try {
-    const result = await fetchDependencyScript(props.botId, '', depId, action, revision)
-    if (sequence === scriptSequence) script.value = result
-  } catch (error) {
-    if (sequence === scriptSequence) scriptError.value = resolveApiErrorMessage(error, t('common.loadFailed'))
-  } finally {
-    if (sequence === scriptSequence) scriptLoading.value = false
-  }
 }
 
 onBeforeUnmount(hideProgress)
@@ -322,20 +289,8 @@ defineExpose({ run, checking })
     :item="item"
     target-kind="native"
     :confirm-label="t('bots.dependencies.confirm.installAndEnable')"
-    :loading="scriptLoading"
-    :script-ready="!!script?.definition_revision && !scriptError"
     @update:open="onConfirmOpenChange"
     @confirm="onConfirmed"
-    @view-script="openScript"
-  />
-
-  <DependencyScriptDialog
-    v-model:open="scriptOpen"
-    :script="script"
-    :loading="scriptLoading"
-    :error="scriptError"
-    :dependency-name="name"
-    :action="OPERATION"
   />
 
   <DependencyProgressDialog

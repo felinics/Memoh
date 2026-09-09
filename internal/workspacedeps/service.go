@@ -189,11 +189,10 @@ type Entry struct {
 	// PATH (managed, then toolkit, then PATH).
 	InstalledVersion string
 	// ImageVersion is the version of the copy the workspace image ships in
-	// its toolkit, empty when the image has none. It is the baseline a
-	// managed overlay sits on and what remove returns to.
+	// its toolkit, empty when the workspace has no toolkit copy.
 	ImageVersion string
 	// Overlay is set when the copy in effect is a managed one installed over
-	// an image copy: removing it uncovers the ImageVersion copy.
+	// an image copy. Native removal clears both copies.
 	Overlay bool
 	// LatestVersion is the last check_update result recorded for the
 	// dependency, empty until a check ran.
@@ -695,8 +694,8 @@ func SupportedActions(dep catalog.Dependency) []catalog.Action {
 }
 
 // availableActions lists the actions the current state allows. A managed
-// copy is what install produces and what update, reinstall, remove, and
-// rollback operate on; an image copy underneath it is only ever a baseline.
+// copy is what install produces and what update, reinstall, and rollback
+// operate on. Remove also clears commands supplied by the workspace image.
 // Update checks follow the script and the pin, not the category: an agent
 // CLI is checked upstream like any other tool.
 func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) []catalog.Action {
@@ -713,10 +712,10 @@ func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) [
 		} else if rec != nil {
 			actions = append(actions, catalog.ActionReinstall)
 		}
-		if rec != nil && !obs.Present {
-			// A missing or failed record can be dropped without a workspace
-			// copy to delete; remove runs the script (a no-op then) and
-			// deletes the intent.
+		imageCopy := rec != nil && rec.WorkspaceTargetID == TargetNative && (imageCandidate(obs).Path != "" || obs.Source == SourceToolkit)
+		if ActionSupported(dep, catalog.ActionRemove) && ((rec != nil && !obs.Present) || imageCopy) {
+			// Remove clears native image copies as well as missing/failed
+			// installation records; remote software stays recipe-owned.
 			actions = append(actions, catalog.ActionRemove)
 		}
 	default:
@@ -836,9 +835,8 @@ func (s *Service) Reinstall(ctx context.Context, botID, targetID, depID, version
 }
 
 // Remove runs the remove script, deletes the shims, and drops the record.
-// For a dependency the image ships this removes the managed overlay only:
-// the next discovery finds the image copy again and adopts it as installed
-// from the image.
+// Native workspaces also remove the image's copy so discovery cannot adopt
+// the same dependency again immediately after a successful removal.
 func (s *Service) Remove(ctx context.Context, botID, targetID, depID string, sink LogSink) (OperationResult, error) {
 	ctx, cancelOperation := context.WithCancel(ctx)
 	defer cancelOperation()
@@ -992,7 +990,7 @@ func (s *Service) ScriptPreview(ctx context.Context, depID string, action catalo
 		return WrapScript(rollbackScript), nil
 	}
 	if script, ok := s.catalogFor(ctx).Script(dep.ID, action); ok {
-		return WrapScript(script), nil
+		return WrapScript(actionScript(dep, action, script)), nil
 	}
 	switch action {
 	case catalog.ActionUpdate:
@@ -1306,15 +1304,16 @@ func (s *Service) runScript(ctx context.Context, op *operation, action catalog.A
 		timeout = op.dep.Timeouts.Duration(action)
 	}
 	spec := RunSpec{
-		DepID:          op.dep.ID,
-		Action:         action,
-		Script:         script,
-		Home:           op.home,
-		ShimDir:        op.shimDir,
-		Version:        version,
-		CurrentVersion: currentVersion,
-		Platform:       op.platform,
-		Timeout:        timeout,
+		DepID:             op.dep.ID,
+		Action:            action,
+		Script:            actionScript(op.dep, action, script),
+		WorkspaceTargetID: op.key.WorkspaceTargetID,
+		Home:              op.home,
+		ShimDir:           op.shimDir,
+		Version:           version,
+		CurrentVersion:    currentVersion,
+		Platform:          op.platform,
+		Timeout:           timeout,
 	}
 	if s.scriptEnv != nil {
 		spec.ExtraEnv = s.scriptEnv(ctx)

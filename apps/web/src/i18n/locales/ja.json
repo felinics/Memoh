@@ -2423,7 +2423,7 @@
         "updateTitle": "{name} を更新",
         "updateDescription": "現在は {from} です。新しいバージョンを先にインストールし、成功した場合のみ切り替えます。失敗しても現在のバージョンには影響せず、後からロールバックできます。",
         "installDescription": "Workspace に {name} をダウンロードしてインストールします。",
-        "reinstallDescription": "現在の {name} を削除して再インストールします。完了するまで、これに依存する Agent は起動できません。",
+        "reinstallDescription": "Workspace に {name} を再ダウンロードしてインストールします。",
         "dependency": "依存関係",
         "installPath": "インストール先",
         "version": "バージョン",
@@ -2460,8 +2460,7 @@
       },
       "remove": {
         "title": "{name} を削除しますか？",
-        "description": "{path} 以下のすべてのバージョンを削除します。これに依存する Agent は再インストールまで起動できません。",
-        "overlayDescription": "{installed} を削除し、Workspace は {image_version} に戻ります。"
+        "description": "この Workspace から {name} とインストール済みの各バージョンを削除します。この依存関係を必要とするプログラムが動作しなくなる場合があります。"
       },
       "rollback": {
         "title": "{name} をロールバック",

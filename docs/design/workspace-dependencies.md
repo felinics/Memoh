@@ -59,11 +59,12 @@ install, update, reinstall, remove, manual update checks and background update
 checks. A software version request is independent of that choice. In particular,
 requesting an older CLI version still uses the current installation recipe.
 
-Preparation freezes one revision for the operation. Script preview returns
-`definition_revision`; the corresponding operation request carries that revision.
-A refresh or publication between preview and execution cannot swap the script.
-A new operation or an explicit retry resolves latest again unless the user is
-confirming that prepared preview. Reinstall keeps the prior installation available
+Preparation freezes one revision for the operation. After the user confirms an
+action, the Server resolves and pins its definition; viewing the script is optional.
+Requests may carry `definition_revision` from catalog metadata or the script viewer.
+A refresh or publication between preparation and execution cannot swap the script.
+A new operation resolves latest when no revision is supplied, while retries retain
+the prepared revision reported by the started event. Reinstall keeps the prior installation available
 while the replacement is staged. If the definition has no dedicated reinstall
 script, Memoh reruns install without removing the existing versions first.
 
@@ -104,7 +105,7 @@ operations remain available in the persistent cache.
   empty. Existing managed, image-provided and PATH copies do not require registry
   access. A missing CLI produces actionable feedback; chat messages and device-code
   login never authorize a script execution. Installation requires Manage permission
-  and confirmation of a revision-bound script preview.
+  and confirmation of the operation; the Server fixes its revision before execution.
 - Script caching is not binary caching. Reinstalling software may still require npm,
   GitHub or the relevant upstream download service.
 
@@ -119,8 +120,14 @@ targets supply their own data root. The direct Codex and Claude Code runtimes cu
 require a native workspace and reject remote targets before launcher resolution.
 
 The image keeps Node.js, Python, uv, display tools and the bridge contract paths.
-Node.js/Python/uv installations add managed overlays; removal restores the image
-baseline. Codex and Claude Code are downloaded per workspace and are absent from the
+Node.js/Python/uv installations add managed copies. Removing a dependency from a
+native workspace deletes both the managed copy and the toolkit commands and runtime
+files in that container. The Debian image's additional system Python is removed
+through its package manager, including packages that require the interpreter; unrelated
+packages are not autoremoved. A removed dependency is no longer discovered or listed
+as installed. Recreating the container from an image restores that image's contents.
+Remote targets continue to use their reviewed removal recipes. Codex and Claude Code
+are downloaded per workspace and are absent from the
 image. The old workspace-contract JSON gate is removed. Server and image upgrades
 must follow the [upgrade and rollback procedure](../workspace-dependencies-upgrade.md);
 an old Server cannot initialize this new image.

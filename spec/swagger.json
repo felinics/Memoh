@@ -23370,7 +23370,7 @@
                     "type": "string"
                 },
                 "image_version": {
-                    "description": "ImageVersion is the version of the copy the workspace image ships,\nomitted when the image has none. It is the baseline a managed overlay\nsits on and what remove returns to.",
+                    "description": "ImageVersion is the version of the workspace's toolkit copy, omitted\nwhen no toolkit copy remains. Native removal clears it as well.",
                     "type": "string"
                 },
                 "install_path": {

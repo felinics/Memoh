@@ -2611,9 +2611,8 @@ export type HandlersWorkspaceDependencyItem = {
     icon_url?: string;
     id?: string;
     /**
-     * ImageVersion is the version of the copy the workspace image ships,
-     * omitted when the image has none. It is the baseline a managed overlay
-     * sits on and what remove returns to.
+     * ImageVersion is the version of the workspace's toolkit copy, omitted
+     * when no toolkit copy remains. Native removal clears it as well.
      */
     image_version?: string;
     /**

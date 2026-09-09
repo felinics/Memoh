@@ -2424,7 +2424,7 @@
         "updateTitle": "Update {name}",
         "updateDescription": "Currently {from}. The new version installs first and switches over only on success; the current one stays untouched on failure, and you can roll back afterwards.",
         "installDescription": "Downloads and installs {name} into the workspace.",
-        "reinstallDescription": "Removes the current copy of {name} and installs it again. Agents that depend on it can't start until it finishes.",
+        "reinstallDescription": "Downloads and reinstalls {name} in the workspace.",
         "dependency": "Dependency",
         "installPath": "Install location",
         "version": "Version",
@@ -2461,8 +2461,7 @@
       },
       "remove": {
         "title": "Remove {name}?",
-        "description": "Deletes every version under {path}. Agents that depend on it can't start until it is reinstalled.",
-        "overlayDescription": "Removes {installed}; the workspace goes back to {image_version}."
+        "description": "Removes {name} and its installed versions from this workspace. Programs that depend on it may stop working."
       },
       "rollback": {
         "title": "Roll back {name}",

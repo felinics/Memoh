@@ -49,6 +49,8 @@ type RunSpec struct {
 	Script  string
 	Home    string
 	ShimDir string
+	// WorkspaceTargetID scopes image cleanup to isolated native workspaces.
+	WorkspaceTargetID string
 	// Version is exported as MEMOH_DEP_VERSION: the version to install (the
 	// one requested, else the manifest pin) and empty for "latest".
 	Version string
@@ -273,6 +275,7 @@ func buildEnv(spec RunSpec, resultPath string, timeout time.Duration) []string {
 	env := []string{
 		"MEMOH_DEP_ID=" + spec.DepID,
 		"MEMOH_DEP_ACTION=" + string(spec.Action),
+		"MEMOH_DEP_WORKSPACE_TARGET=" + spec.WorkspaceTargetID,
 		"MEMOH_DEP_HOME=" + spec.Home,
 		"MEMOH_DEP_BIN=" + spec.ShimDir,
 		"MEMOH_DEP_VERSION=" + spec.Version,

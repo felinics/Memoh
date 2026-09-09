@@ -5,7 +5,7 @@ runtime scripts. Codex and Claude Code are managed per workspace under
 `/data/.memoh/deps`; they are no longer installed in the image. The new Server
 discovers an existing supported CLI before requiring a managed installation.
 A chat message or a device-code login attempt does not authorize installation:
-a user with the Bot's Manage permission must preview and confirm it in workspace
+a user with the Bot's Manage permission must confirm installation in workspace
 dependency settings.
 
 ## Server and image compatibility
@@ -44,9 +44,8 @@ uses this image-level check; it validates a dependency at its point of use.
    An installed CLI outside the supported version range must be updated before
    the Agent can run.
 4. While the old image is still available, have a Manage-capable user open each
-   relevant workspace target's dependency settings, review the manifest and
-   installation script, and confirm installation of the required Codex or Claude
-   Code version. Wait for successful installation, verify the managed executable
+   relevant workspace target's dependency settings and confirm installation of
+   the required Codex or Claude Code version. Wait for successful installation, verify the managed executable
    and its version, and start a fresh Agent session. Dependencies are stored per
    workspace target; installation for one Bot or target does not prepare others.
 5. Only after those checks, select the new baseline image by immutable digest

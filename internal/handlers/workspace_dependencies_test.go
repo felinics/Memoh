@@ -224,13 +224,13 @@ type depsCall struct {
 	depID          string
 	body           any
 	userID         string
-	unreviewed     bool
+	omitRevision   bool
 	requestContext context.Context
 }
 
 func (call depsCall) invoke(t *testing.T, fn func(echo.Context) error) (*httptest.ResponseRecorder, error) {
 	t.Helper()
-	if !call.unreviewed && call.depID != "" && (call.method == http.MethodPost || call.method == http.MethodDelete) && !strings.Contains(call.target, "/rollback") {
+	if !call.omitRevision && call.depID != "" && (call.method == http.MethodPost || call.method == http.MethodDelete) && !strings.Contains(call.target, "/rollback") {
 		switch body := call.body.(type) {
 		case nil:
 			call.body = WorkspaceDependencyInstallRequest{DefinitionRevision: strings.Repeat("a", 64)}
@@ -1049,13 +1049,49 @@ func TestWorkspaceDependencyErrorMapping(t *testing.T) {
 	}
 }
 
-func TestWorkspaceDependencyMutationRequiresReviewedRevision(t *testing.T) {
+func TestWorkspaceDependencyMutationPreparesRevisionWithoutClientPreview(t *testing.T) {
+	for _, action := range []string{"install", "update", "reinstall", "remove"} {
+		t.Run(action, func(t *testing.T) {
+			revision := strings.Repeat("b", 64)
+			svc := &fakeWorkspaceDependencyService{
+				deps:      depsTestCatalog(),
+				preview:   workspacedeps.ScriptPreview{Revision: revision},
+				operation: workspacedeps.OperationResult{DefinitionRevision: revision},
+			}
+			h := newDepsTestHandler("admin", svc)
+			handlers := map[string]func(echo.Context) error{
+				"install":   h.InstallWorkspaceDependency,
+				"update":    h.UpdateWorkspaceDependency,
+				"reinstall": h.ReinstallWorkspaceDependency,
+				"remove":    h.RemoveWorkspaceDependency,
+			}
+			rec, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/" + action, depID: "codex", omitRevision: true}).invoke(t, handlers[action])
+			if err != nil {
+				t.Fatal(err)
+			}
+			frames := sseFrames(t, rec.Body.String())
+			if len(frames) != 2 || frames[0]["type"] != "started" || frames[1]["type"] != "done" {
+				t.Fatalf("operation did not run: %v", frames)
+			}
+			for _, frame := range frames {
+				if frame["definition_revision"] != revision {
+					t.Fatalf("revision was not pinned: %v", frames)
+				}
+			}
+			if len(svc.calls) != 2 || svc.calls[0] != "script" || svc.calls[1] != action {
+				t.Fatalf("expected server preparation followed by operation: %v", svc.calls)
+			}
+		})
+	}
+}
+
+func TestWorkspaceDependencyMutationRejectsMalformedRevision(t *testing.T) {
 	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog()}
 	h := newDepsTestHandler("admin", svc)
-	rec, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex", unreviewed: true}).invoke(t, h.InstallWorkspaceDependency)
+	_, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex", body: WorkspaceDependencyInstallRequest{DefinitionRevision: "invalid"}}).invoke(t, h.InstallWorkspaceDependency)
 	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyRequestInvalid)
-	if strings.HasPrefix(rec.Header().Get(echo.HeaderContentType), "text/event-stream") || len(svc.calls) != 0 {
-		t.Fatal("unreviewed mutation reached operation")
+	if len(svc.calls) != 0 {
+		t.Fatal("malformed revision reached operation")
 	}
 }
 

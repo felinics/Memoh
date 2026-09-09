@@ -40,6 +40,8 @@ export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'v
 
 export interface DependencyMenuAction {
   kind: DependencyMenuActionKind
+  /** The server operation; reinstalling a preinstalled copy uses install. */
+  operation?: DependencyOperationAction
   /** Full i18n key of the item label. */
   labelKey: string
   args?: Record<string, string>
@@ -275,21 +277,15 @@ export function dependencyMenuActions(
 
   const readonly = workspaceState !== 'running' || dependencyInProgress(item)
   const items: DependencyMenuAction[] = []
-  // Install on an installed row lays a chosen version over the copy in effect.
-  // It moves to the primary button when it doubles as the row's update.
-  const installIsPrimary = dependencyUpdateAvailable(item) && dependencyUpdateOperation(item) === 'install'
-  if (item.status === 'installed' && dependencyAllows(item, 'install') && !installIsPrimary) {
-    items.push({
-      kind: 'install',
-      labelKey: `${ACTION_KEY}.install`,
-      destructive: false,
-      disabled: readonly,
-      separatorBefore: false,
-    })
-  }
-  if (dependencyAllows(item, 'reinstall')) {
+  // The copy already exists even when it came from the image. Reinstall
+  // stays available beside Update; the server still decides which script runs.
+  const reinstallOperation = dependencyAllows(item, 'reinstall')
+    ? 'reinstall'
+    : item.status === 'installed' && dependencyAllows(item, 'install') ? 'install' : undefined
+  if (reinstallOperation) {
     items.push({
       kind: 'reinstall',
+      operation: reinstallOperation,
       labelKey: `${ACTION_KEY}.reinstall`,
       destructive: false,
       disabled: readonly,

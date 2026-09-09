@@ -38,7 +38,7 @@ function imageCopy(overrides: Partial<DependencyItem> = {}): DependencyItem {
     status: 'installed',
     installed_version: '24.14.0',
     image_version: '24.14.0',
-    actions: ['install', 'check_update'],
+    actions: ['install', 'remove', 'check_update'],
     ...overrides,
   })
 }
@@ -198,12 +198,33 @@ describe('dependencyMenuActions', () => {
     expect(actions[3]).toMatchObject({ destructive: true, disabled: false })
   })
 
-  it('offers install and script for an up-to-date image copy the Server lets you lay a version over', () => {
+  it('reinstalls a preinstalled copy through install, including when an update is available', () => {
     const actions = dependencyMenuActions(imageCopy(), 'running')
-    expect(actions.map(action => action.kind)).toEqual(['install', 'viewScript'])
-    expect(actions[0]).toMatchObject({ labelKey: 'bots.dependencies.action.install', disabled: false })
-    // Once install doubles as the row's Update button, the menu does not repeat it.
-    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').map(action => action.kind)).toEqual(['viewScript'])
+    expect(actions.map(action => action.kind)).toEqual(['reinstall', 'viewScript', 'remove'])
+    expect(actions[0]).toMatchObject({ labelKey: 'bots.dependencies.action.reinstall', operation: 'install', disabled: false })
+    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running')).toEqual(actions)
+  })
+
+  it('keeps reinstall and remove beside Update for a managed dependency', () => {
+    const updatable = item({ status: 'installed', latest_version: '2', installed_version: '1', actions: ['update', 'reinstall', 'remove'] })
+    expect(dependencyPrimaryAction(updatable, 'running')).toMatchObject({ kind: 'update', operation: 'update' })
+    expect(dependencyMenuActions(updatable, 'running')).toEqual([
+      expect.objectContaining({ kind: 'reinstall', operation: 'reinstall' }),
+      expect.objectContaining({ kind: 'viewScript' }),
+      expect.objectContaining({ kind: 'remove', labelKey: 'bots.dependencies.action.remove' }),
+    ])
+  })
+
+  it('removes an image copy and an overlay with the same menu action', () => {
+    const overlay = imageCopy({ source: 'managed', overlay: true, actions: ['update', 'reinstall', 'remove'] })
+    expect(dependencyMenuActions(overlay, 'running').at(-1)).toMatchObject({
+      kind: 'remove', labelKey: 'bots.dependencies.action.remove',
+    })
+    expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').at(-1)).toMatchObject({
+      kind: 'remove', labelKey: 'bots.dependencies.action.remove', disabled: false,
+    })
+    // After removal no copy or record remains, so the installed list drops it.
+    expect(dependencyIsInstalled(item({ actions: ['install'] }))).toBe(false)
   })
 
   it('keeps only the script preview clickable while the workspace is read-only', () => {
