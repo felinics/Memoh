@@ -491,7 +491,12 @@
                      composer's input row IS the voice surface: live level
                      bars + elapsed time take the textarea's place (same
                      min-height, so the box never jumps), and the controls row
-                     below sheds everything except the voice pair. -->
+                     below sheds everything except the voice pair.
+                     A11y: role="status" is an implicit polite+atomic live
+                     region, so every text change inside re-announces the
+                     whole strip — the per-second timer would chatter for the
+                     entire recording. Bars and timer are aria-hidden; only
+                     the sr-only state line announces, once per transition. -->
                 <div
                   v-if="voiceInputState !== 'idle'"
                   role="status"
@@ -507,6 +512,7 @@
                        runtime audio data, so both stay inline px. -->
                   <div
                     ref="voiceStripEl"
+                    aria-hidden="true"
                     class="flex h-8 min-w-0 flex-1 items-center gap-[3px] overflow-hidden"
                   >
                     <div
@@ -517,7 +523,11 @@
                       :style="{ height: `${Math.max(2, Math.round(level * VOICE_BAR_MAX_PX))}px` }"
                     />
                   </div>
-                  <span class="shrink-0 text-control tabular-nums text-muted-foreground">{{ formattedVoiceSeconds }}</span>
+                  <span
+                    aria-hidden="true"
+                    class="shrink-0 text-control tabular-nums text-muted-foreground"
+                  >{{ formattedVoiceSeconds }}</span>
+                  <span class="sr-only">{{ voiceInputState === 'transcribing' ? $t('chat.voiceInput.transcribing') : $t('chat.voiceInput.barLabel') }}</span>
                 </div>
                 <textarea
                   v-else
