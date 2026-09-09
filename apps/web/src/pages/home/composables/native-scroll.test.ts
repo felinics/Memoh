@@ -64,6 +64,34 @@ describe('native scrolling', () => {
 })
 
 describe('live destinations', () => {
+  it('releases via the backstop when scrollend never arrives', () => {
+    vi.useFakeTimers()
+    const root = viewport()
+    const finish = vi.fn()
+    nativeScrollTo(root, () => 500, finish)
+    vi.advanceTimersByTime(1_999)
+    expect(finish).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(finish).toHaveBeenCalledOnce()
+    // After the backstop fires, a late scrollend is ignored.
+    root.dispatchEvent(new Event('scrollend'))
+    expect(finish).toHaveBeenCalledOnce()
+  })
+
+  it('re-arms the backstop across a live-destination leg', () => {
+    vi.useFakeTimers()
+    const root = viewport()
+    let target = 400
+    const finish = vi.fn()
+    nativeScrollTo(root, () => target, finish)
+    target = 600
+    root.scrollTop = 400
+    root.dispatchEvent(new Event('scrollend'))
+    expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 600, behavior: 'smooth' })
+    vi.advanceTimersByTime(2_000)
+    expect(finish).toHaveBeenCalledOnce()
+  })
+
   it.each([620, 180])('settles at a moved destination (%i) before finishing', (next) => {
     const root = viewport()
     let target = 400

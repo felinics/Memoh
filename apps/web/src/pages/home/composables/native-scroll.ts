@@ -6,10 +6,12 @@ export function nativeScrollTo(
 ): () => void {
   let finished = false
   let idleTimer: ReturnType<typeof setTimeout> | undefined
+  let backstop: ReturnType<typeof setTimeout> | undefined
   const finish = () => {
     if (finished) return
     finished = true
     clearTimeout(idleTimer)
+    clearTimeout(backstop)
     root.removeEventListener('scrollend', settle)
     root.removeEventListener('scroll', onScroll)
     onFinish()
@@ -27,6 +29,7 @@ export function nativeScrollTo(
       target = nextTarget
       root.scrollTo({ top: target, behavior: 'smooth' })
       if (!Reflect.has(root, 'onscrollend')) onScroll()
+      else armBackstop()
       return
     }
     finish()
@@ -36,11 +39,22 @@ export function nativeScrollTo(
     clearTimeout(idleTimer)
     idleTimer = setTimeout(settle, 150)
   }
+  // scrollend is expected on every terminal path, but nothing guarantees it:
+  // if the engine swallows the event, finish would never fire and the caller's
+  // "smooth scroll in flight" latch would stick. Well past any browser smooth-
+  // scroll duration, so a false finish means the flight was already lost —
+  // releasing is the right recovery either way.
+  const armBackstop = () => {
+    clearTimeout(backstop)
+    backstop = setTimeout(finish, 2000)
+  }
   const stationary = Math.abs(root.scrollTop - target) < 1
   root.addEventListener('scrollend', settle)
   if (!Reflect.has(root, 'onscrollend')) {
     root.addEventListener('scroll', onScroll, { passive: true })
     onScroll()
+  } else {
+    armBackstop()
   }
   root.scrollTo({ top: target, behavior: reduced ? 'instant' : 'smooth' })
   // No movement means no scrollend event, including reduced-motion jumps.
