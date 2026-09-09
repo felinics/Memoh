@@ -1,18 +1,18 @@
 package adapters_test
 
 import (
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/dingtalk"
-	"github.com/memohai/memoh/internal/channel/adapters/discord"
-	"github.com/memohai/memoh/internal/channel/adapters/feishu"
-	localadapter "github.com/memohai/memoh/internal/channel/adapters/local"
-	"github.com/memohai/memoh/internal/channel/adapters/matrix"
-	"github.com/memohai/memoh/internal/channel/adapters/misskey"
-	"github.com/memohai/memoh/internal/channel/adapters/qq"
-	"github.com/memohai/memoh/internal/channel/adapters/telegram"
-	"github.com/memohai/memoh/internal/channel/adapters/wechatoa"
-	"github.com/memohai/memoh/internal/channel/adapters/wecom"
-	"github.com/memohai/memoh/internal/channel/adapters/weixin"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/dingtalk"
+	"github.com/felinics/memoh/internal/channel/adapters/discord"
+	"github.com/felinics/memoh/internal/channel/adapters/feishu"
+	localadapter "github.com/felinics/memoh/internal/channel/adapters/local"
+	"github.com/felinics/memoh/internal/channel/adapters/matrix"
+	"github.com/felinics/memoh/internal/channel/adapters/misskey"
+	"github.com/felinics/memoh/internal/channel/adapters/qq"
+	"github.com/felinics/memoh/internal/channel/adapters/telegram"
+	"github.com/felinics/memoh/internal/channel/adapters/wechatoa"
+	"github.com/felinics/memoh/internal/channel/adapters/wecom"
+	"github.com/felinics/memoh/internal/channel/adapters/weixin"
 )
 
 var (

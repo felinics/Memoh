@@ -102,7 +102,7 @@ export async function fetchSafeSkillCatalog(botId: string): Promise<RequestedSki
 export async function executeQuickAction(
   botId: string,
   actionId: string,
-  options: { invocationId?: string; composerScope?: string; sessionId?: string; skillActivationAllowed?: boolean } = {},
+  options: { invocationId?: string; composerScope?: string; sessionId?: string; skillActivationAllowed?: boolean; modeId?: string } = {},
 ): Promise<CommandEventResponse> {
   const bid = botId.trim()
   const aid = actionId.trim()
@@ -115,8 +115,11 @@ export async function executeQuickAction(
       invocation_id: options.invocationId?.trim() || undefined,
       composer_scope: options.composerScope?.trim() || undefined,
       session_id: options.sessionId?.trim() || undefined,
-      params: options.skillActivationAllowed === false
-        ? { skill_activation_allowed: false }
+      params: options.skillActivationAllowed === false || options.modeId?.trim()
+        ? {
+            ...(options.skillActivationAllowed === false ? { skill_activation_allowed: false } : {}),
+            ...(options.modeId?.trim() ? { mode_id: options.modeId.trim() } : {}),
+          }
         : undefined,
     },
     throwOnError: true,

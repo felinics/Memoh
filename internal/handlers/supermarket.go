@@ -1,100 +1,46 @@
 package handlers
 
 import (
-	"archive/tar"
-	"compress/gzip"
-	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"net/http"
-	"net/url"
-	"path"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/config"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/skillpackages"
+	supermarketclient "github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type SupermarketHandler struct {
-	baseURL        string
-	httpClient     *http.Client
-	pluginService  pluginInstaller
-	containers     bridge.Provider
+	upstream       *supermarketclient.Client
+	installer      *supermarketclient.Installer
+	packages       *skillpackages.Service
+	workspaces     *workspace.Manager
 	botService     *bots.Service
 	accountService *accounts.Service
 	logger         *slog.Logger
 }
 
-type pluginInstaller interface {
-	Install(ctx context.Context, botID string, req pluginspkg.InstallRequest) (pluginspkg.Installation, error)
-}
-
-type pluginBundleWriter interface {
-	DeleteFile(ctx context.Context, path string, recursive bool) error
-	Mkdir(ctx context.Context, path string) error
-	WriteFile(ctx context.Context, path string, content []byte) error
-}
-
-type pluginInstallScriptExecutor interface {
-	ExecWithEnv(ctx context.Context, command, workDir string, timeout int32, env []string) (*bridge.ExecResult, error)
-}
-
-type pluginAssetInstallResult struct {
-	OK           bool   `json:"ok"`
-	FilesWritten int    `json:"files_written"`
-	Error        string `json:"error,omitempty"`
-}
-
-type pluginBundleInstallResult struct {
-	Skills  pluginAssetInstallResult
-	Hooks   pluginAssetInstallResult
-	Scripts pluginAssetInstallResult
-}
-
-type pluginInstallScriptsResult struct {
-	OK          bool                         `json:"ok"`
-	CommandsRun int                          `json:"commands_run"`
-	Results     []pluginInstallCommandResult `json:"results,omitempty"`
-	Error       string                       `json:"error,omitempty"`
-}
-
-type pluginInstallCommandResult struct {
-	Command  string `json:"command"`
-	ExitCode int32  `json:"exit_code"`
-	Stdout   string `json:"stdout,omitempty"`
-	Stderr   string `json:"stderr,omitempty"`
-	Error    string `json:"error,omitempty"`
-}
-
-const (
-	pluginInstallScriptTimeoutSeconds int32 = 10 * 60
-	pluginInstallScriptOutputLimit          = 64 * 1024
-)
-
 func NewSupermarketHandler(
 	log *slog.Logger,
 	cfg config.Config,
-	pluginService *pluginspkg.Service,
-	containers bridge.Provider,
+	packageService *skillpackages.Service,
+	workspaces *workspace.Manager,
 	botService *bots.Service,
 	accountService *accounts.Service,
 ) *SupermarketHandler {
+	upstream := supermarketclient.NewClient(cfg.Supermarket.GetBaseURL(), nil)
 	return &SupermarketHandler{
-		baseURL:        cfg.Supermarket.GetBaseURL(),
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
-		pluginService:  pluginService,
-		containers:     containers,
+		upstream:       upstream,
+		installer:      supermarketclient.NewInstaller(upstream, packageService, workspaces, log),
+		packages:       packageService,
+		workspaces:     workspaces,
 		botService:     botService,
 		accountService: accountService,
 		logger:         log.With(slog.String("handler", "supermarket")),
@@ -103,15 +49,20 @@ func NewSupermarketHandler(
 
 func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g := e.Group("/supermarket")
-	g.GET("/plugins", h.ListPlugins)
-	g.GET("/plugins/:id", h.GetPlugin)
 	g.GET("/skills", h.ListSkills)
-	g.GET("/skills/:id", h.GetSkill)
-	g.GET("/tags", h.ListTags)
+	g.GET("/packages", h.ListPackages)
+	g.GET("/registries", h.ListRegistries)
+	g.GET("/registries/:registry_id/categories", h.ListRegistryCategories)
+	g.GET("/registries/:registry_id/packages", h.ListRegistryPackages)
+	g.GET("/registries/:registry_id/packages/:package_id", h.GetRegistryPackage)
+	g.GET("/registries/:registry_id/packages/:package_id/releases/:revision", h.GetRegistryPackageRelease)
+	g.GET("/registries/:registry_id/packages/:package_id/skills/:skill_id", h.GetRegistrySkill)
+	g.GET("/artifacts/icon/:digest", h.GetRegistrySkillIcon)
 
 	ig := e.Group("/bots/:bot_id/supermarket")
-	ig.POST("/install-plugin", h.InstallPlugin)
-	ig.POST("/install-skill", h.InstallSkill)
+	ig.POST("/install-package", h.InstallPackage)
+	ig.GET("/packages", h.ListInstalledPackages)
+	ig.DELETE("/packages/:installation_id", h.UninstallPackage)
 }
 
 func (h *SupermarketHandler) requireBotAccess(c echo.Context) (string, error) {
@@ -128,20 +79,13 @@ func (h *SupermarketHandler) requireBotAccess(c echo.Context) (string, error) {
 
 // proxy forwards a GET request to the supermarket and streams the JSON response back.
 func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
-	url := h.baseURL + upstreamPath
+	requestPath := upstreamPath
 	if qs := c.QueryString(); qs != "" {
-		url += "?" + qs
+		requestPath += "?" + qs
 	}
-
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
+	resp, err := h.upstream.Get(c.Request().Context(), requestPath, "application/json")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
-	if err != nil {
-		h.logger.Error("supermarket proxy failed", slog.String("url", url), slog.Any("error", err))
+		h.logger.Error("supermarket proxy failed", slog.String("path", requestPath), slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -152,598 +96,120 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 	return nil
 }
 
-// ListPlugins godoc
-// @Summary List plugins from supermarket
-// @Tags supermarket
-// @Param q query string false "Search query"
-// @Param tag query string false "Filter by tag"
-// @Param page query int false "Page number"
-// @Param limit query int false "Items per page"
-// @Success 200 {object} SupermarketPluginListResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/plugins [get].
-func (h *SupermarketHandler) ListPlugins(c echo.Context) error {
-	return h.proxy(c, "/api/plugins")
-}
-
-// GetPlugin godoc
-// @Summary Get plugin detail from supermarket
-// @Tags supermarket
-// @Param id path string true "Plugin ID"
-// @Success 200 {object} plugins.Manifest
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/plugins/{id} [get].
-func (h *SupermarketHandler) GetPlugin(c echo.Context) error {
-	id := c.Param("id")
-	return h.proxy(c, "/api/plugins/"+id)
-}
-
-// ListSkills godoc
-// @Summary List skills from supermarket
-// @Tags supermarket
-// @Param q query string false "Search query"
-// @Param tag query string false "Filter by tag"
-// @Param page query int false "Page number"
-// @Param limit query int false "Items per page"
-// @Success 200 {object} SupermarketSkillListResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/skills [get].
-func (h *SupermarketHandler) ListSkills(c echo.Context) error {
-	return h.proxy(c, "/api/skills")
-}
-
-// GetSkill godoc
-// @Summary Get skill detail from supermarket
-// @Tags supermarket
-// @Param id path string true "Skill ID"
-// @Success 200 {object} SupermarketSkillEntry
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/skills/{id} [get].
-func (h *SupermarketHandler) GetSkill(c echo.Context) error {
-	id := c.Param("id")
-	return h.proxy(c, "/api/skills/"+id)
-}
-
-// ListTags godoc
-// @Summary List all tags from supermarket
-// @Tags supermarket
-// @Success 200 {object} SupermarketTagsResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /supermarket/tags [get].
-func (h *SupermarketHandler) ListTags(c echo.Context) error {
-	return h.proxy(c, "/api/tags")
-}
-
 // --- Install endpoints ---
 
-// InstallPluginRequest is the request body for installing a plugin from supermarket.
-type InstallPluginRequest struct {
-	PluginID  string            `json:"plugin_id"`
-	Variables map[string]string `json:"variables,omitempty"`
+// InstallPackageRequest installs one immutable Package revision.
+type InstallPackageRequest struct {
+	RegistryID        string `json:"registry_id" validate:"required"`
+	PackageID         string `json:"package_id" validate:"required"`
+	Revision          string `json:"revision" validate:"required"`
+	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
 }
 
-// InstallSkillRequest is the request body for installing a skill from supermarket.
-type InstallSkillRequest struct {
-	SkillID string `json:"skill_id"`
-}
-
-// InstallPlugin godoc
-// @Summary Install plugin from supermarket to bot
+// InstallPackage godoc
+// @Summary Install an immutable Skill Package release to a bot workspace
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
-// @Param payload body InstallPluginRequest true "Install plugin request"
-// @Success 200 {object} plugins.Installation
+// @Param payload body InstallPackageRequest true "Install Package request"
+// @Success 200 {object} InstallRegistryPackageResponse
 // @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /bots/{bot_id}/supermarket/install-plugin [post].
-func (h *SupermarketHandler) InstallPlugin(c echo.Context) error {
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
+// @Router /bots/{bot_id}/supermarket/install-package [post].
+func (h *SupermarketHandler) InstallPackage(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
 
-	var req InstallPluginRequest
+	var req InstallPackageRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if strings.TrimSpace(req.PluginID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "plugin_id is required")
+	if h.installer == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "supermarket installer is not configured")
 	}
-
-	manifest, err := h.fetchPluginEntry(c, req.PluginID)
-	if err != nil {
-		return err
-	}
-	manifest = pluginspkg.NormalizeManifest(manifest)
-	if manifest.ID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "plugin id is required")
-	}
-
-	ctx := c.Request().Context()
-	bundleResult, err := h.installPluginBundle(ctx, botID, req.PluginID, manifest.ID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
-	}
-	scriptsResult, err := h.runPluginInstallScripts(ctx, botID, manifest.ID, manifest.Install)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
-	}
-
-	installation, err := h.pluginService.Install(ctx, botID, pluginspkg.InstallRequest{
-		Manifest:  manifest,
-		Variables: req.Variables,
+	result, err := h.installer.InstallPackage(c.Request().Context(), botID, supermarketclient.InstallPackageRequest{
+		RegistryID: req.RegistryID, PackageID: req.PackageID, Revision: req.Revision,
+		WorkspaceTargetID: req.WorkspaceTargetID,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return h.installerHTTPError(err)
 	}
-	installation = withPluginBundleInstallMetadata(installation, bundleResult, nil)
-	installation = withPluginInstallScriptsMetadata(installation, scriptsResult, nil)
-	return c.JSON(http.StatusOK, installation)
+	return c.JSON(http.StatusOK, result)
 }
 
-// InstallSkill godoc
-// @Summary Install skill from supermarket to bot workspace
+// ListInstalledPackages godoc
+// @Summary List Skill Packages installed for a bot
 // @Tags supermarket
 // @Param bot_id path string true "Bot ID"
-// @Param payload body InstallSkillRequest true "Install skill request"
-// @Success 200 {object} map[string]bool
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
-// @Router /bots/{bot_id}/supermarket/install-skill [post].
-func (h *SupermarketHandler) InstallSkill(c echo.Context) error {
+// @Param workspace_target_id query string false "Workspace target ID"
+// @Success 200 {array} skillpackages.Installation
+// @Failure 500 {object} ErrorResponse
+// @Router /bots/{bot_id}/supermarket/packages [get].
+func (h *SupermarketHandler) ListInstalledPackages(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
 	if err != nil {
 		return err
 	}
-
-	var req InstallSkillRequest
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if h.packages == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Skill Package service is not configured")
 	}
-	skillID := strings.TrimSpace(req.SkillID)
-	if skillID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "skill_id is required")
-	}
-	if strings.Contains(skillID, "..") || strings.Contains(skillID, "/") {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid skill_id")
-	}
-
-	ctx := c.Request().Context()
-	client, err := h.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "workspace is not reachable")
-	}
-
-	downloadURL := h.baseURL + "/api/skills/" + skillID + "/download"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	resp, err := h.httpClient.Do(httpReq) //nolint:gosec // URL constructed from trusted config
-	if err != nil {
-		h.logger.Error("supermarket skill download failed", slog.String("url", downloadURL), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("skill %q not found in supermarket", skillID))
-	}
-	if resp.StatusCode != http.StatusOK {
-		return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
-	}
-
-	gz, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "invalid gzip response from supermarket")
-	}
-	defer func() { _ = gz.Close() }()
-
-	skillDir := path.Join(skillset.ManagedDir(), skillID)
-	if err := client.Mkdir(ctx, skillDir); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("mkdir failed: %v", err))
-	}
-
-	tr := tar.NewReader(gz)
-	filesWritten := 0
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
+	targetID := strings.TrimSpace(c.QueryParam("workspace_target_id"))
+	if h.workspaces != nil {
+		target, resolveErr := h.workspaces.ResolveWorkspaceTarget(c.Request().Context(), botID, targetID)
+		err = resolveErr
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("invalid tar: %v", err))
+			return workspaceTargetHTTPError(h.logger, err)
 		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-
-		relativePath := strings.TrimPrefix(hdr.Name, skillID+"/")
-		if relativePath == "" || strings.Contains(relativePath, "..") {
-			continue
-		}
-
-		content, err := io.ReadAll(tr)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("read tar entry failed: %v", err))
-		}
-
-		filePath := path.Join(skillDir, relativePath)
-		dir := path.Dir(filePath)
-		if dir != skillDir {
-			_ = client.Mkdir(ctx, dir)
-		}
-
-		if err := client.WriteFile(ctx, filePath, content); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("write file %s failed: %v", relativePath, err))
-		}
-		filesWritten++
+		targetID = target.TargetID
+	} else if targetID == "" {
+		targetID = workspace.WorkspaceTargetNative
 	}
-
-	if filesWritten == 0 {
-		return echo.NewHTTPError(http.StatusBadGateway, "skill archive was empty")
+	items, err := h.packages.ListForTarget(c.Request().Context(), botID, targetID)
+	if err != nil {
+		return err
 	}
+	return c.JSON(http.StatusOK, items)
+}
 
-	return c.JSON(http.StatusOK, map[string]any{"ok": true, "files_written": filesWritten})
+// UninstallPackage godoc
+// @Summary Uninstall a Skill Package from a bot
+// @Tags supermarket
+// @Param bot_id path string true "Bot ID"
+// @Param installation_id path string true "Package installation ID"
+// @Success 200 {object} supermarket.UninstallPackageResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /bots/{bot_id}/supermarket/packages/{installation_id} [delete].
+func (h *SupermarketHandler) UninstallPackage(c echo.Context) error {
+	botID, err := h.requireBotAccess(c)
+	if err != nil {
+		return err
+	}
+	if h.installer == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "supermarket installer is not configured")
+	}
+	result, err := h.installer.UninstallPackage(c.Request().Context(), botID, strings.TrimSpace(c.Param("installation_id")))
+	if err != nil {
+		return h.installerHTTPError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *SupermarketHandler) installerHTTPError(err error) error {
+	var targetErr *supermarketclient.WorkspaceTargetError
+	if errors.As(err, &targetErr) {
+		return workspaceTargetHTTPError(h.logger, targetErr.Err)
+	}
+	var statusErr *supermarketclient.StatusError
+	if errors.As(err, &statusErr) {
+		return echo.NewHTTPError(statusErr.Status, statusErr.Error())
+	}
+	return err
 }
 
 // --- Supermarket upstream types (for swagger) ---
 
-type SupermarketAuthor struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
-
-type SupermarketPluginListResponse struct {
-	Total int                   `json:"total"`
-	Page  int                   `json:"page"`
-	Limit int                   `json:"limit"`
-	Data  []pluginspkg.Manifest `json:"data"`
-}
-
-type SupermarketSkillMetadata struct {
-	Author   SupermarketAuthor `json:"author"`
-	Tags     []string          `json:"tags,omitempty"`
-	Homepage string            `json:"homepage,omitempty"`
-}
-
-type SupermarketSkillEntry struct {
-	ID          string                   `json:"id"`
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	Metadata    SupermarketSkillMetadata `json:"metadata"`
-	Content     string                   `json:"content"`
-	Files       []string                 `json:"files"`
-}
-
-type SupermarketSkillListResponse struct {
-	Total int                     `json:"total"`
-	Page  int                     `json:"page"`
-	Limit int                     `json:"limit"`
-	Data  []SupermarketSkillEntry `json:"data"`
-}
-
-type SupermarketTagsResponse struct {
-	Tags []string `json:"tags"`
-}
-
-// --- Internal helpers ---
-
-func (h *SupermarketHandler) fetchPluginEntry(c echo.Context, pluginID string) (pluginspkg.Manifest, error) {
-	url := h.baseURL + "/api/plugins/" + pluginID
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, url, nil)
-	if err != nil {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := h.httpClient.Do(req) //nolint:gosec // URL constructed from trusted config
-	if err != nil {
-		h.logger.Error("supermarket plugin fetch failed", slog.String("url", url), slog.Any("error", err))
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("plugin %q not found in supermarket", pluginID))
-	}
-	if resp.StatusCode != http.StatusOK {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, fmt.Sprintf("supermarket returned status %d", resp.StatusCode))
-	}
-
-	var manifest pluginspkg.Manifest
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
-		return pluginspkg.Manifest{}, echo.NewHTTPError(http.StatusBadGateway, "invalid JSON from supermarket")
-	}
-	return manifest, nil
-}
-
-func (h *SupermarketHandler) installPluginBundle(ctx context.Context, botID, downloadPluginID, targetPluginID string) (pluginBundleInstallResult, error) {
-	result := newPluginBundleInstallResult()
-	if h.containers == nil {
-		return pluginBundleInstallResult{}, errors.New("workspace runtime provider is not configured")
-	}
-	client, err := h.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("workspace is not reachable: %w", err)
-	}
-
-	downloadURL := h.baseURL + "/api/plugins/" + url.PathEscape(strings.TrimSpace(downloadPluginID)) + "/download"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return pluginBundleInstallResult{}, err
-	}
-
-	resp, err := h.httpClient.Do(httpReq) //nolint:gosec // URL constructed from trusted config
-	if err != nil {
-		h.logger.Warn("supermarket plugin bundle download failed", slog.String("url", downloadURL), slog.Any("error", err))
-		return pluginBundleInstallResult{}, fmt.Errorf("supermarket unreachable: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return result, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return pluginBundleInstallResult{}, fmt.Errorf("supermarket returned status %d", resp.StatusCode)
-	}
-
-	gz, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("invalid gzip response from supermarket: %w", err)
-	}
-	defer func() { _ = gz.Close() }()
-
-	result, err = extractPluginBundleArchive(ctx, client, downloadPluginID, targetPluginID, gz)
-	if err != nil {
-		return pluginBundleInstallResult{}, err
-	}
-	return result, nil
-}
-
-func (h *SupermarketHandler) runPluginInstallScripts(ctx context.Context, botID, pluginID string, commands pluginspkg.InstallCommands) (pluginInstallScriptsResult, error) {
-	result := newPluginInstallScriptsResult()
-	if len(commands) == 0 {
-		return result, nil
-	}
-	if h.containers == nil {
-		return result, errors.New("workspace runtime provider is not configured")
-	}
-	client, err := h.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return result, fmt.Errorf("workspace is not reachable: %w", err)
-	}
-	return runPluginInstallCommands(ctx, client, botID, pluginID, []string(commands))
-}
-
-func runPluginInstallCommands(ctx context.Context, executor pluginInstallScriptExecutor, botID, pluginID string, commands []string) (pluginInstallScriptsResult, error) {
-	result := newPluginInstallScriptsResult()
-	if executor == nil {
-		return result, errors.New("plugin install script executor is not configured")
-	}
-	pluginRoot, err := skillset.PluginDirForID(pluginID)
-	if err != nil {
-		return result, err
-	}
-	env := []string{
-		"MEMOH_PLUGIN_ID=" + pluginID,
-		"MEMOH_PLUGIN_DIR=" + pluginRoot,
-		"MEMOH_BOT_ID=" + botID,
-	}
-	for _, command := range commands {
-		command = strings.TrimSpace(command)
-		if command == "" {
-			continue
-		}
-		commandResult := pluginInstallCommandResult{Command: command}
-		execResult, execErr := executor.ExecWithEnv(ctx, command, pluginRoot, pluginInstallScriptTimeoutSeconds, env)
-		result.CommandsRun++
-		if execResult != nil {
-			commandResult.ExitCode = execResult.ExitCode
-			commandResult.Stdout = truncatePluginInstallOutput(execResult.Stdout)
-			commandResult.Stderr = truncatePluginInstallOutput(execResult.Stderr)
-		}
-		if execErr != nil {
-			commandResult.Error = execErr.Error()
-			result.Results = append(result.Results, commandResult)
-			result.OK = false
-			result.Error = execErr.Error()
-			return result, fmt.Errorf("plugin install command %q failed: %w", command, execErr)
-		}
-		if execResult != nil && execResult.ExitCode != 0 {
-			commandResult.Error = fmt.Sprintf("command exited with code %d", execResult.ExitCode)
-			result.Results = append(result.Results, commandResult)
-			result.OK = false
-			result.Error = commandResult.Error
-			return result, fmt.Errorf("plugin install command %q exited with code %d", command, execResult.ExitCode)
-		}
-		result.Results = append(result.Results, commandResult)
-	}
-	return result, nil
-}
-
-const (
-	pluginArchiveKindSkills  = "skills"
-	pluginArchiveKindHooks   = "hooks"
-	pluginArchiveKindScripts = "scripts"
-)
-
-type pluginArchiveEntry struct {
-	kind         string
-	root         string
-	relativePath string
-}
-
-func extractPluginBundleArchive(ctx context.Context, client pluginBundleWriter, archivePluginID, targetPluginID string, r io.Reader) (pluginBundleInstallResult, error) {
-	result := newPluginBundleInstallResult()
-	pluginRoot, err := skillset.PluginDirForID(targetPluginID)
-	if err != nil {
-		return pluginBundleInstallResult{}, err
-	}
-	if err := client.DeleteFile(ctx, pluginRoot, true); err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("clear plugin root: %w", err)
-	}
-	if err := client.Mkdir(ctx, pluginRoot); err != nil {
-		return pluginBundleInstallResult{}, fmt.Errorf("mkdir plugin root: %w", err)
-	}
-
-	tr := tar.NewReader(r)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return result, fmt.Errorf("invalid tar: %w", err)
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-
-		entry, ok, err := pluginBundleArchiveEntry(archivePluginID, targetPluginID, hdr.Name)
-		if err != nil {
-			return result, err
-		}
-		if !ok {
-			continue
-		}
-		content, err := io.ReadAll(tr)
-		if err != nil {
-			return result, fmt.Errorf("read tar entry failed: %w", err)
-		}
-
-		if err := client.Mkdir(ctx, entry.root); err != nil {
-			return result, fmt.Errorf("mkdir %s failed: %w", entry.root, err)
-		}
-		filePath := path.Clean(path.Join(entry.root, entry.relativePath))
-		if filePath == entry.root || !strings.HasPrefix(filePath, entry.root+"/") {
-			return result, fmt.Errorf("plugin bundle path escapes root: %s", hdr.Name)
-		}
-		if dir := path.Dir(filePath); dir != entry.root {
-			if err := client.Mkdir(ctx, dir); err != nil {
-				return result, fmt.Errorf("mkdir %s failed: %w", dir, err)
-			}
-		}
-		if err := client.WriteFile(ctx, filePath, content); err != nil {
-			return result, fmt.Errorf("write file %s failed: %w", entry.relativePath, err)
-		}
-		switch entry.kind {
-		case pluginArchiveKindSkills:
-			result.Skills.FilesWritten++
-		case pluginArchiveKindHooks:
-			result.Hooks.FilesWritten++
-		case pluginArchiveKindScripts:
-			result.Scripts.FilesWritten++
-		}
-	}
-	return result, nil
-}
-
-func pluginBundleArchiveEntry(archivePluginID, targetPluginID, rawName string) (pluginArchiveEntry, bool, error) {
-	name := strings.TrimSpace(rawName)
-	if name == "" || strings.Contains(name, "\\") || strings.HasPrefix(name, "/") {
-		return pluginArchiveEntry{}, false, nil
-	}
-	pluginPrefix := strings.Trim(path.Clean(archivePluginID), "/")
-	if pluginPrefix != "" {
-		name = strings.TrimPrefix(name, pluginPrefix+"/")
-	}
-	if name == "" {
-		return pluginArchiveEntry{}, false, nil
-	}
-
-	segments := strings.Split(name, "/")
-	for _, segment := range segments {
-		if segment == "" || segment == "." || segment == ".." {
-			return pluginArchiveEntry{}, false, nil
-		}
-	}
-
-	switch segments[0] {
-	case "plugin.yaml":
-		if len(segments) == 1 {
-			return pluginArchiveEntry{}, false, nil
-		}
-	case "hooks.json":
-		if len(segments) != 1 {
-			return pluginArchiveEntry{}, false, nil
-		}
-		root, err := skillset.PluginDirForID(targetPluginID)
-		if err != nil {
-			return pluginArchiveEntry{}, false, err
-		}
-		return pluginArchiveEntry{kind: pluginArchiveKindHooks, root: root, relativePath: "hooks.json"}, true, nil
-	case "skills":
-		if len(segments) < 2 {
-			return pluginArchiveEntry{}, false, nil
-		}
-		root, err := skillset.PluginSkillsDirForID(targetPluginID)
-		if err != nil {
-			return pluginArchiveEntry{}, false, err
-		}
-		return pluginArchiveEntry{kind: pluginArchiveKindSkills, root: root, relativePath: strings.Join(segments[1:], "/")}, true, nil
-	case "scripts":
-		if len(segments) < 2 {
-			return pluginArchiveEntry{}, false, nil
-		}
-		root, err := skillset.PluginScriptsDirForID(targetPluginID)
-		if err != nil {
-			return pluginArchiveEntry{}, false, err
-		}
-		return pluginArchiveEntry{kind: pluginArchiveKindScripts, root: root, relativePath: strings.Join(segments[1:], "/")}, true, nil
-	}
-	return pluginArchiveEntry{}, false, nil
-}
-
-func newPluginBundleInstallResult() pluginBundleInstallResult {
-	return pluginBundleInstallResult{
-		Skills:  pluginAssetInstallResult{OK: true},
-		Hooks:   pluginAssetInstallResult{OK: true},
-		Scripts: pluginAssetInstallResult{OK: true},
-	}
-}
-
-func newPluginInstallScriptsResult() pluginInstallScriptsResult {
-	return pluginInstallScriptsResult{OK: true}
-}
-
-func withPluginBundleInstallMetadata(installation pluginspkg.Installation, result pluginBundleInstallResult, err error) pluginspkg.Installation {
-	metadata := maps.Clone(installation.Metadata)
-	if metadata == nil {
-		metadata = make(map[string]any)
-	}
-	if err != nil {
-		failed := pluginAssetInstallResult{OK: false, Error: err.Error()}
-		result = pluginBundleInstallResult{Skills: failed, Hooks: failed, Scripts: failed}
-	}
-	metadata["skills_install"] = result.Skills
-	metadata["hooks_install"] = result.Hooks
-	metadata["scripts_install"] = result.Scripts
-	installation.Metadata = metadata
-	return installation
-}
-
-func withPluginInstallScriptsMetadata(installation pluginspkg.Installation, result pluginInstallScriptsResult, err error) pluginspkg.Installation {
-	metadata := maps.Clone(installation.Metadata)
-	if metadata == nil {
-		metadata = make(map[string]any)
-	}
-	if err != nil {
-		result.OK = false
-		result.Error = err.Error()
-	}
-	metadata["install_scripts"] = result
-	installation.Metadata = metadata
-	return installation
-}
-
-func truncatePluginInstallOutput(output string) string {
-	if len(output) <= pluginInstallScriptOutputLimit {
-		return output
-	}
-	return output[:pluginInstallScriptOutputLimit]
-}
+type SupermarketAuthor = supermarketclient.Author

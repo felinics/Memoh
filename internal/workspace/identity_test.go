@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	ctr "github.com/memohai/memoh/internal/container"
+	ctr "github.com/felinics/memoh/internal/container"
 )
 
 func TestBotIDFromContainerInfoPrefersCurrentLabel(t *testing.T) {

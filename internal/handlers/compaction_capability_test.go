@@ -15,14 +15,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type compactionCapabilityQueries struct {
@@ -46,7 +46,6 @@ func (q *compactionCapabilityQueries) GetSettingsByBotID(context.Context, pgtype
 	return sqlc.GetSettingsByBotIDRow{
 		Language:                settings.DefaultLanguage,
 		ReasoningEffort:         settings.DefaultReasoningEffort,
-		HeartbeatInterval:       settings.DefaultHeartbeatInterval,
 		CompactionTargetPercent: pgtype.Int4{},
 		ChatModelID:             q.chatModel.ID,
 		CompactionModelID:       q.model.ID,

@@ -72,4 +72,10 @@ type TriggerConfig struct {
 	// just fixed their credentials/model isn't told "done" while nothing runs.
 	// Automatic per-request paths leave this false to keep the cooldown backstop.
 	Manual bool
+
+	// HardPressure marks an automatic trigger fired at or above the blocking
+	// share of the context window. Such retries re-attempt on an exponential
+	// backoff instead of waiting out the full failure cooldown, because every
+	// turn until a summary lands degrades or fails.
+	HardPressure bool
 }

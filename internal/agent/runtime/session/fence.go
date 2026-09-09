@@ -1,6 +1,10 @@
 package sessionruntime
 
-import "context"
+import (
+	"context"
+
+	"github.com/felinics/memoh/internal/runtimefence"
+)
 
 // FenceActivator hands durable persistence ownership to one run's fencing
 // token. It is the second half of a claim: the ledger decides who owns the run,
@@ -19,14 +23,15 @@ type FenceActivator interface {
 }
 
 // DecisionFenceActivator advances a parked run's persistence fence while
-// preserving the one pending decision that will resume it. Implementations
-// must update the decision row to token in the same transaction that activates
-// the session fence.
+// preserving every pending decision that can still resume it — a turn may
+// park on several approvals and user inputs at once. Implementations must
+// update the decision rows to the new token in the same transaction that
+// activates the session fence.
 type DecisionFenceActivator interface {
 	ReclaimWaitingDecision(
 		ctx context.Context,
 		botID, sessionID, runID, ownerID, liveGeneration string,
 		previousToken, newToken int64,
-		decisionKind, decisionID string,
+		decisions []runtimefence.PreservedDecision,
 	) error
 }

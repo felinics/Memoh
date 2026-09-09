@@ -15,9 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/bots"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/bots"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 func TestReadZipEntriesRejectsZipSlip(t *testing.T) {
@@ -212,12 +212,12 @@ func TestScrubImportedProfileACPSecrets(t *testing.T) {
 	}{
 		{
 			name:         "adds warning",
-			wantWarnings: []string{acpManagedSecretsWarning},
+			wantWarnings: []string{agentCredentialsWarning},
 		},
 		{
 			name:         "dedupes warning",
-			warnings:     []string{acpManagedSecretsWarning},
-			wantWarnings: []string{acpManagedSecretsWarning},
+			warnings:     []string{agentCredentialsWarning},
+			wantWarnings: []string{agentCredentialsWarning},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -226,12 +226,12 @@ func TestScrubImportedProfileACPSecrets(t *testing.T) {
 				Metadata: map[string]any{
 					"acp": map[string]any{
 						"agents": map[string]any{
-							"hermes": map[string]any{
+							"custom-agent": map[string]any{
 								"enabled":    true,
 								"setup_mode": "api_key",
 								"managed": map[string]any{
 									"provider": "openrouter",
-									"model":    "nousresearch/hermes",
+									"model":    "custom-model",
 									"api_key":  "secret-value",
 								},
 							},
@@ -240,7 +240,7 @@ func TestScrubImportedProfileACPSecrets(t *testing.T) {
 				},
 			}
 
-			scrubbed := scrubImportedProfileACPSecrets(profile, state)
+			scrubbed := scrubImportedProfileAgentSecrets(profile, state)
 			raw, err := json.Marshal(scrubbed.Metadata)
 			if err != nil {
 				t.Fatalf("marshal metadata: %v", err)

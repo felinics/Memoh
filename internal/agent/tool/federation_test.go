@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 type federationTestSource struct {

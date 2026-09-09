@@ -16,30 +16,48 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/agent/background"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	chatview "github.com/memohai/memoh/internal/agent/view"
-	"github.com/memohai/memoh/internal/bots"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/background"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/media"
 )
 
 // MessageHandler handles bot-scoped messaging endpoints.
 type MessageHandler struct {
-	messageService messagepkg.Service
-	sessionService *session.Service
-	messageEvents  messageevent.Subscriber
-	mediaService   *media.Service
-	botService     *bots.Service
-	accountService *accounts.Service
-	toolApproval   *toolapproval.Service
-	userInput      *userinput.Service
-	bgManager      *background.Manager
-	logger         *slog.Logger
+	messageService     messagepkg.Service
+	sessionService     *session.Service
+	runtimeResets      messageRuntimeResetService
+	messageEvents      messageevent.Subscriber
+	mediaService       *media.Service
+	botService         *bots.Service
+	accountService     *accounts.Service
+	toolApproval       *toolapproval.Service
+	userInput          *userinput.Service
+	bgManager          *background.Manager
+	projectionCache    messageProjectionCache
+	compactionActivity interface{ ActiveSessions(string) []string }
+	logger             *slog.Logger
+}
+
+type messageProjectionCache interface {
+	DropSession(sessionID string)
+	DropAll()
+}
+
+// runtimeResetService is intentionally a narrow handler-owned port. Clearing the
+// canonical timeline must also discard any process-local ACP conversation;
+// otherwise the next turn would silently repopulate history from the old
+// native session even though the UI was cleared.
+type messageRuntimeResetService interface {
+	BeginSessionHistoryReset(ctx context.Context, botID, sessionID string) (resetCtx context.Context, release func(), err error)
+	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
 }
 
 // UIMessageListResponse is the normalized, authoritative session history read by Web.
@@ -75,6 +93,14 @@ func (h *MessageHandler) SetMediaService(svc *media.Service) {
 	h.mediaService = svc
 }
 
+func (h *MessageHandler) SetProjectionCache(cache messageProjectionCache) {
+	h.projectionCache = cache
+}
+
+func (h *MessageHandler) SetCompactionActivity(activity interface{ ActiveSessions(string) []string }) {
+	h.compactionActivity = activity
+}
+
 func (h *MessageHandler) SetToolApprovalService(svc *toolapproval.Service) {
 	h.toolApproval = svc
 }
@@ -85,6 +111,10 @@ func (h *MessageHandler) SetUserInputService(svc *userinput.Service) {
 
 func (h *MessageHandler) SetBackgroundManager(mgr *background.Manager) {
 	h.bgManager = mgr
+}
+
+func (h *MessageHandler) SetRuntimeResetService(resets messageRuntimeResetService) {
+	h.runtimeResets = resets
 }
 
 // Register registers all conversation routes.
@@ -369,10 +399,18 @@ func (h *MessageHandler) toolApprovalCanApproveFn(sess session.Thread) func(tool
 	defaultFn := func(req toolapproval.Request) bool {
 		return toolapproval.CanApprove(req.Status)
 	}
-	if h == nil || h.toolApproval == nil || !session.IsACPRuntime(sess) {
+	if h == nil || h.toolApproval == nil || !session.UsesDecisionWaiter(sess) {
 		return defaultFn
 	}
 	return h.toolApproval.CanRespond
+}
+
+func (h *MessageHandler) userInputCanRespondFn(sess session.Thread) func(userinput.Request) bool {
+	// nil keeps mergeUserInputs' native default: a pending row can respond.
+	if h == nil || h.userInput == nil || !session.UsesDecisionWaiter(sess) {
+		return nil
+	}
+	return h.userInput.CanRespond
 }
 
 func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID string, sess session.Thread, items []chatview.UITurn) {
@@ -412,7 +450,7 @@ func (h *MessageHandler) decorateUITurns(ctx context.Context, botID, sessionID s
 		mergeToolApprovals(items, approvals, h.toolApprovalCanApproveFn(sess))
 	}
 	if len(requests) > 0 {
-		mergeUserInputs(items, requests, h.userInput.CanRespond)
+		mergeUserInputs(items, requests, h.userInputCanRespondFn(sess))
 	}
 }
 
@@ -472,14 +510,31 @@ func mergeToolApprovals(turns []chatview.UITurn, approvals []toolapproval.Reques
 			running := false
 			msg.Running = &running
 			msg.Approval = &chatview.UIToolApproval{
-				ApprovalID:     approval.ID,
-				ShortID:        approval.ShortID,
-				Status:         approval.Status,
-				DecisionReason: approval.DecisionReason,
-				CanApprove:     canApproveFn(approval),
+				ApprovalID:       approval.ID,
+				ShortID:          approval.ShortID,
+				Status:           approval.Status,
+				DecisionReason:   approval.DecisionReason,
+				CanApprove:       canApproveFn(approval),
+				Options:          uiToolApprovalOptions(approval.Options),
+				SelectedOptionID: approval.SelectedOptionID,
 			}
 		}
 	}
+}
+
+func uiToolApprovalOptions(options []toolapproval.PermissionOption) []chatview.UIToolApprovalOption {
+	if len(options) == 0 {
+		return nil
+	}
+	converted := make([]chatview.UIToolApprovalOption, 0, len(options))
+	for _, option := range options {
+		converted = append(converted, chatview.UIToolApprovalOption{
+			ID:   option.ID,
+			Name: option.Name,
+			Kind: option.Kind,
+		})
+	}
+	return converted
 }
 
 func mergeUserInputs(turns []chatview.UITurn, requests []userinput.Request, canRespondFn func(userinput.Request) bool) {
@@ -642,13 +697,44 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "message service not configured")
 	}
 	sessionID := strings.TrimSpace(c.QueryParam("session_id"))
+	ctx := c.Request().Context()
+	if h.runtimeResets == nil {
+		return apperror.Wrap(
+			apperror.CodeSessionHistoryInconsistent,
+			errors.New("runtime reset is not configured"),
+			nil,
+		)
+	}
 	if sessionID != "" {
-		if err := h.messageService.DeleteBySession(c.Request().Context(), sessionID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		if h.sessionService == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "session service not configured")
+		}
+		sess, getErr := h.sessionService.Get(ctx, sessionID)
+		if getErr != nil || sess.BotID != botID {
+			return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		}
+		ctx, release, resetErr := h.runtimeResets.BeginSessionHistoryReset(ctx, botID, sessionID)
+		if resetErr != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, resetErr, nil)
+		}
+		defer release()
+		if err := h.messageService.DeleteBySession(ctx, sessionID); err != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
+		if h.projectionCache != nil {
+			h.projectionCache.DropSession(sessionID)
 		}
 	} else {
-		if err := h.messageService.DeleteByBot(c.Request().Context(), botID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		ctx, release, resetErr := h.runtimeResets.BeginBotHistoryReset(ctx, botID)
+		if resetErr != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, resetErr, nil)
+		}
+		defer release()
+		if err := h.messageService.DeleteByBot(ctx, botID); err != nil {
+			return apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
+		if h.projectionCache != nil {
+			h.projectionCache.DropAll()
 		}
 	}
 	return c.NoContent(http.StatusNoContent)

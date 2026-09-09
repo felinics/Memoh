@@ -7,6 +7,7 @@ import type {
   UIErrorMessage,
   UIForwardRef,
   UIReasoningMessage,
+  UINoticeMessage,
   UIReplyRef,
   UISkillActivation,
   UITextMessage,
@@ -38,6 +39,7 @@ export type ThinkingBlock = UIReasoningMessage
 export type AttachmentItem = UIAttachment
 export type AttachmentBlock = UIAttachmentsMessage
 export type ErrorBlock = UIErrorMessage
+export type NoticeBlock = UINoticeMessage
 
 export interface ToolCallBlock extends UIToolMessage {
   toolCallId: string
@@ -49,7 +51,7 @@ export interface ToolCallBlock extends UIToolMessage {
   backgroundTask?: BackgroundTask
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock
+export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock | NoticeBlock
 
 export interface ChatViewTarget {
   botId: string
@@ -63,18 +65,18 @@ export type ActiveChatTarget =
       sessionId: string
       session: SessionSummary | null
       runtimeType: string
-      isACP: boolean
-      isPendingACP: false
+      isExternalAgent: boolean
+      isPendingExternalAgent: false
       metadata: Record<string, unknown>
       explicitSelection: boolean
     }
   | {
-      kind: 'draft-acp'
+      kind: 'draft-external-agent'
       sessionId: null
       session: null
-      runtimeType: 'acp_agent'
-      isACP: true
-      isPendingACP: true
+      runtimeType: 'acp_agent' | 'codex' | 'claude-code'
+      isExternalAgent: true
+      isPendingExternalAgent: true
       metadata: Record<string, unknown>
       explicitSelection: boolean
     }
@@ -83,8 +85,8 @@ export type ActiveChatTarget =
       sessionId: null
       session: null
       runtimeType: 'model'
-      isACP: false
-      isPendingACP: false
+      isExternalAgent: false
+      isPendingExternalAgent: false
       metadata: Record<string, unknown>
       explicitSelection: boolean
     }
@@ -157,6 +159,8 @@ export type SendMessageStage = 'startup' | 'stream'
 
 export interface SendMessageResult {
   ok: boolean
+  /** A real chat message completed, rather than a locally handled command. */
+  messageSent?: boolean
   stage?: SendMessageStage
   error?: string
   errorCode?: string
@@ -173,8 +177,12 @@ export interface SendMessageOptions {
   workspaceTargetId?: string
   requestedSkills?: RequestedSkillSelection[]
   composerScope?: string
+  /** Called after command handling, before creating a session or sending a message. */
+  onBeforeMessageSend?: () => void
+  /** The server has finished this turn's preference write, before generation ends. */
+  onModelPreferenceSettled?: () => void
   /** Called immediately before a real chat turn is appended or dispatched. */
-  onBeforeTurnAppend?: () => void
+  onBeforeTurnAppend?: (target: ChatViewTarget) => void
   /** Called when that turn is rolled back after a startup-stage failure. */
   onTurnAppendAborted?: () => void
 }
@@ -187,7 +195,12 @@ export interface ChatWorkspaceTargetSnapshot {
 
 export type ChatWorkspaceTargetSelectionSource = 'unset' | 'default' | 'session' | 'user'
 
-export interface ACPAgentSessionInput {
+export interface ExternalAgentSessionInput {
+  /** Persisted Agent instance selected for this session. */
+  botAgentId?: string
+  /** Runtime owned by the selected Agent. Omitted by legacy ACP callers. */
+  runtime?: 'acp' | 'codex' | 'claude-code'
+  /** Temporary ACP provider identity stored in BotAgent metadata. */
   agentId: string
   sessionMode?: 'chat' | 'discuss'
   projectPath?: string

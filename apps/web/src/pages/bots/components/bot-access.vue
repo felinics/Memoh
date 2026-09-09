@@ -298,7 +298,7 @@
                    (EmptyContent) instead — a lone button floated over a "No
                    rules" message is the orphaned-action anti-pattern the skill
                    bans; the empty state's own button is the single call to
-                   action. Same shape as the Skills / Plugins empty states. -->
+                   action. Same shape as the other list empty states. -->
                 <div
                   v-if="!formVisible && advancedRules.length"
                   class="flex items-center gap-3 pt-1 pb-3"

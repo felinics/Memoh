@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // Automatic compaction derives its soft trigger, hard backstop, and target
@@ -24,9 +24,12 @@ const (
 	maxAsyncCompactionPasses = 3
 )
 
-// autoCompactionThreshold is the async trigger level. A zero return leaves
-// automatic compaction off when no usable model window is available.
-func autoCompactionThreshold(userThreshold, contextTokenBudget int) int {
+// AutoCompactionThreshold is the async trigger level, exported so read-side
+// surfaces label the same level the turn path acts on. A zero return leaves
+// automatic compaction off when no usable model window is available. The
+// synchronous backstop is deliberately not exposed: it only runs on the history
+// path, which a reader cannot observe.
+func AutoCompactionThreshold(userThreshold, contextTokenBudget int) int {
 	if contextTokenBudget <= 0 {
 		return 0
 	}
@@ -88,7 +91,7 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		s.logger.Info("compaction: skipped, disabled")
 		return
 	}
-	threshold := autoCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
+	threshold := AutoCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
 	if threshold <= 0 {
 		s.logger.Info("compaction: skipped, no usable threshold",
 			slog.Int("configured_threshold", botSettings.CompactionThreshold),
@@ -125,6 +128,7 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 	cfg.TargetTokens = compactionTargetTokens(botSettings.CompactionTargetPercent, rc.contextTokenBudget)
 	cfg.AllowFrontierFusion = true
 	cfg.ContextWindowTokens = rc.contextTokenBudget
+	cfg.HardPressure = syncCompactionShouldRun(inputTokens, rc.contextTokenBudget)
 	if err := s.drainCompactionBacklog(ctx, cfg); err != nil {
 		s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
 	}
@@ -190,6 +194,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 	}
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
+	cfg.HardPressure = syncCompactionShouldRun(inputTokens, contextTokenBudget)
 
 	s.logger.Info("compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
@@ -263,6 +268,6 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 	cfg.BotID = req.BotID
 	cfg.SessionID = req.ThreadID
 	cfg.TotalInputTokens = inputTokens
-	cfg.HTTPClient = s.streamHTTPClient
+	cfg.HTTPClient = s.compactionHTTPClient
 	return cfg, nil
 }

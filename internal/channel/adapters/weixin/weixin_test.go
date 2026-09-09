@@ -3,7 +3,7 @@ package weixin
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 func TestWeixinAdapter_Type(t *testing.T) {

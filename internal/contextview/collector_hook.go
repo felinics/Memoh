@@ -2,15 +2,20 @@ package contextview
 
 import (
 	"context"
+	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 const hookContextCollectorName = "hook_context"
 
+const maxHookContextChars = 8 * 1024
+
 type HookContextConfig struct {
+	// Text is the combined resolver-hook AppendContext text materialized by
+	// the application. The collector owns its role, placement, and cap.
 	Text string
 }
 
@@ -21,18 +26,34 @@ func (*HookContextCollector) Name() string {
 }
 
 func (*HookContextCollector) Collect(_ context.Context, req CollectRequest) ([]contextfrag.ContextFrag, error) {
-	cfg, err := collectorConfig[HookContextConfig](req.Config, "hook_context config must be HookContextConfig")
+	cfg, err := hookContextConfig(req.Config)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Text == "" {
+	text := strings.TrimSpace(cfg.Text)
+	if text == "" {
 		return nil, nil
 	}
-	return []contextfrag.ContextFrag{{
-		ID: "system.hook_context", Kind: contextfrag.KindHookContext, Role: sdk.MessageRoleSystem, Slot: contextfrag.SlotSystem,
-		Priority: 80, CacheClass: contextfrag.CacheNever, Trust: contextfrag.TrustSystem, Scope: req.Scope,
-		Render:     contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
-		Provenance: contextfrag.Provenance{Source: "hook_context", Collector: hookContextCollectorName},
-		Parts:      []contextfrag.Part{{Type: contextfrag.PartText, Text: cfg.Text}},
-	}}, nil
+	msg := sdk.UserMessage(text)
+	return []contextfrag.ContextFrag{contextfrag.MessageFrag(contextfrag.MessageFragInput{
+		ID:         "hook_context.message",
+		Message:    msg,
+		Kind:       contextfrag.KindHookContext,
+		Slot:       contextfrag.SlotAfterHistoryBeforeCurrent,
+		Priority:   contextfrag.PriorityForMessage(msg),
+		CacheClass: contextfrag.CacheNever,
+		Trust:      contextfrag.TrustWorkspace,
+		Scope:      req.Scope,
+		Source:     hookContextCollectorName,
+		SourceID:   hookContextCollectorName,
+		Collector:  hookContextCollectorName,
+		Budget: contextfrag.BudgetPolicy{
+			MaxChars: maxHookContextChars,
+			Overflow: contextfrag.OverflowDrop,
+		},
+	})}, nil
+}
+
+func hookContextConfig(config any) (HookContextConfig, error) {
+	return collectorConfig[HookContextConfig](config, "hook_context config must be HookContextConfig")
 }

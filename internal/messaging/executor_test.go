@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/media"
 )
 
 type testSender struct {

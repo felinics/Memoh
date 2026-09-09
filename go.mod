@@ -1,4 +1,4 @@
-module github.com/memohai/memoh
+module github.com/felinics/memoh
 
 go 1.25.7
 
@@ -18,6 +18,10 @@ require (
 	github.com/docker/go-connections v0.6.0
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
+	github.com/felinics/acgo v0.0.0-20260829152557-fc78bf271ef8
+	github.com/felinics/connect-it/sdk/go v0.1.1-0.20260829153217-0dcd18de667d
+	github.com/felinics/dingtalk-stream-sdk-go v0.0.0-20260829152622-ce4b7ea674a5
+	github.com/felinics/twilight v0.6.1-0.20260908100548-18a9879d43ba
 	github.com/go-ego/gse v1.0.2
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -32,15 +36,12 @@ require (
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
 	github.com/line/line-bot-sdk-go/v8 v8.20.1
 	github.com/mailgun/mailgun-go/v5 v5.14.0
-	github.com/memohai/acgo v0.0.0-20260221232113-babac0d6acd7
-	github.com/memohai/connect-it/sdk/go v0.1.1-0.20260801041115-19a755fb92f6
-	github.com/memohai/dingtalk-stream-sdk-go v0.0.0-20260405113102-87e23096b978
-	github.com/memohai/twilight-ai v0.4.1-0.20260805161855-932415603f21
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/pgvector/pgvector-go v0.4.0
 	github.com/pgvector/pgvector-go/pgx v0.4.0
+	github.com/pion/ice/v4 v4.2.5
 	github.com/pion/rtp v1.10.2
 	github.com/pion/sdp/v3 v3.0.18
 	github.com/pion/webrtc/v4 v4.2.12
@@ -54,6 +55,7 @@ require (
 	go.uber.org/fx v1.24.0
 	golang.org/x/crypto v0.48.0
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/sys v0.42.0
 	golang.org/x/time v0.15.0
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
@@ -151,7 +153,6 @@ require (
 	github.com/petermattis/goid v0.0.0-20260113132338-7c7de50cc741 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
-	github.com/pion/ice/v4 v4.2.5 // indirect
 	github.com/pion/interceptor v0.1.44 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
@@ -193,7 +194,6 @@ require (
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect

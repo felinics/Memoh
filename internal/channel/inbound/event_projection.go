@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 // sessionEventPersister is the narrow slice of the timeline event store this

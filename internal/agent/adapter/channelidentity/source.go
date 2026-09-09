@@ -5,8 +5,8 @@ package channelidentity
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/agent/application"
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 type configSource interface {

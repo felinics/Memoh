@@ -7,30 +7,38 @@ import (
 	"slices"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 // SystemSection is one typed, priority-ordered piece of the system prompt.
 type SystemSection struct {
-	ID       string
-	Kind     contextfrag.Kind
-	Priority int
-	Text     string
+	ID                 string
+	Kind               contextfrag.Kind
+	Priority           int
+	RetentionTier      contextfrag.RetentionTier
+	DropPriority       contextfrag.DropPriority
+	RequiredCapability string
+	Render             contextfrag.RenderPolicy
+	Text               string
 }
 
 const (
-	sectionIDIntro                 = "system.prompt.intro"
-	sectionIDBotIdentity           = "system.bot_identity"
-	sectionIDBody                  = "system.prompt.body"
-	sectionIDTail                  = "system.prompt.tail"
-	sectionIDPlatformIdentity      = "system.platform_identity"
-	sectionIDSkills                = "system.skills"
-	sectionIDWorkspaceInstructions = "system.workspace_instructions"
-	sectionIDFallback              = "system.prompt.fallback"
+	sectionIDIntro            = "system.prompt.intro"
+	sectionIDBotIdentity      = "system.bot_identity"
+	sectionIDBody             = "system.prompt.body"
+	sectionIDTail             = "system.prompt.tail"
+	sectionIDPlatformIdentity = "system.platform_identity"
+	sectionIDSkills           = "system.skills"
+	sectionIDSkill            = "system.skill"
+	sectionIDWorkspaceFile    = "system.workspace_file"
+	sectionIDFallback         = "system.prompt.fallback"
 )
+
+var skillRequiredCapability = tools.ToolUseSkill().String()
 
 const (
 	priorityIntro                 = 10
@@ -74,39 +82,92 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 
 	sections := []SystemSection{
 		{
-			ID: sectionIDIntro, Kind: contextfrag.KindSystemPrompt, Priority: priorityIntro,
+			ID: sectionIDIntro, Kind: contextfrag.KindSystemPrompt, Priority: priorityIntro, RetentionTier: contextfrag.RetentionRequired,
 			Text: render(intro, map[string]string{"home": home, "timezone": timezone}),
 		},
 		{
-			ID: sectionIDBotIdentity, Kind: contextfrag.KindBotIdentity, Priority: priorityBotIdentity,
+			ID: sectionIDBotIdentity, Kind: contextfrag.KindBotIdentity, Priority: priorityBotIdentity, RetentionTier: contextfrag.RetentionPreferred,
 			Text: buildBotInfoSection(params.Bot),
 		},
-		{ID: sectionIDBody, Kind: contextfrag.KindSystemPrompt, Priority: priorityBody, Text: body},
-		{ID: sectionIDTail, Kind: contextfrag.KindSystemPrompt, Priority: priorityTail, Text: tail},
+		{ID: sectionIDBody, Kind: contextfrag.KindSystemPrompt, Priority: priorityBody, RetentionTier: contextfrag.RetentionRequired, Text: body},
+		{ID: sectionIDTail, Kind: contextfrag.KindSystemPrompt, Priority: priorityTail, RetentionTier: contextfrag.RetentionRequired, Text: tail},
 	}
 
-	if text := strings.TrimSpace(params.PlatformIdentitiesSection); text != "" {
-		sections = append(sections, SystemSection{
-			ID: sectionIDPlatformIdentity, Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity, Text: text,
-		})
-	}
+	sections = append(sections, buildPlatformIdentitySections(params)...)
 
 	if isSubagent {
 		return sections
 	}
 
-	if text := strings.TrimSpace(buildSkillsSection(params.Skills)); text != "" {
+	if items := buildSkillPromptItems(params.Skills); len(items) > 0 {
 		sections = append(sections, SystemSection{
-			ID: sectionIDSkills, Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills, Text: text,
+			ID: sectionIDSkills + ".header", Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills,
+			RetentionTier: contextfrag.RetentionOptional, RequiredCapability: skillRequiredCapability,
+			Text: buildSkillsHeader(len(items)), Render: groupedSystemRender(sectionIDSkills, "\n"),
 		})
+		for _, item := range items {
+			sections = append(sections, SystemSection{
+				ID: sectionIDSkill + "." + item.ID, Kind: contextfrag.KindSkillsCatalog, Priority: prioritySkills,
+				RetentionTier: contextfrag.RetentionOptional, RequiredCapability: skillRequiredCapability,
+				Text: item.Text, Render: groupedSystemRender(sectionIDSkills, "\n"),
+			})
+		}
 	}
-	if text := strings.TrimSpace(buildFileSections(params.Files, params.MaxFilesBytes)); text != "" {
+	for _, item := range buildFilePromptItems(params.Files, params.MaxFilesBytes) {
 		sections = append(sections, SystemSection{
-			ID: sectionIDWorkspaceInstructions, Kind: contextfrag.KindWorkspaceInstruction, Priority: priorityWorkspaceInstructions, Text: text,
+			ID: sectionIDWorkspaceFile + "." + item.ID, Kind: contextfrag.KindWorkspaceInstruction,
+			Priority: priorityWorkspaceInstructions, RetentionTier: contextfrag.RetentionPreferred, Text: item.Text,
 		})
 	}
 
 	return sections
+}
+
+func buildPlatformIdentitySections(params SystemPromptParams) []SystemSection {
+	text := strings.TrimSpace(params.PlatformIdentitiesSection)
+	if text == "" {
+		return nil
+	}
+	items := make([]SystemPromptItem, 0, len(params.PlatformIdentities))
+	itemTexts := make([]string, 0, len(params.PlatformIdentities))
+	for _, item := range params.PlatformIdentities {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Text = strings.TrimSpace(item.Text)
+		if item.ID == "" || item.Text == "" {
+			continue
+		}
+		items = append(items, item)
+		itemTexts = append(itemTexts, item.Text)
+	}
+	itemBlock := strings.Join(itemTexts, "\n")
+	if len(items) == 0 || !strings.HasSuffix(text, itemBlock) {
+		return []SystemSection{{
+			ID: sectionIDPlatformIdentity, Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity,
+			RetentionTier: contextfrag.RetentionPreferred, Text: text,
+		}}
+	}
+	header := strings.TrimSuffix(strings.TrimSuffix(text, itemBlock), "\n")
+	sections := []SystemSection{{
+		ID: sectionIDPlatformIdentity + ".header", Kind: contextfrag.KindPlatformIdentity, Priority: priorityPlatformIdentity,
+		RetentionTier: contextfrag.RetentionPreferred, Text: header,
+		Render: groupedSystemRender(sectionIDPlatformIdentity, "\n"),
+	}}
+	for _, item := range items {
+		sections = append(sections, SystemSection{
+			ID: sectionIDPlatformIdentity + "." + item.ID, Kind: contextfrag.KindPlatformIdentity,
+			Priority: priorityPlatformIdentity, RetentionTier: contextfrag.RetentionPreferred, Text: item.Text,
+			Render: groupedSystemRender(sectionIDPlatformIdentity, "\n"),
+		})
+	}
+	return sections
+}
+
+func groupedSystemRender(groupID, joiner string) contextfrag.RenderPolicy {
+	return contextfrag.RenderPolicy{
+		Format:      contextfrag.RenderMarkdown,
+		GroupID:     groupID,
+		GroupJoiner: joiner,
+	}
 }
 
 // degradedSystemSections is the panic-free fallback for when the embedded
@@ -133,10 +194,11 @@ func degradedSystemSections(params SystemPromptParams, home, timezone string, ca
 		text += "\n\n" + strings.TrimSpace(includes["_memory"])
 	}
 	return []SystemSection{{
-		ID:       sectionIDFallback,
-		Kind:     contextfrag.KindSystemPrompt,
-		Priority: priorityBody,
-		Text:     text,
+		ID:            sectionIDFallback,
+		Kind:          contextfrag.KindSystemPrompt,
+		Priority:      priorityBody,
+		RetentionTier: contextfrag.RetentionRequired,
+		Text:          text,
 	}}
 }
 
@@ -147,19 +209,26 @@ func degradedSystemSections(params SystemPromptParams, home, timezone string, ca
 func SystemSectionFrags(sections []SystemSection, scope contextfrag.Scope) []contextfrag.ContextFrag {
 	frags := make([]contextfrag.ContextFrag, 0, len(sections))
 	for _, section := range sections {
+		renderPolicy := section.Render
+		if renderPolicy.Format == "" {
+			renderPolicy.Format = contextfrag.RenderMarkdown
+		}
 		frags = append(frags, contextfrag.TextFrag(contextfrag.TextFragInput{
-			ID:         section.ID,
-			Kind:       section.Kind,
-			Role:       sdk.MessageRoleSystem,
-			Slot:       contextfrag.SlotSystem,
-			Text:       section.Text,
-			Priority:   section.Priority,
-			CacheClass: contextfrag.CacheStable,
-			Trust:      contextfrag.TrustSystem,
-			Scope:      scope,
-			Source:     contextfrag.SourceRunConfig,
-			Collector:  "system_sections",
-			Render:     contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
+			ID:                 section.ID,
+			Kind:               section.Kind,
+			Role:               sdk.MessageRoleSystem,
+			Slot:               contextfrag.SlotSystem,
+			Text:               section.Text,
+			Priority:           section.Priority,
+			RetentionTier:      section.RetentionTier,
+			DropPriority:       section.DropPriority,
+			RequiredCapability: section.RequiredCapability,
+			CacheClass:         contextfrag.CacheStable,
+			Trust:              contextfrag.TrustSystem,
+			Scope:              scope,
+			Source:             contextfrag.SourceRunConfig,
+			Collector:          "system_sections",
+			Render:             renderPolicy,
 		}))
 	}
 	return frags
@@ -171,15 +240,15 @@ func SystemSectionFrags(sections []SystemSection, scope contextfrag.Scope) []con
 // was appended at all), so the join never special-cases an empty Text.
 func renderSystemSections(sections []SystemSection) string {
 	sorted := slices.Clone(sections)
-	slices.SortFunc(sorted, func(a, b SystemSection) int {
+	slices.SortStableFunc(sorted, func(a, b SystemSection) int {
 		return a.Priority - b.Priority
 	})
 	var sb strings.Builder
 	for i, s := range sorted {
 		if i > 0 {
-			sb.WriteString("\n\n")
+			sb.WriteString(contextfrag.RenderSeparator(sorted[i-1].Render, s.Render))
 		}
-		sb.WriteString(s.Text)
+		sb.WriteString(contextfrag.RenderText(s.Text, s.Render))
 	}
 	return sb.String()
 }

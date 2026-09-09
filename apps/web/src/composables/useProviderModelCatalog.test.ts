@@ -37,15 +37,15 @@ describe('useProviderModelCatalog', () => {
     ])
   })
 
-  it('passes explicit defaults only when the custom-provider UI supplies them', async () => {
+  it('passes explicit protocol defaults when the caller supplies them', async () => {
     mocks.importModels.mockResolvedValue({ data: { created: 1 } })
 
     const { syncProviderModelCatalog } = useProviderModelCatalog()
-    await syncProviderModelCatalog('provider-id', ['tool-call'])
+    await syncProviderModelCatalog('provider-id', ['tool-call', 'reasoning'])
 
     expect(mocks.importModels).toHaveBeenCalledWith({
       path: { id: 'provider-id' },
-      body: { default_compatibilities: ['tool-call'] },
+      body: { default_compatibilities: ['tool-call', 'reasoning'] },
       throwOnError: true,
     })
   })

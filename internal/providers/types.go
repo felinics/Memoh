@@ -3,7 +3,7 @@ package providers
 import (
 	"time"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // CreateRequest represents a request to create a new provider.
@@ -65,6 +65,11 @@ const (
 	TestStatusOK        TestStatus = "ok"
 	TestStatusAuthError TestStatus = "auth_error"
 	TestStatusError     TestStatus = "error"
+	// TestStatusUnverified means the endpoint answered but the models list
+	// could not confirm it works (e.g. the provider does not implement model
+	// listing). It is deliberately not a failure: only a real generation
+	// against a concrete model can settle that (see models.Service.Test).
+	TestStatusUnverified TestStatus = "unverified"
 )
 
 // TestResponse is returned by POST /providers/:id/test.
@@ -112,25 +117,34 @@ type OAuthAuthorizeResponse struct {
 
 // RemoteModel represents a model returned by the provider's /v1/models endpoint.
 type RemoteModel struct {
-	ID                string   `json:"id"`
-	Description       *string  `json:"description,omitempty"`
-	Object            string   `json:"object"`
-	Created           int64    `json:"created"`
-	OwnedBy           string   `json:"owned_by"`
-	Name              string   `json:"name,omitempty"`
-	DisplayName       string   `json:"display_name,omitempty"`
-	Type              string   `json:"type,omitempty"`
-	Compatibilities   []string `json:"compatibilities,omitempty"`
-	ReasoningEfforts  []string `json:"reasoning_efforts,omitempty"`
-	ThinkingMode      string   `json:"thinking_mode,omitempty"`
-	ContextWindow     *int     `json:"context_window,omitempty"`
-	Dimensions        *int     `json:"dimensions,omitempty"`
-	CapabilitiesKnown bool     `json:"-"`
+	ID               string   `json:"id"`
+	Description      *string  `json:"description,omitempty"`
+	Object           string   `json:"object"`
+	Created          int64    `json:"created"`
+	OwnedBy          string   `json:"owned_by"`
+	Name             string   `json:"name,omitempty"`
+	DisplayName      string   `json:"display_name,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Compatibilities  []string `json:"compatibilities,omitempty"`
+	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
+	ThinkingMode     string   `json:"thinking_mode,omitempty"`
+	// ReasoningDialect and the budget bounds must survive the import path, not
+	// just live in the template: an imported Gemini 2.5 row without a dialect
+	// falls back to the tier wire and every request is a 400.
+	ReasoningDialect string `json:"reasoning_dialect,omitempty"`
+	// ReasoningOffSupport declares how the model answers an explicit disable.
+	ReasoningOffSupport string `json:"reasoning_off_support,omitempty"`
+	ReasoningDefaultOn  *bool  `json:"reasoning_default_on,omitempty"`
+	ThinkingBudgetMin   *int   `json:"thinking_budget_min,omitempty"`
+	ThinkingBudgetMax   *int   `json:"thinking_budget_max,omitempty"`
+	ContextWindow       *int   `json:"context_window,omitempty"`
+	Dimensions          *int   `json:"dimensions,omitempty"`
+	CapabilitiesKnown   bool   `json:"-"`
 }
 
-// ImportModelsRequest carries the capabilities a user explicitly selected for
-// chat models whose provider cannot describe them. It is intentionally scoped
-// to the import operation: templates and trusted discovery remain authoritative.
+// ImportModelsRequest carries caller-supplied capability defaults for chat
+// models whose provider cannot describe them. Templates and trusted discovery
+// remain authoritative.
 type ImportModelsRequest struct {
 	DefaultCompatibilities []string `json:"default_compatibilities,omitempty"`
 }

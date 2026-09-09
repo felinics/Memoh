@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 type injectOwnershipAdmitter struct {
@@ -82,3 +82,5 @@ func TestRunEndStopsDirectInjectBeforeSessionFinishes(t *testing.T) {
 		t.Fatal("session inject did not finish before channel close")
 	}
 }
+
+func (*injectOwnershipAdmitter) MarkInlineDecisionRun(string, string, string) {}

@@ -3,16 +3,17 @@ package application
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/contextview"
-	"github.com/memohai/memoh/internal/hooks"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/hooks"
 )
 
 func TestBuildContextFragScopePreservesIMTopology(t *testing.T) {
@@ -160,6 +161,24 @@ func TestPrepareRunConfigPreservesPipelineFileAttachmentBytes(t *testing.T) {
 	}
 }
 
+func TestPrepareRunConfigClearsStaleContextHookText(t *testing.T) {
+	t.Parallel()
+
+	resolver := &Service{}
+	got := resolver.prepareRunConfig(context.Background(), native.RunConfig{
+		Identity:        native.SessionContext{BotID: "bot-1"},
+		ContextHookText: "[Hook Context: BeforePromptBuild]\nstale text",
+	})
+	if got.ContextHookText != "" {
+		t.Fatalf("ContextHookText = %q, want stale carrier cleared", got.ContextHookText)
+	}
+	for _, frag := range got.ContextSourceFrags {
+		if frag.Kind == contextfrag.KindHookContext {
+			t.Fatalf("stale hook fragment survived prepareRunConfig: %#v", frag)
+		}
+	}
+}
+
 func TestNormalizeContextMessagesRemapsCurrentAndMemory(t *testing.T) {
 	t.Parallel()
 
@@ -238,14 +257,14 @@ func TestPrependContextMessagesShiftsTrackedCurrentUser(t *testing.T) {
 	}
 }
 
-func TestBuildProviderSourceFragsPreservesLegacyPromptHookAndMemoryBytes(t *testing.T) {
+func TestBuildProviderSourceFragsPlacesLegacyHookBeforeCurrent(t *testing.T) {
 	t.Parallel()
 	params := native.SystemPromptParams{SessionType: sessionmode.Chat, Timezone: "UTC"}
 	hookTexts := []string{
 		formatServiceHookContext(hooks.EventBeforePromptBuild, "before bytes"),
 		formatServiceHookContext(hooks.EventAfterPromptBuild, "after bytes"),
 	}
-	system := native.GenerateSystemPrompt(params) + "\n\n" + hookTexts[0] + "\n\n" + hookTexts[1]
+	system := native.GenerateSystemPrompt(params)
 	messages := []sdk.Message{
 		sdk.UserMessage("raw memory recall\n\n[Hook Context: AfterMemorySearch]\nraw memory hook"),
 		sdk.UserMessage("  current request  "),
@@ -254,8 +273,9 @@ func TestBuildProviderSourceFragsPreservesLegacyPromptHookAndMemoryBytes(t *test
 	cfg := native.RunConfig{
 		System: system, Messages: messages, ContextCurrentUserMessageIndex: &index,
 		ContextQueryMaterialized: true, ContextScope: contextfrag.Scope{BotID: "bot-1"},
+		ContextHookText: strings.Join(hookTexts, "\n\n"),
 	}
-	cfg.ContextSourceFrags = buildProviderSourceFrags(context.Background(), cfg, native.GenerateSystemSections(params), hookTexts)
+	cfg.ContextSourceFrags = buildProviderSourceFrags(context.Background(), cfg, native.GenerateSystemSections(params), nil)
 
 	hookCount := 0
 	for _, frag := range cfg.ContextSourceFrags {
@@ -264,11 +284,12 @@ func TestBuildProviderSourceFragsPreservesLegacyPromptHookAndMemoryBytes(t *test
 		}
 	}
 	if hookCount != 1 {
-		t.Fatalf("hook fragment count = %d, want one combined system tail", hookCount)
+		t.Fatalf("hook fragment count = %d, want one combined user message", hookCount)
 	}
 	got := contextview.ApplyProviderRunConfig(context.Background(), nil, cfg)
-	if got.System != system || !reflect.DeepEqual(got.Messages, messages) {
-		t.Fatalf("provider bytes changed: system=%q messages=%#v", got.System, got.Messages)
+	wantMessages := []sdk.Message{messages[0], sdk.UserMessage(cfg.ContextHookText), messages[1]}
+	if got.System != system || !reflect.DeepEqual(got.Messages, wantMessages) {
+		t.Fatalf("provider placement changed: system=%q messages=%#v want=%#v", got.System, got.Messages, wantMessages)
 	}
 }
 

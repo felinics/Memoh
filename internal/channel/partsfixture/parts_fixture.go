@@ -5,7 +5,7 @@
 // channel itself or the test binary would form an import cycle.
 package partsfixture
 
-import "github.com/memohai/memoh/internal/channel"
+import "github.com/felinics/memoh/internal/channel"
 
 // Canonical returns the shared rich-message fixture used by the
 // cross-platform Parts rendering regression tests. The slice covers the

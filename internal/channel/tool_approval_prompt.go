@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/decision/approval"
 )
 
 const (

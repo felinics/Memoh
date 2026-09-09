@@ -14,13 +14,13 @@ import (
 	"time"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	sdk "github.com/felinics/twilight/sdk"
 	readability "github.com/go-shiori/go-readability"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/redact"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 const (

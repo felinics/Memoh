@@ -9,7 +9,7 @@
         <span
           v-if="displayTarget"
           class="min-w-0 truncate font-normal"
-          :title="display.fullTarget || display.target"
+          :title="display.fullTarget || undefined"
         >{{ displayTarget }}</span>
       </p>
 
@@ -46,25 +46,17 @@
       </p>
     </div>
 
-    <div class="mt-2 flex gap-1.5 px-3 pb-2">
-      <Button
-        type="button"
-        class="flex-1"
-        :disabled="responding"
-        @click="respond('approve')"
-      >
-        {{ $t('chat.tools.approve') }}
-      </Button>
-      <Button
-        type="button"
-        variant="secondary"
-        class="flex-1"
-        :disabled="responding"
-        @click="respond('reject')"
-      >
-        {{ $t('chat.tools.reject') }}
-      </Button>
-    </div>
+    <ToolApprovalActions
+      v-model:reason="rejectionReason"
+      class="mt-2 px-3 pb-2"
+      :options="approval.options"
+      :responding="responding"
+      :rejecting="rejecting"
+      @approve="approve"
+      @begin-reject="beginReject"
+      @cancel-reject="cancelReject"
+      @confirm-reject="confirmReject"
+    />
   </div>
 </template>
 
@@ -76,8 +68,8 @@
 // getToolDisplay(block), rather than a raw payload dump. The dock carries the
 // block through the pending-approval projection for exactly this.
 import { computed, ref } from 'vue'
-import { Button } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
+import ToolApprovalActions from '@/components/tool-approval-actions.vue'
 import { useChatStore } from '@/store/chat-list'
 import { useChatViewTarget } from '../composables/useChatViewContext'
 import CodeBlock from './code-block.vue'
@@ -90,7 +82,7 @@ const props = defineProps<{
   queueSize: number
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const chatStore = useChatStore()
 const chatViewTarget = useChatViewTarget()
 
@@ -106,15 +98,43 @@ const actionLabel = computed(() => {
   const key = `chat.tools.${display.value.actionKey}`
   return t(key, display.value.actionParams ?? {})
 })
+// A "permission" approval is an agent question that maps to no concrete tool
+// (network access, mode switch, an elicitation fallback). It carries the
+// agent's own title and request text, so render those instead of a tool name.
+const isPermissionRequest = computed(() => block.value.toolName === 'permission')
+const permissionTitle = computed(() => {
+  const title = input.value.title
+  return typeof title === 'string' ? title.trim() : ''
+})
+const permissionRequest = computed(() => {
+  const request = input.value.request
+  return typeof request === 'string' ? request.trim() : ''
+})
+const permissionRequestLang = computed(() => {
+  const lang = input.value.request_lang
+  return typeof lang === 'string' && lang ? lang : 'text'
+})
 const approvalTitle = computed(() => {
-  if (block.value.toolName === 'exec') return t('bots.toolApproval.toolNames.exec')
-  if (block.value.toolName === 'write') return t('bots.toolApproval.toolNames.write')
+  if (isPermissionRequest.value) {
+    return permissionTitle.value || t('chat.approval.permissionRequest')
+  }
+  // An approval names the capability being granted ("Shell command"), not the
+  // per-call verb, whenever the tool has such a name; the rest fall back to the
+  // row label.
+  const capabilityKey = `bots.toolApproval.toolNames.${block.value.toolName}`
+  if (te(capabilityKey)) return t(capabilityKey)
   return actionLabel.value
 })
-const displayTarget = computed(() => (
-  block.value.toolName === 'exec' ? '' : display.value.target
-))
+const displayTarget = computed(() => {
+  if (isPermissionRequest.value) return ''
+  return block.value.toolName === 'exec' ? '' : display.value.target
+})
 const codePreview = computed(() => {
+  if (isPermissionRequest.value) {
+    return permissionRequest.value
+      ? { code: permissionRequest.value, lang: permissionRequestLang.value }
+      : null
+  }
   if (block.value.toolName === 'exec') {
     const command = input.value.command
     return typeof command === 'string' && command
@@ -125,6 +145,7 @@ const codePreview = computed(() => {
 })
 const detailPreview = computed(() => {
   const toolName = block.value.toolName
+  if (toolName === 'permission') return null
   if (toolName === 'write') {
     const content = input.value.content
     return typeof content === 'string' && content ? display.value.detail ?? null : null
@@ -150,11 +171,34 @@ const executionLocationLabel = computed(() => {
 // swaps to the next item), so no spinner — the flag only guards against a
 // double-click landing two answers on the same request before the swap.
 const responding = ref(false)
+const rejecting = ref(false)
+const rejectionReason = ref('')
+const rejectOptionId = ref<string>()
 
-async function respond(decision: 'approve' | 'reject') {
+function beginReject(optionId?: string) {
+  rejectOptionId.value = optionId
+  rejectionReason.value = ''
+  rejecting.value = true
+}
+
+function cancelReject() {
+  rejecting.value = false
+  rejectionReason.value = ''
+  rejectOptionId.value = undefined
+}
+
+async function confirmReject() {
+  await respond('reject', rejectOptionId.value, rejectionReason.value)
+}
+
+async function approve(optionId?: string) {
+  await respond('approve', optionId)
+}
+
+async function respond(decision: 'approve' | 'reject', optionId?: string, reason?: string) {
   if (responding.value) return
   responding.value = true
-  const ok = await chatStore.respondToolApproval(approval.value, decision, chatViewTarget.value)
+  const ok = await chatStore.respondToolApproval(approval.value, decision, chatViewTarget.value, optionId, reason)
   // On success the store already flipped the status and the panel swapped to
   // the next item, so this card unmounts. On failure (WebSocket disconnected,
   // send rejected) the approval stays pending and THIS card stays mounted —

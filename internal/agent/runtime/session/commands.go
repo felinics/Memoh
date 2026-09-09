@@ -14,8 +14,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/agent/runtime/session/ledger"
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func (m *Manager) RunRef(ctx context.Context, botID, sessionID, runID string) (RunRef, bool, error) {
@@ -48,12 +48,14 @@ func runHandleForCommand(cmd Command) RunHandle {
 // DecisionContinuationContext detaches the model continuation from the short
 // command acknowledgement deadline while keeping it tied to the run owner's
 // lifecycle and persistence fence.
-func (m *Manager) DecisionContinuationContext(parent context.Context, cmd Command) (context.Context, context.CancelFunc, error) {
+func (m *Manager) DecisionContinuationContext(cmd Command) (context.Context, context.CancelFunc, error) {
 	ctrl := m.localControlForScope(cmd.BotID, cmd.SessionID, cmd.RunID)
 	if ctrl == nil || ctrl.generation != strings.TrimSpace(cmd.Generation) || !ctrl.commandsActive() {
 		return nil, func() {}, ErrCommandTargetNotActive
 	}
-	ctx, cancel := ctrl.commandContext(context.WithoutCancel(parent))
+	// The acknowledgement request ends before the continuation. Only the run
+	// lifecycle owns this context, so no transport cancellation is attached.
+	ctx, cancel := ctrl.commandContext(context.Background())
 	if err := m.ValidateRunOwnership(ctx, runHandleForCommand(cmd)); err != nil {
 		cancel()
 		return nil, func() {}, err
@@ -364,7 +366,13 @@ func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error
 	if ctrl.cancel != nil {
 		ctrl.cancel()
 	}
-	if waitingDecision {
+	if waitingDecision && !ctrl.resumesOnTerminalDecision() {
+		// A native parked run has no live stream to observe the cancel; the
+		// terminal write must happen here. An inline runtime's turn is still
+		// alive blocked on its waiter — the cancel unwinds it and the turn's
+		// own FinishRun records the abort AFTER the driver actually returns,
+		// so the ledger's terminal state is a truthful "driver stopped"
+		// signal for deletion barriers on any instance.
 		if err := m.FinishRun(context.WithoutCancel(ctx), ctrl.handle(), RunStatusAborted, ""); err != nil {
 			return false, err
 		}
@@ -502,7 +510,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		return DecisionResponseResult{Handled: true}, err
 	} else if ok {
 		err := commandResultErrorFor(Command{PayloadHash: requestHash}, stored)
-		return DecisionResponseResult{Handled: true, Applied: err == nil}, err
+		return DecisionResponseResult{Handled: true, Applied: err == nil, Replayed: true}, err
 	}
 
 	m.mu.Lock()
@@ -520,7 +528,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		// ACP/MCP and other unfenced decisions retain their waiter-backed path.
 		return DecisionResponseResult{}, nil
 	}
-	result := DecisionResponseResult{Handled: true}
+	result := DecisionResponseResult{Handled: true, RunID: target.RunID, SessionID: target.SessionID}
 	if target.Type != response.Type ||
 		target.BotID != response.BotID ||
 		response.SessionID != "" && target.SessionID != response.SessionID ||
@@ -532,7 +540,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 			if target.PayloadHash != requestHash {
 				return result, ErrCommandPayloadConflict
 			}
-			return DecisionResponseResult{Handled: true, Applied: true}, nil
+			return DecisionResponseResult{Handled: true, Applied: true, Replayed: true}, nil
 		}
 		return result, nil
 	}
@@ -564,6 +572,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 	if !ok || strings.TrimSpace(ref.OwnerID) == "" && m.distributed != nil {
 		return result, ErrCommandOwnerUnavailable
 	}
+	result.Generation = ref.Generation
 	createdAt, err := m.backend.Now(ctx)
 	if err != nil {
 		return result, fmt.Errorf("load runtime command time: %w", err)
@@ -572,7 +581,7 @@ func (m *Manager) RouteDecisionResponse(ctx context.Context, response DecisionRe
 		Type: response.Type, ID: commandID,
 		BotID: target.BotID, SessionID: target.SessionID, RunID: target.RunID,
 		Generation: ref.Generation, FencingToken: target.FencingToken,
-		TargetID: target.ID, DecisionResolved: true,
+		TargetID: target.ID, DecisionResolved: true, StreamOutput: response.streamOutput,
 		Payload: append([]byte(nil), response.Payload...), PayloadHash: requestHash,
 		CreatedAt: createdAt, ExpiresAt: createdAt.Add(m.commandTimeout()),
 	}
@@ -802,6 +811,12 @@ func activeCommandPayloadHash(commandType string, payload []byte) string {
 			decision = "rejected"
 		}
 		canonical["decision"] = decision
+		// Zero values stay out of the canonical form so hashes of pre-option_id
+		// payloads keep matching rows persisted by earlier binaries; only a real
+		// selection adds new semantics (and therefore a new hash).
+		if optionID := runtimeCommandExactString(runtimeCommandMapValue(raw, "option_id")); strings.TrimSpace(optionID) != "" {
+			canonical["option_id"] = optionID
+		}
 		canonical["reason"] = runtimeCommandString(runtimeCommandMapValue(raw, "reason"))
 	case CommandUserInputResponse:
 		canceled, _ := runtimeCommandMapValue(raw, "canceled").(bool)
@@ -843,6 +858,13 @@ func runtimeCommandString(value any) string {
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
+func runtimeCommandExactString(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+
 func canonicalRuntimeAnswers(value any) []map[string]any {
 	items, _ := value.([]any)
 	answers := make([]map[string]any, 0, len(items))
@@ -856,12 +878,18 @@ func canonicalRuntimeAnswers(value any) []map[string]any {
 		for _, optionID := range optionValues {
 			optionIDs = append(optionIDs, runtimeCommandString(optionID))
 		}
-		answers = append(answers, map[string]any{
+		answer := map[string]any{
 			"question_id": runtimeCommandString(runtimeCommandMapValue(raw, "question_id")),
 			"option_ids":  optionIDs,
 			"custom_text": runtimeCommandString(runtimeCommandMapValue(raw, "custom_text")),
 			"text":        runtimeCommandString(runtimeCommandMapValue(raw, "text")),
-		})
+		}
+		// skipped=false is the legacy default; keep it out of the canonical form
+		// (see the option_id note above) so only a real skip changes the hash.
+		if skipped, _ := runtimeCommandMapValue(raw, "skipped").(bool); skipped {
+			answer["skipped"] = true
+		}
+		answers = append(answers, answer)
 	}
 	sort.SliceStable(answers, func(i, j int) bool {
 		return answers[i]["question_id"].(string) < answers[j]["question_id"].(string)
@@ -879,7 +907,7 @@ func (m *Manager) requestAbort(ctx context.Context, ctrl *runControl) (bool, err
 		if run == nil {
 			return snapshot, false, nil
 		}
-		if run.RunID != ctrl.runID || !m.runOwnerMatches(run) || !isActiveRunStatus(run.Status) {
+		if run.RunID != ctrl.runID || !m.runOwnerMatches(run) || !isAbortableRunStatus(run.Status) {
 			return snapshot, false, nil
 		}
 		acknowledged = true
@@ -1000,7 +1028,7 @@ func (m *Manager) steer(ctx context.Context, botID, sessionID, runID, expectedGe
 
 func (m *Manager) applyCommand(ctx context.Context, cmd Command) {
 	switch strings.TrimSpace(cmd.Type) {
-	case CommandAbort, CommandToolApprovalResponse, CommandUserInputResponse:
+	case CommandAbort, CommandToolApprovalResponse, CommandUserInputResponse, CommandHistoryReset:
 		m.publishStoredCommandResult(ctx, cmd, m.executeRoutedCommand(ctx, cmd))
 	case CommandSteer:
 		commandCtx, cancel, err := m.activeCommandContext(ctx, cmd)
@@ -1019,7 +1047,13 @@ func (m *Manager) activeCommandContext(ctx context.Context, cmd Command) (contex
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	lookupCtx, lookupCancel := context.WithTimeout(ctx, m.commandTimeout())
+	lookupTimeout := m.commandTimeout()
+	if strings.TrimSpace(cmd.Type) == CommandHistoryReset && !cmd.ExpiresAt.IsZero() {
+		if remaining := time.Until(cmd.ExpiresAt); remaining > lookupTimeout {
+			lookupTimeout = remaining
+		}
+	}
+	lookupCtx, lookupCancel := context.WithTimeout(ctx, lookupTimeout)
 	lookupStarted := time.Now()
 	now, err := m.backend.Now(lookupCtx)
 	lookupElapsed := time.Since(lookupStarted)
@@ -1073,6 +1107,9 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 	if strings.TrimSpace(cmd.Type) == CommandAbort {
 		_, err := m.abortLocal(commandCtx, ctrl)
 		return err
+	}
+	if strings.TrimSpace(cmd.Type) == CommandHistoryReset {
+		return m.applyHistoryResetCommand(commandCtx, cmd, ctrl)
 	}
 	if !cmd.DecisionResolved && !runtimeCommandTargetPresent(run, cmd.Type, cmd.TargetID) {
 		return ErrCommandTargetNotActive
@@ -1472,7 +1509,7 @@ func (m *Manager) finishCommandExecution(commandID string, done chan struct{}) {
 
 func isDurableRoutedCommand(cmd Command) bool {
 	switch strings.TrimSpace(cmd.Type) {
-	case CommandAbort, CommandToolApprovalResponse, CommandUserInputResponse:
+	case CommandAbort, CommandToolApprovalResponse, CommandUserInputResponse, CommandHistoryReset:
 		return strings.TrimSpace(cmd.ID) != ""
 	default:
 		return false

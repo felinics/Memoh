@@ -14,11 +14,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/decision"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/decision"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 const (
@@ -63,17 +63,12 @@ func (s *Service) HasWaiter(requestID string) bool {
 	return s != nil && s.waiter != nil && s.waiter.Has(requestID)
 }
 
-// CanRespond reports whether the UI should offer a response action for this
-// request in the current server process. ACP/MCP requests are consumed by an
-// in-process waiter, so a pending DB row alone is not enough.
+// CanRespond reports whether a waiter-backed request can accept a response in
+// this process. Native chat requests are DB-deferred and must not use this
+// helper; callers classify by the session's runtime (UsesDecisionWaiter), the
+// same way tool approvals do.
 func (s *Service) CanRespond(req Request) bool {
-	if req.Status != StatusPending {
-		return false
-	}
-	if IsACPMCPRequest(req) {
-		return s.HasWaiter(req.ID)
-	}
-	return true
+	return req.Status == StatusPending && s.HasWaiter(req.ID)
 }
 
 func (s *Service) notifyResolved(req Request) {
@@ -133,6 +128,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
+	enableConversationalAnswers(&uiPayload, input.ProviderMetadata)
 	rawInput, err := marshalObject(input.Input)
 	if err != nil {
 		return Request{}, err
@@ -770,6 +766,9 @@ func answerEntry(question UIQuestion, answer QuestionAnswer) (map[string]any, er
 		if len(optionIDs) > 0 || customText != "" || text != "" {
 			return nil, fmt.Errorf("question %q cannot be skipped and answered", question.ID)
 		}
+		if questionIsExplicitlyRequired(question) {
+			return nil, fmt.Errorf("question %q is required and cannot be skipped", question.ID)
+		}
 		entry["skipped"] = true
 		return entry, nil
 	}
@@ -790,6 +789,9 @@ func answerEntry(question UIQuestion, answer QuestionAnswer) (map[string]any, er
 	}
 	if customText != "" && !question.AllowCustom {
 		return nil, fmt.Errorf("question %q does not allow a custom answer", question.ID)
+	}
+	if question.CustomExclusive && len(optionIDs) > 0 && customText != "" {
+		return nil, fmt.Errorf("question %q accepts options or a custom answer, not both", question.ID)
 	}
 	if question.Kind == QuestionKindSingleSelect {
 		if len(optionIDs) > 1 {
@@ -835,13 +837,6 @@ func canceledResult(reason string) map[string]any {
 		"reason":      reason,
 		"instruction": cancelInstruction,
 	}
-}
-
-func IsACPMCPRequest(req Request) bool {
-	if req.ProviderMetadata == nil {
-		return false
-	}
-	return strings.TrimSpace(stringValue(req.ProviderMetadata["source"])) == ProviderSourceACPMCP
 }
 
 func cleanIDs(values []string) []string {
@@ -923,6 +918,7 @@ func requestFromRow(row sqlc.UserInputRequest) Request {
 	_ = json.Unmarshal(row.InteractionJson, &req.Interaction)
 	_ = json.Unmarshal(row.ResultJson, &req.Result)
 	_ = json.Unmarshal(row.ProviderMetadata, &req.ProviderMetadata)
+	enableConversationalAnswers(&req.UIPayload, req.ProviderMetadata)
 	return req
 }
 
@@ -987,4 +983,18 @@ func (s *Service) optionalChannelIdentityUUID(ctx context.Context, value string)
 		return pgtype.UUID{}, err
 	}
 	return id, nil
+}
+
+// Memoh ask_user options are shortcuts, not a closed answer schema. Apply this
+// on both creation and loading so pending questions from older versions also
+// accept text. External elicitation forms retain their provider's constraints.
+func enableConversationalAnswers(payload *UIPayload, metadata map[string]any) {
+	if source, exists := metadata["source"]; exists && source != "" && source != ProviderSourceACPMCP {
+		return
+	}
+	for i := range payload.Questions {
+		if payload.Questions[i].Kind == QuestionKindSingleSelect || payload.Questions[i].Kind == QuestionKindMultiSelect {
+			payload.Questions[i].AllowCustom = true
+		}
+	}
 }

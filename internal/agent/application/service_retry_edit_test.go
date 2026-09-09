@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/apperror"
-	messageevent "github.com/memohai/memoh/internal/chat/event"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/apperror"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type forkAnchorMessageService struct {
@@ -21,37 +21,64 @@ type forkAnchorMessageService struct {
 
 type replacementOperationMessageService struct {
 	recordingMessageService
-	target messagepkg.Message
-	turn   messagepkg.HistoryTurn
-	latest messagepkg.HistoryTurn
-}
-
-func (s *replacementOperationMessageService) GetByIDBySession(context.Context, string, string) (messagepkg.Message, error) {
-	return s.target, nil
-}
-
-func (s *replacementOperationMessageService) GetVisibleTurnByMessage(context.Context, string, string) (messagepkg.HistoryTurn, error) {
-	return s.turn, nil
+	latest      messagepkg.HistoryTurn
+	turnByMsg   messagepkg.HistoryTurn
+	turnByMsgID string
 }
 
 func (s *replacementOperationMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
 	return s.latest, nil
 }
 
+func (s *replacementOperationMessageService) GetVisibleTurnByMessage(_ context.Context, _ string, messageID string) (messagepkg.HistoryTurn, error) {
+	s.turnByMsgID = messageID
+	return s.turnByMsg, nil
+}
+
+// The deprecated message-id spelling is resolved to a round at the boundary, so
+// a client shipped before the turn-id contract keeps working after an upgrade.
+func TestResolveTurnIDForMessageMapsTheLegacySpelling(t *testing.T) {
+	messages := &replacementOperationMessageService{
+		turnByMsg: messagepkg.HistoryTurn{ID: " turn-old "},
+	}
+	service := &Service{messageService: messages}
+
+	got, err := service.ResolveTurnIDForMessage(context.Background(), "session-1", " assistant-result ")
+	if err != nil {
+		t.Fatalf("resolve turn id: %v", err)
+	}
+	if got != "turn-old" {
+		t.Fatalf("turn id = %q, want turn-old", got)
+	}
+	if messages.turnByMsgID != "assistant-result" {
+		t.Fatalf("looked up message %q, want assistant-result", messages.turnByMsgID)
+	}
+
+	if _, err := service.ResolveTurnIDForMessage(context.Background(), "session-1", "  "); err == nil {
+		t.Fatal("resolve without a message id: want error")
+	}
+}
+
+func TestResolveTurnIDForMessageRejectsAMessageWithoutAVisibleTurn(t *testing.T) {
+	service := &Service{messageService: &replacementOperationMessageService{}}
+
+	if _, err := service.ResolveTurnIDForMessage(context.Background(), "session-1", "assistant-result"); err == nil {
+		t.Fatal("resolve a message with no visible turn: want error")
+	}
+}
+
 func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
-	t.Run("retry begins at first assistant message", func(t *testing.T) {
+	t.Run("retry begins at the turn's own assistant anchor", func(t *testing.T) {
 		messages := &replacementOperationMessageService{
-			target: messagepkg.Message{ID: "assistant-result", Role: "assistant"},
-			turn: messagepkg.HistoryTurn{
+			latest: messagepkg.HistoryTurn{
 				ID:                 "turn-old",
 				RequestMessageID:   "user-request",
 				AssistantMessageID: "assistant-first",
 			},
-			latest: messagepkg.HistoryTurn{ID: "turn-old"},
 		}
 		service := &Service{messageService: messages}
 
-		got, err := service.PrepareRetryLatestMessageOperation(context.Background(), "session-1", "assistant-result")
+		got, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old")
 		if err != nil {
 			t.Fatalf("prepare retry operation: %v", err)
 		}
@@ -62,16 +89,14 @@ func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
 
 	t.Run("edit begins at persisted request message", func(t *testing.T) {
 		messages := &replacementOperationMessageService{
-			target: messagepkg.Message{ID: "user-request", Role: "user"},
-			turn: messagepkg.HistoryTurn{
+			latest: messagepkg.HistoryTurn{
 				ID:               "turn-old",
 				RequestMessageID: "user-request",
 			},
-			latest: messagepkg.HistoryTurn{ID: "turn-old"},
 		}
 		service := &Service{messageService: messages}
 
-		got, err := service.PrepareEditLatestMessageOperation(context.Background(), "session-1", "user-request")
+		got, err := service.PrepareEditLatestTurnOperation(context.Background(), "session-1", "turn-old")
 		if err != nil {
 			t.Fatalf("prepare edit operation: %v", err)
 		}
@@ -80,18 +105,44 @@ func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
 		}
 	})
 
-	t.Run("retry rejects a turn without its canonical assistant anchor", func(t *testing.T) {
+	// The turn id is the whole validation: a client that names an older round
+	// is refused without ever naming a stored message.
+	t.Run("a turn that is no longer the latest is refused", func(t *testing.T) {
 		messages := &replacementOperationMessageService{
-			target: messagepkg.Message{ID: "assistant-result", Role: "assistant"},
-			turn: messagepkg.HistoryTurn{
-				ID:               "turn-old",
-				RequestMessageID: "user-request",
+			latest: messagepkg.HistoryTurn{
+				ID:                 "turn-new",
+				RequestMessageID:   "user-request",
+				AssistantMessageID: "assistant-first",
 			},
-			latest: messagepkg.HistoryTurn{ID: "turn-old"},
 		}
 		service := &Service{messageService: messages}
 
-		_, err := service.PrepareRetryLatestMessageOperation(context.Background(), "session-1", "assistant-result")
+		if _, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old"); err == nil {
+			t.Fatal("prepare retry operation on a superseded turn: want error")
+		}
+		if _, err := service.PrepareEditLatestTurnOperation(context.Background(), "session-1", "turn-old"); err == nil {
+			t.Fatal("prepare edit operation on a superseded turn: want error")
+		}
+	})
+
+	t.Run("an unnamed turn is refused before any lookup", func(t *testing.T) {
+		service := &Service{messageService: &replacementOperationMessageService{}}
+
+		if _, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "  "); err == nil {
+			t.Fatal("prepare retry operation without a turn id: want error")
+		}
+	})
+
+	t.Run("retry rejects a turn without its canonical assistant anchor", func(t *testing.T) {
+		messages := &replacementOperationMessageService{
+			latest: messagepkg.HistoryTurn{
+				ID:               "turn-old",
+				RequestMessageID: "user-request",
+			},
+		}
+		service := &Service{messageService: messages}
+
+		_, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old")
 		if got := apperror.CodeOf(err); got != apperror.CodeSessionHistoryInconsistent {
 			t.Fatalf("error code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
 		}

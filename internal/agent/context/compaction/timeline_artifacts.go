@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 // TimelineArtifactSource loads the active artifact frontier of a session as

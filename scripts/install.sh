@@ -7,7 +7,7 @@ PURPLE=$(printf '\033[0;35m')
 RED=$(printf '\033[0;31m')
 NC=$(printf '\033[0m')
 
-GITHUB_REPO="memohai/Memoh"
+GITHUB_REPO="felinics/Memoh"
 REPO="https://github.com/${GITHUB_REPO}.git"
 DIR="Memoh"
 COMPOSE_PROJECT_NAME="memoh"
@@ -73,6 +73,12 @@ EXISTING_DOCKER_CONTAINERS=false
 EXISTING_DOCKER_NETWORK=false
 EXISTING_WORKSPACE_FILES=false
 EXISTING_REPO_DIR=false
+EXISTING_WORKSPACE_IMAGE=""
+EXISTING_WORKSPACE_IMAGE_SECTION="container"
+EXISTING_INSTALLER_WORKSPACE_IMAGE=""
+WORKSPACE_IMAGE=""
+WORKSPACE_IMAGE_SECTION="container"
+WORKSPACE_IMAGE_MANAGED=false
 
 # Parse flags
 while [ $# -gt 0 ]; do
@@ -159,8 +165,11 @@ read_toml_value() {
     return 1
   fi
   value=$(awk -v target_section="[$section]" -v target_key="$key" '
-    /^\[[^]]+\]/ {
-      in_section = ($0 == target_section)
+    /^[[:space:]]*\[[^]]+\]/ {
+      section_header = $0
+      sub(/^[[:space:]]*/, "", section_header)
+      sub(/[[:space:]]*$/, "", section_header)
+      in_section = (section_header == target_section)
       next
     }
     in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
@@ -179,6 +188,12 @@ read_toml_value() {
     return 1
   fi
   printf '%s' "$value" | sed 's/\\"/"/g; s/\\\\/\\/g'
+}
+
+toml_section_exists() {
+  file="$1"
+  section="$2"
+  [ -f "$file" ] && grep -q "^[[:space:]]*\[$section\][[:space:]]*$" "$file"
 }
 
 normalize_database_driver() {
@@ -245,16 +260,35 @@ set_toml_string_value() {
     BEGIN {
       target_value = ENVIRON["TOML_VALUE"]
     }
-    /^\[[^]]+\]/ {
-      in_section = ($0 == target_section)
+    /^[[:space:]]*\[[^]]+\]/ {
+      if (in_section && !value_written) {
+        print target_key " = \"" target_value "\""
+        value_written = 1
+      }
+      section_header = $0
+      sub(/^[[:space:]]*/, "", section_header)
+      sub(/[[:space:]]*$/, "", section_header)
+      in_section = (section_header == target_section)
+      if (in_section) {
+        section_found = 1
+      }
     }
     in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
       indent = $0
       sub(/[^[:space:]].*/, "", indent)
       print indent target_key " = \"" target_value "\""
+      value_written = 1
       next
     }
     { print }
+    END {
+      if (in_section && !value_written) {
+        print target_key " = \"" target_value "\""
+      }
+      if (!section_found) {
+        exit 2
+      }
+    }
   ' "$file" > "$tmp"; then
     mv "$tmp" "$file"
   else
@@ -273,8 +307,11 @@ set_toml_bool_value() {
     BEGIN {
       target_value = ENVIRON["TOML_VALUE"]
     }
-    /^\[[^]]+\]/ {
-      in_section = ($0 == target_section)
+    /^[[:space:]]*\[[^]]+\]/ {
+      section_header = $0
+      sub(/^[[:space:]]*/, "", section_header)
+      sub(/[[:space:]]*$/, "", section_header)
+      in_section = (section_header == target_section)
     }
     in_section && $0 ~ "^[[:space:]]*" target_key "[[:space:]]*=" {
       indent = $0
@@ -318,6 +355,9 @@ detect_existing_installation() {
   EXISTING_DOCKER_NETWORK=false
   EXISTING_WORKSPACE_FILES=false
   EXISTING_REPO_DIR=false
+  EXISTING_WORKSPACE_IMAGE=""
+  EXISTING_WORKSPACE_IMAGE_SECTION="container"
+  EXISTING_INSTALLER_WORKSPACE_IMAGE=""
 
   if [ -d "$WORKSPACE/$DIR" ]; then
     EXISTING_REPO_DIR=true
@@ -373,6 +413,15 @@ detect_existing_installation() {
 
 load_existing_settings() {
   if [ -n "$EXISTING_CONFIG_SOURCE" ]; then
+    value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "container" "default_image" || true)
+    if [ -n "$value" ]; then
+      EXISTING_WORKSPACE_IMAGE="$value"
+    elif toml_section_exists "$EXISTING_CONFIG_SOURCE" "workspace"; then
+      EXISTING_WORKSPACE_IMAGE_SECTION="workspace"
+      value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "workspace" "default_image" || true)
+      [ -n "$value" ] && EXISTING_WORKSPACE_IMAGE="$value"
+    fi
+
     value=$(read_toml_value "$EXISTING_CONFIG_SOURCE" "admin" "username" || true)
     [ -n "$value" ] && ADMIN_USER="$value"
 
@@ -412,6 +461,9 @@ load_existing_settings() {
   fi
 
   if [ -n "$EXISTING_ENV_SOURCE" ]; then
+    value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_INSTALLER_WORKSPACE_IMAGE" || true)
+    [ -n "$value" ] && EXISTING_INSTALLER_WORKSPACE_IMAGE="$value"
+
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "POSTGRES_PASSWORD" || true)
     [ -n "$value" ] && PG_PASS="$value"
 
@@ -468,6 +520,37 @@ load_existing_settings() {
     value=$(read_env_file_value "$EXISTING_ENV_SOURCE" "MEMOH_CONNECT_IT_IMAGE" || true)
     [ -n "$value" ] && MEMOH_CONNECT_IT_IMAGE="${MEMOH_CONNECT_IT_IMAGE:-$value}"
   fi
+
+  return 0
+}
+
+select_workspace_image() {
+  if [ "$MEMOH_DOCKER_VERSION" = "latest" ]; then
+    release_workspace_image="memohai/workspace:debian-latest"
+  else
+    release_workspace_image="memohai/workspace:${MEMOH_DOCKER_VERSION}-debian"
+  fi
+
+  WORKSPACE_IMAGE="$release_workspace_image"
+  WORKSPACE_IMAGE_SECTION="container"
+  WORKSPACE_IMAGE_MANAGED=true
+  if [ "$INSTALL_MODE" != "upgrade" ]; then
+    return
+  fi
+  WORKSPACE_IMAGE_SECTION="$EXISTING_WORKSPACE_IMAGE_SECTION"
+
+  case "$EXISTING_WORKSPACE_IMAGE" in
+    ""|memohai/workspace:debian|docker.io/memohai/workspace:debian|memohai/workspace:debian-latest|docker.io/memohai/workspace:debian-latest)
+      return
+      ;;
+  esac
+
+  if [ -n "$EXISTING_INSTALLER_WORKSPACE_IMAGE" ] && [ "$EXISTING_WORKSPACE_IMAGE" = "$EXISTING_INSTALLER_WORKSPACE_IMAGE" ]; then
+    return
+  fi
+
+  WORKSPACE_IMAGE="$EXISTING_WORKSPACE_IMAGE"
+  WORKSPACE_IMAGE_MANAGED=false
 }
 
 prompt_install_mode() {
@@ -749,6 +832,7 @@ if [ "$INSTALL_MODE" = "fresh" ] && [ "$EXISTING_DOCKER_STATE" = true ]; then
   exit 1
 fi
 enforce_compose_container_backend
+select_workspace_image
 
 if [ "$SILENT" = false ] && [ "$INSTALL_MODE" != "upgrade" ]; then
   printf "  Data directory (reserved for future bind-mount support) [%s]: " "$MEMOH_DATA_DIR" > /dev/tty
@@ -879,6 +963,18 @@ else
   rm -f config.toml.bak
 fi
 
+set_toml_string_value config.toml "$WORKSPACE_IMAGE_SECTION" "default_image" "$WORKSPACE_IMAGE"
+configured_workspace_image=$(read_toml_value config.toml "$WORKSPACE_IMAGE_SECTION" "default_image" || true)
+if [ "$configured_workspace_image" != "$WORKSPACE_IMAGE" ]; then
+  echo "${RED}Error: failed to configure [${WORKSPACE_IMAGE_SECTION}].default_image in config.toml.${NC}"
+  exit 1
+fi
+if [ "$WORKSPACE_IMAGE_MANAGED" = true ]; then
+  echo "${GREEN}✓ Workspace image pinned to ${WORKSPACE_IMAGE}${NC}"
+else
+  echo "${GREEN}✓ Preserving custom workspace image ${WORKSPACE_IMAGE}${NC}"
+fi
+
 INSTALL_DIR="$(pwd)"
 mkdir -p "$MEMOH_DATA_DIR"
 MEMOH_DATA_DIR=$(cd "$MEMOH_DATA_DIR" && pwd)
@@ -981,6 +1077,9 @@ write_env_value "MEMOH_CONFIG" "./config.toml"
 write_env_value "MEMOH_DATA_DIR" "$MEMOH_DATA_DIR"
 write_env_value "MEMOH_DATABASE_DRIVER" "$DATABASE_DRIVER"
 write_env_value "MEMOH_CONTAINER_BACKEND" "$CONTAINER_BACKEND"
+if [ "$WORKSPACE_IMAGE_MANAGED" = true ]; then
+  write_env_value "MEMOH_INSTALLER_WORKSPACE_IMAGE" "$WORKSPACE_IMAGE"
+fi
 write_env_value "MEMOH_WEBHOOK_PUBLIC_BASE_URL" "${MEMOH_WEBHOOK_PUBLIC_BASE_URL:-}"
 write_env_value "MEMOH_WEBHOOK_TUNNEL_MODE" "$WEBHOOK_TUNNEL_MODE"
 write_env_value "MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR" "$MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR"

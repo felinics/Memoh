@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	textprune "github.com/memohai/memoh/internal/prune"
+	textprune "github.com/felinics/memoh/internal/prune"
 )
 
 const (

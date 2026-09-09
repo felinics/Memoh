@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/jsonschema-go/jsonschema"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 type forkSnapshotToolProvider struct {

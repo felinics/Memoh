@@ -1,23 +1,20 @@
+import type { ReasoningOptions } from '@memohai/sdk'
+
 export const REASONING_EFFORT_DISABLE = 'disable'
 // Legacy override value. "adaptive" is no longer an effort tier the UI offers —
 // it is a thinking mode handled server-side. The constant is
 // kept so previously-stored values still render gracefully.
 export const REASONING_EFFORT_ADAPTIVE = 'adaptive'
-
-export type ThinkingMode = 'toggle' | 'adaptive' | 'only_adaptive' | 'none'
-
-// Effort tiers the UI understands, ordered weakest → strongest.
-export const KNOWN_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
-
-// Keep in sync with normalizesMaxReasoningEffort in internal/conversation/flow/resolver.go.
-// Generic OpenAI-format clients retain the existing max-to-xhigh compatibility
-// behavior; Codex uses the effort levels advertised by its catalog directly.
-const MAX_NORMALIZED_CLIENT_TYPES = new Set(['openai-completions', 'openai-responses'])
+// How off was spelled before the two tokens were unified, and still OpenAI's wire
+// word for it. Stored values may carry it, so it has to render and reconcile as
+// off — naming it keeps that intent visible wherever it appears.
+export const REASONING_EFFORT_LEGACY_OFF = 'none'
 
 export const EFFORT_LABELS: Record<string, string> = {
   [REASONING_EFFORT_DISABLE]: 'chat.reasoningOff',
   [REASONING_EFFORT_ADAPTIVE]: 'chat.reasoningAdaptive',
-  none: 'chat.reasoningNone',
+  // Under the same label as off, not a second one.
+  [REASONING_EFFORT_LEGACY_OFF]: 'chat.reasoningOff',
   minimal: 'chat.reasoningMinimal',
   low: 'chat.reasoningLow',
   medium: 'chat.reasoningMedium',
@@ -29,7 +26,7 @@ export const EFFORT_LABELS: Record<string, string> = {
 export const EFFORT_OPACITY: Record<string, number> = {
   [REASONING_EFFORT_DISABLE]: 0.1,
   [REASONING_EFFORT_ADAPTIVE]: 0.25,
-  none: 0.15,
+  [REASONING_EFFORT_LEGACY_OFF]: 0.1,
   minimal: 0.25,
   low: 0.4,
   medium: 0.6,
@@ -38,73 +35,42 @@ export const EFFORT_OPACITY: Record<string, number> = {
   max: 1,
 }
 
-interface ModelConfigLike {
-  thinking_mode?: string
-  reasoning_efforts?: string[]
-  compatibilities?: string[]
-}
-
-// resolveThinkingMode derives the effective thinking mode from a model config,
-// with a legacy fallback for models imported before thinking_mode existed:
-// the old "reasoning" compatibility maps to toggle, its absence to none.
-export function resolveThinkingMode(config?: ModelConfigLike | null): ThinkingMode {
-  const mode = config?.thinking_mode
-  if (mode === 'toggle' || mode === 'adaptive' || mode === 'none') {
-    return mode
-  }
-  if (mode === 'only_adaptive') return 'adaptive'
-  return config?.compatibilities?.includes('reasoning') ? 'toggle' : 'none'
-}
-
-// resolveEffortLevels returns the model's supported effort tiers (filtered to
-// known ones), falling back to the common low/medium/high subset. Generic
-// OpenAI-format clients use xhigh as the highest effort tier, while Codex can
-// expose max directly.
-export function resolveEffortLevels(config?: ModelConfigLike | null, clientType?: string | null): string[] {
-  const efforts = (config?.reasoning_efforts ?? []).filter((e) =>
-    (KNOWN_EFFORTS as readonly string[]).includes(e),
-  )
-  const levels = efforts.length > 0 ? efforts : ['low', 'medium', 'high']
-  if (MAX_NORMALIZED_CLIENT_TYPES.has(clientType ?? '')) {
-    return levels.filter((e) => e !== 'max')
-  }
-  return levels
-}
-
-// nearestEffortToMedium picks the tier closest to medium from levels, breaking
-// ties toward the weaker tier. It is the fallback when a model does not
-// advertise medium: [minimal, low] -> low, [high, max] -> high, [low, high] -> low.
-// Values outside KNOWN_EFFORTS (including the "disable" sentinel that
-// availableEffortsForMode prepends) are ignored, so passing a selectable list
-// straight in never yields "off"; returns '' when no usable tier is present.
+// selectableEfforts turns the server's resolved options into the picker's list:
+// the model's active tiers, with "off" hoisted to the front when off is actually
+// reachable. A model with no thinking concept offers nothing.
 //
-// Keep in sync with NearestEffortToMedium in internal/models/types.go.
-export function nearestEffortToMedium(levels: string[]): string {
-  const order = KNOWN_EFFORTS as readonly string[]
-  const mediumIdx = order.indexOf('medium')
-
-  let best = ''
-  let bestIdx = -1
-  let bestDistance = 0
-  for (const level of levels) {
-    const idx = order.indexOf(level)
-    if (idx < 0) continue
-    const distance = Math.abs(idx - mediumIdx)
-    // Ties break toward the weaker tier rather than toward whichever came first,
-    // because levels arrives in registry order and is not guaranteed sorted.
-    if (best === '' || distance < bestDistance || (distance === bestDistance && idx < bestIdx)) {
-      best = level
-      bestIdx = idx
-      bestDistance = distance
-    }
-  }
-  return best
+// Whether off is reachable is the server's `can_disable`, not something read out
+// of the tier list. It forks by provider family — Claude expresses off by
+// omitting the field and never advertises a token for it — which is why the
+// frontend no longer tries to answer it.
+export function selectableEfforts(options?: ReasoningOptions | null): string[] {
+  if (!options?.supported) return []
+  const tiers = options.efforts ?? []
+  return options.can_disable ? [REASONING_EFFORT_DISABLE, ...tiers] : tiers
 }
 
-// availableEffortsForMode builds the selectable list for a thinking mode:
-//   - none:          nothing
-//   - adaptive/toggle: an explicit "off" plus the effort tiers
-export function availableEffortsForMode(mode: ThinkingMode, levels: string[]): string[] {
-  if (mode === 'none') return []
-  return [REASONING_EFFORT_DISABLE, ...levels]
+// reconcileStoredEffort returns the effort to hold after the model changed. A
+// stored value the model still offers survives; "off" survives when off is still
+// reachable; anything else lands on the model's default tier. It returns '' when
+// the model has no thinking concept, meaning the caller should clear the value.
+//
+// This mirrors reasoning.ReconcileStored in the Go backend, which owns the same
+// policy for the /reasoning command. It is a migration rule rather than a
+// capability derivation: every input it reads was decided server-side.
+export function reconcileStoredEffort(stored: string, options?: ReasoningOptions | null): string {
+  if (!options?.supported) return ''
+  const tiers = options.efforts ?? []
+  if (!options.can_disable && tiers.length === 0) {
+    // Always-on models expose no selection to migrate to. Keep the preference
+    // dormant so switching back restores it and the settings autosave does not
+    // oscillate between an empty local value and the stored server value.
+    return stored === REASONING_EFFORT_LEGACY_OFF ? REASONING_EFFORT_DISABLE : stored
+  }
+  const fallback = options.default_effort ?? ''
+  // Both spellings of off are honoured: rows written before the two tokens were
+  // unified still say "none", and they describe the same state.
+  if (stored === REASONING_EFFORT_DISABLE || stored === REASONING_EFFORT_LEGACY_OFF) {
+    return options.can_disable ? REASONING_EFFORT_DISABLE : fallback
+  }
+  return tiers.includes(stored) ? stored : fallback
 }

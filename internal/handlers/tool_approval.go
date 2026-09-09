@@ -4,17 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/accounts"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 type ToolApprovalHandler struct {
@@ -29,8 +32,13 @@ type toolApprovalResponder interface {
 }
 
 type ToolApprovalDecisionRequest struct {
+	// ControlID is the stable identity of one client mutation. New clients send
+	// it for exact retries; it remains optional for older Web/Desktop clients.
 	ControlID string `json:"control_id,omitempty"`
-	Reason    string `json:"reason,omitempty"`
+	// OptionID selects one of the agent-provided permission options carried on
+	// the approval request; empty keeps the plain binary decision.
+	OptionID string `json:"option_id,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 func NewToolApprovalHandler(log *slog.Logger, botService *bots.Service, accountService *accounts.Service, turnService turn.Service) *ToolApprovalHandler {
@@ -55,9 +63,11 @@ func (h *ToolApprovalHandler) Register(e *echo.Echo) {
 // @Param approval_id path string true "Approval ID"
 // @Param payload body ToolApprovalDecisionRequest false "Approval payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/tool-approvals/{approval_id}/approve [post].
 func (h *ToolApprovalHandler) Approve(c echo.Context) error {
 	return h.respond(c, "approve")
@@ -70,9 +80,11 @@ func (h *ToolApprovalHandler) Approve(c echo.Context) error {
 // @Param approval_id path string true "Approval ID"
 // @Param payload body ToolApprovalDecisionRequest false "Rejection payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/tool-approvals/{approval_id}/reject [post].
 func (h *ToolApprovalHandler) Reject(c echo.Context) error {
 	return h.respond(c, "reject")
@@ -86,17 +98,21 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
 	approvalID := strings.TrimSpace(c.Param("approval_id"))
 	if botID == "" || approvalID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and approval_id are required")
+		return apperror.New(apperror.CodeToolApprovalRequestInvalid, nil)
 	}
 	var req ToolApprovalDecisionRequest
-	_ = c.Bind(&req)
+	if err := c.Bind(&req); err != nil && !errors.Is(err, io.EOF) {
+		return apperror.Wrap(apperror.CodeToolApprovalRequestInvalid, err, nil)
+	}
+	controlID := strings.TrimSpace(req.ControlID)
 	if err := h.turnService.RespondToolApproval(context.WithoutCancel(c.Request().Context()), turn.ToolApprovalResponse{
-		ControlID:              strings.TrimSpace(req.ControlID),
+		ControlID:              controlID,
 		BotID:                  botID,
 		ActorChannelIdentityID: actorUserID,
 		ActorUserID:            actorUserID,
 		ApprovalID:             approvalID,
 		Decision:               decision,
+		OptionID:               req.OptionID,
 		Reason:                 strings.TrimSpace(req.Reason),
 	}, nil); err != nil {
 		return toolApprovalHTTPError(err)
@@ -104,15 +120,26 @@ func (h *ToolApprovalHandler) respond(c echo.Context, decision string) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": decision})
 }
 
-func toolApprovalHTTPError(err error) *echo.HTTPError {
+func toolApprovalHTTPError(err error) error {
+	if err == nil || apperror.CodeOf(err) != "" {
+		return err
+	}
 	switch {
 	case errors.Is(err, toolapproval.ErrForbidden):
-		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		return apperror.New(apperror.CodeToolApprovalForbidden, nil)
 	case errors.Is(err, toolapproval.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
-	case errors.Is(err, toolapproval.ErrAlreadyDecided), errors.Is(err, toolapproval.ErrAmbiguous):
-		return echo.NewHTTPError(http.StatusConflict, err.Error())
+		return apperror.New(apperror.CodeToolApprovalNotFound, nil)
+	case errors.Is(err, toolapproval.ErrAlreadyDecided):
+		return apperror.New(apperror.CodeToolApprovalExpired, nil)
+	case errors.Is(err, toolapproval.ErrAmbiguous):
+		return apperror.New(apperror.CodeToolApprovalAmbiguous, nil)
+	case errors.Is(err, toolapproval.ErrOptionUnavailable):
+		return apperror.Wrap(apperror.CodeToolApprovalRequestInvalid, err, nil)
+	case errors.Is(err, sessionruntime.ErrCommandPayloadConflict):
+		// Reusing one control identity for a different mutation is a malformed
+		// idempotency request, not an infrastructure failure.
+		return apperror.Wrap(apperror.CodeToolApprovalRequestInvalid, err, nil)
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return apperror.Wrap(apperror.CodeToolApprovalOperationFailed, err, nil)
 	}
 }

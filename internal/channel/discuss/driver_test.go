@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	agentevent "github.com/memohai/memoh/internal/agent/event"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/channel"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	agentevent "github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/channel"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 func TestExtractNewImageRefs(t *testing.T) {
@@ -255,6 +255,51 @@ func TestHandleReplyWithTurn_ACPDoesNotAdvanceCursorOnRuntimeError(t *testing.T)
 	}
 }
 
+func TestHandleReplyWithTurn_NativeDoesNotAdvanceCursorOnFailedTurn(t *testing.T) {
+	rc := timeline.RenderedContext{
+		{
+			ReceivedAtMs: 200,
+			MentionsMe:   true,
+			Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">please inspect the app</message>`}},
+		},
+	}
+	svc := &fakeTurnService{streamErr: errors.New("context.protected_overflow")}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{
+		config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
+	}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if svc.calls != 1 {
+		t.Fatalf("StartTurn calls = %d, want 1", svc.calls)
+	}
+	if sess.lastProcessed != (timeline.DiscussCursorPosition{}) {
+		t.Fatalf("lastProcessed = %+v, want zero when the native turn fails", sess.lastProcessed)
+	}
+}
+
+func TestHandleReplyWithTurn_NativeAdvancesCursorAfterRecoveredRetry(t *testing.T) {
+	rc := timeline.RenderedContext{
+		{
+			ReceivedAtMs: 200,
+			MentionsMe:   true,
+			Content:      []timeline.RenderedContentPiece{{Type: "text", Text: `<message id="1">please inspect the app</message>`}},
+		},
+	}
+	svc := &fakeTurnService{midStreamError: true}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{
+		config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"},
+	}
+
+	driver.handleReplyWithTurn(context.Background(), sess, rc, driver.logger, svc)
+
+	if sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("lastProcessed = %+v, want the recovered turn to commit its cursor", sess.lastProcessed)
+	}
+}
+
 func TestHandleReplyWithTurn_ACPSkipsRuntimeForPassiveMessage(t *testing.T) {
 	// Passive group chatter that does not address the bot must NOT spin up the
 	// external ACP runtime, but the consumed cursor must still advance so the
@@ -481,12 +526,17 @@ func TestAgentEventToChannelEventMapsACPDecisionRequests(t *testing.T) {
 // a run-resolved event first, then either a skip marker (ACP participation
 // gate) or a terminal agent event stream.
 type fakeTurnService struct {
-	runtimeType string // empty means the native model runtime
-	startErr    error
-	streamErr   error
-	onStart     func(turn.StartTurnCommand)
-	calls       int
-	lastCmd     turn.StartTurnCommand
+	runtimeType    string // empty means the native model runtime
+	startErr       error
+	streamErr      error
+	midStreamError bool // emit a recovered Error event before the clean AgentEnd
+	onStart        func(turn.StartTurnCommand)
+	calls          int
+	lastCmd        turn.StartTurnCommand
+	// recomposeRuns makes the first N StartTurn calls end with a
+	// DiscussEventRecompose instead of a model stream, emulating the
+	// pre-turn synchronous compaction backstop.
+	recomposeRuns int
 }
 
 func (f *fakeTurnService) StartTurn(_ context.Context, cmd turn.StartTurnCommand) (turn.RunHandle, error) {
@@ -502,6 +552,7 @@ func (f *fakeTurnService) StartTurn(_ context.Context, cmd turn.StartTurnCommand
 	if runtimeType == "" {
 		runtimeType = "native"
 	}
+	recompose := f.calls <= f.recomposeRuns
 	h := &fakeRunHandle{events: make(chan turn.Event, 8), errs: make(chan error, 1)}
 	go func() {
 		defer close(h.events)
@@ -517,9 +568,17 @@ func (f *fakeTurnService) StartTurn(_ context.Context, cmd turn.StartTurnCommand
 			emit(turn.DiscussEventSkipped, nil)
 			return
 		}
+		if recompose {
+			emit(turn.DiscussEventRecompose, nil)
+			return
+		}
 		if f.streamErr != nil {
 			h.errs <- f.streamErr
 			return
+		}
+		if f.midStreamError {
+			retryable, _ := json.Marshal(agentevent.StreamEvent{Type: agentevent.Error, Error: "upstream 429"})
+			emit(string(agentevent.Error), retryable)
 		}
 		end, _ := json.Marshal(agentevent.StreamEvent{Type: agentevent.AgentEnd})
 		emit(string(agentevent.AgentEnd), end)

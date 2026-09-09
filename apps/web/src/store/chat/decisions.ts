@@ -34,7 +34,9 @@ export interface ChatDecisionDeps {
   normalizeTarget: (target?: ChatViewTarget) => ChatViewTarget
   transcriptForTarget: (target?: ChatViewTarget) => Transcript
   currentRun: (sessionId: string) => RuntimeCurrentRunView | null
-  ensureConnected: (botId: string) => boolean
+  // True when a socket handle exists for the bot; messages queue until open,
+  // so this is not limited to fully-connected sockets.
+  ensureWebSocket: (botId: string) => boolean
   send: (botId: string, message: WSClientMessage) => boolean
   createControlId: () => string
   connectionLostMessage: () => string
@@ -154,6 +156,8 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
     approval: UIToolApproval,
     decision: 'approve' | 'reject',
     target?: ChatViewTarget,
+    optionId?: string,
+    reason?: string,
   ): Promise<boolean> {
     const viewTarget = deps.normalizeTarget(target)
     const botId = viewTarget.botId.trim()
@@ -162,7 +166,7 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
     const run = deps.currentRun(sessionId)
     if (!botId || !sessionId || !decisionId || !run) return false
     if (approval.status !== 'pending' || approval.can_approve === false) return false
-    if (!deps.ensureConnected(botId)) {
+    if (!deps.ensureWebSocket(botId)) {
       deps.showError(deps.connectionLostMessage())
       return false
     }
@@ -196,7 +200,8 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
         decision_id: decisionId,
         control_id: controlId,
         decision,
-        reason: undefined,
+        option_id: optionId,
+        reason: reason?.trim() || undefined,
       })) throw new Error('WebSocket is not connected')
     } catch (error) {
       finish(controlId, true)
@@ -218,7 +223,7 @@ export function createChatDecisions(deps: ChatDecisionDeps) {
     const run = deps.currentRun(sessionId)
     if (!botId || !sessionId || !decisionId || !run) return
     if (userInput.status !== 'pending' || userInput.can_respond === false) return
-    if (!deps.ensureConnected(botId)) {
+    if (!deps.ensureWebSocket(botId)) {
       deps.showError(deps.connectionLostMessage())
       return
     }

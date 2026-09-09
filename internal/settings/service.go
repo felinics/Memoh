@@ -12,27 +12,51 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/acl"
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	netctl "github.com/memohai/memoh/internal/network"
-	tzutil "github.com/memohai/memoh/internal/timezone"
+	"github.com/felinics/memoh/internal/acl"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	netctl "github.com/felinics/memoh/internal/network"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/runtimekind"
+	tzutil "github.com/felinics/memoh/internal/timezone"
 )
 
+type ReasoningOptionsResolver interface {
+	ResolveReasoningOptions(context.Context, string) (reasoning.Options, error)
+}
+
 type Service struct {
-	queries dbstore.Queries
-	acl     *acl.Service
-	network *netctl.Service
-	logger  *slog.Logger
+	queries           dbstore.Queries
+	acl               *acl.Service
+	network           *netctl.Service
+	reasoningResolver ReasoningOptionsResolver
+	botAgents         *botagents.Service
+	logger            *slog.Logger
+}
+
+type defaultAgentTransactionalQueries interface {
+	SupportsTransactions() bool
+	InTx(context.Context, func(dbstore.Queries) error) error
 }
 
 var (
-	ErrModelIDAmbiguous = errors.New("model_id is ambiguous across providers")
-	ErrInvalidModelRef  = errors.New("invalid model reference")
+	ErrModelIDAmbiguous            = errors.New("model_id is ambiguous across providers")
+	ErrInvalidModelRef             = errors.New("invalid model reference")
+	ErrReasoningOptionsUnavailable = errors.New("reasoning options unavailable")
 )
+
+type InvalidReasoningEffortError struct {
+	Effort  string
+	Options reasoning.Options
+}
+
+func (e *InvalidReasoningEffortError) Error() string {
+	return fmt.Sprintf("reasoning effort %q is not supported by the chat model", e.Effort)
+}
 
 func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Service, networkService *netctl.Service) *Service {
 	return &Service{
@@ -41,6 +65,14 @@ func NewService(log *slog.Logger, queries dbstore.Queries, aclService *acl.Servi
 		network: networkService,
 		logger:  log.With(slog.String("service", "settings")),
 	}
+}
+
+func (s *Service) SetReasoningOptionsResolver(resolver ReasoningOptionsResolver) {
+	s.reasoningResolver = resolver
+}
+
+func (s *Service) SetBotAgents(service *botagents.Service) {
+	s.botAgents = service
 }
 
 func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
@@ -105,7 +137,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.HeartbeatEnabled, botRow.HeartbeatInterval, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
+	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
 	// A read error here must abort: falling through would leave `current` at the
 	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
 	// its agent id) on the next save. ErrNoRows is impossible because the bot
@@ -118,6 +150,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	} else {
 		existingSettings := normalizeBotSettingsReadRow(settingsRow)
 		current.ChatModelID = existingSettings.ChatModelID
+		current.DefaultBotAgentID = existingSettings.DefaultBotAgentID
 		current.ChatRuntime = existingSettings.ChatRuntime
 		current.ChatACPAgentID = existingSettings.ChatACPAgentID
 		current.ChatACPProjectPath = existingSettings.ChatACPProjectPath
@@ -140,15 +173,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if effect := strings.TrimSpace(req.AclDefaultEffect); effect != "" {
 		current.AclDefaultEffect = effect
-	}
-	if req.ReasoningEffort != nil && isValidReasoningEffort(*req.ReasoningEffort) {
-		current.ReasoningEffort = *req.ReasoningEffort
-	}
-	if req.HeartbeatEnabled != nil {
-		current.HeartbeatEnabled = *req.HeartbeatEnabled
-	}
-	if req.HeartbeatInterval != nil && *req.HeartbeatInterval > 0 {
-		current.HeartbeatInterval = *req.HeartbeatInterval
 	}
 	if req.CompactionEnabled != nil {
 		current.CompactionEnabled = *req.CompactionEnabled
@@ -176,11 +200,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.ChatRuntime != nil {
 		current.ChatRuntime = normalizeChatRuntime(*req.ChatRuntime)
 		if current.ChatRuntime == "" {
-			return Settings{}, acpfeedback.New(
-				acpfeedback.CodeInvalidChatRuntime,
+			return Settings{}, agentfeedback.New(
+				agentfeedback.CodeInvalidChatRuntime,
 				"invalid_chat_runtime",
 				400,
-				"chat.acp.invalidChatRuntime",
+				"chat.externalAgent.invalidChatRuntime",
 				"invalid chat_runtime",
 				nil,
 			)
@@ -195,15 +219,58 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.ChatACPProjectMode != nil {
 		current.ChatACPProjectMode = normalizeACPProjectMode(*req.ChatACPProjectMode)
 		if current.ChatACPProjectMode == "" {
-			return Settings{}, acpfeedback.New(
-				acpfeedback.CodeProjectModeInvalid,
+			return Settings{}, agentfeedback.New(
+				agentfeedback.CodeProjectModeInvalid,
 				"invalid_project_mode",
 				400,
-				"chat.acp.projectModeInvalid",
+				"chat.externalAgent.projectModeInvalid",
 				"invalid chat_acp_project_mode",
 				map[string]string{"project_mode": strings.TrimSpace(*req.ChatACPProjectMode)},
 			)
 		}
+	}
+	defaultBotAgentIDSet := req.DefaultBotAgentID != nil
+	if req.DefaultBotAgentID != nil {
+		current.DefaultBotAgentID = strings.TrimSpace(*req.DefaultBotAgentID)
+	} else if req.ChatRuntime != nil && current.ChatRuntime == ChatRuntimeModel {
+		// Legacy Web/Desktop clients know only chat_runtime. An explicit switch
+		// to Native must therefore clear a migrated Agent binding even when the
+		// newer default_bot_agent_id field is absent from their request.
+		current.DefaultBotAgentID = ""
+		defaultBotAgentIDSet = true
+	}
+	if req.DefaultBotAgentID != nil && current.DefaultBotAgentID != "" {
+		if s.botAgents == nil {
+			return Settings{}, errors.New("bot agent service not configured")
+		}
+		agent, err := s.botAgents.GetActive(ctx, botID, current.DefaultBotAgentID)
+		if err != nil {
+			return Settings{}, err
+		}
+		descriptor, err := botagents.DescriptorFor(agent)
+		if err != nil {
+			return Settings{}, err
+		}
+		switch descriptor.Runtime {
+		case botagents.RuntimeACP:
+			if err := s.botAgents.ValidateConfiguration(ctx, agent, normalizeJSONObject(botRow.Metadata)); err != nil {
+				return Settings{}, err
+			}
+			current.ChatRuntime = ChatRuntimeACPAgent
+			current.ChatACPAgentID = descriptor.Provider
+		case botagents.RuntimeCodex, botagents.RuntimeClaudeCode:
+			// The stored default names the real runtime; direct agents need
+			// no ACP agent id (their identity IS the runtime).
+			current.ChatRuntime = descriptor.Runtime
+			current.ChatACPAgentID = ""
+		default:
+			return Settings{}, botagents.ErrInvalidRuntime
+		}
+	} else if defaultBotAgentIDSet {
+		// Native is the built-in singleton and is represented by a NULL foreign
+		// key rather than a synthetic bot_agents row.
+		current.ChatRuntime = ChatRuntimeModel
+		current.ChatACPAgentID = ""
 	}
 	timezoneValue := pgtype.Text{}
 	if req.Timezone != nil {
@@ -238,16 +305,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			current.ChatModelID = ""
 		}
 	}
-	heartbeatModelUUID := pgtype.UUID{}
-	heartbeatModelIDSet := req.HeartbeatModelID != nil
-	if req.HeartbeatModelID != nil {
-		if value := strings.TrimSpace(*req.HeartbeatModelID); value != "" {
-			modelID, err := s.resolveModelUUID(ctx, value)
-			if err != nil {
-				return Settings{}, err
-			}
-			heartbeatModelUUID = modelID
-		}
+	if err := s.applyReasoningPolicy(ctx, &current, req); err != nil {
+		return Settings{}, err
 	}
 	compactionModelUUID := pgtype.UUID{}
 	compactionModelIDSet := req.CompactionModelID != nil
@@ -373,27 +432,24 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, rollbackNetworkChange(fmt.Errorf("marshal network config: %w", err))
 	}
-	updated, err := s.queries.UpsertBotSettings(ctx, sqlc.UpsertBotSettingsParams{
+	upsertParams := sqlc.UpsertBotSettingsParams{
 		ID:                         pgID,
 		Timezone:                   timezoneValue,
 		Language:                   current.Language,
 		CommandUiLanguage:          current.CommandUILanguage,
 		ReasoningEffort:            current.ReasoningEffort,
-		HeartbeatEnabled:           current.HeartbeatEnabled,
-		HeartbeatInterval:          int32(current.HeartbeatInterval), //nolint:gosec // bounded by positive-only setter above
-		HeartbeatPrompt:            "",
 		CompactionEnabled:          current.CompactionEnabled,
 		CompactionThreshold:        int32(current.CompactionThreshold), //nolint:gosec // bounded by non-negative setter above
 		CompactionTargetPercentSet: compactionTargetPercentSet,
 		CompactionTargetPercent:    nullableCompactionTargetPercent(current.CompactionTargetPercent),
 		ChatModelID:                chatModelUUID,
 		ChatModelIDSet:             chatModelIDSet,
+		DefaultBotAgentID:          db.ParseUUIDOrEmpty(current.DefaultBotAgentID),
+		DefaultBotAgentIDSet:       defaultBotAgentIDSet,
 		ChatRuntime:                current.ChatRuntime,
 		ChatAcpAgentID:             nullableText(current.ChatACPAgentID),
 		ChatAcpProjectPath:         current.ChatACPProjectPath,
 		ChatAcpProjectMode:         current.ChatACPProjectMode,
-		HeartbeatModelID:           heartbeatModelUUID,
-		HeartbeatModelIDSet:        heartbeatModelIDSet,
 		CompactionModelIDSet:       compactionModelIDSet,
 		CompactionModelID:          compactionModelUUID,
 		ImageModelID:               imageModelUUID,
@@ -417,7 +473,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		OverlayProvider:            normalizedNetwork.OverlayProvider,
 		OverlayEnabled:             normalizedNetwork.OverlayEnabled,
 		OverlayConfig:              overlayConfigJSON,
-	})
+	}
+	updated, err := s.upsertBotSettings(ctx, upsertParams)
 	if err != nil {
 		return Settings{}, rollbackNetworkChange(err)
 	}
@@ -434,6 +491,47 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	return settings, nil
 }
 
+// upsertBotSettings serializes default-Agent changes with Agent availability
+// changes. The active recheck intentionally runs after the parent bot lock in
+// a separate statement, so READ COMMITTED observes a disable/delete that won
+// the lock before this assignment. Query-only test doubles retain the direct
+// path used by existing unit tests.
+func (s *Service) upsertBotSettings(ctx context.Context, params sqlc.UpsertBotSettingsParams) (sqlc.UpsertBotSettingsRow, error) {
+	if !params.DefaultBotAgentIDSet {
+		return s.queries.UpsertBotSettings(ctx, params)
+	}
+	txer, ok := s.queries.(defaultAgentTransactionalQueries)
+	if !ok || !txer.SupportsTransactions() {
+		return s.queries.UpsertBotSettings(ctx, params)
+	}
+
+	var updated sqlc.UpsertBotSettingsRow
+	err := txer.InTx(ctx, func(q dbstore.Queries) error {
+		if _, err := q.LockBotForAgentMutation(ctx, params.ID); err != nil {
+			return err
+		}
+		if params.DefaultBotAgentID.Valid {
+			agent, err := q.GetBotAgentByID(ctx, sqlc.GetBotAgentByIDParams{
+				BotID: params.ID,
+				ID:    params.DefaultBotAgentID,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return botagents.ErrUnavailable
+			}
+			if err != nil {
+				return err
+			}
+			if !agent.Enabled || agent.DeletedAt.Valid {
+				return botagents.ErrUnavailable
+			}
+		}
+		var err error
+		updated, err = q.UpsertBotSettings(ctx, params)
+		return err
+	})
+	return updated, err
+}
+
 func (s *Service) Delete(ctx context.Context, botID string) error {
 	if s.queries == nil {
 		return errors.New("settings queries not configured")
@@ -448,14 +546,12 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, heartbeatEnabled bool, heartbeatInterval int32, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
+func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
 	settings := Settings{
 		Language:                strings.TrimSpace(language),
 		CommandUILanguage:       strings.TrimSpace(commandUILanguage),
 		AclDefaultEffect:        strings.TrimSpace(aclDefaultEffect),
 		ReasoningEffort:         strings.TrimSpace(reasoningEffort),
-		HeartbeatEnabled:        heartbeatEnabled,
-		HeartbeatInterval:       int(heartbeatInterval),
 		CompactionEnabled:       compactionEnabled,
 		CompactionThreshold:     int(compactionThreshold),
 		CompactionTargetPercent: normalizeCompactionTargetPercent(compactionTargetPercent),
@@ -473,11 +569,8 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 	if settings.AclDefaultEffect == "" {
 		settings.AclDefaultEffect = "allow"
 	}
-	if !isValidReasoningEffort(settings.ReasoningEffort) {
+	if !hasReasoningEffortValue(settings.ReasoningEffort) {
 		settings.ReasoningEffort = DefaultReasoningEffort
-	}
-	if settings.HeartbeatInterval <= 0 {
-		settings.HeartbeatInterval = DefaultHeartbeatInterval
 	}
 	if settings.CompactionThreshold < 0 {
 		settings.CompactionThreshold = 0
@@ -518,8 +611,70 @@ func nullableCompactionTargetPercent(value *int) pgtype.Int4 {
 // free-form tier string (models expose their own supported levels via capability
 // discovery), so we only reject empty/whitespace values here; the specific tiers
 // a given model accepts are enforced upstream, not by this generic setting.
-func isValidReasoningEffort(effort string) bool {
+func hasReasoningEffortValue(effort string) bool {
 	return strings.TrimSpace(effort) != ""
+}
+
+func (s *Service) applyReasoningPolicy(ctx context.Context, current *Settings, req UpsertRequest) error {
+	requestedSet := req.ReasoningEffort != nil && hasReasoningEffortValue(*req.ReasoningEffort)
+	if !requestedSet && req.ChatModelID == nil {
+		return nil
+	}
+
+	requested := ""
+	if requestedSet {
+		requested = normalizeDormantReasoningEffort(*req.ReasoningEffort)
+	}
+	if strings.TrimSpace(current.ChatModelID) == "" {
+		if requestedSet {
+			current.ReasoningEffort = requested
+		}
+		return nil
+	}
+	if s.reasoningResolver == nil {
+		return fmt.Errorf("%w: resolver not configured", ErrReasoningOptionsUnavailable)
+	}
+
+	opts, err := s.reasoningResolver.ResolveReasoningOptions(ctx, current.ChatModelID)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrReasoningOptionsUnavailable, err)
+	}
+	// A model without a reasoning concept keeps the dormant preference. This
+	// preserves import/create behavior and lets a later switch back to a reasoning
+	// model reconcile the value against that model's real options.
+	if !opts.Supported {
+		if requestedSet {
+			current.ReasoningEffort = requested
+		}
+		return nil
+	}
+	if requestedSet {
+		normalized, ok := reasoning.NormalizeSelection(requested, opts)
+		if !ok {
+			// Full model-setting payloads (create/import and the web model picker)
+			// may carry a preference from the previous model. Reconcile that stale
+			// value in the same write; effort-only requests are explicit choices and
+			// receive a validation error instead.
+			if req.ChatModelID != nil {
+				current.ReasoningEffort = reasoning.ReconcileStored(requested, opts)
+				return nil
+			}
+			return &InvalidReasoningEffortError{Effort: requested, Options: opts}
+		}
+		current.ReasoningEffort = normalized
+		return nil
+	}
+
+	current.ReasoningEffort = reasoning.ReconcileStored(current.ReasoningEffort, opts)
+	return nil
+}
+
+func normalizeDormantReasoningEffort(effort string) string {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "off" || reasoning.IsDisabled(effort) {
+		return reasoning.EffortDisable
+	}
+	return effort
 }
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
@@ -527,18 +682,16 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
-		row.HeartbeatEnabled,
-		row.HeartbeatInterval,
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
+		row.DefaultBotAgentID,
 		row.ChatRuntime,
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
-		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
@@ -562,18 +715,16 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
-		row.HeartbeatEnabled,
-		row.HeartbeatInterval,
 		row.CompactionEnabled,
 		row.CompactionThreshold,
 		row.CompactionTargetPercent,
 		row.Timezone,
 		row.ChatModelID,
+		row.DefaultBotAgentID,
 		row.ChatRuntime,
 		row.ChatAcpAgentID,
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
-		row.HeartbeatModelID,
 		row.CompactionModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
@@ -596,18 +747,16 @@ func normalizeBotSettingsFields(
 	language string,
 	commandUILanguage string,
 	reasoningEffort string,
-	heartbeatEnabled bool,
-	heartbeatInterval int32,
 	compactionEnabled bool,
 	compactionThreshold int32,
 	compactionTargetPercent pgtype.Int4,
 	timezone pgtype.Text,
 	chatModelID pgtype.UUID,
+	defaultBotAgentID pgtype.UUID,
 	chatRuntime string,
 	chatACPAgentID pgtype.Text,
 	chatACPProjectPath string,
 	chatACPProjectMode string,
-	heartbeatModelID pgtype.UUID,
 	compactionModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
@@ -624,12 +773,15 @@ func normalizeBotSettingsFields(
 	overlayEnabled bool,
 	overlayConfig []byte,
 ) Settings {
-	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, heartbeatEnabled, heartbeatInterval, compactionEnabled, compactionThreshold, compactionTargetPercent)
+	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, compactionEnabled, compactionThreshold, compactionTargetPercent)
 	if timezone.Valid {
 		settings.Timezone = timezone.String
 	}
 	if chatModelID.Valid {
 		settings.ChatModelID = uuid.UUID(chatModelID.Bytes).String()
+	}
+	if defaultBotAgentID.Valid {
+		settings.DefaultBotAgentID = uuid.UUID(defaultBotAgentID.Bytes).String()
 	}
 	settings.ChatRuntime = normalizeChatRuntimeValue(chatRuntime)
 	if settings.ChatRuntime == "" {
@@ -638,6 +790,13 @@ func normalizeBotSettingsFields(
 	if chatACPAgentID.Valid {
 		settings.ChatACPAgentID = acpprofile.NormalizeAgentID(chatACPAgentID.String)
 	}
+	// A stored borrowed-shape row (pre-cutover data reached outside the
+	// migration path) is projected as its real runtime, so readers only ever
+	// see the retired shape's meaning, never its encoding.
+	if settings.ChatRuntime == ChatRuntimeACPAgent && runtimekind.IsDirect(settings.ChatACPAgentID) {
+		settings.ChatRuntime = settings.ChatACPAgentID
+		settings.ChatACPAgentID = ""
+	}
 	settings.ChatACPProjectPath = strings.TrimSpace(chatACPProjectPath)
 	if settings.ChatACPProjectPath == "" {
 		settings.ChatACPProjectPath = DefaultACPProjectPath
@@ -645,9 +804,6 @@ func normalizeBotSettingsFields(
 	settings.ChatACPProjectMode = normalizeACPProjectMode(chatACPProjectMode)
 	if settings.ChatACPProjectMode == "" {
 		settings.ChatACPProjectMode = DefaultACPProjectMode
-	}
-	if heartbeatModelID.Valid {
-		settings.HeartbeatModelID = uuid.UUID(heartbeatModelID.Bytes).String()
 	}
 	if compactionModelID.Valid {
 		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()
@@ -706,14 +862,14 @@ func normalizeJSONObject(raw []byte) map[string]any {
 }
 
 func normalizeChatRuntime(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", ChatRuntimeModel:
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
 		return ChatRuntimeModel
-	case ChatRuntimeACPAgent:
-		return ChatRuntimeACPAgent
-	default:
-		return ""
 	}
+	if kind, ok := runtimekind.Normalize(raw); ok {
+		return string(kind)
+	}
+	return ""
 }
 
 func normalizeChatRuntimeValue(raw string) string {
@@ -745,6 +901,13 @@ func nullableText(value string) pgtype.Text {
 func normalizeChatRuntimeFields(current Settings) Settings {
 	current.ChatRuntime = normalizeChatRuntimeValue(current.ChatRuntime)
 	current.ChatACPAgentID = acpprofile.NormalizeAgentID(current.ChatACPAgentID)
+	// Pre-cutover writers (imported backups, stale clients) still express a
+	// direct default as acp_agent plus a direct agent id. Converge to the
+	// real runtime here so the borrowed shape never re-enters the database.
+	if current.ChatRuntime == ChatRuntimeACPAgent && runtimekind.IsDirect(current.ChatACPAgentID) {
+		current.ChatRuntime = current.ChatACPAgentID
+		current.ChatACPAgentID = ""
+	}
 	current.ChatACPProjectPath = strings.TrimSpace(current.ChatACPProjectPath)
 	if current.ChatACPProjectPath == "" {
 		current.ChatACPProjectPath = DefaultACPProjectPath
@@ -758,47 +921,52 @@ func normalizeChatRuntimeFields(current Settings) Settings {
 
 func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	current = normalizeChatRuntimeFields(current)
+	if strings.TrimSpace(current.DefaultBotAgentID) != "" {
+		// The BotAgent path validates availability and shared provider config
+		// before this compatibility validator is reached.
+		return nil
+	}
 	if current.ChatRuntime != ChatRuntimeACPAgent {
 		return nil
 	}
 	agentID := acpprofile.NormalizeAgentID(current.ChatACPAgentID)
 	if agentID == "" {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_agent_id",
 			400,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			"chat_acp_agent_id is required when chat_runtime is acp_agent",
 			nil,
 		)
 	}
 	if current.ChatACPProjectMode == "none" {
-		return acpfeedback.New(
-			acpfeedback.CodeProjectModeInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectModeInvalid,
 			"none_not_supported_for_default_chat",
 			400,
-			"chat.acp.projectModeInvalid",
+			"chat.externalAgent.projectModeInvalid",
 			"chat_acp_project_mode=none is not supported for default chat runtime",
 			map[string]string{"agent_id": agentID, "project_mode": current.ChatACPProjectMode},
 		)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(current.ChatACPProjectPath), "/") {
-		return acpfeedback.New(
-			acpfeedback.CodeProjectPathInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectPathInvalid,
 			"project_path_must_be_absolute",
 			400,
-			"chat.acp.projectPathInvalid",
+			"chat.externalAgent.projectPathInvalid",
 			"chat_acp_project_path must be absolute",
 			map[string]string{"agent_id": agentID},
 		)
 	}
 	profile, ok := acpprofile.Lookup(agentID)
 	if !ok {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotFound,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotFound,
 			"unknown_agent",
 			400,
-			"chat.acp.agentNotFound",
+			"chat.externalAgent.agentNotFound",
 			fmt.Sprintf("unknown ACP agent %q", agentID),
 			map[string]string{"agent_id": agentID, "agent_name": agentID},
 		)
@@ -806,21 +974,21 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	metadata := normalizeJSONObject(botMetadata)
 	setup := acpprofile.ParseAgentSetup(metadata, agentID)
 	if !setup.Enabled {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotEnabled,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotEnabled,
 			"agent_disabled",
 			400,
-			"chat.acp.agentNotEnabled",
+			"chat.externalAgent.agentNotEnabled",
 			fmt.Sprintf("ACP agent %q is not enabled for this bot", agentID),
 			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName},
 		)
 	}
 	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_"+acpprofile.NormalizeAgentID(field.ID),
 			400,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			fmt.Sprintf("ACP agent %q is missing required field %q", agentID, field.ID),
 			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName, "field_id": field.ID, "field_label": field.Label},
 		)

@@ -39,3 +39,17 @@ func TestMemoryStatusIncludesConfiguredPgvectorHealth(t *testing.T) {
 		t.Fatalf("configured pgvector health should be present, got %s", payload)
 	}
 }
+
+func TestMemoryItemJSONOmitsInternalSourceMessageIDs(t *testing.T) {
+	raw, err := json.Marshal(MemoryItem{
+		ID:               "memory-1",
+		Memory:           "shared fact",
+		SourceMessageIDs: []string{"session-private/message-private"},
+	})
+	if err != nil {
+		t.Fatalf("marshal memory item: %v", err)
+	}
+	if strings.Contains(string(raw), "source_message_ids") || strings.Contains(string(raw), "session-private") {
+		t.Fatalf("public memory JSON leaked internal provenance: %s", raw)
+	}
+}

@@ -15,16 +15,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
@@ -38,7 +38,7 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 			ownerID: ownerID,
 			botID:   botID,
 		}))),
-		acpWorkspace: &createBotStreamWorkspace{},
+		workspaceSetup: &createBotStreamWorkspace{},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -129,7 +129,7 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 			ownerID: ownerID,
 			botID:   botID,
 		}))),
-		acpWorkspace: &createBotStreamWorkspace{events: []workspace.ContainerSetupEvent{
+		workspaceSetup: &createBotStreamWorkspace{events: []workspace.ContainerSetupEvent{
 			{Type: "pulling", Image: "debian:bookworm-slim"},
 			{Type: "pull_progress", Layers: []ctr.LayerStatus{{Ref: "layer-1", Offset: 10, Total: 100}}},
 			{Type: "creating"},
@@ -197,10 +197,10 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	}
 
 	handler := &UsersHandler{
-		logger:       slog.Default(),
-		service:      newTestCreateBotAccountService(ownerID),
-		botService:   bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
-		acpWorkspace: &createBotStreamWorkspace{err: errors.New("image pull failed")},
+		logger:         slog.Default(),
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{err: errors.New("image pull failed")},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -248,24 +248,24 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	}
 }
 
-func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T) {
+func TestCreateBotStreamReportsStableBootstrapErrorAndLeavesBotReady(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000108"
 	botID := "00000000-0000-0000-0000-000000000208"
 	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
 	setupErr := errors.Join(
-		workspace.ErrWorkspaceImageIncompatible,
-		errors.New("missing /opt/memoh/toolkit/bin/node"),
+		workspace.ErrWorkspaceTemplateBootstrapFailed,
+		errors.New("write /data/AGENTS.md: permission denied"),
 	)
 	handler := &UsersHandler{
-		logger:       slog.Default(),
-		service:      newTestCreateBotAccountService(ownerID),
-		botService:   bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
-		acpWorkspace: &createBotStreamWorkspace{err: setupErr},
+		logger:         slog.Default(),
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{err: setupErr},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
-		"name": "incompatible-workspace-bot",
-		"display_name": "Incompatible Workspace Bot",
+		"name": "bootstrap-failed-bot",
+		"display_name": "Bootstrap Failed Bot",
 		"acl_preset": "allow_all",
 		"wait_for_ready": true
 	}`))
@@ -282,73 +282,15 @@ func TestCreateBotStreamReportsStableContractErrorAndLeavesBotReady(t *testing.T
 	if last["type"] != "error" {
 		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
 	}
-	if last["code"] != string(apperror.CodeWorkspaceImageIncompatible) {
-		t.Fatalf("error code = %#v, want %q", last["code"], apperror.CodeWorkspaceImageIncompatible)
+	if last["code"] != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("error code = %#v, want %q", last["code"], apperror.CodeWorkspaceTemplateBootstrapFailed)
 	}
 	message, _ := last["message"].(string)
-	if strings.Contains(message, "/opt/memoh") {
+	if strings.Contains(message, "/data/AGENTS.md") {
 		t.Fatalf("private workspace path leaked in message %q", message)
 	}
 	if streamDB.status != bots.BotStatusReady {
 		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
-	}
-}
-
-func TestCreateBotStreamReportsACPConfigWriteError(t *testing.T) {
-	ownerID := "00000000-0000-0000-0000-000000000106"
-	botID := "00000000-0000-0000-0000-000000000206"
-	handler := &UsersHandler{
-		logger:  slog.Default(),
-		service: newTestCreateBotAccountService(ownerID),
-		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(&createBotStreamDB{
-			ownerID: ownerID,
-			botID:   botID,
-		}))),
-		acpWorkspace: &createBotStreamWorkspace{mcpErr: errors.New("bridge unavailable")},
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
-		"name": "hermes-stream-bot",
-		"display_name": "Hermes Stream Bot",
-		"acl_preset": "allow_all",
-		"wait_for_ready": true,
-		"metadata": {
-			"acp": {
-				"agents": {
-					"hermes": {
-						"enabled": true,
-						"setup_mode": "api_key",
-						"managed": {
-							"provider": "openrouter",
-							"model": "nousresearch/hermes",
-							"api_key": "secret-value"
-						}
-					}
-				}
-			}
-		}
-	}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(echo.HeaderAccept, "text/event-stream")
-	rec := httptest.NewRecorder()
-	ctx := testAuthContext(echo.New(), req, rec, ownerID)
-
-	if err := handler.CreateBot(ctx); err != nil {
-		t.Fatalf("CreateBot() error = %v", err)
-	}
-
-	events := decodeSSEEvents(t, rec.Body.String())
-	errorEvent, ok := findEventType(events, "error")
-	if !ok {
-		t.Fatalf("missing ACP config error event: %#v", events)
-	}
-	message, _ := errorEvent["message"].(string)
-	if !strings.Contains(message, "write ACP workspace config: bridge unavailable") {
-		t.Fatalf("error message = %q, want ACP config details", message)
-	}
-	last := events[len(events)-1]
-	if last["type"] != "ready" {
-		t.Fatalf("last event type = %#v, want ready after ACP config warning; events=%#v", last["type"], events)
 	}
 }
 
@@ -464,15 +406,6 @@ func newTestCreateBotAccountService(userID string) *accounts.Service {
 type createBotStreamWorkspace struct {
 	events []workspace.ContainerSetupEvent
 	err    error
-	mcpErr error
-}
-
-func (w *createBotStreamWorkspace) MCPClient(context.Context, string) (*bridge.Client, error) {
-	return nil, w.mcpErr
-}
-
-func (*createBotStreamWorkspace) WorkspaceInfo(context.Context, string) (bridge.WorkspaceInfo, error) {
-	return bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer}, nil
 }
 
 func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(_ context.Context, _ string, progress workspace.ContainerSetupProgress) error {
@@ -558,7 +491,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		metadata = []byte(`{}`)
 	}
 	return &createBotStreamRow{scanFunc: func(dest ...any) error {
-		if len(dest) < 19 {
+		if len(dest) < 16 {
 			return pgx.ErrNoRows
 		}
 		*dest[0].(*pgtype.UUID) = botID
@@ -574,22 +507,19 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[13].(*bool) = false
-		*dest[14].(*int32) = 30
-		*dest[15].(*string) = ""
-		if len(dest) == 19 {
-			*dest[16].(*[]byte) = append([]byte(nil), metadata...)
-			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+		if len(dest) == 16 {
+			*dest[13].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+			*dest[15].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			return nil
 		}
-		*dest[16].(*bool) = false
-		*dest[17].(*int32) = 200
-		*dest[18].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
-		*dest[19].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[20].(*[]byte) = append([]byte(nil), metadata...)
-		*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-		*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+		*dest[13].(*bool) = false
+		*dest[14].(*int32) = 200
+		*dest[15].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
+		*dest[16].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+		*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		return nil
 	}}
 }

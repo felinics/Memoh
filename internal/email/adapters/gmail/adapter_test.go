@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/oauthclients"
+	"github.com/felinics/memoh/internal/oauthclients"
 )
 
 type testOAuthResolver map[string]oauthclients.Client

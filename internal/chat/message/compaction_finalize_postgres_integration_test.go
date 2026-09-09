@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestPostgresCompactionCompletionWaitsForEpochMutation(t *testing.T) {

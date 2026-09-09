@@ -14,7 +14,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	mail "github.com/wneessen/go-mail"
 
-	"github.com/memohai/memoh/internal/email"
+	"github.com/felinics/memoh/internal/email"
 )
 
 const ProviderName email.ProviderName = "generic"

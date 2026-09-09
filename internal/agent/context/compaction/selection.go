@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 type CompactPolicy string

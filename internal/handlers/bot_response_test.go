@@ -3,8 +3,8 @@ package handlers
 import (
 	"testing"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/bots"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/bots"
 )
 
 func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
@@ -13,7 +13,7 @@ func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
 		Metadata: map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{
+					"codex": map[string]any{
 						"enabled": true,
 						"managed": map[string]any{
 							"api_key":  "sk-original-secret",
@@ -26,7 +26,7 @@ func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
 	}
 
 	resp := scrubBotForResponse(original)
-	setup := acpprofile.ParseAgentSetup(resp.Metadata, acpprofile.AgentCodexID)
+	setup := acpprofile.ParseAgentSetup(resp.Metadata, "codex")
 	if got := setup.Managed["api_key"]; got == "" || got == "sk-original-secret" {
 		t.Fatalf("scrubbed api_key = %q, want masked non-empty value", got)
 	}
@@ -34,7 +34,7 @@ func TestScrubBotForResponseMasksACPManagedSecrets(t *testing.T) {
 		t.Fatalf("base_url = %q, want non-sensitive value preserved", got)
 	}
 
-	originalSetup := acpprofile.ParseAgentSetup(original.Metadata, acpprofile.AgentCodexID)
+	originalSetup := acpprofile.ParseAgentSetup(original.Metadata, "codex")
 	if got := originalSetup.Managed["api_key"]; got != "sk-original-secret" {
 		t.Fatalf("original api_key = %q, want original metadata left untouched", got)
 	}
@@ -47,7 +47,7 @@ func TestScrubBotsForResponseScrubsEachItem(t *testing.T) {
 			Metadata: map[string]any{
 				acpprofile.MetadataKeyACP: map[string]any{
 					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{
+						"codex": map[string]any{
 							"managed": map[string]any{"api_key": "sk-one-secret"},
 						},
 					},
@@ -59,7 +59,7 @@ func TestScrubBotsForResponseScrubsEachItem(t *testing.T) {
 			Metadata: map[string]any{
 				acpprofile.MetadataKeyACP: map[string]any{
 					"agents": map[string]any{
-						acpprofile.AgentCodexID: map[string]any{
+						"codex": map[string]any{
 							"managed": map[string]any{"api_key": "sk-two-secret"},
 						},
 					},
@@ -73,7 +73,7 @@ func TestScrubBotsForResponseScrubsEachItem(t *testing.T) {
 		t.Fatalf("response len = %d, want %d", len(resp), len(items))
 	}
 	for _, item := range resp {
-		setup := acpprofile.ParseAgentSetup(item.Metadata, acpprofile.AgentCodexID)
+		setup := acpprofile.ParseAgentSetup(item.Metadata, "codex")
 		if got := setup.Managed["api_key"]; got == "" || got == "sk-one-secret" || got == "sk-two-secret" {
 			t.Fatalf("bot %s api_key = %q, want masked", item.ID, got)
 		}
@@ -86,7 +86,7 @@ func TestScrubBotForResponseRemovesWorkspaceSetupError(t *testing.T) {
 		Metadata: map[string]any{
 			"workspace": map[string]any{
 				"backend":               "container",
-				"image":                 "ghcr.io/memohai/workspace:latest",
+				"image":                 "ghcr.io/felinics/workspace:latest",
 				"last_setup_error":      map[string]any{"message": "pull failed"},
 				"skill_discovery_roots": []any{"/data/skills"},
 			},
@@ -104,7 +104,7 @@ func TestScrubBotForResponseRemovesWorkspaceSetupError(t *testing.T) {
 	if got := workspace["backend"]; got != "container" {
 		t.Fatalf("workspace backend = %#v, want container", got)
 	}
-	if got := workspace["image"]; got != "ghcr.io/memohai/workspace:latest" {
+	if got := workspace["image"]; got != "ghcr.io/felinics/workspace:latest" {
 		t.Fatalf("workspace image = %#v, want preserved image", got)
 	}
 

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	githubcopilot "github.com/memohai/twilight-ai/provider/github/copilot"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	githubcopilot "github.com/felinics/twilight/provider/github/copilot"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func NewProvider(copilotToken string, baseClient *http.Client) sdk.Provider {

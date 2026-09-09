@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 type qqClient struct {

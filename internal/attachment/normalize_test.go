@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/media"
 )
 
 func TestMapMediaType(t *testing.T) {

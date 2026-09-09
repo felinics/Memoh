@@ -7,6 +7,12 @@
       $ {{ command }}
     </div>
     <div
+      v-if="exitLabel"
+      class="text-muted-foreground"
+    >
+      {{ exitLabel }}
+    </div>
+    <div
       v-if="backgroundMeta.length"
       class="flex flex-wrap gap-x-2 gap-y-0.5 text-caption text-muted-foreground"
     >
@@ -67,6 +73,15 @@ function resolveResult(): Record<string, unknown> | null {
   const sc = result.structuredContent as Record<string, unknown> | undefined
   return sc ?? result
 }
+
+// 退出码属于按需查看的执行诊断，不应出现在工具标题中。
+const exitLabel = computed(() => {
+  if (!props.block.done) return ''
+  const result = resolveResult()
+  const code = result?.exit_code ?? result?.exitCode
+  return typeof code === 'number' && code !== 0
+    ? t('chat.tools.exitCode', { code }) : ''
+})
 
 const stdout = computed(() => {
   const r = resolveResult()

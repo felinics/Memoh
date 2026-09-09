@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 // TestNoButtonFallbackCoverage is the regression guard for the no-button
@@ -73,11 +73,11 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			mustContain:   []string{"/email bindings", "/email outbox"},
 		},
 		{
-			name: "list display-only no extras (heartbeat logs — genuinely empty)",
+			name: "list display-only no extras (schedule logs — genuinely empty)",
 			result: &command.Result{
-				Text: "Heartbeat logs",
+				Text: "Schedule logs",
 				Interactive: &command.Interactive{Kind: command.InteractiveList, List: &command.ListView{
-					Resource: "heartbeat", Action: "logs",
+					Resource: "schedule", Action: "logs",
 					Items: []command.ListItem{{Label: "10:00"}, {Label: "11:00"}},
 				}},
 			},
@@ -100,18 +100,18 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			mustContain:   []string{"/reasoning set <off|low|high>"},
 		},
 		{
-			name: "choices toggle-shape (heartbeat flags)",
+			name: "choices toggle-shape (boolean flags)",
 			result: &command.Result{
 				Text: "Settings",
 				Interactive: &command.Interactive{Kind: command.InteractiveChoices, Choices: &command.ChoicesView{
 					Choices: []command.ListItem{
-						{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "true"}}},
-						{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "false"}}},
+						{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--display_enabled", "true"}}},
+						{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--display_enabled", "false"}}},
 					},
 				}},
 			},
 			expectTrailer: true,
-			mustContain:   []string{"/settings update --heartbeat_enabled true", "/settings update --heartbeat_enabled false"},
+			mustContain:   []string{"/settings update --display_enabled true", "/settings update --display_enabled false"},
 		},
 		{
 			name: "choices heterogeneous (settings worst case)",
@@ -119,7 +119,7 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 				Text: "Settings card",
 				Interactive: &command.Interactive{Kind: command.InteractiveChoices, Choices: &command.ChoicesView{
 					Choices: []command.ListItem{
-						{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--heartbeat_enabled", "true"}}},
+						{Action: &command.ItemAction{Resource: "settings", Action: "update", Args: []string{"--display_enabled", "true"}}},
 						{Action: &command.ItemAction{Resource: "reasoning", Action: "show"}},
 						{Action: &command.ItemAction{Resource: "model", Action: "list"}},
 						{Action: &command.ItemAction{Resource: "memory", Action: "list"}},
@@ -130,7 +130,7 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			},
 			expectTrailer: true,
 			mustContain: []string{
-				"/settings update --heartbeat_enabled true",
+				"/settings update --display_enabled true",
 				"/reasoning show",
 				"/model list",
 				"/memory list",

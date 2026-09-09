@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/messaging"
-	"github.com/memohai/memoh/internal/settings"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 const ttsMaxTextLen = 500

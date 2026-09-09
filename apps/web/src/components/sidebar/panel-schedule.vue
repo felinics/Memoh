@@ -16,10 +16,11 @@
       <Spinner class="size-3" />
     </div>
 
-    <!-- Grouped list -->
-    <div
+    <!-- Grouped list (scroller = @felinic/ui ScrollArea, see sidebar-scroll.css) -->
+    <ScrollArea
       v-else
-      class="flex-1 min-h-0 overflow-y-auto sidebar-scroll"
+      class="sidebar-scroll flex-1 min-h-0"
+      :scroll-hide-delay="300"
     >
       <!-- Empty -->
       <div
@@ -69,11 +70,10 @@
 
           <!-- Cards in group -->
           <div class="px-2 pb-1 space-y-1.5">
-            <ScheduleListItem
+            <ScheduleItem
               v-for="item in group.tasks"
               :key="item.id"
               :item="item"
-              variant="sidebar"
               :description="item.description?.trim() || describeItem(item.pattern) || item.pattern || ''"
               :time-label="nextRunTimeLabel(item)"
               :busy="busyIds.has(item.id ?? '')"
@@ -85,7 +85,7 @@
           </div>
         </div>
       </template>
-    </div>
+    </ScrollArea>
 
     <!-- Delete confirmation -->
     <ConfirmDeleteDialog
@@ -108,7 +108,7 @@ import { storeToRefs } from 'pinia'
 import { Plus } from 'lucide-vue-next'
 import { ConfirmDeleteDialog, toast } from '@felinic/ui'
 import {
-  Button, Spinner,
+  Button, ScrollArea, Spinner,
 } from '@felinic/ui'
 import { getBotsByBotIdSchedule, deleteBotsByBotIdScheduleById, putBotsByBotIdScheduleById } from '@memohai/sdk'
 import type { ScheduleSchedule } from '@memohai/sdk'
@@ -116,11 +116,12 @@ import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
-import ScheduleListItem from '@/pages/bots/components/schedule-list-item.vue'
+import ScheduleItem from './schedule-item.vue'
 import SidebarPanelHeader from './panel-header.vue'
-// The narrow native scrollbar this template's `sidebar-scroll` class relies on.
-// Without this import the class was silently inert (it used to be defined only
-// inside recents.vue's scoped style, which never reaches this component).
+// The shared sidebar scroll treatment (fade, thumb ink, skeleton tuning) lives
+// in this stylesheet — NOT a scoped style, because it is used by both
+// panel-sessions.vue and this component (scoped selectors only match the
+// defining component's DOM).
 import '@/styles/sidebar-scroll.css'
 
 const { t, locale } = useI18n()

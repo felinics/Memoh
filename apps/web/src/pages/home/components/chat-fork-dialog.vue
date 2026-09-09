@@ -49,7 +49,7 @@ import { useChatViewTarget } from '../composables/useChatViewContext'
 // back to this panel even if another split gains focus while it is being made.
 const props = defineProps<{
   open: boolean
-  messageId: string
+  turnId: string
 }>()
 
 const emit = defineEmits<{
@@ -76,12 +76,12 @@ watch(() => props.open, (open) => {
 })
 
 async function handleCreateFork() {
-  const messageId = props.messageId.trim()
+  const turnId = props.turnId.trim()
   const title = forkSessionTitle.value.trim()
-  if (!messageId || !title || forkSubmitting.value) return
+  if (!turnId || !title || forkSubmitting.value) return
   forkSubmitting.value = true
   try {
-    const ok = await chatStore.forkMessage(messageId, { title, target: chatViewTarget.value })
+    const ok = await chatStore.forkTurn(turnId, { title, target: chatViewTarget.value })
     if (ok) emit('update:open', false)
   } finally {
     forkSubmitting.value = false

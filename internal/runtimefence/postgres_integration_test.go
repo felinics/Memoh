@@ -15,14 +15,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/dbtest"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/runtimefence"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/dbtest"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 var (
@@ -245,7 +245,7 @@ func TestPostgresRuntimeFenceClaimedInputRemainsRespondableAfterExpiry(t *testin
 	target := createRuntimeFenceUserInput(t, ctx, inputs, botID, sessionID, "claimed-expiring-input", &expiresAt)
 	fence := nextRuntimeFence(t, ctx, queries, botID, sessionID)
 	if err := runtimefence.ActivateWithOptions(ctx, store, fence, runtimefence.ActivationOptions{
-		PreserveDecision: &runtimefence.PreservedDecision{Kind: runtimefence.DecisionUserInput, ID: target.ID},
+		PreserveDecisions: []runtimefence.PreservedDecision{{Kind: runtimefence.DecisionUserInput, ID: target.ID}},
 	}); err != nil {
 		t.Fatalf("claim expiring input: %v", err)
 	}

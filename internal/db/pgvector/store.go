@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	pgxvec "github.com/pgvector/pgvector-go/pgx"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	pgvectorsqlc "github.com/memohai/memoh/internal/db/pgvector/sqlc"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db"
+	pgvectorsqlc "github.com/felinics/memoh/internal/db/pgvector/sqlc"
 )
 
 // Store is the shared typed connection to the optional pgvector database.

@@ -1,4 +1,4 @@
-import type { Component } from 'vue'
+import { defineComponent, h, type Component } from 'vue'
 import { setCustomComponents } from 'markstream-vue'
 import MdCheckbox from './md-checkbox.vue'
 import MdFootnoteReference from './md-footnote-reference.vue'
@@ -25,6 +25,28 @@ const sharedComponents: Record<string, Component> = {
 
 const registered = new Set<string>()
 
+// markstream resolves a code fence's component by its LANGUAGE name before
+// falling back to the `code_block` key, and that lookup shares one namespace
+// with node-type overrides. A ```text fence therefore resolves to the `text`
+// mapping — our prose text node, which reads `node.content` (absent on
+// code_block nodes) and renders nothing. Route by node type so the fence
+// reaches the surface's code block component instead.
+function textNodeRouter(codeBlock: Component | undefined): Component {
+  if (!codeBlock) return MdText
+  return defineComponent({
+    name: 'MdTextRouter',
+    inheritAttrs: false,
+    props: { node: { type: Object, required: true } },
+    setup(props, { attrs }) {
+      return () =>
+        h(
+          (props.node as { type?: string }).type === 'code_block' ? codeBlock : MdText,
+          { ...attrs, node: props.node },
+        )
+    },
+  })
+}
+
 // Register the shared components (plus any surface-specific extras, e.g. the
 // chat code block) in ONE call per `customId`, so the result is correct
 // regardless of whether markstream merges or replaces a scope's mapping.
@@ -34,5 +56,7 @@ export function registerSharedMarkdownComponents(
 ): void {
   if (registered.has(customId)) return
   registered.add(customId)
-  setCustomComponents(customId, { ...sharedComponents, ...extra })
+  const merged = { ...sharedComponents, ...extra }
+  merged.text = textNodeRouter(extra?.code_block)
+  setCustomComponents(customId, merged)
 }

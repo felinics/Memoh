@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestPostgresBotDeleteAndRouteSwitchShareLockOrder(t *testing.T) {

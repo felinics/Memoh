@@ -5,9 +5,9 @@ import (
 	"strings"
 	"sync"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 )
 
 // toolExecutionMetadataRegistry keeps UI-only target identity beside a tool

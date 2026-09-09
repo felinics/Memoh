@@ -72,30 +72,55 @@
     -->
 
     <!-- Folders is a SIBLING section of Recents: folders of workdir-bound
-         chats above, the ungrouped timeline below. The wrapper owns the
-         remaining height so neither section can spill into the sidebar footer. -->
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+         chats above, the ungrouped timeline below — and both live in ONE
+         scrollport owned here. Each section used to scroll itself, which
+         capped Folders at ~14rem and buried long folder lists in a second
+         inner scrollbar; now overflow is handled once, for the whole list, so
+         a folder is a peer of Recents rather than an item inside a box.
+         Per-folder growth is bounded by its Show more page instead
+         (folder-sessions-list.vue). The scroller is @felinic/ui's ScrollArea
+         (reka): its self-drawn bar fades in/out on hover — native scrollbar
+         pseudos can't transition, so a native bar could only snap. -->
+    <ScrollArea
+      ref="scrollAreaRef"
+      class="sidebar-scroll min-h-0 flex-1"
+      :scroll-hide-delay="300"
+    >
       <FoldersSection />
 
-      <Recents class="min-h-0 flex-1 overflow-hidden" />
-    </div>
+      <Recents :scroll-el="listScrollEl" />
+    </ScrollArea>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { SquarePen, Settings2 } from 'lucide-vue-next'
+import { ScrollArea } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import SidebarPanelHeader from './panel-header.vue'
 import SidebarNavButton from './nav-button.vue'
 import FoldersSection from './folders-section.vue'
 import Recents from './recents.vue'
+import '@/styles/sidebar-scroll.css'
 
 const { t } = useI18n()
+
+// The one scrollport for Folders + Recents. Recents needs the scrolling
+// element itself for its load-more sentinel root, so it is passed down rather
+// than provided. With ScrollArea the scroller is the inner viewport node, not
+// the component root — grab it by its data-slot (the library's stable marker).
+// Assigned in onMounted: Recents reads it reactively through toRef(props).
+const scrollAreaRef = ref<InstanceType<typeof ScrollArea> | null>(null)
+const listScrollEl = ref<HTMLElement | null>(null)
+onMounted(() => {
+  const rootEl = (scrollAreaRef.value as unknown as { $el?: HTMLElement } | null)?.$el
+  listScrollEl.value = rootEl?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null
+})
 const router = useRouter()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()

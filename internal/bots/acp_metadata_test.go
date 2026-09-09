@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
 
 func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
@@ -20,7 +20,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 	existingMetadata := mustJSON(map[string]any{
 		acpprofile.MetadataKeyACP: map[string]any{
 			"agents": map[string]any{
-				acpprofile.AgentCodexID: map[string]any{
+				"codex": map[string]any{
 					"enabled": true,
 					"managed": map[string]any{
 						"api_key":  "sk-existing-secret",
@@ -56,7 +56,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 		Metadata: map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{
+					"codex": map[string]any{
 						"enabled": true,
 						"managed": map[string]any{
 							"api_key":  "sk-...cret",
@@ -75,7 +75,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 	if err := json.Unmarshal(persisted, &saved); err != nil {
 		t.Fatalf("decode persisted metadata: %v", err)
 	}
-	setup := acpprofile.ParseAgentSetup(saved, acpprofile.AgentCodexID)
+	setup := acpprofile.ParseAgentSetup(saved, "codex")
 	if got := setup.Managed["api_key"]; got != "sk-existing-secret" {
 		t.Fatalf("persisted api_key = %q, want existing secret preserved", got)
 	}
@@ -83,7 +83,7 @@ func TestUpdateMergesACPSensitiveMetadataBeforePersisting(t *testing.T) {
 		t.Fatalf("persisted base_url = %q, want new non-sensitive value", got)
 	}
 
-	respSetup := acpprofile.ParseAgentSetup(resp.Metadata, acpprofile.AgentCodexID)
+	respSetup := acpprofile.ParseAgentSetup(resp.Metadata, "codex")
 	if got := respSetup.Managed["api_key"]; got != "sk-existing-secret" {
 		t.Fatalf("response api_key = %q, want service to return persisted metadata", got)
 	}
@@ -100,7 +100,7 @@ func mustJSON(value map[string]any) []byte {
 func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) != 23 {
+			if len(dest) != 20 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -117,15 +117,12 @@ func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) 
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[13].(*bool) = false
-			*dest[14].(*int32) = 30
-			*dest[15].(*string) = ""
-			*dest[16].(*bool) = false
-			*dest[17].(*int32) = 100000
-			*dest[18].(*pgtype.Int4) = pgtype.Int4{}
-			*dest[19].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[20].(*[]byte) = append([]byte(nil), metadata...)
-			*dest[21].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[22].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[14].(*int32) = 100000
+			*dest[15].(*pgtype.Int4) = pgtype.Int4{}
+			*dest[16].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}
@@ -134,7 +131,7 @@ func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) 
 func makeUpdateBotProfileRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) != 19 {
+			if len(dest) != 16 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -150,12 +147,9 @@ func makeUpdateBotProfileRowWithMetadata(botID, ownerUserID pgtype.UUID, metadat
 			*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[13].(*bool) = false
-			*dest[14].(*int32) = 30
-			*dest[15].(*string) = ""
-			*dest[16].(*[]byte) = append([]byte(nil), metadata...)
-			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[13].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
+			*dest[15].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

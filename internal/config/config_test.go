@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func TestLoadRejectsLegacyMCPSection(t *testing.T) {
@@ -131,6 +133,8 @@ namespace = "memoh-test"
 
 [docker]
 host = "unix:///var/run/docker.sock"
+network = "memoh-workspace"
+server_container = "memoh-server"
 
 [apple]
 socket_path = "/tmp/socktainer.sock"
@@ -150,8 +154,14 @@ binary_path = "/opt/homebrew/bin/socktainer"
 	if cfg.Containerd.Namespace != "memoh-test" {
 		t.Fatalf("containerd namespace = %q", cfg.Containerd.Namespace)
 	}
+	if cfg.Docker.ServerContainer != "memoh-server" {
+		t.Fatalf("docker server container = %q", cfg.Docker.ServerContainer)
+	}
 	if cfg.Docker.Host != "unix:///var/run/docker.sock" {
 		t.Fatalf("docker host = %q", cfg.Docker.Host)
+	}
+	if cfg.Docker.Network != "memoh-workspace" {
+		t.Fatalf("docker network = %q", cfg.Docker.Network)
 	}
 	if cfg.Apple.SocketPath != "/tmp/socktainer.sock" {
 		t.Fatalf("apple socket path = %q", cfg.Apple.SocketPath)
@@ -597,15 +607,15 @@ func TestWorkspaceImagePullPolicyDefaultsAndNormalizes(t *testing.T) {
 
 func TestWorkspaceImageRefDefaultsToPackagedWorkspace(t *testing.T) {
 	got := (WorkspaceConfig{}).ImageRef()
-	want := "docker.io/memohai/workspace:debian"
+	want := "docker.io/memohai/workspace:debian-latest"
 	if got != want {
 		t.Fatalf("default image ref = %q, want %q", got, want)
 	}
 }
 
 func TestWorkspaceImagePullCandidatesAddsWorkspaceMirror(t *testing.T) {
-	got := WorkspaceImagePullCandidates("memohai/workspace:debian")
-	want := []string{"docker.io/memohai/workspace:debian", "memoh.cn/memohai/workspace:debian"}
+	got := WorkspaceImagePullCandidates("memohai/workspace:debian-latest")
+	want := []string{"docker.io/memohai/workspace:debian-latest", "memoh.cn/memohai/workspace:debian-latest"}
 	if len(got) != len(want) {
 		t.Fatalf("candidate count = %d, want %d (%v)", len(got), len(want), got)
 	}
@@ -620,5 +630,66 @@ func TestWorkspaceImagePullCandidatesDoesNotMirrorCustomImages(t *testing.T) {
 	got := WorkspaceImagePullCandidates("debian:bookworm-slim")
 	if len(got) != 1 || got[0] != "docker.io/library/debian:bookworm-slim" {
 		t.Fatalf("unexpected candidates: %v", got)
+	}
+}
+
+func TestAgentConfigEffectiveContextLoopReselectMode(t *testing.T) {
+	cases := []struct {
+		name           string
+		value          string
+		wantMode       string
+		wantRecognized bool
+	}{
+		{"empty defaults to active", "", ContextLoopReselectModeActive, true},
+		{"active", "active", ContextLoopReselectModeActive, true},
+		{"shadow", "shadow", ContextLoopReselectModeShadow, true},
+		{"off", "off", ContextLoopReselectModeOff, true},
+		{"case insensitive", "SHADOW", ContextLoopReselectModeShadow, true},
+		{"whitespace", "  off  ", ContextLoopReselectModeOff, true},
+		{"unknown normalizes to active", "garbage", ContextLoopReselectModeActive, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotMode, gotRecognized := (AgentConfig{ContextLoopReselect: tc.value}).EffectiveContextLoopReselectMode()
+			if gotMode != tc.wantMode || gotRecognized != tc.wantRecognized {
+				t.Fatalf("EffectiveContextLoopReselectMode() = (%q, %v), want (%q, %v)", gotMode, gotRecognized, tc.wantMode, tc.wantRecognized)
+			}
+		})
+	}
+}
+
+func TestAgentConfigEffectiveSyncCompactionMode(t *testing.T) {
+	cases := []struct {
+		name           string
+		value          string
+		wantMode       string
+		wantRecognized bool
+	}{
+		{"empty defaults to shadow", "", SyncCompactionModeShadow, true},
+		{"active", "active", SyncCompactionModeActive, true},
+		{"shadow", "shadow", SyncCompactionModeShadow, true},
+		{"off", "off", SyncCompactionModeOff, true},
+		{"case insensitive", "ACTIVE", SyncCompactionModeActive, true},
+		{"unknown normalizes to shadow", "garbage", SyncCompactionModeShadow, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotMode, gotRecognized := (AgentConfig{SyncCompaction: tc.value}).EffectiveSyncCompactionMode()
+			if gotMode != tc.wantMode || gotRecognized != tc.wantRecognized {
+				t.Fatalf("EffectiveSyncCompactionMode() = (%q, %v), want (%q, %v)", gotMode, gotRecognized, tc.wantMode, tc.wantRecognized)
+			}
+		})
+	}
+}
+
+func TestAgentConfigEffectiveContextAbsoluteMaxTokens(t *testing.T) {
+	if got := (AgentConfig{}).EffectiveContextAbsoluteMaxTokens(); got != contextfrag.DefaultAbsoluteCapTokens {
+		t.Fatalf("unset cap = %d, want default %d", got, contextfrag.DefaultAbsoluteCapTokens)
+	}
+	if got := (AgentConfig{ContextAbsoluteMaxTokens: -5}).EffectiveContextAbsoluteMaxTokens(); got != contextfrag.DefaultAbsoluteCapTokens {
+		t.Fatalf("negative cap = %d, want default %d", got, contextfrag.DefaultAbsoluteCapTokens)
+	}
+	if got := (AgentConfig{ContextAbsoluteMaxTokens: 500_000}).EffectiveContextAbsoluteMaxTokens(); got != 500_000 {
+		t.Fatalf("explicit cap = %d, want 500000", got)
 	}
 }

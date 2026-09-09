@@ -124,19 +124,11 @@ export const SETTINGS_ROUTE_SPECS: SettingsRouteSpec[] = [
         loader: () => import('@memohai/web/pages/supermarket/index.vue'),
       },
       {
-        name: 'supermarket-plugin-detail',
-        path: 'plugins/:pluginId',
-        loader: () => import('@memohai/web/pages/supermarket/plugin-detail.vue'),
+        name: 'supermarket-package-detail',
+        path: 'skills/:registryId/:packageId',
+        loader: () => import('@memohai/web/pages/supermarket/package-detail.vue'),
         meta: {
-          breadcrumb: (route) => String(route.params.pluginId ?? ''),
-        },
-      },
-      {
-        name: 'supermarket-skill-detail',
-        path: 'skills/:skillId',
-        loader: () => import('@memohai/web/pages/supermarket/skill-detail.vue'),
-        meta: {
-          breadcrumb: (route) => String(route.params.skillId ?? ''),
+          breadcrumb: (route) => String(route.params.packageId ?? ''),
         },
       },
     ],

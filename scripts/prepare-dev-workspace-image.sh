@@ -27,7 +27,6 @@ force="${MEMOH_DEV_WORKSPACE_IMAGE_FORCE:-0}"
 inputs="
 scripts/prepare-dev-workspace-image.sh
 docker/Dockerfile.workspace
-docker/workspace-contract.json
 docker/toolkit
 scripts/desktop-install.sh
 scripts/desktop-style.sh

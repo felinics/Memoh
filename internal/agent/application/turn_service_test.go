@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/apperror"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 type fakeRunner struct {
@@ -94,6 +94,8 @@ func (a *scriptedAdmitter) FinishRun(_ context.Context, handle sessionruntime.Ru
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
 	return nil
 }
+
+func (*scriptedAdmitter) MarkInlineDecisionRun(string, string, string) {}
 
 func (a *scriptedAdmitter) PublishAgentEvent(
 	_ context.Context,
@@ -509,12 +511,12 @@ func TestBoundaryValuesPassThrough(t *testing.T) {
 	activation := &turn.SkillActivation{
 		Skills: []turn.SkillActivationSkill{{
 			Name: "skill", DisplayName: "Skill", Description: "desc",
-			SourceKind: "plugin", State: "effective",
+			SourceKind: "registry", State: "effective",
 		}},
 		Prompt: "prompt",
 	}
 	requested := []turn.RequestedSkillContext{{
-		Name: "skill", Description: "desc", Content: "body", SourceKind: "plugin",
+		Name: "skill", Description: "desc", Content: "body", SourceKind: "registry",
 		OpaqueSourceID: "opaque", ContentHash: "hash", Identity: "identity",
 	}}
 	request := chatRequestFromCommand(turn.StartTurnCommand{

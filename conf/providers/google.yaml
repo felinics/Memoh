@@ -11,7 +11,9 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      # The latest aliases resolve to 3.x today, which takes a named level.
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gemini-flash-latest
     name: Gemini Flash Latest
@@ -20,7 +22,9 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      # The latest aliases resolve to 3.x today, which takes a named level.
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gemini-flash-lite-latest
     name: Gemini Flash-Lite Latest
@@ -29,14 +33,20 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      # The latest aliases resolve to 3.x today, which takes a named level.
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
 
-  - model_id: gemini-3.1-flash-image-preview
+  - model_id: gemini-3.1-flash-image
     name: Nano Banana 2
     type: chat
     config:
       compatibilities: [vision, file-input, reasoning, image-output]
       context_window: 163840
+      thinking_mode: toggle
+      reasoning_dialect: tier
+      reasoning_off_support: rejected
+      reasoning_efforts: [minimal, high]
 
   - model_id: gemini-3.1-pro-preview
     name: Gemini 3.1 Pro Preview
@@ -45,16 +55,21 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
+      # Gemini 3.1 Pro rejects minimal and cannot be turned off.
+      reasoning_dialect: tier
+      reasoning_off_support: rejected
       reasoning_efforts: [low, medium, high]
 
-  - model_id: gemini-3.1-flash-lite-preview
-    name: Gemini 3.1 Flash-Lite Preview
+  - model_id: gemini-3.1-flash-lite
+    name: Gemini 3.1 Flash-Lite
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      # 3.x takes a named level; minimal is the floor, so there is no off.
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gemini-3-flash-preview
     name: Gemini 3 Flash Preview
@@ -63,14 +78,17 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      # 3.x takes a named level; minimal is the floor, so there is no off.
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
 
-  - model_id: gemini-3-pro-image-preview
+  - model_id: gemini-3-pro-image
     name: Nano Banana Pro
     type: chat
     config:
       compatibilities: [vision, file-input, reasoning, image-output]
       context_window: 163840
+      thinking_mode: always
 
   - model_id: gemini-2.5-pro
     name: Gemini 2.5 Pro
@@ -79,21 +97,13 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
+      # 2.5 controls thinking with a token budget; its floor is positive, so this
+      # model cannot be turned off and does not advertise the disable token.
+      reasoning_dialect: budget
+      reasoning_off_support: rejected
+      thinking_budget_min: 128
+      thinking_budget_max: 32768
       reasoning_efforts: [low, medium, high]
-
-  - model_id: gemini-2.5-pro-preview-06-05
-    name: Gemini 2.5 Pro Preview 06-05
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1114112
-
-  - model_id: gemini-2.5-pro-preview-05-06
-    name: Gemini 2.5 Pro Preview 05-06
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1114112
 
   - model_id: gemini-2.5-flash
     name: Gemini 2.5 Flash
@@ -102,7 +112,12 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      # Flash allows a zero budget, so off is reachable here where it is not on Pro.
+      reasoning_dialect: budget
+      reasoning_off_support: accepted
+      thinking_budget_min: 0
+      thinking_budget_max: 24576
+      reasoning_efforts: [disable, low, medium, high]
 
   - model_id: gemini-2.5-flash-image
     name: Nano Banana
@@ -118,6 +133,11 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
+      reasoning_dialect: budget
+      # The active range starts at 512, but 0 is a separate disable sentinel.
+      reasoning_off_support: accepted
+      thinking_budget_min: 512
+      thinking_budget_max: 24576
       reasoning_efforts: [low, medium, high]
 
   - model_id: gemini-2.5-flash-lite-preview-09-2025
@@ -127,6 +147,11 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
+      reasoning_dialect: budget
+      # The active range starts at 512, but 0 is a separate disable sentinel.
+      reasoning_off_support: accepted
+      thinking_budget_min: 512
+      thinking_budget_max: 24576
       reasoning_efforts: [low, medium, high]
 
   - model_id: gemini-2.0-flash

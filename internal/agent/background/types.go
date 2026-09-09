@@ -16,6 +16,8 @@ const (
 	TaskCompleted TaskStatus = "completed"
 	TaskFailed    TaskStatus = "failed"
 	TaskKilled    TaskStatus = "killed"
+	// TaskUnknown means supervision ended without proof of process exit.
+	TaskUnknown TaskStatus = "unknown"
 )
 
 // Task represents a single background task (a container command execution
@@ -44,13 +46,14 @@ type Task struct {
 	StartedAt      time.Time
 	CompletedAt    time.Time
 
-	mu           sync.Mutex
-	cancel       context.CancelFunc
-	stalled      bool            // true once the task appears stuck on interactive input
-	changed      chan struct{}   // closed and replaced whenever waiters should re-check task state
-	output       strings.Builder // buffered output tail
-	lastOutputAt time.Time       // when output last grew; zero means no output yet
-	branches     []SpawnBranch   // spawn-kind branch outcomes, set at completion
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	stopRequested bool            // running agent task cancellation awaits its runtime terminal
+	stalled       bool            // true once the task appears stuck on interactive input
+	changed       chan struct{}   // closed and replaced whenever waiters should re-check task state
+	output        strings.Builder // buffered output tail
+	lastOutputAt  time.Time       // when output last grew; zero means no output yet
+	branches      []SpawnBranch   // spawn-kind branch outcomes, set at completion
 }
 
 // WaitOutcome explains why a wait on a task returned.
@@ -60,6 +63,7 @@ const (
 	WaitCompleted WaitOutcome = "completed"
 	WaitFailed    WaitOutcome = "failed"
 	WaitKilled    WaitOutcome = "killed"
+	WaitUnknown   WaitOutcome = "unknown"
 	WaitStalled   WaitOutcome = "stalled"
 	// WaitIdle means the command is still running but produced no new output
 	// for the idle threshold — for server-style commands this usually means
@@ -249,6 +253,7 @@ const (
 	TaskEventCompleted TaskEventType = "completed"
 	TaskEventFailed    TaskEventType = "failed"
 	TaskEventKilled    TaskEventType = "killed"
+	TaskEventUnknown   TaskEventType = "unknown"
 	TaskEventStalled   TaskEventType = "stalled"
 )
 

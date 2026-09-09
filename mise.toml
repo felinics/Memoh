@@ -26,7 +26,7 @@ dir = "{{cwd}}"
 experimental = true
 
 [tasks.submodule-init]
-description = "Init/update git submodules (packages/ui lives in memohai/ui)"
+description = "Init/update git submodules (packages/ui lives in felinics/ui)"
 run = "node scripts/ensure-submodules.mjs"
 
 [tasks.pnpm-install]
@@ -59,7 +59,17 @@ depends = [
 
 [tasks.sqlc-generate]
 description = "Generate SQL code"
-run = "sqlc generate"
+# Pinned to the same invocation CI uses; a locally installed sqlc of another
+# version silently rewrites every generated file's version stamp.
+run = "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate"
+
+[tasks.codex-protocol-generate]
+description = "Generate Go types for the codex app-server v2 protocol from the vendored schema snapshot"
+run = "go run ./cmd/gen-codex-protocol"
+
+[tasks.codex-schema-sync]
+description = "Refresh the vendored codex app-server schema snapshot from the local codex CLI and report drift"
+run = "bash scripts/codex-schema-sync.sh"
 
 [tasks.grpc-generate]
 description = "Generate internal gRPC protocol code"

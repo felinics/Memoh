@@ -12,7 +12,7 @@ import (
 	"github.com/swaggo/swag"
 
 	// Register the generated swagger document for swag.ReadDoc.
-	_ "github.com/memohai/memoh/spec"
+	_ "github.com/felinics/memoh/spec"
 )
 
 //go:generate go tool swag init -g swagger.go -o ../../spec --parseDependency --parseInternal

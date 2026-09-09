@@ -10,10 +10,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/email"
-	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
-	"github.com/memohai/memoh/internal/webhooktunnel"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/email"
+	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
+	"github.com/felinics/memoh/internal/webhooktunnel"
 )
 
 const (

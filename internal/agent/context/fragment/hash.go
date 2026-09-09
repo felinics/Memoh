@@ -12,15 +12,18 @@ func CanonicalFragmentHash(frag ContextFrag) (FragmentHash, error) {
 		return FragmentHash{}, err
 	}
 	canonical := canonicalFragment{
-		Kind:       frag.Kind,
-		Role:       string(frag.Role),
-		Slot:       frag.Slot,
-		Priority:   frag.Priority,
-		CacheClass: frag.CacheClass,
-		Trust:      frag.Trust,
-		Scope:      frag.Scope,
-		Budget:     frag.Budget,
-		Render:     frag.Render,
+		Kind:               frag.Kind,
+		Role:               string(frag.Role),
+		Slot:               frag.Slot,
+		Priority:           frag.Priority,
+		RetentionTier:      frag.RetentionTier,
+		DropPriority:       frag.DropPriority,
+		RequiredCapability: frag.RequiredCapability,
+		CacheClass:         frag.CacheClass,
+		Trust:              frag.Trust,
+		Scope:              frag.Scope,
+		Budget:             frag.Budget,
+		Render:             frag.Render,
 		Provenance: canonicalProvenance{
 			Source:    frag.Provenance.Source,
 			SourceID:  frag.Provenance.SourceID,
@@ -41,17 +44,20 @@ func CanonicalFragmentHash(frag ContextFrag) (FragmentHash, error) {
 }
 
 type canonicalFragment struct {
-	Kind       Kind                `json:"kind"`
-	Role       string              `json:"role,omitempty"`
-	Slot       Slot                `json:"slot"`
-	Priority   int                 `json:"priority,omitempty"`
-	CacheClass CacheClass          `json:"cache_class,omitempty"`
-	Trust      TrustLevel          `json:"trust,omitempty"`
-	Scope      Scope               `json:"scope,omitempty"`
-	Budget     BudgetPolicy        `json:"budget,omitempty"`
-	Render     RenderPolicy        `json:"render,omitempty"`
-	Provenance canonicalProvenance `json:"provenance,omitempty"`
-	Parts      []canonicalPart     `json:"parts,omitempty"`
+	Kind               Kind                `json:"kind"`
+	Role               string              `json:"role,omitempty"`
+	Slot               Slot                `json:"slot"`
+	Priority           int                 `json:"priority,omitempty"`
+	RetentionTier      RetentionTier       `json:"retention_tier,omitempty"`
+	DropPriority       DropPriority        `json:"drop_priority,omitempty"`
+	RequiredCapability string              `json:"required_capability,omitempty"`
+	CacheClass         CacheClass          `json:"cache_class,omitempty"`
+	Trust              TrustLevel          `json:"trust,omitempty"`
+	Scope              Scope               `json:"scope,omitempty"`
+	Budget             BudgetPolicy        `json:"budget,omitempty"`
+	Render             RenderPolicy        `json:"render,omitempty"`
+	Provenance         canonicalProvenance `json:"provenance,omitempty"`
+	Parts              []canonicalPart     `json:"parts,omitempty"`
 }
 
 type canonicalProvenance struct {

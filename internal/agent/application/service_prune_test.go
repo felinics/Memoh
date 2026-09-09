@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 )
 
 func TestPruneMessagesForGateway_PrunesToolResultContent(t *testing.T) {

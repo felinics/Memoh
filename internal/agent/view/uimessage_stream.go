@@ -100,6 +100,20 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		c.reasoning = nil
 		return nil
 
+	case "runtime_notice":
+		if strings.TrimSpace(event.Delta) == "" {
+			return nil
+		}
+		// Notice blocks are their own kind: terminal-snapshot alignment
+		// matches by kind, so they never shift text/tool block matching.
+		return []UIMessage{{
+			ID:      c.allocBlockID(UIMessageNotice, ""),
+			Type:    UIMessageNotice,
+			Name:    strings.TrimSpace(event.Code),
+			Content: strings.TrimSpace(event.Delta),
+			Args:    noticeArgsFromMetadata(event.Metadata),
+		}}
+
 	case "tool_call_start", "tool_call_input_start", "tool_call_metadata":
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
@@ -185,15 +199,24 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			status = "pending"
 		}
 		state.Message.Running = uiBoolPtr(false)
-		state.Message.Approval = &UIToolApproval{
+		approval := &UIToolApproval{
 			ApprovalID: strings.TrimSpace(event.ApprovalID),
 			ShortID:    event.ShortID,
 			Status:     status,
 			CanApprove: strings.EqualFold(status, "pending"),
 		}
+		// The agent's own permission options ride the event metadata; without
+		// them a live card can only offer a binary answer and the user can
+		// never pick the agent's session/always scope.
+		if obj, ok := event.Metadata["approval"].(map[string]any); ok {
+			approval.Options = approvalOptionsFromAny(obj["options"])
+			approval.SelectedOptionID = stringFromAny(obj["selected_option_id"])
+		}
+		state.Message.Approval = approval
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "user_input_request":
+		c.finalizeTextBlock()
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
 			state = &uiToolStreamState{
@@ -392,6 +415,34 @@ func cloneToolStreamMessage(message UIMessage) UIMessage {
 		clone.Progress = append([]any(nil), message.Progress...)
 	}
 	return clone
+}
+
+// noticeArgsFromMetadata projects the string-valued entries of a
+// runtime_notice's metadata into the notice's Args. Runtimes put the
+// machine-readable notice parameters there (dep_id and install_task_id for a
+// workspace dependency notice, for instance); nested objects and non-string
+// scalars are not part of that vocabulary and are dropped. Empty
+// values are dropped too, since the client treats an absent key and an unknown
+// value alike. The result is nil when nothing survives so the field is omitted
+// from the wire shape.
+func noticeArgsFromMetadata(metadata map[string]any) map[string]string {
+	var args map[string]string
+	for key, raw := range metadata {
+		value, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		if args == nil {
+			args = map[string]string{}
+		}
+		args[key] = value
+	}
+	return args
 }
 
 func applyExecutionLocationMetadata(message *UIMessage, metadata map[string]any) {

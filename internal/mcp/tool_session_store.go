@@ -4,25 +4,48 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/event"
 )
 
-// ToolSessionContextStore keeps the latest per-prompt context for long-lived
-// ACP MCP sessions whose HTTP headers are fixed when the agent process starts.
+// ToolSessionContextStore registers per-run tool event sinks so gateway HTTP
+// tool calls can stream lifecycle events back to the owning prompt. Session
+// context itself travels with each request (ACP runtimes overlay it from the
+// live runtime handle), so the store holds no session state.
 type ToolSessionContextStore struct {
-	mu       sync.RWMutex
-	sessions map[string]ToolSessionContext
-	sinks    map[string]*toolEventSinkEntry
+	mu    sync.RWMutex
+	sinks map[string]*toolEventSinkEntry
 }
 
 type toolEventSinkEntry struct {
+	mu   sync.RWMutex
 	sink func(ToolStreamEvent)
+}
+
+func (e *toolEventSinkEntry) emit(event ToolStreamEvent) bool {
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.sink == nil {
+		return false
+	}
+	e.sink(event)
+	return true
+}
+
+func (e *toolEventSinkEntry) close() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.sink = nil
+	e.mu.Unlock()
 }
 
 func NewToolSessionContextStore() *ToolSessionContextStore {
 	return &ToolSessionContextStore{
-		sessions: map[string]ToolSessionContext{},
-		sinks:    map[string]*toolEventSinkEntry{},
+		sinks: map[string]*toolEventSinkEntry{},
 	}
 }
 
@@ -86,63 +109,6 @@ func (e ToolStreamEvent) ToAgentStreamEvent() (event.StreamEvent, bool) {
 	}
 }
 
-func (s *ToolSessionContextStore) Put(session ToolSessionContext) {
-	if s == nil {
-		return
-	}
-	session.BotID = strings.TrimSpace(session.BotID)
-	session.SessionID = strings.TrimSpace(session.SessionID)
-	key := toolSessionContextKey(session.BotID, session.SessionID)
-	if key == "" {
-		return
-	}
-	s.mu.Lock()
-	if existing, ok := s.sessions[key]; ok {
-		session = MergeToolSessionContext(existing, session)
-	}
-	s.sessions[key] = session
-	s.mu.Unlock()
-}
-
-func (s *ToolSessionContextStore) Merge(session ToolSessionContext) ToolSessionContext {
-	if s == nil {
-		return session
-	}
-	key := toolSessionContextKey(session.BotID, session.SessionID)
-	if key == "" {
-		return session
-	}
-	s.mu.RLock()
-	latest, ok := s.sessions[key]
-	s.mu.RUnlock()
-	if !ok {
-		return session
-	}
-	return MergeToolSessionContext(session, latest)
-}
-
-func (s *ToolSessionContextStore) CloseSession(sessionID string) {
-	if s == nil {
-		return
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return
-	}
-	s.mu.Lock()
-	for key := range s.sessions {
-		if toolSessionKeyHasSessionID(key, sessionID) {
-			delete(s.sessions, key)
-		}
-	}
-	for key := range s.sinks {
-		if toolStreamEventKeyHasSessionID(key, sessionID) {
-			delete(s.sinks, key)
-		}
-	}
-	s.mu.Unlock()
-}
-
 func (s *ToolSessionContextStore) AppendToolEvent(session ToolSessionContext, event ToolStreamEvent) bool {
 	if s == nil {
 		return false
@@ -160,11 +126,7 @@ func (s *ToolSessionContextStore) AppendToolEvent(session ToolSessionContext, ev
 	s.mu.RLock()
 	entry := s.sinks[key]
 	s.mu.RUnlock()
-	if entry != nil && entry.sink != nil {
-		entry.sink(event)
-		return true
-	}
-	return false
+	return entry.emit(event)
 }
 
 func (s *ToolSessionContextStore) RegisterToolEventSink(session ToolSessionContext, sink func(ToolStreamEvent)) func() {
@@ -177,113 +139,26 @@ func (s *ToolSessionContextStore) RegisterToolEventSink(session ToolSessionConte
 	}
 	entry := &toolEventSinkEntry{sink: sink}
 	s.mu.Lock()
+	previous := s.sinks[key]
 	s.sinks[key] = entry
 	s.mu.Unlock()
+	previous.close()
 	return func() {
 		s.mu.Lock()
 		if current := s.sinks[key]; current == entry {
 			delete(s.sinks, key)
 		}
 		s.mu.Unlock()
+		entry.close()
 	}
-}
-
-func toolSessionContextKey(botID, sessionID string) string {
-	botID = strings.TrimSpace(botID)
-	sessionID = strings.TrimSpace(sessionID)
-	if botID == "" || sessionID == "" {
-		return ""
-	}
-	return botID + "\x00" + sessionID
 }
 
 func toolRunEventKey(botID, sessionID, runID string) string {
-	sessionKey := toolSessionContextKey(botID, sessionID)
+	botID = strings.TrimSpace(botID)
+	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
-	if sessionKey == "" || runID == "" {
+	if botID == "" || sessionID == "" || runID == "" {
 		return ""
 	}
-	return sessionKey + "\x00" + runID
-}
-
-func toolSessionKeyHasSessionID(key, sessionID string) bool {
-	parts := strings.Split(key, "\x00")
-	return len(parts) == 2 && parts[1] == sessionID
-}
-
-func toolStreamEventKeyHasSessionID(key, sessionID string) bool {
-	parts := strings.Split(key, "\x00")
-	return len(parts) == 3 && parts[1] == sessionID
-}
-
-// MergeToolSessionContext overlays every non-empty field of latest onto base
-// (bools are sticky-true). It is the single merge for ToolSessionContext -
-// used by the tool-context store and the ACP client callbacks - so a new
-// field only needs to be wired up here.
-func MergeToolSessionContext(base, latest ToolSessionContext) ToolSessionContext {
-	merged := base
-	if value := strings.TrimSpace(latest.BotID); value != "" {
-		merged.BotID = value
-	}
-	if value := strings.TrimSpace(latest.ChatID); value != "" {
-		merged.ChatID = value
-	}
-	if value := strings.TrimSpace(latest.RuntimeID); value != "" {
-		merged.RuntimeID = value
-	}
-	if value := strings.TrimSpace(latest.RuntimeToken); value != "" {
-		merged.RuntimeToken = value
-	}
-	if value := strings.TrimSpace(latest.SessionID); value != "" {
-		merged.SessionID = value
-	}
-	if value := strings.TrimSpace(latest.RunID); value != "" {
-		merged.RunID = value
-	}
-	if value := strings.TrimSpace(latest.SessionType); value != "" {
-		merged.SessionType = value
-	}
-	if value := strings.TrimSpace(latest.RouteID); value != "" {
-		merged.RouteID = value
-	}
-	if value := strings.TrimSpace(latest.ChannelIdentityID); value != "" {
-		merged.ChannelIdentityID = value
-	}
-	if value := strings.TrimSpace(latest.SessionToken); value != "" {
-		merged.SessionToken = value
-	}
-	if value := strings.TrimSpace(latest.CurrentPlatform); value != "" {
-		merged.CurrentPlatform = value
-	}
-	if value := strings.TrimSpace(latest.ReplyTarget); value != "" {
-		merged.ReplyTarget = value
-	}
-	if value := strings.TrimSpace(latest.ConversationType); value != "" {
-		merged.ConversationType = value
-	}
-	if latest.CanRequestUserInput {
-		merged.CanRequestUserInput = true
-	}
-	if latest.CanListUserInput {
-		merged.CanListUserInput = true
-	}
-	if latest.IsSubagent {
-		merged.IsSubagent = true
-	}
-	if latest.RuntimeActive {
-		merged.RuntimeActive = true
-	}
-	if latest.SupportsImageInput {
-		merged.SupportsImageInput = true
-	}
-	if latest.RuntimeFence.Valid() {
-		merged.RuntimeFence = latest.RuntimeFence
-	}
-	if latest.RunContext != nil {
-		merged.RunContext = latest.RunContext
-	}
-	if latest.RuntimeGuard != nil {
-		merged.RuntimeGuard = latest.RuntimeGuard
-	}
-	return merged
+	return botID + "\x00" + sessionID + "\x00" + runID
 }

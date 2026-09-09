@@ -35,56 +35,107 @@ func (q *Queries) ActivateSessionRuntimeFence(ctx context.Context, arg ActivateS
 	return runtime_fencing_token, err
 }
 
+const compareAndSetSessionModelPreference = `-- name: CompareAndSetSessionModelPreference :execrows
+UPDATE bot_sessions
+SET preferred_chat_model_id = $1::uuid,
+    preferred_external_model_id = $2::text,
+    preferred_reasoning_effort = $3::text,
+    model_preference_revision = gen_random_uuid()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $4
+  AND runtime_type = $5
+  AND model_preference_revision IS NOT DISTINCT FROM $6::uuid
+  AND deleted_at IS NULL
+`
+
+type CompareAndSetSessionModelPreferenceParams struct {
+	PreferredChatModelID     pgtype.UUID `json:"preferred_chat_model_id"`
+	PreferredExternalModelID pgtype.Text `json:"preferred_external_model_id"`
+	PreferredReasoningEffort pgtype.Text `json:"preferred_reasoning_effort"`
+	ID                       pgtype.UUID `json:"id"`
+	RuntimeType              string      `json:"runtime_type"`
+	ExpectedRevision         pgtype.UUID `json:"expected_revision"`
+}
+
+// A picker may not overwrite a send or a newer picker operation. Nullable
+// revisions allow existing sessions to upgrade without a table backfill.
+func (q *Queries) CompareAndSetSessionModelPreference(ctx context.Context, arg CompareAndSetSessionModelPreferenceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, compareAndSetSessionModelPreference,
+		arg.PreferredChatModelID,
+		arg.PreferredExternalModelID,
+		arg.PreferredReasoningEffort,
+		arg.ID,
+		arg.RuntimeType,
+		arg.ExpectedRevision,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO bot_sessions (
-  bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id
+  bot_id, bot_agent_id, route_id, channel_type, type, session_mode, runtime_type, visibility, runtime_metadata, title, metadata, parent_session_id, created_by_user_id, workdir_id, preferred_chat_model_id, preferred_reasoning_effort
 )
 VALUES (
   $1,
   $2::uuid,
-  $3::text,
-  $4,
+  $3::uuid,
+  $4::text,
   $5,
   $6,
   $7,
   $8,
   $9,
-  $10::uuid,
-  $11::uuid,
-  $12::uuid
+  $10,
+  $11,
+  $12::uuid,
+  $13::uuid,
+  $14::uuid,
+  $15::uuid,
+  $16::text
 )
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 `
 
 type CreateSessionParams struct {
-	BotID           pgtype.UUID `json:"bot_id"`
-	RouteID         pgtype.UUID `json:"route_id"`
-	ChannelType     pgtype.Text `json:"channel_type"`
-	Type            string      `json:"type"`
-	SessionMode     string      `json:"session_mode"`
-	RuntimeType     string      `json:"runtime_type"`
-	RuntimeMetadata []byte      `json:"runtime_metadata"`
-	Title           string      `json:"title"`
-	Metadata        []byte      `json:"metadata"`
-	ParentSessionID pgtype.UUID `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
-	WorkdirID       pgtype.UUID `json:"workdir_id"`
+	BotID                    pgtype.UUID `json:"bot_id"`
+	BotAgentID               pgtype.UUID `json:"bot_agent_id"`
+	RouteID                  pgtype.UUID `json:"route_id"`
+	ChannelType              pgtype.Text `json:"channel_type"`
+	Type                     string      `json:"type"`
+	SessionMode              string      `json:"session_mode"`
+	RuntimeType              string      `json:"runtime_type"`
+	Visibility               string      `json:"visibility"`
+	RuntimeMetadata          []byte      `json:"runtime_metadata"`
+	Title                    string      `json:"title"`
+	Metadata                 []byte      `json:"metadata"`
+	ParentSessionID          pgtype.UUID `json:"parent_session_id"`
+	CreatedByUserID          pgtype.UUID `json:"created_by_user_id"`
+	WorkdirID                pgtype.UUID `json:"workdir_id"`
+	PreferredChatModelID     pgtype.UUID `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text `json:"preferred_reasoning_effort"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (BotSession, error) {
 	row := q.db.QueryRow(ctx, createSession,
 		arg.BotID,
+		arg.BotAgentID,
 		arg.RouteID,
 		arg.ChannelType,
 		arg.Type,
 		arg.SessionMode,
 		arg.RuntimeType,
+		arg.Visibility,
 		arg.RuntimeMetadata,
 		arg.Title,
 		arg.Metadata,
 		arg.ParentSessionID,
 		arg.CreatedByUserID,
 		arg.WorkdirID,
+		arg.PreferredChatModelID,
+		arg.PreferredReasoningEffort,
 	)
 	var i BotSession
 	err := row.Scan(
@@ -96,11 +147,19 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -108,6 +167,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (B
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }
@@ -128,9 +188,9 @@ func (q *Queries) DeleteSessionDiscussCursorsByBot(ctx context.Context, botID pg
 	return err
 }
 
-const forkSessionFromAssistantMessage = `-- name: ForkSessionFromAssistantMessage :one
+const forkSessionFromAssistantTurn = `-- name: ForkSessionFromAssistantTurn :one
 WITH source_session AS (
-  SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.compaction_epoch, s.runtime_fencing_token, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.team_id, s.workdir_id
+  SELECT s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision, s.visibility, s.title, s.metadata, s.next_turn_position, s.compaction_epoch, s.runtime_fencing_token, s.runtime_reset_token, s.runtime_reset_expires_at, s.runtime_config_epoch, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.team_id, s.workdir_id, s.bot_agent_id
   FROM bot_sessions s
   WHERE s.team_id = public.memoh_current_team_id()
     AND s.id = $1
@@ -146,10 +206,9 @@ target_turn AS (
   FROM source_session s
   JOIN bot_visible_history_messages vm ON vm.team_id = public.memoh_current_team_id()
     AND vm.session_id = s.id
-    AND vm.id = $3
+    AND vm.turn_id = $3
     AND vm.role = 'assistant'
-    AND vm.turn_id IS NOT NULL
-    AND vm.turn_position IS NOT NULL
+  ORDER BY vm.turn_message_seq ASC, vm.created_at ASC, vm.id ASC
   LIMIT 1
 ),
 copy_messages AS (
@@ -208,50 +267,72 @@ prepared_metadata AS (
 ),
 fork_plan AS (
   SELECT
-    s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata, s.next_turn_position, s.compaction_epoch, s.runtime_fencing_token, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.team_id, s.workdir_id,
+    s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision, s.visibility, s.title, s.metadata, s.next_turn_position, s.compaction_epoch, s.runtime_fencing_token, s.runtime_reset_token, s.runtime_reset_expires_at, s.runtime_config_epoch, s.parent_session_id, s.created_by_user_id, s.created_at, s.updated_at, s.deleted_at, s.team_id, s.workdir_id, s.bot_agent_id,
     fam.new_message_id AS fork_message_id,
+    tt.message_id AS source_message_id,
     ntp.value AS next_turn_position_value
   FROM source_session s
   JOIN fork_anchor_message fam ON true
+  JOIN target_turn tt ON true
   CROSS JOIN next_turn_position ntp
   WHERE EXISTS (SELECT 1 FROM copy_turns)
 ),
 created_session AS (
   INSERT INTO bot_sessions (
     bot_id,
+    bot_agent_id,
     channel_type,
     type,
     session_mode,
     runtime_type,
+    visibility,
     runtime_metadata,
     title,
     metadata,
     next_turn_position,
     created_by_user_id,
-    workdir_id
+    workdir_id,
+    preferred_chat_model_id,
+    preferred_reasoning_effort,
+    preferred_external_model_id
   )
   SELECT
     fp.bot_id,
+    fp.bot_agent_id,
     fp.channel_type,
     fp.type,
     fp.session_mode,
     fp.runtime_type,
-    fp.runtime_metadata,
-    $5,
+    -- A fork of a user-visible session is itself user-visible.
+    fp.visibility,
+    -- External runtimes fork their own runtime-side session: the caller
+    -- passes the new driver-owned keys (e.g. the forked codex thread id) so
+    -- the two Memoh sessions never share one runtime session.
+    COALESCE($5, fp.runtime_metadata) AS runtime_metadata,
+    $6,
     jsonb_set(
       pm.value,
       '{forked_from}',
-      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object('fork_message_id', fp.fork_message_id::text),
+      COALESCE(pm.value->'forked_from', '{}'::jsonb) || jsonb_build_object(
+        'message_id', fp.source_message_id::text,
+        'fork_message_id', fp.fork_message_id::text
+      ),
       true
     ),
     fp.next_turn_position_value,
-    $6::uuid,
+    $7::uuid,
     -- A fork continues the source conversation, so it stays in the same
     -- workdir (and therefore the same working directory).
-    fp.workdir_id
+    fp.workdir_id,
+    -- The fork inherits the source's model preference pair (issue #879): it
+    -- continues the same conversation, so it should look and resolve the
+    -- same way on open.
+    fp.preferred_chat_model_id,
+    fp.preferred_reasoning_effort,
+    fp.preferred_external_model_id
   FROM fork_plan fp
   CROSS JOIN prepared_metadata pm
-  RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+  RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 ),
 inserted_messages AS (
   INSERT INTO bot_history_messages (
@@ -330,53 +411,64 @@ copied_assets AS (
   WHERE a.team_id = public.memoh_current_team_id()
   RETURNING id
 )
-SELECT cs.id, cs.bot_id, cs.route_id, cs.channel_type, cs.type, cs.session_mode, cs.runtime_type, cs.runtime_metadata, cs.title, cs.metadata, cs.next_turn_position, cs.compaction_epoch, cs.runtime_fencing_token, cs.parent_session_id, cs.created_by_user_id, cs.created_at, cs.updated_at, cs.deleted_at, cs.team_id, cs.workdir_id
+SELECT cs.id, cs.bot_id, cs.route_id, cs.channel_type, cs.type, cs.session_mode, cs.runtime_type, cs.runtime_metadata, cs.preferred_chat_model_id, cs.preferred_reasoning_effort, cs.preferred_external_model_id, cs.model_preference_revision, cs.visibility, cs.title, cs.metadata, cs.next_turn_position, cs.compaction_epoch, cs.runtime_fencing_token, cs.runtime_reset_token, cs.runtime_reset_expires_at, cs.runtime_config_epoch, cs.parent_session_id, cs.created_by_user_id, cs.created_at, cs.updated_at, cs.deleted_at, cs.team_id, cs.workdir_id, cs.bot_agent_id
 FROM created_session cs
 CROSS JOIN (SELECT count(*) AS copied_asset_count FROM copied_assets) copied_asset_counts
 `
 
-type ForkSessionFromAssistantMessageParams struct {
-	SessionID       pgtype.UUID `json:"session_id"`
-	BotID           pgtype.UUID `json:"bot_id"`
-	MessageID       pgtype.UUID `json:"message_id"`
-	Metadata        []byte      `json:"metadata"`
-	Title           string      `json:"title"`
-	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+type ForkSessionFromAssistantTurnParams struct {
+	SessionID               pgtype.UUID `json:"session_id"`
+	BotID                   pgtype.UUID `json:"bot_id"`
+	TurnID                  pgtype.UUID `json:"turn_id"`
+	Metadata                []byte      `json:"metadata"`
+	RuntimeMetadataOverride []byte      `json:"runtime_metadata_override"`
+	Title                   string      `json:"title"`
+	CreatedByUserID         pgtype.UUID `json:"created_by_user_id"`
 }
 
-type ForkSessionFromAssistantMessageRow struct {
-	ID                  pgtype.UUID        `json:"id"`
-	BotID               pgtype.UUID        `json:"bot_id"`
-	RouteID             pgtype.UUID        `json:"route_id"`
-	ChannelType         pgtype.Text        `json:"channel_type"`
-	Type                string             `json:"type"`
-	SessionMode         string             `json:"session_mode"`
-	RuntimeType         string             `json:"runtime_type"`
-	RuntimeMetadata     []byte             `json:"runtime_metadata"`
-	Title               string             `json:"title"`
-	Metadata            []byte             `json:"metadata"`
-	NextTurnPosition    int64              `json:"next_turn_position"`
-	CompactionEpoch     int64              `json:"compaction_epoch"`
-	RuntimeFencingToken int64              `json:"runtime_fencing_token"`
-	ParentSessionID     pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID     pgtype.UUID        `json:"created_by_user_id"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt           pgtype.Timestamptz `json:"deleted_at"`
-	TeamID              pgtype.UUID        `json:"team_id"`
-	WorkdirID           pgtype.UUID        `json:"workdir_id"`
+type ForkSessionFromAssistantTurnRow struct {
+	ID                       pgtype.UUID        `json:"id"`
+	BotID                    pgtype.UUID        `json:"bot_id"`
+	RouteID                  pgtype.UUID        `json:"route_id"`
+	ChannelType              pgtype.Text        `json:"channel_type"`
+	Type                     string             `json:"type"`
+	SessionMode              string             `json:"session_mode"`
+	RuntimeType              string             `json:"runtime_type"`
+	RuntimeMetadata          []byte             `json:"runtime_metadata"`
+	PreferredChatModelID     pgtype.UUID        `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text        `json:"preferred_reasoning_effort"`
+	PreferredExternalModelID pgtype.Text        `json:"preferred_external_model_id"`
+	ModelPreferenceRevision  pgtype.UUID        `json:"model_preference_revision"`
+	Visibility               string             `json:"visibility"`
+	Title                    string             `json:"title"`
+	Metadata                 []byte             `json:"metadata"`
+	NextTurnPosition         int64              `json:"next_turn_position"`
+	CompactionEpoch          int64              `json:"compaction_epoch"`
+	RuntimeFencingToken      int64              `json:"runtime_fencing_token"`
+	RuntimeResetToken        pgtype.UUID        `json:"runtime_reset_token"`
+	RuntimeResetExpiresAt    pgtype.Timestamptz `json:"runtime_reset_expires_at"`
+	RuntimeConfigEpoch       int64              `json:"runtime_config_epoch"`
+	ParentSessionID          pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID          pgtype.UUID        `json:"created_by_user_id"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	TeamID                   pgtype.UUID        `json:"team_id"`
+	WorkdirID                pgtype.UUID        `json:"workdir_id"`
+	BotAgentID               pgtype.UUID        `json:"bot_agent_id"`
 }
 
-func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg ForkSessionFromAssistantMessageParams) (ForkSessionFromAssistantMessageRow, error) {
-	row := q.db.QueryRow(ctx, forkSessionFromAssistantMessage,
+func (q *Queries) ForkSessionFromAssistantTurn(ctx context.Context, arg ForkSessionFromAssistantTurnParams) (ForkSessionFromAssistantTurnRow, error) {
+	row := q.db.QueryRow(ctx, forkSessionFromAssistantTurn,
 		arg.SessionID,
 		arg.BotID,
-		arg.MessageID,
+		arg.TurnID,
 		arg.Metadata,
+		arg.RuntimeMetadataOverride,
 		arg.Title,
 		arg.CreatedByUserID,
 	)
-	var i ForkSessionFromAssistantMessageRow
+	var i ForkSessionFromAssistantTurnRow
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
@@ -386,11 +478,19 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg ForkS
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -398,12 +498,51 @@ func (q *Queries) ForkSessionFromAssistantMessage(ctx context.Context, arg ForkS
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }
 
+const getLatestSessionModelPreference = `-- name: GetLatestSessionModelPreference :one
+SELECT preferred_chat_model_id, preferred_reasoning_effort
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
+  AND created_by_user_id = $2
+  AND runtime_type = 'model'
+  AND session_mode IN ('chat', 'discuss')
+  AND type = 'chat'
+  AND visibility = 'user'
+  AND deleted_at IS NULL
+  AND preferred_chat_model_id IS NOT NULL
+ORDER BY updated_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestSessionModelPreferenceParams struct {
+	BotID           pgtype.UUID `json:"bot_id"`
+	CreatedByUserID pgtype.UUID `json:"created_by_user_id"`
+}
+
+type GetLatestSessionModelPreferenceRow struct {
+	PreferredChatModelID     pgtype.UUID `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text `json:"preferred_reasoning_effort"`
+}
+
+// Welcome composer seed: the bot's most recent native user-facing session
+// that has a persisted pair, created by the CURRENT user (multi-member bots
+// must not seed one member's welcome from another member's pick). Native =
+// model runtime, chat/discuss mode, user visibility; subagent/schedule/ACP
+// sessions never seed.
+func (q *Queries) GetLatestSessionModelPreference(ctx context.Context, arg GetLatestSessionModelPreferenceParams) (GetLatestSessionModelPreferenceRow, error) {
+	row := q.db.QueryRow(ctx, getLatestSessionModelPreference, arg.BotID, arg.CreatedByUserID)
+	var i GetLatestSessionModelPreferenceRow
+	err := row.Scan(&i.PreferredChatModelID, &i.PreferredReasoningEffort)
+	return i, err
+}
+
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 FROM bot_sessions
 WHERE team_id = public.memoh_current_team_id()
   AND id = $1
@@ -422,11 +561,19 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -434,6 +581,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id pgtype.UUID) (BotSessio
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }
@@ -508,8 +656,8 @@ func (q *Queries) ListSessionDiscussCursorsByBot(ctx context.Context, botID pgty
 
 const listSessionsByBot = `-- name: ListSessionsByBot :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
@@ -518,22 +666,28 @@ ORDER BY s.updated_at DESC
 `
 
 type ListSessionsByBotRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	RouteID         pgtype.UUID        `json:"route_id"`
-	ChannelType     pgtype.Text        `json:"channel_type"`
-	Type            string             `json:"type"`
-	SessionMode     string             `json:"session_mode"`
-	RuntimeType     string             `json:"runtime_type"`
-	RuntimeMetadata []byte             `json:"runtime_metadata"`
-	Title           string             `json:"title"`
-	Metadata        []byte             `json:"metadata"`
-	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	WorkdirID       pgtype.UUID        `json:"workdir_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	BotID                    pgtype.UUID        `json:"bot_id"`
+	BotAgentID               pgtype.UUID        `json:"bot_agent_id"`
+	RouteID                  pgtype.UUID        `json:"route_id"`
+	ChannelType              pgtype.Text        `json:"channel_type"`
+	Type                     string             `json:"type"`
+	SessionMode              string             `json:"session_mode"`
+	RuntimeType              string             `json:"runtime_type"`
+	Visibility               string             `json:"visibility"`
+	RuntimeMetadata          []byte             `json:"runtime_metadata"`
+	Title                    string             `json:"title"`
+	Metadata                 []byte             `json:"metadata"`
+	ParentSessionID          pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID          pgtype.UUID        `json:"created_by_user_id"`
+	WorkdirID                pgtype.UUID        `json:"workdir_id"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	PreferredChatModelID     pgtype.UUID        `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text        `json:"preferred_reasoning_effort"`
+	PreferredExternalModelID pgtype.Text        `json:"preferred_external_model_id"`
+	ModelPreferenceRevision  pgtype.UUID        `json:"model_preference_revision"`
 }
 
 func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]ListSessionsByBotRow, error) {
@@ -548,11 +702,13 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
+			&i.BotAgentID,
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
 			&i.SessionMode,
 			&i.RuntimeType,
+			&i.Visibility,
 			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
@@ -562,6 +718,10 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.PreferredChatModelID,
+			&i.PreferredReasoningEffort,
+			&i.PreferredExternalModelID,
+			&i.ModelPreferenceRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -575,8 +735,8 @@ func (q *Queries) ListSessionsByBot(ctx context.Context, botID pgtype.UUID) ([]L
 
 const listSessionsByBotAndCreatedByUser = `-- name: ListSessionsByBotAndCreatedByUser :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
@@ -591,22 +751,28 @@ type ListSessionsByBotAndCreatedByUserParams struct {
 }
 
 type ListSessionsByBotAndCreatedByUserRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	RouteID         pgtype.UUID        `json:"route_id"`
-	ChannelType     pgtype.Text        `json:"channel_type"`
-	Type            string             `json:"type"`
-	SessionMode     string             `json:"session_mode"`
-	RuntimeType     string             `json:"runtime_type"`
-	RuntimeMetadata []byte             `json:"runtime_metadata"`
-	Title           string             `json:"title"`
-	Metadata        []byte             `json:"metadata"`
-	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	WorkdirID       pgtype.UUID        `json:"workdir_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	BotID                    pgtype.UUID        `json:"bot_id"`
+	BotAgentID               pgtype.UUID        `json:"bot_agent_id"`
+	RouteID                  pgtype.UUID        `json:"route_id"`
+	ChannelType              pgtype.Text        `json:"channel_type"`
+	Type                     string             `json:"type"`
+	SessionMode              string             `json:"session_mode"`
+	RuntimeType              string             `json:"runtime_type"`
+	Visibility               string             `json:"visibility"`
+	RuntimeMetadata          []byte             `json:"runtime_metadata"`
+	Title                    string             `json:"title"`
+	Metadata                 []byte             `json:"metadata"`
+	ParentSessionID          pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID          pgtype.UUID        `json:"created_by_user_id"`
+	WorkdirID                pgtype.UUID        `json:"workdir_id"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	PreferredChatModelID     pgtype.UUID        `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text        `json:"preferred_reasoning_effort"`
+	PreferredExternalModelID pgtype.Text        `json:"preferred_external_model_id"`
+	ModelPreferenceRevision  pgtype.UUID        `json:"model_preference_revision"`
 }
 
 func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg ListSessionsByBotAndCreatedByUserParams) ([]ListSessionsByBotAndCreatedByUserRow, error) {
@@ -621,11 +787,13 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
+			&i.BotAgentID,
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
 			&i.SessionMode,
 			&i.RuntimeType,
+			&i.Visibility,
 			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
@@ -635,6 +803,10 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.PreferredChatModelID,
+			&i.PreferredReasoningEffort,
+			&i.PreferredExternalModelID,
+			&i.ModelPreferenceRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -648,8 +820,8 @@ func (q *Queries) ListSessionsByBotAndCreatedByUser(ctx context.Context, arg Lis
 
 const listSessionsByBotAndCreatedByUserPaged = `-- name: ListSessionsByBotAndCreatedByUserPaged :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
@@ -669,10 +841,14 @@ WHERE s.team_id = public.memoh_current_team_id()
   )
   AND (
     NOT $9::bool
-    OR (s.updated_at, s.id) < ($10::timestamptz, $11::uuid)
+    OR s.visibility = $10::text
+  )
+  AND (
+    NOT $11::bool
+    OR (s.updated_at, s.id) < ($12::timestamptz, $13::uuid)
   )
 ORDER BY s.updated_at DESC, s.id DESC
-LIMIT $12::int
+LIMIT $14::int
 `
 
 type ListSessionsByBotAndCreatedByUserPagedParams struct {
@@ -684,6 +860,8 @@ type ListSessionsByBotAndCreatedByUserPagedParams struct {
 	UseWorkdir        bool               `json:"use_workdir"`
 	WorkdirUnassigned bool               `json:"workdir_unassigned"`
 	WorkdirID         pgtype.UUID        `json:"workdir_id"`
+	UseVisibility     bool               `json:"use_visibility"`
+	Visibility        string             `json:"visibility"`
 	UseCursor         bool               `json:"use_cursor"`
 	CursorUpdatedAt   pgtype.Timestamptz `json:"cursor_updated_at"`
 	CursorID          pgtype.UUID        `json:"cursor_id"`
@@ -691,22 +869,28 @@ type ListSessionsByBotAndCreatedByUserPagedParams struct {
 }
 
 type ListSessionsByBotAndCreatedByUserPagedRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	RouteID         pgtype.UUID        `json:"route_id"`
-	ChannelType     pgtype.Text        `json:"channel_type"`
-	Type            string             `json:"type"`
-	SessionMode     string             `json:"session_mode"`
-	RuntimeType     string             `json:"runtime_type"`
-	RuntimeMetadata []byte             `json:"runtime_metadata"`
-	Title           string             `json:"title"`
-	Metadata        []byte             `json:"metadata"`
-	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	WorkdirID       pgtype.UUID        `json:"workdir_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	BotID                    pgtype.UUID        `json:"bot_id"`
+	BotAgentID               pgtype.UUID        `json:"bot_agent_id"`
+	RouteID                  pgtype.UUID        `json:"route_id"`
+	ChannelType              pgtype.Text        `json:"channel_type"`
+	Type                     string             `json:"type"`
+	SessionMode              string             `json:"session_mode"`
+	RuntimeType              string             `json:"runtime_type"`
+	Visibility               string             `json:"visibility"`
+	RuntimeMetadata          []byte             `json:"runtime_metadata"`
+	Title                    string             `json:"title"`
+	Metadata                 []byte             `json:"metadata"`
+	ParentSessionID          pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID          pgtype.UUID        `json:"created_by_user_id"`
+	WorkdirID                pgtype.UUID        `json:"workdir_id"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	PreferredChatModelID     pgtype.UUID        `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text        `json:"preferred_reasoning_effort"`
+	PreferredExternalModelID pgtype.Text        `json:"preferred_external_model_id"`
+	ModelPreferenceRevision  pgtype.UUID        `json:"model_preference_revision"`
 }
 
 func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, arg ListSessionsByBotAndCreatedByUserPagedParams) ([]ListSessionsByBotAndCreatedByUserPagedRow, error) {
@@ -719,6 +903,8 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 		arg.UseWorkdir,
 		arg.WorkdirUnassigned,
 		arg.WorkdirID,
+		arg.UseVisibility,
+		arg.Visibility,
 		arg.UseCursor,
 		arg.CursorUpdatedAt,
 		arg.CursorID,
@@ -734,11 +920,13 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
+			&i.BotAgentID,
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
 			&i.SessionMode,
 			&i.RuntimeType,
+			&i.Visibility,
 			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
@@ -748,6 +936,10 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.PreferredChatModelID,
+			&i.PreferredReasoningEffort,
+			&i.PreferredExternalModelID,
+			&i.ModelPreferenceRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -761,8 +953,8 @@ func (q *Queries) ListSessionsByBotAndCreatedByUserPaged(ctx context.Context, ar
 
 const listSessionsByBotPaged = `-- name: ListSessionsByBotPaged :many
 SELECT
-  s.id, s.bot_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.runtime_metadata, s.title, s.metadata,
-  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at
+  s.id, s.bot_id, s.bot_agent_id, s.route_id, s.channel_type, s.type, s.session_mode, s.runtime_type, s.visibility, s.runtime_metadata, s.title, s.metadata,
+  s.parent_session_id, s.created_by_user_id, s.workdir_id, s.created_at, s.updated_at, s.deleted_at, s.preferred_chat_model_id, s.preferred_reasoning_effort, s.preferred_external_model_id, s.model_preference_revision
 FROM bot_sessions s
 WHERE s.team_id = public.memoh_current_team_id()
   AND s.bot_id = $1
@@ -781,10 +973,14 @@ WHERE s.team_id = public.memoh_current_team_id()
   )
   AND (
     NOT $8::bool
-    OR (s.updated_at, s.id) < ($9::timestamptz, $10::uuid)
+    OR s.visibility = $9::text
+  )
+  AND (
+    NOT $10::bool
+    OR (s.updated_at, s.id) < ($11::timestamptz, $12::uuid)
   )
 ORDER BY s.updated_at DESC, s.id DESC
-LIMIT $11::int
+LIMIT $13::int
 `
 
 type ListSessionsByBotPagedParams struct {
@@ -795,6 +991,8 @@ type ListSessionsByBotPagedParams struct {
 	UseWorkdir        bool               `json:"use_workdir"`
 	WorkdirUnassigned bool               `json:"workdir_unassigned"`
 	WorkdirID         pgtype.UUID        `json:"workdir_id"`
+	UseVisibility     bool               `json:"use_visibility"`
+	Visibility        string             `json:"visibility"`
 	UseCursor         bool               `json:"use_cursor"`
 	CursorUpdatedAt   pgtype.Timestamptz `json:"cursor_updated_at"`
 	CursorID          pgtype.UUID        `json:"cursor_id"`
@@ -802,22 +1000,28 @@ type ListSessionsByBotPagedParams struct {
 }
 
 type ListSessionsByBotPagedRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	RouteID         pgtype.UUID        `json:"route_id"`
-	ChannelType     pgtype.Text        `json:"channel_type"`
-	Type            string             `json:"type"`
-	SessionMode     string             `json:"session_mode"`
-	RuntimeType     string             `json:"runtime_type"`
-	RuntimeMetadata []byte             `json:"runtime_metadata"`
-	Title           string             `json:"title"`
-	Metadata        []byte             `json:"metadata"`
-	ParentSessionID pgtype.UUID        `json:"parent_session_id"`
-	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
-	WorkdirID       pgtype.UUID        `json:"workdir_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	ID                       pgtype.UUID        `json:"id"`
+	BotID                    pgtype.UUID        `json:"bot_id"`
+	BotAgentID               pgtype.UUID        `json:"bot_agent_id"`
+	RouteID                  pgtype.UUID        `json:"route_id"`
+	ChannelType              pgtype.Text        `json:"channel_type"`
+	Type                     string             `json:"type"`
+	SessionMode              string             `json:"session_mode"`
+	RuntimeType              string             `json:"runtime_type"`
+	Visibility               string             `json:"visibility"`
+	RuntimeMetadata          []byte             `json:"runtime_metadata"`
+	Title                    string             `json:"title"`
+	Metadata                 []byte             `json:"metadata"`
+	ParentSessionID          pgtype.UUID        `json:"parent_session_id"`
+	CreatedByUserID          pgtype.UUID        `json:"created_by_user_id"`
+	WorkdirID                pgtype.UUID        `json:"workdir_id"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                pgtype.Timestamptz `json:"deleted_at"`
+	PreferredChatModelID     pgtype.UUID        `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text        `json:"preferred_reasoning_effort"`
+	PreferredExternalModelID pgtype.Text        `json:"preferred_external_model_id"`
+	ModelPreferenceRevision  pgtype.UUID        `json:"model_preference_revision"`
 }
 
 // Cursor uses (updated_at, id) so pages stay stable when many rows share an
@@ -834,6 +1038,8 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 		arg.UseWorkdir,
 		arg.WorkdirUnassigned,
 		arg.WorkdirID,
+		arg.UseVisibility,
+		arg.Visibility,
 		arg.UseCursor,
 		arg.CursorUpdatedAt,
 		arg.CursorID,
@@ -849,11 +1055,13 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 		if err := rows.Scan(
 			&i.ID,
 			&i.BotID,
+			&i.BotAgentID,
 			&i.RouteID,
 			&i.ChannelType,
 			&i.Type,
 			&i.SessionMode,
 			&i.RuntimeType,
+			&i.Visibility,
 			&i.RuntimeMetadata,
 			&i.Title,
 			&i.Metadata,
@@ -863,6 +1071,10 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.PreferredChatModelID,
+			&i.PreferredReasoningEffort,
+			&i.PreferredExternalModelID,
+			&i.ModelPreferenceRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -875,7 +1087,7 @@ func (q *Queries) ListSessionsByBotPaged(ctx context.Context, arg ListSessionsBy
 }
 
 const listSessionsByRoute = `-- name: ListSessionsByRoute :many
-SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 FROM bot_sessions
 WHERE team_id = public.memoh_current_team_id()
   AND route_id = $1
@@ -901,11 +1113,19 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 			&i.SessionMode,
 			&i.RuntimeType,
 			&i.RuntimeMetadata,
+			&i.PreferredChatModelID,
+			&i.PreferredReasoningEffort,
+			&i.PreferredExternalModelID,
+			&i.ModelPreferenceRevision,
+			&i.Visibility,
 			&i.Title,
 			&i.Metadata,
 			&i.NextTurnPosition,
 			&i.CompactionEpoch,
 			&i.RuntimeFencingToken,
+			&i.RuntimeResetToken,
+			&i.RuntimeResetExpiresAt,
+			&i.RuntimeConfigEpoch,
 			&i.ParentSessionID,
 			&i.CreatedByUserID,
 			&i.CreatedAt,
@@ -913,6 +1133,7 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 			&i.DeletedAt,
 			&i.TeamID,
 			&i.WorkdirID,
+			&i.BotAgentID,
 		); err != nil {
 			return nil, err
 		}
@@ -925,7 +1146,7 @@ func (q *Queries) ListSessionsByRoute(ctx context.Context, routeID pgtype.UUID) 
 }
 
 const listSubagentSessionsByParent = `-- name: ListSubagentSessionsByParent :many
-SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+SELECT id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 FROM bot_sessions
 WHERE team_id = public.memoh_current_team_id()
   AND parent_session_id = $1
@@ -958,11 +1179,19 @@ func (q *Queries) ListSubagentSessionsByParent(ctx context.Context, parentSessio
 			&i.SessionMode,
 			&i.RuntimeType,
 			&i.RuntimeMetadata,
+			&i.PreferredChatModelID,
+			&i.PreferredReasoningEffort,
+			&i.PreferredExternalModelID,
+			&i.ModelPreferenceRevision,
+			&i.Visibility,
 			&i.Title,
 			&i.Metadata,
 			&i.NextTurnPosition,
 			&i.CompactionEpoch,
 			&i.RuntimeFencingToken,
+			&i.RuntimeResetToken,
+			&i.RuntimeResetExpiresAt,
+			&i.RuntimeConfigEpoch,
 			&i.ParentSessionID,
 			&i.CreatedByUserID,
 			&i.CreatedAt,
@@ -970,6 +1199,7 @@ func (q *Queries) ListSubagentSessionsByParent(ctx context.Context, parentSessio
 			&i.DeletedAt,
 			&i.TeamID,
 			&i.WorkdirID,
+			&i.BotAgentID,
 		); err != nil {
 			return nil, err
 		}
@@ -998,6 +1228,31 @@ type LockSessionDecisionSequenceParams struct {
 
 func (q *Queries) LockSessionDecisionSequence(ctx context.Context, arg LockSessionDecisionSequenceParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockSessionDecisionSequence, arg.SessionID, arg.BotID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockSessionForCommitReconciliation = `-- name: LockSessionForCommitReconciliation :one
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+  AND bot_id = $2
+FOR UPDATE
+`
+
+type LockSessionForCommitReconciliationParams struct {
+	SessionID pgtype.UUID `json:"session_id"`
+	BotID     pgtype.UUID `json:"bot_id"`
+}
+
+// Commit-unknown reconciliation must wait for the original writer even when a
+// concurrent reset has soft-deleted the session. A missing row after this lock
+// attempt is terminal (the session was hard-deleted and its history cascaded),
+// not a transient condition to retry forever.
+func (q *Queries) LockSessionForCommitReconciliation(ctx context.Context, arg LockSessionForCommitReconciliationParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockSessionForCommitReconciliation, arg.SessionID, arg.BotID)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
@@ -1077,20 +1332,88 @@ func (q *Queries) SetSessionNextTurnPosition(ctx context.Context, arg SetSession
 }
 
 const softDeleteSession = `-- name: SoftDeleteSession :exec
-UPDATE bot_sessions
-SET deleted_at = now(), updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $1 AND deleted_at IS NULL
+WITH invalidated_session AS MATERIALIZED (
+  UPDATE bot_sessions
+  SET deleted_at = now(),
+      updated_at = now(),
+      runtime_config_epoch = runtime_config_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+  WHERE team_id = public.memoh_current_team_id()
+    AND id = $1
+    AND deleted_at IS NULL
+  RETURNING id
+),
+deleted_acp_states AS (
+  DELETE FROM agent_session_states state
+  USING invalidated_session invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM agent_session_state_lines line
+  USING invalidated_session invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+)
+DELETE FROM agent_session_publications publication
+USING invalidated_session invalidated
+WHERE publication.team_id = public.memoh_current_team_id()
+  AND publication.session_id = invalidated.id
+  AND (SELECT count(*) FROM deleted_acp_states) >= 0
+  AND (SELECT count(*) FROM deleted_acp_lines) >= 0
 `
 
+// ACP state is removed in full: soft delete never fires the hard-delete FK
+// cascades, so headers, the shared line set, and the publication head must
+// all be dropped here or they orphan forever.
 func (q *Queries) SoftDeleteSession(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, softDeleteSession, id)
 	return err
 }
 
 const softDeleteSessionsByBot = `-- name: SoftDeleteSessionsByBot :exec
-UPDATE bot_sessions
-SET deleted_at = now(), updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND deleted_at IS NULL
+WITH target_sessions AS MATERIALIZED (
+  SELECT session.id
+  FROM bot_sessions session
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.bot_id = $1
+    AND session.deleted_at IS NULL
+  ORDER BY session.id
+  FOR UPDATE
+),
+invalidated_sessions AS MATERIALIZED (
+  UPDATE bot_sessions session
+  SET deleted_at = now(),
+      updated_at = now(),
+      runtime_config_epoch = session.runtime_config_epoch + 1,
+      runtime_fencing_token = nextval('session_runtime_fencing_token_seq')::bigint
+  FROM target_sessions target
+  WHERE session.team_id = public.memoh_current_team_id()
+    AND session.id = target.id
+  RETURNING session.id
+),
+deleted_acp_states AS (
+  DELETE FROM agent_session_states state
+  USING invalidated_sessions invalidated
+  WHERE state.team_id = public.memoh_current_team_id()
+    AND state.session_id = invalidated.id
+  RETURNING state.session_id
+),
+deleted_acp_lines AS (
+  DELETE FROM agent_session_state_lines line
+  USING invalidated_sessions invalidated
+  WHERE line.team_id = public.memoh_current_team_id()
+    AND line.session_id = invalidated.id
+  RETURNING line.session_id
+)
+DELETE FROM agent_session_publications publication
+USING invalidated_sessions invalidated
+WHERE publication.team_id = public.memoh_current_team_id()
+  AND publication.session_id = invalidated.id
+  AND (SELECT count(*) FROM deleted_acp_states) >= 0
+  AND (SELECT count(*) FROM deleted_acp_lines) >= 0
 `
 
 func (q *Queries) SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID) error {
@@ -1113,7 +1436,7 @@ const updateSessionMetadata = `-- name: UpdateSessionMetadata :one
 UPDATE bot_sessions
 SET metadata = $1, updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 `
 
 type UpdateSessionMetadataParams struct {
@@ -1133,11 +1456,19 @@ func (q *Queries) UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMe
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -1145,6 +1476,7 @@ func (q *Queries) UpdateSessionMetadata(ctx context.Context, arg UpdateSessionMe
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }
@@ -1157,7 +1489,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $3
   AND runtime_fencing_token = $4
   AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 `
 
 type UpdateSessionMetadataWithRuntimeFenceParams struct {
@@ -1184,11 +1516,19 @@ func (q *Queries) UpdateSessionMetadataWithRuntimeFence(ctx context.Context, arg
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -1196,6 +1536,107 @@ func (q *Queries) UpdateSessionMetadataWithRuntimeFence(ctx context.Context, arg
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
+	)
+	return i, err
+}
+
+const updateSessionModelPreference = `-- name: UpdateSessionModelPreference :exec
+UPDATE bot_sessions
+SET preferred_chat_model_id = $2,
+    preferred_reasoning_effort = $3,
+    preferred_external_model_id = $4,
+    model_preference_revision = gen_random_uuid()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $1
+  AND deleted_at IS NULL
+`
+
+type UpdateSessionModelPreferenceParams struct {
+	ID                       pgtype.UUID `json:"id"`
+	PreferredChatModelID     pgtype.UUID `json:"preferred_chat_model_id"`
+	PreferredReasoningEffort pgtype.Text `json:"preferred_reasoning_effort"`
+	PreferredExternalModelID pgtype.Text `json:"preferred_external_model_id"`
+}
+
+// Preference write-back (issue #879). Deliberately does NOT touch
+// updated_at: sidebar recency must not move on picker changes or
+// per-turn write-backs. The explicit team predicate matches every other
+// query in this file (defense-in-depth under FORCE RLS), and the deleted_at
+// guard keeps late writes out of soft-deleted sessions.
+func (q *Queries) UpdateSessionModelPreference(ctx context.Context, arg UpdateSessionModelPreferenceParams) error {
+	_, err := q.db.Exec(ctx, updateSessionModelPreference,
+		arg.ID,
+		arg.PreferredChatModelID,
+		arg.PreferredReasoningEffort,
+		arg.PreferredExternalModelID,
+	)
+	return err
+}
+
+const updateSessionRuntimeMetadata = `-- name: UpdateSessionRuntimeMetadata :one
+UPDATE bot_sessions
+SET runtime_metadata = $1, updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND runtime_type = $3
+  AND ($4::bigint IS NULL OR runtime_fencing_token <= $4::bigint)
+  AND deleted_at IS NULL
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
+`
+
+type UpdateSessionRuntimeMetadataParams struct {
+	RuntimeMetadata []byte      `json:"runtime_metadata"`
+	ID              pgtype.UUID `json:"id"`
+	RuntimeType     string      `json:"runtime_type"`
+	FencingToken    pgtype.Int8 `json:"fencing_token"`
+}
+
+// The runtime_type guard makes the merge a no-op when the session was
+// concurrently switched to another runtime: driver-owned keys must never be
+// written into a session that no longer belongs to that driver. The fencing
+// guard rejects a superseded owner's late write: after a cluster ownership
+// handoff the old owner's turn still finishes and reports its runtime
+// metadata, and letting it land would point the session at a stale runtime
+// thread. A NULL token skips the guard for callers outside any run.
+func (q *Queries) UpdateSessionRuntimeMetadata(ctx context.Context, arg UpdateSessionRuntimeMetadataParams) (BotSession, error) {
+	row := q.db.QueryRow(ctx, updateSessionRuntimeMetadata,
+		arg.RuntimeMetadata,
+		arg.ID,
+		arg.RuntimeType,
+		arg.FencingToken,
+	)
+	var i BotSession
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.RouteID,
+		&i.ChannelType,
+		&i.Type,
+		&i.SessionMode,
+		&i.RuntimeType,
+		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
+		&i.Title,
+		&i.Metadata,
+		&i.NextTurnPosition,
+		&i.CompactionEpoch,
+		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
+		&i.ParentSessionID,
+		&i.CreatedByUserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.TeamID,
+		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }
@@ -1204,7 +1645,7 @@ const updateSessionTitle = `-- name: UpdateSessionTitle :one
 UPDATE bot_sessions
 SET title = $1, updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $2 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 `
 
 type UpdateSessionTitleParams struct {
@@ -1224,11 +1665,19 @@ func (q *Queries) UpdateSessionTitle(ctx context.Context, arg UpdateSessionTitle
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -1236,6 +1685,7 @@ func (q *Queries) UpdateSessionTitle(ctx context.Context, arg UpdateSessionTitle
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }
@@ -1248,7 +1698,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $3
   AND runtime_fencing_token = $4
   AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 `
 
 type UpdateSessionTitleWithRuntimeFenceParams struct {
@@ -1275,11 +1725,19 @@ func (q *Queries) UpdateSessionTitleWithRuntimeFence(ctx context.Context, arg Up
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -1287,6 +1745,7 @@ func (q *Queries) UpdateSessionTitleWithRuntimeFence(ctx context.Context, arg Up
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }
@@ -1296,27 +1755,41 @@ UPDATE bot_sessions
 SET type = $1,
     session_mode = $2,
     runtime_type = $3,
-    runtime_metadata = $4,
-    metadata = $5,
+    bot_agent_id = $4,
+    runtime_metadata = $5,
+    metadata = $6,
+    preferred_chat_model_id = CASE WHEN runtime_type IS DISTINCT FROM $3 OR bot_agent_id IS DISTINCT FROM $4
+      THEN NULL ELSE preferred_chat_model_id END,
+    preferred_external_model_id = CASE WHEN runtime_type IS DISTINCT FROM $3 OR bot_agent_id IS DISTINCT FROM $4
+      THEN NULL ELSE preferred_external_model_id END,
+    preferred_reasoning_effort = CASE WHEN runtime_type IS DISTINCT FROM $3 OR bot_agent_id IS DISTINCT FROM $4
+      THEN NULL ELSE preferred_reasoning_effort END,
+    model_preference_revision = CASE WHEN runtime_type IS DISTINCT FROM $3 OR bot_agent_id IS DISTINCT FROM $4
+      THEN gen_random_uuid() ELSE model_preference_revision END,
+    runtime_config_epoch = runtime_config_epoch + 1,
     updated_at = now()
-WHERE team_id = public.memoh_current_team_id() AND id = $6 AND deleted_at IS NULL
-RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id
+WHERE team_id = public.memoh_current_team_id() AND id = $7 AND deleted_at IS NULL
+RETURNING id, bot_id, route_id, channel_type, type, session_mode, runtime_type, runtime_metadata, preferred_chat_model_id, preferred_reasoning_effort, preferred_external_model_id, model_preference_revision, visibility, title, metadata, next_turn_position, compaction_epoch, runtime_fencing_token, runtime_reset_token, runtime_reset_expires_at, runtime_config_epoch, parent_session_id, created_by_user_id, created_at, updated_at, deleted_at, team_id, workdir_id, bot_agent_id
 `
 
 type UpdateSessionTypeAndMetadataParams struct {
 	Type            string      `json:"type"`
 	SessionMode     string      `json:"session_mode"`
 	RuntimeType     string      `json:"runtime_type"`
+	BotAgentID      pgtype.UUID `json:"bot_agent_id"`
 	RuntimeMetadata []byte      `json:"runtime_metadata"`
 	Metadata        []byte      `json:"metadata"`
 	ID              pgtype.UUID `json:"id"`
 }
 
+// A different runtime or Agent owns a different model namespace. Clear the
+// old preference and invalidate pending picker writes when changing it.
 func (q *Queries) UpdateSessionTypeAndMetadata(ctx context.Context, arg UpdateSessionTypeAndMetadataParams) (BotSession, error) {
 	row := q.db.QueryRow(ctx, updateSessionTypeAndMetadata,
 		arg.Type,
 		arg.SessionMode,
 		arg.RuntimeType,
+		arg.BotAgentID,
 		arg.RuntimeMetadata,
 		arg.Metadata,
 		arg.ID,
@@ -1331,11 +1804,19 @@ func (q *Queries) UpdateSessionTypeAndMetadata(ctx context.Context, arg UpdateSe
 		&i.SessionMode,
 		&i.RuntimeType,
 		&i.RuntimeMetadata,
+		&i.PreferredChatModelID,
+		&i.PreferredReasoningEffort,
+		&i.PreferredExternalModelID,
+		&i.ModelPreferenceRevision,
+		&i.Visibility,
 		&i.Title,
 		&i.Metadata,
 		&i.NextTurnPosition,
 		&i.CompactionEpoch,
 		&i.RuntimeFencingToken,
+		&i.RuntimeResetToken,
+		&i.RuntimeResetExpiresAt,
+		&i.RuntimeConfigEpoch,
 		&i.ParentSessionID,
 		&i.CreatedByUserID,
 		&i.CreatedAt,
@@ -1343,6 +1824,7 @@ func (q *Queries) UpdateSessionTypeAndMetadata(ctx context.Context, arg UpdateSe
 		&i.DeletedAt,
 		&i.TeamID,
 		&i.WorkdirID,
+		&i.BotAgentID,
 	)
 	return i, err
 }

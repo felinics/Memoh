@@ -7,11 +7,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channelaccess"
-	identitypkg "github.com/memohai/memoh/internal/identity"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channelaccess"
+	identitypkg "github.com/felinics/memoh/internal/identity"
 )
 
 // ChannelAccessHandler exposes the per-bot Manage capability (Channel Access

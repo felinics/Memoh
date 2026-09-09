@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 type Builder struct {
@@ -69,6 +71,14 @@ func (b *Builder) Build(ctx context.Context, input BuildInput) (*ContextView, er
 	profile := b.selector.ProfileFor(input.Intent)
 	result := b.selector.Select(sourceFrags, profile, input.Budget)
 	trace.SelectionSummary = result.Summary
+	if result.TrimNotice && result.TrimNoticeIndex >= 0 && result.TrimNoticeIndex <= len(result.Selected) {
+		notice := contextfrag.NormalizeContextRefs([]contextfrag.ContextFrag{TrimNoticeFrag(input.Scope)})[0]
+		selected := make([]contextfrag.ContextFrag, 0, len(result.Selected)+1)
+		selected = append(selected, result.Selected[:result.TrimNoticeIndex]...)
+		selected = append(selected, notice)
+		selected = append(selected, result.Selected[result.TrimNoticeIndex:]...)
+		result.Selected = selected
+	}
 
 	placement := b.placer.Place(result.Selected, input.Intent)
 	trace.PlacementSummary = summarizePlacement(placement)
@@ -76,7 +86,13 @@ func (b *Builder) Build(ctx context.Context, input BuildInput) (*ContextView, er
 	manifest := contextfrag.BuildManifest(result.Selected)
 	manifest.View = input.Intent.ManifestView()
 	manifest.DynamicMutators = normalizeDynamicMutators(input.DynamicMutators)
+	manifest.Mutations = input.Mutations
 	manifest.Selection = selectionTrace(result.Summary)
+	manifest.SelectionDecisions = selectionDecisions(sourceFrags, result)
+	if input.Budget.Plan != nil {
+		plan := *input.Budget.Plan
+		manifest.BudgetPlan = &plan
+	}
 	manifest.EditTrace = append(manifest.EditTrace, selectionEditTrace(result.Dropped)...)
 	manifest.EditTrace = append(manifest.EditTrace, result.Edited...)
 	manifest.ValidationWarnings = append(manifest.ValidationWarnings, result.Warnings...)
@@ -92,6 +108,9 @@ func (b *Builder) Build(ctx context.Context, input BuildInput) (*ContextView, er
 		Trace:       trace,
 	}
 
+	if result.FatalError != nil {
+		return view, result.FatalError
+	}
 	if input.Options.DryRun {
 		return view, nil
 	}
@@ -127,6 +146,231 @@ func (b *Builder) Build(ctx context.Context, input BuildInput) (*ContextView, er
 	}
 
 	return view, nil
+}
+
+func selectionDecisions(sourceFrags []contextfrag.ContextFrag, result SelectionResult) []contextfrag.SelectionDecision {
+	dropReasonsByRef := make(map[selectionRefKey][]string, len(result.Summary.DropReasons))
+	legacyDropReasonsByID := make(map[string][]string)
+	for _, record := range result.Summary.DropReasons {
+		if key, ok := newSelectionRefKey(record.Ref); ok {
+			dropReasonsByRef[key] = append(dropReasonsByRef[key], record.Reason)
+			continue
+		}
+		legacyDropReasonsByID[record.FragID] = append(legacyDropReasonsByID[record.FragID], record.Reason)
+	}
+	selectedByRef := make(map[selectionRefKey][]int, len(result.Selected))
+	for i, frag := range result.Selected {
+		if key, ok := newSelectionRefKey(frag.Ref); ok {
+			selectedByRef[key] = append(selectedByRef[key], i)
+		}
+	}
+
+	decisions := make([]contextfrag.SelectionDecision, len(sourceFrags))
+	decided := make([]bool, len(sourceFrags))
+	selectedUsed := make([]bool, len(result.Selected))
+
+	// DropRecord.Ref identifies the exact source candidate that was rejected.
+	// Resolve those records before any selected-fragment matching so two
+	// candidates sharing a debug ID cannot exchange their audit outcomes.
+	for i, source := range sourceFrags {
+		key, ok := newSelectionRefKey(source.Ref)
+		if !ok {
+			continue
+		}
+		reasons := dropReasonsByRef[key]
+		if len(reasons) == 0 {
+			continue
+		}
+		decisions[i] = selectionDecisionForFrag(source, contextfrag.DecisionDropped, reasons[0])
+		decided[i] = true
+		dropReasonsByRef[key] = reasons[1:]
+	}
+
+	// Match unchanged selections by the complete ContextRef, including the
+	// content hash, before considering trim identity or legacy IDs.
+	for i, source := range sourceFrags {
+		if decided[i] {
+			continue
+		}
+		key, ok := newSelectionRefKey(source.Ref)
+		if !ok {
+			continue
+		}
+		indexes := selectedByRef[key]
+		for len(indexes) > 0 && selectedUsed[indexes[0]] {
+			indexes = indexes[1:]
+		}
+		selectedByRef[key] = indexes
+		if len(indexes) == 0 {
+			continue
+		}
+		selectedIndex := indexes[0]
+		decisions[i] = selectionDecisionForSelection(source, result.Selected[selectedIndex], result.EditReasons[source.ID])
+		decided[i] = true
+		selectedUsed[selectedIndex] = true
+		selectedByRef[key] = indexes[1:]
+	}
+
+	// A trim keeps the ContextRef identity but refreshes its content hash.
+	// Exact matches above must run first because multiple revisions of one
+	// durable identity can legitimately appear in the same source set.
+	for i, source := range sourceFrags {
+		if decided[i] {
+			continue
+		}
+		for selectedIndex, selected := range result.Selected {
+			if selectedUsed[selectedIndex] || !source.Ref.EqualIdentity(selected.Ref) {
+				continue
+			}
+			decisions[i] = selectionDecisionForSelection(source, selected, result.EditReasons[source.ID])
+			decided[i] = true
+			selectedUsed[selectedIndex] = true
+			break
+		}
+	}
+
+	// A budget edit can refresh a fragment's content hash before a later stage
+	// drops it, so its drop record no longer carries the source's exact ref.
+	// Match those records by ContextRef identity once selected matching is
+	// done, consuming deterministically among the remaining hashes.
+	for i, source := range sourceFrags {
+		if decided[i] {
+			continue
+		}
+		sourceKey, ok := newSelectionRefKey(source.Ref)
+		if !ok {
+			continue
+		}
+		candidateKeys := make([]selectionRefKey, 0, 1)
+		for key, reasons := range dropReasonsByRef {
+			if len(reasons) > 0 && key.identity == sourceKey.identity {
+				candidateKeys = append(candidateKeys, key)
+			}
+		}
+		if len(candidateKeys) == 0 {
+			continue
+		}
+		sort.Slice(candidateKeys, func(a, b int) bool {
+			return candidateKeys[a].contentHash < candidateKeys[b].contentHash
+		})
+		key := candidateKeys[0]
+		reasons := dropReasonsByRef[key]
+		decisions[i] = selectionDecisionForFrag(source, contextfrag.DecisionDropped, reasons[0])
+		decided[i] = true
+		dropReasonsByRef[key] = reasons[1:]
+	}
+
+	// Keep ID-only drop records for legacy selectors that did not provide a Ref.
+	for i, source := range sourceFrags {
+		if decided[i] {
+			continue
+		}
+		if reasons := legacyDropReasonsByID[source.ID]; len(reasons) > 0 {
+			decisions[i] = selectionDecisionForFrag(source, contextfrag.DecisionDropped, reasons[0])
+			decided[i] = true
+			legacyDropReasonsByID[source.ID] = reasons[1:]
+		}
+	}
+
+	// Preserve the former ID fallback for trim/replacement selectors only when
+	// one source and one selected fragment remain for that ID. Multiple
+	// candidates are ambiguous and must never be paired by their debug ID.
+	unresolvedSourcesByID := make(map[string]int)
+	unusedSelectedByID := make(map[string]int)
+	for i, source := range sourceFrags {
+		if !decided[i] {
+			unresolvedSourcesByID[source.ID]++
+		}
+	}
+	for i, selected := range result.Selected {
+		if !selectedUsed[i] {
+			unusedSelectedByID[selected.ID]++
+		}
+	}
+	for i, source := range sourceFrags {
+		if decided[i] || unresolvedSourcesByID[source.ID] != 1 || unusedSelectedByID[source.ID] != 1 {
+			continue
+		}
+		for selectedIndex, selected := range result.Selected {
+			if selectedUsed[selectedIndex] || selected.ID != source.ID {
+				continue
+			}
+			decisions[i] = selectionDecisionForSelection(source, selected, result.EditReasons[source.ID])
+			decided[i] = true
+			selectedUsed[selectedIndex] = true
+			break
+		}
+	}
+
+	for i, source := range sourceFrags {
+		if !decided[i] {
+			decisions[i] = selectionDecisionForFrag(source, contextfrag.DecisionDropped, "unknown")
+		}
+	}
+	for i, selected := range result.Selected {
+		if !selectedUsed[i] {
+			reason := ""
+			if selected.ID == systemBudgetMarkerID {
+				reason = "system_budget_marker"
+			}
+			decisions = append(decisions, selectionDecisionForFrag(selected, contextfrag.DecisionSelected, reason))
+		}
+	}
+	return decisions
+}
+
+type selectionRefKey struct {
+	identity    string
+	hashAlgo    string
+	hashScope   string
+	contentHash string
+}
+
+func newSelectionRefKey(ref contextfrag.ContextRef) (selectionRefKey, bool) {
+	if strings.TrimSpace(ref.Namespace) == "" || strings.TrimSpace(ref.ID) == "" {
+		return selectionRefKey{}, false
+	}
+	return selectionRefKey{
+		identity:    ref.StableKey(),
+		hashAlgo:    strings.TrimSpace(ref.HashAlgo),
+		hashScope:   strings.TrimSpace(ref.HashScope),
+		contentHash: strings.TrimSpace(ref.ContentHash),
+	}, true
+}
+
+func selectionDecisionForSelection(source, selected contextfrag.ContextFrag, reason string) contextfrag.SelectionDecision {
+	decision := contextfrag.DecisionSelected
+	if source.Ref.ContentHash != selected.Ref.ContentHash ||
+		contextfrag.ResolveFragTokens(source) != contextfrag.ResolveFragTokens(selected) {
+		decision = contextfrag.DecisionTrimmed
+	}
+	return selectionDecisionForFrag(selected, decision, reason)
+}
+
+func selectionDecisionForFrag(
+	frag contextfrag.ContextFrag,
+	decision contextfrag.SelectionDecisionKind,
+	reason string,
+) contextfrag.SelectionDecision {
+	itemManifest := contextfrag.BuildManifest([]contextfrag.ContextFrag{frag})
+	item := contextfrag.ManifestItem{}
+	if len(itemManifest.Items) > 0 {
+		item = itemManifest.Items[0]
+	}
+	return contextfrag.SelectionDecision{
+		ID:            frag.ID,
+		Ref:           item.Ref,
+		Slot:          frag.Slot,
+		Source:        frag.Provenance.Source,
+		SourceID:      frag.Provenance.SourceID,
+		Decision:      decision,
+		Reason:        reason,
+		TokenEstimate: item.TokenEstimate,
+		TextBytes:     item.TextBytes,
+		ImageCount:    item.ImageCount,
+		CacheClass:    frag.CacheClass,
+		RetentionTier: frag.RetentionTier,
+	}
 }
 
 func summarizePlacement(placement PlacementPlan) PlacementSummary {

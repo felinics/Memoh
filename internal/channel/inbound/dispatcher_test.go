@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/command"
+	"github.com/felinics/memoh/internal/command"
 )
 
 func TestDetectMode(t *testing.T) {

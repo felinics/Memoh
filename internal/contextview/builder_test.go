@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func TestBuildEndToEndPassthrough(t *testing.T) {
@@ -148,6 +148,49 @@ func TestBuildRecordsDroppedFragmentEditTrace(t *testing.T) {
 	}
 	if len(got.Manifest.Items) != len(frags)-1 {
 		t.Fatalf("manifest items = %d, want %d", len(got.Manifest.Items), len(frags)-1)
+	}
+	if len(got.Manifest.SelectionDecisions) != len(frags) {
+		t.Fatalf("selection decisions = %#v", got.Manifest.SelectionDecisions)
+	}
+	for i, decision := range got.Manifest.SelectionDecisions {
+		if decision.ID != frags[i].ID || decision.Ref.ID == "" {
+			t.Fatalf("selection decision %d = %#v", i, decision)
+		}
+		wantDecision := contextfrag.DecisionSelected
+		wantReason := ""
+		if i == 0 {
+			wantDecision = contextfrag.DecisionDropped
+			wantReason = "fixture"
+		}
+		if decision.Decision != wantDecision || decision.Reason != wantReason {
+			t.Fatalf("selection decision %d = %#v, want %q/%q", i, decision, wantDecision, wantReason)
+		}
+	}
+}
+
+func TestSelectionDecisionsMarksChangedSelectionTrimmed(t *testing.T) {
+	t.Parallel()
+
+	source := textFrag("same", contextfrag.SlotSystem, contextfrag.KindSystemPrompt, sdk.MessageRoleSystem, "changed")
+	selected := textFrag("same", contextfrag.SlotSystem, contextfrag.KindSystemPrompt, sdk.MessageRoleSystem, "change")
+	frags := contextfrag.NormalizeContextRefs([]contextfrag.ContextFrag{source, selected})
+	source, selected = frags[0], frags[1]
+	if contextfrag.ResolveFragTokens(source) != contextfrag.ResolveFragTokens(selected) {
+		t.Fatal("fixture must keep the same token estimate")
+	}
+
+	decisions := selectionDecisions([]contextfrag.ContextFrag{source}, SelectionResult{
+		Selected: []contextfrag.ContextFrag{selected},
+		Summary:  SelectionSummary{TotalCollected: 1, TotalSelected: 1},
+	})
+	if len(decisions) != 1 || decisions[0].Decision != contextfrag.DecisionTrimmed {
+		t.Fatalf("selection decisions = %#v", decisions)
+	}
+	if decisions[0].Ref.ContentHash != selected.Ref.ContentHash || decisions[0].Ref.ContentHash == source.Ref.ContentHash {
+		t.Fatalf("decision ref = %#v, source = %#v, selected = %#v", decisions[0].Ref, source.Ref, selected.Ref)
+	}
+	if decisions[0].TextBytes != len("change") || decisions[0].TokenEstimate != contextfrag.ResolveFragTokens(selected) {
+		t.Fatalf("decision accounting = %#v", decisions[0])
 	}
 }
 

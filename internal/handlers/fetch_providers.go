@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/fetchproviders"
 )
 
 type FetchProvidersHandler struct {

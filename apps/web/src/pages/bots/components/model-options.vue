@@ -2,10 +2,13 @@
   <!-- The Popover root is renderless (reka's PopoverRoot only provides context),
        so wrapping unconditionally costs nothing when the reasoning footer is off. -->
   <Popover v-model:open="reasoningOpen">
-    <div
-      :class="menuSearchHeaderClass"
-      @pointerenter="reasoningOpen = false"
-    >
+    <!-- No pointerenter closers on the search header or the listbox: with the
+         flyout collision-shifted up beside the list (short windows), every
+         diagonal path from the footer trigger to the flyout crossed one of
+         those zones and the menu died mid-flight. The flyout now closes only
+         on explicit actions — model pick, list scroll, typing, outside click
+         / Esc (see commitModel / scroll listener / searchTerm watcher). -->
+    <div :class="menuSearchHeaderClass">
       <input
         v-model="searchTerm"
         role="combobox"
@@ -24,7 +27,6 @@
       ref="scrollEl"
       :class="virtualListboxClass"
       role="listbox"
-      @pointerenter="reasoningOpen = false"
     >
       <div
         v-if="rows.length === 0"
@@ -90,13 +92,18 @@
       <div :class="menuSeparatorClass" />
       <div class="p-1.5 pt-0">
         <PopoverAnchor as-child>
+          <!-- menuItemClass highlights only via [data-highlighted] (the reka
+               Menu contract); these plain buttons must drive it themselves,
+               same as the list rows do via activeIndex. -->
           <button
             type="button"
             :aria-label="$t('chat.reasoningEffort')"
             :class="menuItemClass"
             :data-disabled="canSelectReasoning ? undefined : ''"
+            :data-highlighted="reasoningTriggerHover ? '' : undefined"
             :disabled="!canSelectReasoning"
-            @pointerenter="reasoningOpen = true"
+            @pointerenter="reasoningTriggerHover = true; reasoningOpen = true"
+            @pointerleave="reasoningTriggerHover = false"
             @click="reasoningOpen = true"
           >
             <Lightbulb :style="{ opacity: EFFORT_OPACITY[currentReasoningValue] ?? 0.5 }" />
@@ -119,7 +126,10 @@
       class="w-44"
       @open-auto-focus.prevent
     >
-      <div :class="menuChromeClass">
+      <div
+        :class="menuChromeClass"
+        @pointerleave="reasoningHoverValue = null"
+      >
         <div
           ref="reasoningScrollEl"
           :class="virtualListboxClass"
@@ -135,6 +145,8 @@
               <button
                 type="button"
                 :class="menuItemClass"
+                :data-highlighted="reasoningHoverValue === option.value ? '' : undefined"
+                @pointermove="reasoningHoverValue = option.value"
                 @click="setEffort(option.value)"
               >
                 <Lightbulb :style="{ opacity: EFFORT_OPACITY[option.value] ?? 0.5 }" />
@@ -178,9 +190,7 @@ import {
   EFFORT_LABELS,
   EFFORT_OPACITY,
   REASONING_EFFORT_DISABLE,
-  availableEffortsForMode,
-  resolveEffortLevels,
-  resolveThinkingMode,
+  selectableEfforts,
 } from './reasoning-effort'
 
 export interface ModelOption {
@@ -195,6 +205,7 @@ export interface ModelOption {
   contextWindow?: number
   providerId: string
   config?: ModelsGetResponse['config']
+  reasoning?: ModelsGetResponse['reasoning']
 }
 
 interface HeaderRow {
@@ -257,6 +268,13 @@ const searchTerm = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
 const reasoningScrollEl = ref<HTMLElement | null>(null)
 const reasoningOpen = ref(false)
+// Pointer-driven highlight state for the effort trigger and the flyout rows.
+// Both are plain buttons wearing menuItemClass, whose highlight only renders
+// through [data-highlighted]; nothing reka-side sets it here (unlike the list
+// rows, which are driven by the keyboard composable's activeIndex). Reset when
+// the flyout closes so a stale row never stays lit into the next open.
+const reasoningTriggerHover = ref(false)
+const reasoningHoverValue = ref<string | null>(null)
 const openDescriptionTooltipKey = ref<string | null>(null)
 // Sort order is captured when the picker opens. Changing models inside the same
 // open menu must not make the list jump under the pointer.
@@ -290,6 +308,7 @@ const options = computed<ModelOption[]>(() =>
       contextWindow: config?.context_window,
       providerId,
       config: model.config,
+      reasoning: model.reasoning,
     }
   }),
 )
@@ -451,17 +470,9 @@ const activeModel = computed(() =>
   options.value.find((o) => o.value === modelValue.value),
 )
 
-const activeClientType = computed(() =>
-  props.providers.find((p) => p.id === activeModel.value?.providerId)?.client_type,
+const nativeAvailableEfforts = computed(() =>
+  selectableEfforts(activeModel.value?.reasoning),
 )
-
-const nativeAvailableEfforts = computed(() => {
-  if (!activeModel.value) return []
-  return availableEffortsForMode(
-    resolveThinkingMode(activeModel.value.config),
-    resolveEffortLevels(activeModel.value.config, activeClientType.value),
-  )
-})
 
 const availableReasoningOptions = computed<ReasoningOption[]>(() => {
   if (props.reasoningOptions !== undefined) {
@@ -506,6 +517,13 @@ function setEffort(level: string) {
   // backdrop and dismiss the whole popover.
   reasoningEffort.value = level
 }
+
+watch(reasoningOpen, (open) => {
+  if (!open) {
+    reasoningTriggerHover.value = false
+    reasoningHoverValue.value = null
+  }
+})
 
 watch(() => props.open, (v) => {
   if (v) {

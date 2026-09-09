@@ -2,10 +2,14 @@ package sessionruntime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 // reserveRuntimeRun writes one live reservation whose owner lease ends at
@@ -151,6 +155,41 @@ func runRedisLeaseIndexContract(t *testing.T, redisURL string) {
 		}
 	})
 
+	t.Run("finishing remains renewable until durable finalization", func(t *testing.T) {
+		ref := RunRef{
+			BotID: testBotID, SessionID: "session-lease-finishing", RunID: "run-lease-finishing",
+			OwnerID: "owner-lease-finishing", Generation: "gen-finishing", FencingToken: 15,
+		}
+		key := Key{BotID: ref.BotID, SessionID: ref.SessionID}
+		reserveRuntimeRun(ctx, t, backend, ref, time.Now().Add(150*time.Millisecond))
+		if _, changed, err := backend.UpdateActiveRun(ctx, key, ref.RunID, ref.Generation, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
+			snapshot.Seq++
+			snapshot.UpdatedAt = now
+			snapshot.CurrentRunView.Status = RunStatusFinishing
+			snapshot.CurrentRunView.ProposedTerminalStatus = RunStatusCompleted
+			snapshot.CurrentRunView.UpdatedAt = now
+			return snapshot, true, nil
+		}); err != nil || !changed {
+			t.Fatalf("enter finishing = changed:%v err:%v", changed, err)
+		}
+		renewedAt, err := backend.Now(ctx)
+		if err != nil {
+			t.Fatalf("backend time: %v", err)
+		}
+		if err := backend.RenewLease(ctx, key, ref.RunID, ref.OwnerID, ref.Generation, renewedAt, renewedAt.Add(time.Minute)); err != nil {
+			t.Fatalf("renew finishing lease: %v", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+		if candidate, found := leaseCandidateFor(ctx, t, backend, ref.RunID); found {
+			t.Fatalf("renewed finishing lease reported as expired: %+v", candidate)
+		}
+		snapshot, ok, err := backend.Load(ctx, key)
+		if err != nil || !ok || snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusFinishing ||
+			snapshot.CurrentRunView.OwnerLeaseExpiresAt == nil {
+			t.Fatalf("renewed finishing snapshot = %#v, ok:%v err:%v", snapshot.CurrentRunView, ok, err)
+		}
+	})
+
 	t.Run("release removes the entry", func(t *testing.T) {
 		ref := RunRef{
 			BotID: testBotID, SessionID: "session-lease-release", RunID: "run-lease-release",
@@ -235,6 +274,76 @@ func runRedisLeaseIndexContract(t *testing.T, redisURL string) {
 		}
 		if _, found := leaseCandidateFor(ctx, t, backend, runID); found {
 			t.Fatal("condemned run is still indexed")
+		}
+	})
+
+	t.Run("reaper completes an expired durable proposal and repairs live state", func(t *testing.T) {
+		finishingBackend := newBackend()
+		generation, err := finishingBackend.LivenessGeneration(ctx)
+		if err != nil {
+			t.Fatalf("liveness generation: %v", err)
+		}
+		const runID = "run-lease-finishing-reaped"
+		ref := RunRef{
+			BotID: testBotID, SessionID: "session-lease-finishing-reaped", RunID: runID,
+			OwnerID: "owner-lease-finishing-reaped", Generation: generation, FencingToken: 29,
+		}
+		reserveRuntimeRun(ctx, t, finishingBackend, ref, time.Now().Add(time.Minute))
+		key := Key{BotID: ref.BotID, SessionID: ref.SessionID}
+		if _, changed, err := finishingBackend.UpdateActiveRun(ctx, key, ref.RunID, ref.Generation, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
+			snapshot.Seq++
+			snapshot.UpdatedAt = now
+			expired := now.Add(-time.Second)
+			snapshot.CurrentRunView.Status = RunStatusFinishing
+			snapshot.CurrentRunView.ProposedTerminalStatus = RunStatusCompleted
+			snapshot.CurrentRunView.OwnerLeaseExpiresAt = &expired
+			snapshot.CurrentRunView.UpdatedAt = now
+			return snapshot, true, nil
+		}); err != nil || !changed {
+			t.Fatalf("expire finishing run = changed:%v err:%v", changed, err)
+		}
+		// UpdateActiveRun changes the snapshot but not the sorted-set score. Move
+		// the score to the same expired deadline through the backend's own key.
+		member := encodeLeaseIndexMember(key, ref.RunID, ref.FencingToken)
+		if err := finishingBackend.client.ZAdd(ctx, finishingBackend.leaseIndexKey(), redis.Z{
+			Score: float64(time.Now().Add(-time.Second).UnixMilli()), Member: member,
+		}).Err(); err != nil {
+			t.Fatalf("expire finishing index: %v", err)
+		}
+		staleRef := ref
+		staleRef.FencingToken--
+		if _, changed, err := finishingBackend.ReconcileTerminalRun(ctx, key, staleRef, func(snapshot Snapshot, _ time.Time) (Snapshot, bool, error) {
+			return snapshot, true, nil
+		}); !errors.Is(err, ErrRunOwnershipLost) || changed {
+			t.Fatalf("stale terminal reconciliation = changed:%v err:%v, want fenced", changed, err)
+		}
+
+		runs := newFakeLedger()
+		runs.insertClaimed(runID, ref.SessionID, ref.FencingToken, generation)
+		if _, applied, err := runs.PrepareFinish(ctx, ledger.PrepareFinishParams{
+			RunID: runID, FencingToken: ref.FencingToken, State: ledger.StateCompleted,
+		}); err != nil || !applied {
+			t.Fatalf("prepare durable completion = applied:%v err:%v", applied, err)
+		}
+		manager := NewManager(finishingBackend, Options{OwnerID: ref.OwnerID})
+		reaper := newTestReaperWithLiveness(t, runs, finishingBackend, generation)
+		reaper.SetTerminalObserver(manager.reconcileAndObserveTerminalRun)
+
+		reaper.tick(ctx)
+
+		if got := runs.state(runID); got != ledger.StateCompleted {
+			t.Fatalf("durable state = %q, want completed", got)
+		}
+		snapshot, ok, err := finishingBackend.Load(ctx, key)
+		if err != nil || !ok || snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusCompleted ||
+			snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
+			t.Fatalf("reconciled live run = %#v, ok:%v err:%v", snapshot.CurrentRunView, ok, err)
+		}
+		if _, ok, err := finishingBackend.LoadRunRef(ctx, key, runID); err != nil || ok {
+			t.Fatalf("reconciled run ref = ok:%v err:%v, want removed", ok, err)
+		}
+		if _, found := leaseCandidateFor(ctx, t, finishingBackend, runID); found {
+			t.Fatal("reconciled finishing run is still indexed")
 		}
 	})
 

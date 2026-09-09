@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 const (

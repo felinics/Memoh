@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/stretchr/testify/require"
 
-	"github.com/memohai/memoh/internal/audio/adapter"
+	"github.com/felinics/memoh/internal/audio/adapter"
 )
 
 func TestTranscribeWireContract(t *testing.T) {

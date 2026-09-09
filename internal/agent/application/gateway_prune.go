@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	textprune "github.com/memohai/memoh/internal/prune"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	textprune "github.com/felinics/memoh/internal/prune"
 )
 
 const (
@@ -13,16 +14,6 @@ const (
 	// while preserving as much surrounding context as possible.
 	gatewayToolPayloadMaxBytes = textprune.DefaultMaxBytes
 	gatewayToolPayloadMaxLines = textprune.DefaultMaxLines
-
-	gatewayToolResultHeadBytes = 6 * 1024
-	gatewayToolResultTailBytes = 2 * 1024
-	gatewayToolResultHeadLines = 180
-	gatewayToolResultTailLines = 50
-
-	gatewayToolArgsHeadBytes = 4 * 1024
-	gatewayToolArgsTailBytes = 2 * 1024
-	gatewayToolArgsHeadLines = 180
-	gatewayToolArgsTailLines = 50
 
 	gatewayToolPayloadPrunedMarker = textprune.DefaultMarker
 )
@@ -87,14 +78,7 @@ func pruneToolCalls(calls []ToolCall) ([]ToolCall, bool) {
 		if args == "" || !exceedsTextBudget(args) {
 			continue
 		}
-		out[i].Function.Arguments = pruneStringEdges(
-			args,
-			gatewayToolArgsHeadBytes,
-			gatewayToolArgsTailBytes,
-			gatewayToolArgsHeadLines,
-			gatewayToolArgsTailLines,
-			"tool arguments",
-		)
+		out[i].Function.Arguments = contextlimit.GatewayArgsTier.LimitString(args, "tool arguments")
 		changed = true
 	}
 	return out, changed
@@ -113,14 +97,7 @@ func pruneToolMessage(msg ModelMessage) (ModelMessage, bool) {
 	if !exceedsTextBudget(text) {
 		return msg, false
 	}
-	msg.Content = newTextContent(pruneStringEdges(
-		text,
-		gatewayToolResultHeadBytes,
-		gatewayToolResultTailBytes,
-		gatewayToolResultHeadLines,
-		gatewayToolResultTailLines,
-		"tool result",
-	))
+	msg.Content = newTextContent(contextlimit.GatewayResultTier.LimitString(text, "tool result"))
 	return msg, true
 }
 
@@ -208,14 +185,7 @@ func pruneToolOutput(raw json.RawMessage) (json.RawMessage, bool) {
 		if err := json.Unmarshal(valueRaw, &s); err != nil || !exceedsTextBudget(s) {
 			return nil, false
 		}
-		s = pruneStringEdges(
-			s,
-			gatewayToolResultHeadBytes,
-			gatewayToolResultTailBytes,
-			gatewayToolResultHeadLines,
-			gatewayToolResultTailLines,
-			"tool result",
-		)
+		s = contextlimit.GatewayResultTier.LimitString(s, "tool result")
 		data, err := json.Marshal(s)
 		if err != nil {
 			return nil, false
@@ -231,14 +201,7 @@ func pruneToolOutput(raw json.RawMessage) (json.RawMessage, bool) {
 		if !hasValue || !exceedsTextBudget(string(valueRaw)) {
 			return nil, false
 		}
-		pruned := pruneStringEdges(
-			string(valueRaw),
-			gatewayToolResultHeadBytes,
-			gatewayToolResultTailBytes,
-			gatewayToolResultHeadLines,
-			gatewayToolResultTailLines,
-			"tool result (json)",
-		)
+		pruned := contextlimit.GatewayResultTier.LimitString(string(valueRaw), "tool result (json)")
 		data, err := json.Marshal(pruned)
 		if err != nil {
 			return nil, false
@@ -273,14 +236,7 @@ func pruneToolOutput(raw json.RawMessage) (json.RawMessage, bool) {
 			if !ok || !exceedsTextBudget(text) {
 				continue
 			}
-			items[i]["text"] = pruneStringEdges(
-				text,
-				gatewayToolResultHeadBytes,
-				gatewayToolResultTailBytes,
-				gatewayToolResultHeadLines,
-				gatewayToolResultTailLines,
-				"tool result (content)",
-			)
+			items[i]["text"] = contextlimit.GatewayResultTier.LimitString(text, "tool result (content)")
 			didPrune = true
 		}
 		if !didPrune {
@@ -300,18 +256,6 @@ func pruneToolOutput(raw json.RawMessage) (json.RawMessage, bool) {
 	default:
 		return nil, false
 	}
-}
-
-func pruneStringEdges(s string, headBytes, tailBytes, headLines, tailLines int, label string) string {
-	return textprune.PruneWithEdges(s, label, textprune.Config{
-		MaxBytes:  gatewayToolPayloadMaxBytes,
-		MaxLines:  gatewayToolPayloadMaxLines,
-		HeadBytes: headBytes,
-		TailBytes: tailBytes,
-		HeadLines: headLines,
-		TailLines: tailLines,
-		Marker:    gatewayToolPayloadPrunedMarker,
-	})
 }
 
 func exceedsTextBudget(s string) bool {

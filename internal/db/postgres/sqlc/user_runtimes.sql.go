@@ -11,6 +11,83 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activateUserRuntime = `-- name: ActivateUserRuntime :one
+UPDATE user_runtimes runtime
+SET activated_at = COALESCE(runtime.activated_at, now()),
+    pending_expires_at = NULL,
+    updated_at = CASE WHEN runtime.activated_at IS NULL THEN now() ELSE runtime.updated_at END
+FROM team_members owner_membership, users owner
+WHERE runtime.team_id = public.memoh_current_team_id()
+  AND runtime.id = $1
+  AND runtime.api_token = $2
+  AND runtime.revoked_at IS NULL
+  AND (runtime.activated_at IS NOT NULL OR runtime.pending_expires_at > now())
+  AND owner_membership.team_id = public.memoh_current_team_id()
+  AND owner_membership.user_id = runtime.user_id
+  AND owner_membership.is_active = TRUE
+  AND owner.id = owner_membership.user_id
+  AND owner.is_active = TRUE
+RETURNING runtime.id, runtime.user_id, runtime.name, runtime.api_token, runtime.revoked_at, runtime.activated_at, runtime.pending_expires_at, runtime.created_at, runtime.updated_at, runtime.team_id
+`
+
+type ActivateUserRuntimeParams struct {
+	ID       pgtype.UUID `json:"id"`
+	ApiToken string      `json:"api_token"`
+}
+
+// The first ready connection consumes the short-lived pending state. Existing
+// activated credentials remain reusable for later reconnects.
+func (q *Queries) ActivateUserRuntime(ctx context.Context, arg ActivateUserRuntimeParams) (UserRuntime, error) {
+	row := q.db.QueryRow(ctx, activateUserRuntime, arg.ID, arg.ApiToken)
+	var i UserRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.ApiToken,
+		&i.RevokedAt,
+		&i.ActivatedAt,
+		&i.PendingExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TeamID,
+	)
+	return i, err
+}
+
+const backfillUserRuntimeName = `-- name: BackfillUserRuntimeName :execrows
+UPDATE user_runtimes
+SET name = $1, updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND id = $2
+  AND user_id = $3
+  AND revoked_at IS NULL
+  AND (name = '' OR name = $4)
+`
+
+type BackfillUserRuntimeNameParams struct {
+	Name        string      `json:"name"`
+	ID          pgtype.UUID `json:"id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	DefaultName string      `json:"default_name"`
+}
+
+// Fills the display name from the connecting machine, but ONLY while the row
+// still carries its creation-time default (or an empty name): a user-chosen
+// name is never overwritten by a later handshake.
+func (q *Queries) BackfillUserRuntimeName(ctx context.Context, arg BackfillUserRuntimeNameParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillUserRuntimeName,
+		arg.Name,
+		arg.ID,
+		arg.UserID,
+		arg.DefaultName,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearBotRemoteRuntimePrimary = `-- name: ClearBotRemoteRuntimePrimary :exec
 UPDATE bot_remote_runtime_bindings
 SET is_primary = FALSE,
@@ -33,6 +110,7 @@ JOIN user_runtimes r
  AND r.team_id = public.memoh_current_team_id()
  AND r.user_id = b.owner_user_id
  AND r.revoked_at IS NULL
+ AND r.activated_at IS NOT NULL
 JOIN team_members owner_membership
   ON owner_membership.team_id = public.memoh_current_team_id()
  AND owner_membership.user_id = b.owner_user_id
@@ -60,7 +138,7 @@ func (q *Queries) CreateOrUpdateBotRemoteRuntimeMount(ctx context.Context, arg C
 const createUserRuntime = `-- name: CreateUserRuntime :one
 INSERT INTO user_runtimes (user_id, name, api_token)
 VALUES ($1, $2, $3)
-RETURNING id, user_id, name, api_token, revoked_at, created_at, updated_at, team_id
+RETURNING id, user_id, name, api_token, revoked_at, activated_at, pending_expires_at, created_at, updated_at, team_id
 `
 
 type CreateUserRuntimeParams struct {
@@ -78,6 +156,8 @@ func (q *Queries) CreateUserRuntime(ctx context.Context, arg CreateUserRuntimePa
 		&i.Name,
 		&i.ApiToken,
 		&i.RevokedAt,
+		&i.ActivatedAt,
+		&i.PendingExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
@@ -86,10 +166,20 @@ func (q *Queries) CreateUserRuntime(ctx context.Context, arg CreateUserRuntimePa
 }
 
 const deleteBotRemoteRuntimeMount = `-- name: DeleteBotRemoteRuntimeMount :one
-DELETE FROM bot_remote_runtime_bindings
-WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $1
-  AND id = $2
+WITH deleted_packages AS (
+  DELETE FROM bot_skill_package_installations AS package
+  USING bot_remote_runtime_bindings AS binding
+  WHERE package.team_id = public.memoh_current_team_id()
+    AND package.bot_id = binding.bot_id
+    AND package.workspace_target_id = binding.id::text
+    AND binding.team_id = public.memoh_current_team_id()
+    AND binding.bot_id = $1
+    AND binding.id = $2
+)
+DELETE FROM bot_remote_runtime_bindings AS binding
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND binding.bot_id = $1
+  AND binding.id = $2
 RETURNING id
 `
 
@@ -103,6 +193,52 @@ func (q *Queries) DeleteBotRemoteRuntimeMount(ctx context.Context, arg DeleteBot
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteBotRemoteRuntimeMountsByRuntime = `-- name: DeleteBotRemoteRuntimeMountsByRuntime :exec
+WITH deleted_packages AS (
+  DELETE FROM bot_skill_package_installations AS package
+  USING bot_remote_runtime_bindings AS binding
+  WHERE package.team_id = public.memoh_current_team_id()
+    AND package.bot_id = binding.bot_id
+    AND package.workspace_target_id = binding.id::text
+    AND binding.team_id = public.memoh_current_team_id()
+    AND binding.runtime_id = $1
+)
+DELETE FROM bot_remote_runtime_bindings AS binding
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND binding.runtime_id = $1
+`
+
+// Revoking a runtime kills every bot mount of it in the same transaction:
+// dead bindings would otherwise linger as ghost rows on every surface.
+func (q *Queries) DeleteBotRemoteRuntimeMountsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteBotRemoteRuntimeMountsByRuntime, runtimeID)
+	return err
+}
+
+const expirePendingUserRuntimes = `-- name: ExpirePendingUserRuntimes :exec
+WITH expired AS (
+  UPDATE user_runtimes
+  SET revoked_at = now(), updated_at = now()
+  WHERE team_id = public.memoh_current_team_id()
+    AND user_id = $1
+    AND revoked_at IS NULL
+    AND activated_at IS NULL
+    AND pending_expires_at <= now()
+  RETURNING id
+)
+DELETE FROM bot_remote_runtime_bindings binding
+USING expired
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND binding.runtime_id = expired.id
+`
+
+// Expired attempts can no longer authenticate. Mark them revoked and remove
+// any defensive direct-API mounts so they release names and grant rows too.
+func (q *Queries) ExpirePendingUserRuntimes(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, expirePendingUserRuntimes, userID)
+	return err
 }
 
 const getBotRemoteRuntimeMount = `-- name: GetBotRemoteRuntimeMount :one
@@ -227,7 +363,7 @@ func (q *Queries) GetPrimaryBotRemoteRuntimeMount(ctx context.Context, botID pgt
 }
 
 const getUserRuntimeByAPIToken = `-- name: GetUserRuntimeByAPIToken :one
-SELECT runtime.id, runtime.user_id, runtime.name, runtime.api_token, runtime.revoked_at, runtime.created_at, runtime.updated_at, runtime.team_id
+SELECT runtime.id, runtime.user_id, runtime.name, runtime.api_token, runtime.revoked_at, runtime.activated_at, runtime.pending_expires_at, runtime.created_at, runtime.updated_at, runtime.team_id
 FROM user_runtimes runtime
 JOIN team_members owner_membership
   ON owner_membership.team_id = public.memoh_current_team_id()
@@ -237,6 +373,7 @@ JOIN users owner ON owner.id = owner_membership.user_id AND owner.is_active = TR
 WHERE runtime.team_id = public.memoh_current_team_id()
   AND runtime.api_token = $1
   AND runtime.revoked_at IS NULL
+  AND (runtime.activated_at IS NOT NULL OR runtime.pending_expires_at > now())
 `
 
 func (q *Queries) GetUserRuntimeByAPIToken(ctx context.Context, apiToken string) (UserRuntime, error) {
@@ -248,11 +385,64 @@ func (q *Queries) GetUserRuntimeByAPIToken(ctx context.Context, apiToken string)
 		&i.Name,
 		&i.ApiToken,
 		&i.RevokedAt,
+		&i.ActivatedAt,
+		&i.PendingExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,
 	)
 	return i, err
+}
+
+const listBotRemoteRuntimeGrantsByRuntimeOwner = `-- name: ListBotRemoteRuntimeGrantsByRuntimeOwner :many
+SELECT
+  binding.id,
+  binding.bot_id,
+  binding.runtime_id,
+  binding.is_primary
+FROM bot_remote_runtime_bindings binding
+JOIN bots bot ON bot.id = binding.bot_id AND bot.team_id = public.memoh_current_team_id()
+JOIN user_runtimes runtime ON runtime.id = binding.runtime_id AND runtime.team_id = public.memoh_current_team_id()
+WHERE binding.team_id = public.memoh_current_team_id()
+  AND bot.owner_user_id = $1
+  AND runtime.revoked_at IS NULL
+ORDER BY binding.created_at ASC, binding.id ASC
+`
+
+type ListBotRemoteRuntimeGrantsByRuntimeOwnerRow struct {
+	ID        pgtype.UUID `json:"id"`
+	BotID     pgtype.UUID `json:"bot_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	IsPrimary bool        `json:"is_primary"`
+}
+
+// Account-level reverse lookup: every live mount held by the owner's bots.
+// A mount can only exist while runtime.user_id = bot.owner_user_id (enforced
+// by CreateOrUpdateBotRemoteRuntimeMount), so scoping by the bot owner covers
+// exactly the grants on the owner's own runtimes.
+func (q *Queries) ListBotRemoteRuntimeGrantsByRuntimeOwner(ctx context.Context, ownerUserID pgtype.UUID) ([]ListBotRemoteRuntimeGrantsByRuntimeOwnerRow, error) {
+	rows, err := q.db.Query(ctx, listBotRemoteRuntimeGrantsByRuntimeOwner, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListBotRemoteRuntimeGrantsByRuntimeOwnerRow
+	for rows.Next() {
+		var i ListBotRemoteRuntimeGrantsByRuntimeOwnerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.RuntimeID,
+			&i.IsPrimary,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listBotRemoteRuntimeMounts = `-- name: ListBotRemoteRuntimeMounts :many
@@ -277,6 +467,7 @@ JOIN team_members owner_membership
 JOIN users owner ON owner.id = owner_membership.user_id
 WHERE binding.team_id = public.memoh_current_team_id()
   AND binding.bot_id = $1
+  AND runtime.revoked_at IS NULL
 ORDER BY binding.created_at ASC, binding.id ASC
 `
 
@@ -327,7 +518,7 @@ func (q *Queries) ListBotRemoteRuntimeMounts(ctx context.Context, botID pgtype.U
 }
 
 const listUserRuntimes = `-- name: ListUserRuntimes :many
-SELECT id, user_id, name, api_token, revoked_at, created_at, updated_at, team_id FROM user_runtimes
+SELECT id, user_id, name, api_token, revoked_at, activated_at, pending_expires_at, created_at, updated_at, team_id FROM user_runtimes
 WHERE team_id = public.memoh_current_team_id()
   AND user_id = $1 AND revoked_at IS NULL
 ORDER BY created_at ASC, id ASC
@@ -348,6 +539,8 @@ func (q *Queries) ListUserRuntimes(ctx context.Context, userID pgtype.UUID) ([]U
 			&i.Name,
 			&i.ApiToken,
 			&i.RevokedAt,
+			&i.ActivatedAt,
+			&i.PendingExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TeamID,
@@ -367,7 +560,7 @@ UPDATE user_runtimes
 SET revoked_at = now(), updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = $1 AND user_id = $2 AND revoked_at IS NULL
-RETURNING id, user_id, name, api_token, revoked_at, created_at, updated_at, team_id
+RETURNING id, user_id, name, api_token, revoked_at, activated_at, pending_expires_at, created_at, updated_at, team_id
 `
 
 type RevokeUserRuntimeParams struct {
@@ -384,6 +577,8 @@ func (q *Queries) RevokeUserRuntime(ctx context.Context, arg RevokeUserRuntimePa
 		&i.Name,
 		&i.ApiToken,
 		&i.RevokedAt,
+		&i.ActivatedAt,
+		&i.PendingExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.TeamID,

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/network/overlay/internal/sidecar"
+	netctl "github.com/felinics/memoh/internal/network"
+	"github.com/felinics/memoh/internal/network/overlay/internal/sidecar"
 )
 
 func (d *nativeDriver) enrichStatus(ctx context.Context, req netctl.AttachmentRequest, status *netctl.OverlayStatus) {

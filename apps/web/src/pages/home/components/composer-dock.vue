@@ -14,27 +14,19 @@
         :approvals="approvals"
         :command-panel="commandPanel"
         :error-message="errorMessage"
+        :compacting="compacting"
         class="mb-2"
         @select-command-item="emit('selectCommandItem', $event)"
         @dismiss-command="emit('dismissCommand')"
       />
     </Transition>
-    <Transition
-      enter-active-class="transition-all duration-150 ease-out"
-      enter-from-class="opacity-0 translate-y-1"
-      enter-to-class="opacity-100 translate-y-0"
-      leave-active-class="transition-all duration-100 ease-in"
-      leave-from-class="opacity-100 translate-y-0"
-      leave-to-class="opacity-0 translate-y-1"
-    >
-      <ChatUserInputForm
-        v-if="pendingUserInput"
-        ref="formEl"
-        :class="composerVisible ? 'mb-2' : ''"
-        :user-input="pendingUserInput"
-        @reveal-composer="handleUserInputReveal"
-      />
-    </Transition>
+    <ChatUserInputForm
+      v-if="pendingUserInput"
+      ref="formEl"
+      :class="composerVisible ? 'mb-2' : ''"
+      :user-input="pendingUserInput"
+      @reveal-composer="handleUserInputReveal"
+    />
     <div
       v-show="composerVisible"
       ref="boxEl"
@@ -94,6 +86,7 @@ const props = defineProps<{
   commandPanel: CommandPanelData | null
   errorMessage: string
   pendingUserInput: UIUserInput | null
+  compacting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -103,7 +96,7 @@ const emit = defineEmits<{
 }>()
 
 const stackVisible = computed(() => Boolean(
-  props.errorMessage || props.commandPanel || props.approvals.length,
+  props.errorMessage || props.commandPanel || props.approvals.length || props.compacting,
 ))
 
 // Box-tier mutex: while an ask_user request is pending the capsule owns the

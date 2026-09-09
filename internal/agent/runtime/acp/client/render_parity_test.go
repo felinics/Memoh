@@ -7,10 +7,10 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 // renderScript renders a sequence of runtime events to final UI messages.

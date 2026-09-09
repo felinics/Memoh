@@ -33,7 +33,7 @@ The terminal state as of 2026-07-06:
   (sidebar, dockview, onboarding, chat loaders). The residual pass caught the sites that
   slipped every earlier net — mostly loading shapes judged "correctly local" *before*
   InlineLoadingRow/PanePlaceholder existed (2026-07-04) and never re-judged: supermarket
-  list/detail loaders, bot-compaction/bot-heartbeat's byte-identical pair, file-tree,
+  list/detail loaders, bot-compaction's settings loader, file-tree,
   browser-pane/panel-files placeholders, appearance's code-highlight row (its mermaid
   sibling was TRIED on SettingsRow and reverted after visual review — it's a three-piece
   row whose full-width preview the owner can't model; reason recorded in-file), and
@@ -194,7 +194,7 @@ then it unblocks its bucket.
   `justify-between` when content spans (pagination). Trivial build, 6-file reuse, zero new component.
 
 ### 4. ExpandableSettingsRow — unblocks 6
-- **First validation:** `bots/components/bot-heartbeat.vue` L174-248 (log row: whole header toggles, expands to pre/error/usage panels — richest case)
+- **First validation:** `dev/components/sections/SectionSpacing.vue` (interactive settings-row specimen)
 - **API:** `{ label?; description? }` + `v-model:open` + slots `#leading` / `#content` /
   `#trailing` (default: chevron that rotates 90° on open) / `#expanded` (collapsible body).
   Internally composes `SettingsRow` for the header + a height/grid-rows transition.

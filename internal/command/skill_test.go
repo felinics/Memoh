@@ -26,7 +26,7 @@ func (f *fakeRuntimeSkillLoader) ListRuntimeSkills(context.Context, string) ([]S
 }
 
 func newSkillTestHandler(loader SkillLoader) *Handler {
-	return NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, loader, nil)
+	return NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, loader, nil)
 }
 
 // TestSkillListUpgradesToTapToActivate pins the tap-to-activate contract: with

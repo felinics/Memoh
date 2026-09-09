@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 func injectWorkspaceTransitionRecords(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
@@ -113,17 +113,22 @@ func (s *Service) currentWorkspaceContextMessage(ctx context.Context, req ChatRe
 	return &message
 }
 
-func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes int) ([]historyfrag.HistoryRecord, error) {
+// loadHistoryRecords loads the recent history window. The load is
+// byte-budgeted on the database side (CM-ADM-001): rows are admitted
+// newest-first within contextTokenBudget (the absolute cap when the budget
+// is unset), so the time window alone never bounds process memory.
+func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.ScopeFallback, sessionID string, maxContextMinutes, contextTokenBudget int) ([]historyfrag.HistoryRecord, error) {
 	if s.messageService == nil {
 		return nil, nil
 	}
 	since := time.Now().UTC().Add(-time.Duration(maxContextMinutes) * time.Minute)
+	maxBytes := s.historyLoadMaxBytes(contextTokenBudget)
 	var msgs []messagepkg.Message
 	var err error
 	if strings.TrimSpace(sessionID) != "" {
-		msgs, err = s.messageService.ListActiveSinceBySession(ctx, sessionID, since)
+		msgs, err = s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, maxBytes)
 	} else {
-		msgs, err = s.messageService.ListActiveSince(ctx, fallback.ChatID, since)
+		msgs, err = s.messageService.ListActiveSinceWithinBytes(ctx, fallback.ChatID, since, maxBytes)
 	}
 	if err != nil {
 		return nil, err
@@ -296,9 +301,9 @@ func estimateMessageTokens(msg ModelMessage) int {
 	text := msg.TextContent()
 	if len(text) == 0 {
 		data, _ := json.Marshal(msg.Content)
-		return len(data) / 4
+		return contextfrag.TokensFromBytes(len(data))
 	}
-	return len(text) / 4
+	return contextfrag.TokensFromBytes(len(text))
 }
 
 func trimMessagesByTokens(log *slog.Logger, messages []historyfrag.HistoryRecord, maxTokens int) ([]ModelMessage, int) {

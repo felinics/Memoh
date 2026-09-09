@@ -8,10 +8,9 @@
     to the majority: py-px, duration-75, unnamed `group`), so the hover chrome
     lives in the component instead of being injected onto it from a caller.
     Each caller keeps its own open/toggle state and slot content, and only
-    picks its rest-ink `tone` — the three tones map exactly to what each site
-    already used (cluster = muted-foreground rest; group/inline's non-error
-    rows = the shared --cop-title ink; inline's error row = destructive, which
-    never had a hover color-swap in the original).
+    picks its neutral rest-ink `tone`. Tool execution failures are recoverable
+    steps in an Agent turn, so process headers do not offer an error tone;
+    diagnostics belong in the expanded tool detail.
 
     `nested` picks the root tag: tool-call-inline's expandable row contains a
     real nested <button> (the "open in files" action), so ITS root can't also
@@ -24,7 +23,7 @@
     :is="nested ? 'div' : 'button'"
     v-bind="nested ? { role: 'button', tabindex: 0 } : {}"
     :aria-expanded="open"
-    class="group flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px select-none"
+    class="tool-header-row group flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px select-none"
     :class="toneClass"
     v-on="nested ? { keydown: onKeydown } : {}"
     @click="emit('toggle')"
@@ -39,7 +38,7 @@ import { computed } from 'vue'
 const props = withDefaults(defineProps<{
   open?: boolean
   nested?: boolean
-  tone?: 'muted' | 'cop' | 'error'
+  tone?: 'muted' | 'cop'
 }>(), {
   open: false,
   nested: false,
@@ -49,11 +48,9 @@ const emit = defineEmits<{ toggle: [] }>()
 
 // Hover is the component's own chrome, not a page injection — enumerated in
 // full per tone (never string-concatenated) so Tailwind's literal-text scan
-// picks up every combination. 'error' never had a hover swap in the original
-// three sites, so it stays a flat destructive ink.
+// picks up every combination.
 const toneClass = computed(() => {
   if (props.tone === 'muted') return 'text-muted-foreground hover:text-foreground' /* ui-allow-style */
-  if (props.tone === 'error') return 'text-destructive'
   return 'text-cop-title hover:text-foreground' /* ui-allow-style */
 })
 
@@ -69,3 +66,15 @@ function onKeydown(event: KeyboardEvent) {
   emit('toggle')
 }
 </script>
+
+<style scoped>
+/* Shimmer uses transparent text over a gradient, so changing inherited color
+   alone cannot highlight it. Hover belongs to the whole interactive row. */
+.tool-header-row:hover :deep(.tool-shimmer-text),
+.tool-header-row:focus-visible :deep(.tool-shimmer-text) {
+  background-image: none;
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+</style>

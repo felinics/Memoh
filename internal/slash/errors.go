@@ -16,6 +16,10 @@ const (
 	CodePermissionDenied               = "permission_denied"
 	CodeReservedSkillMetadata          = "reserved_skill_metadata"
 	CodeInvalidQuickActionScope        = "invalid_quick_action_scope"
+	CodePermissionSessionRequired      = "permission_session_required"
+	CodePermissionModeUnsupported      = "permission_mode_unsupported"
+	CodePermissionModeUnavailable      = "permission_mode_unavailable"
+	CodePermissionModeFailed           = "permission_mode_failed"
 )
 
 type Error struct {

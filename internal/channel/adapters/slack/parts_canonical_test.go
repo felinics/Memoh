@@ -3,8 +3,8 @@ package slack
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/partsfixture"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/partsfixture"
 )
 
 // TestCanonicalPartsRendering pins the Slack adapter's mrkdwn output for

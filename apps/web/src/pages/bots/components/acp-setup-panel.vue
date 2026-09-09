@@ -13,7 +13,6 @@ import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/s
 import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
 import {
   defaultSetupMode,
-  ensureHermesManagedDefaults,
   findMissingRequiredManagedField,
   normalizeACPAgentID,
 } from '@/utils/acp'
@@ -30,10 +29,8 @@ const props = withDefaults(defineProps<{
   profile: AcpprofilePublicProfile
   oauthHint: string
   fieldGap?: 'card' | 'bare'
-  initialSelection?: AcpSetupSelection | null
 }>(), {
   fieldGap: 'card',
-  initialSelection: null,
 })
 
 const errorMessage = defineModel<string>('errorMessage', { default: '' })
@@ -44,33 +41,11 @@ const { setupModeItems, setupModes } = useAcpSetupModeItems(() => props.profile)
 const setupMode = ref('api_key')
 const managed = reactive<Record<string, string>>({})
 
-const isHermes = computed(() => normalizeACPAgentID(props.profile.id) === 'hermes')
-
 const visibleManagedFields = computed(() =>
   filterCreateVisibleManagedFields(props.profile, managed, setupMode.value),
 )
 
-const selfModeHint = computed(() => isHermes.value
-  ? t('bots.settings.acpHermesSelfModeHint')
-  : t('bots.settings.acpSelfModeHint'))
-
-function applyInitialSelection(profile: AcpprofilePublicProfile) {
-  const seed = props.initialSelection
-  if (!seed) return
-  if (normalizeACPAgentID(seed.agentId) !== normalizeACPAgentID(profile.id)) return
-  const modes = setupModes()
-  if (modes.includes(seed.setupMode)) {
-    setupMode.value = seed.setupMode
-  }
-  if (setupMode.value !== 'api_key') return
-  for (const [key, value] of Object.entries(seed.managed)) {
-    const id = normalizeACPAgentID(key)
-    if (id && id in managed) managed[id] = value
-  }
-  if (isHermes.value) {
-    ensureHermesManagedDefaults(managed)
-  }
-}
+const selfModeHint = computed(() => t('bots.settings.acpSelfModeHint'))
 
 watch(() => props.profile, (profile) => {
   for (const key of Object.keys(managed)) delete managed[key]
@@ -81,18 +56,11 @@ watch(() => props.profile, (profile) => {
   const modes = setupModes()
   const preferred = defaultSetupMode(profile)
   setupMode.value = modes.includes(preferred) ? preferred : (modes[0] ?? defaultSetupMode(profile))
-  if (isHermes.value && setupMode.value === 'api_key') {
-    ensureHermesManagedDefaults(managed)
-  }
-  applyInitialSelection(profile)
   errorMessage.value = ''
 }, { immediate: true })
 
 function setSetupMode(mode: string) {
   setupMode.value = mode
-  if (isHermes.value && mode === 'api_key') {
-    ensureHermesManagedDefaults(managed)
-  }
   errorMessage.value = ''
 }
 
@@ -126,7 +94,12 @@ defineExpose({ selection, missingRequiredField })
 
 <template>
   <FormStack>
+    <!-- A picker with one segment is not a choice. The only profile shipped
+         today publishes api_key alone — an internal managed-mode marker, not
+         something a user picks — so the row disappears; a profile that really
+         publishes two modes still gets its chooser. -->
     <FieldStack
+      v-if="setupModeItems.length > 1"
       :label="t('bots.settings.acpSetupMode')"
       :gap="fieldGap"
     >

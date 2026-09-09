@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 const (

@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/audio/adapter"
+	"github.com/felinics/memoh/internal/audio/adapter"
 )
 
 const (

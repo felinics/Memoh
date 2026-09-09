@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/memohai/memoh/internal/slash"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 func TestBuildSafeCatalogFiltersUnsafeEntries(t *testing.T) {

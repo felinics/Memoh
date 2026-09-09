@@ -1,13 +1,14 @@
 package contextview
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func TestFragBudgetDropsOversizedFragEvenWithoutEnvelopeBudget(t *testing.T) {
@@ -165,6 +166,75 @@ func TestFragBudgetEnforcesBothCharacterAndTokenDimensions(t *testing.T) {
 	}
 	if text == original {
 		t.Fatal("MaxTokens did not trim while MaxChars remained under limit")
+	}
+}
+
+func TestFragBudgetDropsOptionalSystemBeforeTierPass(t *testing.T) {
+	t.Parallel()
+
+	selector := &FragmentSelector{}
+	optional := textFrag(
+		"system.optional",
+		contextfrag.SlotSystem,
+		contextfrag.KindSystemPrompt,
+		sdk.MessageRoleSystem,
+		"oversized optional section",
+	)
+	optional.Trust = contextfrag.TrustSystem
+	optional.RetentionTier = contextfrag.RetentionOptional
+	optional.Budget = contextfrag.BudgetPolicy{MaxTokens: 1, Overflow: contextfrag.OverflowDrop}
+	plan := &contextfrag.ContextBudgetPlan{SystemBudget: 500}
+
+	result := selector.Select(
+		[]contextfrag.ContextFrag{optional},
+		selector.ProfileFor(contextfrag.IntentRunConfigPreProvider),
+		BudgetEnvelope{Plan: plan},
+	)
+
+	if got := fragIDs(result.Selected); !reflect.DeepEqual(got, []string{systemBudgetMarkerID}) {
+		t.Fatalf("selected = %v, want exactly one budget-accounted system omission marker", got)
+	}
+	if len(result.Dropped) != 1 {
+		t.Fatalf("dropped = %#v, want optional oversized system fragment dropped", result.Dropped)
+	}
+	if len(result.Summary.DropReasons) != 1 ||
+		result.Summary.DropReasons[0].Reason != "frag_budget:max_tokens" {
+		t.Fatalf("drop reasons = %#v, want per-fragment budget reason", result.Summary.DropReasons)
+	}
+	if plan.ActualSystemCost != systemFragCost(result.Selected) {
+		t.Fatalf("actual system cost = %d, want rendered marker cost %d", plan.ActualSystemCost, systemFragCost(result.Selected))
+	}
+}
+
+func TestFragBudgetPlanDisabledKeepsOptionalSystemByteEquivalent(t *testing.T) {
+	t.Parallel()
+
+	selector := &FragmentSelector{}
+	optional := textFrag(
+		"system.optional",
+		contextfrag.SlotSystem,
+		contextfrag.KindSystemPrompt,
+		sdk.MessageRoleSystem,
+		"oversized optional section",
+	)
+	optional.Trust = contextfrag.TrustSystem
+	optional.RetentionTier = contextfrag.RetentionOptional
+	optional.Budget = contextfrag.BudgetPolicy{MaxTokens: 1, Overflow: contextfrag.OverflowDrop}
+
+	result := selector.Select(
+		[]contextfrag.ContextFrag{optional},
+		selector.ProfileFor(contextfrag.IntentRunConfigPreProvider),
+		BudgetEnvelope{},
+	)
+
+	if got := fragIDs(result.Selected); !reflect.DeepEqual(got, []string{"system.optional"}) {
+		t.Fatalf("selected = %v, want the original system fragment when the plan is disabled", got)
+	}
+	if len(result.Dropped) != 0 {
+		t.Fatalf("dropped = %#v, want no plan-disabled system drop", result.Dropped)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0].Code != "frag_budget_drop_blocked_must_keep" {
+		t.Fatalf("warnings = %#v, want one must-keep warning", result.Warnings)
 	}
 }
 

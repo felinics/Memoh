@@ -3,17 +3,16 @@ package historyfrag
 import (
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/messageconv"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // ToFrag renders the history record for context-frag manifests. Consumers that
 // need provider-continuity details should classify from HistoryRecord.ModelMessage.
 func ToFrag(record HistoryRecord) contextfrag.ContextFrag {
-	msg := messageconv.ModelMessageToSDKMessage(record.ModelMessage)
+	msg := StoredModelMessageToSDKMessage(record.ModelMessage)
 	kind := record.Kind
 	if kind == "" {
 		kind = contextfrag.KindConversationEvent
@@ -59,7 +58,7 @@ func ToModelMessages(records []HistoryRecord) []turn.ModelMessage {
 func ToSDKMessages(records []HistoryRecord) []sdk.Message {
 	out := make([]sdk.Message, 0, len(records))
 	for _, record := range records {
-		out = append(out, messageconv.ModelMessageToSDKMessage(record.ModelMessage))
+		out = append(out, StoredModelMessageToSDKMessage(record.ModelMessage))
 	}
 	return out
 }

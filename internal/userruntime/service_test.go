@@ -12,9 +12,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -33,7 +33,7 @@ func (s *serviceTestStore) CreateUserRuntime(_ context.Context, input dbstore.Cr
 	defer s.mu.Unlock()
 	s.runtime = dbstore.UserRuntimeRecord{
 		ID: serviceTestRuntimeID, TeamID: serviceTestTeamID, UserID: input.UserID, Name: input.Name,
-		APIToken: input.APIToken, CreatedAt: time.Now().UTC(),
+		APIToken: input.APIToken, PendingExpiresAt: time.Now().UTC().Add(15 * time.Minute), CreatedAt: time.Now().UTC(),
 	}
 	s.revoked = false
 	return s.runtime, nil
@@ -42,10 +42,35 @@ func (s *serviceTestStore) CreateUserRuntime(_ context.Context, input dbstore.Cr
 func (s *serviceTestStore) GetUserRuntimeByAPIToken(_ context.Context, token string) (dbstore.UserRuntimeRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.revoked || s.runtime.ID == "" || s.runtime.APIToken != token {
+	if s.revoked || s.runtime.ID == "" || s.runtime.APIToken != token ||
+		(s.runtime.ActivatedAt.IsZero() && !s.runtime.PendingExpiresAt.After(time.Now())) {
 		return dbstore.UserRuntimeRecord{}, db.ErrNotFound
 	}
 	return s.runtime, nil
+}
+
+func (s *serviceTestStore) ActivateUserRuntime(_ context.Context, runtimeID, token string) (dbstore.UserRuntimeRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.revoked || s.runtime.ID != runtimeID || s.runtime.APIToken != token ||
+		(s.runtime.ActivatedAt.IsZero() && !s.runtime.PendingExpiresAt.After(time.Now())) {
+		return dbstore.UserRuntimeRecord{}, db.ErrNotFound
+	}
+	if s.runtime.ActivatedAt.IsZero() {
+		s.runtime.ActivatedAt = time.Now().UTC()
+		s.runtime.PendingExpiresAt = time.Time{}
+	}
+	return s.runtime, nil
+}
+
+func (s *serviceTestStore) ExpirePendingUserRuntimes(_ context.Context, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.revoked && s.runtime.UserID == userID && s.runtime.ActivatedAt.IsZero() &&
+		!s.runtime.PendingExpiresAt.IsZero() && !s.runtime.PendingExpiresAt.After(time.Now()) {
+		s.revoked = true
+	}
+	return nil
 }
 
 func (s *serviceTestStore) ListUserRuntimes(_ context.Context, userID string) ([]dbstore.UserRuntimeRecord, error) {
@@ -65,6 +90,178 @@ func (s *serviceTestStore) RevokeUserRuntime(_ context.Context, runtimeID, userI
 	}
 	s.revoked = true
 	return nil
+}
+
+func (s *serviceTestStore) BackfillUserRuntimeName(_ context.Context, runtimeID, userID, name, defaultName string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.revoked || s.runtime.ID != runtimeID || s.runtime.UserID != userID {
+		return false, nil
+	}
+	if s.runtime.Name != "" && s.runtime.Name != defaultName {
+		return false, nil
+	}
+	s.runtime.Name = name
+	return true, nil
+}
+
+func TestCreateRuntimeDefaultsNameAndHandshakeBackfills(t *testing.T) {
+	store := &serviceTestStore{}
+	service := NewService(store, NewHub(nil))
+
+	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	wantDefault := DefaultRuntimeName(created.Key)
+	if created.Name != wantDefault {
+		t.Fatalf("default name = %q, want %q", created.Name, wantDefault)
+	}
+
+	// A never-connected default claims no row in the list.
+	items, err := service.ListRuntimes(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("ListRuntimes() error = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("unconnected default listed: %#v", items)
+	}
+
+	connection := &Connection{
+		ConnectionID: "connection-1",
+		Client:       newServiceTestClient(t),
+		Close:        func(string) {},
+	}
+	info := HandshakeInfo{
+		Version: 1, Hostname: "qingfengdeMacBook-Pro", OS: "darwin", Arch: "arm64",
+		ClientVersion: "test", WorkspaceBase: "/workspace", Capabilities: []string{CapabilityFS},
+	}
+	if err := service.ActivateConnection(context.Background(), created.Key, created.ID, info, connection, func() error { return nil }); err != nil {
+		t.Fatalf("ActivateConnection() error = %v", err)
+	}
+	store.mu.Lock()
+	backfilled := store.runtime.Name
+	store.mu.Unlock()
+	if backfilled != "qingfengdeMacBook-Pro" {
+		t.Fatalf("backfilled name = %q", backfilled)
+	}
+
+	// Activation is persisted independently of the Hub: after disconnect and a
+	// service restart the machine remains visible and manageable while offline.
+	service.DeactivateConnection(created.ID, connection, "test disconnect")
+	service = NewService(store, NewHub(nil))
+	items, err = service.ListRuntimes(context.Background(), "user-1")
+	if err != nil || len(items) != 1 || items[0].Online {
+		t.Fatalf("ListRuntimes() = %#v, %v", items, err)
+	}
+}
+
+func TestHandshakeDoesNotOverwriteUserChosenName(t *testing.T) {
+	store := &serviceTestStore{}
+	service := NewService(store, NewHub(nil))
+
+	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: "Workstation"})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	connection := &Connection{
+		ConnectionID: "connection-1",
+		Client:       newServiceTestClient(t),
+		Close:        func(string) {},
+	}
+	info := HandshakeInfo{
+		Version: 1, Hostname: "other-host", OS: "linux", Arch: "amd64",
+		ClientVersion: "test", WorkspaceBase: "/workspace", Capabilities: []string{CapabilityFS},
+	}
+	if err := service.ActivateConnection(context.Background(), created.Key, created.ID, info, connection, func() error { return nil }); err != nil {
+		t.Fatalf("ActivateConnection() error = %v", err)
+	}
+	store.mu.Lock()
+	name := store.runtime.Name
+	store.mu.Unlock()
+	if name != "Workstation" {
+		t.Fatalf("user-chosen name overwritten: %q", name)
+	}
+}
+
+func TestPendingRuntimeExpiresWithoutBecomingAHiddenCredential(t *testing.T) {
+	store := &serviceTestStore{}
+	service := NewService(store, NewHub(nil))
+
+	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: "Abandoned"})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	store.mu.Lock()
+	store.runtime.PendingExpiresAt = time.Now().UTC().Add(-time.Second)
+	store.mu.Unlock()
+
+	if _, err := service.AuthenticateKey(context.Background(), created.Key); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("AuthenticateKey() expired pending error = %v, want not found", err)
+	}
+	items, err := service.ListRuntimes(context.Background(), "user-1")
+	if err != nil || len(items) != 0 {
+		t.Fatalf("ListRuntimes() expired pending = %#v, %v", items, err)
+	}
+	store.mu.Lock()
+	revoked := store.revoked
+	store.mu.Unlock()
+	if !revoked {
+		t.Fatal("expired pending Runtime was not revoked during cleanup")
+	}
+}
+
+func TestFailedConnectionCommitDoesNotActivatePendingRuntime(t *testing.T) {
+	store := &serviceTestStore{}
+	service := NewService(store, NewHub(nil))
+	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	connection := &Connection{
+		ConnectionID: "connection-1",
+		Client:       newServiceTestClient(t),
+		Close:        func(string) {},
+	}
+	wantErr := errors.New("transport lost")
+	err = service.ActivateConnection(context.Background(), created.Key, created.ID, HandshakeInfo{}, connection, func() error { return wantErr })
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ActivateConnection() error = %v, want %v", err, wantErr)
+	}
+	store.mu.Lock()
+	activatedAt := store.runtime.ActivatedAt
+	store.mu.Unlock()
+	if !activatedAt.IsZero() {
+		t.Fatalf("failed connection activated pending Runtime at %v", activatedAt)
+	}
+}
+
+func TestPublicationFailureDoesNotHideConsumedCredential(t *testing.T) {
+	store := &serviceTestStore{}
+	service := NewService(store, NewHub(nil))
+	created, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{})
+	if err != nil {
+		t.Fatalf("CreateRuntime() error = %v", err)
+	}
+	client := newServiceTestClient(t)
+	defer client.Close() //nolint:errcheck // test cleanup
+	connection := &Connection{ConnectionID: "connection-1", Client: client, Close: func(string) {}}
+	wantErr := errors.New("transport lost at publication")
+	var checks int
+	err = service.ActivateConnection(context.Background(), created.Key, created.ID, HandshakeInfo{}, connection, func() error {
+		checks++
+		if checks == 2 {
+			return wantErr
+		}
+		return nil
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ActivateConnection() error = %v, want %v", err, wantErr)
+	}
+	items, err := service.ListRuntimes(context.Background(), "user-1")
+	if err != nil || len(items) != 1 || items[0].Online {
+		t.Fatalf("ListRuntimes() consumed credential = %#v, %v", items, err)
+	}
 }
 
 func TestCreateRuntimeCapsNameLength(t *testing.T) {

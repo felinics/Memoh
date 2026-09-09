@@ -89,8 +89,41 @@ func policyDecision(cfg PolicyConfig, toolName string, input any) string {
 			return DecisionNeedsApproval
 		}
 		return DecisionBypass
+	case OperationPermission:
+		// Generic ACP permission requests (network grants, mode switches, and
+		// any shape that maps to no concrete tool) carry the agent's own
+		// question and options; there is no path or command to match globs
+		// against, so an enabled policy routes them to the user. One exception:
+		// when the agent declared a kind the classifier maps to read/write/exec
+		// and only the path/command failed to parse (the callback marks exactly
+		// that case as policy_kind), an explicit deny posture on that operation
+		// still auto-rejects - degrading to the generic lane must never be
+		// weaker than the classified equivalent. Consent and MCP shapes never
+		// carry policy_kind and always reach the user.
+		if mode, ok := permissionKindMode(cfg, readString(args, "policy_kind")); ok && mode == PolicyModeDeny {
+			return DecisionDeny
+		}
+		return DecisionNeedsApproval
 	default:
 		return DecisionBypass
+	}
+}
+
+// permissionKindMode maps an agent-declared ACP tool kind carried by a generic
+// permission request onto the policy mode that would have governed the
+// classified equivalent. The mapping mirrors nativeToolFromACPState exactly
+// (execute→exec, read→read, edit→write); kinds the classifier never maps stay
+// unmapped so they keep routing to the user.
+func permissionKindMode(cfg PolicyConfig, kind string) (PolicyMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "execute":
+		return cfg.Exec.Mode, true
+	case "read":
+		return cfg.Read.Mode, true
+	case "edit":
+		return cfg.Write.Mode, true
+	default:
+		return "", false
 	}
 }
 
@@ -115,6 +148,8 @@ func OperationForTool(toolName string) (string, bool) {
 		return OperationWrite, true
 	case "exec":
 		return OperationExec, true
+	case "permission":
+		return OperationPermission, true
 	default:
 		return "", false
 	}
@@ -146,7 +181,7 @@ func readString(m map[string]any, key string) string {
 }
 
 func approvalPaths(args map[string]any) []string {
-	keys := []string{"path", "file_path", "filePath", "file", "filename", "old_path", "new_path"}
+	keys := []string{"path", "file_path", "filePath", "file", "filename", "old_path", "new_path", "notebook_path"}
 	seen := map[string]struct{}{}
 	var out []string
 	for _, key := range keys {

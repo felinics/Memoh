@@ -9,9 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 const namespaceDBHistoryMessage = "bot_history_message"
@@ -34,7 +33,7 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 	}
 	rowID := ref.ID
 
-	modelMessage := modelMessageFromDBMessage(log, msg)
+	modelMessage := DecodeStoredModelMessage(log, msg.ID, msg.Role, msg.Content)
 	inputTokens, outputTokens := parseUsage(msg.Usage)
 	ref.HashAlgo = contextfrag.HashAlgoSHA256
 	ref.HashScope = contextfrag.HashScopeSourcePayload
@@ -146,51 +145,6 @@ type dbMessageSourceHashPayload struct {
 	Assets                  []MediaRef     `json:"assets,omitempty"`
 }
 
-func modelMessageFromDBMessage(log *slog.Logger, msg messagepkg.Message) turn.ModelMessage {
-	var modelMessage turn.ModelMessage
-	if err := json.Unmarshal(msg.Content, &modelMessage); err != nil {
-		if log != nil {
-			log.Warn("historyfrag: content unmarshal failed, treating as raw text",
-				slog.String("message_id", msg.ID),
-				slog.String("role", msg.Role),
-				slog.Any("error", err),
-			)
-		}
-		modelMessage = turn.ModelMessage{
-			Role:    strings.TrimSpace(msg.Role),
-			Content: cloneRawMessage(msg.Content),
-		}
-		return modelMessage
-	}
-
-	// A bare content-part object (e.g. {"type":"text","text":"hello"}) has no
-	// role/content/tool_calls keys, so it unmarshals successfully into an empty
-	// ModelMessage instead of erroring — unknown JSON fields are ignored. Detect
-	// that shape before the row's Role column gets stamped below, and normalize
-	// it into a one-element parts array so TextContent/ContentParts still see it.
-	if modelMessage.Role == "" && !modelMessage.HasContent() {
-		if wrapped, ok := bareContentPartArray(msg.Content); ok {
-			modelMessage.Content = wrapped
-		}
-	}
-
-	modelMessage.Role = strings.TrimSpace(msg.Role)
-	return modelMessage
-}
-
-// bareContentPartArray wraps a raw JSON object into a single-element parts
-// array, e.g. {"type":"text","text":"hello"} -> [{"type":"text","text":"hello"}].
-// Only a non-empty object is wrapped: `{}` carries no content to recover, and
-// unmarshal already guarantees non-object payloads (arrays/strings/scalars)
-// took the error branch above.
-func bareContentPartArray(raw json.RawMessage) (json.RawMessage, bool) {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" || trimmed[0] != '{' || trimmed == "{}" {
-		return nil, false
-	}
-	return json.RawMessage("[" + trimmed + "]"), true
-}
-
 func parseUsage(raw json.RawMessage) (*int, *int) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -259,11 +213,4 @@ func cloneMetadata(metadata map[string]any) map[string]any {
 		return nil
 	}
 	return out
-}
-
-func cloneRawMessage(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return nil
-	}
-	return append(json.RawMessage(nil), raw...)
 }

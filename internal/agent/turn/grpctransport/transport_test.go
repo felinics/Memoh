@@ -14,12 +14,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/agent/turn/turnpb"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	intrpc "github.com/memohai/memoh/internal/rpc"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	intrpc "github.com/felinics/memoh/internal/rpc"
 )
 
 func TestStartTurnRoundTrip(t *testing.T) {
@@ -394,7 +394,7 @@ func TestInjectFailureKeepsStreamAlive(t *testing.T) {
 	}
 }
 
-// TestFeedbackErrorSurvivesTransport pins the acpfeedback envelope: typed
+// TestFeedbackErrorSurvivesTransport pins the agentfeedback envelope: typed
 // ACP feedback must cross the wire so the channel process can render its
 // localized guidance instead of a bare internal error.
 func TestFeedbackErrorSurvivesTransport(t *testing.T) {
@@ -416,21 +416,21 @@ func TestFeedbackErrorSurvivesTransport(t *testing.T) {
 	for err := range handle.Errs() {
 		runErr = err
 	}
-	var feedback *acpfeedback.Error
+	var feedback *agentfeedback.Error
 	if !errors.As(runErr, &feedback) {
 		t.Fatalf("run error lost feedback identity: %v", runErr)
 	}
-	if feedback.Code != acpfeedback.CodeAgentNotConfigured {
+	if feedback.Code != agentfeedback.CodeAgentNotConfigured {
 		t.Fatalf("feedback code = %q", feedback.Code)
 	}
 
 	// Start-path errors carry the envelope too.
-	direct := acpfeedback.New(acpfeedback.CodeAgentNotEnabled, "agent_not_enabled", 403, "chat.acp.agentNotEnabled", "disabled", nil)
+	direct := agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", 403, "chat.externalAgent.agentNotEnabled", "disabled", nil)
 	client2, cleanup2 := newTestClient(t, &scriptedService{startErr: direct}, "secret")
 	defer cleanup2()
 	_, err = client2.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
-	var startFeedback *acpfeedback.Error
-	if !errors.As(err, &startFeedback) || startFeedback.Code != acpfeedback.CodeAgentNotEnabled {
+	var startFeedback *agentfeedback.Error
+	if !errors.As(err, &startFeedback) || startFeedback.Code != agentfeedback.CodeAgentNotEnabled {
 		t.Fatalf("start error lost feedback identity: %v", err)
 	}
 }
@@ -469,5 +469,38 @@ func TestUnknownControlFrameIgnored(t *testing.T) {
 	}
 	for err := range handle.Errs() {
 		t.Fatalf("unexpected run error after unknown frame: %v", err)
+	}
+}
+
+func TestSessionBusySurvivesTransport(t *testing.T) {
+	client, cleanup := newTestClient(t, &scriptedService{startErr: fmt.Errorf("private diagnostic: %w", turn.ErrSessionBusy)}, "secret")
+	defer cleanup()
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	if !errors.Is(err, turn.ErrSessionBusy) {
+		t.Fatalf("got %v, want busy sentinel", err)
+	}
+}
+
+type stoppingService struct {
+	fakeService
+	stopped chan turn.StopCommand
+}
+
+func (s *stoppingService) StopTurn(_ context.Context, cmd turn.StopCommand) (bool, error) {
+	s.stopped <- cmd
+	return true, nil
+}
+
+func TestStopTurnSurvivesTransport(t *testing.T) {
+	service := &stoppingService{stopped: make(chan turn.StopCommand, 1)}
+	client, cleanup := newTestClient(t, service, "secret")
+	defer cleanup()
+	cmd := turn.StopCommand{TeamID: "team-1", BotID: "bot-1", ThreadID: "thread-1"}
+	stopped, err := client.StopTurn(context.Background(), cmd)
+	if err != nil || !stopped {
+		t.Fatalf("stop = %t, %v", stopped, err)
+	}
+	if got := <-service.stopped; got != cmd {
+		t.Fatalf("command = %#v", got)
 	}
 }

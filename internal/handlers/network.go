@@ -7,9 +7,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	netctl "github.com/memohai/memoh/internal/network"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	netctl "github.com/felinics/memoh/internal/network"
 )
 
 type NetworkHandler struct {

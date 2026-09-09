@@ -30,6 +30,10 @@ const (
 	Retry               StreamEventType = "retry"
 	Progress            StreamEventType = "progress"
 	Error               StreamEventType = "error"
+	// RuntimeNotice surfaces a runtime-side degradation the user should see
+	// in the conversation (tools unavailable, an interaction declined).
+	// Code carries the machine-readable reason, Delta the human text.
+	RuntimeNotice StreamEventType = "runtime_notice"
 )
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
@@ -53,6 +57,7 @@ type StreamEvent struct {
 	Messages       json.RawMessage  `json:"messages,omitempty"`
 	Usage          json.RawMessage  `json:"usage,omitempty"`
 	Reasoning      []string         `json:"reasoning,omitempty"`
+	Code           string           `json:"code,omitempty"`
 	Error          string           `json:"error,omitempty"`
 	Attempt        int              `json:"attempt,omitempty"`
 	MaxAttempt     int              `json:"maxAttempt,omitempty"`

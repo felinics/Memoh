@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 )
 
 // subagentRunHandleKey carries the admitted run's handle through the context

@@ -12,9 +12,9 @@ import (
 
 	"github.com/line/line-bot-sdk-go/v8/linebot/messaging_api"
 
-	"github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/publicmedia"
+	"github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/publicmedia"
 )
 
 const (

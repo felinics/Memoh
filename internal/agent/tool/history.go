@@ -8,15 +8,16 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	dbpkg "github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 const defaultMaxLookbackDays = 7
@@ -28,10 +29,9 @@ type SessionLister interface {
 
 // HistoryMessageReader is the minimal interface for reading persisted messages.
 type HistoryMessageReader interface {
-	ListLatest(ctx context.Context, botID string, limit int32) ([]messagepkg.Message, error)
-	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]messagepkg.Message, error)
 	ListLatestBySession(ctx context.Context, sessionID string, limit int32) ([]messagepkg.Message, error)
 	ListBeforeBySession(ctx context.Context, sessionID string, before time.Time, limit int32) ([]messagepkg.Message, error)
+	GetByIDBySession(ctx context.Context, sessionID string, messageID string) (messagepkg.Message, error)
 }
 
 // HistoryProvider exposes list_sessions, get_messages, and search_messages tools.
@@ -59,10 +59,10 @@ func (*HistoryProvider) Usage(_ context.Context, _ SessionContext, available Ava
 	listSessionsRef := ""
 	if ref, ok := available.Ref(ToolListSessions()); ok {
 		listSessionsRef = ref
-		parts = append(parts, ref+": List all chat sessions with their bound contact/route info. Filter by `type` (chat/heartbeat/schedule) or `platform`.")
+		parts = append(parts, ref+": List accessible chat sessions with their bound contact/route info. Filter by `type` (chat/schedule) or `platform`.")
 	}
 	if ref, ok := available.Ref(ToolGetMessages()); ok {
-		parts = append(parts, ref+": Get recent messages from the current or selected session.")
+		parts = append(parts, ref+": Get recent messages from the current or selected session, or resolve one exact `message_id`.")
 		if listSessionsRef != "" {
 			parts = append(parts, "Use session IDs from "+listSessionsRef+" as `session_id` for "+ref+" when reading a specific conversation.")
 		}
@@ -83,14 +83,14 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 		s := sess
 		tools = append(tools, sdk.Tool{
 			Name:        ToolListSessions().String(),
-			Description: "List all chat sessions for the current bot with their bound contact/route information.",
+			Description: "List chat sessions accessible from the current user or channel route, with their bound contact/route information.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"type": map[string]any{
 						"type":        "string",
-						"description": "Filter by session type: chat, heartbeat, or schedule. Returns all types when omitted.",
-						"enum":        []string{"chat", "heartbeat", "schedule"},
+						"description": "Filter by session type: chat or schedule. Returns all types when omitted.",
+						"enum":        []string{"chat", "schedule"},
 					},
 					"platform": map[string]any{
 						"type":        "string",
@@ -113,13 +113,17 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 		s := sess
 		tools = append(tools, sdk.Tool{
 			Name:        ToolGetMessages().String(),
-			Description: "Get recent messages from a chat session. Defaults to the current session. Results are returned oldest-first.",
+			Description: "Get recent messages from a chat session, or resolve one exact message ID. Defaults to the current session. Results are returned oldest-first.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_id": map[string]any{
 						"type":        "string",
 						"description": "Session ID to read. Defaults to the current session when omitted.",
+					},
+					"message_id": map[string]any{
+						"type":        "string",
+						"description": "Exact persisted message ID to resolve, such as a message_id returned in search_memory source_refs.",
 					},
 					"before": map[string]any{
 						"type":        "string",
@@ -142,7 +146,7 @@ func (p *HistoryProvider) Tools(_ context.Context, sess SessionContext) ([]sdk.T
 		s := sess
 		tools = append(tools, sdk.Tool{
 			Name:        ToolSearchMessages().String(),
-			Description: "Search message history across all sessions. Supports filtering by time range, keyword, session, contact, and role. All parameters are optional. If start_time is not provided, only the last 7 days are searched.",
+			Description: "Search message history across sessions accessible from the current user or channel route. Supports filtering by time range, keyword, session, contact, and role. All parameters are optional. If start_time is not provided, only the last 7 days are searched.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -197,7 +201,7 @@ func (p *HistoryProvider) execListSessions(ctx context.Context, sess SessionCont
 		return nil, errors.New("bot_id is required")
 	}
 
-	sessions, err := p.sessions.ListByBot(ctx, botID)
+	sessions, _, err := visibleHistorySessions(ctx, p.sessions, sess)
 	if err != nil {
 		return nil, err
 	}
@@ -280,10 +284,17 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(sess.SessionID)
 	}
+	if sessionID == "" {
+		return nil, errors.New("session_id is required when there is no current session")
+	}
 	if sessionID != "" && sessionID != strings.TrimSpace(sess.SessionID) {
-		if err := p.ensureSessionBelongsToBot(ctx, botID, sessionID); err != nil {
+		if err := p.ensureSessionVisible(ctx, sess, sessionID); err != nil {
 			return nil, err
 		}
+	}
+	messageID := strings.TrimSpace(StringArg(args, "message_id"))
+	if messageID != "" && strings.TrimSpace(StringArg(args, "before")) != "" {
+		return nil, errors.New("message_id and before cannot be used together")
 	}
 
 	var (
@@ -291,21 +302,24 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 		err      error
 		before   time.Time
 	)
-	if rawBefore := StringArg(args, "before"); rawBefore != "" {
+	if messageID != "" {
+		message, loadErr := p.messages.GetByIDBySession(ctx, sessionID, messageID)
+		switch {
+		case errors.Is(loadErr, pgx.ErrNoRows):
+			messages = []messagepkg.Message{}
+		case loadErr != nil:
+			return nil, loadErr
+		default:
+			messages = []messagepkg.Message{message}
+		}
+	} else if rawBefore := StringArg(args, "before"); rawBefore != "" {
 		before, err = parseFlexibleTime(rawBefore)
 		if err != nil {
 			return nil, err
 		}
-		if sessionID != "" {
-			messages, err = p.messages.ListBeforeBySession(ctx, sessionID, before, limit)
-		} else {
-			messages, err = p.messages.ListBefore(ctx, botID, before, limit)
-		}
-	} else if sessionID != "" {
-		messages, err = p.messages.ListLatestBySession(ctx, sessionID, limit)
-		reverseHistoryMessages(messages)
+		messages, err = p.messages.ListBeforeBySession(ctx, sessionID, before, limit)
 	} else {
-		messages, err = p.messages.ListLatest(ctx, botID, limit)
+		messages, err = p.messages.ListLatestBySession(ctx, sessionID, limit)
 		reverseHistoryMessages(messages)
 	}
 	if err != nil {
@@ -323,8 +337,9 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 		"count":    len(results),
 		"messages": results,
 	}
-	if sessionID != "" {
-		out["session_id"] = sessionID
+	out["session_id"] = sessionID
+	if messageID != "" {
+		out["message_id"] = messageID
 	}
 	if !before.IsZero() {
 		out["before"] = sess.FormatTime(before)
@@ -332,20 +347,15 @@ func (p *HistoryProvider) execGetMessages(ctx context.Context, sess SessionConte
 	return out, nil
 }
 
-func (p *HistoryProvider) ensureSessionBelongsToBot(ctx context.Context, botID, sessionID string) error {
-	if p.sessions == nil {
-		return errors.New("session lookup is not configured")
-	}
-	sessions, err := p.sessions.ListByBot(ctx, botID)
+func (p *HistoryProvider) ensureSessionVisible(ctx context.Context, sess SessionContext, sessionID string) error {
+	_, allowed, err := visibleHistorySessions(ctx, p.sessions, sess)
 	if err != nil {
 		return err
 	}
-	for _, item := range sessions {
-		if item.ID == sessionID {
-			return nil
-		}
+	if historySessionVisible(allowed, sessionID) {
+		return nil
 	}
-	return errors.New("session_id does not belong to the current bot")
+	return errors.New("session_id is not accessible from the current context")
 }
 
 // ---------------------------------------------------------------------------
@@ -368,13 +378,38 @@ func (p *HistoryProvider) execSearchMessages(ctx context.Context, sess SessionCo
 		limit = int32(v) //nolint:gosec // bounds-checked above
 	}
 
+	_, allowed, err := visibleHistorySessions(ctx, p.sessions, sess)
+	if err != nil {
+		return nil, err
+	}
+	allowedSessionIDs := make([]pgtype.UUID, 0, len(allowed))
+	for sessionID := range allowed {
+		parsed, parseErr := dbpkg.ParseUUID(sessionID)
+		if parseErr == nil {
+			allowedSessionIDs = append(allowedSessionIDs, parsed)
+		}
+	}
+	if len(allowedSessionIDs) == 0 {
+		return map[string]any{
+			"ok": true, "bot_id": botID, "count": 0, "messages": []map[string]any{},
+		}, nil
+	}
+
 	params := sqlc.SearchMessagesParams{
-		BotID:    pgBotID,
-		MaxCount: limit,
+		BotID:      pgBotID,
+		SessionIds: allowedSessionIDs,
+		MaxCount:   limit,
 	}
 
 	if v := StringArg(args, "session_id"); v != "" {
-		params.SessionID = dbpkg.ParseUUIDOrEmpty(v)
+		if !historySessionVisible(allowed, v) {
+			return nil, errors.New("session_id is not accessible from the current context")
+		}
+		parsed, parseErr := dbpkg.ParseUUID(v)
+		if parseErr != nil {
+			return nil, errors.New("invalid session_id")
+		}
+		params.SessionID = parsed
 	}
 	if v := StringArg(args, "contact_id"); v != "" {
 		params.ContactID = dbpkg.ParseUUIDOrEmpty(v)

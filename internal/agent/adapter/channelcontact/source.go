@@ -4,8 +4,8 @@ package channelcontact
 import (
 	"context"
 
-	"github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 type RouteLister interface {

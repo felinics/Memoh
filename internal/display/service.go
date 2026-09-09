@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pion/ice/v4"
 	"github.com/pion/rtp"
 	sdpv3 "github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
@@ -33,6 +34,7 @@ const (
 	CodecH264            = webrtc.MimeTypeH264
 	CodecVP8             = webrtc.MimeTypeVP8
 	gstLaunchEnv         = "MEMOH_GSTREAMER_LAUNCH"
+	rtcUDPPortEnv        = "MEMOH_DISPLAY_WEBRTC_UDP_PORT"
 	rtcUDPPortMinEnv     = "MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN"
 	rtcUDPPortMaxEnv     = "MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX"
 	rtcNATIPsEnv         = "MEMOH_DISPLAY_WEBRTC_NAT_IPS"
@@ -142,6 +144,7 @@ type ControlInput struct {
 }
 
 type rtcSettings struct {
+	UDPPort    uint16
 	UDPPortMin uint16
 	UDPPortMax uint16
 	NATIPs     []string
@@ -154,6 +157,11 @@ type Service struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	starting map[string]*sessionStart
+
+	rtcMu      sync.Mutex
+	rtcMux     ice.UDPMux
+	rtcMuxPort uint16
+	rtcClosed  bool
 }
 
 type sessionStart struct {
@@ -172,6 +180,37 @@ func NewService(logger *slog.Logger, workspace Workspace) *Service {
 		sessions:  make(map[string]*session),
 		starting:  make(map[string]*sessionStart),
 	}
+}
+
+// Start reserves the configured shared ICE UDP port before the server begins
+// accepting display requests, so an invalid or unavailable port fails startup.
+func (s *Service) Start() error {
+	cfg, err := readRTCSettings(nil)
+	if err != nil {
+		return err
+	}
+	if cfg.UDPPort == 0 {
+		return nil
+	}
+	_, err = s.sharedICEUDPMux(cfg.UDPPort)
+	return err
+}
+
+// Close releases the shared ICE UDP listener owned by this display service.
+// It is called after the HTTP server stops accepting display requests.
+func (s *Service) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.rtcMu.Lock()
+	s.rtcClosed = true
+	mux := s.rtcMux
+	s.rtcMux = nil
+	s.rtcMu.Unlock()
+	if mux == nil {
+		return nil
+	}
+	return mux.Close()
 }
 
 func (s *Service) displayTarget(botID string) string {
@@ -674,7 +713,7 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 		return OfferResponse{}, err
 	}
 
-	api, rtcCfg, err := newWebRTCAPI(mediaEngine, req.NATIPs)
+	api, rtcCfg, err := s.service.newWebRTCAPI(mediaEngine, req.NATIPs)
 	if err != nil {
 		return OfferResponse{}, err
 	}
@@ -682,9 +721,10 @@ func (s *session) answer(ctx context.Context, req OfferRequest) (OfferResponse, 
 	if err != nil {
 		return OfferResponse{}, err
 	}
-	if rtcCfg.UDPPortMin != 0 || len(rtcCfg.NATIPs) > 0 {
+	if rtcCfg.UDPPort != 0 || rtcCfg.UDPPortMin != 0 || len(rtcCfg.NATIPs) > 0 {
 		s.service.logger.Info("display webrtc configured",
 			slog.String("bot_id", s.botID),
+			slog.Int("udp_port", int(rtcCfg.UDPPort)),
 			slog.Int("udp_port_min", int(rtcCfg.UDPPortMin)),
 			slog.Int("udp_port_max", int(rtcCfg.UDPPortMax)),
 			slog.Any("nat_ips", rtcCfg.NATIPs),
@@ -1135,14 +1175,20 @@ func drainRTCP(sender *webrtc.RTPSender) {
 	}
 }
 
-func newWebRTCAPI(mediaEngine *webrtc.MediaEngine, inferredNATIPs []string) (*webrtc.API, rtcSettings, error) {
+func (s *Service) newWebRTCAPI(mediaEngine *webrtc.MediaEngine, inferredNATIPs []string) (*webrtc.API, rtcSettings, error) {
 	cfg, err := readRTCSettings(inferredNATIPs)
 	if err != nil {
 		return nil, rtcSettings{}, err
 	}
 
 	settingEngine := webrtc.SettingEngine{}
-	if cfg.UDPPortMin != 0 || cfg.UDPPortMax != 0 {
+	if cfg.UDPPort != 0 {
+		mux, err := s.sharedICEUDPMux(cfg.UDPPort)
+		if err != nil {
+			return nil, rtcSettings{}, err
+		}
+		settingEngine.SetICEUDPMux(mux)
+	} else if cfg.UDPPortMin != 0 || cfg.UDPPortMax != 0 {
 		if err := settingEngine.SetEphemeralUDPPortRange(cfg.UDPPortMin, cfg.UDPPortMax); err != nil {
 			return nil, rtcSettings{}, fmt.Errorf("configure display WebRTC UDP port range: %w", err)
 		}
@@ -1160,10 +1206,42 @@ func newWebRTCAPI(mediaEngine *webrtc.MediaEngine, inferredNATIPs []string) (*we
 	return webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithSettingEngine(settingEngine)), cfg, nil
 }
 
+func (s *Service) sharedICEUDPMux(port uint16) (ice.UDPMux, error) {
+	s.rtcMu.Lock()
+	defer s.rtcMu.Unlock()
+	if s.rtcClosed {
+		return nil, errors.New("display WebRTC service is closed")
+	}
+	if s.rtcMux != nil {
+		if s.rtcMuxPort != port {
+			return nil, fmt.Errorf("display WebRTC UDP mux already listens on port %d, cannot switch to %d", s.rtcMuxPort, port)
+		}
+		return s.rtcMux, nil
+	}
+	mux, err := ice.NewMultiUDPMuxFromPort(int(port))
+	if err != nil {
+		return nil, fmt.Errorf("listen for display WebRTC on UDP port %d: %w", port, err)
+	}
+	s.rtcMux = mux
+	s.rtcMuxPort = port
+	return mux, nil
+}
+
 func readRTCSettings(inferredNATIPs []string) (rtcSettings, error) {
 	var cfg rtcSettings
+	portRaw := strings.TrimSpace(os.Getenv(rtcUDPPortEnv))
 	minRaw := strings.TrimSpace(os.Getenv(rtcUDPPortMinEnv))
 	maxRaw := strings.TrimSpace(os.Getenv(rtcUDPPortMaxEnv))
+	if portRaw != "" && (minRaw != "" || maxRaw != "") {
+		return cfg, fmt.Errorf("%s cannot be combined with %s or %s", rtcUDPPortEnv, rtcUDPPortMinEnv, rtcUDPPortMaxEnv)
+	}
+	if portRaw != "" {
+		port, err := parseRTCUDPPort(rtcUDPPortEnv, portRaw)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.UDPPort = port
+	}
 	if minRaw != "" || maxRaw != "" {
 		if minRaw == "" || maxRaw == "" {
 			return cfg, fmt.Errorf("%s and %s must be configured together", rtcUDPPortMinEnv, rtcUDPPortMaxEnv)

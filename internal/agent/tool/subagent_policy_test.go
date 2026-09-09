@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.T) {

@@ -26,7 +26,7 @@ import (
 	"github.com/opencontainers/runtime-spec/specs-go"
 	cdi "tags.cncf.io/container-device-interface/pkg/cdi"
 
-	"github.com/memohai/memoh/internal/config"
+	"github.com/felinics/memoh/internal/config"
 )
 
 var ErrTaskStopTimeout = errors.New("timeout waiting for task to stop")

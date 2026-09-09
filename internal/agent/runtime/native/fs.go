@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // FSClient provides file operations against a bot's container filesystem.

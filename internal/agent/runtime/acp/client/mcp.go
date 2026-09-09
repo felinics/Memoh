@@ -5,7 +5,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
+	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
 
 const (

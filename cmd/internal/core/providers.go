@@ -12,6 +12,7 @@ import (
 	"os"
 	stdpath "path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,82 +20,89 @@ import (
 	"go.uber.org/fx"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/acl"
-	acpprofileadapter "github.com/memohai/memoh/internal/agent/adapter/acpprofile"
-	acpsessionadapter "github.com/memohai/memoh/internal/agent/adapter/acpsession"
-	channelcontactadapter "github.com/memohai/memoh/internal/agent/adapter/channelcontact"
-	channelidentityadapter "github.com/memohai/memoh/internal/agent/adapter/channelidentity"
-	channelmessagingadapter "github.com/memohai/memoh/internal/agent/adapter/channelmessaging"
-	channelthreadadapter "github.com/memohai/memoh/internal/agent/adapter/channelthread"
-	"github.com/memohai/memoh/internal/agent/application"
-	"github.com/memohai/memoh/internal/agent/background"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	agentpayload "github.com/memohai/memoh/internal/agent/event/payload"
-	acpagent "github.com/memohai/memoh/internal/agent/runtime/acp"
-	acpclient "github.com/memohai/memoh/internal/agent/runtime/acp/client"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
-	"github.com/memohai/memoh/internal/agent/turn"
-	audiopkg "github.com/memohai/memoh/internal/audio"
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/botbackup"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/route"
-	"github.com/memohai/memoh/internal/chat/event"
-	"github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/connectors"
-	ctr "github.com/memohai/memoh/internal/container"
-	containerprovider "github.com/memohai/memoh/internal/container/provider"
-	"github.com/memohai/memoh/internal/contextview"
-	"github.com/memohai/memoh/internal/db"
-	pgvectordb "github.com/memohai/memoh/internal/db/pgvector"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/heartbeat"
-	hookspkg "github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/logger"
-	"github.com/memohai/memoh/internal/mcp"
-	mcpfederation "github.com/memohai/memoh/internal/mcp/sources/federation"
-	"github.com/memohai/memoh/internal/media"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	membuiltin "github.com/memohai/memoh/internal/memory/adapters/builtin"
-	memmem0 "github.com/memohai/memoh/internal/memory/adapters/mem0"
-	memopenviking "github.com/memohai/memoh/internal/memory/adapters/openviking"
-	"github.com/memohai/memoh/internal/memory/memllm"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
-	"github.com/memohai/memoh/internal/memory/wikistore"
-	"github.com/memohai/memoh/internal/messaging"
-	"github.com/memohai/memoh/internal/models"
-	netctl "github.com/memohai/memoh/internal/network"
-	netoverlay "github.com/memohai/memoh/internal/network/overlay"
-	pluginspkg "github.com/memohai/memoh/internal/plugins"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/providertemplates"
-	"github.com/memohai/memoh/internal/registry"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/storage/providers/containerfs"
-	"github.com/memohai/memoh/internal/storage/providers/fallback"
-	"github.com/memohai/memoh/internal/storage/providers/localfs"
-	"github.com/memohai/memoh/internal/team"
-	"github.com/memohai/memoh/internal/userruntime"
-	videopkg "github.com/memohai/memoh/internal/video"
-	"github.com/memohai/memoh/internal/workdir"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/acl"
+	acpprofileadapter "github.com/felinics/memoh/internal/agent/adapter/acpprofile"
+	agentsessionadapter "github.com/felinics/memoh/internal/agent/adapter/agentsession"
+	channelcontactadapter "github.com/felinics/memoh/internal/agent/adapter/channelcontact"
+	channelidentityadapter "github.com/felinics/memoh/internal/agent/adapter/channelidentity"
+	channelmessagingadapter "github.com/felinics/memoh/internal/agent/adapter/channelmessaging"
+	channelthreadadapter "github.com/felinics/memoh/internal/agent/adapter/channelthread"
+	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	agentpayload "github.com/felinics/memoh/internal/agent/event/payload"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
+	claudecoderuntime "github.com/felinics/memoh/internal/agent/runtime/claudecode"
+	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agentcredential"
+	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/boot"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/botbackup"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/connectors"
+	ctr "github.com/felinics/memoh/internal/container"
+	containerprovider "github.com/felinics/memoh/internal/container/provider"
+	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/db"
+	pgvectordb "github.com/felinics/memoh/internal/db/pgvector"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	displaypkg "github.com/felinics/memoh/internal/display"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	"github.com/felinics/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/handlers"
+	hookspkg "github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/logger"
+	"github.com/felinics/memoh/internal/mcp"
+	mcpfederation "github.com/felinics/memoh/internal/mcp/sources/federation"
+	"github.com/felinics/memoh/internal/media"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
+	memmem0 "github.com/felinics/memoh/internal/memory/adapters/mem0"
+	memopenviking "github.com/felinics/memoh/internal/memory/adapters/openviking"
+	"github.com/felinics/memoh/internal/memory/memllm"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
+	"github.com/felinics/memoh/internal/memory/wikistore"
+	"github.com/felinics/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/models"
+	netctl "github.com/felinics/memoh/internal/network"
+	netoverlay "github.com/felinics/memoh/internal/network/overlay"
+	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/providertemplates"
+	"github.com/felinics/memoh/internal/registry"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/storage/providers/containerfs"
+	"github.com/felinics/memoh/internal/storage/providers/fallback"
+	"github.com/felinics/memoh/internal/storage/providers/localfs"
+	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/userruntime"
+	videopkg "github.com/felinics/memoh/internal/video"
+	"github.com/felinics/memoh/internal/workdir"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspacedeps"
+	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
@@ -103,7 +111,9 @@ func provideLogger(cfg config.Config) *slog.Logger {
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
-	svc, cleanup, err := containerprovider.ProvideService(context.Background(), log, cfg, rc.ContainerBackend)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	svc, cleanup, err := containerprovider.ProvideService(ctx, log, cfg, rc.ContainerBackend)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +241,32 @@ func provideAccountService(log *slog.Logger, accountStore dbstore.AccountStore) 
 	return accounts.NewService(log, accountStore)
 }
 
+func provideSettingsService(
+	log *slog.Logger,
+	queries dbstore.Queries,
+	aclService *acl.Service,
+	networkService *netctl.Service,
+	modelsService *models.Service,
+	botAgentsService *botagents.Service,
+) *settings.Service {
+	service := settings.NewService(log, queries, aclService, networkService)
+	service.SetReasoningOptionsResolver(modelsService)
+	service.SetBotAgents(botAgentsService)
+	return service
+}
+
+func provideBotAgentsService(log *slog.Logger, queries dbstore.Queries, credentialService *agentcredential.Service) *botagents.Service {
+	service := botagents.NewService(log, queries)
+	service.SetCredentialResolver(func(ctx context.Context, botID, botAgentID string) string {
+		credential, err := credentialService.ResolveForBotAgent(ctx, botID, botAgentID)
+		if err != nil {
+			return ""
+		}
+		return credential.AuthKind
+	})
+	return service
+}
+
 // provideWikiStore wires the PostgreSQL memory wiki store. Returns a pointer
 // so FX can inject nil-safe into providers that may run without a wiki store.
 func provideWikiStore(postgresStore *postgresstore.Store) (*wikistore.Store, error) {
@@ -317,14 +353,8 @@ func (p nativeWorkspaceBridgeProvider) MCPClient(ctx context.Context, botID stri
 	return p.manager.NativeMCPClient(ctx, botID)
 }
 
-func providePluginBridgeProvider(provider bridge.Provider) pluginspkg.BridgeProvider {
-	return pluginspkg.BridgeProvider{Provider: provider}
-}
-
-func provideHooksService(log *slog.Logger, provider bridge.Provider, pluginService *pluginspkg.Service) *hookspkg.Service {
-	service := hookspkg.NewService(log, provider)
-	service.SetPluginService(pluginService)
-	return service
+func provideHooksService(log *slog.Logger, provider bridge.Provider) *hookspkg.Service {
+	return hookspkg.NewService(log, provider)
 }
 
 func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkController netctl.Controller, cfg config.Config, conn *pgxpool.Pool, queries dbstore.Queries, remote *workspace.RemoteWorkspaceService) (*workspace.Manager, error) {
@@ -403,12 +433,9 @@ func provideScheduleTriggerer(service *application.Service) schedule.Triggerer {
 	return application.NewScheduleGateway(service)
 }
 
-func provideHeartbeatTriggerer(service *application.Service) heartbeat.Triggerer {
-	return application.NewHeartbeatGateway(service)
-}
-
 type sessionCreatorAdapter struct {
-	svc *sessionpkg.Service
+	svc      *sessionpkg.Service
+	workdirs *workdir.Service
 }
 
 func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessionType string) (string, error) {
@@ -422,12 +449,51 @@ func (a *sessionCreatorAdapter) CreateSession(ctx context.Context, botID, sessio
 	return sess.ID, nil
 }
 
-func provideHeartbeatSessionCreator(sessionService *sessionpkg.Service) heartbeat.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
+// CreateScheduleSession creates the user-visible session one schedule fire
+// runs in. The schedule domain states intent (runtime, agent, workdir); this
+// adapter resolves the workdir path and shapes the thread-create input the
+// same way the interactive session-create handler does.
+func (a *sessionCreatorAdapter) CreateScheduleSession(ctx context.Context, spec schedule.SessionSpec) (string, error) {
+	input := sessionpkg.CreateInput{
+		BotID:           spec.BotID,
+		BotAgentID:      spec.BotAgentID,
+		Type:            sessionpkg.TypeSchedule,
+		RuntimeType:     strings.TrimSpace(spec.RuntimeType),
+		Title:           spec.Title,
+		CreatedByUserID: spec.OwnerUserID,
+		// Schedule sessions surface in the sidebar so the user can open the
+		// produced conversation and continue it; the schedule session mode
+		// is preserved for prompt and tool gating.
+		Visibility: sessionpkg.VisibilityUser,
+	}
+	if strings.TrimSpace(spec.ACPAgentID) != "" {
+		input.RuntimeType = sessionpkg.RuntimeACPAgent
+		// The thread service derives the ACP runtime owner from
+		// CreatedByUserID and applies project-path defaults; the workdir
+		// override below wins when a workdir is bound.
+		input.Metadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
+		input.RuntimeMetadata = map[string]any{"acp_agent_id": spec.ACPAgentID}
+	}
+	if strings.TrimSpace(spec.WorkdirID) != "" {
+		if a.workdirs == nil {
+			return "", errors.New("workdir service not configured")
+		}
+		wd, err := a.workdirs.RequireActive(ctx, spec.BotID, spec.WorkdirID)
+		if err != nil {
+			return "", fmt.Errorf("resolve schedule workdir: %w", err)
+		}
+		input.WorkdirID = wd.ID
+		input.WorkdirPath = wd.Path
+	}
+	sess, err := a.svc.Create(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	return sess.ID, nil
 }
 
-func provideScheduleSessionCreator(sessionService *sessionpkg.Service) schedule.SessionCreator {
-	return &sessionCreatorAdapter{svc: sessionService}
+func provideScheduleSessionCreator(sessionService *sessionpkg.Service, workdirService *workdir.Service) schedule.SessionCreator {
+	return &sessionCreatorAdapter{svc: sessionService, workdirs: workdirService}
 }
 
 func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hookspkg.Service, cfg config.Config) *native.Agent {
@@ -437,6 +503,7 @@ func provideAgent(log *slog.Logger, provider bridge.Provider, hookService *hooks
 		Logger:             log,
 		Limits:             agentLimitsFromConfig(cfg.Agent),
 		ContextViewApplier: contextview.ProviderRunConfigApplier(log),
+		LoopReselectMode:   agentLoopReselectModeFromConfig(log, cfg.Agent),
 	})
 }
 
@@ -446,6 +513,14 @@ func agentLimitsFromConfig(cfg config.AgentConfig) native.Limits {
 		cfg.ToolOutputMaxLines,
 		cfg.SystemFilesMaxBytes,
 	)
+}
+
+func agentLoopReselectModeFromConfig(log *slog.Logger, cfg config.AgentConfig) native.LoopReselectMode {
+	mode, recognized := cfg.EffectiveContextLoopReselectMode()
+	if !recognized {
+		log.Warn("unrecognized agent.context_loop_reselect value; defaulting to active", slog.String("value", cfg.ContextLoopReselect))
+	}
+	return native.LoopReselectMode(mode)
 }
 
 func injectToolProviders(a *native.Agent, msgService *message.DBService, hookService *hookspkg.Service, agentService *application.Service, providers []agenttools.ToolProvider) {
@@ -477,12 +552,18 @@ func injectBotConnectorLifecycle(botService *bots.Service, connectorService *con
 	botService.SetConnectorLifecycle(connectorService)
 }
 
+func injectBotContainerLifecycle(botService *bots.Service, manager *workspace.Manager) {
+	botService.SetContainerLifecycle(manager)
+}
+
 func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler) *acpagent.SessionPool {
-	pool := acpagent.NewSessionPool(log, runner, botService, acpsessionadapter.NewSource(sessionService))
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
+	pool := acpagent.NewSessionPool(log, runner, botService, agentsessionadapter.NewSource(sessionService))
+	pool.SetSessionRuntime(sessionRuntime)
+	pool.SetSessionStateStore(agentsessionadapter.NewStateStore(queries))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
@@ -501,8 +582,120 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service) *application.Service {
+func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
+	driver := codexruntime.NewDriver(
+		workspaceManager,
+		botAgents,
+		credentials,
+		toolApproval,
+		userInput,
+		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
+		log,
+	)
+	// The dependency service sits upstream of the drivers in the FX graph
+	// (workspace manager, store, catalog, background manager), so it can be
+	// handed over here; the setter only keeps the driver constructible
+	// without a resolver (tests, toolkit fallback).
+	driver.SetLauncherResolver(workspaceDeps)
+	lc.Append(fx.Hook{
+		OnStop: func(context.Context) error {
+			driver.CloseAll()
+			return nil
+		},
+	})
+	return driver
+}
+
+func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *claudecoderuntime.Driver {
+	driver := claudecoderuntime.NewDriver(
+		workspaceManager,
+		botAgents,
+		credentials,
+		toolApproval,
+		agentsessionadapter.NewStateStore(queries),
+		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
+		log,
+	)
+	driver.SetLauncherResolver(workspaceDeps)
+	return driver
+}
+
+// directRuntimeLaunchers names the CLI command each direct runtime executes,
+// keyed by runtime type. validateDriverDependencies requires it to be the
+// primary command (provides[0]) of the dependency the driver declares: the
+// launcher resolver hands drivers the path of provides[0], so any other
+// arrangement would launch the wrong binary. A new direct runtime that
+// declares a dependency must be added here, or the Server refuses to start.
+var directRuntimeLaunchers = map[string]string{
+	codexruntime.RuntimeType:      "codex",
+	claudecoderuntime.RuntimeType: "claude",
+}
+
+// Built-in runtimes bind official dependency IDs to their launcher command.
+// The recipe itself is downloaded and validated by RemoteCatalog.
+var directRuntimeDependencies = workspacedeps.BuiltinLauncherCommands()
+
+func provideDirectAgentDrivers(codex *codexruntime.Driver, claude *claudecoderuntime.Driver) (external.Drivers, error) {
+	drivers := external.Drivers{codex, claude}
+	discovery, err := depcatalog.Discovery(directRuntimeDependencies)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateDriverDependencies(drivers, discovery); err != nil {
+		return nil, err
+	}
+	return drivers, nil
+}
+
+// validateDriverDependencies checks every driver that declares a workspace
+// dependency (external.DependencyRequirer): the dependency is in the catalog
+// and its primary command is the runtime's launcher. All violations are
+// reported together.
+func validateDriverDependencies(drivers external.Drivers, cat *depcatalog.Catalog) error {
+	if cat == nil {
+		return errors.New("validate direct agent dependencies: catalog is nil")
+	}
+	requirements := drivers.RequiredDependencies()
+	runtimes := make([]string, 0, len(requirements))
+	for runtimeType := range requirements {
+		runtimes = append(runtimes, runtimeType)
+	}
+	sort.Strings(runtimes)
+
+	var errs []error
+	for _, runtimeType := range runtimes {
+		req := requirements[runtimeType]
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("direct runtime %q requires workspace dependency %q: %s", runtimeType, req.DependencyID, fmt.Sprintf(format, args...)))
+		}
+		dep, ok := cat.Get(req.DependencyID)
+		if !ok {
+			fail("not in the catalog")
+			continue
+		}
+		command, known := directRuntimeLaunchers[runtimeType]
+		switch {
+		case !known:
+			fail("no launcher command registered in directRuntimeLaunchers")
+		case len(dep.Provides) == 0 || dep.Provides[0] != command:
+			fail("primary command %v (provides[0]) is not the runtime launcher %q", dep.Provides, command)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func provideExternalAgentCodexHandler(log *slog.Logger, driver *codexruntime.Driver, botAgents *botagents.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ExternalAgentCodexHandler {
+	return handlers.NewExternalAgentCodexHandler(log, driver, botAgents, botService, accountService)
+}
+
+func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, directAgents external.Drivers, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, cfg config.Config) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
+	service.SetContextAbsoluteMaxTokens(cfg.Agent.EffectiveContextAbsoluteMaxTokens())
+	syncCompactionMode, recognized := cfg.Agent.EffectiveSyncCompactionMode()
+	if !recognized {
+		log.Warn("unrecognized agent.sync_compaction value; defaulting to shadow", slog.String("value", cfg.Agent.SyncCompaction))
+	}
+	service.SetSyncCompactionMode(syncCompactionMode)
 	service.SetBotPermissionChecker(&applicationBotPermissionChecker{bots: botService, accounts: accountService})
 	// Every turn entry point goes through admission, so a service without it can
 	// start nothing: this is the thread's single-run guarantee, not an add-on.
@@ -515,6 +708,7 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	}
 	if compactionService != nil {
 		compactionService.SetHookService(hookService)
+		compactionService.SetEventPublisher(eventHub)
 	}
 	if workspaceManager != nil {
 		workspaceManager.SetHookService(hookService)
@@ -535,8 +729,52 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 	service.SetToolApprovalService(toolApproval)
 	service.SetUserInputService(userInput)
 	service.SetACPSessionPool(acpPool)
+	service.SetExternalRuntimes(directAgents...)
+	return service
+}
+
+// injectBackgroundTaskEvents connects notifications after the application and
+// Channel runtime exist. The embedded Channel runtime depends on turn.Service,
+// so an application constructor must not depend on that runtime in return.
+func injectBackgroundTaskEvents(log *slog.Logger, bgManager *background.Manager, msgService *message.DBService, sessionService *sessionpkg.Service, routeService *route.DBService, channelRuntime channel.Runtime, channelRegistry *channel.Registry, eventHub *event.Hub) {
 	if bgManager != nil {
+		sender := channelmessagingadapter.New(channelRuntime, channelRegistry, nil)
+		notifications := application.NewBackgroundTaskNotifications(msgService, sessionService, func(ctx context.Context, sess sessionpkg.Thread, text string) error {
+			if strings.TrimSpace(sess.RouteID) == "" || sess.ChannelType == "local" {
+				return nil
+			}
+			channelRoute, err := routeService.GetByID(ctx, sess.RouteID)
+			if err != nil {
+				return err
+			}
+			if channelRoute.BotID != sess.BotID {
+				return errors.New("dependency notification route does not belong to bot")
+			}
+			if channelRoute.Platform == "local" {
+				return nil
+			}
+			target := strings.TrimSpace(channelRoute.ReplyTarget)
+			if target == "" {
+				target = strings.TrimSpace(channelRoute.ExternalConversationID)
+			}
+			if target == "" {
+				return errors.New("dependency notification route has no reply target")
+			}
+			msg := messaging.Message{Text: text, Format: messaging.MessageFormatPlain}
+			if channelRoute.ExternalThreadID != "" {
+				msg.Thread = &messaging.ThreadRef{ID: channelRoute.ExternalThreadID}
+			}
+			return sender.Send(ctx, sess.BotID, messaging.Platform(channelRoute.Platform), messaging.SendRequest{Target: target, Message: msg})
+		})
 		bgManager.SetEventFunc(func(evt background.TaskEvent) {
+			if evt.Kind == background.KindDependency && evt.SessionID != "" && evt.Event != background.TaskEventOutput {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				err := notifications.Handle(ctx, evt)
+				cancel()
+				if err != nil {
+					log.Warn("dependency task notification failed", slog.String("bot_id", evt.BotID), slog.String("session_id", evt.SessionID), slog.String("task_id", evt.TaskID), slog.Any("error", err))
+				}
+			}
 			if eventHub == nil {
 				return
 			}
@@ -554,14 +792,103 @@ func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *model
 			})
 		})
 	}
+}
+
+func provideDisplayService(lc fx.Lifecycle, log *slog.Logger, manager *workspace.Manager) *displaypkg.Service {
+	service := displaypkg.NewService(log, manager)
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			return service.Start()
+		},
+		OnStop: func(context.Context) error {
+			return service.Close()
+		},
+	})
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, pluginService *pluginspkg.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, workspaceDeps *workspacedeps.Service) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
-	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, botService, accountService, policyService)
-	h.SetPluginService(pluginService)
+	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, displayService, botService, accountService, policyService)
+	h.SetWorkspaceDependencyService(workspaceDeps)
 	return h
+}
+
+// provideWorkspaceDependencyCatalog constructs the remote catalog without
+// blocking startup on a network request. Maintenance refreshes its durable cache.
+func provideWorkspaceDependencyCatalog(cfg config.Config, queries dbstore.Queries, log *slog.Logger) (*workspacedeps.RemoteCatalog, error) {
+	provider, err := workspacedeps.NewRemoteCatalog(cfg.Supermarket.GetBaseURL(), workspacedeps.NewPostgresCatalogStore(queries), nil, log)
+	if err != nil {
+		return nil, err
+	}
+	provider.SetRequiredCommands(directRuntimeDependencies)
+	provider.Configure(cfg.WorkspaceDependencies.CatalogRefreshInterval(), cfg.WorkspaceDependencies.Offline)
+	return provider, nil
+}
+
+func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, provider *workspacedeps.RemoteCatalog, bgManager *background.Manager, sessions *sessionpkg.Service, cfg config.Config) *workspacedeps.Service {
+	return workspacedeps.NewService(workspacedeps.Options{
+		Workspace: workspacedeps.NewManagerWorkspaceAccess(manager),
+		Store:     workspacedeps.NewPostgresStore(queries),
+		Provider:  provider,
+		Logger:    log,
+		Cache:     workspacedeps.NewCache(cfg.WorkspaceDependencies.DiscoveryCacheTTL()),
+		ScriptEnv: func(context.Context) []string {
+			keys := make([]string, 0, len(cfg.WorkspaceDependencies.ScriptEnv))
+			for key := range cfg.WorkspaceDependencies.ScriptEnv {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			env := make([]string, 0, len(keys))
+			for _, key := range keys {
+				env = append(env, key+"="+cfg.WorkspaceDependencies.ScriptEnv[key])
+			}
+			return env
+		},
+		OperationSessionValidator: func(ctx context.Context, botID, sessionID string) error {
+			sess, err := sessions.Get(ctx, sessionID)
+			if err != nil {
+				return err
+			}
+			if sess.BotID != botID || !sessionpkg.IsUserFacingType(sess.Type) {
+				return errors.New("dependency operation session does not belong to this bot")
+			}
+			return nil
+		},
+		Background: bgManager,
+	})
+}
+
+func provideWorkspaceDependencyUpdateWorker(log *slog.Logger, service *workspacedeps.Service, cfg config.Config) *workspacedeps.UpdateWorker {
+	return workspacedeps.NewUpdateWorker(service, cfg.WorkspaceDependencies.UpdateCheckInterval(), log)
+}
+
+// startWorkspaceDependencyMaintenance refreshes the catalog, reconciles
+// interrupted operations, and checks upstream tool versions. The configured
+// workers detach from startup and stop with the application.
+func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, service *workspacedeps.Service, worker *workspacedeps.UpdateWorker, provider *workspacedeps.RemoteCatalog, cfg config.Config) {
+	var stopReaper func()
+	var stopCatalog func()
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			stopCatalog = provider.Start(context.WithoutCancel(ctx))
+			stopReaper = workspacedeps.StartReaper(context.WithoutCancel(ctx), service, cfg.WorkspaceDependencies.ReapInterval(), log)
+			if !cfg.WorkspaceDependencies.Offline {
+				worker.Start(ctx)
+			}
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			if stopReaper != nil {
+				stopReaper()
+			}
+			worker.Stop()
+			if stopCatalog != nil {
+				stopCatalog()
+			}
+			return service.Shutdown(ctx)
+		},
+	})
 }
 
 func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
@@ -649,23 +976,26 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
 	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
+	historySessions := channelthreadadapter.NewLister(sessionService, routeService)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 	return []agenttools.ToolProvider{
 		agenttools.NewAskUserProvider(log),
 		agenttools.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
 		agenttools.NewContactsProvider(log, channelcontactadapter.NewSource(routeService)),
 		agenttools.NewScheduleProvider(log, scheduleService),
-		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService),
+		agenttools.NewWorkdirProvider(log, workdirService),
+		agenttools.NewACPAgentsProvider(log, &acpRuntimePoolAdapter{pool: acpPool}, queries),
+		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService, historySessions),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
 		agenttools.NewBackgroundProvider(log, bgManager),
-		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, manager, config.DefaultDataMount),
+		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, displayService, config.DefaultDataMount),
 		agenttools.NewEmailProvider(log, emailService, emailRuntime),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
@@ -676,8 +1006,48 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewVideoGenProvider(log, settingsService, videoService, bgManager, manager, config.DefaultDataMount),
 		agenttools.NewFederationProvider(log, connectorSource),
 		agenttools.NewFederationProvider(log, fedSource),
-		agenttools.NewHistoryProvider(log, channelthreadadapter.NewLister(sessionService, routeService), messageService, queries),
+		agenttools.NewHistoryProvider(log, historySessions, messageService, queries),
 	}
+}
+
+// acpRuntimePoolAdapter maps the ACP session pool onto the tool package's
+// local ACPRuntimePool interface. The tool package deliberately does not
+// import the acp packages (the acp client test binary imports the tool
+// package), so the projection to tool-local DTOs happens here.
+type acpRuntimePoolAdapter struct {
+	pool *acpagent.SessionPool
+}
+
+func (a *acpRuntimePoolAdapter) CreateAgentRuntime(ctx context.Context, botID, agentID, runtimeOwnerAccountID string) (agenttools.ACPRuntimeSummary, error) {
+	status, err := a.pool.CreateRuntime(ctx, acpagent.CreateRuntimeInput{
+		BotID:                 botID,
+		AgentID:               agentID,
+		RuntimeOwnerAccountID: runtimeOwnerAccountID,
+	})
+	if err != nil {
+		return agenttools.ACPRuntimeSummary{}, err
+	}
+	summary := agenttools.ACPRuntimeSummary{
+		RuntimeID:      status.RuntimeID,
+		DefaultModelID: status.DefaultModelID,
+	}
+	if status.Models != nil {
+		summary.CurrentModelID = status.Models.CurrentModelID
+		for _, m := range status.Models.Available {
+			summary.Models = append(summary.Models, agenttools.ACPOptionInfo{ID: m.ID, Name: m.Name})
+		}
+	}
+	if status.Reasoning != nil {
+		summary.CurrentEffort = status.Reasoning.CurrentEffort
+		for _, e := range status.Reasoning.Available {
+			summary.Efforts = append(summary.Efforts, agenttools.ACPOptionInfo{ID: e.ID, Name: e.Name})
+		}
+	}
+	return summary, nil
+}
+
+func (a *acpRuntimePoolAdapter) CloseAgentRuntime(botID, runtimeID string) error {
+	return a.pool.CloseRuntime(botID, runtimeID)
 }
 
 func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {
@@ -689,14 +1059,6 @@ func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.
 	secondary := localfs.New(filepath.Join(dataRoot, "media"))
 	storageProvider := fallback.New(primary, secondary)
 	return media.NewService(log, storageProvider)
-}
-
-func provideACPCodexOAuthHandler(providersService *providers.Service, botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPCodexOAuthHandler {
-	return handlers.NewACPCodexOAuthHandler(providersService, botService, accountService, workspaceManager, defaultACPCodexOAuthCallbackURL())
-}
-
-func provideACPClaudeCodeOAuthHandler(botService *bots.Service, accountService *accounts.Service, workspaceManager *workspace.Manager) *handlers.ACPClaudeCodeOAuthHandler {
-	return handlers.NewACPClaudeCodeOAuthHandler(botService, accountService, workspaceManager)
 }
 
 func provideAudioRegistry() *audiopkg.Registry {
@@ -749,10 +1111,6 @@ func defaultProviderOAuthCallbackURL() string {
 	return "http://localhost:1455/auth/callback"
 }
 
-func defaultACPCodexOAuthCallbackURL() string {
-	return defaultProviderOAuthCallbackURL()
-}
-
 func startProviderTemplateSync(
 	lc fx.Lifecycle,
 	log *slog.Logger,
@@ -794,12 +1152,8 @@ func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 	})
 }
 
-func startHeartbeatService(lc fx.Lifecycle, heartbeatService *heartbeat.Service) {
-	lc.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			return heartbeatService.Bootstrap(ctx)
-		},
-	})
+func injectScheduleBotAgents(scheduleService *schedule.Service, botAgentsService *botagents.Service) {
+	scheduleService.SetBotAgents(botAgentsService)
 }
 
 func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
@@ -1044,9 +1398,7 @@ func provideTurnService(service *application.Service) turn.Service {
 	return service
 }
 
-// applicationBotPermissionChecker duplicates the Channel module's inbound
-// permission glue; both adapt bots/accounts onto the same
-// HasBotPermission shape.
+// applicationBotPermissionChecker adapts bot permissions to the application port.
 type applicationBotPermissionChecker struct {
 	bots     *bots.Service
 	accounts *accounts.Service

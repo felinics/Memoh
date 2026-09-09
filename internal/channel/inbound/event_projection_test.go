@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type stampingEventStore struct {

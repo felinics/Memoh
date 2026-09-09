@@ -7,7 +7,7 @@
       "computedHash": "7bd195e3bcdcc24f078dfd4e3b3e37e8ac321c36f410a41241fc4175eab1825a"
     },
     "twilight-ai": {
-      "source": "memohai/twilight-ai",
+      "source": "felinics/twilight",
       "sourceType": "github",
       "computedHash": "84e60a3bf2743a7e47bb85a3bdb989c63caacf10d72a6e63e77c777cfffc30d5"
     }

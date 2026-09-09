@@ -6,9 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 func (s *Store) CreateOrUpdateMount(ctx context.Context, botID, runtimeID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
@@ -45,6 +45,27 @@ func (s *Store) ListMounts(ctx context.Context, botID string) ([]dbstore.BotRemo
 			row.RuntimeName, row.RuntimeUserID, row.RuntimeUnavailable, row.BotOwnerUserID,
 			row.CreatedAt, row.UpdatedAt,
 		))
+	}
+	return records, nil
+}
+
+func (s *Store) ListGrantsByRuntimeOwner(ctx context.Context, ownerUserID string) ([]dbstore.BotRemoteRuntimeBindingRecord, error) {
+	id, err := db.ParseUUID(ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListBotRemoteRuntimeGrantsByRuntimeOwner(ctx, id)
+	if err != nil {
+		return nil, mapQueryErr(err)
+	}
+	records := make([]dbstore.BotRemoteRuntimeBindingRecord, 0, len(rows))
+	for _, row := range rows {
+		records = append(records, dbstore.BotRemoteRuntimeBindingRecord{
+			ID:        row.ID.String(),
+			BotID:     row.BotID.String(),
+			RuntimeID: row.RuntimeID.String(),
+			IsPrimary: row.IsPrimary,
+		})
 	}
 	return records, nil
 }

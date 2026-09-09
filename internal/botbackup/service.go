@@ -20,23 +20,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/acl"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	fetchpkg "github.com/memohai/memoh/internal/fetchproviders"
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	modelpkg "github.com/memohai/memoh/internal/models"
-	providerpkg "github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/schedule"
-	searchpkg "github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/version"
+	"github.com/felinics/memoh/internal/acl"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
+	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	modelpkg "github.com/felinics/memoh/internal/models"
+	providerpkg "github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/runtimekind"
+	"github.com/felinics/memoh/internal/schedule"
+	searchpkg "github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/version"
 )
 
 type WorkspaceData interface {
@@ -48,7 +49,7 @@ type WorkspaceData interface {
 }
 
 type ACPRuntimeCloser interface {
-	CloseBotAgentRuntimes(botID, agentID string) error
+	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
 }
 
 type Service struct {
@@ -72,7 +73,14 @@ type Service struct {
 	workdirs        dbstore.BotWorkdirStore
 }
 
-const acpManagedSecretsWarning = "ACP managed secrets were excluded from bot/profile.json; re-enter API keys after import" // #nosec G101 -- user-facing warning text, not a credential.
+const agentCredentialsWarning = "External Agent credentials were excluded from bot/profile.json; re-enter them after import" // #nosec G101 -- user-facing warning text, not a credential.
+
+// Agent checkpoints are intentionally not part of backup schema v1. They are
+// versioned against process-run rows and native session files, while history
+// import remaps sessions, turns, and messages without recreating those runs.
+// Keeping a promotion watermark without its matching checkpoint would make an
+// imported transcript claim resumability that the bundle cannot provide.
+const acpCheckpointBackupWarning = "Agent runtime checkpoints are not included in bot backups; imported agent sessions keep their visible history but start a fresh runtime conversation" // #nosec G101 -- user-facing warning text, not a credential.
 
 type Params struct {
 	Logger          *slog.Logger
@@ -144,9 +152,9 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 		data.Profile = originalBot
 		manifest.SourceBotName = originalBot.DisplayName
 	}
-	if scrubbed, changed := scrubBotACPSecretsForBackup(data.Profile); changed {
+	if scrubbed, changed := scrubBotAgentSecretsForBackup(data.Profile); changed {
 		data.Profile = scrubbed
-		manifest.Warnings = append(manifest.Warnings, acpManagedSecretsWarning)
+		manifest.Warnings = append(manifest.Warnings, agentCredentialsWarning)
 	}
 
 	zw := zip.NewWriter(dst)
@@ -252,7 +260,7 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 	return writer.writeManifest()
 }
 
-func scrubBotACPSecretsForBackup(profile any) (any, bool) {
+func scrubBotAgentSecretsForBackup(profile any) (any, bool) {
 	bot, err := roundTripJSON[bots.Bot](profile)
 	if err != nil {
 		return profile, false
@@ -432,7 +440,6 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 		cfg.ImageModelID,
 		cfg.TtsModelID,
 		cfg.TranscriptionModelID,
-		cfg.HeartbeatModelID,
 		cfg.CompactionModelID,
 		cfg.DiscussProbeModelID,
 	})
@@ -547,6 +554,15 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 	}
 	if messages, err := s.queries.ListAllMessagesForBackup(ctx, pgBotID); err == nil {
 		history.Messages = messages
+		// Agent runtime publication heads and JSONL snapshots live outside
+		// the backup schema, so exported agent history (ACP and direct
+		// runtimes alike) is never runtime-resumable.
+		for _, message := range messages {
+			if runtimekind.IsExternal(message.RuntimeType) {
+				warnings = appendWarningOnce(warnings, acpCheckpointBackupWarning)
+				break
+			}
+		}
 		if includeAssets {
 			messageIDs := make([]pgtype.UUID, 0, len(messages))
 			for _, message := range messages {

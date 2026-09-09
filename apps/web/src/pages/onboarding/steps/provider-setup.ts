@@ -18,7 +18,11 @@ export function mergeOnboardingModels(
   const merged = new Map<string, ModelsGetResponse>()
   for (const model of [...enabledModels, ...providerModels]) {
     const key = model.id || `${model.provider_id ?? ''}\u0000${model.model_id ?? ''}`
-    if (key) merged.set(key, model)
+    if (!key) continue
+    const existing = merged.get(key)
+    merged.set(key, existing
+      ? { ...existing, ...model, enable: !!existing.enable || !!model.enable }
+      : model)
   }
   return [...merged.values()]
 }

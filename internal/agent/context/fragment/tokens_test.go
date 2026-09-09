@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestTokensFromBytes(t *testing.T) {
@@ -29,6 +29,54 @@ func TestTokensFromBytes(t *testing.T) {
 				t.Fatalf("TokensFromBytes(%d) = %d, want %d", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestProviderBudgetTokensFromBytesUsesCeilingAndSafetyMargin(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   int
+		want int
+	}{
+		{in: -1, want: 0},
+		{in: 0, want: 0},
+		{in: 1, want: 1},
+		{in: 3, want: 1},
+		{in: 4, want: 1},
+		{in: 7, want: 2},
+		{in: 8, want: 2},
+		{in: 16, want: 5},
+		{in: 4096, want: 1280},
+	}
+	for _, tc := range cases {
+		if got := ProviderBudgetTokensFromBytes(tc.in); got != tc.want {
+			t.Fatalf("ProviderBudgetTokensFromBytes(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+
+	if got := TokensFromBytes(3); got != 0 {
+		t.Fatalf("TokensFromBytes(3) = %d, want legacy floor estimate 0", got)
+	}
+}
+
+func TestResolveProviderBudgetFragTokensKeepsGreaterEstimate(t *testing.T) {
+	t.Parallel()
+
+	frag := TextFrag(TextFragInput{
+		ID:   "current",
+		Kind: KindCurrentUserMessage,
+		Slot: SlotCurrentUser,
+		Text: "abcdefghijklmnop",
+	})
+	frag.TokenEstimate = 1
+	if got := ResolveProviderBudgetFragTokens(frag); got != 5 {
+		t.Fatalf("ResolveProviderBudgetFragTokens(16 bytes) = %d, want conservative byte estimate 5", got)
+	}
+
+	frag.TokenEstimate = 99
+	if got := ResolveProviderBudgetFragTokens(frag); got != 99 {
+		t.Fatalf("ResolveProviderBudgetFragTokens(authoritative) = %d, want 99", got)
 	}
 }
 
@@ -207,5 +255,51 @@ func TestResolveFragTokensPrefersPresetEstimate(t *testing.T) {
 	frag.TokenEstimate = 0
 	if got := ResolveFragTokens(frag); got != 2 {
 		t.Fatalf("ResolveFragTokens = %d, want 2 (fallback to computed)", got)
+	}
+}
+
+func TestProviderEnvelopeTokensPricesInlineImagesFlat(t *testing.T) {
+	t.Parallel()
+
+	photo := sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{
+		sdk.TextPart{Text: "what is in this photo?"},
+		sdk.ImagePart{Image: "data:image/jpeg;base64," + strings.Repeat("A", 400_000), MediaType: "image/jpeg"},
+	}}
+	got := ProviderEnvelopeTokens("", []sdk.Message{photo}, nil)
+	want := ResolveProviderBudgetFragTokens(MessageFrag(MessageFragInput{Message: photo}))
+	if got != want {
+		t.Fatalf("ProviderEnvelopeTokens(photo) = %d, want selection estimate %d", got, want)
+	}
+	if got > 2*EstimateImageTokens {
+		t.Fatalf("ProviderEnvelopeTokens(photo) = %d, want flat image pricing near %d", got, EstimateImageTokens)
+	}
+}
+
+func TestProviderEnvelopeTokensSumsSystemMessagesAndTools(t *testing.T) {
+	t.Parallel()
+
+	system := strings.Repeat("s", 400)
+	messages := []sdk.Message{
+		sdk.UserMessage(strings.Repeat("u", 800)),
+		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{sdk.ToolResultPart{
+			ToolCallID: "call-1", ToolName: "exec", Result: strings.Repeat("r", 1200),
+		}}},
+	}
+	tools := []sdk.Tool{{
+		Name:        "exec",
+		Description: "Execute a bounded command.",
+		Parameters:  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}},
+	}}
+
+	if got := ProviderEnvelopeTokens(system, messages[:1], nil); got != 125+250 {
+		t.Fatalf("ProviderEnvelopeTokens(system+user) = %d, want 375 (400 and 800 bytes at ceil/4 x 1.25)", got)
+	}
+	want := 375 + ResolveProviderBudgetFragTokens(MessageFrag(MessageFragInput{Message: messages[1]})) +
+		ProviderToolDefTokens(ToolDefAccountingFor("native", tools[0]))
+	if got := ProviderEnvelopeTokens(system, messages, tools); got != want {
+		t.Fatalf("ProviderEnvelopeTokens = %d, want %d", got, want)
+	}
+	if got := ProviderEnvelopeTokens("", nil, nil); got != 0 {
+		t.Fatalf("ProviderEnvelopeTokens(empty) = %d, want 0", got)
 	}
 }

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	agenttools "github.com/memohai/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 func TestGenerateSystemPromptIncludesPlatformIdentitiesInChat(t *testing.T) {
@@ -71,14 +71,6 @@ func TestGenerateSystemPromptIncludesCommonAndModeContracts(t *testing.T) {
 				"You are an AI agent running inside a private Memoh workspace.",
 				"## Session mode: schedule",
 				"Your normal text output is logged only.",
-			},
-		},
-		{
-			sessionType: sessionmode.Heartbeat,
-			want: []string{
-				"You are an AI agent running inside a private Memoh workspace.",
-				"## Session mode: heartbeat",
-				"If nothing needs attention, output exactly `HEARTBEAT_OK`.",
 			},
 		},
 		{
@@ -364,7 +356,6 @@ func allPromptSessionTypes() []string {
 		sessionmode.Chat,
 		sessionmode.Discuss,
 		sessionmode.Schedule,
-		sessionmode.Heartbeat,
 		sessionmode.Subagent,
 	}
 }

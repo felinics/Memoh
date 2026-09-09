@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 type SDKRenderedPayload struct {
@@ -42,19 +42,14 @@ func (*SDKMessagesRenderer) Render(_ context.Context, input RenderInput) (Render
 
 func renderSDKPayloadFromFrags(ordered []contextfrag.ContextFrag) *SDKRenderedPayload {
 	payload := &SDKRenderedPayload{}
-	firstSystem := true
+	var previousSystemRender contextfrag.RenderPolicy
+	hasSystemFrag := false
 	for _, frag := range ordered {
 		switch frag.Slot {
 		case contextfrag.SlotSystem:
-			if !firstSystem {
-				payload.System += "\n\n"
-			}
-			firstSystem = false
-			for _, part := range frag.Parts {
-				if part.Type == contextfrag.PartText {
-					payload.System += part.Text
-				}
-			}
+			renderSystemFrag(payload, frag, previousSystemRender, hasSystemFrag)
+			previousSystemRender = frag.Render
+			hasSystemFrag = true
 		case contextfrag.SlotCurrentUser:
 			renderCurrentUserFrag(payload, frag)
 		default:
@@ -63,6 +58,22 @@ func renderSDKPayloadFromFrags(ordered []contextfrag.ContextFrag) *SDKRenderedPa
 	}
 	materializeRenderedCurrent(payload)
 	return payload
+}
+
+func renderSystemFrag(
+	payload *SDKRenderedPayload,
+	frag contextfrag.ContextFrag,
+	previous contextfrag.RenderPolicy,
+	hasPrevious bool,
+) {
+	if hasPrevious {
+		payload.System += contextfrag.RenderSeparator(previous, frag.Render)
+	}
+	for _, part := range frag.Parts {
+		if part.Type == contextfrag.PartText {
+			payload.System += part.Text
+		}
+	}
 }
 
 func orderedSelectedFrags(selected []contextfrag.ContextFrag, placement PlacementPlan) ([]contextfrag.ContextFrag, error) {

@@ -12,10 +12,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 var (
@@ -103,6 +104,29 @@ func (s *Service) GetByID(ctx context.Context, id string) (GetResponse, error) {
 	}
 
 	return s.convertToGetResponse(dbModel), nil
+}
+
+// ResolveReasoningOptions returns the selectable reasoning contract for a model
+// using the client type of its persisted provider. Keeping provider lookup here
+// gives commands and settings writes the same capability answer.
+func (s *Service) ResolveReasoningOptions(ctx context.Context, id string) (reasoning.Options, error) {
+	model, err := s.GetByID(ctx, id)
+	if err != nil {
+		return reasoning.Options{}, err
+	}
+	providerID, err := db.ParseUUID(model.ProviderID)
+	if err != nil {
+		return reasoning.Options{}, fmt.Errorf("invalid provider ID: %w", err)
+	}
+	provider, err := s.queries.GetProviderByID(ctx, providerID)
+	if err != nil {
+		return reasoning.Options{}, fmt.Errorf("failed to get provider: %w", err)
+	}
+	clientType := strings.TrimSpace(provider.ClientType)
+	if clientType == "" {
+		return reasoning.Options{}, errors.New("provider client type is required")
+	}
+	return model.ReasoningOptions(clientType), nil
 }
 
 // GetByModelID retrieves a model by its model_id field.
@@ -438,6 +462,8 @@ func (s *Service) convertToGetResponse(dbModel sqlc.Model) GetResponse {
 		if err := json.Unmarshal(dbModel.Config, &resp.Config); err != nil {
 			s.logger.Warn("failed to unmarshal model config", slog.String("model_id", dbModel.ModelID), slog.Any("error", err))
 		}
+		// Rows written before "off" was unified still advertise the legacy spelling.
+		resp.Config = normalizeModelConfig(resp.Config)
 	}
 
 	return resp

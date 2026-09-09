@@ -15,7 +15,7 @@ var ErrInvalidAskUserInput = errors.New("invalid ask_user input")
 var (
 	allowedPayloadKeys  = map[string]struct{}{"questions": {}}
 	allowedQuestionKeys = map[string]struct{}{
-		"text": {}, "kind": {}, "options": {}, "allow_custom": {}, "placeholder": {},
+		"text": {}, "kind": {}, "options": {}, "allow_custom": {}, "custom_exclusive": {}, "required": {}, "placeholder": {},
 	}
 	allowedOptionKeys = map[string]struct{}{"label": {}, "description": {}}
 )
@@ -98,6 +98,23 @@ func parseQuestion(item any, idx int) (UIQuestion, error) {
 			return UIQuestion{}, invalidf("questions[%d].allow_custom must be a boolean", idx)
 		}
 		question.AllowCustom = allowCustom
+	}
+	if value, exists := obj["custom_exclusive"]; exists {
+		customExclusive, ok := value.(bool)
+		if !ok {
+			return UIQuestion{}, invalidf("questions[%d].custom_exclusive must be a boolean", idx)
+		}
+		question.CustomExclusive = customExclusive
+	}
+	if question.CustomExclusive && !question.AllowCustom {
+		return UIQuestion{}, invalidf("questions[%d].custom_exclusive requires allow_custom", idx)
+	}
+	if value, exists := obj["required"]; exists {
+		required, ok := value.(bool)
+		if !ok {
+			return UIQuestion{}, invalidf("questions[%d].required must be a boolean", idx)
+		}
+		question.Required = &required
 	}
 	if question.Placeholder, err = strictString(obj, "placeholder", fmt.Sprintf("questions[%d]", idx)); err != nil {
 		return UIQuestion{}, err
@@ -218,11 +235,13 @@ func decodeStoredV2(raw map[string]any) UIPayload {
 			continue
 		}
 		question := UIQuestion{
-			ID:          stringValue(obj["id"]),
-			Text:        stringValue(obj["text"]),
-			Kind:        stringValue(obj["kind"]),
-			AllowCustom: boolValue(obj["allow_custom"]),
-			Placeholder: stringValue(obj["placeholder"]),
+			ID:              stringValue(obj["id"]),
+			Text:            stringValue(obj["text"]),
+			Kind:            stringValue(obj["kind"]),
+			AllowCustom:     boolValue(obj["allow_custom"]),
+			CustomExclusive: boolValue(obj["custom_exclusive"]),
+			Required:        optionalBool(obj, "required"),
+			Placeholder:     stringValue(obj["placeholder"]),
 		}
 		if question.ID == "" {
 			question.ID = fmt.Sprintf("q%d", idx+1)
@@ -253,6 +272,18 @@ func decodeStoredV2(raw map[string]any) UIPayload {
 		payload.Questions = append(payload.Questions, question)
 	}
 	return payload
+}
+
+func optionalBool(object map[string]any, key string) *bool {
+	value, exists := object[key]
+	if !exists {
+		return nil
+	}
+	parsed, ok := value.(bool)
+	if !ok {
+		return nil
+	}
+	return &parsed
 }
 
 // upgradeLegacyPayload converts the pre-v2 single-question shape

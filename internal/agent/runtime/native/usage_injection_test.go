@@ -6,10 +6,11 @@ import (
 	"sync"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
 // usageTestProvider is a ToolProvider that also implements tools.ToolUsage. It
@@ -17,6 +18,7 @@ import (
 // letting us assert that usage guidance is gated by tool registration.
 type usageTestProvider struct {
 	emitTool      bool
+	toolName      string
 	usage         string
 	requireTool   tools.ToolName
 	missingMarker string
@@ -30,7 +32,11 @@ func (p *usageTestProvider) Tools(_ context.Context, session tools.SessionContex
 	if !p.emitTool {
 		return nil, nil
 	}
-	return []sdk.Tool{{Name: "fake_tool", Description: "fake"}}, nil
+	name := p.toolName
+	if name == "" {
+		name = "fake_tool"
+	}
+	return []sdk.Tool{{Name: name, Description: "fake"}}, nil
 }
 
 func (p *usageTestProvider) Usage(_ context.Context, _ tools.SessionContext, available tools.AvailableTools) string {
@@ -233,6 +239,24 @@ func TestStreamPassesLiveToolStreamFlagToTools(t *testing.T) {
 	}
 }
 
+func TestAssembleToolsPassesReasoningInputsToToolSession(t *testing.T) {
+	t.Parallel()
+
+	var seen tools.SessionContext
+	a := newTestAgent(&usageTestProvider{emitTool: true, sessionSeen: &seen})
+	_, _, _, _, err := a.assembleTools(context.Background(), RunConfig{
+		ReasoningStoredEffort:    "high",
+		ReasoningRequestedEffort: "disable",
+	}, nil, false)
+	if err != nil {
+		t.Fatalf("assembleTools error: %v", err)
+	}
+	if seen.ReasoningStoredEffort != "high" || seen.ReasoningRequestedEffort != "disable" {
+		t.Fatalf("tool session reasoning inputs = stored %q, requested %q",
+			seen.ReasoningStoredEffort, seen.ReasoningRequestedEffort)
+	}
+}
+
 func TestStreamOmitsToolUsageWhenToolCallingUnsupported(t *testing.T) {
 	t.Parallel()
 	modelProvider := &usageStreamRecordingProvider{}
@@ -284,7 +308,7 @@ func TestAssembleToolsInjectsUsageWhenProviderEmitsTools(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&usageTestProvider{emitTool: true, usage: usageMarker})
 
-	gotTools, usage, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
@@ -302,11 +326,32 @@ func TestAssembleToolsInjectsUsageWhenProviderEmitsTools(t *testing.T) {
 	}
 }
 
+func TestAssembleToolsPassesContextBudgetAndToolExchangePolicyToSession(t *testing.T) {
+	t.Parallel()
+	var captured tools.SessionContext
+	a := newTestAgent(&usageTestProvider{emitTool: true, sessionSeen: &captured})
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
+
+	if _, _, _, _, err := a.assembleTools(context.Background(), RunConfig{
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true); err != nil {
+		t.Fatalf("assembleTools error: %v", err)
+	}
+
+	if captured.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", captured.ContextBudgetMaxTokens)
+	}
+	if captured.ContextToolExchangePolicy != policy {
+		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", captured.ContextToolExchangePolicy, policy)
+	}
+}
+
 func TestAssembleToolsOmitsUsageWhenProviderEmitsNoTools(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&usageTestProvider{emitTool: false, usage: usageMarker})
 
-	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
@@ -325,7 +370,7 @@ func TestAssembleToolsUsesProviderAccountingLabel(t *testing.T) {
 		{label: " ", want: "native"},
 	} {
 		a := newTestAgent(labeledTestProvider{label: tc.label})
-		_, _, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, nil, false)
+		_, _, _, toolDefs, err := a.assembleTools(context.Background(), RunConfig{}, nil, false)
 		if err != nil {
 			t.Fatalf("assembleTools error: %v", err)
 		}
@@ -339,7 +384,7 @@ func TestAssembleToolsDoesNotExposeAskUserWithoutCapability(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(&tools.AskUserProvider{})
 
-	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{
+	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{
 		SessionType: sessionmode.Chat,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
@@ -352,7 +397,7 @@ func TestAssembleToolsDoesNotExposeAskUserWithoutCapability(t *testing.T) {
 		t.Fatalf("expected no ask_user usage without user input capability, got %q", usage)
 	}
 
-	gotTools, usage, _, err = a.assembleTools(context.Background(), RunConfig{
+	gotTools, usage, _, _, err = a.assembleTools(context.Background(), RunConfig{
 		SessionType:         sessionmode.Chat,
 		CanRequestUserInput: true,
 	}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
@@ -371,7 +416,7 @@ func TestAssembleToolsIgnoresProvidersWithoutUsage(t *testing.T) {
 	t.Parallel()
 	a := newTestAgent(plainTestProvider{})
 
-	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
@@ -399,7 +444,7 @@ func TestAssembleToolsGatesUsagePerProvider(t *testing.T) {
 		plainTestProvider{},
 	)
 
-	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}
@@ -425,7 +470,7 @@ func TestAssembleToolsKeepsFirstDuplicateToolAndItsUsage(t *testing.T) {
 		&usageTestProvider{emitTool: true, usage: secondUsage},
 	)
 
-	gotTools, usage, toolDefs, err := a.assembleTools(
+	gotTools, usage, _, toolDefs, err := a.assembleTools(
 		context.Background(),
 		RunConfig{},
 		tools.StreamEmitter(func(tools.ToolStreamEvent) {}),
@@ -464,7 +509,7 @@ func TestAssembleToolsPassesCompleteAvailableToolSetToUsage(t *testing.T) {
 		plainTestProvider{},
 	)
 
-	gotTools, usage, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
+	gotTools, usage, _, _, err := a.assembleTools(context.Background(), RunConfig{}, tools.StreamEmitter(func(tools.ToolStreamEvent) {}), true)
 	if err != nil {
 		t.Fatalf("assembleTools error: %v", err)
 	}

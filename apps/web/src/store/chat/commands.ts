@@ -5,8 +5,9 @@ import type {
 } from '@/composables/api/useChat'
 import { executeQuickAction } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX } from '@/utils/bot-agent'
 import { createInvocationId } from '../chat-list.normalize'
-import type { ACPAgentSessionInput, ActiveChatTarget, ChatViewTarget } from './types'
+import type { ExternalAgentSessionInput, ActiveChatTarget, ChatViewTarget } from './types'
 import type { WebCommandResult } from './send'
 
 interface DraftCommand {
@@ -21,14 +22,14 @@ export interface ChatCommandDeps {
   beginDraftCommand: (target: ChatViewTarget) => DraftCommand
   requestDraftView: (
     target: ChatViewTarget,
-    input: ACPAgentSessionInput | null,
+    input: ExternalAgentSessionInput | null,
     activate: boolean,
   ) => void
   ensureBot: () => Promise<string | null>
-  defaultACPSettingsForAgent: (
+  defaultExternalAgentSettingsForAgent: (
     botId: string,
     agentId: string,
-  ) => Promise<Partial<ACPAgentSessionInput>>
+  ) => Promise<Partial<ExternalAgentSessionInput>>
   normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
   chatTargetFor: (target: ChatViewTarget) => ActiveChatTarget
   commandErrorMessage: (code: string) => string
@@ -41,6 +42,7 @@ export interface ChatCommandDeps {
     event: CommandEventResponse,
     scope: { botId: string; sessionId?: string; composerScope?: string },
   ) => void
+  refreshACPRuntime: (botId: string, sessionId: string) => Promise<unknown>
 }
 
 function parseWebNewCommand(
@@ -70,6 +72,7 @@ export function createChatCommands(deps: ChatCommandDeps) {
     const action = parts[1]?.toLowerCase() ?? ''
     if (command === '/help' && !action) return 'help'
     if (command === '/skill' && (!action || action === 'list')) return 'skill.list'
+    if (command === '/permission') return 'permission'
     return ''
   }
 
@@ -90,7 +93,7 @@ export function createChatCommands(deps: ChatCommandDeps) {
       if (parsed.mode === 'discuss') {
         return {
           kind: 'error',
-          message: 'Discuss ACP sessions require an agent, for example /new discuss codex',
+          message: 'Discuss External Agent sessions require an agent, for example /new discuss codex',
         }
       }
       const command = deps.beginDraftCommand(target)
@@ -98,16 +101,18 @@ export function createChatCommands(deps: ChatCommandDeps) {
       command.finish()
       return { kind: 'handled' }
     }
-    if (agentId !== 'codex' && agentId !== 'claude-code') {
-      return { kind: 'error', message: `Unknown ACP agent "${agentId}"` }
+    if (agentId !== BOT_AGENT_RUNTIME_CODEX && agentId !== BOT_AGENT_RUNTIME_CLAUDE_CODE) {
+      return { kind: 'error', message: `Unknown agent "${agentId}" — use /new codex or /new claude-code, or pick an agent from the composer` }
     }
 
     const command = deps.beginDraftCommand(target)
     try {
       const targetBotId = target.botId === '__unbound__' ? '' : target.botId
-      const botId = targetBotId || await deps.ensureBot()
+      // ensureBot now rethrows fetch failures (so bootstrap recovery can retry
+      // them); this interactive path keeps its original "not ready" reply.
+      const botId = targetBotId || await deps.ensureBot().catch(() => null)
       if (!botId) return { kind: 'error', message: 'Bot not ready' }
-      const defaults = await deps.defaultACPSettingsForAgent(botId, agentId)
+      const defaults = await deps.defaultExternalAgentSettingsForAgent(botId, agentId)
       if (
         generation !== deps.userScopeGeneration()
         || (deps.currentBotId.value ?? '').trim() !== botId
@@ -119,6 +124,10 @@ export function createChatCommands(deps: ChatCommandDeps) {
         agentId,
         sessionMode: parsed.mode === 'discuss' ? 'discuss' : 'chat',
         ...defaults,
+        // codex / claude-code are direct runtimes, not ACP profiles; without
+        // the explicit runtime the draft would create an acp_agent session
+        // the server refuses.
+        runtime: agentId === BOT_AGENT_RUNTIME_CODEX ? BOT_AGENT_RUNTIME_CODEX : BOT_AGENT_RUNTIME_CLAUDE_CODE,
       }, activate)
       return { kind: 'handled' }
     } finally {
@@ -146,7 +155,7 @@ export function createChatCommands(deps: ChatCommandDeps) {
 
     const actionId = quickActionIDForSlash(text)
     if (!actionId) return { kind: 'none' }
-    const skillActivationAllowed = !deps.chatTargetFor(resolved).isACP
+    const skillActivationAllowed = !deps.chatTargetFor(resolved).isExternalAgent
     let event: CommandEventResponse | null
     try {
       event = await executeQuickAction(botId, actionId, {
@@ -154,6 +163,9 @@ export function createChatCommands(deps: ChatCommandDeps) {
         composerScope: scope,
         sessionId: sessionId || undefined,
         skillActivationAllowed,
+        modeId: actionId === 'permission'
+          ? text.trim().replace(/^\/permission(?:\s+|$)/i, '').trim() || undefined
+          : undefined,
       })
     } catch (error) {
       const message = resolveApiErrorMessage(error, deps.commandErrorMessage('generic'))
@@ -168,6 +180,13 @@ export function createChatCommands(deps: ChatCommandDeps) {
         kind: 'error',
         message: event.error?.message || deps.commandErrorMessage('generic'),
       }
+    }
+    if (actionId === 'permission' && sessionId) {
+      // The command endpoint returns a presentation envelope, while the
+      // registry owns the full runtime status used by the composer controls.
+      // Refresh after both list and set so the mode selector cannot remain on
+      // the pre-command snapshot.
+      await deps.refreshACPRuntime(botId, sessionId).catch(() => undefined)
     }
     return { kind: 'handled' }
   }

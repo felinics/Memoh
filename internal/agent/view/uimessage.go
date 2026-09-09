@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // UIMessageType identifies the frontend-friendly message block type.
@@ -16,6 +16,11 @@ const (
 	UIMessageReasoning   UIMessageType = "reasoning"
 	UIMessageTool        UIMessageType = "tool"
 	UIMessageAttachments UIMessageType = "attachments"
+	UIMessageError       UIMessageType = "error"
+	// UIMessageNotice is an inline runtime degradation notice (tools
+	// unavailable, an interaction declined). Name carries the machine code,
+	// Content the human-readable text.
+	UIMessageNotice UIMessageType = "notice"
 )
 
 // UIAttachment is the normalized attachment shape used by the web frontend.
@@ -65,7 +70,21 @@ type UIMessage struct {
 	UserInput         *UIUserInput         `json:"user_input,omitempty"`
 	Attachments       []UIAttachment       `json:"attachments,omitempty"`
 	Background        *UIBackgroundTask    `json:"background_task,omitempty"`
+	ReasoningTiming   *UIReasoningTiming   `json:"reasoning_timing,omitempty"`
+	Code              string               `json:"code,omitempty"`
+	// Args are the machine-readable parameters of a notice block: the string
+	// values of the runtime_notice event metadata (dep_id and install_task_id
+	// for a workspace dependency notice, for instance). The client renders
+	// actions from them instead of parsing Content.
+	Args map[string]string `json:"args,omitempty"`
 } // @name conversation.UIMessage
+
+// UIReasoningTiming is the persisted server observation for one reasoning
+// block. It is absent for legacy rows and non-streaming responses whose block
+// boundaries were not observable.
+type UIReasoningTiming struct {
+	DurationMS int64 `json:"duration_ms"`
+} // @name conversation.UIReasoningTiming
 
 type UIExecutionLocation struct {
 	Kind string `json:"kind"`
@@ -78,7 +97,17 @@ type UIToolApproval struct {
 	Status         string `json:"status"`
 	DecisionReason string `json:"decision_reason,omitempty"`
 	CanApprove     bool   `json:"can_approve,omitempty"`
+	// Options are the agent-provided permission options, verbatim; the client
+	// renders one action per option and answers with the chosen option id.
+	Options          []UIToolApprovalOption `json:"options,omitempty"`
+	SelectedOptionID string                 `json:"selected_option_id,omitempty"`
 } // @name conversation.UIToolApproval
+
+type UIToolApprovalOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	Kind string `json:"kind,omitempty"`
+} // @name conversation.UIToolApprovalOption
 
 type UIUserInput struct {
 	UserInputID string                 `json:"user_input_id"`
@@ -147,6 +176,7 @@ type UIMessageStreamEvent struct {
 	UserInputID string
 	ShortID     int
 	Status      string
+	Code        string
 	Metadata    map[string]any
 }
 

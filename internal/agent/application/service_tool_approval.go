@@ -5,40 +5,45 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/bots"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/workspace"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/bots"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type ToolApprovalResponseInput struct {
-	ControlID                  string
-	BotID                      string
-	ThreadID                   string
-	ActorChannelIdentityID     string
-	ActorUserID                string
-	ApprovalID                 string
-	ExplicitID                 string
-	ReplyExternalMessageID     string
-	Decision                   string
+	ControlID              string
+	BotID                  string
+	ThreadID               string
+	ActorChannelIdentityID string
+	ActorUserID            string
+	ApprovalID             string
+	ExplicitID             string
+	ReplyExternalMessageID string
+	Decision               string
+	// OptionID names the agent-provided permission option the decider picked;
+	// empty means the plain binary decision.
+	OptionID                   string
 	Reason                     string
 	ChatToken                  string
 	SuppressActivePromptAttach bool
 }
 
 type CommittedToolApprovalResponse struct {
-	request      toolapproval.Request
-	input        ToolApprovalResponseInput
-	isACP        bool
-	activePrompt *acpActivePromptSubscription
-	ackOnly      bool
+	request         toolapproval.Request
+	input           ToolApprovalResponseInput
+	runID           string
+	isExternalAgent bool
+	activePrompt    *externalAgentActivePromptSubscription
+	ackOnly         bool
 }
 
 func (s *Service) respondToolApproval(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
@@ -62,39 +67,73 @@ func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolAppr
 	if err != nil {
 		return CommittedToolApprovalResponse{}, err
 	}
-	isACP, err := s.isACPToolApprovalSession(ctx, target.SessionID)
+	isExternalAgent, err := s.isExternalAgentToolApprovalSession(ctx, target.SessionID)
 	if err != nil {
 		return CommittedToolApprovalResponse{}, err
 	}
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
-	if isACP {
-		if err := s.authorizeACPToolApprovalResponse(ctx, target, input); err != nil {
+	if isExternalAgent {
+		if err := s.authorizeExternalAgentToolApprovalResponse(ctx, target, input); err != nil {
 			return CommittedToolApprovalResponse{}, err
 		}
 	} else if err := s.authorizeToolApprovalResponse(ctx, target, input); err != nil {
 		return CommittedToolApprovalResponse{}, err
 	}
-	if isACP && !s.toolApproval.CanRespond(target) {
+	if isExternalAgent && !s.toolApproval.CanRespond(target) {
 		if _, err := s.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting"); err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
 			return CommittedToolApprovalResponse{}, err
 		}
-		return CommittedToolApprovalResponse{request: target, input: input, isACP: true, ackOnly: true}, nil
+		return CommittedToolApprovalResponse{request: target, input: input, isExternalAgent: true, ackOnly: true}, nil
 	}
-	var activePrompt *acpActivePromptSubscription
-	if isACP && !input.SuppressActivePromptAttach {
-		activePrompt, _ = s.subscribeACPActivePrompt(
+	decision := strings.ToLower(strings.TrimSpace(input.Decision))
+	optionID := input.OptionID
+	if optionID == "" && len(target.Options) > 0 {
+		// Older Web/Desktop clients only send approve/reject. Preserve that
+		// contract without inventing a durable choice: a binary response maps
+		// only to the agent's one-shot option. Session/always options must be
+		// selected explicitly by a client that can show their semantics.
+		optionID, err = legacyPermissionOptionID(target.Options, decision)
+	}
+	if err != nil {
+		return CommittedToolApprovalResponse{}, err
+	}
+	var activePrompt *externalAgentActivePromptSubscription
+	if isExternalAgent && !input.SuppressActivePromptAttach {
+		activePrompt, _ = s.subscribeExternalAgentActivePrompt(
 			firstNonEmpty(target.BotID, input.BotID),
 			firstNonEmpty(target.SessionID, input.ThreadID),
 		)
 	}
-
-	switch strings.ToLower(strings.TrimSpace(input.Decision)) {
-	case "approve", "approved":
-		target, err = s.toolApproval.Approve(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
-	case "reject", "rejected":
-		target, err = s.toolApproval.Reject(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
-	default:
-		err = fmt.Errorf("unknown tool approval decision %q", input.Decision)
+	if optionID != "" {
+		// The decider picked one of the agent's own options. Its kind is
+		// authoritative for approve-vs-reject; a contradicting decision label
+		// is an error rather than a silent reinterpretation.
+		option, ok := toolapproval.FindOption(target.Options, optionID)
+		switch {
+		case !ok:
+			err = fmt.Errorf("%w: unknown option %q", toolapproval.ErrOptionUnavailable, optionID)
+		case option.Approves():
+			if decision != "" && decision != "approve" && decision != "approved" {
+				err = fmt.Errorf("%w: decision %q does not match allow option %q", toolapproval.ErrOptionUnavailable, input.Decision, optionID)
+				break
+			}
+			target, err = s.toolApproval.ApproveOption(ctx, target.ID, input.ActorChannelIdentityID, input.Reason, optionID)
+		default:
+			if decision != "" && decision != "reject" && decision != "rejected" {
+				err = fmt.Errorf("%w: decision %q does not match reject option %q", toolapproval.ErrOptionUnavailable, input.Decision, optionID)
+				break
+			}
+			target, err = s.toolApproval.RejectOption(ctx, target.ID, input.ActorChannelIdentityID, input.Reason, optionID)
+		}
+	} else {
+		switch decision {
+		case "approve", "approved":
+			target, err = s.toolApproval.Approve(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
+		case "reject", "rejected":
+			target, err = s.toolApproval.Reject(ctx, target.ID, input.ActorChannelIdentityID, input.Reason)
+		default:
+			err = fmt.Errorf("unknown tool approval decision %q", input.Decision)
+		}
 	}
 	if err != nil {
 		if activePrompt != nil {
@@ -103,14 +142,67 @@ func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolAppr
 		return CommittedToolApprovalResponse{}, err
 	}
 	return CommittedToolApprovalResponse{
-		request:      target,
-		input:        input,
-		isACP:        isACP,
-		activePrompt: activePrompt,
+		request:         target,
+		input:           input,
+		isExternalAgent: isExternalAgent,
+		activePrompt:    activePrompt,
 	}, nil
 }
 
+func legacyPermissionOptionID(options []toolapproval.PermissionOption, decision string) (string, error) {
+	wantKind := ""
+	switch decision {
+	case "approve", "approved":
+		wantKind = toolapproval.OptionKindAllowOnce
+	case "reject", "rejected":
+		wantKind = toolapproval.OptionKindRejectOnce
+	default:
+		// Preserve the existing unknown-decision error below.
+		return "", nil
+	}
+	match := ""
+	matches := 0
+	for _, option := range options {
+		if strings.EqualFold(strings.TrimSpace(option.Kind), wantKind) {
+			matches++
+			if matches > 1 {
+				match = ""
+				break
+			}
+			match = option.ID
+		}
+	}
+	if matches == 1 {
+		return match, nil
+	}
+	if wantKind == toolapproval.OptionKindRejectOnce {
+		// A binary rejection is always safe. With no reject_once option — or
+		// an ambiguous set of several — the ACP adapter converts the rejected
+		// result to a cancelled outcome instead of guessing an option or
+		// selecting a broader reject_always scope.
+		return "", nil
+	}
+	if matches > 1 {
+		return "", fmt.Errorf("%w: legacy %s matches more than one %s option", toolapproval.ErrOptionUnavailable, decision, wantKind)
+	}
+	// No allow_once option exists, so a binary approve cannot be honored:
+	// Memoh never persists ACP permission grants on the user's behalf, and
+	// every remaining allow option carries always/session persistence the
+	// binary surface could not show. The decider gets an explicit error and
+	// must approve from a surface that renders the agent's options.
+	return "", fmt.Errorf("%w: legacy %s requires an agent-provided %s option", toolapproval.ErrOptionUnavailable, decision, wantKind)
+}
+
 func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, committed CommittedToolApprovalResponse, eventCh chan<- WSStreamEvent) error {
+	return s.continueCommittedToolApprovalResponse(ctx, committed, nil, eventCh)
+}
+
+func (s *Service) continueCommittedToolApprovalResponse(
+	ctx context.Context,
+	committed CommittedToolApprovalResponse,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	target := committed.request
 	if strings.TrimSpace(target.ID) == "" {
 		return errors.New("committed tool approval response is missing its request")
@@ -118,9 +210,9 @@ func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, com
 	if committed.ackOnly {
 		return emitApprovalAck(ctx, eventCh)
 	}
-	if committed.isACP {
+	if committed.isExternalAgent {
 		if committed.activePrompt != nil {
-			return forwardACPActivePrompt(ctx, committed.activePrompt, eventCh, acpActivePromptForwardOptions{
+			return forwardExternalAgentActivePrompt(ctx, committed.activePrompt, eventCh, externalAgentActivePromptForwardOptions{
 				SkipToolCallID: target.ToolCallID,
 				SkipApprovalID: target.ID,
 			})
@@ -129,10 +221,11 @@ func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, com
 	}
 
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
+	runID := runIDForChatRequest(committed.runID)
 	var toolResult sdk.ToolResultPart
 	switch target.Status {
 	case toolapproval.StatusApproved:
-		result, err := s.executeApprovedTool(ctx, target, committed.input)
+		result, err := s.executeApprovedTool(ctx, target, committed.input, runID)
 		if err != nil {
 			return err
 		}
@@ -147,7 +240,7 @@ func (s *Service) ContinueCommittedToolApprovalResponse(ctx context.Context, com
 	default:
 		return fmt.Errorf("committed tool approval has unexpected status %q", target.Status)
 	}
-	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, eventCh)
+	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, runID, lifecycle, eventCh)
 }
 
 func (s *Service) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -174,7 +267,7 @@ func (s *Service) limitToolApprovalResult(result sdk.ToolApprovalResult, toolNam
 	return result
 }
 
-func (s *Service) isACPToolApprovalSession(ctx context.Context, sessionID string) (bool, error) {
+func (s *Service) isExternalAgentToolApprovalSession(ctx context.Context, sessionID string) (bool, error) {
 	if s == nil || s.sessionService == nil {
 		return false, nil
 	}
@@ -182,22 +275,19 @@ func (s *Service) isACPToolApprovalSession(ctx context.Context, sessionID string
 	if err != nil {
 		return false, err
 	}
-	return sessionpkg.IsACPRuntime(sess), nil
+	return sessionpkg.UsesDecisionWaiter(sess), nil
 }
 
-func (s *Service) authorizeACPToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
+func (s *Service) authorizeExternalAgentToolApprovalResponse(ctx context.Context, target toolapproval.Request, input ToolApprovalResponseInput) error {
 	if s == nil || s.sessionService == nil {
 		return errors.New("session service not configured")
-	}
-	if s.botPermissions == nil {
-		return errors.New("bot permission checker not configured")
 	}
 	sessionID := firstNonEmpty(target.SessionID, input.ThreadID)
 	sess, err := s.sessionService.Get(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	if !sessionpkg.IsACPRuntime(sess) {
+	if !sessionpkg.UsesDecisionWaiter(sess) {
 		return s.authorizeToolApprovalResponse(ctx, target, input)
 	}
 	botID := firstNonEmpty(target.BotID, input.BotID)
@@ -212,11 +302,13 @@ func (s *Service) authorizeACPToolApprovalResponse(ctx context.Context, target t
 	if actorID == "" {
 		return toolapproval.ErrForbidden
 	}
-	acpMeta := mergeACPRuntimeMetadata(sess.Metadata, sess.RuntimeMetadata)
-	runtimeOwnerID := metadataString(acpMeta, "runtime_owner_account_id")
-	if runtimeOwnerID == "" || runtimeOwnerID != actorID {
+	runtimeOwnerID := metadataString(runtimeSessionMeta(sess), "runtime_owner_account_id")
+	if runtimeOwnerID == "" {
 		return toolapproval.ErrForbidden
 	}
+	// The runtime owner has no standing beyond their live grants: a revoked
+	// or offboarded owner must lose approval authority at decision time, so
+	// every actor — owner included — passes the permission check.
 	return s.authorizeToolApprovalResponse(ctx, target, input)
 }
 
@@ -225,6 +317,9 @@ func (s *Service) authorizeToolApprovalResponse(ctx context.Context, target tool
 		return errors.New("bot permission checker not configured")
 	}
 	botID := firstNonEmpty(target.BotID, input.BotID)
+	// Channel deciders without a bound account carry only their channel
+	// identity; grants are keyed on that identity, so it stays a valid
+	// authorization subject (base behavior).
 	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
 	permission, ok := toolApprovalPermission(target.Operation)
 	if strings.TrimSpace(botID) == "" || strings.TrimSpace(actorID) == "" || !ok {
@@ -246,6 +341,11 @@ func toolApprovalPermission(operation string) (string, bool) {
 		return bots.PermissionWorkspaceWrite, true
 	case toolapproval.OperationExec:
 		return bots.PermissionWorkspaceExec, true
+	case toolapproval.OperationPermission:
+		// A generic agent permission request (network grant, mode switch)
+		// authorizes the agent to act, so it sits at the same authority as
+		// running the agent's own commands.
+		return bots.PermissionWorkspaceExec, true
 	default:
 		return "", false
 	}
@@ -266,7 +366,7 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 	return nil
 }
 
-func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput) (sdk.ToolResultPart, error) {
+func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput, runID string) (sdk.ToolResultPart, error) {
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	req = withLocalWebReplyTarget(req)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -281,6 +381,7 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 	if err != nil {
 		return sdk.ToolResultPart{}, err
 	}
+	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 	return s.agent.ExecuteTool(ctx, resolved.RunConfig, sdk.ToolCall{
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
@@ -288,7 +389,15 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 	})
 }
 
-func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, result sdk.ToolResultPart, eventCh chan<- WSStreamEvent) error {
+func (s *Service) storeToolResultAndContinue(
+	ctx context.Context,
+	approval toolapproval.Request,
+	input ToolApprovalResponseInput,
+	result sdk.ToolResultPart,
+	runID string,
+	lifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	target, err := s.resolveWorkspaceTargetSnapshot(ctx, input.BotID, approval.WorkspaceTargetID)
@@ -297,6 +406,7 @@ func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toola
 	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := ChatRequest{
+		RunID:                   runID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
@@ -311,10 +421,17 @@ func (s *Service) storeToolResultAndContinue(ctx context.Context, approval toola
 	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
 		return err
 	}
-	return s.continueToolApprovalSession(ctx, approval, input, eventCh)
+	return s.continueToolApprovalSession(ctx, approval, input, runID, lifecycle, eventCh)
 }
 
-func (s *Service) continueToolApprovalSession(ctx context.Context, approval toolapproval.Request, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
+func (s *Service) continueToolApprovalSession(
+	ctx context.Context,
+	approval toolapproval.Request,
+	input ToolApprovalResponseInput,
+	runID string,
+	runtimeLifecycle *continuationLifecycleResult,
+	eventCh chan<- WSStreamEvent,
+) error {
 	approval = withLocalWebReplyTarget(approval)
 	ctx = workspace.WithWorkspaceTarget(ctx, approval.WorkspaceTargetID)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -329,6 +446,7 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 	if err != nil {
 		return err
 	}
+	resolved.RunConfig.RunID = runIDForChatRequest(runID)
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -340,8 +458,26 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 	if err != nil {
 		return err
 	}
+	terminal := s.contextLifecycleTerminal(ctx, cfg)
+	var lifecycleCause error
+	var lifecycleDeferred bool
+	var terminalEventSeen bool
+	defer func() {
+		if runtimeLifecycle != nil {
+			runtimeLifecycle.cause = lifecycleCause
+			runtimeLifecycle.deferred = lifecycleDeferred
+			if snapshot, ok := cfg.ContextLifecycle.Snapshot(); ok {
+				runtimeLifecycle.snapshot = &snapshot
+			}
+			return
+		}
+		if !lifecycleDeferred {
+			terminal(lifecycleCause)
+		}
+	}()
 
 	req := ChatRequest{
+		RunID:                   cfg.RunID,
 		BotID:                   input.BotID,
 		ChatID:                  input.BotID,
 		ThreadID:                approval.SessionID,
@@ -354,36 +490,110 @@ func (s *Service) continueToolApprovalSession(ctx context.Context, approval tool
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
 
-	stream := s.agent.Stream(ctx, cfg)
+	reasoningTiming := newReasoningTimingTracker(nil)
+	configureNativeReasoningTiming(&cfg, reasoningTiming, nil)
+	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(cfg))
+	defer idleCancel.Stop()
+	stream := s.agent.Stream(idleCtx, cfg)
 	stored := false
+	failureEventForwarded := false
+	var hasVisibleOutput bool
 	for event := range stream {
-		data, err := json.Marshal(event)
+		idleCancel.Reset()
+		if event.Type == native.EventToolCallStart {
+			idleCancel.RecordToolCall()
+		}
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
+			lifecycleCause = eventErr
+		}
+		if event.IsTerminal() {
+			terminalEventSeen = true
+			lifecycleDeferred = pendingContinuationDecision(event)
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					lifecycleCause = nil
+				case native.EventAgentAbort:
+					if idleCancel.DidFire() {
+						lifecycleCause = context.Cause(idleCtx)
+					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
+						lifecycleCause = agentAbortCause(ctx)
+					}
+				}
+			}
+		}
+		if hasVisibleAgentStreamOutput(event) {
+			hasVisibleOutput = true
+		}
+		if event.Type == native.EventAgentAbort && idleCancel.DidFire() && eventCh != nil {
+			if failureData, marshalErr := json.Marshal(agentFailureStreamEvent(context.Cause(idleCtx))); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(failureData):
+					failureEventForwarded = true
+				case <-ctx.Done():
+					lifecycleCause = context.Cause(ctx)
+					return lifecycleCause
+				}
+			}
+		}
+		data, err := json.Marshal(publicAgentStreamEvent(event))
 		if err != nil {
 			continue
 		}
 		if !stored && event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
+				snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
+				snap.visibleOutput = hasVisibleOutput
+				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)
+				lifecycleDeferred = lifecycleDeferred || snap.deferredToolID != ""
+				if snap.aborted && !lifecycleDeferred && lifecycleCause == nil {
+					lifecycleCause = agentAbortCause(ctx)
+				}
 				if storeErr := s.persistTerminalSnapshot(
 					context.WithoutCancel(ctx),
 					req,
-					resolvedContext{model: models.GetResponse{ID: resolved.ModelID}},
+					resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}},
 					snap,
 				); storeErr != nil {
+					lifecycleCause = storeErr
+					lifecycleDeferred = false
 					return storeErr
 				}
 				stored = true
 			}
 		}
-		if eventCh != nil {
+		if eventCh != nil && shouldForwardAfterIdleFailure(event, failureEventForwarded) {
 			select {
 			case eventCh <- json.RawMessage(data):
 			case <-ctx.Done():
-				return ctx.Err()
+				lifecycleCause = context.Cause(ctx)
+				return lifecycleCause
 			}
 		}
 	}
+	if idleCancel.DidFire() {
+		lifecycleCause = context.Cause(idleCtx)
+		if !stored {
+			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, resolvedContext{runConfig: cfg, model: models.GetResponse{ID: resolved.ModelID}}, snapshotFailureCode(true, lifecycleCause)); storeErr != nil {
+				s.logger.Error("tool approval timeout persist failed", slog.Any("error", storeErr))
+			}
+		}
+		if eventCh != nil && !failureEventForwarded {
+			if data, marshalErr := json.Marshal(agentFailureStreamEvent(lifecycleCause)); marshalErr == nil {
+				select {
+				case eventCh <- json.RawMessage(data):
+				case <-ctx.Done():
+				}
+			}
+		}
+		return lifecycleCause
+	}
 	if ctx.Err() != nil {
-		return context.Cause(ctx)
+		lifecycleCause = context.Cause(ctx)
+		return lifecycleCause
+	}
+	if lifecycleCause == nil && !lifecycleDeferred && !terminalEventSeen {
+		lifecycleCause = errors.New("agent continuation ended without a terminal event")
 	}
 	return nil
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/config"
+	"github.com/felinics/memoh/internal/config"
 )
 
 func TestNewManagerFromConfigDefersRedisIOUntilStart(t *testing.T) {

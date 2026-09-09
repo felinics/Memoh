@@ -12,8 +12,8 @@ import (
 
 	slackapi "github.com/slack-go/slack"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const (

@@ -41,12 +41,13 @@
 - `accepted`：输入和准入结果已持久化，调用方可以安全停止重试。
 - `running`：某个有效 owner 正在执行。
 - `waiting_decision`：执行等待一个明确的 `decision_id`。
+- `finishing`：最终输出已经持久化，owner 已提交带 fencing 的终态提案，但持久化终态与 live 投影尚未全部收敛；该状态仍占用 active slot 并续租。
 - `completed`：执行正常结束，最终结果已持久化。
 - `aborted`：终止请求已生效。
 - `failed`：执行失败，失败结果已持久化。
 - `lost`：owner 消失，系统尚未恢复执行，但已接受的输入没有丢失。
 
-终态为 `completed`、`aborted` 或 `failed`。`lost` 不是成功终态；系统必须允许查询，并通过明确策略恢复或结束它。
+终态为 `completed`、`aborted`、`failed` 或 `lost`。`lost` 不是成功结果；系统必须允许查询，并通过明确策略重试或开始新的 run。
 
 ## 4. 正确性要求
 
@@ -156,6 +157,18 @@ run 进入终态时，终态、最终输出和 turn 投影必须形成一个一�
 
 如果无法在一个数据库事务中完成，协议必须允许幂等重放，并保证重放不会生成第二个 turn 或第二份最终消息。
 
+最终输出持久化之后、释放 owner lease 之前，owner 必须先用当前 fencing token 持久化不可变的终态提案，再把 live 投影切换到 `finishing`。在最终 ledger 写入成功前：
+
+- Native、ACP、schedule 和 subagent 的终态事件都必须位于各自最终输出持久化屏障之后；屏障失败时不得发布成功终态；
+- `finishing` 必须继续占用 session 的 active slot 并续租；
+- 新的输入、abort、steer 和 decision response 不能覆盖已接受的终态提案；
+- 第一次终态提案胜出，重试只能重放同一个结果；
+- owner 对持久化终态失败的本地重试必须有总预算；预算耗尽后，Redis/Valkey 部署停止续租并由 lease reaper 收敛，memory 部署把同一 fenced handle 交给本地 reaper 的共享重试队列，不能为每个 run 永久保留重试 goroutine；
+- owner 进程退出、租约到期、live backend 更换或优雅关机时，reaper/关闭流程必须把提案收敛为其原始 `completed`、`aborted` 或 `failed`，不能改写为 `lost`；
+- 只有从未跨过终态提案边界的 active run 才能因 owner 消失进入 `lost`。
+
+ledger 成为终态后，系统必须以该 durable outcome 修复可能滞后的 live 投影；修复必须校验 live run ref 中保存的同一个 fencing token，不能覆盖后继 run。
+
 ### SR-TURN-001：turn 必须是显式身份
 
 每个已准入 run 必须显式关联一个服务端生成的 `turn_id`。用户消息、Agent 输出、工具事件和决策都通过该身份归属到同一个 turn。
@@ -226,9 +239,10 @@ Redis 或 Valkey 不应成为单实例 OSS 部署的强制依赖。
 | same-session concurrency | 双 Server | 不出现两个有效 owner 并发执行 | SR-OWN-001、SR-OWN-002 |
 | owner crash | Server 重启 | 已接受输入与 run 状态仍可查询 | SR-DUR-001 |
 | terminal retry | 故障注入 | 重放终态不产生重复 turn 或输出 | SR-DUR-002、SR-TURN-001 |
+| terminal proposal crash | 故障注入/Server 重启 | `finishing` 在 owner 消失后收敛到原提案，不能变成 `lost` | SR-DUR-002、SR-OWN-002 |
 | decision restart | Server 重启 | decision 可恢复，回答只消费一次 | SR-DEC-001 |
 
-当前验收代码覆盖 `baseline`、`reconnect snapshot`、`reconnect abort`、`duplicate invocation`、`same-session concurrency` 和 `owner crash`。`concurrent subscribers` 需要补充双连接黑盒用例；`terminal retry` 和 `decision restart` 需要稳定的故障注入点，列入下一版。
+当前黑盒验收代码覆盖 `baseline`、`reconnect snapshot`、`reconnect abort`、`duplicate invocation`、`same-session concurrency` 和 `owner crash`。包内测试使用故障注入覆盖终态提案重试、owner 租约到期、live backend 更换和优雅关机；`concurrent subscribers`、完整进程级 `terminal proposal crash` 与 `decision restart` 仍需补充黑盒用例。
 
 ## 7. 通过标准
 

@@ -206,7 +206,7 @@ DiscussDriver留在Channel侧的理由：它的输入是入站观察投影（Cha
 - Email Manager、Webhook Tunnel listener（RFC第8节归属Channel的后台任务）；
 - 依赖注入的端口：`turn.Service`、`dbstore.Queries`、`identities.Service`、`acl.Service`等由上层composition root提供。
 
-`cmd/internal/core`汇集数据库、Workspace、Agent、Schedule、Heartbeat等两个二进制共同需要的装配。Go的`internal`可见性保证这两个模块只能由`cmd/**`引用。
+`cmd/internal/core`汇集数据库、Workspace、Agent、Schedule等两个二进制共同需要的装配。Go的`internal`可见性保证这两个模块只能由`cmd/**`引用。
 
 ### 7.2 `cmd/agent`
 

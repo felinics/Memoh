@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/messaging"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 type usageTestResolver struct{}
@@ -202,6 +202,8 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 	exempt := map[ToolName]string{
 		ToolWebSearch():         "self-describing one-shot search tool",
 		ToolWebFetch():          "self-describing one-shot fetch tool",
+		ToolListWorkdirs():      "self-describing one-shot listing tool; schedule Usage references it",
+		ToolListACPAgents():     "self-describing two-tier listing tool; schedule Usage references it",
 		ToolGenerateVideo():     "self-describing media generation tool",
 		ToolTranscribeAudio():   "self-describing media transcription tool",
 		ToolListEmailAccounts(): "email tool descriptions carry account/read/write semantics",
@@ -271,7 +273,7 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 		t.Fatalf("Usage should not expose Telegram Markdown math guidance for non-Telegram sessions, got:\n%s", got)
 	}
 
-	backgroundSession := SessionContext{SessionType: sessionmode.Heartbeat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
+	backgroundSession := SessionContext{SessionType: sessionmode.Schedule, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), backgroundSession, availableToolsForTest(ToolReact()))
 	if strings.Contains(got, "Omit `target`") || strings.Contains(got, "unless the current conversation target is explicit") || !strings.Contains(got, "Specify `platform` and `target`") {
 		t.Fatalf("Usage for background reactions should require explicit target, got:\n%s", got)
@@ -300,7 +302,7 @@ func TestMessageProviderToolDescriptionsGateCurrentConversationTarget(t *testing
 	}
 
 	backgroundTools, err := provider.Tools(context.Background(), SessionContext{
-		SessionType:     sessionmode.Heartbeat,
+		SessionType:     sessionmode.Schedule,
 		CurrentPlatform: "telegram",
 		ReplyTarget:     "chat-1",
 	})
@@ -578,7 +580,7 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 
 	got := provider.Usage(context.Background(), SessionContext{CanRequestUserInput: true}, availableToolsForTest(ToolAskUser()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom", "`multi_select`", "（多选）"} {
+	for _, want := range []string{"`ask_user`", "multiple-choice question", "custom_text", "`multi_select`", "（多选）"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with ask_user should contain %q, got:\n%s", want, got)
 		}
@@ -589,11 +591,11 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 		t.Fatalf("Usage without user input delivery = %q, want empty", got)
 	}
 
-	got = provider.Usage(context.Background(), SessionContext{SessionType: sessionmode.ACPAgent, CanListUserInput: true}, availableToolsForTest(ToolAskUser()))
+	got = provider.Usage(context.Background(), SessionContext{SessionType: sessionmode.Chat, CanListUserInput: true}, availableToolsForTest(ToolAskUser()))
 	assertUsageItemsAreBulleted(t, got)
-	for _, want := range []string{"`ask_user`", "multiple-choice question", "allow_custom", "`multi_select`", "（多选）"} {
+	for _, want := range []string{"`ask_user`", "multiple-choice question", "custom_text", "`multi_select`", "（多选）"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("Usage with ACP list-only discovery should contain %q, got:\n%s", want, got)
+			t.Fatalf("Usage with list-only discovery should contain %q, got:\n%s", want, got)
 		}
 	}
 
@@ -633,10 +635,10 @@ func TestAskUserProviderUsageGatesAskUser(t *testing.T) {
 
 	listOnlyChatTools, err := provider.Tools(context.Background(), SessionContext{SessionType: sessionmode.Chat, CanListUserInput: true})
 	if err != nil {
-		t.Fatalf("Tools with non-ACP list-only user input discovery: %v", err)
+		t.Fatalf("Tools with list-only user input discovery: %v", err)
 	}
-	if len(listOnlyChatTools) != 0 {
-		t.Fatalf("non-ACP list-only tools = %#v, want none", listOnlyChatTools)
+	if len(listOnlyChatTools) != 1 || listOnlyChatTools[0].Name != ToolAskUser().String() {
+		t.Fatalf("list-only chat tools = %#v, want ask_user", listOnlyChatTools)
 	}
 
 	listOnlyACPTools, err := provider.Tools(context.Background(), SessionContext{SessionType: sessionmode.ACPAgent, CanListUserInput: true})
@@ -726,7 +728,7 @@ func TestSpeakToolPromptMetadataGatesCurrentConversationTarget(t *testing.T) {
 func TestMemoryProviderUsageGatesSearchMemory(t *testing.T) {
 	t.Parallel()
 
-	provider := NewMemoryProvider(nil, nil, nil)
+	provider := NewMemoryProvider(nil, nil, nil, nil)
 	if got := provider.Usage(context.Background(), SessionContext{}, AvailableTools{}); got != "" {
 		t.Fatalf("Usage without search_memory = %q, want empty", got)
 	}
@@ -735,6 +737,12 @@ func TestMemoryProviderUsageGatesSearchMemory(t *testing.T) {
 	for _, want := range []string{"`search_memory`", "durable user preferences", "prior conversations", "latest user message"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Usage with search_memory should mention %q, got:\n%s", want, got)
+		}
+	}
+	got = provider.Usage(context.Background(), SessionContext{}, availableToolsForTest(ToolSearchMemory(), ToolGetMessages()))
+	for _, want := range []string{"`source_refs`", "`get_messages`", "`session_id`", "`message_id`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Usage with memory/history drill-down should mention %q, got:\n%s", want, got)
 		}
 	}
 }

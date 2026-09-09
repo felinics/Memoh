@@ -9,7 +9,7 @@ import (
 
 	tele "gopkg.in/telebot.v4"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 const (

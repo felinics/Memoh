@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package memoh.runtime.v1;
 
-option go_package = "github.com/memohai/memoh/internal/rpc/runtimepb";
+option go_package = "github.com/felinics/memoh/internal/rpc/runtimepb";
 
 // RuntimeService is the narrow control plane shared by the Server and Channel
 // processes. Method names are stable protocol identifiers; payloads are JSON

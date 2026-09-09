@@ -3,7 +3,8 @@ package application
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/models"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/models"
 )
 
 const (
@@ -77,7 +78,7 @@ func routeAttachmentsByCapability(compatibilities []string, attachments []gatewa
 
 		native := false
 		switch {
-		case att.Type == "image" && hasVision:
+		case att.Type == "image" && hasVision && isNativeImageAttachment(att):
 			native = isGatewayNativeAttachment(att)
 		case att.Type == "file" && isNativeDocumentMime(att.Mime) && hasFileInput:
 			native = isGatewayNativeAttachment(att)
@@ -139,6 +140,31 @@ func isNativeDocumentMime(mime string) bool {
 		mime = strings.TrimSpace(mime[:idx])
 	}
 	return mime == "application/pdf"
+}
+
+// isNativeImageMime is the common raster set accepted by the native provider
+// adapters. UI type=image is only a presentation hint; it must not admit SVG,
+// BMP, HEIC, or arbitrary image/* bytes into a provider ImagePart.
+func isNativeImageMime(mime string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.SplitN(mime, ";", 2)[0])) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNativeImageAttachment(att gatewayAttachment) bool {
+	mime := attachmentpkg.NormalizeMime(att.Mime)
+	if mime == "" && strings.EqualFold(strings.TrimSpace(att.Transport), gatewayTransportInlineDataURL) {
+		mime = attachmentpkg.MimeFromDataURL(att.Payload)
+	}
+	// Preserve URL-only image input: its bytes are remote and cannot be sniffed
+	// here. A supplied MIME still has to pass the common-raster allowlist.
+	if mime == "" && strings.EqualFold(strings.TrimSpace(att.Transport), gatewayTransportPublicURL) {
+		return true
+	}
+	return isNativeImageMime(mime)
 }
 
 // isInlineTextMime reports whether the attachment is plain text that can be

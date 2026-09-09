@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	memslug "github.com/memohai/memoh/internal/memory/slug"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	memslug "github.com/felinics/memoh/internal/memory/slug"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
 )
 
 // MemoryLayer is the canonical layer a memory node belongs to. Existing flat

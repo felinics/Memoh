@@ -2,12 +2,15 @@ package postgresstore
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type Queries struct {
@@ -28,8 +31,8 @@ func (*Queries) SupportsAtomicDirectHistoryTurnWrites() bool {
 }
 
 // SupportsTransactions reports whether InTx opens a real PostgreSQL
-// transaction. The pool-less wrapper intentionally retains its historical
-// direct-execution fallback for tests and legacy callers.
+// transaction. Wrappers without a pool or pinned connection retain the
+// historical direct-execution fallback for tests and legacy callers.
 func (q *Queries) SupportsTransactions() bool {
 	return q != nil && q.pool != nil
 }
@@ -45,7 +48,11 @@ func (q *Queries) InTx(ctx context.Context, fn func(dbstore.Queries) error) erro
 	if q == nil || q.pool == nil {
 		return fn(q)
 	}
-	tx, err := q.pool.Begin(ctx)
+	var (
+		tx  pgx.Tx
+		err error
+	)
+	tx, err = q.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -55,5 +62,11 @@ func (q *Queries) InTx(ctx context.Context, fn func(dbstore.Queries) error) erro
 	if err := fn(q.WithTx(tx)); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		if errors.Is(err, pgx.ErrTxCommitRollback) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", dbpkg.ErrCommitOutcomeUnknown, err)
+	}
+	return nil
 }

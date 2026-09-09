@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 func TestContextRefRoundTripPreservesReducerIdentity(t *testing.T) {
@@ -99,6 +99,89 @@ func TestCanonicalFragmentHashIsStableAndIgnoresDebugID(t *testing.T) {
 	}
 }
 
+func TestCanonicalFragmentHashIncludesSectionPolicy(t *testing.T) {
+	t.Parallel()
+
+	base := TextFrag(TextFragInput{
+		ID:                 "system.skills",
+		Kind:               KindSkillsCatalog,
+		Role:               sdk.MessageRoleSystem,
+		Slot:               SlotSystem,
+		Text:               "skills",
+		RetentionTier:      RetentionRequired,
+		DropPriority:       10,
+		RequiredCapability: "use_skill",
+		Render: RenderPolicy{
+			Format:      RenderMarkdown,
+			GroupID:     "system.skills",
+			GroupJoiner: "\n",
+		},
+	})
+
+	baseHash, err := CanonicalFragmentHash(base)
+	if err != nil {
+		t.Fatalf("canonical base hash: %v", err)
+	}
+	mutations := []struct {
+		name   string
+		mutate func(*ContextFrag)
+	}{
+		{name: "retention tier", mutate: func(frag *ContextFrag) { frag.RetentionTier = RetentionPreferred }},
+		{name: "drop priority", mutate: func(frag *ContextFrag) { frag.DropPriority = 20 }},
+		{name: "required capability", mutate: func(frag *ContextFrag) { frag.RequiredCapability = "other_tool" }},
+		{name: "render group", mutate: func(frag *ContextFrag) { frag.Render.GroupID = "other.group" }},
+		{name: "render joiner", mutate: func(frag *ContextFrag) { frag.Render.GroupJoiner = "\n\n" }},
+	}
+	for _, mutation := range mutations {
+		mutation := mutation
+		t.Run(mutation.name, func(t *testing.T) {
+			t.Parallel()
+			changed := base
+			mutation.mutate(&changed)
+			changedHash, err := CanonicalFragmentHash(changed)
+			if err != nil {
+				t.Fatalf("canonical changed hash: %v", err)
+			}
+			if changedHash.Value == baseHash.Value {
+				t.Fatalf("canonical hash must change with %s", mutation.name)
+			}
+		})
+	}
+}
+
+func TestDropPriorityHigherValuesDropFirst(t *testing.T) {
+	t.Parallel()
+
+	if !DropPriority(20).DropsBefore(10) {
+		t.Fatal("higher drop priority must drop before a lower value")
+	}
+	if DropPriority(10).DropsBefore(20) {
+		t.Fatal("lower drop priority must survive longer than a higher value")
+	}
+}
+
+func TestMessageFragAndRepairPreserveSectionPolicy(t *testing.T) {
+	t.Parallel()
+
+	policy := RenderPolicy{Format: RenderSDKMessage, GroupID: "messages", GroupJoiner: "\n"}
+	frag := MessageFrag(MessageFragInput{
+		ID:                 "message.001",
+		Message:            sdk.UserMessage("before"),
+		Kind:               KindConversationEvent,
+		Slot:               SlotHistory,
+		RetentionTier:      RetentionPreferred,
+		DropPriority:       25,
+		RequiredCapability: "read",
+		Render:             policy,
+	})
+	rebuilt := RebuildFragMessage(frag, sdk.AssistantMessage("after"))
+
+	if rebuilt.RetentionTier != frag.RetentionTier || rebuilt.DropPriority != frag.DropPriority ||
+		rebuilt.RequiredCapability != frag.RequiredCapability || rebuilt.Render != policy {
+		t.Fatalf("rebuilt policy = %#v, want %#v", rebuilt, frag)
+	}
+}
+
 func TestCanonicalFragmentHashGoldenValue(t *testing.T) {
 	t.Parallel()
 
@@ -122,6 +205,32 @@ func TestCanonicalFragmentHashGoldenValue(t *testing.T) {
 	const want = "a33139d731966124ebcadf9eb4f2ce815b63650e866794086fc587c504193764"
 	if hash.Value != want {
 		t.Fatalf("golden hash drifted: got %q, want %q — if the canonical struct shape changed intentionally, update this value", hash.Value, want)
+	}
+}
+
+func TestBuildManifestItemCarriesSectionPolicy(t *testing.T) {
+	t.Parallel()
+
+	render := RenderPolicy{Format: RenderMarkdown, GroupID: "system.skills", GroupJoiner: "\n"}
+	frag := TextFrag(TextFragInput{
+		ID:                 "system.skill.alpha",
+		Kind:               KindSkillsCatalog,
+		Slot:               SlotSystem,
+		Text:               "alpha",
+		RetentionTier:      RetentionOptional,
+		DropPriority:       30,
+		RequiredCapability: "use_skill",
+		Render:             render,
+	})
+	manifest := BuildManifest([]ContextFrag{frag})
+
+	if len(manifest.Items) != 1 {
+		t.Fatalf("manifest items = %d, want 1", len(manifest.Items))
+	}
+	item := manifest.Items[0]
+	if item.RetentionTier != RetentionOptional || item.DropPriority != 30 ||
+		item.RequiredCapability != "use_skill" || item.Render != render {
+		t.Fatalf("manifest section policy = %#v", item)
 	}
 }
 

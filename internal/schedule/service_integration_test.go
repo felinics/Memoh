@@ -11,12 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/boot"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/boot"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Queries, *pgxpool.Pool, *mockTriggerer, func()) {
@@ -41,7 +41,7 @@ func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Quer
 	mock := &mockTriggerer{}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	cfg := &boot.RuntimeConfig{JwtSecret: "integration-test-jwt-secret"}
-	svc := schedule.NewService(logger, queries, mock, nil, cfg)
+	svc := schedule.NewService(logger, queries, mock, nil, nil, cfg)
 
 	return svc, queries, pool, mock, func() { pool.Close() }
 }

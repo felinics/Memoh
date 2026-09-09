@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func TestProviderViewFallbackKeepsLegacyBytesAndAudit(t *testing.T) {
@@ -30,7 +30,8 @@ func TestProviderViewFallbackKeepsLegacyBytesAndAudit(t *testing.T) {
 		t.Fatalf("manifest = %#v", got.ContextManifest)
 	}
 	records := got.ContextMutations.Records()
-	if len(records) != 1 || records[0].Kind != contextfrag.MutationContextViewFallback {
+	if len(records) != 2 || records[0].Kind != contextfrag.MutationContextBudgetDisabled ||
+		records[1].Kind != contextfrag.MutationContextViewFallback {
 		t.Fatalf("records = %#v", records)
 	}
 }
@@ -74,8 +75,9 @@ func TestApplyProviderRunConfigAcceptsEmptyProviderInput(t *testing.T) {
 	if got.ContextMutations == nil {
 		t.Fatal("empty provider input did not install a mutation ledger")
 	}
-	if records := got.ContextMutations.Records(); len(records) != 0 {
-		t.Fatalf("empty provider input was classified as fallback: %#v", records)
+	if records := got.ContextMutations.Records(); len(records) != 1 ||
+		records[0].Kind != contextfrag.MutationContextBudgetDisabled {
+		t.Fatalf("empty provider input audit = %#v, want only missing-window classification", records)
 	}
 }
 
@@ -100,4 +102,68 @@ func TestLegacyMaterializeQueryPreservesRawMemoryBeforeCurrent(t *testing.T) {
 	cfg := agentpkg.RunConfig{Messages: []sdk.Message{memory}, Query: "current"}
 	got := legacyMaterializeQuery(cfg)
 	assertMessagesEqual(t, got.Messages, []sdk.Message{memory, sdk.UserMessage("current")})
+}
+
+func TestProviderViewFallbackPlacesHookAfterDynamicContextBeforeCurrent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pipeline current before marked memory", func(t *testing.T) {
+		currentIndex := 0
+		memoryIndex := 1
+		out := providerViewFallback(nil, agentpkg.RunConfig{
+			Messages: []sdk.Message{
+				sdk.UserMessage("pipeline current"),
+				sdk.UserMessage("memory recall"),
+			},
+			ForkContextSourceMessageIDs:    []string{"current-id", "memory-id"},
+			ContextHistoryTokenEstimates:   []int{11, 22},
+			ContextCurrentUserMessageIndex: &currentIndex,
+			ContextMemoryMessageIndex:      &memoryIndex,
+			ContextQueryMaterialized:       true,
+			ContextHookText:                "workspace hook guidance",
+		}, contextfrag.NewMutationLedger(), nil, "build_error", "fallback", nil)
+
+		assertMessagesEqual(t, out.Messages, []sdk.Message{
+			sdk.UserMessage("memory recall"),
+			sdk.UserMessage("workspace hook guidance"),
+			sdk.UserMessage("pipeline current"),
+		})
+		if out.ContextMemoryMessageIndex == nil || *out.ContextMemoryMessageIndex != 0 ||
+			out.ContextCurrentUserMessageIndex == nil || *out.ContextCurrentUserMessageIndex != 2 {
+			t.Fatalf("fallback indexes = memory %#v current %#v, want 0 and 2", out.ContextMemoryMessageIndex, out.ContextCurrentUserMessageIndex)
+		}
+		if !reflect.DeepEqual(out.ForkContextSourceMessageIDs, []string{"memory-id", "", "current-id"}) {
+			t.Fatalf("fallback source IDs = %#v", out.ForkContextSourceMessageIDs)
+		}
+		if !reflect.DeepEqual(out.ContextHistoryTokenEstimates, []int{22, 0, 11}) {
+			t.Fatalf("fallback token estimates = %#v", out.ContextHistoryTokenEstimates)
+		}
+	})
+
+	t.Run("discuss current recovered from source fragment", func(t *testing.T) {
+		current := contextfrag.MessageFrag(contextfrag.MessageFragInput{
+			ID:      "discuss.message.001",
+			Message: sdk.UserMessage("latest discuss user"),
+			Kind:    contextfrag.KindCurrentUserMessage,
+			Slot:    contextfrag.SlotHistory,
+			Index:   1,
+		})
+		out := providerViewFallback(nil, agentpkg.RunConfig{
+			Messages: []sdk.Message{
+				sdk.AssistantMessage("previous answer"),
+				sdk.UserMessage("latest discuss user"),
+			},
+			ContextSourceFrags: []contextfrag.ContextFrag{current},
+			ContextHookText:    "discuss hook guidance",
+		}, contextfrag.NewMutationLedger(), nil, "build_error", "fallback", nil)
+
+		assertMessagesEqual(t, out.Messages, []sdk.Message{
+			sdk.AssistantMessage("previous answer"),
+			sdk.UserMessage("discuss hook guidance"),
+			sdk.UserMessage("latest discuss user"),
+		})
+		if out.ContextCurrentUserMessageIndex == nil || *out.ContextCurrentUserMessageIndex != 2 {
+			t.Fatalf("fallback current index = %#v, want 2", out.ContextCurrentUserMessageIndex)
+		}
+	})
 }

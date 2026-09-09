@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/slash"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 func requestedSkillGuardRequest(sessionID string) ChatRequest {
@@ -229,6 +229,7 @@ func TestStreamChatWSRejectsACPRequestedSkillsBeforePool(t *testing.T) {
 		acpPool:        pool,
 		sessionService: acpRuntimeSessionServiceForTest("user-1"),
 	}
+	resolver.SetACPSessionPool(pool)
 
 	err := resolver.StreamChatWS(
 		context.Background(),

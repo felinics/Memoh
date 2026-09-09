@@ -1,7 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type {
-  UIStreamEvent,
-} from '@/composables/api/useChat'
+import type { UIStreamEvent } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isGuiToolName } from '@/utils/gui-tools'
 import { createInvocationId } from '../chat-list.normalize'
@@ -175,6 +173,10 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       handleSessionCreated(event, sourceBotId)
       return
     }
+    if (event.type === 'model_preference_settled') {
+      deps.assistantStreams.settleModelPreference(event)
+      return
+    }
     if (event.type === 'run_accepted') {
       const turnId = event.turn_id.trim()
       if (!turnId) {
@@ -275,7 +277,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
         pending.assistantTurn,
       ) ? 'stream' : 'startup'
-      if (pending.assistantTurn.messages.length === 0) {
+      if (pending.assistantTurn.messages.length === 0 && !event.code) {
         deps.removeTurnFromSession(
           pending.botId,
           pending.sessionId,
@@ -376,13 +378,17 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (currentRun.status === 'completed') {
         deps.assistantStreams.resolveAssistantStream(invocationId)
       } else {
-        const message = currentRun.error || deps.sendFailedMessage()
+        const message = resolveApiErrorMessage(
+          currentRun,
+          currentRun.error || deps.sendFailedMessage(),
+        )
         if (currentRun.status === 'aborted') {
           const aborted = new Error(message)
           aborted.name = 'AbortError'
           deps.assistantStreams.rejectAssistantStream(invocationId, aborted)
         } else {
           const stage: SendMessageStage = currentRun.messages.length > 0
+            || Boolean(currentRun.error_code)
             ? 'stream'
             : 'startup'
           deps.assistantStreams.rejectAssistantStream(

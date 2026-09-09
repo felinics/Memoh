@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/memohai/memoh/internal/apperror"
-	runtimeRpc "github.com/memohai/memoh/internal/rpc/runtime"
+	"github.com/felinics/memoh/internal/apperror"
+	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
 )
 
 func TestMapChannelRuntimeErrorKeepsCausePrivate(t *testing.T) {

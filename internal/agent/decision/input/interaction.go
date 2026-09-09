@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 // Structured ask_user gestures from channels with native controls (inline
@@ -95,7 +95,7 @@ func (s *Service) AdvanceInteraction(ctx context.Context, input AdvanceInteracti
 		return AdvanceInteractionResult{}, errors.New("user input request id is required")
 	}
 	for attempt := 0; attempt < maxTextInteractionRetries; attempt++ {
-		req, err := s.ResolveTarget(ctx, resolve)
+		req, err := s.resolveInteractionTarget(ctx, resolve)
 		if errors.Is(err, ErrNotFound) {
 			return AdvanceInteractionResult{Handled: false}, nil
 		}
@@ -180,8 +180,7 @@ func ApplyInteractionOp(payload UIPayload, state TextInteractionState, op Intera
 	case OpSetText:
 		return applySetText(payload, state, op)
 	case OpSubmit:
-		state.Answers = fillSkippedAnswers(payload, state.Answers)
-		state.Completed = true
+		state = completeOrFocusRequired(payload, state)
 		return state, InteractionOutcome{Changed: true}
 	default:
 		return state, InteractionOutcome{Reject: RejectInvalidOp}
@@ -209,9 +208,8 @@ func applySelectOption(payload UIPayload, state TextInteractionState, op Interac
 		state.QuestionIndex = op.QuestionIndex + 1
 	} else {
 		// Answering the last question completes the set; earlier questions
-		// deliberately left blank become skips, same as plain-text "skip".
-		state.Answers = fillSkippedAnswers(payload, state.Answers)
-		state.Completed = true
+		// deliberately left blank become skips unless ACP marked one required.
+		state = completeOrFocusRequired(payload, state)
 	}
 	return state, InteractionOutcome{Changed: true}
 }
@@ -225,6 +223,9 @@ func applyToggleOption(payload UIPayload, state TextInteractionState, op Interac
 	answer, _ := state.Answer(question.ID)
 	answer.QuestionID = question.ID
 	answer.Skipped = false
+	if question.CustomExclusive {
+		answer.CustomText = ""
+	}
 	answer.OptionIDs = toggleOptionID(answer.OptionIDs, question.Options[op.OptionIndex].ID)
 	if len(answer.OptionIDs) == 0 && strings.TrimSpace(answer.CustomText) == "" {
 		state.Answers = removeTextAnswer(state.Answers, question.ID)
@@ -263,11 +264,14 @@ func applySetText(payload UIPayload, state TextInteractionState, op InteractionO
 		if !question.AllowCustom {
 			return state, InteractionOutcome{Reject: RejectCustomNotAllowed}
 		}
-		// Custom text joins any options already toggled; the user may keep
-		// toggling, so multi-select never auto-advances on text.
+		// Custom text normally joins toggled options. ACP can explicitly mark
+		// the companion field exclusive, in which case it replaces them.
 		answer, _ := state.Answer(question.ID)
 		answer.QuestionID = question.ID
 		answer.Skipped = false
+		if question.CustomExclusive {
+			answer.OptionIDs = nil
+		}
 		answer.CustomText = text
 		state.Answers = putTextAnswer(state.Answers, answer)
 		return state, InteractionOutcome{Changed: true}
@@ -277,26 +281,9 @@ func applySetText(payload UIPayload, state TextInteractionState, op InteractionO
 	if questionIndex < len(payload.Questions)-1 {
 		state.QuestionIndex = questionIndex + 1
 	} else {
-		state.Answers = fillSkippedAnswers(payload, state.Answers)
-		state.Completed = true
+		state = completeOrFocusRequired(payload, state)
 	}
 	return state, InteractionOutcome{Changed: true}
-}
-
-// fillSkippedAnswers appends explicit skip entries for unanswered questions so
-// the completed set satisfies Submit's every-question-answered contract.
-func fillSkippedAnswers(payload UIPayload, answers []QuestionAnswer) []QuestionAnswer {
-	out := append([]QuestionAnswer(nil), answers...)
-	have := make(map[string]struct{}, len(out))
-	for _, answer := range out {
-		have[answer.QuestionID] = struct{}{}
-	}
-	for _, question := range payload.Questions {
-		if _, ok := have[question.ID]; !ok {
-			out = append(out, QuestionAnswer{QuestionID: question.ID, Skipped: true})
-		}
-	}
-	return out
 }
 
 func removeTextAnswer(answers []QuestionAnswer, questionID string) []QuestionAnswer {
@@ -331,4 +318,41 @@ func interactionQuestionAt(payload UIPayload, index int) (UIQuestion, bool) {
 		return UIQuestion{}, false
 	}
 	return payload.Questions[index], true
+}
+
+// Interaction drafts are channel-owned UI state, not runtime decisions. Reading
+// a draft must not require the run owner's fence; Submit/Cancel still require
+// that authority. Keep this separate from ResolveTarget so a UI lookup cannot
+// weaken the final decision guard (including when a CAS retry pins the UUID).
+func (s *Service) resolveInteractionTarget(ctx context.Context, input ResolveInput) (Request, error) {
+	if explicit := strings.TrimSpace(input.ExplicitID); explicit != "" {
+		if id, err := db.ParseUUID(explicit); err == nil {
+			botID, err := db.ParseUUID(input.BotID)
+			if err != nil {
+				return Request{}, err
+			}
+			row, err := s.queries.GetUserInputRequest(ctx, id)
+			if err != nil {
+				return Request{}, mapLookupErr(err)
+			}
+			if row.BotID != botID {
+				return Request{}, ErrNotFound
+			}
+			if input.SessionID != "" {
+				sessionID, err := db.ParseUUID(input.SessionID)
+				if err != nil {
+					return Request{}, err
+				}
+				if row.SessionID != sessionID {
+					return Request{}, ErrNotFound
+				}
+			}
+			req := requestFromRow(row)
+			if req.Status != StatusPending {
+				return Request{}, ErrNotFound
+			}
+			return req, nil
+		}
+	}
+	return s.ResolveTarget(ctx, input)
 }

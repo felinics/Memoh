@@ -11,6 +11,7 @@ import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { watchEffect } from 'vue'
 import i18n from '@memohai/web/i18n'
 import { setupApiClient } from '@memohai/web/api-client'
+import { installFileDropGuard } from '@memohai/web/lib/file-drop-guard'
 import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
 import { connectBrowserKeyboardShortcutsLive } from '@memohai/web/lib/browser-keyboard-shortcuts'
 import { selectDesktopKeydownBindings, toElectronAccelerator } from '@memohai/web/lib/keyboard-bindings'
@@ -51,6 +52,10 @@ function closeWindowWhenNoTab(command: AppKeyboardCommand): void {
 }
 
 async function bootstrap() {
+  // An unclaimed OS file drop would otherwise reach the shell's will-navigate
+  // guard. Same guard as web, installed per renderer (see file-drop-guard.ts).
+  installFileDropGuard()
+
   const pendingNavigationTargets: string[] = []
   let navigationReady = false
   window.api.window.onNavigate((target) => {

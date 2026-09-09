@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 func TestBuildSendPayload_Text(t *testing.T) {

@@ -32,11 +32,21 @@ type MemoryContextCacheKey struct {
 	MemoryVersion string
 }
 
+// MemoryContextCacheState classifies an available cache entry by age.
+type MemoryContextCacheState string
+
+const (
+	MemoryContextCacheFresh MemoryContextCacheState = "fresh"
+	MemoryContextCacheStale MemoryContextCacheState = "stale"
+)
+
 // MemoryContextCacheValue is a cached rendered memory context.
 type MemoryContextCacheValue struct {
 	ContextText    string
 	RetrievalMode  string
 	FallbackReason string
+	ResultCount    int
+	ResultRefs     []string
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
 	StaleUntil     time.Time
@@ -96,7 +106,7 @@ func (c *MemoryContextCache) Get(key MemoryContextCacheKey) (MemoryContextCacheV
 	}
 	entry.LastAccessedAt = now
 	c.entries[key] = entry
-	return entry, true
+	return cloneMemoryContextCacheValue(entry), true
 }
 
 // GetStale returns a value inside its stale grace window.
@@ -114,7 +124,29 @@ func (c *MemoryContextCache) GetStale(key MemoryContextCacheKey) (MemoryContextC
 	}
 	entry.LastAccessedAt = now
 	c.entries[key] = entry
-	return entry, true
+	return cloneMemoryContextCacheValue(entry), true
+}
+
+// GetFreshOrStale returns an available value and atomically classifies its age.
+func (c *MemoryContextCache) GetFreshOrStale(key MemoryContextCacheKey) (MemoryContextCacheValue, MemoryContextCacheState, bool) {
+	if c == nil || !validMemoryContextCacheKey(key) {
+		return MemoryContextCacheValue{}, "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := c.now()
+	entry, ok := c.entries[key]
+	if !ok || now.After(entry.StaleUntil) {
+		return MemoryContextCacheValue{}, "", false
+	}
+	state := MemoryContextCacheFresh
+	if now.After(entry.ExpiresAt) {
+		state = MemoryContextCacheStale
+	}
+	entry.LastAccessedAt = now
+	c.entries[key] = entry
+	return cloneMemoryContextCacheValue(entry), state, true
 }
 
 // Set stores a rendered memory context.
@@ -130,12 +162,18 @@ func (c *MemoryContextCache) Set(key MemoryContextCacheKey, value MemoryContextC
 	defer c.mu.Unlock()
 
 	now := c.now()
+	value = cloneMemoryContextCacheValue(value)
 	value.CreatedAt = now
 	value.LastAccessedAt = now
 	value.ExpiresAt = now.Add(c.ttl)
 	value.StaleUntil = value.ExpiresAt.Add(c.staleTTL)
 	c.entries[key] = value
 	c.pruneLocked()
+}
+
+func cloneMemoryContextCacheValue(value MemoryContextCacheValue) MemoryContextCacheValue {
+	value.ResultRefs = append([]string(nil), value.ResultRefs...)
+	return value
 }
 
 func (c *MemoryContextCache) pruneLocked() {

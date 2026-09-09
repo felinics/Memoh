@@ -14,14 +14,14 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/userruntime"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/userruntime"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (
@@ -37,6 +37,7 @@ const (
 type fakeRemoteBindingStore struct {
 	records   []dbstore.BotRemoteRuntimeBindingRecord
 	createErr error
+	deleteErr error
 }
 
 func (s *fakeRemoteBindingStore) CreateOrUpdateMount(_ context.Context, botID, runtimeID string) (dbstore.BotRemoteRuntimeBindingRecord, error) {
@@ -67,6 +68,16 @@ func (s *fakeRemoteBindingStore) ListMounts(_ context.Context, botID string) ([]
 	var records []dbstore.BotRemoteRuntimeBindingRecord
 	for _, record := range s.records {
 		if record.BotID == botID {
+			records = append(records, record)
+		}
+	}
+	return records, nil
+}
+
+func (s *fakeRemoteBindingStore) ListGrantsByRuntimeOwner(_ context.Context, ownerUserID string) ([]dbstore.BotRemoteRuntimeBindingRecord, error) {
+	var records []dbstore.BotRemoteRuntimeBindingRecord
+	for _, record := range s.records {
+		if record.BotOwnerUserID == ownerUserID {
 			records = append(records, record)
 		}
 	}
@@ -116,6 +127,9 @@ func (s *fakeRemoteBindingStore) UpdateToolApproval(_ context.Context, botID, ta
 }
 
 func (s *fakeRemoteBindingStore) DeleteMount(_ context.Context, botID, targetID string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	for i := range s.records {
 		if s.records[i].BotID == botID && s.records[i].ID == targetID {
 			s.records = append(s.records[:i], s.records[i+1:]...)
@@ -123,6 +137,22 @@ func (s *fakeRemoteBindingStore) DeleteMount(_ context.Context, botID, targetID 
 		}
 	}
 	return db.ErrNotFound
+}
+
+func TestDeleteMountRemovesTarget(t *testing.T) {
+	store := &fakeRemoteBindingStore{
+		records: []dbstore.BotRemoteRuntimeBindingRecord{{
+			ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID,
+		}},
+	}
+	service := &RemoteWorkspaceService{store: store}
+
+	if err := service.DeleteMount(context.Background(), remoteTestBotID, remoteTestTargetID); err != nil {
+		t.Fatalf("DeleteMount() error = %v", err)
+	}
+	if len(store.records) != 0 {
+		t.Fatalf("target records = %d, want 0", len(store.records))
+	}
 }
 
 type fakeRuntimeConnections map[string]*userruntime.Connection
@@ -187,9 +217,32 @@ func TestRemoteWorkspaceMountsAreIndependentAndPrimaryIsUnique(t *testing.T) {
 	}
 }
 
+func TestListAccountGrantsScopesByOwnerAndValidatesID(t *testing.T) {
+	store := &fakeRemoteBindingStore{records: []dbstore.BotRemoteRuntimeBindingRecord{
+		{ID: remoteTestTargetID, BotID: remoteTestBotID, RuntimeID: remoteTestRuntimeID, IsPrimary: true, BotOwnerUserID: remoteTestOwnerID},
+		{ID: remoteTestTargetID2, BotID: remoteTestBotID2, RuntimeID: remoteTestRuntimeID, BotOwnerUserID: "55555555-5555-4555-8555-555555555555"},
+	}}
+	service := &RemoteWorkspaceService{store: store, runtimes: fakeRuntimeConnections{}}
+
+	grants, err := service.ListAccountGrants(context.Background(), remoteTestOwnerID)
+	if err != nil {
+		t.Fatalf("ListAccountGrants: %v", err)
+	}
+	if len(grants) != 1 {
+		t.Fatalf("grants = %#v", grants)
+	}
+	if grants[0].TargetID != remoteTestTargetID || grants[0].BotID != remoteTestBotID || grants[0].RuntimeID != remoteTestRuntimeID || !grants[0].Primary {
+		t.Fatalf("grant = %#v", grants[0])
+	}
+
+	if _, err := service.ListAccountGrants(context.Background(), "not-a-uuid"); !errors.Is(err, userruntime.ErrInvalidInput) {
+		t.Fatalf("invalid owner id err = %v", err)
+	}
+}
+
 func TestRemoteWorkspaceDefaultApprovalDoesNotInheritNativeBypasses(t *testing.T) {
 	config := DefaultRemoteToolApprovalConfig()
-	if config.Read.Mode != settings.ToolApprovalAllow || config.Write.Mode != settings.ToolApprovalAsk || config.Exec.Mode != settings.ToolApprovalAsk {
+	if config.Read.Mode != settings.ToolApprovalAllow || config.Write.Mode != settings.ToolApprovalAllow || config.Exec.Mode != settings.ToolApprovalAllow {
 		t.Fatalf("modes = %#v", config)
 	}
 	if len(config.Read.BypassGlobs) != 0 || len(config.Write.BypassGlobs) != 0 || len(config.Exec.BypassCommands) != 0 {

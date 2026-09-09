@@ -6,20 +6,28 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/decision"
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	sessionruntime "github.com/memohai/memoh/internal/agent/runtime/session"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/decision"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
+
+type continuationLifecycleResult struct {
+	snapshot *contextfrag.LifecycleSnapshot
+	cause    error
+	deferred bool
+}
 
 // ResolveRuntimeDecision reads the authoritative decision row before any live
 // owner lookup. Terminal rows are returned too: the router needs to distinguish
@@ -50,37 +58,44 @@ func (s *Service) ResolveRuntimeDecision(ctx context.Context, commandType, decis
 	}
 }
 
-// PendingRuntimeDecision resolves the one durable decision that parked runID.
-// It is used only by expired-owner recovery, where preserving the exact row is
-// required before advancing the run's fencing token.
-func (s *Service) PendingRuntimeDecision(ctx context.Context, runID string) (sessionruntime.DecisionTarget, bool, error) {
+// PendingRuntimeDecisions resolves every durable decision that parked runID.
+// It is used only by expired-owner recovery, where preserving the exact rows
+// is required before advancing the run's fencing token — a turn can park on
+// several approvals and user inputs at once, and dropping any of them here
+// would supersede a decision the user can still answer.
+func (s *Service) PendingRuntimeDecisions(ctx context.Context, runID string) ([]sessionruntime.DecisionTarget, error) {
 	if s == nil || s.queries == nil {
-		return sessionruntime.DecisionTarget{}, false, errors.New("runtime decision store is not configured")
+		return nil, errors.New("runtime decision store is not configured")
 	}
 	id, err := db.ParseUUID(runID)
 	if err != nil {
-		return sessionruntime.DecisionTarget{}, false, err
+		return nil, err
 	}
-	approval, approvalErr := s.queries.GetPendingToolApprovalByRun(ctx, id)
-	input, inputErr := s.queries.GetPendingUserInputByRun(ctx, id)
-	approvalFound := approvalErr == nil
-	inputFound := inputErr == nil
-	if approvalErr != nil && !errors.Is(approvalErr, pgx.ErrNoRows) {
-		return sessionruntime.DecisionTarget{}, false, fmt.Errorf("read pending tool approval for run: %w", approvalErr)
+	approvals, err := s.queries.ListPendingToolApprovalsByRun(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read pending tool approvals for run: %w", err)
 	}
-	if inputErr != nil && !errors.Is(inputErr, pgx.ErrNoRows) {
-		return sessionruntime.DecisionTarget{}, false, fmt.Errorf("read pending user input for run: %w", inputErr)
+	inputs, err := s.queries.ListPendingUserInputsByRun(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read pending user inputs for run: %w", err)
 	}
-	if approvalFound && inputFound {
-		return sessionruntime.DecisionTarget{}, false, errors.New("run has multiple pending runtime decisions")
+	out := make([]sessionruntime.DecisionTarget, 0, len(approvals)+len(inputs))
+	for _, approval := range approvals {
+		out = append(out, toolApprovalDecisionTarget(approval))
 	}
-	if approvalFound {
-		return toolApprovalDecisionTarget(approval), true, nil
+	for _, input := range inputs {
+		out = append(out, userInputDecisionTarget(input))
 	}
-	if inputFound {
-		return userInputDecisionTarget(input), true, nil
+	// Recovery decides by session runtime whether the parked run is
+	// resumable at all; every pending decision here shares one session.
+	if len(out) > 0 && s.sessionService != nil {
+		if sess, sessErr := s.sessionService.Get(ctx, out[0].SessionID); sessErr == nil {
+			for i := range out {
+				out[i].SessionRuntime = sess.RuntimeType
+			}
+		}
 	}
-	return sessionruntime.DecisionTarget{}, false, nil
+	return out, nil
 }
 
 func runtimeDecisionReadError(err error) error {
@@ -131,7 +146,7 @@ func pgText(value pgtype.Text) string {
 	return value.String
 }
 
-func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput) (bool, error) {
+func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
@@ -142,15 +157,27 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 	if err != nil {
 		return true, err
 	}
-	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
 		ControlID: input.ControlID, Type: sessionruntime.CommandToolApprovalResponse,
 		DecisionID: firstNonEmpty(input.ExplicitID, input.ApprovalID),
 		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	})
+	}, eventCh)
 	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
 		return false, nil
 	}
 	if err != nil {
+		if result.Applied && eventCh != nil {
+			if s.logger != nil {
+				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+			}
+			raw, _ := json.Marshal(agentFailureStreamEvent(err))
+			select {
+			case eventCh <- raw:
+				return true, nil
+			case <-ctx.Done():
+				return true, ctx.Err()
+			}
+		}
 		return true, err
 	}
 	if !result.Handled {
@@ -162,7 +189,7 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 	return true, nil
 }
 
-func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput) (bool, error) {
+func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputResponseInput, eventCh chan<- WSStreamEvent) (bool, error) {
 	if s == nil || s.decisionRuntime == nil {
 		return false, nil
 	}
@@ -173,15 +200,27 @@ func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputRes
 	if err != nil {
 		return true, err
 	}
-	result, err := s.decisionRuntime.RouteDecisionResponse(ctx, sessionruntime.DecisionResponse{
+	result, err := s.decisionRuntime.StreamDecisionResponse(ctx, sessionruntime.DecisionResponse{
 		ControlID: input.ControlID, Type: sessionruntime.CommandUserInputResponse,
 		DecisionID: firstNonEmpty(input.ExplicitID, input.UserInputID),
 		BotID:      input.BotID, SessionID: input.ThreadID, Payload: payload,
-	})
+	}, eventCh)
 	if errors.Is(err, sessionruntime.ErrDecisionNotFound) {
 		return false, nil
 	}
 	if err != nil {
+		if result.Applied && eventCh != nil {
+			if s.logger != nil {
+				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+			}
+			raw, _ := json.Marshal(agentFailureStreamEvent(err))
+			select {
+			case eventCh <- raw:
+				return true, nil
+			case <-ctx.Done():
+				return true, ctx.Err()
+			}
+		}
 		return true, err
 	}
 	if !result.Handled {
@@ -200,11 +239,13 @@ func implicitDecisionControlID(commandType, decisionID string) string {
 // handleRuntimeDecisionCommand commits on the routed-command deadline, then
 // continues independently on the owning run. The command result therefore
 // means "the decision was durably accepted", not "the model finished".
+//
+//nolint:contextcheck // the continuation is rooted in the owning run, not the acknowledgement request.
 func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sessionruntime.Command) error {
 	if s == nil || s.decisionRuntime == nil {
 		return errors.New("runtime decision handler is not configured")
 	}
-	runCtx, runCancel, err := s.decisionRuntime.DecisionContinuationContext(ctx, command)
+	runCtx, runCancel, err := s.decisionRuntime.DecisionContinuationContext(command)
 	if err != nil {
 		return err
 	}
@@ -231,6 +272,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			runCancel()
 			return err
 		}
+		committed.runID = command.RunID
 		s.publishCommittedRuntimeDecision(runCtx, command, native.StreamEvent{
 			Type:        native.EventUserInputRequest,
 			ToolName:    committed.request.ToolName,
@@ -245,9 +287,10 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			defer runCancel()
 			s.continueRuntimeDecision(runCtx, command, func(
 				continuationCtx context.Context,
+				lifecycle *continuationLifecycleResult,
 				eventCh chan<- WSStreamEvent,
 			) error {
-				return s.ContinueCommittedUserInputResponse(continuationCtx, committed, eventCh)
+				return s.continueCommittedUserInputResponse(continuationCtx, committed, lifecycle, eventCh)
 			})
 		}()
 		return nil
@@ -273,6 +316,7 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			runCancel()
 			return err
 		}
+		committed.runID = command.RunID
 		s.publishCommittedRuntimeDecision(runCtx, command, native.StreamEvent{
 			Type:       native.EventToolApprovalRequest,
 			ToolName:   committed.request.ToolName,
@@ -287,9 +331,10 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			defer runCancel()
 			s.continueRuntimeDecision(runCtx, command, func(
 				continuationCtx context.Context,
+				lifecycle *continuationLifecycleResult,
 				eventCh chan<- WSStreamEvent,
 			) error {
-				return s.ContinueCommittedToolApprovalResponse(continuationCtx, committed, eventCh)
+				return s.continueCommittedToolApprovalResponse(continuationCtx, committed, lifecycle, eventCh)
 			})
 		}()
 		return nil
@@ -326,7 +371,7 @@ func (s *Service) publishCommittedRuntimeDecision(ctx context.Context, command s
 func (s *Service) continueRuntimeDecision(
 	ctx context.Context,
 	command sessionruntime.Command,
-	continueRun func(context.Context, chan<- WSStreamEvent) error,
+	continueRun func(context.Context, *continuationLifecycleResult, chan<- WSStreamEvent) error,
 ) {
 	handle := sessionruntime.RunHandle{
 		BotID:      command.BotID,
@@ -334,45 +379,183 @@ func (s *Service) continueRuntimeDecision(
 		RunID:      command.RunID,
 		Generation: command.Generation,
 	}
+	var outputSeq int64
+	var outputCause error
+	defer func() {
+		if outputCause != nil {
+			raw, _ := json.Marshal(agentFailureStreamEvent(outputCause))
+			outputSeq++
+			_ = s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq, raw)
+		}
+		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("close decision output failed", slog.Any("error", err))
+			}
+			// A failed checkpoint write must not leave a parked run owning an output
+			// subscription that can never finish. Use the normal run failure lifecycle.
+			s.finishRuntimeDecision(context.WithoutCancel(ctx), handle, err)
+		}
+	}()
+
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
+		outputCause = err
+		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
 		s.finishRuntimeDecision(ctx, handle, err)
 		return
 	}
 	eventCh := make(chan WSStreamEvent, 64)
 	runDone := make(chan error, 1)
+	lifecycle := &continuationLifecycleResult{}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
-		runDone <- continueRun(runCtx, eventCh)
+		runDone <- continueRun(runCtx, lifecycle, eventCh)
 		close(eventCh)
 	}()
 
-	var publishErr error
+	var (
+		publishErr        error
+		eventCause        error
+		lifecycleDeferred bool
+	)
 	for raw := range eventCh {
+		// Cancellation may leave already-buffered events. Drain them so the runner
+		// can return and finish through the same lifecycle as other stream failures.
+		if publishErr != nil {
+			continue
+		}
 		var event native.StreamEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
 			continue
 		}
+		if eventErr := agentStreamLifecycleError(event); eventErr != nil && eventCause == nil {
+			eventCause = eventErr
+		}
+		if event.IsTerminal() {
+			lifecycleDeferred = pendingContinuationDecision(event)
+			if !lifecycleDeferred {
+				switch event.Type {
+				case native.EventAgentEnd:
+					eventCause = nil
+				case native.EventAgentAbort:
+					if context.Cause(ctx) != nil || eventCause == nil {
+						eventCause = agentAbortCause(ctx)
+					}
+				}
+			}
+		}
 		if _, err := s.decisionRuntime.HandleAgentEvent(runCtx, handle, event); err != nil {
 			publishErr = err
 			cancel()
-			break
+			continue
+		}
+		outputSeq++
+		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq, raw); err != nil {
+			publishErr = err
+			cancel()
 		}
 	}
 	runErr := <-runDone
+	lifecycleDeferred = lifecycleDeferred || lifecycle.deferred
+	lifecycleCause := firstLifecycleCause(runErr, eventCause, lifecycle.cause)
 	if publishErr != nil {
 		runErr = publishErr
+		lifecycleCause = publishErr
+		lifecycleDeferred = false
 	}
 	if runErr != nil {
+		outputCause = runErr
+		s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
 		s.finishRuntimeDecision(ctx, handle, runErr)
 		return
 	}
-	_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+	if lifecycleDeferred {
+		_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+		return
+	}
+	s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
+	s.finishRuntimeDecision(ctx, handle, lifecycleCause)
+}
+
+func firstLifecycleCause(causes ...error) error {
+	for _, cause := range causes {
+		if cause != nil {
+			return cause
+		}
+	}
+	return nil
+}
+
+func pendingContinuationDecision(event native.StreamEvent) bool {
+	if !event.IsTerminal() ||
+		(strings.TrimSpace(event.ApprovalID) == "" && strings.TrimSpace(event.UserInputID) == "") {
+		return false
+	}
+	status := strings.TrimSpace(event.Status)
+	return status == "" || strings.EqualFold(status, "pending")
+}
+
+func (s *Service) persistRuntimeDecisionLifecycle(
+	ctx context.Context,
+	command sessionruntime.Command,
+	result *continuationLifecycleResult,
+	cause error,
+) {
+	if result != nil && result.snapshot != nil {
+		s.persistContextLifecycleSnapshot(
+			ctx,
+			command.RunID,
+			command.BotID,
+			command.SessionID,
+			result.snapshot,
+			cause,
+			true,
+		)
+		return
+	}
+	s.recoverContextLifecycleFromAssistantMetadata(
+		ctx,
+		command.RunID,
+		command.BotID,
+		command.SessionID,
+		cause,
+	)
 }
 
 func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionruntime.RunHandle, cause error) {
 	status, message := runtimeDecisionTerminal(ctx, cause)
-	_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, status, message)
+	lifecycleCtx := frozenContextCause(ctx)
+	minimal := minimalContextLifecycleSnapshot()
+	staged := s.stageContextLifecycleCandidate(
+		lifecycleCtx,
+		handle.RunID,
+		handle.BotID,
+		handle.SessionID,
+		&minimal,
+		cause,
+		contextLifecycleCandidateMinimal,
+	)
+	if err := s.decisionRuntime.FinishRun(context.WithoutCancel(nonNilContext(ctx)), handle, status, message); err == nil && !staged {
+		s.EnsureTerminalContextLifecycle(
+			lifecycleCtx,
+			handle.RunID,
+			handle.BotID,
+			handle.SessionID,
+			cause,
+		)
+	}
+}
+
+func frozenContextCause(ctx context.Context) context.Context {
+	ctx = nonNilContext(ctx)
+	frozen := context.WithoutCancel(ctx)
+	cause := context.Cause(ctx)
+	if cause == nil {
+		return frozen
+	}
+	frozen, cancel := context.WithCancelCause(frozen)
+	cancel(cause)
+	return frozen
 }
 
 func runtimeDecisionTerminal(ctx context.Context, cause error) (string, string) {

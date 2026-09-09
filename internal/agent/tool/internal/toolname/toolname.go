@@ -1,8 +1,8 @@
 package toolname
 
 import (
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 // Name identifies a built-in Memoh agent tool. Its raw value is intentionally
@@ -55,6 +55,9 @@ func ToolSendMessage() Name    { return newName("send_message") }
 func ToolListAgents() Name     { return newName("list_agents") }
 func ToolListModels() Name     { return newName("list_models") }
 
+func ToolListWorkdirs() Name  { return newName("list_workdirs") }
+func ToolListACPAgents() Name { return newName("list_acp_agents") }
+
 func ToolListSchedule() Name   { return newName("list_schedule") }
 func ToolGetSchedule() Name    { return newName("get_schedule") }
 func ToolCreateSchedule() Name { return newName("create_schedule") }
@@ -83,6 +86,7 @@ var all = []Name{
 	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
 	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
+	ToolListWorkdirs(), ToolListACPAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
 	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolGenerateVideo(), ToolTranscribeAudio(), ToolAskUser(),

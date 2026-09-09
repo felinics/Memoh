@@ -222,6 +222,16 @@ describe('useChat.ws', () => {
     expect(third.sent).toEqual([])
   })
 
+  it('forwards preference settlement before the response completes', () => {
+    const onStreamEvent = vi.fn()
+    connectWebSocket('bot-1', onStreamEvent)
+    const socket = MockWebSocket.instances[0]!
+    socket.open()
+    const event = { type: 'model_preference_settled', invocation_id: 'inv', run_id: 'run', session_id: 'session' }
+    socket.emit(event)
+    expect(onStreamEvent).toHaveBeenCalledWith(event)
+  })
+
   it('uses the configured absolute API base URL', () => {
     client.setConfig({ baseUrl: 'http://127.0.0.1:18080' })
     vi.stubGlobal('localStorage', {

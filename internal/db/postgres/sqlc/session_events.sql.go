@@ -188,6 +188,150 @@ func (q *Queries) ListSessionEventsBySessionAfter(ctx context.Context, arg ListS
 	return items, nil
 }
 
+const listSessionEventsBySessionPageBeforeWithinBytes = `-- name: ListSessionEventsBySessionPageBeforeWithinBytes :many
+WITH post_coverage_ids AS MATERIALIZED (
+  SELECT DISTINCT changed.external_message_id
+  FROM bot_session_events changed
+  WHERE changed.team_id = public.memoh_current_team_id()
+    AND changed.session_id = $1
+    AND changed.external_message_id IS NOT NULL
+    AND $2::jsonb ? changed.external_message_id
+    AND changed.received_at_ms > COALESCE(
+      ($2::jsonb ->> changed.external_message_id)::BIGINT,
+      0
+    )
+), candidates AS MATERIALIZED (
+  SELECT
+    event.id,
+    event.received_at_ms,
+    event.created_at,
+    octet_length(event.event_data::text)::BIGINT AS payload_bytes
+  FROM bot_session_events event
+  LEFT JOIN post_coverage_ids changed
+    ON changed.external_message_id = event.external_message_id
+  WHERE event.team_id = public.memoh_current_team_id()
+    AND event.session_id = $1
+    AND (
+      NOT $3::boolean
+      OR (event.received_at_ms, event.created_at, event.id) < (
+        $4::BIGINT,
+        $5::TIMESTAMPTZ,
+        $6::UUID
+      )
+    )
+    AND (
+      event.external_message_id IS NULL
+      OR NOT ($2::jsonb ? event.external_message_id)
+      OR event.received_at_ms > COALESCE(
+        ($2::jsonb ->> event.external_message_id)::BIGINT,
+        0
+      )
+      OR changed.external_message_id IS NOT NULL
+    )
+), ranked AS MATERIALIZED (
+  SELECT
+    candidates.id, candidates.received_at_ms, candidates.created_at, candidates.payload_bytes,
+    SUM(payload_bytes) OVER (
+      ORDER BY received_at_ms DESC, created_at DESC, id DESC
+    )::BIGINT AS cumulative_bytes
+  FROM candidates
+), admitted AS MATERIALIZED (
+  SELECT id, received_at_ms, created_at, payload_bytes, cumulative_bytes
+  FROM ranked
+  WHERE cumulative_bytes <= $7::BIGINT
+  ORDER BY received_at_ms DESC, created_at DESC, id DESC
+  LIMIT $8
+)
+SELECT
+  event.id,
+  event.team_id,
+  event.bot_id,
+  event.session_id,
+  event.event_kind,
+  event.event_data,
+  event.external_message_id,
+  event.sender_channel_identity_id,
+  event.received_at_ms,
+  event.created_at,
+  admitted.payload_bytes,
+  admitted.cumulative_bytes
+FROM admitted
+JOIN bot_session_events event ON event.id = admitted.id
+ORDER BY event.received_at_ms DESC, event.created_at DESC, event.id DESC
+`
+
+type ListSessionEventsBySessionPageBeforeWithinBytesParams struct {
+	SessionID               pgtype.UUID        `json:"session_id"`
+	CoveredExternalMessages []byte             `json:"covered_external_messages"`
+	HasCursor               bool               `json:"has_cursor"`
+	BeforeReceivedAtMs      int64              `json:"before_received_at_ms"`
+	BeforeCreatedAt         pgtype.Timestamptz `json:"before_created_at"`
+	BeforeID                pgtype.UUID        `json:"before_id"`
+	MaxBytes                int64              `json:"max_bytes"`
+	PageSize                int32              `json:"page_size"`
+}
+
+type ListSessionEventsBySessionPageBeforeWithinBytesRow struct {
+	ID                      pgtype.UUID        `json:"id"`
+	TeamID                  pgtype.UUID        `json:"team_id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	SessionID               pgtype.UUID        `json:"session_id"`
+	EventKind               string             `json:"event_kind"`
+	EventData               []byte             `json:"event_data"`
+	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
+	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
+	ReceivedAtMs            int64              `json:"received_at_ms"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	PayloadBytes            int64              `json:"payload_bytes"`
+	CumulativeBytes         int64              `json:"cumulative_bytes"`
+}
+
+// Replay reads newest-first with a stable keyset and a hard page-byte budget.
+// Covered message/edit payloads are excluded in SQL before event_data reaches
+// the process. If a covered message has a post-frontier mutation, its complete
+// event chain remains eligible so edit projection still has its base node.
+func (q *Queries) ListSessionEventsBySessionPageBeforeWithinBytes(ctx context.Context, arg ListSessionEventsBySessionPageBeforeWithinBytesParams) ([]ListSessionEventsBySessionPageBeforeWithinBytesRow, error) {
+	rows, err := q.db.Query(ctx, listSessionEventsBySessionPageBeforeWithinBytes,
+		arg.SessionID,
+		arg.CoveredExternalMessages,
+		arg.HasCursor,
+		arg.BeforeReceivedAtMs,
+		arg.BeforeCreatedAt,
+		arg.BeforeID,
+		arg.MaxBytes,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionEventsBySessionPageBeforeWithinBytesRow
+	for rows.Next() {
+		var i ListSessionEventsBySessionPageBeforeWithinBytesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TeamID,
+			&i.BotID,
+			&i.SessionID,
+			&i.EventKind,
+			&i.EventData,
+			&i.ExternalMessageID,
+			&i.SenderChannelIdentityID,
+			&i.ReceivedAtMs,
+			&i.CreatedAt,
+			&i.PayloadBytes,
+			&i.CumulativeBytes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextSessionEventCursor = `-- name: NextSessionEventCursor :one
 SELECT nextval('bot_session_event_cursor_seq')::bigint
 `

@@ -13,8 +13,8 @@ import (
 
 	tele "gopkg.in/telebot.v4"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/command"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/command"
 )
 
 // newStubTelegramBot builds a telebot bot suitable for tests that need a

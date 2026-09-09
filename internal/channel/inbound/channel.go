@@ -18,24 +18,26 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/memohai/memoh/internal/acl"
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/discuss"
-	"github.com/memohai/memoh/internal/channel/route"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	sessionpkg "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/chat/timeline"
-	"github.com/memohai/memoh/internal/command"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/media"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/slash"
+	"github.com/felinics/memoh/internal/acl"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/discuss"
+	"github.com/felinics/memoh/internal/channel/route"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/runtimekind"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/slash"
 )
 
 var base64Std = base64.StdEncoding
@@ -123,6 +125,7 @@ type IMDisplayOptionsReader interface {
 }
 
 type DefaultChatRuntimeSettings struct {
+	BotAgentID  string
 	Runtime     string
 	ACPAgentID  string
 	ProjectPath string
@@ -168,6 +171,7 @@ type SessionResult struct {
 }
 
 type NewSessionSpec struct {
+	BotAgentID            string
 	Mode                  string
 	Runtime               string
 	Type                  string
@@ -421,6 +425,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if sender == nil {
 		return errors.New("reply sender not configured")
 	}
+	sender = p.withDecisionReceipts(sender, cfg)
 	text := strings.TrimSpace(msg.Message.PlainText())
 	if p.logger != nil {
 		p.logger.Debug("inbound handle start",
@@ -722,7 +727,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// Mode and skill commands remain control-plane messages even while an
 	// ask_user request is pending; they must not become text-question answers.
 	if pendingSkillIntent == nil && !isModeCommand {
-		if handled, err := p.handlePlainTextUserInput(ctx, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
+		if handled, err := p.handlePlainTextUserInput(ctx, cfg, msg, sender, identity, resolved.RouteID, sessionID, text); handled || err != nil {
 			return err
 		}
 	}
@@ -853,8 +858,8 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	var latestRC timeline.RenderedContext
 	var eventID string
 	if p.pipeline != nil && sessionID != "" && pendingSkillIntent == nil {
-		if _, loaded := p.pipeline.GetIC(sessionID); !loaded {
-			p.replayPipelineSession(ctx, sessionID)
+		if !p.pipeline.HasSession(sessionID) {
+			p.replayPipelineSession(ctx, identity.BotID, sessionID)
 		}
 		pipelineMsg := msg
 		pipelineMsg.Message = msg.Message
@@ -1232,13 +1237,10 @@ startStream:
 			return nil
 		}
 		if errors.Is(startErr, turn.ErrSessionBusy) {
-			// The thread is already running a turn and the runtime persisted
-			// nothing for this message, so the platform's own retry is what
-			// carries it: the redelivery repeats this idempotency key and is
-			// admitted as the same invocation once the thread frees up. Reporting
-			// an error to the user would describe a transient queueing detail as a
-			// failure, so only the marker is cleared and the error is returned to
-			// the adapter, whose non-2xx response is what asks for the retry.
+			// Telegram dispatches updates asynchronously: returning an error cannot
+			// request redelivery. Tell the sender to retry instead of silently
+			// dropping a message the runtime never admitted. Webhook channels
+			// retain their existing adapter retry contract.
 			if p.logger != nil {
 				p.logger.Info(
 					"inbound turn deferred: thread busy",
@@ -1250,6 +1252,12 @@ startStream:
 				if notifyErr := p.notifyProcessingCompleted(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle); notifyErr != nil {
 					p.logProcessingStatusError("processing_completed", msg, identity, notifyErr)
 				}
+			}
+			if msg.Channel == channel.ChannelType("telegram") {
+				return sender.Send(ctx, channel.OutboundMessage{
+					Target:  target,
+					Message: replyTextMessage(p.localizer(ctx, identity.BotID).T("cmd.userInput.busy"), sourceMessageID),
+				})
 			}
 			return startErr
 		}
@@ -3083,7 +3091,7 @@ func isHTTPURL(raw string) bool {
 }
 
 // extractStorageKey derives the media storage key from a container-internal
-// access path. The expected path format is /data/media/<storage_key>.
+// access path. The expected path format is /data/.memoh/media/<storage_key>.
 func extractStorageKey(accessPath string, _ string) string {
 	return attachment.ExtractStorageKey(accessPath)
 }
@@ -3097,11 +3105,11 @@ func isLocalChannelType(ct channel.ChannelType) bool {
 
 // replayPipelineSession loads persisted events from the DB and replays them
 // into the pipeline. Called lazily on first access per session after cold start.
-func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, sessionID string) {
+func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, botID, sessionID string) {
 	if p.eventStore == nil || p.pipeline == nil {
 		return
 	}
-	events, err := p.eventStore.LoadEvents(ctx, sessionID)
+	events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Warn("pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
@@ -3547,6 +3555,44 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 		})
 	}
 
+	// /stop is handled before the normal message ACL gate. Check the same
+	// source scope before allowing it to cancel a durable run.
+	if p.acl != nil {
+		allowed, err := p.acl.Evaluate(ctx, acl.EvaluateRequest{
+			BotID: identity.BotID, ChannelIdentityID: identity.ChannelIdentityID,
+			ChannelType: msg.Channel.String(), SourceScope: acl.SourceScope{
+				ConversationType: channel.NormalizeConversationType(msg.Conversation.Type),
+				ConversationID:   strings.TrimSpace(msg.Conversation.ID), ThreadID: threadID,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return nil
+		}
+	}
+	if stopper, ok := p.turnSvc.(turn.Stopper); ok && p.sessionEnsurer != nil {
+		sess, err := p.sessionEnsurer.GetActiveSession(ctx, resolved.RouteID)
+		if err == nil && sess.ID != "" {
+			stopped, stopErr := stopper.StopTurn(ctx, turn.StopCommand{
+				TeamID: cfg.TeamID, BotID: identity.BotID, ThreadID: sess.ID,
+			})
+			if stopErr != nil {
+				if p.logger != nil {
+					p.logger.Warn("stop durable turn failed", slog.Any("error", stopErr))
+				}
+				return sender.Send(ctx, channel.OutboundMessage{
+					Target:  target,
+					Message: plainTextMessage(friendlyOps(loc, "ops.verb.stopReply"), caps),
+				})
+			}
+			if stopped {
+				return nil
+			}
+		}
+	}
+
 	streamKey := strings.TrimSpace(identity.BotID) + ":" + strings.TrimSpace(resolved.RouteID)
 	cancelVal, loaded := p.activeStreams.LoadAndDelete(streamKey)
 	if !loaded {
@@ -3797,6 +3843,8 @@ func (p *ChannelInboundProcessor) streamUserInputResponseCommand(ctx context.Con
 type streamContinuationFunc func(context.Context, chan<- json.RawMessage) error
 
 func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context, msg channel.InboundMessage, sender channel.StreamReplySender, identity InboundIdentity, routeID string, run streamContinuationFunc) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	target := strings.TrimSpace(msg.ReplyTarget)
 	if target == "" {
 		return errors.New("reply target missing")
@@ -3847,11 +3895,24 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	}()
 
 	var finalMessages []turn.ModelMessage
+	var continuationErr error
+	accepted := false
 	for eventCh != nil || errCh != nil {
 		select {
 		case chunk, ok := <-eventCh:
 			if !ok {
 				eventCh = nil
+				continue
+			}
+			var receipt struct {
+				Type       string `json:"type"`
+				DecisionID string `json:"decision_id"`
+			}
+			if json.Unmarshal(chunk, &receipt) == nil && receipt.Type == "decision_accepted" {
+				accepted = true
+				if receiver, ok := sender.(interface{ AcceptDecision(context.Context, string) }); ok {
+					receiver.AcceptDecision(ctx, receipt.DecisionID)
+				}
 				continue
 			}
 			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
@@ -3889,12 +3950,25 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				continue
 			}
 			if runErr != nil {
-				_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: runErr.Error()})
-				return runErr
+				continuationErr = runErr
 			}
 		}
 	}
 
+	if continuationErr != nil {
+		if !accepted {
+			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: p.localizer(ctx, identity.BotID).T("cmd.userInput.submitFailed")})
+			return continuationErr
+		}
+		if p.logger != nil {
+			p.logger.Warn("accepted decision delivery interrupted", slog.Any("error", continuationErr))
+		}
+		public, _ := apperror.PublicFrom(apperror.Wrap(apperror.CodeAgentResponseInterrupted, continuationErr, nil), "")
+		if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: public.Detail}); err != nil {
+			return err
+		}
+		return closeStream()
+	}
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
 	if !suppressReplies {
 		outputs := turn.ExtractAssistantOutputs(finalMessages)
@@ -4047,8 +4121,8 @@ func looksLikeApprovalID(value string) bool {
 }
 
 // resolveNewSessionSpecParsed determines the session mode/runtime for /new.
-// /new chat → chat+model, /new codex → default-mode+ACP, /new chat codex →
-// chat+ACP, /new discuss codex → discuss+ACP.
+// /new chat → chat+model; a named Agent selects either its direct runtime or
+// the generic ACP runtime while the explicit/default channel mode stays intact.
 func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.InboundMessage, profiles turn.ACPProfileResolver) (NewSessionSpec, error) {
 	operands := newSessionOperands(parsed)
 	explicit := ""
@@ -4081,6 +4155,18 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 			mode = sessionpkg.TypeDiscuss
 		}
 	default:
+		if direct := normalizeACPAgentID(explicit); sessionpkg.IsDirectRuntimeType(direct) {
+			// A bare direct external agent name ("/new codex") is a valid
+			// operand even though it has no ACP profile.
+			agentID = direct
+			switch {
+			case isLocalChannelType(msg.Channel), channel.IsPrivateConversationType(msg.Conversation.Type):
+				mode = sessionpkg.TypeChat
+			default:
+				mode = sessionpkg.TypeDiscuss
+			}
+			break
+		}
 		profile := resolveACPProfile(profiles, explicit)
 		if !profile.Known {
 			return NewSessionSpec{}, fmt.Errorf("unknown session type %q — use /new, /new chat, or /new discuss", explicit)
@@ -4105,13 +4191,22 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 	if agentID == "" {
 		return spec, nil
 	}
+	// Direct external agents (codex, claude-code) are addressed by their
+	// runtime name and never live in the ACP profile registry.
+	if sessionpkg.IsDirectRuntimeType(agentID) {
+		spec.Runtime = agentID
+		if mode != sessionpkg.TypeChat {
+			spec.Type = sessionpkg.TypeDiscuss
+		}
+		return spec, nil
+	}
 	profile := resolveACPProfile(profiles, agentID)
 	if !profile.Known {
-		return NewSessionSpec{}, acpfeedback.New(
-			acpfeedback.CodeAgentNotFound,
+		return NewSessionSpec{}, agentfeedback.New(
+			agentfeedback.CodeAgentNotFound,
 			"unknown_agent",
 			http.StatusBadRequest,
-			"chat.acp.agentNotFound",
+			"chat.externalAgent.agentNotFound",
 			fmt.Sprintf("Unknown ACP agent %q.", agentID),
 			map[string]string{"agent_id": agentID},
 		)
@@ -4128,8 +4223,8 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 }
 
 // newSessionOperands applies /new's grammar after the shared syntax parser.
-// Mentions address chat participants rather than naming a session mode or ACP
-// profile, and callback flags control execution rather than session semantics.
+// Mentions address chat participants rather than naming a session mode or
+// Agent, and callback flags control execution rather than session semantics.
 func newSessionOperands(parsed command.ParsedCommand) []string {
 	values := make([]string, 0, 1+len(parsed.Args))
 	values = append(values, parsed.Action)
@@ -4206,6 +4301,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 			}
 			return err
 		}
+	}
+	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		if err := p.requireWorkspaceExecForACP(ctx, identity); err != nil {
 			if feedback := acpFeedbackFromError(err); feedback != nil {
 				return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
@@ -4260,7 +4357,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		})
 	}
 
-	if spec.Runtime == sessionpkg.RuntimeACPAgent {
+	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, spec.RuntimeOwnerAccountID)
 	}
 	if strings.TrimSpace(spec.CreatedByUserID) == "" {
@@ -4353,6 +4450,9 @@ func newSessionConfirmModeText(spec NewSessionSpec) string {
 			return mode + " " + agentID
 		}
 	}
+	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
+		return mode + " " + spec.Runtime
+	}
 	return mode
 }
 
@@ -4365,12 +4465,17 @@ func newSessionModeKey(spec NewSessionSpec) string {
 
 func newSessionDisplayModeLabel(loc *i18n.Localizer, spec NewSessionSpec, profiles turn.ACPProfileResolver) string {
 	mode := loc.T(newSessionModeKey(spec))
-	if spec.Runtime != sessionpkg.RuntimeACPAgent {
+	runtime := ""
+	switch {
+	case spec.Runtime == sessionpkg.RuntimeACPAgent:
+		runtime = newSessionACPRuntimeLabel(spec, profiles)
+		if runtime == "" {
+			runtime = "ACP"
+		}
+	case sessionpkg.IsDirectRuntimeType(spec.Runtime):
+		runtime = spec.Runtime
+	default:
 		return mode
-	}
-	runtime := newSessionACPRuntimeLabel(spec, profiles)
-	if runtime == "" {
-		runtime = "ACP"
 	}
 	return loc.T("newSession.modeWithRuntime", map[string]any{
 		"mode":    mode,
@@ -4413,32 +4518,26 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if err != nil {
 		return NewSessionSpec{}, err
 	}
-	if strings.TrimSpace(defaults.Runtime) != sessionpkg.RuntimeACPAgent {
+	defaultRuntime := strings.TrimSpace(defaults.Runtime)
+	directDefault := runtimekind.IsDirect(defaultRuntime)
+	if !directDefault && defaultRuntime != sessionpkg.RuntimeACPAgent {
 		return spec, nil
 	}
 	agentID := normalizeACPAgentID(defaults.ACPAgentID)
+	if directDefault {
+		// A direct default is fully described by its runtime.
+		agentID = defaultRuntime
+	}
 	if agentID == "" {
-		return NewSessionSpec{}, acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+		return NewSessionSpec{}, agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_agent_id",
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			"External agent is selected as the default chat runtime, but no agent is configured.",
 			nil,
 		)
 	}
-	profile := resolveACPProfile(p.acpProfiles, agentID)
-	if !profile.Known {
-		return NewSessionSpec{}, acpfeedback.New(
-			acpfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.acp.agentNotFound",
-			"Configured ACP agent was not found.",
-			map[string]string{"agent_id": agentID},
-		)
-	}
-	agentID = profile.ID
 	if p.permissionChecker == nil {
 		return NewSessionSpec{}, p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
 	}
@@ -4449,12 +4548,39 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if projectPath == "" {
 		projectPath = sessionpkg.DefaultACPProjectPath
 	}
+
+	// Direct external agents have no ACP profile to resolve; only real ACP
+	// providers go through the profile registry.
+	if directDefault {
+		spec.Runtime = defaultRuntime
+		spec.Type = sessionpkg.TypeChat
+		spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
+		spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, "")
+		spec.Metadata = map[string]any{
+			"project_path": projectPath,
+		}
+		return spec, nil
+	}
+
+	profile := resolveACPProfile(p.acpProfiles, agentID)
+	if !profile.Known {
+		return NewSessionSpec{}, agentfeedback.New(
+			agentfeedback.CodeAgentNotFound,
+			"unknown_agent",
+			http.StatusBadRequest,
+			"chat.externalAgent.agentNotFound",
+			"Configured ACP agent was not found.",
+			map[string]string{"agent_id": agentID},
+		)
+	}
+	agentID = profile.ID
 	projectMode := strings.TrimSpace(defaults.ProjectMode)
 	if projectMode == "" {
 		projectMode = sessionpkg.DefaultACPProjectMode
 	}
 	spec.Runtime = sessionpkg.RuntimeACPAgent
 	spec.Type = sessionpkg.TypeACPAgent
+	spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
 	spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, "")
 	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{
 		"acp_agent_id":     agentID,
@@ -4522,22 +4648,22 @@ func metadataString(metadata map[string]any, key string) string {
 func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) error {
 	agentID := acpNewSessionAgentID(spec)
 	if agentID == "" {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_agent_id",
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			"ACP agent id is required for external-agent sessions.",
 			nil,
 		)
 	}
 	profile := resolveACPProfile(p.acpProfiles, agentID)
 	if !profile.Known {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotFound,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotFound,
 			"unknown_agent",
 			http.StatusBadRequest,
-			"chat.acp.agentNotFound",
+			"chat.externalAgent.agentNotFound",
 			"Configured ACP agent was not found.",
 			map[string]string{"agent_id": agentID},
 		)
@@ -4547,11 +4673,11 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 		projectPath = sessionpkg.DefaultACPProjectPath
 	}
 	if !strings.HasPrefix(projectPath, "/") {
-		return acpfeedback.New(
-			acpfeedback.CodeProjectPathInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectPathInvalid,
 			"project_path_must_be_absolute",
 			http.StatusBadRequest,
-			"chat.acp.projectPathInvalid",
+			"chat.externalAgent.projectPathInvalid",
 			"ACP project path must be absolute.",
 			map[string]string{"agent_id": agentID},
 		)
@@ -4563,20 +4689,20 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	switch projectMode {
 	case sessionpkg.DefaultACPProjectMode:
 	case "none":
-		return acpfeedback.New(
-			acpfeedback.CodeProjectModeInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectModeInvalid,
 			"none_not_supported_for_new_session",
 			http.StatusBadRequest,
-			"chat.acp.projectModeInvalid",
+			"chat.externalAgent.projectModeInvalid",
 			"acp_project_mode=none is not supported for channel-created ACP sessions.",
 			map[string]string{"agent_id": agentID, "project_mode": projectMode},
 		)
 	default:
-		return acpfeedback.New(
-			acpfeedback.CodeProjectModeInvalid,
+		return agentfeedback.New(
+			agentfeedback.CodeProjectModeInvalid,
 			"unknown_project_mode",
 			http.StatusBadRequest,
-			"chat.acp.projectModeInvalid",
+			"chat.externalAgent.projectModeInvalid",
 			"Unknown ACP project mode.",
 			map[string]string{"agent_id": agentID, "project_mode": projectMode},
 		)
@@ -4589,22 +4715,22 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 		return err
 	}
 	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
-	if !setup.Enabled {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotEnabled,
+	if strings.TrimSpace(spec.BotAgentID) == "" && !setup.Enabled {
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotEnabled,
 			"agent_not_enabled",
 			http.StatusForbidden,
-			"chat.acp.agentNotEnabled",
+			"chat.externalAgent.agentNotEnabled",
 			"ACP agent is not enabled for this bot.",
 			map[string]string{"agent_id": agentID},
 		)
 	}
 	if field := setup.MissingManagedField; field != nil {
-		return acpfeedback.New(
-			acpfeedback.CodeAgentNotConfigured,
+		return agentfeedback.New(
+			agentfeedback.CodeAgentNotConfigured,
 			"missing_managed_field",
 			http.StatusBadRequest,
-			"chat.acp.agentNotConfigured",
+			"chat.externalAgent.agentNotConfigured",
 			"ACP agent setup is incomplete.",
 			map[string]string{"agent_id": agentID, "field_id": field.ID, "field_label": field.Label},
 		)
@@ -4649,8 +4775,13 @@ func (p *ChannelInboundProcessor) requireACPRuntimeActor(_ context.Context, iden
 	return p.missingWorkspaceExecFeedback("runtime_owner_mismatch", "This ACP runtime belongs to another user.")
 }
 
+// sessionUsesACPRuntime reports a session that runs on an agent runtime with
+// workspace access — ACP or a direct external agent — and therefore needs the
+// runtime-owner workspace-exec gate before a turn starts. The name predates
+// the direct runtimes; every caller wants "agent runtime", not "ACP".
 func sessionUsesACPRuntime(sess SessionResult) bool {
-	return strings.TrimSpace(sess.Runtime) == sessionpkg.RuntimeACPAgent || strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent
+	return runtimekind.RequiresWorkspaceExec(sess.Runtime) ||
+		strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent
 }
 
 func sessionSupportsRequestedSkills(sess SessionResult) bool {
@@ -4683,23 +4814,23 @@ func isGroupConversation(msg channel.InboundMessage) bool {
 	return !isLocalChannelType(msg.Channel) && !channel.IsPrivateConversationType(msg.Conversation.Type)
 }
 
-func groupChatACPUnsupportedFeedback() *acpfeedback.Error {
-	return acpfeedback.New(
-		acpfeedback.CodeGroupChatUnsupported,
+func groupChatACPUnsupportedFeedback() *agentfeedback.Error {
+	return agentfeedback.New(
+		agentfeedback.CodeGroupChatUnsupported,
 		"group_chat_acp_unsupported",
 		http.StatusBadRequest,
-		"chat.acp.groupChatUnsupported",
+		"chat.externalAgent.groupChatUnsupported",
 		"Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex to create a discuss external-agent session.",
 		nil,
 	)
 }
 
-func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message string) *acpfeedback.Error {
-	return acpfeedback.New(
-		acpfeedback.CodeNoWorkspaceExec,
+func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message string) *agentfeedback.Error {
+	return agentfeedback.New(
+		agentfeedback.CodeNoWorkspaceExec,
 		reason,
 		http.StatusForbidden,
-		"chat.acp.noWorkspaceExec",
+		"chat.externalAgent.noWorkspaceExec",
 		message,
 		nil,
 	)
@@ -4726,28 +4857,32 @@ func (p *ChannelInboundProcessor) sendACPFeedbackError(ctx context.Context, send
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-func acpFeedbackFromError(err error) *acpfeedback.Error {
-	var feedback *acpfeedback.Error
+func acpFeedbackFromError(err error) *agentfeedback.Error {
+	var feedback *agentfeedback.Error
 	if errors.As(err, &feedback) {
 		return feedback
 	}
 	switch {
 	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired):
-		return acpfeedback.New(acpfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.acp.agentNotConfigured", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPUnknownAgent):
-		return acpfeedback.New(acpfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.acp.agentNotFound", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.externalAgent.agentNotFound", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
-		return acpfeedback.New(acpfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.acp.agentNotEnabled", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.externalAgent.agentNotEnabled", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
-		return acpfeedback.New(acpfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.acp.agentNotConfigured", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
 	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
-		return acpfeedback.New(acpfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.acp.runtimeOwnerMissing", err.Error(), nil)
+		return agentfeedback.New(agentfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.externalAgent.runtimeOwnerMissing", err.Error(), nil)
 	default:
 		return nil
 	}
 }
 
 func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {
+	if sessionpkg.IsDirectRuntimeType(spec.Runtime) {
+		cc.ChatModel = spec.Runtime
+		return cc
+	}
 	if spec.Runtime != sessionpkg.RuntimeACPAgent {
 		return cc
 	}

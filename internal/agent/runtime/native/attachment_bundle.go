@@ -1,8 +1,8 @@
 package native
 
 import (
-	tools "github.com/memohai/memoh/internal/agent/tool"
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
 )
 
 func bundleFromToolAttachment(att tools.Attachment) attachmentpkg.Bundle {

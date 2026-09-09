@@ -27,6 +27,7 @@ interface PendingAssistantStream extends AssistantStream {
   runId: string
   appendMessages: boolean
   messageIds: Map<number, number>
+  onModelPreferenceSettled?: () => void
   resolve: () => void
   reject: (error: Error) => void
 }
@@ -44,6 +45,7 @@ export interface StreamIdentity {
 }
 
 export interface TrackAssistantStreamInput {
+  onModelPreferenceSettled?: () => void
   invocationId: string
   assistantTurn: ChatAssistantTurn
   botId: string
@@ -139,6 +141,7 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
         viewId: input.viewId?.trim() || 'chat',
         appendMessages: input.assistantTurn.messages.length > 0,
         messageIds: new Map(),
+        onModelPreferenceSettled: input.onModelPreferenceSettled,
         resolve,
         reject,
       })
@@ -174,6 +177,15 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
       sessionId: stream?.sessionId ?? deferredAbort?.sessionId ?? '',
       abortRequested,
     }
+  }
+
+  // Only the matching live submission may release its ordering barrier.
+  function settleModelPreference(event: StreamIdentity) {
+    const stream = streams.get(event.invocation_id?.trim() || '')
+    if (!stream?.runId || stream.runId !== event.run_id || stream.sessionId !== event.session_id) return
+    const notify = stream.onModelPreferenceSettled
+    stream.onModelPreferenceSettled = undefined
+    notify?.()
   }
 
   // requestAbort resolves a stop to the run the server can address. Before
@@ -299,6 +311,7 @@ export function createAssistantStreamRegistry({ finishAssistantTurn }: Assistant
     invocationIdForEvent,
     trackAssistantStream,
     bindRunId,
+    settleModelPreference,
     requestAbort,
     getAssistantStream,
     mapAssistantStreamMessage,

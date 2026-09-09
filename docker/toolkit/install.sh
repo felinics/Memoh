@@ -22,14 +22,6 @@
 #   PYTHON_EXTRA_ARCHES Optional space-separated extra Python runtime arches:
 #                       amd64/x86_64 or arm64/aarch64. Useful for emulated
 #                       workspace images in local development.
-#   CODEX_VERSION       Default: pinned @openai/codex version below
-#   CODEX_ACP_VERSION   Default: pinned @agentclientprotocol/codex-acp version below
-#   CLAUDE_AGENT_ACP_VERSION
-#                       Default: pinned @agentclientprotocol/claude-agent-acp version below
-#   HERMES_AGENT_VERSION
-#                       Default: pinned hermes-agent[acp,mcp] version below
-#   HERMES_AGENT_PACKAGE
-#                       Default: hermes-agent[acp,mcp]==$HERMES_AGENT_VERSION
 #   ALPINE_MIRROR       Default: https://dl-cdn.alpinelinux.org/alpine
 #   DEBIAN_MIRROR       Default: https://deb.debian.org/debian
 #   DEBIAN_VERSION      Default: bookworm
@@ -48,11 +40,6 @@ NODE_VERSION=24.14.0
 NPM_VERSION=10.9.2
 PYTHON_VERSION="${PYTHON_VERSION:-3.14.6}"
 PYTHON_STANDALONE_TAG="${PYTHON_STANDALONE_TAG:-20260623}"
-CODEX_VERSION="${CODEX_VERSION:-0.145.0}"
-CODEX_ACP_VERSION="${CODEX_ACP_VERSION:-1.1.9}"
-CLAUDE_AGENT_ACP_VERSION="${CLAUDE_AGENT_ACP_VERSION:-0.64.2}"
-HERMES_AGENT_VERSION="${HERMES_AGENT_VERSION:-0.19.0}"
-HERMES_AGENT_PACKAGE="${HERMES_AGENT_PACKAGE:-hermes-agent[acp,mcp]==$HERMES_AGENT_VERSION}"
 
 if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
   echo "ERROR: toolkit_output_dir is required." >&2
@@ -84,8 +71,8 @@ DEBIAN_VERSION="${DEBIAN_VERSION:-bookworm}"
 UV_MIRROR="${UV_MIRROR:-https://github.com/astral-sh/uv/releases/latest/download}"
 
 case "$ARCH" in
-  amd64) NODE_ARCH=x64;  UV_ARCH=x86_64;  APK_ARCH=x86_64;  DEB_ARCH=amd64; NPM_CPU=x64;  PYTHON_ARCH=x86_64 ;;
-  arm64) NODE_ARCH=arm64; UV_ARCH=aarch64; APK_ARCH=aarch64; DEB_ARCH=arm64; NPM_CPU=arm64; PYTHON_ARCH=aarch64 ;;
+  amd64) NODE_ARCH=x64;  UV_ARCH=x86_64;  APK_ARCH=x86_64;  DEB_ARCH=amd64; PYTHON_ARCH=x86_64 ;;
+  arm64) NODE_ARCH=arm64; UV_ARCH=aarch64; APK_ARCH=aarch64; DEB_ARCH=arm64; PYTHON_ARCH=aarch64 ;;
   *) echo "ERROR: unsupported arch: $ARCH" >&2; exit 1 ;;
 esac
 
@@ -255,7 +242,7 @@ install_ca_bundle() {
     fi
   done
 
-  echo "warning: no host CA bundle found; ACP agents may fail HTTPS requests in minimal workspace images." >&2
+  echo "warning: no host CA bundle found; toolkit wrappers and managed dependency shims may fail HTTPS requests in minimal workspace images." >&2
 }
 
 apk_package_filename_from_index() {
@@ -550,159 +537,6 @@ install_python_runtime() {
   fi
 }
 
-npm_cli() {
-  node_dir="$1"
-  echo "$OUTDIR/$node_dir/lib/node_modules/npm/bin/npm-cli.js"
-}
-
-run_toolkit_npm() {
-  node_dir="$1"
-  shift
-  node_bin="$OUTDIR/$node_dir/bin/node"
-  npm_bin="$(npm_cli "$node_dir")"
-  if [ ! -x "$node_bin" ] || [ ! -f "$npm_bin" ]; then
-    return 1
-  fi
-
-  case "$node_dir" in
-    node-musl)
-      if [ -d "$OUTDIR/node-musl/runtime-lib" ]; then
-        LD_LIBRARY_PATH="$OUTDIR/node-musl/runtime-lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-          "$node_bin" "$npm_bin" "$@"
-      else
-        "$node_bin" "$npm_bin" "$@"
-      fi
-      ;;
-    *)
-      "$node_bin" "$npm_bin" "$@"
-      ;;
-  esac
-}
-
-install_acp_packages_with_toolkit_npm() {
-  node_dir="$1"
-  run_toolkit_npm "$node_dir" \
-    install \
-    -g \
-    --prefix "$OUTDIR/acp" \
-    --include=optional \
-    --omit=dev \
-    --no-audit \
-    --no-fund \
-    --registry "$NPM_MIRROR" \
-    --os=linux \
-    --cpu="$NPM_CPU" \
-    --libc=glibc \
-    "@openai/codex@$CODEX_VERSION" \
-    "@agentclientprotocol/codex-acp@$CODEX_ACP_VERSION" \
-    "@agentclientprotocol/claude-agent-acp@$CLAUDE_AGENT_ACP_VERSION"
-}
-
-install_acp_packages_with_host_npm() {
-  npm \
-    install \
-    -g \
-    --prefix "$OUTDIR/acp" \
-    --include=optional \
-    --omit=dev \
-    --no-audit \
-    --no-fund \
-    --registry "$NPM_MIRROR" \
-    --os=linux \
-    --cpu="$NPM_CPU" \
-    --libc=glibc \
-    "@openai/codex@$CODEX_VERSION" \
-    "@agentclientprotocol/codex-acp@$CODEX_ACP_VERSION" \
-    "@agentclientprotocol/claude-agent-acp@$CLAUDE_AGENT_ACP_VERSION"
-}
-
-# acp_package_at_version checks that an installed ACP npm package matches the
-# pinned version, so bumping a pin in this script triggers a reinstall instead
-# of being silently skipped by the file-existence check.
-acp_package_at_version() {
-  pkg_json="$OUTDIR/acp/lib/node_modules/$1/package.json"
-  [ -f "$pkg_json" ] || return 1
-  installed="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg_json" | head -n 1)"
-  [ "$installed" = "$2" ]
-}
-
-install_acp_packages() {
-  codex_bin="$OUTDIR/acp/lib/node_modules/@openai/codex/bin/codex.js"
-  codex_acp_bin="$OUTDIR/acp/lib/node_modules/@agentclientprotocol/codex-acp/dist/index.js"
-  claude_agent_acp_bin="$OUTDIR/acp/lib/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js"
-  if [ -f "$codex_bin" ] && [ -f "$codex_acp_bin" ] && [ -f "$claude_agent_acp_bin" ] &&
-    acp_package_at_version "@openai/codex" "$CODEX_VERSION" &&
-    acp_package_at_version "@agentclientprotocol/codex-acp" "$CODEX_ACP_VERSION" &&
-    acp_package_at_version "@agentclientprotocol/claude-agent-acp" "$CLAUDE_AGENT_ACP_VERSION"; then
-    echo "ACP agent packages already installed at pinned versions; skipping npm install."
-    return
-  fi
-
-  echo "Installing ACP agent packages for linux-${NPM_CPU}..."
-  mkdir -p "$OUTDIR/acp"
-
-  # On Linux builders, prefer the freshly downloaded target Node/npm so Docker
-  # builds do not depend on a host npm install. On macOS development hosts the
-  # downloaded Linux Node cannot run, so fall back to the project npm.
-  if [ "$(uname -s)" = "Linux" ]; then
-    if install_acp_packages_with_toolkit_npm node-glibc; then
-      return
-    fi
-    if install_acp_packages_with_toolkit_npm node-musl; then
-      return
-    fi
-  fi
-
-  if command -v npm >/dev/null 2>&1; then
-    install_acp_packages_with_host_npm
-    return
-  fi
-
-  echo "ERROR: npm is required to install Codex ACP packages into the workspace toolkit." >&2
-  exit 1
-}
-
-install_hermes_acp_package() {
-  if [ "$(uname -s)" != "Linux" ]; then
-    echo "warning: skipping Hermes ACP package cache on non-Linux host; build the Linux workspace toolkit in Docker/CI for container Hermes support." >&2
-    return
-  fi
-  if [ ! -x "$OUTDIR/uv" ]; then
-    echo "ERROR: uv is required to install Hermes ACP into the workspace toolkit." >&2
-    exit 1
-  fi
-
-  mkdir -p "$OUTDIR/uv-cache" "$OUTDIR/uv-tools" "$OUTDIR/python"
-  if UV_CACHE_DIR="$OUTDIR/uv-cache" \
-    UV_TOOL_DIR="$OUTDIR/uv-tools" \
-    UV_PYTHON_INSTALL_DIR="$OUTDIR/python" \
-    "$OUTDIR/uv" tool run --offline --from "$HERMES_AGENT_PACKAGE" hermes-acp --help >/dev/null 2>&1; then
-    echo "Hermes ACP package already cached at pinned version; skipping uv install."
-    return
-  fi
-
-  echo "Installing Hermes ACP package with uv ($HERMES_AGENT_PACKAGE)..."
-  UV_CACHE_DIR="$OUTDIR/uv-cache" \
-    UV_TOOL_DIR="$OUTDIR/uv-tools" \
-    UV_PYTHON_INSTALL_DIR="$OUTDIR/python" \
-    "$OUTDIR/uv" tool run --from "$HERMES_AGENT_PACKAGE" hermes-acp --help >/dev/null
-}
-
-install_toolkit_wrappers() {
-  source_dir="$SCRIPT_DIR/bin"
-  if [ ! -d "$source_dir" ]; then
-    echo "warning: toolkit command wrappers not found at $source_dir" >&2
-    return
-  fi
-
-  mkdir -p "$OUTDIR/bin"
-  cp -R "$source_dir"/. "$OUTDIR/bin/"
-  for wrapper in "$OUTDIR"/bin/*; do
-    [ -e "$wrapper" ] || continue
-    chmod +x "$wrapper"
-  done
-}
-
 write_display_wrappers() {
   mkdir -p "$DISPLAY_OUTDIR/bin"
 
@@ -990,9 +824,7 @@ if [ "${MEMOH_TOOLKIT_GLIBC_ONLY:-0}" != "1" ]; then
 fi
 
 install_uv
-install_acp_packages
-install_hermes_acp_package
-install_toolkit_wrappers
+sh "$SCRIPT_DIR/install-wrappers.sh" "$OUTDIR"
 install_ca_bundle
 
 echo "Toolkit installed to $OUTDIR"

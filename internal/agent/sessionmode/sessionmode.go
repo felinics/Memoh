@@ -3,12 +3,11 @@ package sessionmode
 import "strings"
 
 const (
-	Chat      = "chat"
-	Heartbeat = "heartbeat"
-	Schedule  = "schedule"
-	Subagent  = "subagent"
-	Discuss   = "discuss"
-	ACPAgent  = "acp_agent"
+	Chat     = "chat"
+	Schedule = "schedule"
+	Subagent = "subagent"
+	Discuss  = "discuss"
+	ACPAgent = "acp_agent"
 )
 
 // IsInteractive reports whether a run mode can pause and wait for user-facing

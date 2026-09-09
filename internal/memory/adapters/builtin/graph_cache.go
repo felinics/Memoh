@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/memory/migrate"
-	memseg "github.com/memohai/memoh/internal/memory/segment"
-	"github.com/memohai/memoh/internal/memory/wikistore"
+	"github.com/felinics/memoh/internal/memory/migrate"
+	memseg "github.com/felinics/memoh/internal/memory/segment"
+	"github.com/felinics/memoh/internal/memory/wikistore"
 )
 
 // graphCacheTTL is how long a cached bot graph stays fresh before it is rebuilt
@@ -73,28 +73,41 @@ func newGraphCache() *graphCache {
 // missing, stale (older than graphCacheTTL), or if the store's content hash
 // changed since the last build.
 func (c *graphCache) getOrBuild(ctx context.Context, botID string, store wikistore.Store) (*botGraph, error) {
-	// Fast path: a fresh, hash-matching entry under a read lock.
-	c.mu.RLock()
-	g := c.graphs[botID]
-	c.mu.RUnlock()
-	if g != nil && time.Since(g.builtAt) < graphCacheTTL {
-		return g, nil
-	}
+	for {
+		c.mu.RLock()
+		g := c.graphs[botID]
+		version := c.versions[botID]
+		c.mu.RUnlock()
+		if g != nil && time.Since(g.builtAt) < graphCacheTTL {
+			return g, nil
+		}
 
-	nodes, err := store.ListNodes(ctx, botID)
-	if err != nil {
-		return nil, fmt.Errorf("graph cache: list nodes: %w", err)
-	}
-	edges, err := store.ListEdges(ctx, botID)
-	if err != nil {
-		return nil, fmt.Errorf("graph cache: list edges: %w", err)
-	}
+		nodes, err := store.ListNodes(ctx, botID)
+		if err != nil {
+			return nil, fmt.Errorf("graph cache: list nodes: %w", err)
+		}
+		edges, err := store.ListEdges(ctx, botID)
+		if err != nil {
+			return nil, fmt.Errorf("graph cache: list edges: %w", err)
+		}
+		built := buildBotGraph(nodes, edges)
 
-	built := buildBotGraph(nodes, edges)
-	c.mu.Lock()
-	c.graphs[botID] = built
-	c.mu.Unlock()
-	return built, nil
+		c.mu.Lock()
+		if c.versions[botID] != version {
+			c.mu.Unlock()
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if current := c.graphs[botID]; current != nil && time.Since(current.builtAt) < graphCacheTTL {
+			c.mu.Unlock()
+			return current, nil
+		}
+		c.graphs[botID] = built
+		c.mu.Unlock()
+		return built, nil
+	}
 }
 
 // invalidate drops the cached graph for botID so the next read rebuilds.

@@ -9,12 +9,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/settings"
-	"github.com/memohai/memoh/internal/userruntime"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/userruntime"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type botRemoteRuntimeService interface {

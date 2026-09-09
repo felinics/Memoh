@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/decision/approval"
 )
 
 func TestBuildToolApprovalPromptIncludesStableExecutionLocationName(t *testing.T) {

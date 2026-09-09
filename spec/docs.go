@@ -389,6 +389,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/user-access/candidates": {
+            "get": {
+                "description": "List grantable workspace members before the bot exists, for the create form",
+                "tags": [
+                    "bots"
+                ],
+                "summary": "Search workspace member candidates for a bot being created",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BotUserCandidateListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/acl/channel-identities": {
             "get": {
                 "description": "Search locally observed channel identities for building ACL rules",
@@ -875,19 +918,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "429": {
                         "description": "Too Many Requests",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -925,17 +980,29 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -970,19 +1037,109 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/acp-runtimes/{runtime_id}/mode": {
+            "patch": {
+                "description": "Sends the selected agent-declared mode ID unchanged to session/set_mode before the first chat message binds this runtime to a Session.",
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Set an unbound ACP runtime's mode",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Runtime ID",
+                        "name": "runtime_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Mode selection",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.acpRuntimeModeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/acpagent.RuntimeStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -1036,7 +1193,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "404": {
@@ -1048,7 +1205,13 @@ const docTemplate = `{
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "502": {
@@ -1107,6 +1270,204 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents": {
+            "get": {
+                "description": "List active and disabled non-deleted Agents attached to a bot. Direct-runtime Agents carry the workspace dependency their runtime declares.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "List a bot's Agents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.ListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Add a named Agent backed by a runtime descriptor. Omit enabled to create it enabled; pass enabled=false to hold a direct-runtime Agent back until its workspace dependency preflight passes. The response reports that dependency (dependency_id) when the runtime declares one.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Add an Agent to a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent payload",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/botagents.CreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}": {
+            "get": {
+                "description": "Get one Agent attached to a bot, including the workspace dependency its runtime declares (omitted for runtimes without one).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Get a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Soft-delete an Agent while preserving existing session bindings",
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Delete a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
@@ -1119,11 +1480,75 @@ const docTemplate = `{
                     "409": {
                         "description": "Conflict",
                         "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Update an Agent's name, availability, or runtime configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "Update a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent changes",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/botagents.UpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/botagents.BotAgent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "502": {
-                        "description": "Bad Gateway",
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -1131,49 +1556,12 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/acp/claude-code/oauth/authorize": {
-            "get": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Start Claude Code ACP OAuth authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthAuthorizeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/claude-code/oauth/exchange": {
+        "/bots/{bot_id}/agents/{id}/codex/login/device/authorize": {
             "post": {
                 "tags": [
-                    "acp"
+                    "external-agents"
                 ],
-                "summary": "Exchange Claude Code OAuth code for an ACP token",
+                "summary": "Start a ChatGPT device-code login for the direct codex runtime",
                 "parameters": [
                     {
                         "type": "string",
@@ -1183,48 +1571,9 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "OAuth exchange request",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthExchangeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/claude-code/oauth/status": {
-            "get": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Get Claude Code ACP OAuth status",
-                "parameters": [
-                    {
                         "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
+                        "description": "Bot Agent ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -1233,81 +1582,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ACPClaudeCodeOAuthStatus"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/authorize": {
-            "get": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Start Codex ACP OAuth authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthAuthorizeResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/device/authorize": {
-            "post": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Start Codex ACP device code authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceAuthorizeResponse"
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginAuthorizeResponse"
                         }
                     },
                     "400": {
@@ -1322,27 +1597,21 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
             }
         },
-        "/bots/{bot_id}/acp/codex/oauth/device/cancel": {
+        "/bots/{bot_id}/agents/{id}/codex/login/device/cancel": {
             "post": {
                 "tags": [
-                    "acp"
+                    "external-agents"
                 ],
-                "summary": "Cancel Codex ACP device code authorization",
+                "summary": "Cancel a pending codex device-code login",
                 "parameters": [
                     {
                         "type": "string",
@@ -1352,20 +1621,77 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Device authorization session",
-                        "name": "request",
+                        "description": "Login reference",
+                        "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest"
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollRequest"
                         }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/codex/login/device/poll": {
+            "post": {
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Poll a pending codex device-code login",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Login reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollRequest"
+                        }
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse"
+                            "$ref": "#/definitions/externalagent.CodexDeviceLoginPollResponse"
                         }
                     },
                     "400": {
@@ -1379,91 +1705,28 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
                     }
                 }
             }
         },
-        "/bots/{bot_id}/acp/codex/oauth/device/poll": {
-            "post": {
-                "tags": [
-                    "acp"
-                ],
-                "summary": "Poll Codex ACP device code authorization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Device authorization session",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceSessionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthDeviceStatusResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/acp/codex/oauth/status": {
+        "/bots/{bot_id}/agents/{id}/credential": {
             "get": {
                 "tags": [
-                    "acp"
+                    "agent-credentials"
                 ],
-                "summary": "Get Codex ACP OAuth status",
+                "summary": "Get the credential attached to a Bot Agent",
                 "parameters": [
                     {
                         "type": "string",
                         "description": "Bot ID",
                         "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -1472,11 +1735,146 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ACPCodexOAuthStatus"
+                            "$ref": "#/definitions/agentcredential.PublicCredential"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Creates an encrypted credential from the submitted secret and",
+                "tags": [
+                    "agent-credentials"
+                ],
+                "summary": "Attach a credential to a Bot Agent, replacing any previous one",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Secret",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.agentCredentialPutRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/agentcredential.PublicCredential"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "agent-credentials"
+                ],
+                "summary": "Disconnect a Bot Agent's credential",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/agents/{id}/models": {
+            "get": {
+                "tags": [
+                    "bot-agents"
+                ],
+                "summary": "List models available to a bot Agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/external.ModelCatalog"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -1484,7 +1882,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -3572,6 +3976,12 @@ const docTemplate = `{
                         "name": "bot_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID",
+                        "name": "workspace_target_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3649,10 +4059,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "503": {
@@ -3703,6 +4119,12 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
@@ -3761,6 +4183,12 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
@@ -4070,6 +4498,724 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/dependencies": {
+            "get": {
+                "description": "Every catalog dependency (image-provided runtimes, managed agent CLIs and tools) reconciled with its installation record and, when the workspace is running, with what is actually installed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "List workspace dependencies",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Refresh definitions and workspace discovery",
+                        "name": "refresh",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/check-updates": {
+            "post": {
+                "description": "Re-discovers the workspace and runs the upstream update check of every installed tool dependency, then returns the refreshed list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Check workspace dependencies for updates",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/preflight": {
+            "post": {
+                "description": "Reports for each requested dependency whether a copy is installed, whatever its version. Never starts the workspace: when it is not running, items is empty and workspace_state says why.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Check whether dependencies are ready",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Dependencies to check",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyPreflightRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyPreflightResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}": {
+            "delete": {
+                "description": "Runs the catalog remove script, deletes the generated shims, drops the installation record, and streams the output. For a dependency the image ships this removes the managed overlay only; the image copy becomes the one in effect again.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Remove a workspace dependency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Prepared definition revision (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}/install": {
+            "post": {
+                "description": "Runs the catalog install script and streams its output. The optional body names the version to install; without one the script installs the latest version (or the manifest pin). For a dependency the image already ships this installs a managed overlay that takes precedence over the image copy. A stopped native workspace is started first. Events: started, log, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Install a workspace dependency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Version to install (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}/reinstall": {
+            "post": {
+                "description": "Runs the catalog reinstall script, or remove followed by install, and streams the output. The optional body names the version to install; without one the script picks the latest version (or the manifest pin).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Reinstall a workspace dependency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Version to install (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}/rollback": {
+            "post": {
+                "description": "Switches the dependency back to the previous version kept in the workspace. A pure data operation: nothing is downloaded and no log is streamed.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Roll a workspace dependency back to its previous version",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyOperationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}/script": {
+            "get": {
+                "description": "The exact stdin text the workspace shell receives, prelude included, with the command, time budget, and environment the runner uses. Scripts never touch the workspace disk, so this is the only way to inspect them.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Show the script a dependency action would run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "install",
+                            "update",
+                            "remove",
+                            "reinstall",
+                            "rollback"
+                        ],
+                        "type": "string",
+                        "default": "install",
+                        "description": "Action",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Keep a previously prepared definition revision",
+                        "name": "definition_revision",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyScriptResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}/update": {
+            "post": {
+                "description": "Runs the catalog update script (or the install script when the manifest has none) and streams its output. The optional body names the version to update to; without one the script picks the latest version (or the manifest pin). The previous version is kept for rollback.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Update a workspace dependency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Version to update to (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/email-bindings": {
             "get": {
                 "produces": [
@@ -4339,91 +5485,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/heartbeat/logs": {
-            "get": {
-                "description": "List heartbeat execution logs for a bot",
-                "tags": [
-                    "heartbeat"
-                ],
-                "summary": "List heartbeat logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Limit",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "default": 0,
-                        "description": "Offset",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/heartbeat.ListLogsResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete all heartbeat execution logs for a bot",
-                "tags": [
-                    "heartbeat"
-                ],
-                "summary": "Delete heartbeat logs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/hooks/events": {
             "get": {
                 "tags": [
@@ -4526,14 +5587,6 @@ const docTemplate = `{
                     "mcp"
                 ],
                 "summary": "List MCP connections",
-                "parameters": [
-                    {
-                        "type": "boolean",
-                        "description": "Include plugin-managed hidden MCP connections",
-                        "name": "include_managed",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4588,7 +5641,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -4639,6 +5692,87 @@ const docTemplate = `{
                 "responses": {
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp-ops/export": {
+            "get": {
+                "description": "Export all MCP connections for a bot in standard mcpServers format.",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Export MCP connections",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ExportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/mcp-ops/import": {
+            "put": {
+                "description": "Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.",
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Import MCP connections",
+                "parameters": [
+                    {
+                        "description": "mcpServers dict",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ImportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mcp.ListResponse"
+                        }
                     },
                     "400": {
                         "description": "Bad Request",
@@ -4774,87 +5908,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/mcp/export": {
-            "get": {
-                "description": "Export all MCP connections for a bot in standard mcpServers format.",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Export MCP connections",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ExportResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/mcp/import": {
-            "put": {
-                "description": "Batch import MCP connections from standard mcpServers format. Existing connections (matched by name) get config updated with is_active preserved. New connections are created as active.",
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Import MCP connections",
-                "parameters": [
-                    {
-                        "description": "mcpServers dict",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ImportRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/mcp/{id}": {
             "get": {
                 "description": "Get a MCP connection by ID",
@@ -4875,7 +5928,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -4932,7 +5985,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                            "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                         }
                     },
                     "400": {
@@ -6201,408 +7254,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/plugins": {
-            "get": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "List bot plugins",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.ListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}": {
-            "get": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Get bot plugin installation",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Purge bot plugin installation",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/disable": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Disable bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/enable": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Enable bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/oauth/authorize": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Start managed OAuth for a bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "OAuth authorize request",
-                        "name": "payload",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.OAuthAuthorizeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/mcp.AuthorizeResult"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/oauth/status": {
-            "get": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Refresh managed OAuth status for a bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/plugins/{id}/uninstall": {
-            "post": {
-                "tags": [
-                    "plugins"
-                ],
-                "summary": "Uninstall bot plugin",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Plugin installation ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/quick-actions/execute": {
             "post": {
                 "description": "Runs a typed Web quick action such as help or skill.list and returns a command_result or command_error envelope.",
@@ -6669,6 +7320,15 @@ const docTemplate = `{
                     "schedule"
                 ],
                 "summary": "List schedules",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -6697,6 +7357,13 @@ const docTemplate = `{
                 ],
                 "summary": "Create schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "description": "Schedule payload",
                         "name": "payload",
@@ -6824,6 +7491,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "Schedule ID",
                         "name": "id",
                         "in": "path",
@@ -6864,6 +7538,13 @@ const docTemplate = `{
                 ],
                 "summary": "Update schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Schedule ID",
@@ -6909,6 +7590,13 @@ const docTemplate = `{
                 ],
                 "summary": "Delete schedule",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Schedule ID",
@@ -7108,7 +7796,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/events": {
             "get": {
-                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as heartbeat, schedule, subagent.",
+                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as schedule and subagent.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -7146,6 +7834,43 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/model-preference-seed": {
+            "get": {
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Welcome composer model seed",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.modelPreferenceSeedResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7295,6 +8020,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
                     }
                 }
             }
@@ -7331,19 +8062,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -7379,19 +8122,115 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/sessions/{session_id}/acp-runtime/mode": {
+            "patch": {
+                "description": "Sends the selected agent-declared mode ID unchanged to session/set_mode. The selection applies only to this live session.",
+                "tags": [
+                    "acp"
+                ],
+                "summary": "Set ACP session runtime mode",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "ACP session mode selection",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.acpRuntimeModeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/acpagent.RuntimeStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -7444,13 +8283,25 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "502": {
@@ -7509,13 +8360,25 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "502": {
@@ -7572,6 +8435,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/context-lifecycle": {
+            "get": {
+                "description": "List run-keyed context lifecycle snapshots for a chat session, newest first, with page-scoped aggregate totals (cache read/write tokens, drop reasons, mutation kinds). Aggregates cover only the returned page; has_more reports older turns. Sessions predating run lifecycle persistence fall back to legacy assistant metadata (legacy_source). Per-fragment selection_decisions are never returned; each turn's selection trace carries their rolled-up counts and token costs",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get session context lifecycle",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum number of turns to return (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ContextLifecycleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/fork": {
             "post": {
                 "tags": [
@@ -7594,7 +8526,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Fork source message",
+                        "description": "Fork source turn",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -7765,13 +8697,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -7810,13 +8748,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -7904,12 +8848,12 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/supermarket/install-plugin": {
+        "/bots/{bot_id}/supermarket/install-package": {
             "post": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Install plugin from supermarket to bot",
+                "summary": "Install an immutable Skill Package release to a bot workspace",
                 "parameters": [
                     {
                         "type": "string",
@@ -7919,12 +8863,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Install plugin request",
+                        "description": "Install Package request",
                         "name": "payload",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.InstallPluginRequest"
+                            "$ref": "#/definitions/handlers.InstallPackageRequest"
                         }
                     }
                 ],
@@ -7932,7 +8876,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/plugins.Installation"
+                            "$ref": "#/definitions/handlers.InstallRegistryPackageResponse"
                         }
                     },
                     "400": {
@@ -7944,11 +8888,63 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/supermarket/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages installed for a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/skillpackages.Installation"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7956,12 +8952,12 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/supermarket/install-skill": {
-            "post": {
+        "/bots/{bot_id}/supermarket/packages/{installation_id}": {
+            "delete": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Install skill from supermarket to bot workspace",
+                "summary": "Uninstall a Skill Package from a bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -7971,39 +8967,22 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Install skill request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.InstallSkillRequest"
-                        }
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/supermarket.UninstallPackageResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -8013,7 +8992,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/token-usage": {
             "get": {
-                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, heartbeat, and schedule session types, with optional model filter and per-model breakdown",
+                "description": "Get daily aggregated token usage for a bot, split by chat, discuss, and schedule session types, with optional model filter and per-model breakdown",
                 "tags": [
                     "token-usage"
                 ],
@@ -8048,7 +9027,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     }
@@ -8121,7 +9100,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
                         "name": "session_type",
                         "in": "query"
                     },
@@ -8210,19 +9189,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -8271,19 +9262,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -12989,12 +13992,55 @@ const docTemplate = `{
                 }
             }
         },
-        "/supermarket/plugins": {
+        "/supermarket/artifacts/icon/{digest}": {
             "get": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "List plugins from supermarket",
+                "summary": "Get a mirrored Skill icon",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SHA-256 digest",
+                        "name": "digest",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages across supermarket Registries",
                 "parameters": [
                     {
                         "type": "string",
@@ -13004,7 +14050,19 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by tag",
+                        "description": "Registry ID",
+                        "name": "registry",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
                         "name": "tag",
                         "in": "query"
                     },
@@ -13019,13 +14077,25 @@ const docTemplate = `{
                         "description": "Items per page",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketPluginListResponse"
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "502": {
@@ -13037,17 +14107,39 @@ const docTemplate = `{
                 }
             }
         },
-        "/supermarket/plugins/{id}": {
+        "/supermarket/registries": {
             "get": {
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "Get plugin detail from supermarket",
+                "summary": "List Skill Registries from supermarket",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketRegistryListResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/categories": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List categories in a Skill Registry",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Plugin ID",
-                        "name": "id",
+                        "description": "Registry ID",
+                        "name": "registry_id",
                         "in": "path",
                         "required": true
                     }
@@ -13056,7 +14148,256 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/plugins.Manifest"
+                            "$ref": "#/definitions/handlers.SupermarketSkillCategoryListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Skill Packages in one Registry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages/{package_id}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get a namespaced Skill Package",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageDescriptor"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get an immutable Skill Package release",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package revision",
+                        "name": "revision",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketSkillPackageDescriptor"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "Get a namespaced Registry Skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skill_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "404": {
@@ -13079,7 +14420,7 @@ const docTemplate = `{
                 "tags": [
                     "supermarket"
                 ],
-                "summary": "List skills from supermarket",
+                "summary": "List Skills across supermarket Registries",
                 "parameters": [
                     {
                         "type": "string",
@@ -13089,7 +14430,25 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by tag",
+                        "description": "Registry ID",
+                        "name": "registry",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package ID",
+                        "name": "package",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Category ID",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact tag",
                         "name": "tag",
                         "in": "query"
                     },
@@ -13104,72 +14463,25 @@ const docTemplate = `{
                         "description": "Items per page",
                         "name": "limit",
                         "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketSkillListResponse"
-                        }
                     },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/supermarket/skills/{id}": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "Get skill detail from supermarket",
-                "parameters": [
                     {
                         "type": "string",
-                        "description": "Skill ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
+                        "description": "Sort order",
+                        "name": "sort",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketSkillEntry"
+                            "$ref": "#/definitions/handlers.SupermarketCatalogSkillListResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/supermarket/tags": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "List all tags from supermarket",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketTagsResponse"
                         }
                     },
                     "502": {
@@ -13931,6 +15243,38 @@ const docTemplate = `{
                 }
             }
         },
+        "/users/me/computer-access": {
+            "get": {
+                "description": "Every live Remote Runtime mount held by the caller's bots, across all of their runtimes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user-runtimes"
+                ],
+                "summary": "List the caller's bot-to-Computer access grants",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspace.WorkspaceTargetGrantsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/users/me/password": {
             "put": {
                 "description": "Update current user password with current password check",
@@ -14564,6 +15908,86 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/workspace-dependencies/catalog": {
+            "get": {
+                "description": "Every dependency the catalog declares, as its manifest describes it: what it provides, where it installs, whether it can be installed and whether the workspace image ships a baseline copy. Reads no workspace and needs no bot; the Supermarket shows it before a bot is chosen.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "List the workspace dependency catalog",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Refresh the remote catalog",
+                        "name": "refresh",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspace-dependencies/icons/{digest}": {
+            "get": {
+                "produces": [
+                    "image/svg+xml"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Read a cached verified dependency icon",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SHA-256 digest",
+                        "name": "digest",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -14926,11 +16350,20 @@ const docTemplate = `{
                 "agent_id": {
                     "type": "string"
                 },
+                "available_commands": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/acpclient.AvailableCommandInfo"
+                    }
+                },
                 "default_model_id": {
                     "type": "string"
                 },
                 "models": {
                     "$ref": "#/definitions/acpclient.ModelState"
+                },
+                "modes": {
+                    "$ref": "#/definitions/acpclient.ModeState"
                 },
                 "project_path": {
                     "type": "string"
@@ -14946,6 +16379,51 @@ const docTemplate = `{
                 },
                 "state": {
                     "type": "string"
+                }
+            }
+        },
+        "acpclient.AvailableCommandInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "input_hint": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "acpclient.ModeInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "acpclient.ModeState": {
+            "type": "object",
+            "properties": {
+                "available_modes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/acpclient.ModeInfo"
+                    }
+                },
+                "current_mode_id": {
+                    "type": "string"
+                },
+                "supported": {
+                    "type": "boolean"
                 }
             }
         },
@@ -15452,6 +16930,45 @@ const docTemplate = `{
                 }
             }
         },
+        "agentcredential.PublicCredential": {
+            "type": "object",
+            "properties": {
+                "account_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "auth_kind": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "credential_version": {
+                    "type": "integer"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "owner_user_id": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "revoked": {
+                    "type": "boolean"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "apperror.Problem": {
             "type": "object",
             "required": [
@@ -15834,6 +17351,104 @@ const docTemplate = `{
                 },
                 "lang": {
                     "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.BotAgent": {
+            "type": "object",
+            "properties": {
+                "agent_credential_id": {
+                    "description": "AgentCredentialID points at the encrypted credential this instance uses;\nempty means not connected (legacy metadata path).",
+                    "type": "string"
+                },
+                "bot_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "type": "string"
+                },
+                "dependency": {
+                    "description": "Dependency comes from the runtime driver at read time. It is not\npersisted and is omitted for runtimes without a declaration (ACP).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/botagents.DependencyRequirement"
+                        }
+                    ]
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.CreateRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enabled defaults to true when omitted. The web passes false for direct\nruntimes so the dependency preflight runs before the agent goes live.",
+                    "type": "boolean"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.DependencyRequirement": {
+            "type": "object",
+            "properties": {
+                "dependency_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "botagents.ListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/botagents.BotAgent"
+                    }
+                }
+            }
+        },
+        "botagents.UpdateRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "name": {
                     "type": "string"
@@ -17271,6 +18886,640 @@ const docTemplate = `{
                 }
             }
         },
+        "contextfrag.CacheClass": {
+            "type": "string",
+            "enum": [
+                "stable",
+                "dynamic",
+                "never"
+            ],
+            "x-enum-varnames": [
+                "CacheStable",
+                "CacheDynamic",
+                "CacheNever"
+            ]
+        },
+        "contextfrag.CacheComparison": {
+            "type": "object",
+            "properties": {
+                "first_step_cache_read_tokens": {
+                    "type": "integer"
+                },
+                "outcome": {
+                    "type": "string"
+                },
+                "prev_age_ms": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.CacheUsageRecord": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_1h_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_5m_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "no_cache_tokens": {
+                    "type": "integer"
+                },
+                "step_index": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContentRange": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextBudgetPlan": {
+            "type": "object",
+            "properties": {
+                "actual_system_cost": {
+                    "type": "integer"
+                },
+                "current_request_cost": {
+                    "type": "integer"
+                },
+                "estimator": {
+                    "type": "string"
+                },
+                "estimator_safety_factor_percent": {
+                    "type": "integer"
+                },
+                "history_budget": {
+                    "type": "integer"
+                },
+                "output_reserve": {
+                    "type": "integer"
+                },
+                "output_reserve_resolution": {
+                    "type": "string"
+                },
+                "system_budget": {
+                    "type": "integer"
+                },
+                "tool_defs_cost": {
+                    "type": "integer"
+                },
+                "window": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextRef": {
+            "type": "object",
+            "properties": {
+                "content_hash": {
+                    "type": "string"
+                },
+                "durability": {
+                    "$ref": "#/definitions/contextfrag.RefDurability"
+                },
+                "hash_algo": {
+                    "type": "string"
+                },
+                "hash_scope": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "range": {
+                    "$ref": "#/definitions/contextfrag.ContentRange"
+                },
+                "schema": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.Kind": {
+            "type": "string",
+            "enum": [
+                "system_prompt",
+                "system_policy",
+                "bot_identity",
+                "workspace_instruction",
+                "platform_identity",
+                "tool_usage",
+                "conversation_event",
+                "current_user_message",
+                "attachment_ref",
+                "native_image",
+                "skills_catalog",
+                "hook_context",
+                "injected_message",
+                "background_summary",
+                "runtime_context",
+                "memory_recall",
+                "conversation_summary"
+            ],
+            "x-enum-varnames": [
+                "KindSystemPrompt",
+                "KindSystemPolicy",
+                "KindBotIdentity",
+                "KindWorkspaceInstruction",
+                "KindPlatformIdentity",
+                "KindToolUsage",
+                "KindConversationEvent",
+                "KindCurrentUserMessage",
+                "KindAttachmentRef",
+                "KindNativeImage",
+                "KindSkillsCatalog",
+                "KindHookContext",
+                "KindInjectedMessage",
+                "KindBackgroundSummary",
+                "KindRuntimeContext",
+                "KindMemoryRecall",
+                "KindConversationSummary"
+            ]
+        },
+        "contextfrag.KindBreakdown": {
+            "type": "object",
+            "properties": {
+                "fragments": {
+                    "type": "integer"
+                },
+                "images": {
+                    "type": "integer"
+                },
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.Kind"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.LifecycleSnapshot": {
+            "type": "object",
+            "properties": {
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "breakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.KindBreakdown"
+                    }
+                },
+                "budget_plan": {
+                    "$ref": "#/definitions/contextfrag.ContextBudgetPlan"
+                },
+                "cache_comparison": {
+                    "$ref": "#/definitions/contextfrag.CacheComparison"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_usage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.CacheUsageRecord"
+                    }
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "client_type": {
+                    "type": "string"
+                },
+                "counts": {
+                    "$ref": "#/definitions/contextfrag.ManifestCounts"
+                },
+                "final_input_hash": {
+                    "type": "string"
+                },
+                "loop_selection_mode": {
+                    "type": "string"
+                },
+                "memory_recall": {
+                    "$ref": "#/definitions/contextfrag.MemoryRecallTrace"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "mutations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.MutationRecord"
+                    }
+                },
+                "selection": {
+                    "$ref": "#/definitions/contextfrag.SelectionTrace"
+                },
+                "selection_decisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.SelectionDecision"
+                    }
+                },
+                "stable_message_count": {
+                    "type": "integer"
+                },
+                "stable_prefix_hash": {
+                    "type": "string"
+                },
+                "stable_prefix_token_estimate": {
+                    "type": "integer"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.StepSnapshot"
+                    }
+                },
+                "tool_defs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.ToolDefAccounting"
+                    }
+                },
+                "trust_breakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.TrustBreakdown"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "view": {
+                    "$ref": "#/definitions/contextfrag.ManifestView"
+                }
+            }
+        },
+        "contextfrag.ManifestCounts": {
+            "type": "object",
+            "properties": {
+                "fragments": {
+                    "type": "integer"
+                },
+                "images": {
+                    "type": "integer"
+                },
+                "messages": {
+                    "type": "integer"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ManifestView": {
+            "type": "string",
+            "enum": [
+                "run_config_pre_provider",
+                "external_agent_prompt"
+            ],
+            "x-enum-varnames": [
+                "ViewRunConfigPreProvider",
+                "ViewExternalAgentPrompt"
+            ]
+        },
+        "contextfrag.MemoryRecallQueryTrace": {
+            "type": "object",
+            "properties": {
+                "recent_messages": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "truncated": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "contextfrag.MemoryRecallResultTrace": {
+            "type": "object",
+            "properties": {
+                "context_bytes": {
+                    "type": "integer"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "refs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "contextfrag.MemoryRecallTrace": {
+            "type": "object",
+            "properties": {
+                "cache_state": {
+                    "type": "string"
+                },
+                "fallback_reason": {
+                    "type": "string"
+                },
+                "memory_version": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "query": {
+                    "$ref": "#/definitions/contextfrag.MemoryRecallQueryTrace"
+                },
+                "result": {
+                    "$ref": "#/definitions/contextfrag.MemoryRecallResultTrace"
+                },
+                "retrieval_mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "contextfrag.MutationKind": {
+            "type": "string",
+            "enum": [
+                "before_model_call_hook",
+                "background_summary",
+                "mid_task_prune",
+                "loop_step_reselection",
+                "injected_message",
+                "context_view_fallback",
+                "context_budget_failure",
+                "context_budget_disabled",
+                "capability_gate",
+                "read_media",
+                "renderer_prune",
+                "mid_stream_retry",
+                "run_abort_observed"
+            ],
+            "x-enum-varnames": [
+                "MutationBeforeModelCallHook",
+                "MutationBackgroundSummary",
+                "MutationMidTaskPrune",
+                "MutationLoopStepReselection",
+                "MutationInjectedMessage",
+                "MutationContextViewFallback",
+                "MutationContextBudgetFailure",
+                "MutationContextBudgetDisabled",
+                "MutationCapabilityGate",
+                "MutationReadMedia",
+                "MutationRendererPrune",
+                "MutationMidStreamRetry",
+                "MutationRunAbortObserved"
+            ]
+        },
+        "contextfrag.MutationRecord": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.MutationKind"
+                }
+            }
+        },
+        "contextfrag.RefDurability": {
+            "type": "string",
+            "enum": [
+                "durable",
+                "synthetic",
+                "debug"
+            ],
+            "x-enum-varnames": [
+                "RefDurable",
+                "RefSynthetic",
+                "RefDebug"
+            ]
+        },
+        "contextfrag.RetentionTier": {
+            "type": "string",
+            "enum": [
+                "",
+                "required",
+                "preferred",
+                "optional"
+            ],
+            "x-enum-varnames": [
+                "RetentionUnspecified",
+                "RetentionRequired",
+                "RetentionPreferred",
+                "RetentionOptional"
+            ]
+        },
+        "contextfrag.SelectionDecision": {
+            "type": "object",
+            "properties": {
+                "cache_class": {
+                    "$ref": "#/definitions/contextfrag.CacheClass"
+                },
+                "decision": {
+                    "$ref": "#/definitions/contextfrag.SelectionDecisionKind"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_count": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "ref": {
+                    "$ref": "#/definitions/contextfrag.ContextRef"
+                },
+                "retention_tier": {
+                    "$ref": "#/definitions/contextfrag.RetentionTier"
+                },
+                "slot": {
+                    "$ref": "#/definitions/contextfrag.Slot"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.SelectionDecisionKind": {
+            "type": "string",
+            "enum": [
+                "selected",
+                "trimmed",
+                "dropped"
+            ],
+            "x-enum-varnames": [
+                "DecisionSelected",
+                "DecisionTrimmed",
+                "DecisionDropped"
+            ]
+        },
+        "contextfrag.SelectionTrace": {
+            "type": "object",
+            "properties": {
+                "drop_reason_tokens": {
+                    "description": "DropReasonTokens is the token estimate lost per drop reason, rolled up\nwhen the snapshot is built so readers never need the per-fragment audit.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dropped": {
+                    "type": "integer"
+                },
+                "selected": {
+                    "type": "integer"
+                },
+                "trimmed": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.Slot": {
+            "type": "string",
+            "enum": [
+                "system",
+                "before_history",
+                "history",
+                "after_history_before_current",
+                "current_user",
+                "after_current"
+            ],
+            "x-enum-varnames": [
+                "SlotSystem",
+                "SlotBeforeHistory",
+                "SlotHistory",
+                "SlotAfterHistoryBeforeCurrent",
+                "SlotCurrentUser",
+                "SlotAfterCurrent"
+            ]
+        },
+        "contextfrag.StepSnapshot": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dropped": {
+                    "type": "integer"
+                },
+                "post_prepare_input_hash": {
+                    "type": "string"
+                },
+                "reselection_applied": {
+                    "type": "boolean"
+                },
+                "reselection_outcome": {
+                    "type": "string"
+                },
+                "step_index": {
+                    "type": "integer"
+                },
+                "truncated": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ToolDefAccounting": {
+            "type": "object",
+            "properties": {
+                "bytes": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.TrustBreakdown": {
+            "type": "object",
+            "properties": {
+                "fragments": {
+                    "type": "integer"
+                },
+                "images": {
+                    "type": "integer"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                },
+                "trust": {
+                    "$ref": "#/definitions/contextfrag.TrustLevel"
+                }
+            }
+        },
+        "contextfrag.TrustLevel": {
+            "type": "string",
+            "enum": [
+                "system",
+                "workspace",
+                "user",
+                "external"
+            ],
+            "x-enum-varnames": [
+                "TrustSystem",
+                "TrustWorkspace",
+                "TrustUser",
+                "TrustExternal"
+            ]
+        },
         "conversation.SkillActivation": {
             "type": "object",
             "properties": {
@@ -17425,6 +19674,13 @@ const docTemplate = `{
                 "approval": {
                     "$ref": "#/definitions/conversation.UIToolApproval"
                 },
+                "args": {
+                    "description": "Args are the machine-readable parameters of a notice block: the string\nvalues of the runtime_notice event metadata (dep_id and install_task_id\nfor a workspace dependency notice, for instance). The client renders\nactions from them instead of parsing Content.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "attachments": {
                     "type": "array",
                     "items": {
@@ -17433,6 +19689,9 @@ const docTemplate = `{
                 },
                 "background_task": {
                     "$ref": "#/definitions/conversation.UIBackgroundTask"
+                },
+                "code": {
+                    "type": "string"
                 },
                 "content": {
                     "type": "string"
@@ -17451,6 +19710,9 @@ const docTemplate = `{
                 "progress": {
                     "type": "array",
                     "items": {}
+                },
+                "reasoning_timing": {
+                    "$ref": "#/definitions/conversation.UIReasoningTiming"
                 },
                 "running": {
                     "type": "boolean"
@@ -17472,14 +19734,26 @@ const docTemplate = `{
                 "text",
                 "reasoning",
                 "tool",
-                "attachments"
+                "attachments",
+                "error",
+                "notice"
             ],
             "x-enum-varnames": [
                 "UIMessageText",
                 "UIMessageReasoning",
                 "UIMessageTool",
-                "UIMessageAttachments"
+                "UIMessageAttachments",
+                "UIMessageError",
+                "UIMessageNotice"
             ]
+        },
+        "conversation.UIReasoningTiming": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "type": "integer"
+                }
+            }
         },
         "conversation.UIReplyRef": {
             "type": "object",
@@ -17513,10 +19787,34 @@ const docTemplate = `{
                 "decision_reason": {
                     "type": "string"
                 },
+                "options": {
+                    "description": "Options are the agent-provided permission options, verbatim; the client\nrenders one action per option and answers with the chosen option id.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/conversation.UIToolApprovalOption"
+                    }
+                },
+                "selected_option_id": {
+                    "type": "string"
+                },
                 "short_id": {
                     "type": "integer"
                 },
                 "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "conversation.UIToolApprovalOption": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }
@@ -17892,6 +20190,110 @@ const docTemplate = `{
                 }
             }
         },
+        "external.ModelCatalog": {
+            "type": "object",
+            "properties": {
+                "configured_model_id": {
+                    "type": "string"
+                },
+                "configured_reasoning_effort": {
+                    "type": "string"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/external.ModelOption"
+                    }
+                }
+            }
+        },
+        "external.ModelOption": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "boolean"
+                },
+                "default_reasoning_effort": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reasoning_efforts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/external.ReasoningEffortOption"
+                    }
+                }
+            }
+        },
+        "external.ReasoningEffortOption": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.CodexDeviceLoginAuthorizeResponse": {
+            "type": "object",
+            "required": [
+                "login_id",
+                "user_code",
+                "verification_url"
+            ],
+            "properties": {
+                "login_id": {
+                    "type": "string"
+                },
+                "user_code": {
+                    "type": "string"
+                },
+                "verification_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.CodexDeviceLoginPollRequest": {
+            "type": "object",
+            "required": [
+                "login_id"
+            ],
+            "properties": {
+                "login_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "externalagent.CodexDeviceLoginPollResponse": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "pending",
+                        "success",
+                        "error",
+                        "unknown"
+                    ]
+                }
+            }
+        },
         "fetchproviders.CreateRequest": {
             "type": "object",
             "properties": {
@@ -18014,7 +20416,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_memohai_memoh_internal_mcp.Connection": {
+        "github_com_felinics_memoh_internal_mcp.Connection": {
             "type": "object",
             "properties": {
                 "auth_type": {
@@ -18039,16 +20441,6 @@ const docTemplate = `{
                 "last_probed_at": {
                     "type": "string"
                 },
-                "managed_by_plugin_installation_id": {
-                    "type": "string"
-                },
-                "managed_resource_key": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
                 "name": {
                     "type": "string"
                 },
@@ -18069,124 +20461,6 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
-                },
-                "visible": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "handlers.ACPClaudeCodeOAuthAuthorizeResponse": {
-            "type": "object",
-            "properties": {
-                "auth_url": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPClaudeCodeOAuthExchangeRequest": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPClaudeCodeOAuthStatus": {
-            "type": "object",
-            "properties": {
-                "configured": {
-                    "type": "boolean"
-                },
-                "has_token": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthAuthorizeResponse": {
-            "type": "object",
-            "properties": {
-                "auth_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthDeviceAuthorizeResponse": {
-            "type": "object",
-            "properties": {
-                "expires_at": {
-                    "type": "string"
-                },
-                "interval_seconds": {
-                    "type": "integer"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "user_code": {
-                    "type": "string"
-                },
-                "verification_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthDeviceSessionRequest": {
-            "type": "object",
-            "required": [
-                "session_id"
-            ],
-            "properties": {
-                "session_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthDeviceStatusResponse": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "error": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "has_token": {
-                    "type": "boolean"
-                },
-                "interval_seconds": {
-                    "type": "integer"
-                },
-                "next_poll_after": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.ACPCodexOAuthStatus": {
-            "type": "object",
-            "properties": {
-                "account_id": {
-                    "type": "string"
-                },
-                "callback_url": {
-                    "type": "string"
-                },
-                "configured": {
-                    "type": "boolean"
-                },
-                "has_token": {
-                    "type": "boolean"
                 }
             }
         },
@@ -18354,6 +20628,17 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.CompactionInfo": {
+            "type": "object",
+            "properties": {
+                "auto_tokens": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
                 }
             }
         },
@@ -18537,11 +20822,112 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.ContextLifecycleAggregates": {
+            "type": "object",
+            "properties": {
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "mutation_kinds": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "total_cache_read_tokens": {
+                    "type": "integer"
+                },
+                "total_cache_write_tokens": {
+                    "type": "integer"
+                },
+                "turns": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.ContextLifecycleResponse": {
+            "type": "object",
+            "properties": {
+                "aggregate_scope": {
+                    "description": "AggregateScope is always \"returned_page\": aggregates cover the returned\nturns, never the whole session.",
+                    "type": "string"
+                },
+                "aggregates": {
+                    "$ref": "#/definitions/handlers.ContextLifecycleAggregates"
+                },
+                "has_more": {
+                    "description": "HasMore reports whether older lifecycle turns exist beyond this page.",
+                    "type": "boolean"
+                },
+                "legacy_history_may_exist": {
+                    "description": "LegacyHistoryMayExist reports that pre-run-table assistant metadata also\nexists for this session while the run-keyed table served the page, so\nthis response does not cover the session's full history era.",
+                    "type": "boolean"
+                },
+                "legacy_source": {
+                    "description": "LegacySource reports that turns were recovered from pre-run-table\nassistant metadata instead of the run-keyed lifecycle table.",
+                    "type": "boolean"
+                },
+                "limit": {
+                    "description": "Limit is the page bound the turns and aggregates were computed over.",
+                    "type": "integer"
+                },
+                "turns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ContextLifecycleTurn"
+                    }
+                }
+            }
+        },
+        "handlers.ContextLifecycleTurn": {
+            "type": "object",
+            "properties": {
+                "assistant_message_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "snapshot": {
+                    "$ref": "#/definitions/contextfrag.LifecycleSnapshot"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.ContextUsage": {
             "type": "object",
             "properties": {
+                "breakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.KindBreakdown"
+                    }
+                },
+                "budget_plan": {
+                    "$ref": "#/definitions/contextfrag.ContextBudgetPlan"
+                },
+                "compaction": {
+                    "$ref": "#/definitions/handlers.CompactionInfo"
+                },
                 "context_window": {
                     "type": "integer"
+                },
+                "tool_defs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ToolDefBucket"
+                    }
                 },
                 "used_tokens": {
                     "type": "integer"
@@ -19018,24 +21404,101 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.InstallPluginRequest": {
+        "handlers.InstallPackageRequest": {
             "type": "object",
+            "required": [
+                "package_id",
+                "registry_id",
+                "revision"
+            ],
             "properties": {
-                "plugin_id": {
+                "package_id": {
                     "type": "string"
                 },
-                "variables": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
                 }
             }
         },
-        "handlers.InstallSkillRequest": {
+        "handlers.InstallRegistryPackageResponse": {
             "type": "object",
+            "required": [
+                "installation",
+                "ok",
+                "package_id",
+                "registry_id",
+                "revision",
+                "skills",
+                "workspace_target_id"
+            ],
             "properties": {
+                "installation": {
+                    "$ref": "#/definitions/skillpackages.Installation"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.InstallRegistrySkillResponse"
+                    }
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.InstallRegistrySkillResponse": {
+            "type": "object",
+            "required": [
+                "artifact_digest",
+                "files_written",
+                "install_id",
+                "ok",
+                "package_id",
+                "registry_id",
+                "skill_id",
+                "workspace_target_id"
+            ],
+            "properties": {
+                "artifact_digest": {
+                    "type": "string"
+                },
+                "files_written": {
+                    "type": "integer"
+                },
+                "install_id": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
                 "skill_id": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
                     "type": "string"
                 }
             }
@@ -19303,8 +21766,14 @@ const docTemplate = `{
                 "content": {
                     "type": "string"
                 },
+                "deletable": {
+                    "type": "boolean"
+                },
                 "description": {
                     "type": "string"
+                },
+                "editable": {
+                    "type": "boolean"
                 },
                 "managed": {
                     "type": "boolean"
@@ -19316,10 +21785,19 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "package_id": {
+                    "type": "string"
+                },
                 "raw": {
                     "type": "string"
                 },
+                "registry_id": {
+                    "type": "string"
+                },
                 "shadowed_by": {
+                    "type": "string"
+                },
+                "skill_id": {
                     "type": "string"
                 },
                 "source_kind": {
@@ -19350,7 +21828,8 @@ const docTemplate = `{
         "handlers.SkillsDeleteRequest": {
             "type": "object",
             "properties": {
-                "names": {
+                "source_paths": {
+                    "description": "SourcePaths are SKILL.md paths reported in the skill list. Deleting by name\ncannot address registry skills, which are nested by registry and package.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -19377,6 +21856,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "source_path": {
+                    "description": "SourcePath is the existing SKILL.md being edited when saving a single skill.\nEmpty means create (or overwrite by frontmatter name under\n/data/skills/user/personal/\u003cname\u003e/).",
+                    "type": "string"
                 }
             }
         },
@@ -19426,6 +21909,10 @@ const docTemplate = `{
         },
         "handlers.SupermarketAuthor": {
             "type": "object",
+            "required": [
+                "email",
+                "name"
+            ],
             "properties": {
                 "email": {
                     "type": "string"
@@ -19435,30 +21922,35 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.SupermarketPluginListResponse": {
+        "handlers.SupermarketCatalogSkill": {
             "type": "object",
+            "required": [
+                "artifact",
+                "author",
+                "category",
+                "category_name",
+                "description",
+                "files",
+                "install_id",
+                "name",
+                "package_id",
+                "registry_id",
+                "schema_version",
+                "skill_id",
+                "source",
+                "tags"
+            ],
             "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.Manifest"
-                    }
+                "artifact": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillArtifact"
                 },
-                "limit": {
-                    "type": "integer"
+                "author": {
+                    "$ref": "#/definitions/handlers.SupermarketAuthor"
                 },
-                "page": {
-                    "type": "integer"
+                "category": {
+                    "type": "string"
                 },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "handlers.SupermarketSkillEntry": {
-            "type": "object",
-            "properties": {
-                "content": {
+                "category_name": {
                     "type": "string"
                 },
                 "description": {
@@ -19470,24 +21962,57 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "id": {
+                "homepage": {
                     "type": "string"
                 },
-                "metadata": {
-                    "$ref": "#/definitions/handlers.SupermarketSkillMetadata"
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "install_id": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_id": {
+                    "type": "string"
+                },
+                "source": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillSource"
+                },
+                "source_category": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
-        "handlers.SupermarketSkillListResponse": {
+        "handlers.SupermarketCatalogSkillListResponse": {
             "type": "object",
+            "required": [
+                "data",
+                "limit",
+                "page",
+                "total"
+            ],
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.SupermarketSkillEntry"
+                        "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
                     }
                 },
                 "limit": {
@@ -19501,14 +22026,268 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.SupermarketSkillMetadata": {
+        "handlers.SupermarketRegistry": {
+            "type": "object",
+            "required": [
+                "adapter",
+                "category_count",
+                "enabled",
+                "id",
+                "name",
+                "package_count",
+                "priority",
+                "skill_count",
+                "skipped_package_count"
+            ],
+            "properties": {
+                "adapter": {
+                    "type": "string"
+                },
+                "category_count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_count": {
+                    "type": "integer"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
+                "skipped_package_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketRegistryListResponse": {
+            "type": "object",
+            "required": [
+                "data"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketRegistry"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketSkillArtifact": {
+            "type": "object",
+            "required": [
+                "archive_size",
+                "content_type",
+                "digest",
+                "download_url",
+                "file_count",
+                "format",
+                "size",
+                "uncompressed_size"
+            ],
+            "properties": {
+                "archive_size": {
+                    "type": "integer"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "download_url": {
+                    "type": "string"
+                },
+                "file_count": {
+                    "type": "integer"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "uncompressed_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillCategory": {
+            "type": "object",
+            "required": [
+                "count",
+                "id",
+                "name",
+                "registries"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillCategoryRegistry"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketSkillCategoryListResponse": {
+            "type": "object",
+            "required": [
+                "data"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillCategory"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketSkillCategoryRegistry": {
+            "type": "object",
+            "required": [
+                "count",
+                "id"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SupermarketSkillIcon": {
             "type": "object",
             "properties": {
-                "author": {
-                    "$ref": "#/definitions/handlers.SupermarketAuthor"
-                },
-                "homepage": {
+                "brand_color": {
                     "type": "string"
+                },
+                "card": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
+                },
+                "dark": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
+                },
+                "detail": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIconAsset"
+                }
+            }
+        },
+        "handlers.SupermarketSkillIconAsset": {
+            "type": "object",
+            "required": [
+                "content_type",
+                "digest",
+                "size"
+            ],
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageCategory": {
+            "type": "object",
+            "required": [
+                "id",
+                "name",
+                "skill_count"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageDescriptor": {
+            "type": "object",
+            "required": [
+                "categories",
+                "description",
+                "name",
+                "package_id",
+                "registry_id",
+                "revision",
+                "schema_version",
+                "skill_count",
+                "skills",
+                "tags"
+            ],
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketCatalogSkill"
+                    }
                 },
                 "tags": {
                     "type": "array",
@@ -19518,14 +22297,99 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.SupermarketTagsResponse": {
+        "handlers.SupermarketSkillPackageListResponse": {
             "type": "object",
+            "required": [
+                "data",
+                "limit",
+                "page",
+                "total"
+            ],
             "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageSummary"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.SupermarketSkillPackageSummary": {
+            "type": "object",
+            "required": [
+                "categories",
+                "description",
+                "name",
+                "package_id",
+                "registry_id",
+                "schema_version",
+                "skill_count",
+                "tags"
+            ],
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "string"
+                },
+                "skill_count": {
+                    "type": "integer"
+                },
                 "tags": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "handlers.SupermarketSkillSource": {
+            "type": "object",
+            "required": [
+                "path",
+                "revision",
+                "type"
+            ],
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "repository": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
                 }
             }
         },
@@ -19611,12 +22475,6 @@ const docTemplate = `{
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
                     }
                 },
-                "heartbeat": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.DailyTokenUsage"
-                    }
-                },
                 "schedule": {
                     "type": "array",
                     "items": {
@@ -19629,10 +22487,29 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "control_id": {
+                    "description": "ControlID is the stable identity of one client mutation. New clients send\nit for exact retries; it remains optional for older Web/Desktop clients.",
+                    "type": "string"
+                },
+                "option_id": {
+                    "description": "OptionID selects one of the agent-provided permission options carried on\nthe approval request; empty keeps the plain binary decision.",
                     "type": "string"
                 },
                 "reason": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.ToolDefBucket": {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                },
+                "tools": {
+                    "type": "integer"
                 }
             }
         },
@@ -19709,6 +22586,527 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.WorkspaceDependencyCatalogItem": {
+            "type": "object",
+            "properties": {
+                "actions_supported": {
+                    "description": "ActionsSupported lists the actions the catalog gives the dependency,\nbefore any workspace state is considered.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "install",
+                            "update",
+                            "reinstall",
+                            "remove",
+                            "rollback",
+                            "check_update"
+                        ]
+                    }
+                },
+                "category": {
+                    "description": "Category is agent, runtime, or tool.",
+                    "type": "string",
+                    "enum": [
+                        "agent",
+                        "runtime",
+                        "tool"
+                    ]
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "has_image_baseline": {
+                    "description": "HasImageBaseline is set when the workspace image ships a copy of the\ndependency; removing a managed overlay returns to that copy.",
+                    "type": "boolean"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "icon_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installable": {
+                    "description": "Installable is set when the catalog has an install script for the\ndependency, i.e. it can be installed into a workspace (as a managed\noverlay when the image already ships it).",
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "platforms": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogPlatform"
+                    }
+                },
+                "provides": {
+                    "description": "Provides lists the commands the dependency makes available.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "retired": {
+                    "type": "boolean"
+                },
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyTranslation"
+                    }
+                },
+                "version_pin": {
+                    "description": "VersionPin is the version every install produces when the manifest\nlocks one; omitted when installs follow the latest release.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyCatalogPlatform": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "libc": {
+                    "description": "Libc is empty when the libc flavour does not matter for the OS.",
+                    "type": "string"
+                },
+                "os": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyCatalogResponse": {
+            "type": "object",
+            "properties": {
+                "catalog_fetched_at": {
+                    "type": "string"
+                },
+                "catalog_stale": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogItem"
+                    }
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyInstallRequest": {
+            "type": "object",
+            "properties": {
+                "definition_revision": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "description": "SessionID optionally routes operation progress to its originating conversation.",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version to install. Empty (or no body) installs the latest version the\ncatalog script resolves, or the manifest pin when the dependency has\none. The version recorded afterwards is the one the script reports.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyItem": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "description": "Actions lists what may be requested right now.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "install",
+                            "update",
+                            "reinstall",
+                            "remove",
+                            "rollback",
+                            "check_update"
+                        ]
+                    }
+                },
+                "category": {
+                    "description": "Category is agent, runtime, or tool.",
+                    "type": "string",
+                    "enum": [
+                        "agent",
+                        "runtime",
+                        "tool"
+                    ]
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string"
+                },
+                "icon_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_version": {
+                    "description": "ImageVersion is the version of the copy the workspace image ships,\nomitted when the image has none. It is the baseline a managed overlay\nsits on and what remove returns to.",
+                    "type": "string"
+                },
+                "install_path": {
+                    "description": "InstallPath is the dependency home when a managed copy is in effect or\ncan be installed, and the discovered command path when the image copy\nis in effect.",
+                    "type": "string"
+                },
+                "installed_version": {
+                    "description": "InstalledVersion is the version of the copy in effect: the one the\nruntime launches and the one first on PATH (managed, then image, then\nPATH).",
+                    "type": "string"
+                },
+                "last_checked_at": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "last_error_code": {
+                    "type": "string"
+                },
+                "latest_version": {
+                    "description": "LatestVersion is the last upstream check result, omitted until a check\nran.",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "overlay": {
+                    "description": "Overlay is set when the copy in effect is a managed one installed over\nan image copy.",
+                    "type": "boolean"
+                },
+                "platform_reason": {
+                    "type": "string",
+                    "enum": [
+                        "unsupported_platform"
+                    ]
+                },
+                "platform_supported": {
+                    "description": "PlatformSupported is false when the probed workspace platform is not\nlisted by the catalog manifest; PlatformReason then says why.",
+                    "type": "boolean"
+                },
+                "previous_version": {
+                    "description": "PreviousVersion is the version rollback would switch back to.",
+                    "type": "string"
+                },
+                "provides": {
+                    "description": "Provides lists the commands the dependency makes available.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "retired": {
+                    "type": "boolean"
+                },
+                "source": {
+                    "description": "Source is image for dependencies shipped with the workspace image and\nmanaged for dependencies installed by catalog scripts.",
+                    "type": "string",
+                    "enum": [
+                        "image",
+                        "managed"
+                    ]
+                },
+                "status": {
+                    "description": "Status is omitted when the dependency has no record and was not found\nin the workspace.",
+                    "type": "string",
+                    "enum": [
+                        "installed",
+                        "installing",
+                        "updating",
+                        "removing",
+                        "missing",
+                        "failed"
+                    ]
+                },
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyTranslation"
+                    }
+                },
+                "update_available": {
+                    "description": "UpdateAvailable is set for installed dependencies whose last upstream\ncheck reported a version other than the one in effect.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyListResponse": {
+            "type": "object",
+            "properties": {
+                "catalog_fetched_at": {
+                    "type": "string"
+                },
+                "catalog_stale": {
+                    "type": "boolean"
+                },
+                "discovery_error": {
+                    "description": "DiscoveryError is set when the workspace is running but could not be\ninspected (the discovery command was killed or timed out). Items then\nreflect the installation records alone, without workspace facts or\nactions; a refresh retries discovery.",
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyItem"
+                    }
+                },
+                "platform": {
+                    "$ref": "#/definitions/handlers.WorkspaceDependencyPlatform"
+                },
+                "workspace_state": {
+                    "type": "string",
+                    "enum": [
+                        "running",
+                        "not_running",
+                        "missing",
+                        "remote_offline"
+                    ]
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyOperationResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "entrypoints": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyPlatform": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "string"
+                },
+                "libc": {
+                    "type": "string"
+                },
+                "os": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyPreflightItem": {
+            "type": "object",
+            "properties": {
+                "dependency_id": {
+                    "type": "string"
+                },
+                "installed_version": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string",
+                    "enum": [
+                        "satisfied",
+                        "missing",
+                        "platform_unsupported",
+                        "unknown_dependency"
+                    ]
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyPreflightRequest": {
+            "type": "object",
+            "properties": {
+                "dependency_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "workspace_target_id": {
+                    "description": "WorkspaceTargetID overrides the query parameter of the same name.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyPreflightResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyPreflightItem"
+                    }
+                },
+                "workspace_state": {
+                    "type": "string",
+                    "enum": [
+                        "running",
+                        "not_running",
+                        "missing",
+                        "remote_offline"
+                    ]
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyScriptEnv": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "secret": {
+                    "type": "boolean"
+                },
+                "value": {
+                    "description": "Value is empty when Secret is set.",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyScriptResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "install",
+                        "update",
+                        "remove",
+                        "reinstall",
+                        "rollback"
+                    ]
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": "string"
+                },
+                "env": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.WorkspaceDependencyScriptEnv"
+                    }
+                },
+                "exec": {
+                    "type": "string"
+                },
+                "script": {
+                    "type": "string"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyStreamEvent": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "type": "string"
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "entrypoints": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "stream": {
+                    "type": "string",
+                    "enum": [
+                        "stdout",
+                        "stderr"
+                    ]
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "started",
+                        "log",
+                        "done",
+                        "error"
+                    ]
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyTranslation": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.acpRuntimeCreateRequest": {
             "type": "object",
             "properties": {
@@ -19716,6 +23114,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "project_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.acpRuntimeModeRequest": {
+            "type": "object",
+            "required": [
+                "mode_id"
+            ],
+            "properties": {
+                "mode_id": {
                     "type": "string"
                 }
             }
@@ -19733,6 +23142,20 @@ const docTemplate = `{
             "properties": {
                 "reasoning_effort": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.agentCredentialPutRequest": {
+            "type": "object",
+            "properties": {
+                "auth_kind": {
+                    "type": "string"
+                },
+                "secret": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -19779,12 +23202,22 @@ const docTemplate = `{
                     "description": "ACPRuntimeID optionally binds a warm pre-session runtime (created via\nPOST /bots/{bot_id}/acp-runtimes) to the new ACP session. It is a\ntransient in-memory handle reference, never persisted in metadata.",
                     "type": "string"
                 },
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "channel_type": {
                     "type": "string"
                 },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "preferred_chat_model_id": {
+                    "description": "PreferredChatModelID / PreferredReasoningEffort carry the first-send\npicker pair (issue #879 spec v2). The composer sends them only when the\npair has an explicit source (user pick or remembered session); omitted\nfields leave the columns NULL so the session follows the bot default.",
+                    "type": "string"
+                },
+                "preferred_reasoning_effort": {
+                    "type": "string"
                 },
                 "runtime_metadata": {
                     "type": "object",
@@ -19919,15 +23352,18 @@ const docTemplate = `{
         },
         "handlers.forkSessionRequest": {
             "type": "object",
-            "required": [
-                "message_id"
-            ],
             "properties": {
                 "message_id": {
-                    "type": "string"
+                    "description": "MessageID is the pre-turn spelling of TurnID, resolved server-side to the\nround that contains it. Deprecated: send turn_id. A client holds a turn id\nfrom admission onward, while a stored message id exists only once the\nround has been persisted.",
+                    "type": "string",
+                    "format": "uuid"
                 },
                 "title": {
                     "type": "string"
+                },
+                "turn_id": {
+                    "type": "string",
+                    "format": "uuid"
                 }
             }
         },
@@ -20129,6 +23565,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.modelPreferenceSeedResponse": {
+            "type": "object",
+            "properties": {
+                "model_id": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.oauthAuthorizeRequest": {
             "type": "object",
             "properties": {
@@ -20206,9 +23653,22 @@ const docTemplate = `{
         "handlers.updateSessionRequest": {
             "type": "object",
             "properties": {
+                "bot_agent_id": {
+                    "type": "string"
+                },
+                "expected_model_preference_revision": {
+                    "type": "string"
+                },
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "preferred_chat_model_id": {
+                    "description": "PreferredChatModelID / PreferredReasoningEffort are the picker pair\n(issue #879). The composer always patches the pair together; either one\nalone is reconciled against the model the session would actually use.\nChanging either requires ExpectedModelPreferenceRevision (\"\" when the\nsession has none yet): picker writes are always compare-and-set.",
+                    "type": "string"
+                },
+                "preferred_reasoning_effort": {
+                    "type": "string"
                 },
                 "runtime_metadata": {
                     "type": "object",
@@ -20228,55 +23688,17 @@ const docTemplate = `{
                 }
             }
         },
-        "heartbeat.ListLogsResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/heartbeat.Log"
-                    }
-                },
-                "total_count": {
-                    "type": "integer"
-                }
-            }
-        },
-        "heartbeat.Log": {
-            "type": "object",
-            "properties": {
-                "bot_id": {
-                    "type": "string"
-                },
-                "completed_at": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "result_text": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "started_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "usage": {}
-            }
-        },
         "hooks.ActionResult": {
             "type": "object",
             "properties": {
                 "action_type": {
                     "type": "string"
+                },
+                "append_system_sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.SystemSectionOutput"
+                    }
                 },
                 "decision": {
                     "type": "string"
@@ -20303,6 +23725,29 @@ const docTemplate = `{
                 },
                 "stdout": {
                     "type": "string"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.OutputWarning"
+                    }
+                }
+            }
+        },
+        "hooks.OutputWarning": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "hook_name": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "section_id": {
+                    "type": "string"
                 }
             }
         },
@@ -20321,6 +23766,12 @@ const docTemplate = `{
                 "append_context": {
                     "type": "string"
                 },
+                "append_system_sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.SystemSectionOutput"
+                    }
+                },
                 "decision": {
                     "type": "string"
                 },
@@ -20336,8 +23787,56 @@ const docTemplate = `{
                 },
                 "runtime_supported": {
                     "type": "boolean"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/hooks.OutputWarning"
+                    }
                 }
             }
+        },
+        "hooks.SystemSectionCache": {
+            "type": "string",
+            "enum": [
+                "dynamic",
+                "stable"
+            ],
+            "x-enum-varnames": [
+                "SystemSectionCacheDynamic",
+                "SystemSectionCacheStable"
+            ]
+        },
+        "hooks.SystemSectionOutput": {
+            "type": "object",
+            "properties": {
+                "cache": {
+                    "$ref": "#/definitions/hooks.SystemSectionCache"
+                },
+                "hook_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "retention": {
+                    "$ref": "#/definitions/hooks.SystemSectionRetention"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "hooks.SystemSectionRetention": {
+            "type": "string",
+            "enum": [
+                "optional",
+                "preferred"
+            ],
+            "x-enum-varnames": [
+                "SystemSectionRetentionOptional",
+                "SystemSectionRetentionPreferred"
+            ]
         },
         "hooks.ToolPayload": {
             "type": "object",
@@ -20420,7 +23919,7 @@ const docTemplate = `{
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_memohai_memoh_internal_mcp.Connection"
+                        "$ref": "#/definitions/github_com_felinics_memoh_internal_mcp.Connection"
                     }
                 }
             }
@@ -20608,6 +24107,14 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "string"
                 },
+                "reasoning": {
+                    "description": "Reasoning is the model's resolved thinking options, filled by the API layer\n(it depends on the provider's client type). Clients render this rather than\nderiving their own answer from ThinkingMode and ReasoningEfforts — the\nduplication that let the web picker and the wire disagree.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/reasoning.Options"
+                        }
+                    ]
+                },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
                 }
@@ -20634,11 +24141,30 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "reasoning_default_on": {
+                    "description": "ReasoningDefaultOn reports whether omitting the thinking field leaves the\nmodel thinking. Separate from off-ability: Claude 4.6 can be turned off *and*\ndefaults to off, while Opus 5 can be turned off but defaults to on, so\nomitting the field there keeps thinking running — billed, and invisible to a\nuser who believes they turned it off. nil means unknown.",
+                    "type": "boolean"
+                },
+                "reasoning_dialect": {
+                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty leaves provider\npolicy in charge; Google's adaptor deliberately sends no thinking control so\npre-dialect rows retain their safe pre-upgrade request shape.",
+                    "type": "string"
+                },
                 "reasoning_efforts": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "reasoning_off_support": {
+                    "description": "ReasoningOffSupport declares how the model answers an explicit request to\nstop thinking. Anthropic's per-model table splits models that share a\nthinking mode and an identical tier list, so this cannot be derived — see the\nreasoning package's OffSupport constants.",
+                    "type": "string"
+                },
+                "thinking_budget_max": {
+                    "type": "integer"
+                },
+                "thinking_budget_min": {
+                    "description": "ThinkingBudgetMin/Max bound the budget dialect. The range is per model\nfamily, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned\noff, while Flash starts at 0 and can.",
+                    "type": "integer"
                 },
                 "thinking_mode": {
                     "type": "string"
@@ -20714,352 +24240,6 @@ const docTemplate = `{
                 },
                 "type": {
                     "$ref": "#/definitions/models.ModelType"
-                }
-            }
-        },
-        "plugins.AuthRequirement": {
-            "type": "object",
-            "properties": {
-                "client_ref": {
-                    "type": "string"
-                },
-                "key": {
-                    "type": "string"
-                },
-                "scopes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "type": {
-                    "type": "string"
-                },
-                "variables": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "plugins.Author": {
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.ConfigVar": {
-            "type": "object",
-            "properties": {
-                "defaultValue": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "key": {
-                    "type": "string"
-                },
-                "required": {
-                    "type": "boolean"
-                },
-                "secret": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "plugins.Icon": {
-            "type": "object",
-            "properties": {
-                "kind": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "url": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.Installation": {
-            "type": "object",
-            "properties": {
-                "bot_id": {
-                    "type": "string"
-                },
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "installed_at": {
-                    "type": "string"
-                },
-                "manifest": {
-                    "$ref": "#/definitions/plugins.Manifest"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "plugin_id": {
-                    "type": "string"
-                },
-                "plugin_name": {
-                    "type": "string"
-                },
-                "resources": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.Resource"
-                    }
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.ListResponse": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.Installation"
-                    }
-                }
-            }
-        },
-        "plugins.MCPResource": {
-            "type": "object",
-            "properties": {
-                "args": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "auth_ref": {
-                    "type": "string"
-                },
-                "capabilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "command": {
-                    "type": "string"
-                },
-                "cwd": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "env": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.ConfigVar"
-                    }
-                },
-                "headers": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.ConfigVar"
-                    }
-                },
-                "key": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "transport": {
-                    "type": "string"
-                },
-                "url": {
-                    "type": "string"
-                },
-                "visibility": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.Manifest": {
-            "type": "object",
-            "properties": {
-                "auth_requirements": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.AuthRequirement"
-                    }
-                },
-                "author": {
-                    "$ref": "#/definitions/plugins.Author"
-                },
-                "bundled_skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.SkillEntry"
-                    }
-                },
-                "capabilities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "description": {
-                    "type": "string"
-                },
-                "homepage": {
-                    "type": "string"
-                },
-                "icon": {
-                    "$ref": "#/definitions/plugins.Icon"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "install": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "mcps": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.MCPResource"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                },
-                "schema_version": {
-                    "type": "string"
-                },
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.SkillResource"
-                    }
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "variables": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/plugins.ConfigVar"
-                    }
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.OAuthAuthorizeRequest": {
-            "type": "object",
-            "properties": {
-                "callback_url": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.Resource": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "resource_id": {
-                    "type": "string"
-                },
-                "resource_key": {
-                    "type": "string"
-                },
-                "resource_type": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.SkillEntry": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "id": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "plugins.SkillResource": {
-            "type": "object",
-            "properties": {
-                "key": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "path": {
-                    "type": "string"
                 }
             }
         },
@@ -21298,12 +24478,14 @@ const docTemplate = `{
             "enum": [
                 "ok",
                 "auth_error",
-                "error"
+                "error",
+                "unverified"
             ],
             "x-enum-varnames": [
                 "TestStatusOK",
                 "TestStatusAuthError",
-                "TestStatusError"
+                "TestStatusError",
+                "TestStatusUnverified"
             ]
         },
         "providers.UpdateRequest": {
@@ -21418,9 +24600,52 @@ const docTemplate = `{
                 }
             }
         },
+        "reasoning.Options": {
+            "type": "object",
+            "properties": {
+                "can_disable": {
+                    "description": "CanDisable reports whether picking \"off\" actually reaches the model.",
+                    "type": "boolean"
+                },
+                "default_effort": {
+                    "description": "DefaultEffort is the tier to use when nothing is stored, and the tier to fall\nback to when a stored value is no longer offered by the model.",
+                    "type": "string"
+                },
+                "efforts": {
+                    "description": "Efforts are the selectable active tiers, weakest to strongest as advertised.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "efforts_without_off": {
+                    "description": "EffortsWithoutOff are tiers that cannot be combined with off on this model.\nOpus 5 accepts an explicit disable only at effort high or below, so a client\nthat lets a user hold both must know which tiers conflict.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "supported": {
+                    "description": "Supported is false when the model has no thinking concept; the other fields\nare then empty and no control should be rendered at all.",
+                    "type": "boolean"
+                }
+            }
+        },
         "schedule.CreateRequest": {
             "type": "object",
             "properties": {
+                "acp_agent_id": {
+                    "description": "ACPAgentID names the ACP agent when RuntimeType is acp_agent.",
+                    "type": "string"
+                },
+                "acp_model_id": {
+                    "description": "ACPModelID is an agent-reported model identifier override for External\nAgent runs. Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
+                    "type": "string"
+                },
                 "command": {
                     "type": "string"
                 },
@@ -21433,10 +24658,75 @@ const docTemplate = `{
                 "max_calls": {
                     "$ref": "#/definitions/schedule.NullableInt"
                 },
+                "model_id": {
+                    "description": "ModelID is a native model UUID override (models.id).",
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
                 "pattern": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort overrides the reasoning effort for this schedule.",
+                    "type": "string"
+                },
+                "run_target": {
+                    "description": "RunTarget is new_session (default) or existing_session.",
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "description": "RuntimeType selects the runtime for new sessions: \"\" or \"model\" for\nthe native model runtime, \"acp_agent\" for an ACP agent. Must be empty\nin existing_session mode (inherited from the target session).",
+                    "type": "string"
+                },
+                "target_session_id": {
+                    "description": "TargetSessionID names the session reused by existing_session mode.",
+                    "type": "string"
+                },
+                "workdir_id": {
+                    "description": "WorkdirID binds new sessions to a bot workdir. Must be empty in\nexisting_session mode (inherited from the target session).",
+                    "type": "string"
+                }
+            }
+        },
+        "schedule.ExecutionConfig": {
+            "type": "object",
+            "properties": {
+                "acp_agent_id": {
+                    "description": "ACPAgentID names the ACP agent when RuntimeType is acp_agent.",
+                    "type": "string"
+                },
+                "acp_model_id": {
+                    "description": "ACPModelID is an agent-reported model identifier override for External\nAgent runs. Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
+                    "type": "string"
+                },
+                "model_id": {
+                    "description": "ModelID is a native model UUID override (models.id).",
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort overrides the reasoning effort for this schedule.",
+                    "type": "string"
+                },
+                "run_target": {
+                    "description": "RunTarget is new_session (default) or existing_session.",
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "description": "RuntimeType selects the runtime for new sessions: \"\" or \"model\" for\nthe native model runtime, \"acp_agent\" for an ACP agent. Must be empty\nin existing_session mode (inherited from the target session).",
+                    "type": "string"
+                },
+                "target_session_id": {
+                    "description": "TargetSessionID names the session reused by existing_session mode.",
+                    "type": "string"
+                },
+                "workdir_id": {
+                    "description": "WorkdirID binds new sessions to a bot workdir. Must be empty in\nexisting_session mode (inherited from the target session).",
                     "type": "string"
                 }
             }
@@ -21513,6 +24803,18 @@ const docTemplate = `{
         "schedule.Schedule": {
             "type": "object",
             "properties": {
+                "acp_agent_id": {
+                    "description": "ACPAgentID names the ACP agent when RuntimeType is acp_agent.",
+                    "type": "string"
+                },
+                "acp_model_id": {
+                    "description": "ACPModelID is an agent-reported model identifier override for External\nAgent runs. Mutually exclusive with ModelID.",
+                    "type": "string"
+                },
+                "bot_agent_id": {
+                    "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -21537,13 +24839,37 @@ const docTemplate = `{
                 "max_calls": {
                     "type": "integer"
                 },
+                "model_id": {
+                    "description": "ModelID is a native model UUID override (models.id).",
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
                 "pattern": {
                     "type": "string"
                 },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort overrides the reasoning effort for this schedule.",
+                    "type": "string"
+                },
+                "run_target": {
+                    "description": "RunTarget is new_session (default) or existing_session.",
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "description": "RuntimeType selects the runtime for new sessions: \"\" or \"model\" for\nthe native model runtime, \"acp_agent\" for an ACP agent. Must be empty\nin existing_session mode (inherited from the target session).",
+                    "type": "string"
+                },
+                "target_session_id": {
+                    "description": "TargetSessionID names the session reused by existing_session mode.",
+                    "type": "string"
+                },
                 "updated_at": {
+                    "type": "string"
+                },
+                "workdir_id": {
+                    "description": "WorkdirID binds new sessions to a bot workdir. Must be empty in\nexisting_session mode (inherited from the target session).",
                     "type": "string"
                 }
             }
@@ -21559,6 +24885,14 @@ const docTemplate = `{
                 },
                 "enabled": {
                     "type": "boolean"
+                },
+                "execution": {
+                    "description": "Execution replaces the whole execution parameter block when present.\nField-level patching is deliberately not offered: the block carries\ncross-field constraints (run target vs runtime vs workdir), so\ncallers send the full desired state and the service validates it as\none unit.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/schedule.ExecutionConfig"
+                        }
+                    ]
                 },
                 "max_calls": {
                     "$ref": "#/definitions/schedule.NullableInt"
@@ -21714,6 +25048,9 @@ const docTemplate = `{
         "session.Session": {
             "type": "object",
             "properties": {
+                "bot_agent_id": {
+                    "type": "string"
+                },
                 "bot_id": {
                     "type": "string"
                 },
@@ -21733,7 +25070,20 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "model_preference_revision": {
+                    "type": "string"
+                },
                 "parent_session_id": {
+                    "type": "string"
+                },
+                "preferred_chat_model_id": {
+                    "type": "string"
+                },
+                "preferred_external_model_id": {
+                    "description": "Preferred* is the session's persisted (model, effort) pair (issue #879).\nEmpty means \"no memory\"; the composer reseeds from it on open/repoint.",
+                    "type": "string"
+                },
+                "preferred_reasoning_effort": {
                     "type": "string"
                 },
                 "route_conversation_type": {
@@ -21807,6 +25157,9 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
+                "default_bot_agent_id": {
+                    "type": "string"
+                },
                 "discuss_probe_model_id": {
                     "type": "string"
                 },
@@ -21814,15 +25167,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "fetch_provider_id": {
-                    "type": "string"
-                },
-                "heartbeat_enabled": {
-                    "type": "boolean"
-                },
-                "heartbeat_interval": {
-                    "type": "integer"
-                },
-                "heartbeat_model_id": {
                     "type": "string"
                 },
                 "image_model_id": {
@@ -21987,6 +25331,9 @@ const docTemplate = `{
                 "compaction_threshold": {
                     "type": "integer"
                 },
+                "default_bot_agent_id": {
+                    "type": "string"
+                },
                 "discuss_probe_model_id": {
                     "type": "string"
                 },
@@ -21994,16 +25341,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "fetch_provider_id": {
-                    "type": "string"
-                },
-                "heartbeat_enabled": {
-                    "type": "boolean"
-                },
-                "heartbeat_interval": {
-                    "type": "integer"
-                },
-                "heartbeat_model_id": {
-                    "description": "HeartbeatModelID joins the pointer group above (nil/\"\"/value) so the\nheartbeat tab's autosave can clear a model override.",
                     "type": "string"
                 },
                 "image_model_id": {
@@ -22055,6 +25392,45 @@ const docTemplate = `{
                 }
             }
         },
+        "skillpackages.Installation": {
+            "type": "object",
+            "required": [
+                "bot_id",
+                "id",
+                "installed_at",
+                "package_id",
+                "registry_id",
+                "revision",
+                "updated_at",
+                "workspace_target_id"
+            ],
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "installed_at": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
         "skills.SafeCatalogItem": {
             "type": "object",
             "properties": {
@@ -22072,6 +25448,21 @@ const docTemplate = `{
                 },
                 "state": {
                     "type": "string"
+                }
+            }
+        },
+        "supermarket.UninstallPackageResponse": {
+            "type": "object",
+            "required": [
+                "installation",
+                "ok"
+            ],
+            "properties": {
+                "installation": {
+                    "$ref": "#/definitions/skillpackages.Installation"
+                },
+                "ok": {
+                    "type": "boolean"
                 }
             }
         },
@@ -22121,6 +25512,9 @@ const docTemplate = `{
                 "allow_custom": {
                     "type": "boolean"
                 },
+                "custom_exclusive": {
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -22135,6 +25529,10 @@ const docTemplate = `{
                 },
                 "placeholder": {
                     "type": "string"
+                },
+                "required": {
+                    "description": "Required is tri-state for compatibility. Legacy/native ask_user payloads\nomit it and keep their existing surface semantics; ACP forms set it\nexplicitly so false means an optional schema property.",
+                    "type": "boolean"
                 },
                 "text": {
                     "type": "string"
@@ -22527,6 +25925,34 @@ const docTemplate = `{
                 },
                 "tool_approval_config": {
                     "$ref": "#/definitions/settings.ToolApprovalConfig"
+                }
+            }
+        },
+        "workspace.WorkspaceTargetGrant": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "primary": {
+                    "type": "boolean"
+                },
+                "runtime_id": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspace.WorkspaceTargetGrantsResponse": {
+            "type": "object",
+            "properties": {
+                "grants": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspace.WorkspaceTargetGrant"
+                    }
                 }
             }
         },

@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/email"
-	emailgmail "github.com/memohai/memoh/internal/email/adapters/gmail"
-	"github.com/memohai/memoh/internal/oauthclients"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/email"
+	emailgmail "github.com/felinics/memoh/internal/email/adapters/gmail"
+	"github.com/felinics/memoh/internal/oauthclients"
 )
 
 const emailOAuthCallbackPath = "/api/email/oauth/callback"

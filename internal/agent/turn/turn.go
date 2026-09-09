@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 // ErrDuplicateTurn reports that a StartTurnCommand's (TeamID,
@@ -143,6 +143,11 @@ const (
 	// DiscussEventSkipped signals the runtime declined to start (e.g. ACP
 	// participation gate); the run ends after this event.
 	DiscussEventSkipped = "discuss_skipped"
+	// DiscussEventRecompose signals the runtime compacted the thread
+	// synchronously before calling the model; the run ends after this event
+	// and the driver must recompose against the refreshed artifact frontier
+	// and resubmit (CM-CMP-001). The cursor must not advance.
+	DiscussEventRecompose = "discuss_recompose"
 )
 
 // DiscussRunResolvedPayload is the payload of DiscussEventRunResolved.
@@ -153,15 +158,18 @@ type DiscussRunResolvedPayload struct {
 // ToolApprovalResponse resumes a thread's turn deferred on tool approval
 // (RFC ResumeApprovalCommand).
 type ToolApprovalResponse struct {
-	ControlID                  string
-	BotID                      string
-	ThreadID                   string
-	ActorChannelIdentityID     string
-	ActorUserID                string
-	ApprovalID                 string
-	ExplicitID                 string
-	ReplyExternalMessageID     string
-	Decision                   string
+	ControlID              string
+	BotID                  string
+	ThreadID               string
+	ActorChannelIdentityID string
+	ActorUserID            string
+	ApprovalID             string
+	ExplicitID             string
+	ReplyExternalMessageID string
+	Decision               string
+	// OptionID is the opaque agent-provided permission option selected by the
+	// Web client. Empty retains the legacy binary approve/reject behavior.
+	OptionID                   string
 	Reason                     string
 	ChatToken                  string
 	SuppressActivePromptAttach bool
@@ -219,4 +227,14 @@ type Service interface {
 	RespondToolApproval(ctx context.Context, input ToolApprovalResponse, eventCh chan<- json.RawMessage) error
 	RespondUserInput(ctx context.Context, input UserInputResponse, eventCh chan<- json.RawMessage) error
 	AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
+}
+
+// StopCommand targets the current durable run, including a parked decision.
+// TeamID must match the runtime instance; channel ingress authorizes the actor.
+type StopCommand struct{ TeamID, BotID, ThreadID string }
+
+// Stopper supplements stream cancellation for runs whose output stream ended
+// while waiting for a decision. Kept separate for alternate turn providers.
+type Stopper interface {
+	StopTurn(context.Context, StopCommand) (bool, error)
 }

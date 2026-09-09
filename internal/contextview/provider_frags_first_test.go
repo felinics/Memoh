@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	agentpkg "github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func systemTextFrag(id, text string, kind contextfrag.Kind, priority int) contextfrag.ContextFrag {
@@ -45,30 +45,71 @@ func fragsFirstFixture() agentpkg.RunConfig {
 			stableHistoryMessageFrag("message.000", sdk.UserMessage("history")),
 			currentMessageFrag("message.001", "current"),
 		},
-		ContextToolUsage: "## Tool usage\n\nUSE_TOOLS",
-		ContextToolDefs:  []contextfrag.ToolDefAccounting{{Provider: "native", Name: "read", TokenEstimate: 5}},
+		ContextToolUsage: "## Tool usage\n\nUSE_TOOLS\n\nUNICODE 用法",
+		ContextToolUsageFrags: []contextfrag.ContextFrag{
+			toolUsageTestFrag("system.tool_usage.header", "## Tool usage", "zeta_tool", 0),
+			toolUsageTestFrag("system.tool_usage.zeta_tool", "USE_TOOLS", "zeta_tool", 1),
+			toolUsageTestFrag("system.tool_usage.alpha_tool", "UNICODE 用法", "alpha_tool", 2),
+		},
+		ContextToolDefs: []contextfrag.ToolDefAccounting{
+			{Provider: "native", Name: "zeta_tool", TokenEstimate: 5},
+			{Provider: "native", Name: "alpha_tool"},
+		},
+		ContextToolDefsResolved: true,
 	}
+}
+
+func toolUsageTestFrag(id, text, capability string, index int) contextfrag.ContextFrag {
+	return contextfrag.TextFrag(contextfrag.TextFragInput{
+		ID:                 id,
+		Kind:               contextfrag.KindToolUsage,
+		Role:               sdk.MessageRoleSystem,
+		Slot:               contextfrag.SlotSystem,
+		Text:               text,
+		Priority:           45,
+		RetentionTier:      contextfrag.RetentionPreferred,
+		RequiredCapability: capability,
+		CacheClass:         contextfrag.CacheStable,
+		Trust:              contextfrag.TrustSystem,
+		Scope:              contextfrag.Scope{BotID: "bot-1"},
+		Source:             contextfrag.SourceAgentToolUsage,
+		Collector:          "assemble_tools",
+		Index:              index,
+		Render: contextfrag.RenderPolicy{
+			Format:      contextfrag.RenderMarkdown,
+			GroupID:     "system.tool_usage",
+			GroupJoiner: "\n\n",
+		},
+	})
 }
 
 func TestApplyProviderRunConfigFragsFirst(t *testing.T) {
 	t.Parallel()
 	got := ApplyProviderRunConfig(context.Background(), nil, fragsFirstFixture())
-	wantSystem := "base system\n\n## Tool usage\n\nUSE_TOOLS\n\n## Workspace instruction files\n\nworkspace"
+	wantSystem := "base system\n\n## Tool usage\n\nUSE_TOOLS\n\nUNICODE 用法\n\n## Workspace instruction files\n\nworkspace"
 	if got.System != wantSystem || strings.Contains(got.System, "LEGACY") {
 		t.Fatalf("system = %q", got.System)
 	}
 	assertMessagesEqual(t, got.Messages, []sdk.Message{sdk.UserMessage("history"), sdk.UserMessage("current")})
-	if len(got.ContextFrags) != 5 {
+	if len(got.ContextFrags) != 7 {
 		t.Fatalf("frags = %#v", got.ContextFrags)
 	}
-	wantOrder := []string{"system.prompt", "system.tool_usage", "system.workspace", "message.000", "message.001"}
+	wantOrder := []string{
+		"system.prompt",
+		"system.tool_usage.header",
+		"system.tool_usage.zeta_tool",
+		"system.tool_usage.alpha_tool",
+		"system.workspace",
+		"message.000",
+		"message.001",
+	}
 	for i, id := range wantOrder {
 		if got.ContextFrags[i].ID != id {
 			t.Fatalf("frag order = %#v", got.ContextFrags)
 		}
 	}
 	wantEstimate := 5
-	for _, frag := range got.ContextFrags[:4] {
+	for _, frag := range got.ContextFrags[:6] {
 		wantEstimate += contextfrag.ResolveFragTokens(frag)
 	}
 	if got.ContextCachePlan.StablePrefixTokenEstimate != wantEstimate || got.ContextCachePlan.StableMessageCount != 1 {
@@ -83,6 +124,15 @@ func TestApplyProviderRunConfigDedupesToolUsage(t *testing.T) {
 	got := ApplyProviderRunConfig(context.Background(), nil, cfg)
 	if strings.Contains(got.System, "stale usage") || strings.Count(got.System, "## Tool usage") != 1 {
 		t.Fatalf("system = %q", got.System)
+	}
+	usageFrags := 0
+	for _, frag := range got.ContextFrags {
+		if frag.Kind == contextfrag.KindToolUsage {
+			usageFrags++
+		}
+	}
+	if usageFrags != len(cfg.ContextToolUsageFrags) {
+		t.Fatalf("tool usage frags = %d, want %d structured fragments", usageFrags, len(cfg.ContextToolUsageFrags))
 	}
 }
 

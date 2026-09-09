@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 func TestBuiltinProviderNilService(t *testing.T) {
@@ -118,6 +118,12 @@ func TestBuiltinProviderContextPackingProducesMemoryContextTags(t *testing.T) {
 	}
 	if !strings.Contains(result.ContextText, "</memory-context>") {
 		t.Fatalf("expected closing memory-context tag, got: %s", result.ContextText)
+	}
+	if result.ResultCount != 1 || len(result.ResultRefs) != 1 {
+		t.Fatalf("result trace = count %d refs %#v, want the one packed match", result.ResultCount, result.ResultRefs)
+	}
+	if result.ResultRefs[0] == "" {
+		t.Fatalf("result ref must be the stable packed memory id: %#v", result.ResultRefs)
 	}
 }
 

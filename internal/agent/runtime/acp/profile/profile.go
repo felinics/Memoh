@@ -7,12 +7,8 @@ import (
 )
 
 const (
-	AgentCodexID        = "codex"
-	AgentCodexName      = "Codex"
-	AgentClaudeCodeID   = "claude-code"
-	AgentClaudeCodeName = "Claude Code"
-	AgentHermesID       = "hermes"
-	AgentHermesName     = "Hermes"
+	AgentACPID   = "acp"
+	AgentACPName = "ACP"
 
 	MetadataKeyACP = "acp"
 
@@ -25,25 +21,11 @@ type Profile struct {
 	ID          string
 	DisplayName string
 	Description string
-	// DynamicCommand, DynamicArgs, and DynamicPackage describe an npm-backed
-	// launcher whose version can be refreshed independently of Memoh. The
-	// session pool resolves the dist-tag once per bot for the lifetime of the
-	// server process, launches the resulting exact package version, and falls
-	// back to Command/Args when lookup or startup fails. DynamicArgs are the
-	// arguments inserted before the exact package spec.
-	DynamicCommand string
-	DynamicArgs    []string
-	DynamicPackage string
-	Command        string
-	Args           []string
+	Launch      LaunchPolicy
 	// SessionModeID, when set, is the ACP session mode Memoh pins right after
 	// session/new so tool permissions flow through ACP regardless of ambient
 	// agent-side configuration (e.g. a host ~/.claude/settings.json).
 	SessionModeID string
-	// SessionConfigValues are ACP session config options pinned after
-	// session/new when the agent advertises them. Options the agent does not
-	// expose are skipped.
-	SessionConfigValues map[string]string
 	// ReasoningConfigID maps an agent-specific select to ACP's semantic
 	// thought_level category when the agent has not annotated the option yet.
 	// Categorized options always take precedence over this compatibility ID.
@@ -65,6 +47,16 @@ type Profile struct {
 	ManagedFields     []ManagedField
 	SupportedBackends []string
 	SetupModes        []string
+}
+
+// LaunchPolicy declares how an ACP profile resolves its process command. A
+// pinned Command is used by built-in adapters. ManagedCommandField and
+// ManagedArgumentsField let a profile opt into bot-metadata-driven launch
+// configuration without teaching the runtime about that profile's ID.
+type LaunchPolicy struct {
+	Command               string
+	ManagedCommandField   string
+	ManagedArgumentsField string
 }
 
 type ManagedField struct {
@@ -115,37 +107,6 @@ func MissingRequiredManagedField(profile Profile, setup AgentSetup) (ManagedFiel
 	if managed == nil {
 		managed = map[string]string{}
 	}
-	switch NormalizeAgentID(profile.ID) {
-	case AgentCodexID:
-		if mode == setupModeOAuth {
-			return ManagedField{}, false
-		}
-		if strings.TrimSpace(managed["api_key"]) == "" {
-			return managedFieldOrFallback(profile, "api_key", ManagedField{
-				ID:        "api_key",
-				Label:     "OpenAI API key",
-				Type:      "password",
-				Required:  true,
-				Sensitive: true,
-			}), true
-		}
-		return ManagedField{}, false
-	case AgentClaudeCodeID:
-		fieldID := "api_key"
-		if mode == setupModeOAuth {
-			fieldID = "oauth_token"
-		}
-		if strings.TrimSpace(managed[fieldID]) == "" {
-			return managedFieldOrFallback(profile, fieldID, ManagedField{
-				ID:        fieldID,
-				Label:     fieldID,
-				Type:      "password",
-				Required:  true,
-				Sensitive: true,
-			}), true
-		}
-		return ManagedField{}, false
-	}
 	for _, field := range profile.ManagedFields {
 		id := NormalizeAgentID(field.ID)
 		if id == "" || !field.Required {
@@ -159,23 +120,11 @@ func MissingRequiredManagedField(profile Profile, setup AgentSetup) (ManagedFiel
 }
 
 // MissingRequiredManagedFieldForPreflight applies only the checks that can be
-// decided without a workspace backend. Legacy metadata with no explicit
-// setup_mode is resolved by the runtime pool because legacy metadata may omit it.
+// decided without a workspace backend. (The legacy no-setup-mode exemption
+// died with the built-in profiles; the generic profile's fields are always
+// explicit.)
 func MissingRequiredManagedFieldForPreflight(profile Profile, setup AgentSetup) (ManagedField, bool) {
-	if !setup.ModeSet {
-		return ManagedField{}, false
-	}
 	return MissingRequiredManagedField(profile, setup)
-}
-
-func managedFieldOrFallback(profile Profile, fieldID string, fallback ManagedField) ManagedField {
-	fieldID = NormalizeAgentID(fieldID)
-	for _, field := range profile.ManagedFields {
-		if NormalizeAgentID(field.ID) == fieldID {
-			return field
-		}
-	}
-	return fallback
 }
 
 // registry holds all known ACP agent profiles keyed by NormalizeAgentID.
@@ -185,9 +134,9 @@ func managedFieldOrFallback(profile Profile, fieldID string, fallback ManagedFie
 var registry = map[string]Profile{}
 
 func init() {
-	Register(codexProfile())
-	Register(claudeCodeProfile())
-	Register(hermesProfile())
+	// The built-in external agents (codex, claude-code) run as direct runtimes;
+	// ACP serves user-configured custom agents through the generic profile.
+	Register(genericACPProfile())
 }
 
 // Register adds (or replaces) a profile in the registry. Intended to be
@@ -204,136 +153,40 @@ func Register(profile Profile) {
 	registry[id] = profile
 }
 
-func codexProfile() Profile {
+func genericACPProfile() Profile {
 	return Profile{
-		ID:                     AgentCodexID,
-		DisplayName:            AgentCodexName,
-		Description:            "OpenAI Codex ACP adapter",
-		Command:                "codex-acp",
-		DefaultReasoningEffort: "medium",
-		RuntimeStorage:         codexRuntimeStorage(),
-		ManagedFields: []ManagedField{
-			{
-				ID:          "api_key",
-				Label:       "OpenAI API key",
-				Type:        "password",
-				Sensitive:   true,
-				Placeholder: "sk-...",
-				Help:        "Used by API key setup to authenticate Codex.",
-			},
-			{
-				ID:          "base_url",
-				Label:       "OpenAI base URL",
-				Type:        "url",
-				Placeholder: "https://api.openai.com/v1",
-				Help:        "Optional Codex provider base URL.",
-			},
-		},
-		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
-	}
-}
-
-func claudeCodeProfile() Profile {
-	return Profile{
-		ID:          AgentClaudeCodeID,
-		DisplayName: AgentClaudeCodeName,
-		Description: "Claude Code ACP adapter",
-		Command:     "claude-agent-acp",
-		// "default" routes every gated tool through session/request_permission;
-		// without the pin a host-level Claude settings file (defaultMode auto /
-		// acceptEdits) silently bypasses Memoh's approval flow.
-		SessionModeID: "default",
-		// Newer Claude models gate extended thinking on the effort level, not
-		// MAX_THINKING_TOKENS. The ID remains as a compatibility fallback for
-		// older/custom adapters that omit ACP's thought_level category.
-		ReasoningConfigID:      "effort",
-		DefaultReasoningEffort: "high",
-		RuntimeStorage:         claudeCodeRuntimeStorage(),
-		ManagedFields: []ManagedField{
-			{
-				ID:          "api_key",
-				Label:       "Anthropic API key",
-				Type:        "password",
-				Required:    true,
-				Sensitive:   true,
-				Placeholder: "sk-ant-...",
-				Help:        "Used by API key setup to authenticate Claude Code.",
-			},
-			{
-				ID:          "base_url",
-				Label:       "Anthropic base URL",
-				Type:        "url",
-				Placeholder: "https://api.anthropic.com",
-				Help:        "Optional Claude Code API endpoint override.",
-			},
-			{
-				ID:          "oauth_token",
-				Label:       "Claude Code OAuth token",
-				Type:        "password",
-				Required:    true,
-				Sensitive:   true,
-				Placeholder: "Token from claude setup-token",
-				Help:        "Used by OAuth setup to authenticate Claude Code.",
-			},
-		},
-		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeAPIKey, setupModeOAuth, setupModeSelf},
-	}
-}
-
-func hermesProfile() Profile {
-	return Profile{
-		ID:          AgentHermesID,
-		DisplayName: AgentHermesName,
-		Description: "Hermes Agent ACP adapter",
-		Command:     "hermes-acp",
-		ToolQuirks: &ToolQuirks{
-			WriteTitleKeywords: []string{"write", "write file", "create", "create file", "new file"},
-			GenericExecTitles: []string{
-				"shell", "shell command", "command", "run", "run command",
-				"execute", "exec", "bash", "terminal", "terminal command",
-				"execute_code", "execute code", "python", "python code",
-			},
-		},
+		// Custom ACP adapters rarely advertise mcpCapabilities.http; forcing
+		// the HTTP MCP server injection keeps Memoh tools reachable either way.
 		ForceHTTPMCPServer: true,
-		RuntimeStorage:     hermesRuntimeStorage(),
+		ID:                 AgentACPID,
+		DisplayName:        AgentACPName,
+		Description:        "Run a custom Agent Client Protocol command",
+		Launch: LaunchPolicy{
+			ManagedCommandField:   genericACPCommandFieldID,
+			ManagedArgumentsField: genericACPArgumentsFieldID,
+		},
+		RuntimeStorage: genericACPRuntimeStorage(),
 		ManagedFields: []ManagedField{
 			{
-				ID:          "provider",
-				Label:       "Provider",
+				ID:          "command",
+				Label:       "Command",
 				Type:        "text",
 				Required:    true,
-				Placeholder: "gemini",
-				Help:        "Select Gemini, OpenRouter, OpenAI API, or a custom OpenAI-compatible endpoint.",
+				Placeholder: "my-agent-acp",
+				Help:        "Executable name or path for the ACP agent.",
 			},
 			{
-				ID:          "model",
-				Label:       "Model",
-				Type:        "text",
-				Required:    true,
-				Placeholder: "gemini-3.5-flash",
-				Help:        "Hermes model name for managed sessions.",
-			},
-			{
-				ID:          "base_url",
-				Label:       "Base URL",
-				Type:        "url",
-				Placeholder: "https://api.example.com/v1",
-				Help:        "Only required when Provider is Custom endpoint.",
-			},
-			{
-				ID:          "api_key",
-				Label:       "API key",
-				Type:        "password",
-				Required:    true,
-				Sensitive:   true,
-				Placeholder: "sk-...",
-				Help:        "Written to the bot-scoped Hermes .env file.",
+				ID:          "arguments",
+				Label:       "Arguments",
+				Type:        "textarea",
+				Placeholder: "--stdio",
+				Help:        "Optional process arguments, one argument per line.",
 			},
 		},
 		SupportedBackends: []string{"container"},
-		SetupModes:        []string{setupModeSelf, setupModeAPIKey},
+		// api_key is an internal managed-mode marker here; generic ACP has no
+		// authentication UI of its own and only needs Memoh-managed launch data.
+		SetupModes: []string{setupModeAPIKey},
 	}
 }
 
@@ -450,31 +303,13 @@ func NormalizeAgentID(agentID string) string {
 
 func ScrubMetadataForResponse(metadata map[string]any) map[string]any {
 	cloned := cloneMap(metadata)
-	acpConfig, ok := metadataRecord(cloned[MetadataKeyACP])
-	if !ok {
-		return cloned
-	}
-	agents, ok := metadataRecord(acpConfig["agents"])
-	if !ok {
-		return cloned
-	}
-	for rawAgentID, rawAgent := range agents {
-		agentConfig, ok := metadataRecord(rawAgent)
-		if !ok {
-			continue
-		}
-		managed, ok := metadataRecord(agentConfig["managed"])
-		if !ok {
-			continue
-		}
-		profile, _ := Lookup(rawAgentID)
-		sensitive := sensitiveFieldSet(profile)
-		for key, value := range managed {
-			if !sensitive[key] && !looksSensitiveKey(key) {
+	for _, entry := range acpManagedRecords(cloned) {
+		for key, value := range entry.fields {
+			if !entry.sensitive[key] && !looksSensitiveKey(key) {
 				continue
 			}
 			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
-				managed[key] = maskSecret(s)
+				entry.fields[key] = maskSecret(s)
 			}
 		}
 	}
@@ -483,15 +318,36 @@ func ScrubMetadataForResponse(metadata map[string]any) map[string]any {
 
 func ScrubMetadataForExport(metadata map[string]any) (map[string]any, bool) {
 	cloned := cloneMap(metadata)
-	acpConfig, ok := metadataRecord(cloned[MetadataKeyACP])
+	changed := false
+	for _, entry := range acpManagedRecords(cloned) {
+		for key := range entry.fields {
+			if !entry.sensitive[key] && !looksSensitiveKey(key) {
+				continue
+			}
+			delete(entry.fields, key)
+			changed = true
+		}
+	}
+	return cloned, changed
+}
+
+// acpManagedRecords walks metadata.acp.agents[*].managed, pairing each
+// managed record with its profile-declared sensitive field set.
+type acpManagedRecord struct {
+	fields    map[string]any
+	sensitive map[string]bool
+}
+
+func acpManagedRecords(metadata map[string]any) []acpManagedRecord {
+	acpConfig, ok := metadataRecord(metadata[MetadataKeyACP])
 	if !ok {
-		return cloned, false
+		return nil
 	}
 	agents, ok := metadataRecord(acpConfig["agents"])
 	if !ok {
-		return cloned, false
+		return nil
 	}
-	changed := false
+	out := make([]acpManagedRecord, 0, len(agents))
 	for rawAgentID, rawAgent := range agents {
 		agentConfig, ok := metadataRecord(rawAgent)
 		if !ok {
@@ -502,68 +358,68 @@ func ScrubMetadataForExport(metadata map[string]any) (map[string]any, bool) {
 			continue
 		}
 		profile, _ := Lookup(rawAgentID)
-		sensitive := sensitiveFieldSet(profile)
-		for key := range managed {
-			if !sensitive[key] && !looksSensitiveKey(key) {
-				continue
-			}
-			delete(managed, key)
-			changed = true
-		}
+		out = append(out, acpManagedRecord{fields: managed, sensitive: sensitiveFieldSet(profile)})
 	}
-	return cloned, changed
+	return out
 }
 
 func MergeSensitiveFieldsForUpdate(existing, incoming map[string]any) map[string]any {
 	merged := cloneMap(incoming)
 	existingACP, okExistingACP := metadataRecord(existing[MetadataKeyACP])
 	incomingACP, okIncomingACP := metadataRecord(merged[MetadataKeyACP])
-	if !okExistingACP || !okIncomingACP {
-		return merged
-	}
-	existingAgents, okExistingAgents := metadataRecord(existingACP["agents"])
-	incomingAgents, okIncomingAgents := metadataRecord(incomingACP["agents"])
-	if !okExistingAgents || !okIncomingAgents {
-		return merged
+	if okExistingACP && okIncomingACP {
+		existingAgents, okExistingAgents := metadataRecord(existingACP["agents"])
+		incomingAgents, okIncomingAgents := metadataRecord(incomingACP["agents"])
+		if okExistingAgents && okIncomingAgents {
+			for rawAgentID, rawIncomingAgent := range incomingAgents {
+				incomingAgent, ok := metadataRecord(rawIncomingAgent)
+				if !ok {
+					continue
+				}
+				incomingManaged, ok := metadataRecord(incomingAgent["managed"])
+				if !ok {
+					continue
+				}
+				existingAgent, ok := metadataRecord(existingAgents[rawAgentID])
+				if !ok {
+					continue
+				}
+				existingManaged, ok := metadataRecord(existingAgent["managed"])
+				if !ok {
+					continue
+				}
+				profile, _ := Lookup(rawAgentID)
+				sensitive := sensitiveFieldSet(profile)
+				restoreSensitiveFields(incomingManaged, existingManaged, func(key string) bool {
+					return sensitive[key] || looksSensitiveKey(key)
+				})
+			}
+		}
 	}
 
-	for rawAgentID, rawIncomingAgent := range incomingAgents {
-		incomingAgent, ok := metadataRecord(rawIncomingAgent)
-		if !ok {
+	return merged
+}
+
+// restoreSensitiveFields carries stored secrets through an update whose
+// payload echoes the scrubbed response: a missing, masked, or empty value
+// keeps the stored one, and an explicit null clears it.
+func restoreSensitiveFields(incoming, existing map[string]any, isSensitive func(string) bool) {
+	for key := range existing {
+		if !isSensitive(key) {
 			continue
 		}
-		incomingManaged, ok := metadataRecord(incomingAgent["managed"])
-		if !ok {
-			continue
-		}
-		existingAgent, ok := metadataRecord(existingAgents[rawAgentID])
-		if !ok {
-			continue
-		}
-		existingManaged, ok := metadataRecord(existingAgent["managed"])
-		if !ok {
-			continue
-		}
-		profile, _ := Lookup(rawAgentID)
-		sensitive := sensitiveFieldSet(profile)
-		for key := range existingManaged {
-			if !sensitive[key] && !looksSensitiveKey(key) {
-				continue
-			}
-			value, exists := incomingManaged[key]
-			switch {
-			case !exists:
-				incomingManaged[key] = existingManaged[key]
-			case value == nil:
-				delete(incomingManaged, key)
-			case isMaskedSecretValue(value):
-				incomingManaged[key] = existingManaged[key]
-			case isEmptyString(value):
-				incomingManaged[key] = existingManaged[key]
-			}
+		value, exists := incoming[key]
+		switch {
+		case !exists:
+			incoming[key] = existing[key]
+		case value == nil:
+			delete(incoming, key)
+		case isMaskedSecretValue(value):
+			incoming[key] = existing[key]
+		case isEmptyString(value):
+			incoming[key] = existing[key]
 		}
 	}
-	return merged
 }
 
 func sensitiveFieldSet(profile Profile) map[string]bool {

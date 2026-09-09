@@ -3,9 +3,9 @@ package application
 import (
 	"context"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func (s *Service) prepareContinuationRunConfig(
@@ -15,7 +15,7 @@ func (s *Service) prepareContinuationRunConfig(
 	summaryScope contextfrag.Scope,
 	eventCh chan<- WSStreamEvent,
 ) (native.RunConfig, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, defaultMaxContextMinutes)
+	loaded, err := s.loadHistoryRecords(ctx, fallback, summaryScope.SessionID, defaultMaxContextMinutes, 0)
 	if err != nil {
 		return native.RunConfig{}, err
 	}
@@ -27,6 +27,12 @@ func (s *Service) prepareContinuationRunConfig(
 	loaded = projectInterruptedHistoryReasoning(loaded)
 	messages, retained, _ := trimMessagesAndRecordsByTokens(s.logger, loaded, 0)
 	messages = sanitizeMessages(messages)
+	historyEstimates := make([]int, len(messages))
+	for i := range messages {
+		historyEstimates[i] = estimateMessageTokens(messages[i])
+	}
+	base.ContextHistoryTokenEstimates = historyEstimates
+	base.ContextTrimmableMessages = len(messages)
 
 	base.ContextFrags = historyContextFragsForMessages(messages, retained)
 	// Close any tool call left open by an interrupted turn before the transcript
@@ -39,6 +45,9 @@ func (s *Service) prepareContinuationRunConfig(
 	base.Messages = modelMessagesToSDKMessages(repairToolCallClosures(nonNilModelMessages(messages), syntheticToolClosureError))
 	base.ContextCurrentUserMessageIndex = nil
 	base.ContextMemoryMessageIndex = nil
+	if base.ContextToolExchangePolicy == nil {
+		base.ContextToolExchangePolicy = defaultToolExchangePolicy()
+	}
 	base.Query = ""
 	base.LiveToolStream = eventCh != nil
 	base.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)

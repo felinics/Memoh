@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 const systemPromptCollectorName = "system_prompt"
@@ -99,17 +99,18 @@ func preserveSystemBytes(raw string, frags []contextfrag.ContextFrag, scope cont
 		return frags
 	}
 	return []contextfrag.ContextFrag{{
-		ID:         "system.prompt",
-		Kind:       contextfrag.KindSystemPrompt,
-		Role:       sdk.MessageRoleSystem,
-		Slot:       contextfrag.SlotSystem,
-		Priority:   20,
-		CacheClass: contextfrag.CacheStable,
-		Trust:      contextfrag.TrustSystem,
-		Scope:      scope,
-		Render:     contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
-		Provenance: contextfrag.Provenance{Source: contextfrag.SourceRunConfig, Collector: systemPromptCollectorName},
-		Parts:      []contextfrag.Part{{Type: contextfrag.PartText, Text: raw}},
+		ID:            "system.prompt",
+		Kind:          contextfrag.KindSystemPrompt,
+		Role:          sdk.MessageRoleSystem,
+		Slot:          contextfrag.SlotSystem,
+		Priority:      20,
+		RetentionTier: contextfrag.RetentionRequired,
+		CacheClass:    contextfrag.CacheStable,
+		Trust:         contextfrag.TrustSystem,
+		Scope:         scope,
+		Render:        contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
+		Provenance:    contextfrag.Provenance{Source: contextfrag.SourceRunConfig, Collector: systemPromptCollectorName},
+		Parts:         []contextfrag.Part{{Type: contextfrag.PartText, Text: raw}},
 	}}
 }
 
@@ -119,18 +120,19 @@ func systemPromptConfig(config any) (SystemPromptConfig, error) {
 
 func systemPromptTextFrag(scope contextfrag.Scope, id string, kind contextfrag.Kind, text string, priority int, source string, index int) contextfrag.ContextFrag {
 	return contextfrag.TextFrag(contextfrag.TextFragInput{
-		ID:         id,
-		Kind:       kind,
-		Role:       sdk.MessageRoleSystem,
-		Slot:       contextfrag.SlotSystem,
-		Text:       text,
-		Priority:   priority,
-		CacheClass: contextfrag.CacheStable,
-		Trust:      contextfrag.TrustSystem,
-		Scope:      scope,
-		Source:     source,
-		Collector:  systemPromptCollectorName,
-		Index:      index,
-		Render:     contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
+		ID:            id,
+		Kind:          kind,
+		Role:          sdk.MessageRoleSystem,
+		Slot:          contextfrag.SlotSystem,
+		Text:          text,
+		Priority:      priority,
+		RetentionTier: contextfrag.RetentionRequired,
+		CacheClass:    contextfrag.CacheStable,
+		Trust:         contextfrag.TrustSystem,
+		Scope:         scope,
+		Source:        source,
+		Collector:     systemPromptCollectorName,
+		Index:         index,
+		Render:        contextfrag.RenderPolicy{Format: contextfrag.RenderMarkdown},
 	})
 }

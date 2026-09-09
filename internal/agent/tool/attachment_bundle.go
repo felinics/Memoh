@@ -1,8 +1,8 @@
 package tools
 
 import (
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/messaging"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/messaging"
 )
 
 // toolAttachmentFromBundle converts a normalized bundle to a tools.Attachment.

@@ -14,16 +14,23 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/toolcontext"
+	"github.com/felinics/memoh/internal/version"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-type ToolSessionContext = mcp.ToolSessionContext
+type ToolSessionContext = toolcontext.Session
+
+// RuntimeSyncGuard runs one runtime-configuration workspace operation while
+// its caller holds the durable bot generation lock. The client intentionally
+// knows nothing about the persistence implementation behind this callback.
+type RuntimeSyncGuard func(context.Context, func(context.Context) error) error
 
 type StartRequest struct {
 	AgentID     string
@@ -32,17 +39,12 @@ type StartRequest struct {
 	Command     string
 	Args        []string
 	Env         []string
-	CleanEnv    bool
 	UnsetEnv    []string
 	Resolved    *ResolvedSessionContext
 	SetupMode   SetupMode
 	// SessionMode, when set, is pinned via session/set_mode right after the
 	// session is created (see acpprofile.Profile.SessionModeID).
 	SessionMode string
-	// SessionConfigValues are pinned via session/set_config_option after the
-	// session is created, for options the agent advertises (see
-	// acpprofile.Profile.SessionConfigValues).
-	SessionConfigValues map[string]string
 	// ReasoningConfigID is a profile compatibility mapping used only when the
 	// agent omits ACP's thought_level category. DefaultReasoningEffort is the
 	// profile default applied at startup; per-turn choices are applied by the
@@ -52,10 +54,12 @@ type StartRequest struct {
 	Timeout                time.Duration
 	ToolSession            ToolSessionContext
 	ToolApproval           ToolApprovalService
+	UserInput              UserInputService
 	ToolGateway            *mcp.ToolGatewayService
 	ToolPreflightGateway   *mcp.ToolGatewayService
 	ToolHTTPURL            string
 	ToolHTTPHandler        http.Handler
+	RuntimeSyncGuard       RuntimeSyncGuard
 }
 
 type PromptResult struct {
@@ -85,6 +89,10 @@ type PromptOptions struct {
 	ToolOutputLimit   ToolOutputLimit
 	Images            []PromptImage
 	AllowResourceOnly bool
+	// RequiredCommand is an exact, opaque Agent command name. When set, the
+	// Session rechecks its latest available_commands snapshot immediately
+	// before dispatching the prompt.
+	RequiredCommand string
 }
 
 type Session struct {
@@ -99,9 +107,14 @@ type Session struct {
 	reasoningConfigFallbackID string
 	reasoningConfigID         string
 	reasoningState            ReasoningState
+	modeState                 ModeState
+	availableCommands         []AvailableCommandInfo
+	modeRevision              uint64
 	embeddedContext           bool
 	imagePromptSupported      bool
+	closeSessionSupported     bool
 	defaultSink               EventSink
+	lifecycleCtx              context.Context
 	cancel                    context.CancelFunc
 	reverseHTTPStop           func()
 
@@ -121,12 +134,8 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if strings.TrimSpace(req.BotID) == "" {
 		return nil, errors.New("bot_id is required")
 	}
-	// Codex was the only ACP runtime before profiles were introduced, and the
-	// direct Runner API historically allowed callers (including embedders) to
-	// omit AgentID. Keep that compatibility default while still rejecting any
-	// explicit unknown profile in prepareRuntimeLease.
 	if strings.TrimSpace(req.AgentID) == "" {
-		req.AgentID = acpprofile.AgentCodexID
+		return nil, errors.New("ACP agent id is required")
 	}
 
 	info, err := r.workspace.WorkspaceInfo(ctx, req.BotID)
@@ -210,6 +219,13 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 					slog.Any("error", err),
 				)
 			}
+			if sink != nil {
+				sink.EmitStreamEvent(event.StreamEvent{
+					Type:  event.RuntimeNotice,
+					Code:  "tools_unavailable",
+					Delta: "Memoh tools are unavailable for this session: tool bridge failed to start",
+				})
+			}
 			toolHTTPURL = ""
 		} else {
 			toolHTTPStop = stop
@@ -217,15 +233,15 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		Backend:   backend,
-		BotID:     req.BotID,
-		AgentID:   req.AgentID,
-		SetupMode: req.SetupMode,
-		Env:       req.Env,
-		CleanEnv:  req.CleanEnv,
-		UnsetEnv:  req.UnsetEnv,
-		NoTimeout: true,
-		Logger:    r.logger,
+		Backend:          backend,
+		BotID:            req.BotID,
+		AgentID:          req.AgentID,
+		SetupMode:        req.SetupMode,
+		Env:              req.Env,
+		UnsetEnv:         req.UnsetEnv,
+		NoTimeout:        true,
+		Logger:           r.logger,
+		RuntimeSyncGuard: req.RuntimeSyncGuard,
 	})
 	if err != nil {
 		if toolHTTPStop != nil {
@@ -246,20 +262,27 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	if preflightGateway == nil {
 		preflightGateway = req.ToolGateway
 	}
-	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, req.CleanEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	callbacks := newClientCallbacks(lifecycleCtx, client, root, projectPath, timeout, sink, proc.toolEnv, proc.unsetEnv, req.ToolApproval, preflightGateway, toolSession, acpprofile.QuirksFor(req.AgentID))
+	callbacks.userInput = req.UserInput
 	callbacks.logger = r.logger
 	conn := newClientConnection(callbacks, proc, proc)
 
-	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientInfo:      &acp.Implementation{Name: "memoh", Version: "dev"},
-		ClientCapabilities: acp.ClientCapabilities{
-			Fs: acp.FileSystemCapabilities{
-				ReadTextFile:  true,
-				WriteTextFile: true,
-			},
-			Terminal: true,
+	clientCapabilities := acp.ClientCapabilities{
+		Fs: acp.FileSystemCapabilities{
+			ReadTextFile:  true,
+			WriteTextFile: true,
 		},
+		Terminal: true,
+	}
+	if req.UserInput != nil {
+		clientCapabilities.Elicitation = &acp.ElicitationCapabilities{
+			Form: &acp.ElicitationFormCapabilities{},
+		}
+	}
+	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientInfo:         &acp.Implementation{Name: "memoh", Version: version.Version},
+		ClientCapabilities: clientCapabilities,
 	})
 	if err != nil {
 		callbacks.close()
@@ -269,6 +292,19 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		}
 		cancel()
 		return nil, fmt.Errorf("initialize ACP agent: %w", err)
+	}
+	if initResp.ProtocolVersion != acp.ProtocolVersionNumber {
+		callbacks.close()
+		_ = proc.Close()
+		if toolHTTPStop != nil {
+			toolHTTPStop()
+		}
+		cancel()
+		return nil, fmt.Errorf(
+			"initialize ACP agent: unsupported protocol version %d (client supports %d)",
+			initResp.ProtocolVersion,
+			acp.ProtocolVersionNumber,
+		)
 	}
 
 	mcpServers := []acp.McpServer{}
@@ -302,10 +338,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			)
 		}
 	}
-	sess, err := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        projectPath,
-		McpServers: mcpServers,
-	})
+	sess, err := startSession(ctx, conn, projectPath, mcpServers)
 	if err != nil {
 		callbacks.close()
 		_ = proc.Close()
@@ -313,7 +346,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			toolHTTPStop()
 		}
 		cancel()
-		return nil, fmt.Errorf("create ACP session: %w", err)
+		return nil, err
 	}
 	if err := pinSessionMode(ctx, conn, sess.SessionId, sess.Modes, req.SessionMode, r.logger, req.AgentID); err != nil {
 		callbacks.close()
@@ -324,8 +357,6 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		cancel()
 		return nil, err
 	}
-	configOptions := pinSessionConfigValues(ctx, conn, sess.SessionId, sess.ConfigOptions, req.SessionConfigValues, r.logger, req.AgentID)
-
 	clientSession := &Session{
 		logger:                    r.logger,
 		proc:                      proc,
@@ -336,13 +367,16 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		reasoningConfigFallbackID: strings.TrimSpace(req.ReasoningConfigID),
 		embeddedContext:           initResp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
 		imagePromptSupported:      initResp.AgentCapabilities.PromptCapabilities.Image,
+		closeSessionSupported:     initResp.AgentCapabilities.SessionCapabilities.Close != nil,
 		defaultSink:               sink,
+		lifecycleCtx:              lifecycleCtx,
 		cancel:                    cancel,
 		reverseHTTPStop:           toolHTTPStop,
 	}
-	clientSession.replaceConfigOptions(sess.SessionId, configOptions)
+	clientSession.replaceConfigOptions(sess.SessionId, sess.ConfigOptions)
 	clientSession.installLegacyModels(sess.Models)
-	callbacks.setConfigOptionsHandler(clientSession.replaceConfigOptions)
+	clientSession.installModes(sess.Modes)
+	callbacks.setSession(clientSession)
 	if defaultReasoning := strings.TrimSpace(req.DefaultReasoningEffort); defaultReasoning != "" && clientSession.ReasoningState().Supported {
 		if _, err := clientSession.SetReasoningEffort(ctx, defaultReasoning); err != nil {
 			if errors.Is(err, ErrReasoningEffortUnavailable) ||
@@ -367,6 +401,28 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	proc.Activate()
 	finishStartup()
 	return clientSession, nil
+}
+
+// startSession creates a fresh ACP session. Every process starts from a
+// clean runtime home; conversation continuity is Memoh's context document,
+// not adapter-native session state.
+func startSession(
+	ctx context.Context,
+	conn *clientConnection,
+	projectPath string,
+	mcpServers []acp.McpServer,
+) (sessionResponse, error) {
+	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
+		Cwd:        projectPath,
+		McpServers: mcpServers,
+	})
+	if err != nil {
+		return sessionResponse{}, fmt.Errorf("create ACP session: %w", err)
+	}
+	if strings.TrimSpace(string(resp.SessionId)) == "" {
+		return sessionResponse{}, errors.New("create ACP session: agent returned an empty session id")
+	}
+	return resp, nil
 }
 
 // pinSessionMode forces the agent session into the requested permission mode
@@ -407,91 +463,15 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 	}); err != nil {
 		return fmt.Errorf("pin ACP session mode %q: %w", desired, err)
 	}
+	previousMode := modes.CurrentModeId
+	modes.CurrentModeId = acp.SessionModeId(desired)
 	if logger != nil {
 		logger.Info("pinned ACP session mode",
 			slog.String("agent_id", agentID),
 			slog.String("mode", desired),
-			slog.String("previous_mode", string(modes.CurrentModeId)))
+			slog.String("previous_mode", string(previousMode)))
 	}
 	return nil
-}
-
-// pinSessionConfigValues applies any non-semantic profile config pins to
-// options the agent actually advertises. Thought level is handled separately
-// through ReasoningState so explicit user choices can override profile
-// defaults. Unlike the session mode, these are quality settings rather than a
-// security boundary, so failures are logged and startup continues.
-func pinSessionConfigValues(ctx context.Context, conn *clientConnection, sessionID acp.SessionId, options []acp.SessionConfigOption, desired map[string]string, logger *slog.Logger, agentID string) []acp.SessionConfigOption {
-	current := options
-	for _, option := range options {
-		if option.Select == nil {
-			continue
-		}
-		value, ok := desired[string(option.Select.Id)]
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if value == "" || string(option.Select.CurrentValue) == value {
-			continue
-		}
-		if !selectOptionHasValue(option.Select.Options, value) {
-			if logger != nil {
-				logger.Warn("ACP agent does not offer the pinned config value; leaving agent default",
-					slog.String("agent_id", agentID),
-					slog.String("config_id", string(option.Select.Id)),
-					slog.String("desired_value", value),
-					slog.String("current_value", string(option.Select.CurrentValue)))
-			}
-			continue
-		}
-		resp, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
-			ValueId: &acp.SetSessionConfigOptionValueId{
-				SessionId: sessionID,
-				ConfigId:  option.Select.Id,
-				Value:     acp.SessionConfigValueId(value),
-			},
-		})
-		if err != nil {
-			if logger != nil {
-				logger.Warn("failed to pin ACP session config option",
-					slog.String("agent_id", agentID),
-					slog.String("config_id", string(option.Select.Id)),
-					slog.String("desired_value", value),
-					slog.Any("error", err))
-			}
-			continue
-		}
-		current = resp.ConfigOptions
-		if logger != nil {
-			logger.Info("pinned ACP session config option",
-				slog.String("agent_id", agentID),
-				slog.String("config_id", string(option.Select.Id)),
-				slog.String("value", value),
-				slog.String("previous_value", string(option.Select.CurrentValue)))
-		}
-	}
-	return current
-}
-
-func selectOptionHasValue(options acp.SessionConfigSelectOptions, value string) bool {
-	if options.Ungrouped != nil {
-		for _, option := range *options.Ungrouped {
-			if string(option.Value) == value {
-				return true
-			}
-		}
-	}
-	if options.Grouped != nil {
-		for _, group := range *options.Grouped {
-			for _, option := range group.Options {
-				if string(option.Value) == value {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client *bridge.Client, route string, handler http.Handler) (*bridge.Client, func(), error) {
@@ -620,6 +600,23 @@ func (s *Session) ProjectPath() string {
 	return s.projectPath
 }
 
+// CancelPrompt asks an in-flight prompt to unwind without closing the ACP
+// session. Pool shutdown uses this before waiting for the per-runtime operation
+// lock: a prompt that already completed can finish its durable snapshot, while
+// a prompt still blocked in the agent receives session/cancel and releases the
+// lock. The actual session/process close happens only after that boundary.
+func (s *Session) CancelPrompt() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	cancel := s.promptCancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (s *Session) Prompt(ctx context.Context, prompt string, sinks ...EventSink) (PromptResult, error) {
 	return s.PromptWithResources(ctx, prompt, nil, sinks...)
 }
@@ -690,6 +687,9 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 
 	promptBlocks := s.promptBlocks(prompt, resources, images)
 	collector := newEventCollector(options.ToolOutputLimit)
+	// The prompt context is the output boundary. Once Stop/Close cancels it,
+	// late adapter notifications must not reach either history or the live UI.
+	collector.bindContext(promptCtx)
 	sink := defaultSink
 	if len(sinks) > 0 {
 		sink = sinks[0]
@@ -699,21 +699,24 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 	}
 	defer func() {
 		if callbacks != nil {
+			if promptCtx.Err() != nil {
+				// Record the cancelled turn's tool calls before the per-prompt
+				// states are wiped, so a late permission callback for one of
+				// them resolves as cancelled instead of correlating against
+				// the next turn.
+				callbacks.markPromptCancelled()
+			}
 			callbacks.setPromptState(nil, nil, ToolSessionContext{}, ToolOutputLimit{})
 		}
 	}()
+	if options.RequiredCommand != "" && !s.AdvertisesCommand(options.RequiredCommand) {
+		return PromptResult{}, ErrAgentCommandUnavailable
+	}
 
 	resp, err := conn.Prompt(promptCtx, acp.PromptRequest{
 		SessionId: sessionID,
 		Prompt:    promptBlocks,
 	})
-	if proc != nil {
-		if syncErr := proc.SyncPromptState(promptCtx); syncErr != nil && s.logger != nil {
-			s.logger.Warn("failed to synchronize ACP prompt runtime state",
-				slog.String("session_id", string(sessionID)),
-				slog.Any("error", syncErr))
-		}
-	}
 	collected := collector.result()
 	usage := promptUsageFromACP(resp.Usage)
 	result := PromptResult{
@@ -777,9 +780,6 @@ func (s *Session) promptBlocks(prompt string, resources []PromptResource, images
 			blocks = append(blocks, acp.TextBlock(prompt))
 		}
 	case s != nil && s.embeddedContext:
-		if prompt != "" {
-			blocks = append(blocks, acp.TextBlock(prompt))
-		}
 		for _, resource := range cleaned {
 			mimeType := resource.MimeType
 			blocks = append(blocks, acp.ResourceBlock(acp.EmbeddedResourceResource{
@@ -789,6 +789,9 @@ func (s *Session) promptBlocks(prompt string, resources []PromptResource, images
 					Text:     resource.Text,
 				},
 			}))
+		}
+		if prompt != "" {
+			blocks = append(blocks, acp.TextBlock(prompt))
 		}
 	default:
 		var sb strings.Builder
@@ -863,7 +866,49 @@ func cleanPromptResources(resources []PromptResource) []PromptResource {
 	return out
 }
 
+// AdvertisesCommand reports whether the live session currently declares the
+// named agent command. Names are opaque and case-sensitive; the caller passes
+// the exact selector, never a normalized form.
+func (s *Session) AdvertisesCommand(name string) bool {
+	if s == nil || name == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, command := range s.availableCommands {
+		if command.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// WaitDecisionCallbacksIdle reports whether every in-flight permission/Form
+// callback finished before the timeout. A cancelled prompt uses it as the
+// quiescence barrier before the warm runtime is handed to the next turn.
+func (s *Session) WaitDecisionCallbacksIdle(timeout time.Duration) bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	callbacks := s.callbacks
+	s.mu.Unlock()
+	return callbacks.waitDecisionCallbacksIdle(timeout)
+}
+
 func (s *Session) Close() error {
+	return s.close(false)
+}
+
+// ForceClose tears down the transport before attempting any protocol-level
+// cleanup. It is reserved for an unconfirmed prompt cancellation, where a
+// blocked JSON-RPC write can otherwise prevent graceful session/close from
+// ever reaching the process close that would unblock it.
+func (s *Session) ForceClose() error {
+	return s.close(true)
+}
+
+func (s *Session) close(force bool) error {
 	if s == nil {
 		return nil
 	}
@@ -879,6 +924,8 @@ func (s *Session) Close() error {
 	proc := s.proc
 	cancel := s.cancel
 	reverseHTTPStop := s.reverseHTTPStop
+	closeSessionSupported := s.closeSessionSupported
+	lifecycleCtx := s.lifecycleCtx
 	promptCancel := s.promptCancel
 	promptDone := s.promptDone
 	s.mu.Unlock()
@@ -886,7 +933,7 @@ func (s *Session) Close() error {
 	if promptCancel != nil {
 		promptCancel()
 	}
-	if promptDone != nil {
+	if !force && promptDone != nil {
 		timer := time.NewTimer(500 * time.Millisecond)
 		select {
 		case <-promptDone:
@@ -899,8 +946,29 @@ func (s *Session) Close() error {
 			}
 		}
 	}
-	if conn != nil && sessionID != "" {
-		ctx, cancelClose := context.WithTimeout(context.Background(), 2*time.Second)
+	if force {
+		// Close the process/pipe before any graceful JSON-RPC request. This is the
+		// operation that releases a writer stuck behind connection.writeMu.
+		if cancel != nil {
+			cancel()
+		}
+		var closeErr error
+		if proc != nil {
+			closeErr = proc.Close()
+		}
+		if callbacks != nil {
+			callbacks.close()
+		}
+		if reverseHTTPStop != nil {
+			reverseHTTPStop()
+		}
+		return closeErr
+	}
+	if closeSessionSupported && conn != nil && sessionID != "" {
+		if lifecycleCtx == nil {
+			lifecycleCtx = context.Background()
+		}
+		ctx, cancelClose := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 2*time.Second)
 		_, _ = conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: sessionID})
 		cancelClose()
 	}

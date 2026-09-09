@@ -9,7 +9,14 @@ import (
 const (
 	ToolNameAskUser = "ask_user"
 
-	ProviderSourceACPMCP = "acp_mcp"
+	// Provider sources record which surface created a request, for audit and
+	// display only. Nothing classifies on them: whether an answer feeds an
+	// in-process waiter or a native continuation is decided by the session's
+	// runtime (runtimekind.UsesDecisionWaiter), the same as tool approvals.
+	ProviderSourceACPMCP           = "acp_mcp"
+	ProviderSourceACPElicitation   = "acp_elicitation"
+	ProviderSourceCodexUserInput   = "codex_request_user_input"
+	ProviderSourceCodexElicitation = "codex_mcp_elicitation"
 
 	StatusPending   = "pending"
 	StatusSubmitted = "submitted"
@@ -156,12 +163,17 @@ type UIPayload struct {
 
 // UIQuestion describes one question in the ask_user UI payload.
 type UIQuestion struct {
-	ID          string     `json:"id"`
-	Text        string     `json:"text"`
-	Kind        string     `json:"kind"`
-	Options     []UIOption `json:"options,omitempty"`
-	AllowCustom bool       `json:"allow_custom,omitempty"`
-	Placeholder string     `json:"placeholder,omitempty"`
+	ID              string     `json:"id"`
+	Text            string     `json:"text"`
+	Kind            string     `json:"kind"`
+	Options         []UIOption `json:"options,omitempty"`
+	AllowCustom     bool       `json:"allow_custom,omitempty"`
+	CustomExclusive bool       `json:"custom_exclusive,omitempty"`
+	// Required is tri-state for compatibility. Legacy/native ask_user payloads
+	// omit it and keep their existing surface semantics; ACP forms set it
+	// explicitly so false means an optional schema property.
+	Required    *bool  `json:"required,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
 } // @name userinput.UIQuestion
 
 // UIOption describes one selectable option in an ask_user question.

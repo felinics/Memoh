@@ -27,13 +27,13 @@ import { isArchiveFile, sortDirsFirst } from './utils'
 import { resolveFileIcon } from './file-icon'
 import { FileTreeKey } from './file-tree-context'
 import {
-  treeAsideClass,
   treeGlyphSlotClass,
   treeIndentClass,
   treeRowClass,
   treeRowIdleClass,
   treeRowSelectedClass,
 } from './tree-row'
+import { useTreeDisclosure } from './tree-disclosure'
 
 const props = defineProps<{
   entry: HandlersFsFileInfo
@@ -46,9 +46,6 @@ if (!ctx) throw new Error('FileTreeNode must be used within a FileTree provider'
 const tree = ctx
 const isDark = useDark()
 
-const expanded = ref(false)
-const loaded = ref(false)
-const loading = ref(false)
 const children = ref<HandlersFsFileInfo[]>([])
 const rowEl = ref<HTMLElement | null>(null)
 
@@ -63,38 +60,24 @@ const isArchive = computed(() => isArchiveFile(props.entry.name))
 // Seti type glyph by name/extension (color tracks the active theme).
 const fileIcon = computed(() => resolveFileIcon(props.entry.name ?? '', isDark.value))
 
-async function loadChildren() {
-  if (!props.entry.isDir || !path.value) return
-  loading.value = true
-  try {
-    children.value = sortDirsFirst(await tree.listDirectory(path.value))
-    loaded.value = true
-  } finally {
-    loading.value = false
-  }
-}
-
-async function expand() {
-  expanded.value = true
-  if (!loaded.value) await loadChildren()
-}
+const { expanded, loaded, spinnerVisible, expand, toggle, reload } = useTreeDisclosure(async () => {
+  if (!props.entry.isDir || !path.value) return false
+  children.value = sortDirsFirst(await tree.listDirectory(path.value))
+  return true
+})
 
 function onRowClick() {
   if (selectionMode.value && path.value) {
     tree.toggleSelect(props.entry, !selected.value)
     return
   }
-  if (props.entry.isDir) {
-    if (expanded.value) expanded.value = false
-    else void expand()
-  } else {
-    tree.openFile(props.entry)
-  }
+  if (props.entry.isDir) toggle()
+  else tree.openFile(props.entry)
 }
 
 // Re-fetch an expanded folder's children when the workspace changes.
 watch(() => tree.refreshKey.value, () => {
-  if (expanded.value) void loadChildren()
+  if (expanded.value) void reload()
 })
 
 // Reveal (deep-link): expand the chain of ancestor folders leading to the
@@ -143,11 +126,15 @@ function onCheckbox(checked: boolean | 'indeterminate') {
         />
 
         <span :class="treeGlyphSlotClass">
+          <Spinner
+            v-if="entry.isDir && spinnerVisible"
+            class="text-muted-foreground"
+          />
           <ChevronRight
-            v-if="entry.isDir"
+            v-else-if="entry.isDir"
             :stroke-width="1.53"
-            class="size-4 text-muted-foreground"
-            :class="{ 'rotate-90': expanded }"
+            class="size-4 text-muted-foreground transition-[rotate]"
+            :class="{ 'rotate-90': expanded && loaded }"
           />
           <span
             v-else
@@ -213,22 +200,6 @@ function onCheckbox(checked: boolean | 'indeterminate') {
       </ContextMenuItem>
     </ContextMenuContent>
   </ContextMenu>
-
-  <!-- Loading spinner: kept outside the display:contents wrapper so the
-       browser can composite the animation layer correctly. -->
-  <div
-    v-if="entry.isDir && expanded && loading && children.length === 0"
-    :class="treeAsideClass"
-  >
-    <span
-      v-for="g in depth + 1"
-      :key="g"
-      :class="treeIndentClass"
-    />
-    <span :class="treeGlyphSlotClass">
-      <Spinner class="size-3.5" />
-    </span>
-  </div>
 
   <!-- Children: kept mounted after first load to avoid re-mount cost on
        close/reopen. display:contents when expanded (no layout impact),

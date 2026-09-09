@@ -12,8 +12,8 @@ func TestRenderMessage_ImageRefsPopulated(t *testing.T) {
 		TimestampSec: 100,
 		Content:      []ContentNode{{Type: "text", Text: "photo"}},
 		Attachments: []Attachment{
-			{Type: "image", ContentHash: "hash-1", MimeType: "image/jpeg", FilePath: "/data/media/bot/ab/hash-1.jpg"},
-			{Type: "file", ContentHash: "hash-2", MimeType: "application/pdf", FilePath: "/data/media/bot/cd/hash-2.pdf"},
+			{Type: "image", ContentHash: "hash-1", MimeType: "image/jpeg", FilePath: "/data/.memoh/media/bot/ab/hash-1.jpg"},
+			{Type: "file", ContentHash: "hash-2", MimeType: "application/pdf", FilePath: "/data/.memoh/media/bot/cd/hash-2.pdf"},
 			{Type: "image", MimeType: "image/png"},
 		},
 		Conversation: ConversationMeta{Channel: "telegram", ConversationType: "private"},

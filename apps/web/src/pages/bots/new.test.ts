@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
+/* eslint-disable vue/one-component-per-file */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick } from 'vue'
 import type { Slots } from 'vue'
 
 const mocks = vi.hoisted(() => ({
+  acpProfiles: [] as Array<{ id: string, display_name: string, setup_modes: string[] }>,
   getBotsNameAvailability: vi.fn(),
   routerBack: vi.fn(),
   routerPush: vi.fn(),
@@ -49,13 +51,16 @@ vi.mock('@vueuse/core', () => ({
 vi.mock('@pinia/colada', async () => {
   const { ref } = await import('vue')
   return {
-    useQuery: () => ({ data: ref([]) }),
+    useQuery: (options: { key?: string[] }) => ({
+      data: ref(options.key?.[0] === 'acp-profiles' ? { items: mocks.acpProfiles } : []),
+    }),
     useQueryCache: () => ({ invalidateQueries: vi.fn() }),
   }
 })
 
 vi.mock('@memohai/sdk', () => ({
   getBotsNameAvailability: (...args: unknown[]) => mocks.getBotsNameAvailability(...args),
+  getAcpProfiles: vi.fn(async () => ({ data: { items: mocks.acpProfiles } })),
   getMemoryProviders: vi.fn(async () => ({ data: [] })),
   getModels: vi.fn(async () => ({ data: [] })),
   getProviders: vi.fn(async () => ({ data: [] })),
@@ -76,9 +81,21 @@ vi.mock('@/composables/useAvatarInitials', () => ({
   useAvatarInitials: () => 'P',
 }))
 
+// The page seeds the workspace-members draft with the signed-in user; the test
+// mounts a bare app with no Pinia, so the store stands in as a plain object.
+vi.mock('@/store/user', () => ({
+  useUserStore: () => ({
+    userInfo: { id: 'user-1', username: 'admin', displayName: 'Admin', avatarUrl: '' },
+  }),
+}))
+
 vi.mock('@felinic/ui', async () => {
   const { h } = await import('vue')
   const Passthrough = (_props: Record<string, unknown>, { slots }: { slots: Slots }) => h('div', slots.default?.())
+  // A settings row puts its body in the #content slot, so a default-slot-only
+  // stub would drop every field on the page.
+  const SlottedRow = (_props: Record<string, unknown>, { slots }: { slots: Slots }) =>
+    h('div', [slots.content?.(), slots.default?.()])
   const Button = (props: Record<string, unknown>, { attrs, slots }: { attrs: Record<string, unknown>, slots: Slots }) =>
     h('button', { ...attrs, disabled: props.disabled, type: props.type ?? 'button' }, slots.default?.())
   const Input = Object.assign((
@@ -104,7 +121,8 @@ vi.mock('@felinic/ui', async () => {
     SelectItem: Passthrough,
     SelectTrigger: Passthrough,
     SelectValue: Passthrough,
-    Separator: Passthrough,
+    SettingsRow: SlottedRow,
+    SettingsSection: Passthrough,
     Spinner: Passthrough,
     Tabs: Passthrough,
     TabsList: Passthrough,
@@ -131,10 +149,44 @@ vi.mock('@/components/timezone-select/index.vue', () => ({ default: (_props: Rec
 vi.mock('./components/avatar-edit-dialog.vue', () => ({ default: () => h('div') }))
 vi.mock('./components/bot-import-panel.vue', () => ({ default: () => h('div') }))
 vi.mock('./components/memory-provider-select.vue', () => ({ default: () => h('select') }))
+// The members list owns its own queries and a dozen @felinic/ui imports; this
+// test is about the submit hand-off, so it stands in as an inert child.
+vi.mock('./components/bot-user-access.vue', () => ({ default: () => h('div') }))
 vi.mock('./components/model-select.vue', () => ({ default: () => h('select') }))
+vi.mock('./components/agent-type-pill.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    default: defineComponent({
+      props: { profiles: { type: Array, default: () => [] } },
+      emits: ['update:modelValue'],
+      setup(props, { emit }) {
+        return () => h('button', {
+          'data-select-oauth-agent': '',
+          type: 'button',
+          onClick: () => emit('update:modelValue', (props.profiles as Array<{ id: string }>)[0]?.id ?? 'memoh'),
+        })
+      },
+    }),
+  }
+})
+vi.mock('./components/acp-setup-panel.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    default: defineComponent({
+      setup(_props, { expose }) {
+        expose({
+          selection: () => ({ agentId: 'claude-code', setupMode: 'oauth', managed: {} }),
+          missingRequiredField: () => null,
+        })
+        return () => h('div')
+      },
+    }),
+  }
+})
 
 describe('bot create page', () => {
   beforeEach(() => {
+    mocks.acpProfiles = []
     mocks.getBotsNameAvailability.mockReset()
     mocks.routerBack.mockReset()
     mocks.routerPush.mockReset()
@@ -172,5 +224,4 @@ describe('bot create page', () => {
     app.unmount()
     root.remove()
   })
-
 })

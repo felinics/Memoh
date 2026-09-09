@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/media"
 )
 
 func (a *Adapter) ResolveAttachment(ctx context.Context, cfg channel.ChannelConfig, att channel.Attachment) (channel.AttachmentPayload, error) {

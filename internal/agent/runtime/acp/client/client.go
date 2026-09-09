@@ -9,22 +9,24 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/runtimefence"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/toolcontext"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -33,16 +35,20 @@ const (
 	// permissionStateWaitTimeout bounds request/notification correlation so a
 	// missing session update cannot hold the agent prompt open indefinitely.
 	permissionStateWaitTimeout = 30 * time.Second
+	// genericPermissionStateWaitTimeout lets an ordinary request_permission
+	// correlate with the preceding session/update without holding a prompt open
+	// when that update never arrives.
+	genericPermissionStateWaitTimeout = 300 * time.Millisecond
+	// tombstoneReclaimWaitTimeout gives a live turn that legitimately reuses a
+	// tombstoned tool-call ID time for its session/update to reclaim the ID
+	// before the request is answered as cancelled.
+	tombstoneReclaimWaitTimeout = 2 * time.Second
 	// approvalGrantTTL bounds how long a RequestPermission grant stays
 	// consumable by the follow-up client-capability callback. Deliberately its
 	// own constant: it is unrelated to how long the approval flow waits for a
 	// user decision, even though both happen to be generous.
 	approvalGrantTTL = 10 * time.Minute
 )
-
-const acpAdapterVersionLookupTimeoutSeconds int32 = 90
-
-var exactACPAdapterVersionPattern = regexp.MustCompile(`^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
 type Workspace interface {
 	bridge.Provider
@@ -56,6 +62,10 @@ type ToolApprovalService interface {
 	Reject(ctx context.Context, approvalID, actorID, reason string) (toolapproval.Request, error)
 	WaitForDecision(ctx context.Context, approvalID string) (toolapproval.Request, error)
 	RegisterWaiter(approvalID string) func()
+}
+
+type UserInputService interface {
+	userinput.FlowService
 }
 
 type Runner struct {
@@ -113,38 +123,6 @@ func (r *Runner) MCPClient(ctx context.Context, botID string) (*bridge.Client, e
 	return r.workspace.MCPClient(ctx, botID)
 }
 
-// ResolveACPAdapterVersion returns the exact version currently behind an npm
-// package's latest dist-tag in the target workspace.
-func (r *Runner) ResolveACPAdapterVersion(ctx context.Context, botID, packageName string, env []string) (string, error) {
-	info, err := r.WorkspaceInfo(ctx, botID)
-	if err != nil {
-		return "", fmt.Errorf("resolve workspace: %w", err)
-	}
-	client, err := r.MCPClient(ctx, botID)
-	if err != nil {
-		return "", fmt.Errorf("connect workspace bridge: %w", err)
-	}
-	command := buildShellCommand("npm", []string{"view", packageName, "dist-tags.latest", "--json"})
-	result, err := client.ExecWithOptions(ctx, command, info.DefaultWorkDir, acpAdapterVersionLookupTimeoutSeconds, nil, bridge.ExecOptions{
-		Env: append([]string(nil), env...),
-	})
-	if err != nil {
-		return "", fmt.Errorf("resolve adapter version: %w", err)
-	}
-	if result.ExitCode != 0 {
-		return "", fmt.Errorf("resolve adapter version: npm exited with code %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
-	}
-	var version string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Stdout)), &version); err != nil {
-		return "", fmt.Errorf("parse adapter version: %w", err)
-	}
-	version = strings.TrimSpace(version)
-	if !exactACPAdapterVersionPattern.MatchString(version) {
-		return "", fmt.Errorf("npm returned invalid adapter version %q", version)
-	}
-	return version, nil
-}
-
 // Run is a convenience wrapper that performs a single-shot ACP exchange:
 // start a session, send one prompt, then close. Production code that needs a
 // persistent session should use StartSession + (*Session).Prompt directly.
@@ -200,26 +178,41 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 }
 
 type clientCallbacks struct {
-	client               *bridge.Client
-	logger               *slog.Logger
-	root                 string
-	cwd                  string
-	approval             ToolApprovalService
-	toolGateway          *mcp.ToolGatewayService
-	baseSession          ToolSessionContext
-	mu                   sync.RWMutex
-	collector            *eventCollector
-	sink                 EventSink
-	promptSession        ToolSessionContext
-	approvalGrants       map[string]approvedToolGrant
-	events               *toolEventEmitter
-	toolMapper           *acpToolEventMapper
-	terminals            *terminalManager
-	toolLimit            ToolOutputLimit
-	configOptionsHandler func(acp.SessionId, []acp.SessionConfigOption)
+	client         *bridge.Client
+	logger         *slog.Logger
+	root           string
+	cwd            string
+	approval       ToolApprovalService
+	userInput      UserInputService
+	toolGateway    *mcp.ToolGatewayService
+	baseSession    ToolSessionContext
+	mu             sync.RWMutex
+	collector      *eventCollector
+	sink           EventSink
+	promptSession  ToolSessionContext
+	approvalGrants map[string]approvedToolGrant
+	events         *toolEventEmitter
+	toolMapper     *acpToolEventMapper
+	terminals      *terminalManager
+	toolLimit      ToolOutputLimit
+	runtimeSession *Session
+	// pendingCurrentModes retains the latest mode replacement when a
+	// session/update overtakes session/new. It is fenced by ACP session ID in
+	// exactly the same way as pendingAvailableCommands below.
+	pendingCurrentModes map[acp.SessionId]acp.SessionModeId
+	// pendingAvailableCommands retains the latest Agent-declared command set
+	// when session/update overtakes the session/new response. The ACP SDK waits
+	// for pre-response notifications before returning session/new, so the
+	// canonical Session cannot be attached until after those callbacks finish.
+	pendingAvailableCommands map[acp.SessionId][]AvailableCommandInfo
 	// quirks carries the per-agent title heuristics (profile owns them);
 	// the zero value behaves like the defaults.
 	quirks acpprofile.ToolQuirks
+	// decisions counts in-flight permission/Form callbacks. ACP dispatches
+	// inbound requests on connection-scoped goroutines that survive prompt
+	// cancellation, so a cancelled turn waits on this gauge before the runtime
+	// is handed to the next turn.
+	decisions decisionInflight
 }
 
 type approvedToolGrant struct {
@@ -227,7 +220,53 @@ type approvedToolGrant struct {
 	ExpiresAt  time.Time
 }
 
-func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, cleanEnv bool, unsetEnv []string, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext, quirks acpprofile.ToolQuirks) *clientCallbacks {
+// decisionInflight is a counter with an idle broadcast: enter/exit bracket a
+// decision callback, waitIdle reports whether every in-flight callback
+// finished before the deadline.
+type decisionInflight struct {
+	mu   sync.Mutex
+	n    int
+	idle chan struct{}
+}
+
+func (g *decisionInflight) enter() {
+	g.mu.Lock()
+	g.n++
+	g.mu.Unlock()
+}
+
+func (g *decisionInflight) exit() {
+	g.mu.Lock()
+	g.n--
+	if g.n <= 0 && g.idle != nil {
+		close(g.idle)
+		g.idle = nil
+	}
+	g.mu.Unlock()
+}
+
+func (g *decisionInflight) waitIdle(timeout time.Duration) bool {
+	g.mu.Lock()
+	if g.n <= 0 {
+		g.mu.Unlock()
+		return true
+	}
+	if g.idle == nil {
+		g.idle = make(chan struct{})
+	}
+	idle := g.idle
+	g.mu.Unlock()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-idle:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd string, timeout time.Duration, sink EventSink, env []string, unsetEnv []string, approval ToolApprovalService, toolGateway *mcp.ToolGatewayService, toolSession ToolSessionContext, quirks acpprofile.ToolQuirks) *clientCallbacks {
 	timeoutSeconds := int32(timeout.Seconds())
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultTerminalTimeout
@@ -243,7 +282,7 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 		sink:        sink,
 		events:      events,
 		toolMapper:  newACPToolEventMapper(quirks),
-		terminals:   newTerminalManager(ctx, client, root, cwd, timeoutSeconds, env, cleanEnv, unsetEnv, events),
+		terminals:   newTerminalManager(ctx, client, root, cwd, timeoutSeconds, env, unsetEnv, events),
 		quirks:      quirks,
 	}
 }
@@ -280,18 +319,101 @@ func (c *clientCallbacks) setPromptState(collector *eventCollector, sink EventSi
 	}
 }
 
-func (c *clientCallbacks) setConfigOptionsHandler(handler func(acp.SessionId, []acp.SessionConfigOption)) {
+// markPromptCancelled records the cancelled prompt's tool calls so late
+// permission callbacks resolve as cancelled (see isTombstoned). It must run
+// before setPromptState wipes the per-prompt tool states.
+func (c *clientCallbacks) markPromptCancelled() {
+	if c == nil {
+		return
+	}
+	if c.toolMapper != nil {
+		c.toolMapper.tombstoneActiveToolCalls()
+	}
+}
+
+// waitDecisionCallbacksIdle reports whether every in-flight permission/Form
+// callback finished before the timeout. A cancelled prompt uses it as the
+// quiescence barrier before the runtime is reused.
+func (c *clientCallbacks) waitDecisionCallbacksIdle(timeout time.Duration) bool {
+	if c == nil {
+		return true
+	}
+	return c.decisions.waitIdle(timeout)
+}
+
+func (c *clientCallbacks) setSession(session *Session) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
-	c.configOptionsHandler = handler
+	c.runtimeSession = session
+	if session != nil {
+		if modeID, ok := c.pendingCurrentModes[session.sessionID]; ok {
+			session.updateCurrentMode(session.sessionID, modeID)
+		}
+		if commands, ok := c.pendingAvailableCommands[session.sessionID]; ok {
+			session.replaceAvailableCommands(session.sessionID, commands)
+		}
+		// One client connection owns one canonical Session. Notifications for
+		// any other ID are stale or invalid and must not survive attachment.
+		c.pendingCurrentModes = nil
+		c.pendingAvailableCommands = nil
+	}
 	c.mu.Unlock()
+}
+
+func (c *clientCallbacks) updateCurrentMode(sessionID acp.SessionId, modeID acp.SessionModeId) (ModeState, bool) {
+	if c == nil {
+		return ModeState{Supported: false}, false
+	}
+	c.mu.Lock()
+	if c.runtimeSession == nil {
+		if c.pendingCurrentModes == nil {
+			c.pendingCurrentModes = make(map[acp.SessionId]acp.SessionModeId)
+		}
+		// current_mode_update is a replacement. Preserve only the newest value
+		// for each not-yet-attached session.
+		c.pendingCurrentModes[sessionID] = modeID
+		c.mu.Unlock()
+		return ModeState{Supported: false}, false
+	}
+	if sessionID != c.runtimeSession.sessionID {
+		c.mu.Unlock()
+		return ModeState{Supported: false}, false
+	}
+	session := c.runtimeSession
+	c.mu.Unlock()
+	return session.updateCurrentMode(sessionID, modeID), true
+}
+
+func (c *clientCallbacks) updateAvailableCommands(sessionID acp.SessionId, commands []acp.AvailableCommand) ([]AvailableCommandInfo, bool) {
+	if c == nil {
+		return nil, false
+	}
+	parsed := availableCommandsFromACP(commands)
+	c.mu.Lock()
+	if c.runtimeSession == nil {
+		if c.pendingAvailableCommands == nil {
+			c.pendingAvailableCommands = make(map[acp.SessionId][]AvailableCommandInfo)
+		}
+		// available_commands_update is a full replacement, not a delta. Store
+		// only the newest set for this session, including an explicit empty set.
+		c.pendingAvailableCommands[sessionID] = cloneAvailableCommands(parsed)
+		c.mu.Unlock()
+		return nil, false
+	}
+	if sessionID != c.runtimeSession.sessionID {
+		c.mu.Unlock()
+		return nil, false
+	}
+	session := c.runtimeSession
+	c.mu.Unlock()
+	return session.replaceAvailableCommands(sessionID, parsed), true
 }
 
 func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 
 	toolID := "read-" + uuid.NewString()
@@ -334,7 +456,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	if p.Limit != nil && *p.Limit > 0 {
 		limit = boundedPositiveInt32(*p.Limit)
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		toolErr = err
 		return acp.ReadTextFileResponse{}, err
 	}
@@ -376,7 +498,7 @@ func (c *clientCallbacks) limitedApprovalRejectionMessage(toolName string, appro
 
 func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 
 	toolID := "write-" + uuid.NewString()
@@ -405,7 +527,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		toolErr = err
 		return acp.WriteTextFileResponse{}, err
 	}
-	if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		toolErr = err
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -492,15 +614,51 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 	if c == nil {
 		return cancelledPermission(), nil
 	}
+	c.decisions.enter()
+	defer c.decisions.exit()
+	approvalOptions, err := approvalOptionsFromACP(p.Options)
+	if err != nil {
+		if errors.Is(err, errUnsupportedOptionKind) {
+			// A vendor or future option kind is not a protocol violation; the
+			// options simply cannot be shown to a decider, so resolve the
+			// request as cancelled instead of aborting the agent's turn.
+			if c.logger != nil {
+				c.logger.Warn("permission options unmappable; cancelling",
+					slog.String("tool_call_id", strings.TrimSpace(string(p.ToolCall.ToolCallId))),
+					slog.String("error", err.Error()))
+			}
+			return cancelledPermission(), nil
+		}
+		return acp.RequestPermissionResponse{}, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
+	if c.toolMapper != nil && c.toolMapper.isTombstoned(p.SessionId, string(p.ToolCall.ToolCallId)) {
+		// The tool call matches a prompt the user already stopped. The SDK
+		// dispatches requests concurrently with the ordered notification
+		// queue, so give a live turn that legitimately reuses the ID a short
+		// window for its session/update to arrive and reclaim the tombstone
+		// (ensureTool deletes it); a genuinely stale callback has no such
+		// update coming and resolves as cancelled instead of correlating
+		// against - and creating an approval row under - the next turn.
+		if c.toolMapper != nil {
+			waitCtx, cancelWait := context.WithTimeout(ctx, tombstoneReclaimWaitTimeout)
+			c.toolMapper.waitForPermissionState(waitCtx, p.SessionId, p.ToolCall, func(*acpToolState) bool {
+				return !c.toolMapper.isTombstoned(p.SessionId, string(p.ToolCall.ToolCallId))
+			})
+			cancelWait()
+		}
+		if c.toolMapper.isTombstoned(p.SessionId, string(p.ToolCall.ToolCallId)) {
+			return cancelledPermission(), nil
+		}
+	}
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 	allowWithGuard := func() (acp.RequestPermissionResponse, error) {
 		resp := allowOncePermission(p)
 		if resp.Outcome.Cancelled != nil {
 			return resp, nil
 		}
-		if err := mcp.ValidateRuntimeGuard(ctx, session); err != nil {
+		if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 			return acp.RequestPermissionResponse{}, err
 		}
 		return resp, nil
@@ -516,74 +674,118 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		waitCtx, cancelWait := context.WithTimeout(ctx, permissionStateWaitTimeout)
 		state = c.toolMapper.waitForPermissionState(waitCtx, p.SessionId, p.ToolCall, mcpPermissionStateReady)
 		cancelWait()
+	} else if !genericPermissionStateReady(state) && c.toolMapper != nil {
+		waitCtx, cancelWait := context.WithTimeout(ctx, genericPermissionStateWaitTimeout)
+		state = c.toolMapper.waitForPermissionState(waitCtx, p.SessionId, p.ToolCall, genericPermissionStateReady)
+		cancelWait()
 	}
 	if err := c.validatePermissionScope(state); err != nil {
 		// Security-relevant rejection: an agent asked to act outside the
 		// workspace root. Log it (an agent probing the boundary is exactly what
-		// we want visibility into) before cancelling.
+		// we want visibility into) before refusing.
 		if c.logger != nil {
-			c.logger.Warn("cancelling out-of-scope ACP permission request", slog.Any("error", err))
+			c.logger.Warn("rejecting out-of-scope ACP permission request", slog.Any("error", err))
 		}
-		return cancelledPermission(), nil
+		return rejectOncePermission(p), nil
 	}
+	// Consent is never a policy shortcut. ACP adapters encode fallback
+	// elicitation consent in the request shape, so the user must see the Agent's
+	// choices even when its server name would otherwise pass MCP preflight.
+	// Correlated real Memoh MCP tool calls remain delegated to the gateway's own
+	// scoped policy and approval flow rather than creating a duplicate prompt.
+	consentShaped := isConsentShapedPermission(state)
+	forceReview := consentShaped
+	mcpShaped := false
 	if preflight, ok := mcpPermissionPreflightFromState(state); ok {
-		if !c.allowsMemohMCPToolPreflight(ctx, preflight) {
-			if c.logger != nil {
-				c.logger.Warn("cancelling untrusted ACP MCP permission request",
-					slog.String("tool_call_id", state.id),
-					slog.String("server_name", preflight.serverName),
-					slog.String("tool_name", preflight.toolName),
-					slog.String("shape", preflight.shape))
-			}
-			return cancelledPermission(), nil
+		mcpShaped = true
+		if !forceReview && c.allowsMemohMCPToolPreflight(ctx, preflight) {
+			return allowWithGuard()
 		}
-		return allowWithGuard()
+		// Servers outside Memoh's scoped tool gateway are still ones the user
+		// configured in their agent deliberately; the user decides, not a
+		// blanket refusal - and "the user decides" must hold in every policy
+		// configuration, so a disabled approval policy cannot silently select
+		// an allow option on the user's behalf.
+		forceReview = true
+		if c.logger != nil {
+			c.logger.Info("routing non-Memoh MCP permission request to generic approval",
+				slog.String("tool_call_id", state.id),
+				slog.String("server_name", preflight.serverName),
+				slog.String("tool_name", preflight.toolName),
+				slog.String("shape", preflight.shape))
+		}
 	}
 	toolCallID, toolName, input, native := permissionNativeToolState(state, c.quirks)
 	if !native {
-		if !allowUnmappedPermission(state) {
-			if c.logger != nil {
-				title, kind := permissionToolIdentityFromState(state)
-				c.logger.Warn("cancelling unmapped ACP permission request",
-					slog.String("tool_call_id", state.id),
-					slog.String("title", title),
-					slog.String("kind", kind),
-					slog.String("raw_input", permissionRawInputSummary(state.input)))
+		if isThinkPermissionState(state) && !forceReview {
+			// Pure thought carries no side effect worth gating.
+			return allowWithGuard()
+		}
+		// Every other shape that maps to no concrete tool - network grants,
+		// mode switches, fetch/search asks, novel encodings - becomes a
+		// generic permission approval carrying the agent's own title and
+		// options, so nothing is silently answered on the user's behalf.
+		// ForceReview keeps that promise when the approval policy is disabled.
+		toolCallID, toolName, input = permissionApprovalToolState(state)
+		forceReview = true
+		if !mcpShaped && !consentShaped {
+			// Only an agent-declared kind whose path/command failed to parse
+			// inherits the classified deny posture (policy_kind). MCP consents
+			// carry a Memoh-synthesized kind - denying them under the shell
+			// exec policy class would silently kill the agent's MCP tools -
+			// so they stay on the human-review lane.
+			if kind := stringFromAny(input["kind"]); kind != "" {
+				input["policy_kind"] = kind
 			}
-			return cancelledPermission(), nil
 		}
-		// Only protocol-level ACP permissions are allowed here. MCP preflights
-		// were classified and checked against the scoped gateway above. Unknown
-		// shapes fail closed so a new write/exec encoding cannot bypass policy.
 		if c.logger != nil {
-			title, kind := permissionToolIdentityFromState(state)
-			c.logger.Info("allowing ACP permission request that maps to no policy-gated tool",
-				slog.String("tool_call_id", state.id),
-				slog.String("title", title),
-				slog.String("kind", kind))
+			// The raw-input summary reports the shape without echoing values
+			// into logs, which is how a new agent encoding gets noticed.
+			c.logger.Info("routing unmapped ACP permission request to generic approval",
+				slog.String("tool_call_id", toolCallID),
+				slog.String("title", stringFromAny(input["title"])),
+				slog.String("kind", stringFromAny(input["kind"])),
+				slog.String("raw_input", permissionRawInputSummary(state.input)))
 		}
-		return allowWithGuard()
 	}
 	if c.approval == nil {
-		return allowWithGuard()
+		return rejectOncePermission(p), nil
 	}
-	result, err := c.requireToolApproval(ctx, toolCallID, toolName, input)
+	result, err := c.requireToolApproval(ctx, toolCallID, toolName, input, approvalOptions, forceReview)
 	if err != nil {
+		if ctx.Err() != nil {
+			// The prompt turn itself is going away; ACP reserves the cancelled
+			// outcome for exactly this case, so resolve the pending request
+			// with it instead of surfacing a JSON-RPC error.
+			return cancelledPermission(), nil
+		}
 		return acp.RequestPermissionResponse{}, err
 	}
 	if !result.Approved {
+		if strings.EqualFold(result.Status, toolapproval.StatusCancelled) {
+			// The row was cancelled because the turn itself is going away
+			// (session/cancel, runtime close) - exactly what ACP reserves the
+			// cancelled outcome for.
+			return cancelledPermission(), nil
+		}
+		if strings.TrimSpace(result.SelectedOptionID) != "" {
+			return selectedPermission(acp.PermissionOptionId(result.SelectedOptionID)), nil
+		}
 		if result.DecidedByUser {
 			// A live user said no: select the agent's reject option so the
 			// turn continues with a clean refusal instead of an aborted turn.
 			return rejectOncePermission(p), nil
 		}
-		// System outcomes (no session identity, non-interactive auto-reject)
-		// cancel the request: there was no user decision to report.
+		// System outcomes (policy deny, approval timeout, non-interactive
+		// auto-reject, missing session identity) cancel the request: there
+		// was no user decision to report, and answering with reject_once
+		// would invite an unattended agent to retry-loop against
+		// auto-rejections no user made.
 		return cancelledPermission(), nil
 	}
-	resp, err := allowWithGuard()
-	if err != nil {
-		return acp.RequestPermissionResponse{}, err
+	resp := allowOncePermission(p)
+	if strings.TrimSpace(result.SelectedOptionID) != "" {
+		resp = selectedPermission(acp.PermissionOptionId(result.SelectedOptionID))
 	}
 	if resp.Outcome.Cancelled != nil {
 		// The user approved but the agent offered no allow_once option, so the
@@ -597,7 +799,12 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		}
 		return resp, nil
 	}
-	c.rememberApprovalGrant(toolCallID, toolName, input)
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
+		return acp.RequestPermissionResponse{}, err
+	}
+	if native {
+		c.rememberApprovalGrant(toolCallID, toolName, input)
+	}
 	return resp, nil
 }
 
@@ -623,21 +830,43 @@ func mcpPermissionStateReady(state *acpToolState) bool {
 	return ok && strings.TrimSpace(preflight.serverName) != ""
 }
 
+func genericPermissionStateReady(state *acpToolState) bool {
+	if state == nil {
+		return false
+	}
+	return strings.TrimSpace(state.title) != "" ||
+		strings.TrimSpace(state.kind) != "" ||
+		strings.TrimSpace(state.name) != "" ||
+		state.input != nil || state.nativeIn != nil ||
+		len(state.locations) > 0 || len(state.content) > 0
+}
+
+// normalizeACPOptionKind canonicalizes an agent-provided option kind for
+// comparison. Storage (approvalOptionsFromACP) and classification must agree,
+// or a non-canonically-cased kind would be approved by Memoh yet unanswered
+// toward the agent.
+func normalizeACPOptionKind(kind acp.PermissionOptionKind) acp.PermissionOptionKind {
+	return acp.PermissionOptionKind(strings.ToLower(strings.TrimSpace(string(kind))))
+}
+
 func allowOncePermission(p acp.RequestPermissionRequest) acp.RequestPermissionResponse {
 	for _, opt := range p.Options {
-		if opt.Kind == acp.PermissionOptionKindAllowOnce {
+		if normalizeACPOptionKind(opt.Kind) == acp.PermissionOptionKindAllowOnce {
 			return selectedPermission(opt.OptionId)
 		}
 	}
 	return cancelledPermission()
 }
 
-// rejectOncePermission selects the agent's reject_once option so a denied
-// approval reads as a clean user rejection instead of an aborted turn;
-// cancellation is the fallback.
+// rejectOncePermission selects the agent's reject_once option so any live-turn
+// denial — user rejection, policy deny, timeout, out-of-scope, untrusted MCP,
+// or an unmapped shape — reads as a clean per-tool refusal. ACP reserves the
+// cancelled outcome for genuine turn cancellation (agents treat it as a
+// whole-turn abort), so cancellation is only the fallback when the agent
+// offered no reject_once option.
 func rejectOncePermission(p acp.RequestPermissionRequest) acp.RequestPermissionResponse {
 	for _, opt := range p.Options {
-		if opt.Kind == acp.PermissionOptionKindRejectOnce {
+		if normalizeACPOptionKind(opt.Kind) == acp.PermissionOptionKindRejectOnce {
 			return selectedPermission(opt.OptionId)
 		}
 	}
@@ -648,6 +877,11 @@ func rejectOncePermission(p acp.RequestPermissionRequest) acp.RequestPermissionR
 // consuming the one-shot grant left by RequestPermission when one matches. It
 // returns the tool call ID the events should be emitted under.
 func (c *clientCallbacks) approveCallbackTool(ctx context.Context, fallbackToolCallID, toolName string, input map[string]any) (string, toolapproval.FlowResult, error) {
+	// fs/terminal capability callbacks block on the same user-decision flow
+	// as permissions, so they join the quiescence gauge a cancelled prompt
+	// waits on before the runtime is reused.
+	c.decisions.enter()
+	defer c.decisions.exit()
 	fallbackToolCallID = strings.TrimSpace(fallbackToolCallID)
 	if fallbackToolCallID == "" {
 		fallbackToolCallID = "acp-callback-" + uuid.NewString()
@@ -661,17 +895,26 @@ func (c *clientCallbacks) approveCallbackTool(ctx context.Context, fallbackToolC
 			DecidedByUser: true,
 		}, nil
 	}
-	result, err := c.requireToolApproval(ctx, fallbackToolCallID, toolName, input)
+	result, err := c.requireToolApproval(ctx, fallbackToolCallID, toolName, input, nil, false)
 	return fallbackToolCallID, result, err
 }
 
-func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, toolName string, input map[string]any) (toolapproval.FlowResult, error) {
+func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, toolName string, input map[string]any, options []toolapproval.PermissionOption, forceReview bool) (toolapproval.FlowResult, error) {
 	if c == nil || c.approval == nil {
-		return toolapproval.FlowResult{Approved: true}, nil
+		return toolapproval.FlowResult{Status: toolapproval.StatusRejected}, nil
 	}
 	session := c.currentToolSession()
 	if strings.TrimSpace(session.BotID) == "" || strings.TrimSpace(session.SessionID) == "" {
 		return toolapproval.FlowResult{}, nil
+	}
+	cancelOnAbort := func(ctx context.Context, req toolapproval.Request, reason string) (toolapproval.Request, error) {
+		// ACP can cancel one nested request without stopping its owning prompt.
+		// Only a stopped run owns the session-wide cancellation semantics; an
+		// isolated request cancellation retains the legacy single-row rejection.
+		if session.RunContext == nil || session.RunContext.Err() == nil {
+			return c.approval.Reject(ctx, req.ID, "", reason)
+		}
+		return c.cancelApprovalOnAbort(ctx, req, reason)
 	}
 	ctx = runtimefence.WithContext(ctx, session.RuntimeFence)
 	return toolapproval.RunFlow(ctx, c.approval, toolapproval.FlowRequest{
@@ -684,14 +927,46 @@ func (c *clientCallbacks) requireToolApproval(ctx context.Context, toolCallID, t
 			ToolCallID:                   toolCallID,
 			ToolName:                     toolName,
 			ToolInput:                    input,
+			Options:                      options,
+			ForceReview:                  forceReview,
 			SourcePlatform:               session.CurrentPlatform,
 			ReplyTarget:                  session.ReplyTarget,
 			ConversationType:             session.ConversationType,
 		},
-		Interactive:    strings.TrimSpace(session.RunID) != "",
+		Interactive: strings.TrimSpace(session.RunID) != "" &&
+			!strings.EqualFold(strings.TrimSpace(session.SessionType), sessionmode.Schedule),
 		RegisterWaiter: c.approval.RegisterWaiter,
 		Emit:           c.emitToolApprovalRequest,
+		CancelOnAbort:  cancelOnAbort,
 	})
+}
+
+func (c *clientCallbacks) cancelApprovalOnAbort(ctx context.Context, req toolapproval.Request, reason string) (toolapproval.Request, error) {
+	canceller, ok := c.approval.(interface {
+		CancelPendingForSession(context.Context, string, string, string) ([]toolapproval.Request, error)
+	})
+	if !ok || strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.SessionID) == "" {
+		return c.approval.Reject(ctx, req.ID, "", reason)
+	}
+	cancelled, err := canceller.CancelPendingForSession(ctx, req.BotID, req.SessionID, reason)
+	if err != nil {
+		return toolapproval.Request{}, err
+	}
+	for _, candidate := range cancelled {
+		if candidate.ID == req.ID {
+			return candidate, nil
+		}
+	}
+	// Pool-level Stop cleanup may have won the race. Preserve that durable
+	// terminal status rather than trying to rewrite it as rejected.
+	resolved, err := c.approval.Get(ctx, req.ID)
+	if err != nil {
+		return toolapproval.Request{}, err
+	}
+	if !strings.EqualFold(toolapproval.NormalizedStatus(resolved.Status), toolapproval.StatusPending) {
+		return resolved, nil
+	}
+	return toolapproval.Request{}, toolapproval.ErrAlreadyDecided
 }
 
 func (c *clientCallbacks) rememberApprovalGrant(toolCallID, toolName string, input map[string]any) {
@@ -782,7 +1057,7 @@ func (c *clientCallbacks) currentToolSession() ToolSessionContext {
 	base := c.baseSession
 	prompt := c.promptSession
 	c.mu.RUnlock()
-	return mcp.MergeToolSessionContext(base, prompt)
+	return toolcontext.Merge(base, prompt)
 }
 
 func permissionNativeToolState(state *acpToolState, quirks acpprofile.ToolQuirks) (toolCallID, toolName string, input map[string]any, ok bool) {
@@ -803,14 +1078,135 @@ func permissionNativeToolState(state *acpToolState, quirks acpprofile.ToolQuirks
 	return toolCallID, toolName, input, true
 }
 
-func allowUnmappedPermission(state *acpToolState) bool {
+func isThinkPermissionState(state *acpToolState) bool {
 	_, kind := permissionToolIdentityFromState(state)
-	switch kind {
-	case string(acp.ToolKindRead), string(acp.ToolKindSearch), string(acp.ToolKindFetch), string(acp.ToolKindThink), string(acp.ToolKindSwitchMode):
-		return true
-	default:
+	return kind == string(acp.ToolKindThink)
+}
+
+// isConsentShapedPermission recognizes the MCP elicitation fallback shapes
+// codex-acp emits when the client lacks the elicitation capability: a URL
+// consent ("open this link") arrives with an "elicitation-" tool call id and a
+// {serverName, url} raw input. Selecting an accept option on the user's behalf
+// would report a consent no user gave, so these force review even when the
+// approval policy is disabled.
+func isConsentShapedPermission(state *acpToolState) bool {
+	if state == nil {
 		return false
 	}
+	if strings.HasPrefix(strings.TrimSpace(state.id), "elicitation-") {
+		return true
+	}
+	input, ok := state.input.(map[string]any)
+	if !ok {
+		return false
+	}
+	// Match on the load-bearing fields rather than an exact key count: an
+	// upstream adapter adding a field must not silently reclassify a consent
+	// as an auto-allowable tool preflight.
+	return strings.TrimSpace(stringFromAny(input["serverName"])) != "" &&
+		strings.TrimSpace(stringFromAny(input["url"])) != ""
+}
+
+// permissionApprovalToolState shapes an unmapped ACP permission request into
+// the generic "permission" approval: the agent's own title, kind, and raw
+// input reach the user, and the decision returns the agent's option id.
+func permissionApprovalToolState(state *acpToolState) (toolCallID, toolName string, input map[string]any) {
+	toolCallID = strings.TrimSpace(state.id)
+	if toolCallID == "" {
+		toolCallID = "acp-permission-" + uuid.NewString()
+	}
+	title, kind := permissionToolIdentityFromState(state)
+	input = map[string]any{}
+	if title != "" {
+		input["title"] = title
+	}
+	if kind != "" {
+		input["kind"] = kind
+	}
+	if detail, lang := permissionRequestDetail(state.input); detail != "" {
+		input["request"] = detail
+		input["request_lang"] = lang
+	}
+	return toolCallID, "permission", input
+}
+
+// permissionRequestDetail renders what an agent is asking to do for the user
+// who must answer it. Unlike permissionRawInputSummary - a log formatter that
+// deliberately elides values - this shows the values themselves, because a
+// user cannot give informed consent to "map keys=command,host". It returns the
+// rendered text and the language to highlight it as.
+func permissionRequestDetail(raw any) (detail, lang string) {
+	switch value := raw.(type) {
+	case nil:
+		return "", ""
+	case string:
+		// Agent-controlled content: the budget applies to every shape,
+		// including a bare string.
+		return limitPermissionDetail(strings.TrimSpace(value)), "text"
+	}
+	if input, ok := raw.(map[string]any); ok {
+		// A request whose only content is one descriptive string reads better
+		// as that sentence than as a wrapper object.
+		if len(input) == 1 {
+			for _, key := range []string{"description", "command", "prompt", "message", "url", "content"} {
+				if text := strings.TrimSpace(stringFromAny(input[key])); text != "" {
+					return limitPermissionDetail(text), "text"
+				}
+			}
+		}
+	}
+	encoded, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return "", ""
+	}
+	return limitPermissionDetail(string(encoded)), "json"
+}
+
+func limitPermissionDetail(text string) string {
+	return limitToolOutputStringExact(text, "permission request", ToolOutputLimit{
+		MaxBytes: 4096,
+		MaxLines: 60,
+	})
+}
+
+// approvalOptionsFromACP preserves the agent's permission options verbatim for
+// the approval pipeline: ids are returned to the agent unchanged, names are
+// rendered to the user, kinds drive approve/reject validation.
+// errUnsupportedOptionKind marks an option set that is well-formed JSON-RPC
+// but uses a kind outside the four canonical values. The SDK's option kind is
+// an open string, so this degrades to a cancelled outcome rather than an
+// InvalidParams hard failure that would abort the agent's whole turn.
+var errUnsupportedOptionKind = errors.New("permission option kind is unsupported")
+
+func approvalOptionsFromACP(options []acp.PermissionOption) ([]toolapproval.PermissionOption, error) {
+	if len(options) == 0 {
+		return nil, errors.New("permission options must not be empty")
+	}
+	converted := make([]toolapproval.PermissionOption, 0, len(options))
+	seen := make(map[string]struct{}, len(options))
+	for _, option := range options {
+		id := string(option.OptionId)
+		if strings.TrimSpace(id) == "" {
+			return nil, errors.New("permission option id must not be empty")
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, fmt.Errorf("permission option id %q is duplicated", id)
+		}
+		seen[id] = struct{}{}
+		kind := string(normalizeACPOptionKind(option.Kind))
+		switch kind {
+		case toolapproval.OptionKindAllowOnce, toolapproval.OptionKindAllowAlways,
+			toolapproval.OptionKindRejectOnce, toolapproval.OptionKindRejectAlways:
+		default:
+			return nil, fmt.Errorf("%w: option %q has kind %q", errUnsupportedOptionKind, id, option.Kind)
+		}
+		converted = append(converted, toolapproval.PermissionOption{
+			ID:   id,
+			Name: option.Name,
+			Kind: kind,
+		})
+	}
+	return converted, nil
 }
 
 func permissionToolIdentityFromState(state *acpToolState) (title, kind string) {
@@ -847,6 +1243,16 @@ const (
 func mcpPermissionPreflightFromState(state *acpToolState) (mcpPermissionPreflight, bool) {
 	if state == nil {
 		return mcpPermissionPreflight{}, false
+	}
+	if input, ok := state.input.(map[string]any); ok {
+		if strings.TrimSpace(stringFromAny(input["url"])) != "" {
+			// A top-level url marks a consent-style ask ("open this link"),
+			// never a tool-call preflight (tool arguments nest under their own
+			// key). Refusing to parse it here means a consent whose id prefix
+			// or key set drifts upstream still lands on the forced-review lane
+			// instead of the Memoh-server auto-allow.
+			return mcpPermissionPreflight{}, false
+		}
 	}
 	title, _ := permissionToolIdentityFromState(state)
 	if toolName, serverName, ok := mcpToolCallFromStructuredTitle(title); ok {
@@ -903,7 +1309,7 @@ func (c *clientCallbacks) allowsMemohMCPToolPreflight(ctx context.Context, prefl
 	}
 	if !isMemohToolsMCPServerName(preflight.serverName) {
 		if c.logger != nil {
-			c.logger.Warn("cancelling MCP tool preflight for missing or non-Memoh server",
+			c.logger.Warn("rejecting MCP tool preflight for missing or non-Memoh server",
 				slog.String("shape", preflight.shape),
 				slog.String("server_name", preflight.serverName),
 				slog.String("tool_name", preflight.toolName))
@@ -1046,7 +1452,7 @@ func (c *clientCallbacks) emitToolApprovalRequest(req toolapproval.Request) bool
 	if c == nil || c.events == nil {
 		return false
 	}
-	c.events.emit(event.StreamEvent{
+	ev := event.StreamEvent{
 		Type:       event.ToolApprovalRequest,
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
@@ -1057,27 +1463,46 @@ func (c *clientCallbacks) emitToolApprovalRequest(req toolapproval.Request) bool
 		Metadata: map[string]any{
 			"approval": toolapproval.RequestMetadata(req),
 		},
-	})
-	return true
+	}
+	if !strings.EqualFold(toolapproval.NormalizedStatus(req.Status), toolapproval.StatusPending) {
+		return c.events.emitTerminalDecision(ev)
+	}
+	return c.events.emit(ev)
 }
 
 func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotification) error {
 	c.mu.RLock()
-	collector := c.collector
-	sink := c.sink
-	limit := c.toolLimit
-	configOptionsHandler := c.configOptionsHandler
+	runtimeSession := c.runtimeSession
 	c.mu.RUnlock()
-	if p.Update.ConfigOptionUpdate != nil && configOptionsHandler != nil {
-		configOptionsHandler(p.SessionId, p.Update.ConfigOptionUpdate.ConfigOptions)
+	if p.Update.ConfigOptionUpdate != nil && runtimeSession != nil {
+		runtimeSession.replaceConfigOptions(p.SessionId, p.Update.ConfigOptionUpdate.ConfigOptions)
+	}
+	if update := p.Update.CurrentModeUpdate; update != nil {
+		_, _ = c.updateCurrentMode(p.SessionId, update.CurrentModeId)
+	}
+	if update := p.Update.AvailableCommandsUpdate; update != nil {
+		_, _ = c.updateAvailableCommands(p.SessionId, update.AvailableCommands)
 	}
 	var events []event.StreamEvent
 	if c.toolMapper != nil {
-		events = c.toolMapper.eventsFromNotification(p)
+		events = append(events, c.toolMapper.eventsFromNotification(p)...)
 	}
+	// Keep the read lock through delivery. Clearing prompt state takes the
+	// write lock, so Prompt cannot return and let its owner close the sink
+	// while a callback that already observed that sink is still emitting.
+	// Delivery is bounded: a sink whose consumer stops draining cancels its
+	// own stream after runtimeSinkStallTimeout (application layer), so this lock
+	// cannot pin the prompt's runtime slot indefinitely.
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	collector := c.collector
+	sink := c.sink
+	limit := c.toolLimit
 	events = limitStreamEvents(events, limit)
 	if collector != nil {
-		collector.apply(p, events)
+		if !collector.apply(p, events) {
+			return nil
+		}
 	}
 	if sink != nil {
 		for _, ev := range events {
@@ -1089,7 +1514,7 @@ func (c *clientCallbacks) SessionUpdate(_ context.Context, p acp.SessionNotifica
 
 func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
 	session := c.currentToolSession()
-	ctx, cancel := mcp.BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 	return c.terminals.CreateTerminal(ctx, p, func(toolCallID string, input map[string]any) (terminalApprovalResult, error) {
 		id, approval, err := c.approveCallbackTool(ctx, toolCallID, "exec", input)
@@ -1100,7 +1525,7 @@ func (c *clientCallbacks) CreateTerminal(ctx context.Context, p acp.CreateTermin
 		}, err
 	}, terminalRuntimeScope{
 		validate: func(guardCtx context.Context) error {
-			return mcp.ValidateRuntimeGuard(guardCtx, session)
+			return toolcontext.ValidateRuntimeGuard(guardCtx, session)
 		},
 		runContext: session.RunContext,
 	})

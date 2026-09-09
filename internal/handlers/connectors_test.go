@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	connectsdk "github.com/felinics/connect-it/sdk/go"
 	"github.com/jackc/pgx/v5"
-	connectsdk "github.com/memohai/connect-it/sdk/go"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/connectors"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/connectors"
 )
 
 func TestConnectorHTTPErrorUsesStablePublicContract(t *testing.T) {

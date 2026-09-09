@@ -17,8 +17,13 @@ var (
 	ErrSessionNotInitialized          = errors.New("ACP session is not initialized")
 	ErrSessionClosed                  = errors.New("ACP session is closed")
 	ErrPromptRequired                 = errors.New("prompt is required")
-	ErrImagePromptUnsupported         = errors.New("ACP agent does not support image prompts")
-	ErrInvalidPromptImage             = errors.New("invalid ACP prompt image")
+	// ErrPromptCancellationUnconfirmed means session/cancel was sent, but the
+	// original session/prompt did not reach a confirmed terminal response (with
+	// its pre-response notification watermark drained) before the grace period.
+	// A runtime in this state must not be reused for another prompt.
+	ErrPromptCancellationUnconfirmed = errors.New("ACP prompt cancellation was not confirmed")
+	ErrImagePromptUnsupported        = errors.New("ACP agent does not support image prompts")
+	ErrInvalidPromptImage            = errors.New("invalid ACP prompt image")
 )
 
 type ModelInfo struct {

@@ -19,10 +19,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	embeddeddb "github.com/memohai/memoh/db"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/team"
+	embeddeddb "github.com/felinics/memoh/db"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/team"
 )
 
 func sqlState(err error) string {
@@ -246,6 +246,34 @@ func TestCanonicalInitContainsFinalTeamMembershipSchema(t *testing.T) {
 		t.Fatalf("canonical membership protection = rls:%v forced:%v policies:%d", rls, forced, policyCount)
 	}
 
+	var packageInstallations, pluginInstallations, pluginResources bool
+	if err := pool.QueryRow(ctx, `
+		SELECT to_regclass('public.bot_skill_package_installations') IS NOT NULL,
+		       to_regclass('public.bot_plugin_installations') IS NOT NULL,
+		       to_regclass('public.bot_plugin_resources') IS NOT NULL`).Scan(
+		&packageInstallations, &pluginInstallations, &pluginResources,
+	); err != nil {
+		t.Fatalf("inspect canonical extension relations: %v", err)
+	}
+	if !packageInstallations || pluginInstallations || pluginResources {
+		t.Fatalf(
+			"canonical extension relations = packages:%v plugin_installations:%v plugin_resources:%v",
+			packageInstallations, pluginInstallations, pluginResources,
+		)
+	}
+
+	var legacyMCPColumns int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM information_schema.columns
+		 WHERE table_schema = 'public' AND table_name = 'mcp_connections'
+		   AND column_name IN ('managed_by_plugin_installation_id', 'managed_resource_key', 'visible', 'metadata')`).Scan(&legacyMCPColumns); err != nil {
+		t.Fatalf("inspect canonical MCP columns: %v", err)
+	}
+	if legacyMCPColumns != 0 {
+		t.Fatalf("canonical MCP schema retains %d Plugin ownership columns", legacyMCPColumns)
+	}
+
 	var teamID string
 	if err := pool.QueryRow(ctx, `SELECT public.memoh_current_team_id()::text`).Scan(&teamID); sqlState(err) != "42501" {
 		t.Fatalf("canonical team context SQLSTATE = %q, want 42501", sqlState(err))
@@ -375,6 +403,42 @@ func stepUp(t *testing.T, dsn string, n int) {
 	defer func() { _, _ = m.Close() }()
 	if err := m.Steps(n); err != nil {
 		t.Fatalf("step up %d: %v", n, err)
+	}
+}
+
+// migrateTo positions the schema at exactly the given migration version
+// (applying or rolling back as needed). Version-anchored tests stay valid
+// when new migrations land on top of the chain.
+func migrateTo(t *testing.T, dsn string, version uint) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate to %d: %v", version, err)
+	}
+}
+
+// migrateUpAll applies every remaining migration up to the chain head.
+func migrateUpAll(t *testing.T, dsn string) {
+	t.Helper()
+	src, err := iofs.New(postgresMigrationsFS(t), ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
+	if err != nil {
+		t.Fatalf("migrate init: %v", err)
+	}
+	defer func() { _, _ = m.Close() }()
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate up: %v", err)
 	}
 }
 

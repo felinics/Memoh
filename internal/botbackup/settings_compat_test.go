@@ -3,7 +3,7 @@ package botbackup
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func TestDecodeBackupSettingsCompactionRatioCompatibility(t *testing.T) {

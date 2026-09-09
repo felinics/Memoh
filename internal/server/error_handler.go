@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 func newHTTPErrorHandler(log *slog.Logger, fallback echo.HTTPErrorHandler) echo.HTTPErrorHandler {

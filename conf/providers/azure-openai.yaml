@@ -293,7 +293,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high]
+      reasoning_efforts: [disable, minimal, low, medium, high]
   - model_id: "gpt-5.1-2025-11-13"
     name: "GPT 5.1 2025 11 13"
     type: chat
@@ -301,7 +301,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high]
+      reasoning_efforts: [disable, minimal, low, medium, high]
   - model_id: "gpt-5.1-chat"
     name: "GPT 5.1 Chat"
     type: chat
@@ -309,7 +309,7 @@ models:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 128000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high]
+      reasoning_efforts: [disable, low, medium, high]
   - model_id: "gpt-5.1-chat-2025-11-13"
     name: "GPT 5.1 Chat 2025 11 13"
     type: chat
@@ -317,7 +317,7 @@ models:
       compatibilities: [vision, reasoning]
       context_window: 128000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high]
+      reasoning_efforts: [disable, low, medium, high]
   - model_id: "gpt-5.2"
     name: "GPT 5.2"
     type: chat
@@ -325,7 +325,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high, xhigh]
+      reasoning_efforts: [disable, minimal, low, medium, high, xhigh]
   - model_id: "gpt-5.2-2025-12-11"
     name: "GPT 5.2 2025 12 11"
     type: chat
@@ -333,7 +333,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 272000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high, xhigh]
+      reasoning_efforts: [disable, minimal, low, medium, high, xhigh]
   - model_id: "gpt-5.2-chat"
     name: "GPT 5.2 Chat"
     type: chat
@@ -365,7 +365,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, minimal, low, medium, high, xhigh]
+      reasoning_efforts: [disable, minimal, low, medium, high, xhigh]
   - model_id: "gpt-5.4-2026-03-05"
     name: "GPT 5.4 2026 03 05"
     type: chat
@@ -373,7 +373,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      reasoning_efforts: [disable, minimal, low, medium, high, xhigh]
   - model_id: "gpt-5.4-mini"
     name: "GPT 5.4 Mini"
     type: chat
@@ -381,7 +381,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "gpt-5.4-mini-2026-03-17"
     name: "GPT 5.4 Mini 2026 03 17"
     type: chat
@@ -389,7 +389,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "gpt-5.4-nano"
     name: "GPT 5.4 Nano"
     type: chat
@@ -397,7 +397,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "gpt-5.4-nano-2026-03-17"
     name: "GPT 5.4 Nano 2026 03 17"
     type: chat
@@ -405,7 +405,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "gpt-5.5"
     name: "GPT 5.5"
     type: chat
@@ -413,7 +413,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "gpt-5.5-2026-04-23"
     name: "GPT 5.5 2026 04 23"
     type: chat
@@ -421,7 +421,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [none, low, medium, high, xhigh]
+      reasoning_efforts: [disable, low, medium, high, xhigh]
   - model_id: "gpt-audio-1.5-2026-02-23"
     name: "GPT Audio 1.5 2026 02 23"
     type: chat

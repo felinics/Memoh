@@ -12,10 +12,10 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/common"
-	"github.com/memohai/memoh/internal/redact"
-	"github.com/memohai/memoh/internal/textutil"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/common"
+	"github.com/felinics/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const (

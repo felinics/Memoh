@@ -38,7 +38,7 @@ const publishScope = process.env.NPM_PUBLISH_SCOPE?.trim() || null
 // - OIDC mode (CI trusted publishing): pnpm exchanges the GitHub
 //   Actions OIDC token (ACTIONS_ID_TOKEN_REQUEST_TOKEN, available when the job
 //   has id-token: write) for a short-lived npm credential at publish time.
-//   Every published package must have memohai/Memoh + release.yml registered
+//   Every published package must have felinics/Memoh + release.yml registered
 //   as its trusted publisher on npmjs.com, or the exchange is rejected.
 // OIDC mode changes two behaviors below: the token preflight is impossible
 // (npm whoami needs a token), so it is skipped; and --provenance is added,

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 const (
@@ -93,7 +95,7 @@ func (s *ToolGatewayService) LookupTool(ctx context.Context, session ToolSession
 }
 
 func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionContext, payload ToolCallPayload) (map[string]any, error) {
-	ctx, cancel := BindRuntimeContext(ctx, session)
+	ctx, cancel := toolcontext.Bind(ctx, session)
 	defer cancel()
 
 	toolName := strings.TrimSpace(payload.Name)
@@ -121,7 +123,7 @@ func (s *ToolGatewayService) CallTool(ctx context.Context, session ToolSessionCo
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
-	if err := ValidateRuntimeGuard(ctx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 		return nil, err
 	}
 	result, err := source.CallTool(ctx, session, toolName, arguments)

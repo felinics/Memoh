@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/internal/mcp"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/mcp"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 const (
@@ -18,7 +18,24 @@ const (
 
 	defaultMemoryToolLimit = 8
 	maxMemoryToolLimit     = 50
+	maxSourceRefsPerResult = adapters.MaxSourceRefsPerToolResult
 )
+
+// sourceRefsPayload renders a bounded set of retained, scoped source refs as
+// tool-facing {session_id, message_id} objects. Validation happens before the
+// projection cap so malformed tail entries cannot crowd out valid refs.
+func sourceRefsPayload(refs []string) []map[string]any {
+	refs = adapters.RetainSourceRefs(refs, maxSourceRefsPerResult)
+	out := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		sessionID, messageID, ok := adapters.ParseScopedSourceRef(ref)
+		if !ok {
+			continue
+		}
+		out = append(out, map[string]any{"session_id": sessionID, "message_id": messageID})
+	}
+	return out
+}
 
 // BuiltinProvider wraps the existing Service as a Provider.
 type BuiltinProvider struct {
@@ -240,10 +257,18 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 	if retrievalMode == "" {
 		retrievalMode = strings.TrimSpace(p.service.Mode())
 	}
+	resultRefs := make([]string, 0, len(packed.Items))
+	for _, entry := range packed.Items {
+		if id := strings.TrimSpace(entry.Item.ID); id != "" {
+			resultRefs = append(resultRefs, id)
+		}
+	}
 	return &adapters.BeforeChatResult{
 		ContextText:    payload,
 		RetrievalMode:  retrievalMode,
 		FallbackReason: strings.TrimSpace(resp.FallbackReason),
+		ResultCount:    len(packed.Items),
+		ResultRefs:     resultRefs,
 	}, nil
 }
 
@@ -280,10 +305,11 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 	}
 	metadata := adapters.BuildProfileMetadata(req.UserID, req.ChannelIdentityID, req.DisplayName)
 	if _, err := p.service.Add(ctx, adapters.AddRequest{
-		Messages: req.Messages,
-		BotID:    botID,
-		Metadata: metadata,
-		Filters:  filters,
+		Messages:         req.Messages,
+		BotID:            botID,
+		Metadata:         metadata,
+		Filters:          filters,
+		SourceMessageIDs: sourceMessageIDsFromMessages(req.Messages),
 	}); err != nil {
 		p.logger.Warn("store memory failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
@@ -372,11 +398,15 @@ func (p *BuiltinProvider) CallTool(ctx context.Context, session mcp.ToolSessionC
 
 	results := make([]map[string]any, 0, len(allResults))
 	for _, item := range allResults {
-		results = append(results, map[string]any{
+		entry := map[string]any{
 			"id":     item.ID,
 			"memory": item.Memory,
 			"score":  item.Score,
-		})
+		}
+		if refs := sourceRefsPayload(item.SourceMessageIDs); len(refs) > 0 {
+			entry["source_refs"] = refs
+		}
+		results = append(results, entry)
 	}
 
 	return mcp.BuildToolSuccessResult(map[string]any{

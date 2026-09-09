@@ -73,6 +73,28 @@ export function normalizedRuntimeType(session: SessionDescriptorShape): string {
   return (session.type ?? '').trim() === 'acp_agent' ? 'acp_agent' : 'model'
 }
 
+export function isAgentRuntimeType(runtimeType: string): boolean {
+  return runtimeType === 'acp_agent'
+    || runtimeType === 'codex'
+    || runtimeType === 'claude-code'
+}
+
+// Default visible label for a channel-bound session that has no title: a group
+// shows its conversation (group) name, a DM the peer's display name. Discuss
+// sessions never get a title generated server-side (only the chat turn path
+// runs maybeGenerateSessionTitle), so without this fallback they would pile up
+// in Recents as indistinguishable "Untitled Session" rows. The name comes from
+// the channel route metadata that EnrichThreads projects onto session list
+// responses; every render surface (sidebar row, workspace tab, session picker)
+// funnels through here so the fallback chain stays identical.
+export function routeConversationLabel(session: { route_metadata?: Record<string, unknown> | null } | null | undefined): string {
+  const meta = session?.route_metadata ?? {}
+  return (meta.conversation_name as string ?? '').trim()
+    || (meta.sender_display_name as string ?? '').trim()
+    || (meta.sender_username as string ?? '').trim()
+    || ''
+}
+
 export function isSessionVisibleInSidebarMode(session: SessionDescriptorShape, mode: SidebarSessionMode): boolean {
   switch (mode) {
     case 'recent': {
@@ -82,7 +104,7 @@ export function isSessionVisibleInSidebarMode(session: SessionDescriptorShape, m
     case 'schedule':
       return normalizedSessionMode(session) === 'schedule'
     case 'agent':
-      return normalizedRuntimeType(session) === 'acp_agent'
+      return isAgentRuntimeType(normalizedRuntimeType(session))
     default:
       return false
   }

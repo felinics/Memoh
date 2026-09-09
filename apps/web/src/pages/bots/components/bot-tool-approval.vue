@@ -56,7 +56,6 @@
               :model-value="modeFor(target, tool)"
               :items="modeItems"
               :aria-label="t('bots.toolApproval.toolNames.' + tool)"
-              class="w-full sm:w-fit"
               @update:model-value="(value) => updateMode(target, tool, value)"
             />
           </SettingsRow>

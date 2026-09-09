@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // memoh-server-mtls Secret 在 server pod 内的文件布局（设计 §6.1，由 bytenet 挂载）。

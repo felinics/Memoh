@@ -11,8 +11,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/auth"
 )
 
 type recordingToolApprovalResponder struct {
@@ -47,7 +47,7 @@ func TestToolApprovalHTTPUsesJWTUserIDForPermissionActor(t *testing.T) {
 	e := echo.New()
 	e.Use(auth.JWTMiddleware(secret, func(echo.Context) bool { return false }))
 	handler.Register(e)
-	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tool-approvals/approval-1/approve", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/bots/bot-1/tool-approvals/approval-1/approve", strings.NewReader(`{"control_id":"control-1","option_id":"allow-once"}`))
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
@@ -61,5 +61,11 @@ func TestToolApprovalHTTPUsesJWTUserIDForPermissionActor(t *testing.T) {
 	}
 	if responder.input.ActorUserID == channelIdentityID {
 		t.Fatal("HTTP approval used channel identity id as the permission actor")
+	}
+	if responder.input.ControlID != "control-1" {
+		t.Fatalf("ControlID = %q, want control-1", responder.input.ControlID)
+	}
+	if responder.input.OptionID != "allow-once" {
+		t.Fatalf("OptionID = %q, want allow-once", responder.input.OptionID)
 	}
 }

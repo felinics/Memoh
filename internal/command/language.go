@@ -3,8 +3,8 @@ package command
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func (h *Handler) buildLanguageGroup() *CommandGroup {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/audio/adapter"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/audio/adapter"
 )
 
 func transcriptionHTTPError(err error) error {

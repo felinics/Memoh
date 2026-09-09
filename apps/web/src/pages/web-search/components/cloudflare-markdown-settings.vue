@@ -1,35 +1,47 @@
 <template>
-  <SettingsRow :label="$t('webSearch.accountId')">
+  <SettingsRow
+    :label="$t('webSearch.accountId')"
+    stack="sm"
+  >
     <Input
       id="cloudflare-account-id"
       v-model="localConfig.account_id"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('webSearch.accountId')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('webSearch.apiToken')">
+  <SettingsRow
+    :label="$t('webSearch.apiToken')"
+    stack="sm"
+  >
     <Input
       id="cloudflare-api-token"
       v-model="localConfig.api_token"
       type="password"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('webSearch.apiToken')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.baseUrl')">
+  <SettingsRow
+    :label="$t('common.baseUrl')"
+    stack="sm"
+  >
     <Input
       id="cloudflare-base-url"
       v-model="localConfig.base_url"
-      class="w-80"
+      class="w-full sm:w-80"
       :aria-label="$t('common.baseUrl')"
     />
   </SettingsRow>
-  <SettingsRow :label="$t('common.timeoutSeconds')">
+  <SettingsRow
+    :label="$t('common.timeoutSeconds')"
+    stack="sm"
+  >
     <Input
       id="cloudflare-timeout-seconds"
       v-model.number="localConfig.timeout_seconds"
       type="number"
-      class="w-40"
+      class="w-full sm:w-40"
       :min="1"
       :aria-label="$t('common.timeoutSeconds')"
     />

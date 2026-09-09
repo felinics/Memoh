@@ -1,6 +1,6 @@
 // Package containerfs implements storage.Provider for bot containers
 // backed by gRPC calls to the in-container MCP service. Files are stored
-// inside the container's writable layer at /data/media/<subpath>.
+// inside the container's writable layer at /data/.memoh/media/<subpath>.
 package containerfs
 
 import (
@@ -11,11 +11,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	attachmentpkg "github.com/memohai/memoh/internal/attachment"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
-const containerMediaRoot = "media"
+const (
+	containerMediaRoot       = ".memoh/media"
+	legacyContainerMediaRoot = "media"
+)
 
 // Provider stores media assets inside bot containers via gRPC.
 type Provider struct {
@@ -54,11 +57,15 @@ func (p *Provider) Open(ctx context.Context, key string) (io.ReadCloser, error) 
 	if err != nil {
 		return nil, fmt.Errorf("get client: %w", err)
 	}
-	containerPath := filepath.Join(containerMediaRoot, sub)
-	return client.ReadRaw(ctx, containerPath)
+	paths := mediaContainerPaths(sub)
+	reader, err := client.ReadRaw(ctx, paths[0])
+	if err == nil || !errors.Is(err, bridge.ErrNotFound) {
+		return reader, err
+	}
+	return client.ReadRaw(ctx, paths[1])
 }
 
-// Delete removes a file from the bot container.
+// Delete removes both current and legacy copies during the transition.
 func (p *Provider) Delete(ctx context.Context, key string) error {
 	botID, sub, err := parseRoutingKey(key)
 	if err != nil {
@@ -68,14 +75,37 @@ func (p *Provider) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return fmt.Errorf("get client: %w", err)
 	}
-	containerPath := filepath.Join(containerMediaRoot, sub)
-	return client.DeleteFile(ctx, containerPath, false)
+	var errs []error
+	for _, containerPath := range mediaContainerPaths(sub) {
+		if err := client.DeleteFile(ctx, containerPath, false); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
-// AccessPath returns the stable path in the workspace filesystem namespace.
-func (*Provider) AccessPath(_ context.Context, key string) string {
-	_, sub := splitRoutingKey(key)
-	return attachmentpkg.MediaAccessPath(sub)
+// AccessPath returns a reachable current or legacy workspace path.
+func (p *Provider) AccessPath(ctx context.Context, key string) string {
+	botID, sub, err := parseRoutingKey(key)
+	if err != nil {
+		return ""
+	}
+	paths := mediaContainerPaths(sub)
+	if p == nil || p.clients == nil {
+		return attachmentpkg.DataMountPath(paths[0])
+	}
+	client, err := p.clients.MCPClient(ctx, botID)
+	if err != nil {
+		return ""
+	}
+	for _, containerPath := range paths {
+		if _, err := client.Stat(ctx, containerPath); err == nil {
+			return attachmentpkg.DataMountPath(containerPath)
+		} else if !errors.Is(err, bridge.ErrNotFound) {
+			return ""
+		}
+	}
+	return ""
 }
 
 // OpenContainerFile opens a file from a bot's /data/ directory.
@@ -98,7 +128,12 @@ func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath s
 	if err != nil {
 		return nil, fmt.Errorf("get client: %w", err)
 	}
-	return client.ReadRaw(ctx, subPath)
+	// Read with the absolute container path, not the stripped subPath: workspace
+	// clients resolve relative paths against different bases (the in-container
+	// bridge joins its /data workdir, but the runtime-worker chain resolves
+	// against the sandbox home), so a relative subPath reads the wrong file
+	// anywhere off the bridge. Absolute paths resolve consistently everywhere.
+	return client.ReadRaw(ctx, filepath.Clean(containerPath))
 }
 
 // ListPrefix returns all keys under the given routing prefix.
@@ -111,24 +146,38 @@ func (p *Provider) ListPrefix(ctx context.Context, prefix string) ([]string, err
 	if err != nil {
 		return nil, nil
 	}
-	dir := filepath.Dir(filepath.Join(containerMediaRoot, sub))
 	base := filepath.Base(sub)
-	entries, err := client.ListDirAll(ctx, dir, false)
-	if err != nil {
-		return nil, nil
-	}
 	var keys []string
-	for _, e := range entries {
-		if e.GetIsDir() {
+	seen := make(map[string]struct{})
+	for _, containerPath := range mediaContainerPaths(sub) {
+		entries, err := client.ListDirAll(ctx, filepath.Dir(containerPath), false)
+		if err != nil {
 			continue
 		}
-		name := e.GetPath()
-		if strings.HasPrefix(name, base) {
-			storageKey := filepath.Join(filepath.Dir(sub), name)
-			keys = append(keys, filepath.Join(botID, storageKey))
+		for _, e := range entries {
+			if e.GetIsDir() {
+				continue
+			}
+			name := e.GetPath()
+			if !strings.HasPrefix(name, base) {
+				continue
+			}
+			key := filepath.Join(botID, filepath.Dir(sub), name)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			keys = append(keys, key)
 		}
 	}
 	return keys, nil
+}
+
+func mediaContainerPaths(sub string) [2]string {
+	return [2]string{
+		filepath.Join(containerMediaRoot, sub),
+		filepath.Join(legacyContainerMediaRoot, sub),
+	}
 }
 
 func parseRoutingKey(key string) (botID, storageKey string, err error) {

@@ -95,6 +95,7 @@ import MobileBar from '@/components/mobile-bar/index.vue'
 import MobileBarIconButton from '@/components/mobile-bar/icon-button.vue'
 import { mobileBarIconButtonClass } from '@/components/mobile-bar/icon-button-class'
 import { useChatStore } from '@/store/chat-list'
+import { routeConversationLabel } from '@/store/chat-list.utils'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -152,7 +153,7 @@ onBeforeUnmount(() => titleSub?.dispose())
 const title = computed(() => {
   if (!activePanelIsChat.value) return activePanelTitle.value || botLabel.value
   if (selectionStore.sessionId) {
-    return chatStore.activeSession?.title?.trim() || t('chat.untitledSession')
+    return chatStore.activeSession?.title?.trim() || routeConversationLabel(chatStore.activeSession) || t('chat.untitledSession')
   }
   return botLabel.value
 })

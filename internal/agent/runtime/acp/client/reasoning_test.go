@@ -74,7 +74,7 @@ func TestSessionConfigOptionUpdateReplacesReasoningState(t *testing.T) {
 		testSelectOption("thinking", &category, "low", "low", "high"),
 	})
 	callbacks := &clientCallbacks{}
-	callbacks.setConfigOptionsHandler(sess.replaceConfigOptions)
+	callbacks.setSession(sess)
 
 	err := callbacks.SessionUpdate(context.Background(), acp.SessionNotification{
 		SessionId: sess.sessionID,

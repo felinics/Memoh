@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 )
 
 func TestStripToolMessagesWhenCompactionSummaryIsActive(t *testing.T) {

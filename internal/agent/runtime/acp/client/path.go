@@ -1,7 +1,7 @@
 package client
 
 import (
-	"github.com/memohai/memoh/internal/workspace/vpath"
+	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
 const dataMountPath = vpath.DataMount

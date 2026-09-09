@@ -3,7 +3,7 @@ package view
 import (
 	"strings"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 func uiUserInputFromPayload(userInputID string, shortID int, status string, payload, answers any, canRespond bool) *UIUserInput {

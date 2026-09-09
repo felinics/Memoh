@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -11,11 +12,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/oauthctx"
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 type ProvidersHandler struct {
@@ -181,7 +182,11 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
-	return c.JSON(http.StatusOK, resp)
+	provider, err := h.service.Get(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	return c.JSON(http.StatusOK, withReasoningForClientType(resp, provider.ClientType))
 }
 
 // GetByName godoc
@@ -338,10 +343,8 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 	var req providers.ImportModelsRequest
-	if c.Request().ContentLength > 0 {
-		if err := c.Bind(&req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
+	if err := c.Bind(&req); err != nil && !errors.Is(err, io.EOF) {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := models.ValidateCompatibilities(req.DefaultCompatibilities); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -382,41 +385,38 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		if strings.TrimSpace(m.Type) == string(models.ModelTypeEmbedding) {
 			modelType = models.ModelTypeEmbedding
 		}
-		compatibilities := importedCompatibilities(
+		name := strings.TrimSpace(m.Name)
+		if name == "" {
+			name = m.ID
+		}
+		// The discovered config carries capabilities exactly as reported, so a
+		// re-import refresh never inherits caller-supplied defaults; only the
+		// create path below applies them.
+		discoveredConfig := modelConfigFromRemote(m, append([]string(nil), m.Compatibilities...))
+		if managedCatalog {
+			available := true
+			discoveredConfig.CatalogAvailable = &available
+		}
+		createConfig := discoveredConfig
+		createConfig.Compatibilities = importedCompatibilities(
 			m,
 			modelType,
 			req.DefaultCompatibilities,
 			provider.ProviderTemplateID == "",
 		)
-		name := strings.TrimSpace(m.Name)
-		if name == "" {
-			name = m.ID
-		}
-		cfg := models.ModelConfig{
-			Description:      m.Description,
-			Compatibilities:  compatibilities,
-			ReasoningEfforts: m.ReasoningEfforts,
-			ThinkingMode:     m.ThinkingMode,
-			ContextWindow:    m.ContextWindow,
-			Dimensions:       m.Dimensions,
-		}
-		if managedCatalog {
-			available := true
-			cfg.CatalogAvailable = &available
-		}
 		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    m.ID,
 			Name:       name,
 			ProviderID: id,
 			Type:       modelType,
 			Enable:     &disabled,
-			Config:     cfg,
+			Config:     createConfig,
 		})
 		if err != nil {
 			if errors.Is(err, models.ErrModelIDAlreadyExists) {
 				// Upsert/assert: re-importing fills in newly discovered
 				// capabilities on existing models without clobbering user config.
-				if h.fillExistingModel(ctx, id, m.ID, cfg, managedCatalog && m.CapabilitiesKnown) {
+				if h.fillExistingModel(ctx, id, m.ID, discoveredConfig, managedCatalog && m.CapabilitiesKnown) {
 					resp.Updated++
 				} else {
 					resp.Skipped++
@@ -441,8 +441,8 @@ func importedCompatibilities(remote providers.RemoteModel, modelType models.Mode
 	if len(remote.Compatibilities) > 0 || modelType != models.ModelTypeChat || remote.CapabilitiesKnown || !allowCustomDefaults {
 		return remote.Compatibilities
 	}
-	// Unknown means unknown. Custom-provider defaults are a user choice from
-	// the request, never an inference from the client protocol.
+	// Unknown means unknown unless the caller explicitly supplies defaults.
+	// The backend never infers model capabilities from the client protocol.
 	return append([]string(nil), defaults...)
 }
 
@@ -510,6 +510,45 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 	return true
 }
 
+// modelConfigFromRemote builds the stored config for an imported model. It exists
+// as a named function so a test can assert that every wire declaration survives
+// the import path: a dialect or off-support token lost here is lost for every row
+// this path creates, and the resulting model resolves onto the wrong wire — which
+// is how these fields came to be missing from RemoteModel in the first place.
+func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) models.ModelConfig {
+	return models.ModelConfig{
+		Description:         m.Description,
+		Compatibilities:     compatibilities,
+		ReasoningEfforts:    m.ReasoningEfforts,
+		ThinkingMode:        m.ThinkingMode,
+		ReasoningDialect:    m.ReasoningDialect,
+		ReasoningOffSupport: m.ReasoningOffSupport,
+		ReasoningDefaultOn:  m.ReasoningDefaultOn,
+		ThinkingBudgetMin:   m.ThinkingBudgetMin,
+		ThinkingBudgetMax:   m.ThinkingBudgetMax,
+		ContextWindow:       m.ContextWindow,
+		Dimensions:          m.Dimensions,
+	}
+}
+
+// preserveDeclaredCapabilities lets generic discovery refresh the tier list while
+// keeping capability tokens it structurally cannot know about.
+//
+// The disable token declares that a model can be turned off. For providers whose
+// off travels outside the effort field — DeepSeek through chat_completions_compat,
+// Gemini 2.5 Flash through a zero budget — the hand-maintained template is the only
+// source. Managed Codex/Copilot catalogs skip this helper and replace the list
+// exactly, so an upstream removal can revoke Off.
+func preserveDeclaredCapabilities(stored, discovered []string) []string {
+	out := append([]string(nil), discovered...)
+	for _, token := range []string{models.ReasoningEffortDisable} {
+		if slices.Contains(stored, token) && !slices.Contains(out, token) {
+			out = append([]string{token}, out...)
+		}
+	}
+	return out
+}
+
 func mergeManagedDiscoveredConfig(existing, discovered models.ModelConfig) (models.ModelConfig, bool) {
 	out, changed := mergeDiscoveredConfig(existing, discovered)
 	if !slices.Equal(out.Compatibilities, discovered.Compatibilities) {
@@ -520,8 +559,28 @@ func mergeManagedDiscoveredConfig(existing, discovered models.ModelConfig) (mode
 		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
 		changed = true
 	}
-	if discovered.ThinkingMode != "" && out.ThinkingMode != discovered.ThinkingMode {
+	if out.ThinkingMode != discovered.ThinkingMode {
 		out.ThinkingMode = discovered.ThinkingMode
+		changed = true
+	}
+	if out.ReasoningDialect != discovered.ReasoningDialect {
+		out.ReasoningDialect = discovered.ReasoningDialect
+		changed = true
+	}
+	if out.ReasoningOffSupport != discovered.ReasoningOffSupport {
+		out.ReasoningOffSupport = discovered.ReasoningOffSupport
+		changed = true
+	}
+	if !sameBoolPointer(out.ReasoningDefaultOn, discovered.ReasoningDefaultOn) {
+		out.ReasoningDefaultOn = discovered.ReasoningDefaultOn
+		changed = true
+	}
+	if !sameIntPointer(out.ThinkingBudgetMin, discovered.ThinkingBudgetMin) {
+		out.ThinkingBudgetMin = discovered.ThinkingBudgetMin
+		changed = true
+	}
+	if !sameIntPointer(out.ThinkingBudgetMax, discovered.ThinkingBudgetMax) {
+		out.ThinkingBudgetMax = discovered.ThinkingBudgetMax
 		changed = true
 	}
 	return out, changed
@@ -544,8 +603,30 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 		out.ThinkingMode = discovered.ThinkingMode
 		changed = true
 	}
-	if len(discovered.ReasoningEfforts) > 0 && !slices.Equal(discovered.ReasoningEfforts, out.ReasoningEfforts) {
-		out.ReasoningEfforts = append([]string(nil), discovered.ReasoningEfforts...)
+	if len(discovered.ReasoningEfforts) > 0 {
+		if wanted := preserveDeclaredCapabilities(out.ReasoningEfforts, discovered.ReasoningEfforts); !slices.Equal(wanted, out.ReasoningEfforts) {
+			out.ReasoningEfforts = wanted
+			changed = true
+		}
+	}
+	if discovered.ReasoningDialect != "" && discovered.ReasoningDialect != out.ReasoningDialect {
+		out.ReasoningDialect = discovered.ReasoningDialect
+		changed = true
+	}
+	if discovered.ReasoningOffSupport != "" && discovered.ReasoningOffSupport != out.ReasoningOffSupport {
+		out.ReasoningOffSupport = discovered.ReasoningOffSupport
+		changed = true
+	}
+	if discovered.ReasoningDefaultOn != nil && !sameBoolPointer(out.ReasoningDefaultOn, discovered.ReasoningDefaultOn) {
+		out.ReasoningDefaultOn = discovered.ReasoningDefaultOn
+		changed = true
+	}
+	if discovered.ThinkingBudgetMin != nil && !sameIntPointer(out.ThinkingBudgetMin, discovered.ThinkingBudgetMin) {
+		out.ThinkingBudgetMin = discovered.ThinkingBudgetMin
+		changed = true
+	}
+	if discovered.ThinkingBudgetMax != nil && !sameIntPointer(out.ThinkingBudgetMax, discovered.ThinkingBudgetMax) {
+		out.ThinkingBudgetMax = discovered.ThinkingBudgetMax
 		changed = true
 	}
 	if discovered.ContextWindow != nil && (out.ContextWindow == nil || *discovered.ContextWindow != *out.ContextWindow) {
@@ -565,4 +646,12 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 		}
 	}
 	return out, changed
+}
+
+func sameBoolPointer(left, right *bool) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func sameIntPointer(left, right *int) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }

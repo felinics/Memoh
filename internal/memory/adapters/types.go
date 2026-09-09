@@ -17,6 +17,8 @@ type BeforeChatResult struct {
 	ContextText    string // formatted text to inject as a user message
 	RetrievalMode  string // graph, file_fallback, mem0, etc.
 	FallbackReason string // non-empty when the provider degraded to another retrieval path
+	ResultCount    int    // number of memory items represented in ContextText; zero when item metadata is unavailable
+	ResultRefs     []string
 }
 
 // AfterChatRequest is passed to OnAfterChat after receiving the gateway response.
@@ -37,8 +39,9 @@ type LLM interface {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role            string `json:"role"`
+	Content         string `json:"content"`
+	SourceMessageID string `json:"-"`
 }
 
 type AddRequest struct {
@@ -51,6 +54,7 @@ type AddRequest struct {
 	Filters          map[string]any `json:"filters,omitempty"`
 	Infer            *bool          `json:"infer,omitempty"`
 	EmbeddingEnabled *bool          `json:"embedding_enabled,omitempty"`
+	SourceMessageIDs []string       `json:"source_message_ids,omitempty"`
 }
 
 type SearchRequest struct {
@@ -66,9 +70,10 @@ type SearchRequest struct {
 }
 
 type UpdateRequest struct {
-	MemoryID         string `json:"memory_id"`
-	Memory           string `json:"memory"`
-	EmbeddingEnabled *bool  `json:"embedding_enabled,omitempty"`
+	MemoryID         string   `json:"memory_id"`
+	Memory           string   `json:"memory"`
+	EmbeddingEnabled *bool    `json:"embedding_enabled,omitempty"`
+	SourceMessageIDs []string `json:"source_message_ids,omitempty"`
 }
 
 type GetAllRequest struct {
@@ -98,6 +103,10 @@ type MemoryItem struct {
 	BotID     string         `json:"bot_id,omitempty"`
 	AgentID   string         `json:"agent_id,omitempty"`
 	RunID     string         `json:"run_id,omitempty"`
+	// SourceMessageIDs is internal provenance. Public HTTP responses must not
+	// expose raw session/message locators; tool projections authorize and render
+	// them explicitly at the request boundary.
+	SourceMessageIDs []string `json:"-"`
 }
 
 type SearchResponse struct {
@@ -120,7 +129,8 @@ type ExtractRequest struct {
 }
 
 type ExtractResponse struct {
-	Facts []string `json:"facts"`
+	Facts                []string   `json:"facts"`
+	FactSourceMessageIDs [][]string `json:"-"`
 }
 
 type CandidateMemory struct {
@@ -139,10 +149,11 @@ type DecideRequest struct {
 }
 
 type DecisionAction struct {
-	Event     string `json:"event"`
-	ID        string `json:"id,omitempty"`
-	Text      string `json:"text"`
-	OldMemory string `json:"old_memory,omitempty"`
+	Event             string `json:"event"`
+	ID                string `json:"id,omitempty"`
+	Text              string `json:"text"`
+	OldMemory         string `json:"old_memory,omitempty"`
+	SourceFactIndices []int  `json:"source_fact_indices,omitempty"`
 }
 
 type DecideResponse struct {

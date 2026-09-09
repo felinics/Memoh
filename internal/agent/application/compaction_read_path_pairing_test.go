@@ -12,11 +12,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type pairingQueries struct {
@@ -28,6 +28,32 @@ type pairingQueries struct {
 
 func (f *pairingQueries) ListUncompactedMessagesBySession(context.Context, pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, error) {
 	return f.uncompacted, nil
+}
+
+func (f *pairingQueries) MeasureUncompactedMessagesBySession(context.Context, pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
+	return sqlc.MeasureUncompactedMessagesBySessionRow{CandidateCount: int64(len(f.uncompacted)), CandidateBytes: 1}, nil
+}
+
+func (f *pairingQueries) ListUncompactedMessagesBySessionWithinBytes(context.Context, sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
+	return compactionRowsForPairing(f.uncompacted), nil
+}
+
+func compactionRowsForPairing(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.ListUncompactedMessagesBySessionWithinBytesRow {
+	converted := make([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, len(rows))
+	for i, row := range rows {
+		converted[i] = sqlc.ListUncompactedMessagesBySessionWithinBytesRow{
+			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
+			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
+			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
+			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
+			EventID: row.EventID, DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
+			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl,
+			Platform: row.Platform, CompactionEpoch: row.CompactionEpoch,
+			ConversationType: row.ConversationType, ConversationName: row.ConversationName, ReplyTarget: row.ReplyTarget,
+			CandidateCount: int64(len(rows)), CandidateBytes: 1, CumulativeBytes: 1,
+		}
+	}
+	return converted
 }
 
 func (*pairingQueries) ListCompactionLogsBySession(context.Context, pgtype.UUID) ([]sqlc.BotHistoryMessageCompact, error) {

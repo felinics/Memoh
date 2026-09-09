@@ -84,19 +84,32 @@ vi.mock('./model-select.vue', async () => {
 })
 
 vi.mock('@/utils/acp', async () => {
-  const { defineComponent, h } = await import('vue')
-  const normalizeACPAgentID = (value: unknown) => typeof value === 'string' ? value.trim().toLowerCase() : ''
   return {
     ACP_DEFAULT_PROJECT_MODE: 'project',
     ACP_DEFAULT_PROJECT_PATH: '/data',
-    acpAgentIcon: () => defineComponent({ setup: () => () => h('span') }),
-    findMissingRequiredManagedField: () => null,
-    isACPAgentEnabled: (metadata: Record<string, unknown> | undefined, agentID: unknown) => {
-      const agents = ((metadata?.acp as { agents?: Record<string, { enabled?: boolean }> } | undefined)?.agents) ?? {}
-      return agents[normalizeACPAgentID(agentID)]?.enabled === true
+    findMissingRequiredManagedField: (_profile: unknown, managed: Record<string, unknown>, setupMode: string) =>
+      setupMode === 'self' || String(managed.api_key ?? '').trim() ? null : { id: 'api_key' },
+    isACPAgentEnabled: (metadata: Record<string, unknown> | undefined, provider: string) => {
+      const acp = metadata?.acp as { agents?: Record<string, { enabled?: boolean }> } | undefined
+      return acp?.agents?.[provider]?.enabled === true
     },
-    normalizeACPAgentID,
-    readACPAgentConfig: () => ({ setupMode: 'api_key', setupModeSet: false, managed: {} }),
+    normalizeACPAgentID: (value: unknown) => String(value ?? '').trim().toLowerCase(),
+    readACPAgentConfig: (metadata: Record<string, unknown> | undefined, provider: string) => {
+      const acp = metadata?.acp as { agents?: Record<string, { setup_mode?: string, managed?: Record<string, unknown> }> } | undefined
+      const config = acp?.agents?.[provider] ?? {}
+      return { setupMode: config.setup_mode ?? 'api_key', setupModeSet: !!config.setup_mode, managed: config.managed ?? {} }
+    },
+  }
+})
+
+vi.mock('@/utils/bot-agent', async (importActual) => {
+  const actual = await importActual<typeof import('@/utils/bot-agent')>()
+  const { defineComponent, h } = await import('vue')
+  return {
+    ...actual,
+    botAgentIcon: () => defineComponent({ setup: () => () => h('span') }),
+    botAgentName: (agent: { name?: string }) => agent.name ?? '',
+    botAgentProvider: (agent: { metadata?: { provider?: string } }) => agent.metadata?.provider ?? '',
   }
 })
 
@@ -107,6 +120,7 @@ function createForm(overrides: Record<string, unknown> = {}) {
     chat_acp_agent_id: '',
     chat_acp_project_path: '',
     chat_acp_project_mode: '',
+    default_bot_agent_id: '',
     reasoning_enabled: false,
     reasoning_effort: 'medium',
     show_tool_calls_in_im: false,
@@ -114,23 +128,27 @@ function createForm(overrides: Record<string, unknown> = {}) {
   })
 }
 
-const profiles = [
-  { id: 'codex', display_name: 'Codex' },
-  { id: 'claude-code', display_name: 'Claude Code' },
+const botAgents = [
+  { id: 'agent-codex', name: 'Codex', runtime: 'codex', enabled: true, agent_credential_id: 'credential-codex', metadata: { provider: 'codex', auth: 'api_key' } },
+  { id: 'agent-claude', name: 'Claude Code', runtime: 'claude-code', enabled: true, metadata: { provider: 'claude-code', auth: 'workspace' } },
+  { id: 'agent-custom', name: 'Custom', runtime: 'acp', enabled: true, metadata: { provider: 'custom-agent' } },
 ]
 
-const metadata = {
+const acpProfiles = [
+  { id: 'custom-agent', display_name: 'Custom' },
+]
+
+const configuredMetadata = {
   acp: {
     agents: {
-      codex: { enabled: true },
-      'claude-code': { enabled: true },
+      'custom-agent': { enabled: true, setup_mode: 'api_key', managed: { api_key: 'custom-key' } },
     },
   },
 }
 
 async function mountCard(form: ReturnType<typeof createForm>, options: {
-  acpProfiles?: typeof profiles
-  botMetadata?: typeof metadata
+  botAgents?: typeof botAgents
+	botMetadata?: Record<string, unknown>
 } = {}) {
   const Card = (await import('./settings-interaction-card.vue')).default
   const root = document.createElement('div')
@@ -139,8 +157,9 @@ async function mountCard(form: ReturnType<typeof createForm>, options: {
     form,
     models: [],
     providers: [],
-    acpProfiles: options.acpProfiles ?? profiles,
-    botMetadata: options.botMetadata ?? metadata,
+    botAgents: options.botAgents ?? botAgents,
+		botMetadata: options.botMetadata ?? configuredMetadata,
+		acpProfiles,
   })
   app.config.globalProperties.$t = translate
   app.mount(root)
@@ -158,36 +177,38 @@ describe('settings interaction default Agent selector', () => {
     document.body.innerHTML = ''
   })
 
-  it('selects an ACP Agent and initializes its project defaults', async () => {
+  it('selects a Bot Agent row and initializes its project defaults', async () => {
     const form = createForm()
     const { app, root } = await mountCard(form)
 
     const selector = root.querySelector('[data-select-value="memoh"]')
     expect(selector).not.toBeNull()
-    expect(root.querySelector('[data-option-value="acp:codex"]')).not.toBeNull()
+    expect(root.querySelector('[data-option-value="agent:agent-codex"]')).not.toBeNull()
 
-    uiState.nextSelectValue = 'acp:codex'
+    uiState.nextSelectValue = 'agent:agent-codex'
     selector!.dispatchEvent(new MouseEvent('click'))
     await nextTick()
 
-    expect(form.chat_runtime).toBe('acp_agent')
-    expect(form.chat_acp_agent_id).toBe('codex')
+    expect(form.chat_runtime).toBe('codex')
+    expect(form.default_bot_agent_id).toBe('agent-codex')
+    expect(form.chat_acp_agent_id).toBe('')
     expect(form.chat_acp_project_path).toBe('/data')
     expect(form.chat_acp_project_mode).toBe('project')
 
     app.unmount()
   })
 
-  it('switches back to Memoh without discarding the saved ACP Agent', async () => {
+  it('switches back to Memoh and clears the default Bot Agent binding', async () => {
     const form = createForm({
-      chat_runtime: 'acp_agent',
-      chat_acp_agent_id: 'codex',
+      chat_runtime: 'codex',
+      default_bot_agent_id: 'agent-codex',
+      chat_acp_agent_id: '',
       chat_acp_project_path: '/data/project',
       chat_acp_project_mode: 'project',
     })
     const { app, root } = await mountCard(form)
 
-    const selector = root.querySelector('[data-select-value="acp:codex"]')
+    const selector = root.querySelector('[data-select-value="agent:agent-codex"]')
     expect(selector).not.toBeNull()
 
     uiState.nextSelectValue = 'memoh'
@@ -195,15 +216,17 @@ describe('settings interaction default Agent selector', () => {
     await nextTick()
 
     expect(form.chat_runtime).toBe('model')
-    expect(form.chat_acp_agent_id).toBe('codex')
+    expect(form.default_bot_agent_id).toBe('')
+    expect(form.chat_acp_agent_id).toBe('')
     expect(form.chat_acp_project_path).toBe('/data/project')
 
     app.unmount()
   })
 
-  it('shows a recoverable warning when the saved ACP Agent is unavailable', async () => {
+  it('shows a recoverable warning when the saved Bot Agent is unavailable', async () => {
     const form = createForm({
       chat_runtime: 'acp_agent',
+      default_bot_agent_id: 'removed-agent',
       chat_acp_agent_id: 'removed-agent',
     })
     const { app, root } = await mountCard(form)
@@ -211,6 +234,52 @@ describe('settings interaction default Agent selector', () => {
     expect(root.textContent).toContain('bots.settings.defaultAgentUnavailable')
     expect(root.textContent).toContain('bots.settings.defaultAgentUnavailableDescription')
     expect(root.querySelector('[data-option-value="memoh"]')).not.toBeNull()
+
+    app.unmount()
+  })
+
+	it('hides Agents whose provider setup is incomplete', async () => {
+		const form = createForm()
+		const { app, root } = await mountCard(form, {
+			botAgents: [
+				{ ...botAgents[0], agent_credential_id: undefined },
+				botAgents[1],
+				botAgents[2],
+			],
+			botMetadata: {
+				acp: {
+					agents: {
+            'custom-agent': { enabled: true, setup_mode: 'api_key', managed: {} },
+					},
+				},
+			},
+		})
+
+		expect(root.querySelector('[data-option-value="agent:agent-codex"]')).toBeNull()
+		expect(root.querySelector('[data-option-value="agent:agent-custom"]')).toBeNull()
+		expect(root.querySelector('[data-option-value="agent:agent-claude"]')).not.toBeNull()
+
+    app.unmount()
+  })
+
+  it('keeps legacy enabled Agents selectable when setup mode was not stored', async () => {
+    const form = createForm()
+    const { app, root } = await mountCard(form, {
+      botAgents: [
+        { ...botAgents[0], agent_credential_id: undefined },
+        botAgents[2],
+      ],
+      botMetadata: {
+        acp: {
+          agents: {
+            'custom-agent': { enabled: true, managed: {} },
+          },
+        },
+      },
+    })
+
+    expect(root.querySelector('[data-option-value="agent:agent-custom"]')).not.toBeNull()
+    expect(root.querySelector('[data-option-value="agent:agent-codex"]')).toBeNull()
 
     app.unmount()
   })

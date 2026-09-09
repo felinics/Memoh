@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type fakeArtifactProvider struct {
@@ -140,7 +140,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 		Sources: []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
 	}}
 
-	pending, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts)
+	pending, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -148,7 +148,7 @@ func TestBuildMentionGatesOnWatermarkNotCoverage(t *testing.T) {
 		t.Fatal("a mention the watermark has not consumed must wake the session even when compaction covers it")
 	}
 
-	consumed, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{SourceCursor: 150}, artifacts)
+	consumed, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{SourceCursor: 150}, artifacts, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan past the mention")
 	}
@@ -178,7 +178,7 @@ func TestBuildSkipsImageRefsCoveredByArtifacts(t *testing.T) {
 		Sources: []timeline.CompactionSource{{ExternalMessageID: "m1", CreatedAtMs: 100}},
 	}}
 
-	plan, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts)
+	plan, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, artifacts, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan")
 	}
@@ -186,7 +186,7 @@ func TestBuildSkipsImageRefsCoveredByArtifacts(t *testing.T) {
 		t.Fatalf("covered image must not be re-attached, got %+v", plan.command.DiscussImageRefs)
 	}
 
-	planLive, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, nil)
+	planLive, _, ok := discussTriggerBuilder{}.Build(DiscussSessionConfig{ConversationType: "group"}, rc, nil, timeline.DiscussCursorPosition{}, nil, timeline.ComposeBudget{})
 	if !ok {
 		t.Fatal("expected a composed plan without artifacts")
 	}

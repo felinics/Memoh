@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	connectsdk "github.com/memohai/connect-it/sdk/go"
+	connectsdk "github.com/felinics/connect-it/sdk/go"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 func TestNormalizeAlias(t *testing.T) {

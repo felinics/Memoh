@@ -12,6 +12,7 @@ export interface WSUserInputAnswer {
   option_ids?: string[]
   custom_text?: string
   text?: string
+  skipped?: boolean
 }
 
 interface WSTurnOptions {
@@ -34,13 +35,17 @@ export type WSClientMessage =
       type: 'retry_message'
       invocation_id: string
       session_id: string
-      message_id: string
+      /** The turn being replaced. A client holds it from admission onward,
+       *  unlike a stored message id, which only exists once the round has
+       *  been persisted and fetched back. */
+      turn_id: string
     } & WSTurnOptions)
   | ({
       type: 'edit_message'
       invocation_id: string
       session_id: string
-      message_id: string
+      /** See retry_message. */
+      turn_id: string
       text?: string
       attachments?: ChatAttachment[]
     } & WSTurnOptions)
@@ -57,6 +62,8 @@ export type WSClientMessage =
       decision_id: string
       control_id: string
       decision: 'approve' | 'reject'
+      /** Agent-provided permission option id, when the user picked one. */
+      option_id?: string
       reason?: string
     }
   | {
@@ -227,6 +234,7 @@ export function connectWebSocket(
         const eventType = String(parsed.type ?? '').trim()
         if (
           eventType !== 'run_accepted'
+          && eventType !== 'model_preference_settled'
           && eventType !== 'run_rejected'
           && eventType !== 'error'
           && eventType !== 'session_created'

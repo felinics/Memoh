@@ -13,12 +13,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/decision"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/agent/decision"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type Service struct {
@@ -73,6 +73,28 @@ func (s *Service) EvaluatePolicy(ctx context.Context, input CreatePendingInput) 
 	if s == nil {
 		return Evaluation{Decision: DecisionBypass}, nil
 	}
+	eval, err := s.policyEvaluation(ctx, input)
+	if err != nil {
+		return eval, err
+	}
+	if eval.Decision == DecisionDeny {
+		// An explicit admin deny outranks a forced review: auto-declining is an
+		// honest answer, while showing the card would let a user approve what
+		// the policy hard-blocks.
+		return eval, nil
+	}
+	if input.ForceReview {
+		// Requests that must never be auto-answered (consent shapes, unmapped
+		// generic permissions): with the policy disabled a bypass would select
+		// the agent's accept option and report a consent the user never gave.
+		// Interactive turns show the card; non-interactive ones auto-reject,
+		// which reads as an honest decline instead of a false accept.
+		eval.Decision = DecisionNeedsApproval
+	}
+	return eval, nil
+}
+
+func (s *Service) policyEvaluation(ctx context.Context, input CreatePendingInput) (Evaluation, error) {
 	if input.WorkspaceTargeted && s.targets != nil {
 		args, ok := input.ToolInput.(map[string]any)
 		if !ok {
@@ -123,6 +145,14 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
+	options := input.Options
+	if options == nil {
+		options = []PermissionOption{}
+	}
+	optionsJSON, err := json.Marshal(options)
+	if err != nil {
+		return Request{}, err
+	}
 	channelIdentityID, err := s.optionalChannelIdentityUUID(ctx, input.ChannelIdentityID)
 	if err != nil {
 		return Request{}, err
@@ -152,6 +182,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 		ToolName:                     strings.TrimSpace(input.ToolName),
 		Operation:                    operation,
 		ToolInput:                    toolInput,
+		Options:                      optionsJSON,
 		RuntimeFencingToken:          runtimeFencingToken(ctx),
 		RequestedByChannelIdentityID: requestedByID,
 		RequestedMessageID:           optionalUUID(input.RequestedMessageID),
@@ -255,6 +286,12 @@ func (s *Service) ResolveTarget(ctx context.Context, input ResolveInput) (Reques
 }
 
 func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason string) (Request, error) {
+	return s.ApproveOption(ctx, approvalID, actorID, reason, "")
+}
+
+// ApproveOption approves the request recording the agent-provided option the
+// decider selected; an empty optionID is the plain binary approve.
+func (s *Service) ApproveOption(ctx context.Context, approvalID, actorID, reason, optionID string) (Request, error) {
 	id, err := db.ParseUUID(approvalID)
 	if err != nil {
 		return Request{}, err
@@ -274,6 +311,7 @@ func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason strin
 		row, approveErr = queries.ApproveToolApprovalRequest(ctx, sqlc.ApproveToolApprovalRequestParams{
 			ID:                         id,
 			Reason:                     strings.TrimSpace(reason),
+			SelectedOptionID:           optionID,
 			DecidedByChannelIdentityID: decidedBy,
 			RuntimeFencingToken:        runtimeToken,
 			ResponseControlID:          responseControlID,
@@ -292,6 +330,12 @@ func (s *Service) Approve(ctx context.Context, approvalID, actorID, reason strin
 }
 
 func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string) (Request, error) {
+	return s.RejectOption(ctx, approvalID, actorID, reason, "")
+}
+
+// RejectOption rejects the request recording the agent-provided option the
+// decider selected; an empty optionID is the plain binary reject.
+func (s *Service) RejectOption(ctx context.Context, approvalID, actorID, reason, optionID string) (Request, error) {
 	id, err := db.ParseUUID(approvalID)
 	if err != nil {
 		return Request{}, err
@@ -311,6 +355,7 @@ func (s *Service) Reject(ctx context.Context, approvalID, actorID, reason string
 		row, rejectErr = queries.RejectToolApprovalRequest(ctx, sqlc.RejectToolApprovalRequestParams{
 			ID:                         id,
 			Reason:                     strings.TrimSpace(reason),
+			SelectedOptionID:           optionID,
 			DecidedByChannelIdentityID: decidedBy,
 			RuntimeFencingToken:        runtimeToken,
 			ResponseControlID:          responseControlID,
@@ -716,6 +761,8 @@ func (s *Service) optionalChannelIdentityUUID(ctx context.Context, value string)
 func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 	var input map[string]any
 	_ = json.Unmarshal(row.ToolInput, &input)
+	var options []PermissionOption
+	_ = json.Unmarshal(row.Options, &options)
 	req := Request{
 		ID:                      uuid.UUID(row.ID.Bytes).String(),
 		BotID:                   uuid.UUID(row.BotID.Bytes).String(),
@@ -725,6 +772,8 @@ func requestFromRow(row sqlc.ToolApprovalRequest) Request {
 		ToolName:                strings.TrimSpace(row.ToolName),
 		Operation:               strings.TrimSpace(row.Operation),
 		ToolInput:               input,
+		Options:                 options,
+		SelectedOptionID:        row.SelectedOptionID,
 		ShortID:                 int(row.ShortID),
 		Status:                  strings.TrimSpace(row.Status),
 		DecisionReason:          strings.TrimSpace(row.DecisionReason),

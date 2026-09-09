@@ -99,6 +99,8 @@ src/
 │   │   ├── useChat.ws.test.ts #     WebSocket tests
 │   │   ├── useChat.content.ts #     Message content parsing (tool calls, text, reasoning)
 │   │   ├── useContainerStream.ts  # Container creation SSE stream
+│   │   ├── useWorkspaceDependencies.ts  # Workspace dependency list query, preflight / rollback / check-updates / script calls
+│   │   ├── useWorkspaceDependencyStream.ts  # Dependency install / update / reinstall / remove SSE stream
 │   │   └── usePlatform.ts     #     Platform list query + create mutation
 │   ├── useDialogMutation.ts   #   Mutation wrapper with toast error handling
 │   ├── useRetryingStream.ts   #   SSE retry with exponential backoff
@@ -157,12 +159,13 @@ src/
 │   │       ├── tool-call-detail-spawn.vue   # Spawn (subagent) task list + links
 │   │       ├── tool-call-detail-image.vue   # generate_image preview
 │   │       ├── tool-call-detail-generic.vue # Generic input/result JSON detail
-│   │       ├── schedule-trigger-block.vue  # Schedule trigger display
-│   │       └── heartbeat-trigger-block.vue # Heartbeat trigger display
+│   │       └── schedule-trigger-block.vue  # Schedule trigger display
 │   ├── bots/                  #   Bot list + detail (tabs: overview, desktop, container, memory, channels, etc.)
 │   │   ├── index.vue          #     Bot grid
 │   │   ├── new.vue            #     Create bot flow
 │   │   ├── detail.vue         #     Bot detail with tabbed interface
+│   │   ├── composables/       #     Page-specific composables
+│   │   │   └── useDependencyOperation.ts  # One streamed dependency operation: log, outcome, progress dialog state
 │   │   └── components/        #     Bot sub-components
 │   │       ├── bot-overview.vue       # Bot overview tab
 │   │       ├── bot-settings.vue       # Bot settings tab
@@ -171,7 +174,6 @@ src/
 │   │       ├── bot-memory.vue         # Memory configuration tab
 │   │       ├── bot-mcp.vue            # MCP connections tab
 │   │       ├── bot-schedule.vue       # Schedule management tab
-│   │       ├── bot-heartbeat.vue      # Heartbeat configuration tab
 │   │       ├── bot-email.vue          # Email configuration tab
 │   │       ├── bot-container.vue      # Container management tab
 │   │       ├── bot-network.vue        # Workspace network tab
@@ -189,6 +191,13 @@ src/
 │   │       ├── tts-model-select.vue         # TTS model selector
 │   │       ├── channel-settings-panel.vue   # Channel settings panel
 │   │       ├── container-create-progress.vue # Container creation progress
+│   │       ├── bot-dependencies.vue         # Workspace dependencies tab (target select, check updates, grouped rows, dialogs)
+│   │       ├── dependency-row.vue           # One dependency row: icon, version/status badges, primary action + menu
+│   │       ├── dependency-kv-list.vue       # Read-only key/value block shared by the dependency dialogs
+│   │       ├── dependency-confirm-dialog.vue # Confirm install / update / align / reinstall of a workspace dependency
+│   │       ├── dependency-progress-dialog.vue # Live SSE log of a dependency operation (copy log, retry, no auto-close)
+│   │       ├── dependency-script-dialog.vue # Preview of the exact script a dependency action runs
+│   │       ├── dependency-rollback-dialog.vue # Confirm rolling a dependency back to its previous version
 │   │       └── weixin-qr-login.vue          # WeChat QR login
 │   ├── providers/             #   LLM provider & model management
 │   ├── web-search/            #   Web search provider management
@@ -233,6 +242,8 @@ src/
     ├── image-ref.ts           #   Image reference URL resolution
     ├── image-ref.test.ts      #   Image ref tests
     ├── timezones.ts           #   Timezone list and utilities
+    ├── workspace-dependency.ts #  Dependency row rules: status badge, primary / menu actions, icon, version format
+    ├── workspace-dependency.test.ts # Dependency rule tests
     └── useControlVisibleStatus.ts  # Visibility control utility
 ```
 
@@ -266,8 +277,7 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 | `/settings/transcription` | — | redirect | Legacy alias → `voice` |
 | `/settings/email` | email | `email/index.vue` | Email provider management |
 | `/settings/supermarket` | supermarket | `supermarket/index.vue` | Template/skill marketplace |
-| `/settings/supermarket/plugins/:pluginId` | supermarket-plugin-detail | `supermarket/plugin-detail.vue` | Plugin detail |
-| `/settings/supermarket/skills/:skillId` | supermarket-skill-detail | `supermarket/skill-detail.vue` | Skill detail |
+| `/settings/supermarket/skills/:registryId/:packageId` | supermarket-package-detail | `supermarket/package-detail.vue` | Registry Skill Package detail |
 | `/settings/usage` | usage | `usage/index.vue` | Token usage statistics |
 | `/settings/people` | people | `people/index.vue` | User management (admin only) |
 | `/settings/appearance` | appearance | `appearance/index.vue` | Theme, locale, and appearance settings |
@@ -489,10 +499,11 @@ Stores use Composition API style (`defineStore(() => { ... })`), with persistenc
 
 ### Streaming (Chat)
 
-A conversation is read over the **WebSocket** only. SSE is left with one job that has nothing to do with conversation contents: telling the sidebar which sessions moved.
+Live conversation turns are read over the **WebSocket**. SSE carries identifiers and invalidation hints, never conversation contents.
 
 #### Sessions activity SSE
 - **Endpoint**: `GET /bots/{bot_id}/sessions/events` — bot-wide lightweight activity stream; `session_touched` / `session_title_changed` / `session_created` for sidebar live-sort. Never carries message bodies.
+- `session_touched` with `reason: background_task` also refreshes persisted messages for an already loaded session. Notifications can arrive without a live turn; use the transcript merge path so active output survives. Coalesce pending notifications and perform a trailing refresh for the final outcome.
 - **Parsing**: handled by the generated SDK (`@memohai/sdk` `sse.get`); wrappers live in `composables/api/useChat.message-api.ts`.
 - **Retry**: `useRetryingStream` composable drives reconnection with exponential backoff.
 - There is no per-session SSE. A session's messages and run state come from the session runtime over the WebSocket, so that every subscriber of a session — this tab, another tab, another device — is reading the same projection instead of each building its own.
@@ -502,6 +513,14 @@ A conversation is read over the **WebSocket** only. SSE is left with one job tha
 - **Implementation**: `composables/api/useChat.ws.ts` wraps native `WebSocket` with send, abort, close, and auto-reconnect
 - **State**: `store/chat-list.ts` processes streaming events from either transport into reactive message blocks in real-time
 - **Abort**: Stream cancellation via `AbortSignal` (SSE) or close message (WS)
+
+## Dependency Operations
+
+- Installation, update, reinstall, and removal require script preview followed by explicit confirmation. Carry the preview's `definition_revision` into the request and retain it on retry; a retry must not silently resolve a new script.
+- Missing-agent feedback never starts installation. Its management link carries the requested dependency and source session; only a confirmed operation for that dependency forwards `session_id` for notifications. Other dependencies must not inherit the conversation association.
+- Shared operation stores use the host application's injected router, including Desktop's memory history. Never import the standalone Web router into a shared store.
+- A disconnected operation or `workspace_dependency_operation_unknown` has an unknown outcome. Display it without Retry until server reconciliation establishes the result. Full logs are manually readable regions; only concise phase changes are live announcements.
+- Dependency rows render the server's sanitized `last_error` and `retired` state so another tab can diagnose a failed or delisted installation.
 
 ## Workspace, Display, Browser Use, and Computer Use
 

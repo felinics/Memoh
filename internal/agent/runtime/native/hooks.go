@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type hookToolRunner struct {
@@ -234,8 +234,9 @@ func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig,
 				p = override
 			}
 		}
+		currentStep := step
 		req := a.baseHookRequest(ctx, cfg, hooks.EventBeforeModelCall)
-		req.Turn = modelCallHookPayload(cfg, step, len(p.Messages))
+		req.Turn = modelCallHookPayload(cfg, currentStep, len(p.Messages))
 		step++
 		res, err := a.hookService.Run(ctx, req, nil)
 		if err != nil {
@@ -248,11 +249,17 @@ func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig,
 			}
 			return p
 		}
-		if strings.TrimSpace(res.AppendContext) != "" {
-			p.Messages = append(p.Messages, sdk.UserMessage(formatHookContext(hooks.EventBeforeModelCall, res.AppendContext)))
-		}
+		return applyStepHookAppendContext(p, cfg.ContextMutations, currentStep, res.AppendContext)
+	}
+}
+
+func applyStepHookAppendContext(p *sdk.GenerateParams, ledger *contextfrag.MutationLedger, step int, appendContext string) *sdk.GenerateParams {
+	if strings.TrimSpace(appendContext) == "" {
 		return p
 	}
+	p.Messages = append(p.Messages, sdk.UserMessage(formatHookContext(hooks.EventBeforeModelCall, appendContext)))
+	ledger.Record(contextfrag.MutationBeforeModelCallHook, fmt.Sprintf("step=%d append_bytes=%d", step, len(appendContext)))
+	return p
 }
 
 func (a *Agent) runAfterModelCallHook(ctx context.Context, cfg RunConfig, step *sdk.StepResult, stepIndex int) {

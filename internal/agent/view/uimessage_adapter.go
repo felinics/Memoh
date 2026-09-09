@@ -3,7 +3,7 @@ package view
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/event"
 )
 
 // UIStreamEventFromAgentEvent adapts a runtime stream event to the UI
@@ -33,6 +33,7 @@ func UIStreamEventFromAgentEvent(ev event.StreamEvent) UIMessageStreamEvent {
 		UserInputID: ev.UserInputID,
 		ShortID:     ev.ShortID,
 		Status:      ev.Status,
+		Code:        ev.Code,
 		Metadata:    ev.Metadata,
 	}
 }

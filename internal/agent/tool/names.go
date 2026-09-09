@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"github.com/memohai/memoh/internal/agent/tool/internal/toolname"
+	"github.com/felinics/memoh/internal/agent/tool/internal/toolname"
 )
 
 // ToolName identifies a built-in Memoh agent tool.
@@ -37,6 +37,9 @@ func ToolSpawnAgent() ToolName     { return toolname.ToolSpawnAgent() }
 func ToolSendMessage() ToolName    { return toolname.ToolSendMessage() }
 func ToolListAgents() ToolName     { return toolname.ToolListAgents() }
 func ToolListModels() ToolName     { return toolname.ToolListModels() }
+
+func ToolListWorkdirs() ToolName  { return toolname.ToolListWorkdirs() }
+func ToolListACPAgents() ToolName { return toolname.ToolListACPAgents() }
 
 func ToolListSchedule() ToolName   { return toolname.ToolListSchedule() }
 func ToolGetSchedule() ToolName    { return toolname.ToolGetSchedule() }

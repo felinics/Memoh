@@ -8,13 +8,16 @@ import (
 
 const legacyAgentMethodSessionSetModel = "session/set_model"
 
-// newSessionResponse preserves the standard ACP response while retaining the
-// dedicated model selector used by agents that still implement the former
-// models + session/set_model protocol. Keeping this compatibility DTO at the
-// wire boundary prevents the legacy shape from leaking into the pool or UI.
-type newSessionResponse struct {
-	acp.NewSessionResponse
-	Models *legacySessionModelState `json:"models,omitempty"`
+// sessionResponse is the session/new response shape, retaining the dedicated
+// model selector used by agents that still implement the former models +
+// session/set_model protocol. Keeping this compatibility DTO at the wire
+// boundary prevents the legacy shape from leaking into the pool or UI.
+type sessionResponse struct {
+	Meta          map[string]any            `json:"_meta,omitempty"`
+	ConfigOptions []acp.SessionConfigOption `json:"configOptions,omitempty"`
+	Modes         *acp.SessionModeState     `json:"modes,omitempty"`
+	SessionId     acp.SessionId             `json:"sessionId,omitempty"`
+	Models        *legacySessionModelState  `json:"models,omitempty"`
 }
 
 type legacySessionModelState struct {

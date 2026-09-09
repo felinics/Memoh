@@ -15,14 +15,14 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
-	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
-	coremodule "github.com/memohai/memoh/cmd/internal/core"
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/adapters/weixin"
-	"github.com/memohai/memoh/internal/config"
-	"github.com/memohai/memoh/internal/handlers"
-	"github.com/memohai/memoh/internal/server"
-	"github.com/memohai/memoh/internal/version"
+	channelmodule "github.com/felinics/memoh/cmd/internal/channel"
+	coremodule "github.com/felinics/memoh/cmd/internal/core"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/adapters/weixin"
+	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/server"
+	"github.com/felinics/memoh/internal/version"
 )
 
 type healthHandler struct{}

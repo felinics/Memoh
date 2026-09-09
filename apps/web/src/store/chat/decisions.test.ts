@@ -51,7 +51,7 @@ function setup(
     },
     transcriptForTarget: () => transcript,
     currentRun: () => currentRun,
-    ensureConnected: () => options.connected ?? true,
+    ensureWebSocket: () => options.connected ?? true,
     send: (_botId, message) => {
       if (options.sendError) throw options.sendError
       sent.push(message)

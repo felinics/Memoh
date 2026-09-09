@@ -136,22 +136,57 @@ func userChanged(a, b CanonicalUser) bool {
 // This is a pure function — it does not mutate the input IC.
 func Reduce(ic IntermediateContext, event CanonicalEvent) IntermediateContext {
 	out := cloneIC(ic)
+	reduceInPlace(&out, event)
+	return out
+}
+
+// reduceInPlace applies an event without cloning the complete projection and
+// returns the node indexes whose rendered segments may have changed. Pipeline
+// owns its IC exclusively, so this is the hot-path reducer; Reduce remains the
+// public pure-function oracle used by callers and equivalence tests.
+func reduceInPlace(ic *IntermediateContext, event CanonicalEvent) []int {
+	before := len(ic.Nodes)
+	dirty := make([]int, 0, 2)
 	switch e := event.(type) {
 	case MessageEvent:
-		reduceMessage(&out, e)
+		if idx := findMessageIndex(ic.Nodes, e.MessageID); idx >= 0 {
+			dirty = append(dirty, idx)
+		}
+		reduceMessage(ic, e)
 	case EditEvent:
-		reduceEdit(&out, e)
+		if idx := findMessageIndex(ic.Nodes, e.MessageID); idx >= 0 {
+			dirty = append(dirty, idx)
+		}
+		reduceEdit(ic, e)
 	case DeleteEvent:
-		reduceDelete(&out, e)
+		for _, messageID := range e.MessageIDs {
+			if idx := findMessageIndex(ic.Nodes, messageID); idx >= 0 {
+				dirty = append(dirty, idx)
+			}
+		}
+		reduceDelete(ic, e)
 	case ServiceEvent:
-		reduceService(&out, e)
+		reduceService(ic, e)
 	}
-	return out
+	for idx := before; idx < len(ic.Nodes); idx++ {
+		dirty = append(dirty, idx)
+	}
+	return dirty
 }
 
 func cloneIC(ic IntermediateContext) IntermediateContext {
 	nodes := make([]ICNode, len(ic.Nodes))
-	copy(nodes, ic.Nodes)
+	for i, node := range ic.Nodes {
+		nodes[i] = node
+		if node.Message != nil {
+			message := *node.Message
+			nodes[i].Message = &message
+		}
+		if node.SystemEvent != nil {
+			systemEvent := *node.SystemEvent
+			nodes[i].SystemEvent = &systemEvent
+		}
+	}
 	users := make(map[string]ICUserState, len(ic.Users))
 	for k, v := range ic.Users {
 		users[k] = v

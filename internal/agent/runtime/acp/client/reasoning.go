@@ -114,17 +114,18 @@ func (s *Session) ReasoningState() ReasoningState {
 	return cloneReasoningState(s.reasoningState)
 }
 
-// ConfigurationState returns the model and reasoning capabilities from one
-// config snapshot. ACP updates both values together, so runtime status must
-// not read them under separate locks and expose a combination that never
-// existed in the Agent.
-func (s *Session) ConfigurationState() (ModelState, ReasoningState) {
+// ConfigurationState returns every agent-declared runtime control from
+// one cache snapshot so status responses never mix values from two updates.
+func (s *Session) ConfigurationState() (ModelState, ReasoningState, ModeState, []AvailableCommandInfo) {
 	if s == nil {
-		return ModelState{Supported: false}, ReasoningState{Supported: false}
+		return ModelState{Supported: false}, ReasoningState{Supported: false}, ModeState{Supported: false}, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return cloneModelState(s.modelState), cloneReasoningState(s.reasoningState)
+	return cloneModelState(s.modelState),
+		cloneReasoningState(s.reasoningState),
+		cloneModeState(s.modeState),
+		cloneAvailableCommands(s.availableCommands)
 }
 
 func (s *Session) replaceConfigOptions(sessionID acp.SessionId, options []acp.SessionConfigOption) {

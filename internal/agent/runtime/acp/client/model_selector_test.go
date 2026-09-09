@@ -38,23 +38,23 @@ func TestSessionSupportsLegacyModelProtocol(t *testing.T) {
 			}
 			switch request.Method {
 			case acp.AgentMethodSessionNew:
-				description := "Hermes provider model"
+				description := "Custom provider model"
 				if err := encoder.Encode(rawACPResponse{
 					JSONRPC: "2.0",
 					ID:      request.ID,
 					Result: map[string]any{
-						"sessionId": "hermes-session",
+						"sessionId": "custom-session",
 						"models": map[string]any{
-							"currentModelId": "openrouter:hermes-3",
+							"currentModelId": "provider:model-a",
 							"availableModels": []map[string]any{
 								{
-									"modelId":     "openrouter:hermes-3",
-									"name":        "Hermes 3",
+									"modelId":     "provider:model-a",
+									"name":        "Model A",
 									"description": description,
 								},
 								{
-									"modelId": "nous:hermes-4",
-									"name":    "Hermes 4",
+									"modelId": "provider:model-b",
+									"name":    "Model B",
 								},
 							},
 						},
@@ -94,31 +94,31 @@ func TestSessionSupportsLegacyModelProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if response.SessionId != "hermes-session" || response.Models == nil {
-		t.Fatalf("NewSession() = %#v, want legacy Hermes model state", response)
+	if response.SessionId != "custom-session" || response.Models == nil {
+		t.Fatalf("NewSession() = %#v, want custom agent model state", response)
 	}
 
 	sess := &Session{conn: conn, sessionID: response.SessionId}
 	sess.replaceConfigOptions(response.SessionId, response.ConfigOptions)
 	sess.installLegacyModels(response.Models)
 	state := sess.ModelState()
-	if !state.Supported || state.CurrentModelID != "openrouter:hermes-3" || len(state.Available) != 2 {
+	if !state.Supported || state.CurrentModelID != "provider:model-a" || len(state.Available) != 2 {
 		t.Fatalf("ModelState() = %#v, want normalized legacy models", state)
 	}
-	if state.Available[0].Description != "Hermes provider model" {
+	if state.Available[0].Description != "Custom provider model" {
 		t.Fatalf("model description = %q", state.Available[0].Description)
 	}
 
-	state, err = sess.SetModel(context.Background(), "nous:hermes-4")
+	state, err = sess.SetModel(context.Background(), "provider:model-b")
 	if err != nil {
 		t.Fatalf("SetModel() error = %v", err)
 	}
-	if state.CurrentModelID != "nous:hermes-4" {
+	if state.CurrentModelID != "provider:model-b" {
 		t.Fatalf("SetModel() state = %#v", state)
 	}
 	select {
 	case params := <-selected:
-		if params.SessionID != response.SessionId || params.ModelID != "nous:hermes-4" {
+		if params.SessionID != response.SessionId || params.ModelID != "provider:model-b" {
 			t.Fatalf("session/set_model params = %#v", params)
 		}
 	case err := <-peerErr:
@@ -162,9 +162,9 @@ func TestConfigUpdatesPreserveIndependentLegacyModelState(t *testing.T) {
 
 	sess := &Session{sessionID: "session-1"}
 	sess.installLegacyModels(&legacySessionModelState{
-		CurrentModelID: "openrouter:hermes-3",
+		CurrentModelID: "provider:model-a",
 		AvailableModels: []legacyModelInfo{
-			{ModelID: "openrouter:hermes-3", Name: "Hermes 3"},
+			{ModelID: "provider:model-a", Name: "Model A"},
 		},
 	})
 	thoughtLevel := acp.SessionConfigOptionCategoryThoughtLevel
@@ -173,7 +173,7 @@ func TestConfigUpdatesPreserveIndependentLegacyModelState(t *testing.T) {
 	})
 
 	state := sess.ModelState()
-	if !state.Supported || state.CurrentModelID != "openrouter:hermes-3" {
+	if !state.Supported || state.CurrentModelID != "provider:model-a" {
 		t.Fatalf("ModelState() = %#v, want preserved legacy state", state)
 	}
 	if !sess.ReasoningState().Supported {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/memohai/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 // ScheduleGateway adapts schedule trigger calls to the chat Service.

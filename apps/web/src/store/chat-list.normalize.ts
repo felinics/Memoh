@@ -72,6 +72,15 @@ export function normalizeForwardRef(forward?: UIForwardRef): UIForwardRef | unde
     : undefined
 }
 
+/** The string-valued entries of an open record; undefined when there are none. */
+export function stringRecord(record?: Record<string, unknown>): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(record ?? {})) {
+    if (typeof value === 'string') out[key] = value
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 export function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}
 }
@@ -215,7 +224,12 @@ export function cloneRequestedSkills(items: RequestedSkillSelection[]): Requeste
   return items.map(item => ({ ...item }))
 }
 
-export function serverMessageId(turn: ChatMessage): string {
+// This identity is allowed to fall back to the render id because reconciliation
+// must still find optimistic/runtime turns before their settled twin arrives.
+// It is a lookup key, never a name to send to the server: retry, edit and fork
+// name a turn, and the history cursor is taken from a turn the database has
+// already numbered, so nothing needs to sniff whether an id looks persisted.
+export function messageIdentityId(turn: ChatMessage): string {
   return (turn.serverId ?? turn.id).trim()
 }
 

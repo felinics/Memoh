@@ -2,25 +2,27 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"unicode"
 
-	"github.com/memohai/memoh/internal/acl"
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	"github.com/memohai/memoh/internal/bots"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	emailpkg "github.com/memohai/memoh/internal/email"
-	"github.com/memohai/memoh/internal/heartbeat"
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/mcp"
-	memprovider "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
-	"github.com/memohai/memoh/internal/schedule"
-	"github.com/memohai/memoh/internal/searchproviders"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	emailpkg "github.com/felinics/memoh/internal/email"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/mcp"
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/schedule"
+	"github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // MemberRoleResolver resolves a user's role within a bot.
@@ -77,7 +79,6 @@ type Handler struct {
 	searchProvService  *searchproviders.Service
 	emailService       *emailpkg.Service
 	emailOutboxService *emailpkg.OutboxService
-	heartbeatService   *heartbeat.Service
 	compactionService  *compaction.Service
 	queries            CommandQueries
 	sqlcQueries        dbstore.Queries
@@ -125,7 +126,6 @@ func NewHandler(
 	searchProvService *searchproviders.Service,
 	emailService *emailpkg.Service,
 	emailOutboxService *emailpkg.OutboxService,
-	heartbeatService *heartbeat.Service,
 	queries CommandQueries,
 	aclEvaluator AccessEvaluator,
 	skillLoader SkillLoader,
@@ -145,7 +145,6 @@ func NewHandler(
 		searchProvService:  searchProvService,
 		emailService:       emailService,
 		emailOutboxService: emailOutboxService,
-		heartbeatService:   heartbeatService,
 		queries:            queries,
 		aclEvaluator:       aclEvaluator,
 		skillLoader:        skillLoader,
@@ -162,7 +161,27 @@ func (h *Handler) SetCompactionService(s *compaction.Service, q dbstore.Queries)
 	h.sqlcQueries = q
 }
 
-// CurrentContext resolves the bot's current model/heartbeat/reasoning state for
+// clearSessionModelPreference re-takes the current session from a web picker
+// pin (issue #879, spec P11′): /model and /reasoning move the bot default,
+// and a session remembering a web-picked pair would otherwise silently keep
+// the old model after the user just saw "switched". Clearing the pair returns
+// the session to the bot-default chain. NULL over NULL is harmless
+// (preference writes never bump updated_at), so there is no pre-read.
+// Best-effort: a failure is logged, never fails the command.
+func (h *Handler) clearSessionModelPreference(cc CommandContext) {
+	sessionID, err := db.ParseUUID(strings.TrimSpace(cc.SessionID))
+	if err != nil || h.queries == nil {
+		return
+	}
+	if err := h.queries.UpdateSessionModelPreference(cc.Ctx, dbsqlc.UpdateSessionModelPreferenceParams{ID: sessionID}); err != nil {
+		h.logger.Warn("clear session model preference after channel command",
+			slog.String("session_id", cc.SessionID),
+			slog.Any("error", err),
+		)
+	}
+}
+
+// CurrentContext resolves the bot's current model/reasoning state for
 // enriching command output (e.g. the /new confirmation). It is a read-only view
 // over existing bot settings and makes no changes.
 func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentContext, error) {
@@ -174,7 +193,6 @@ func (h *Handler) CurrentContext(ctx context.Context, botID string) (CurrentCont
 	}
 	return CurrentContext{
 		ChatModel:       h.resolveModelName(cc, s.ChatModelID),
-		HeartbeatModel:  h.resolveModelName(cc, s.HeartbeatModelID),
 		ReasoningEffort: s.ReasoningEffort,
 		ContextWindow:   h.resolveContextWindow(cc),
 	}, nil
@@ -522,6 +540,16 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err error) string {
 	if err == nil {
 		return ""
+	}
+	var invalidReasoning *settings.InvalidReasoningEffortError
+	if errors.As(err, &invalidReasoning) {
+		return t.T("cmd.reasoning.unknownLevel", map[string]any{
+			"level":  fmt.Sprintf("%q", invalidReasoning.Effort),
+			"levels": strings.Join(reasoningChoicesFor(invalidReasoning.Options), ", "),
+		})
+	}
+	if errors.Is(err, settings.ErrReasoningOptionsUnavailable) {
+		return t.T("cmd.reasoning.unavailable")
 	}
 	msg := strings.TrimSpace(err.Error())
 	res := strings.TrimSpace(resource)

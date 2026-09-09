@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	session "github.com/memohai/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/agent/turn"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	session "github.com/felinics/memoh/internal/chat/thread"
 )
 
 type fakeHistorySessionLister struct {
@@ -22,18 +22,13 @@ func (f fakeHistorySessionLister) ListByBot(_ context.Context, _ string) ([]sess
 type fakeHistoryMessageReader struct {
 	latestSessionID string
 	beforeSessionID string
+	exactSessionID  string
+	exactMessageID  string
 	before          time.Time
 	latestMessages  []messagepkg.Message
 	beforeMessages  []messagepkg.Message
-}
-
-func (f *fakeHistoryMessageReader) ListLatest(_ context.Context, _ string, _ int32) ([]messagepkg.Message, error) {
-	return f.latestMessages, nil
-}
-
-func (f *fakeHistoryMessageReader) ListBefore(_ context.Context, _ string, before time.Time, _ int32) ([]messagepkg.Message, error) {
-	f.before = before
-	return f.beforeMessages, nil
+	exactMessage    messagepkg.Message
+	exactErr        error
 }
 
 func (f *fakeHistoryMessageReader) ListLatestBySession(_ context.Context, sessionID string, _ int32) ([]messagepkg.Message, error) {
@@ -45,6 +40,12 @@ func (f *fakeHistoryMessageReader) ListBeforeBySession(_ context.Context, sessio
 	f.beforeSessionID = sessionID
 	f.before = before
 	return f.beforeMessages, nil
+}
+
+func (f *fakeHistoryMessageReader) GetByIDBySession(_ context.Context, sessionID string, messageID string) (messagepkg.Message, error) {
+	f.exactSessionID = sessionID
+	f.exactMessageID = messageID
+	return f.exactMessage, f.exactErr
 }
 
 func TestHistoryProviderGetMessagesDefaultsToCurrentSession(t *testing.T) {
@@ -79,6 +80,16 @@ func TestHistoryProviderGetMessagesDefaultsToCurrentSession(t *testing.T) {
 	}
 }
 
+func TestHistoryProviderGetMessagesRejectsMissingSessionScope(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeHistoryMessageReader{}
+	provider := NewHistoryProvider(nil, nil, reader, nil)
+	if _, err := provider.execGetMessages(context.Background(), SessionContext{BotID: "bot-1"}, nil); err == nil {
+		t.Fatal("execGetMessages() error = nil, want missing session scope error")
+	}
+}
+
 func TestHistoryProviderGetMessagesBeforeUsesRequestedSession(t *testing.T) {
 	t.Parallel()
 
@@ -88,12 +99,13 @@ func TestHistoryProviderGetMessagesBeforeUsesRequestedSession(t *testing.T) {
 		},
 	}
 	provider := NewHistoryProvider(nil, fakeHistorySessionLister{
-		sessions: []session.Thread{{ID: "session-other", BotID: "bot-1"}},
+		sessions: []session.Thread{{ID: "session-other", BotID: "bot-1", CreatedByUserID: "user-1"}},
 	}, reader, nil)
 
 	got, err := provider.execGetMessages(context.Background(), SessionContext{
 		BotID:     "bot-1",
 		SessionID: "session-current",
+		UserID:    "user-1",
 	}, map[string]any{
 		"session_id": "session-other",
 		"before":     "2026-06-14T09:00:00Z",
@@ -118,12 +130,48 @@ func TestHistoryProviderGetMessagesBeforeUsesRequestedSession(t *testing.T) {
 	}
 }
 
-func TestHistoryProviderGetMessagesRejectsSessionOutsideBot(t *testing.T) {
+func TestHistoryProviderGetMessagesResolvesExactSourceRef(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeHistoryMessageReader{exactMessage: historyTestMessage(
+		t, "msg-source", "session-current", "user", "supporting detail", time.Date(2026, 6, 14, 8, 0, 0, 0, time.UTC),
+	)}
+	provider := NewHistoryProvider(nil, nil, reader, nil)
+	got, err := provider.execGetMessages(context.Background(), SessionContext{
+		BotID: "bot-1", SessionID: "session-current",
+	}, map[string]any{"session_id": "session-current", "message_id": "msg-source"})
+	if err != nil {
+		t.Fatalf("execGetMessages() error = %v", err)
+	}
+	if reader.exactSessionID != "session-current" || reader.exactMessageID != "msg-source" {
+		t.Fatalf("exact lookup = (%q, %q)", reader.exactSessionID, reader.exactMessageID)
+	}
+	messages := got.(map[string]any)["messages"].([]map[string]any)
+	if len(messages) != 1 || messages[0]["text"] != "supporting detail" {
+		t.Fatalf("exact messages = %v", messages)
+	}
+}
+
+func TestHistoryProviderGetMessagesRejectsExactLookupWithBefore(t *testing.T) {
+	t.Parallel()
+	provider := NewHistoryProvider(nil, nil, &fakeHistoryMessageReader{}, nil)
+	_, err := provider.execGetMessages(context.Background(), SessionContext{
+		BotID: "bot-1", SessionID: "session-current",
+	}, map[string]any{"message_id": "msg-source", "before": "2026-06-14T09:00:00Z"})
+	if err == nil {
+		t.Fatal("execGetMessages() error = nil, want ambiguous argument error")
+	}
+}
+
+func TestHistoryProviderGetMessagesRejectsInaccessibleSessionOnSameBot(t *testing.T) {
 	t.Parallel()
 
 	reader := &fakeHistoryMessageReader{}
 	provider := NewHistoryProvider(nil, fakeHistorySessionLister{
-		sessions: []session.Thread{{ID: "session-current", BotID: "bot-1"}},
+		sessions: []session.Thread{
+			{ID: "session-current", BotID: "bot-1", RouteID: "route-alice"},
+			{ID: "session-other", BotID: "bot-1", RouteID: "route-bob"},
+		},
 	}, reader, nil)
 
 	_, err := provider.execGetMessages(context.Background(), SessionContext{
@@ -133,7 +181,78 @@ func TestHistoryProviderGetMessagesRejectsSessionOutsideBot(t *testing.T) {
 		"session_id": "session-other",
 	})
 	if err == nil {
-		t.Fatal("execGetMessages() error = nil, want session ownership error")
+		t.Fatal("execGetMessages() error = nil, want session visibility error")
+	}
+}
+
+func TestHistoryProviderGetMessagesAllowsSessionOnSameRoute(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakeHistoryMessageReader{}
+	provider := NewHistoryProvider(nil, fakeHistorySessionLister{
+		sessions: []session.Thread{
+			{ID: "session-current", BotID: "bot-1", RouteID: "route-private"},
+			{ID: "session-previous", BotID: "bot-1", RouteID: "route-private"},
+		},
+	}, reader, nil)
+
+	if _, err := provider.execGetMessages(context.Background(), SessionContext{
+		BotID: "bot-1", SessionID: "session-current",
+	}, map[string]any{"session_id": "session-previous"}); err != nil {
+		t.Fatalf("execGetMessages() error = %v, want same-route session to be visible", err)
+	}
+	if reader.latestSessionID != "session-previous" {
+		t.Fatalf("latest session id = %q, want session-previous", reader.latestSessionID)
+	}
+}
+
+func TestHistoryProviderListSessionsFiltersOtherUsersAndRoutes(t *testing.T) {
+	t.Parallel()
+
+	provider := NewHistoryProvider(nil, fakeHistorySessionLister{
+		sessions: []session.Thread{
+			{ID: "session-current", BotID: "bot-1", RouteID: "route-current"},
+			{ID: "session-same-route", BotID: "bot-1", RouteID: "route-current"},
+			{ID: "session-same-user", BotID: "bot-1", CreatedByUserID: "user-1"},
+			{ID: "session-bob", BotID: "bot-1", RouteID: "route-bob", CreatedByUserID: "user-2"},
+		},
+	}, nil, nil)
+
+	got, err := provider.execListSessions(context.Background(), SessionContext{
+		BotID: "bot-1", SessionID: "session-current", UserID: "user-1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("execListSessions() error = %v", err)
+	}
+	items := got.(map[string]any)["sessions"].([]map[string]any)
+	if len(items) != 3 {
+		t.Fatalf("visible sessions = %v, want current, same route, and same user", items)
+	}
+	for _, item := range items {
+		if item["session_id"] == "session-bob" {
+			t.Fatalf("inaccessible session leaked: %v", item)
+		}
+	}
+}
+
+func TestHistoryVisibilityUsesPersistedCurrentSessionOwner(t *testing.T) {
+	t.Parallel()
+
+	_, allowed, err := visibleHistorySessions(context.Background(), fakeHistorySessionLister{
+		sessions: []session.Thread{
+			{ID: "session-current", BotID: "bot-1", CreatedByUserID: "user-owner"},
+			{ID: "session-owner", BotID: "bot-1", CreatedByUserID: "user-owner"},
+			{ID: "session-context", BotID: "bot-1", CreatedByUserID: "user-context"},
+		},
+	}, SessionContext{BotID: "bot-1", SessionID: "session-current", UserID: "user-context"})
+	if err != nil {
+		t.Fatalf("visibleHistorySessions() error = %v", err)
+	}
+	if !historySessionVisible(allowed, "session-owner") {
+		t.Fatal("persisted current-session owner should define the user scope")
+	}
+	if historySessionVisible(allowed, "session-context") {
+		t.Fatal("request context must not override the persisted current-session owner")
 	}
 }
 

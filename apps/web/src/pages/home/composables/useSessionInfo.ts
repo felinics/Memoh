@@ -8,6 +8,8 @@ import type { HandlersSessionInfoResponse } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
 import { useChatViewTarget } from './useChatViewContext'
+import { resolveSessionContextView } from './session-context-view'
+import { installTurnEndInvalidation } from './turn-end-invalidation'
 
 interface UseSessionInfoOptions {
   botId?: Ref<string | null | undefined>
@@ -38,7 +40,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
       sessionId.value ?? '',
       options.overrideModelId?.value ?? '',
     ],
-    query: async () => {
+    query: async ({ signal }) => {
       const { data } = await getBotsByBotIdSessionsBySessionIdStatus({
         path: {
           bot_id: currentBotId.value!,
@@ -47,6 +49,7 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
         query: {
           model_id: options.overrideModelId?.value || undefined,
         },
+        signal,
         throwOnError: true,
       })
       return data as HandlersSessionInfoResponse
@@ -56,15 +59,20 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   })
 
   const usedTokens = computed(() => info.value?.context_usage?.used_tokens ?? 0)
-  const contextWindow = computed(() => {
-    const fromStatus = info.value?.context_usage?.context_window
-    if (fromStatus != null && fromStatus > 0) return fromStatus
-    const fallback = options.fallbackContextWindow?.value
-    return fallback != null && fallback > 0 ? fallback : null
-  })
+  const contextView = computed(() => resolveSessionContextView(info.value?.context_usage, {
+    fallbackWindow: options.fallbackContextWindow?.value,
+  }))
+  const composition = computed(() => contextView.value.composition)
+  const estimatedTokens = computed(() => contextView.value.estimatedTokens)
+  const contextWindow = computed(() => contextView.value.contextWindow)
+  const outputReserve = computed(() => contextView.value.outputReserve)
+  const autoCompactTokens = computed(() => contextView.value.autoCompactTokens)
+  const compactionAvailable = computed(() => contextView.value.compactionAvailable)
+  // Anything that owns context is compactable, whichever basis reported it.
+  const contextTokens = computed(() => estimatedTokens.value ?? usedTokens.value)
   const contextPercent = computed(() => {
     if (contextWindow.value == null || contextWindow.value <= 0) return 0
-    return (usedTokens.value / contextWindow.value) * 100
+    return ((estimatedTokens.value ?? usedTokens.value) / contextWindow.value) * 100
   })
 
   // Compaction lives here (not in a component) so every surface that offers
@@ -73,14 +81,17 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   // invalidation of this composable's own query.
   const { t } = useI18n()
   const queryCache = useQueryCache()
-  const isCompacting = ref(false)
+  const isCompacting = computed(() => chatStore.isSessionCompacting(
+    currentBotId.value ?? '', sessionId.value ?? '',
+  ))
 
   async function triggerCompact() {
     const botId = currentBotId.value
     const sid = sessionId.value
-    if (!botId || !sid || isCompacting.value) return
+    if (!botId || !sid) return
+    const finish = chatStore.beginSessionCompaction(botId, sid)
+    if (!finish) return
 
-    isCompacting.value = true
     try {
       await postBotsByBotIdSessionsBySessionIdCompact({
         path: { bot_id: botId, session_id: sid },
@@ -93,14 +104,21 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
       toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
     }
     finally {
-      isCompacting.value = false
+      finish()
     }
   }
+
+  installTurnEndInvalidation(storeRefs.streamingSessionIds, queryCache)
 
   return {
     info,
     usedTokens,
+    composition,
     contextWindow,
+    outputReserve,
+    autoCompactTokens,
+    compactionAvailable,
+    contextTokens,
     contextPercent,
     currentBotId,
     sessionId,

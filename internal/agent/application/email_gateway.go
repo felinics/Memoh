@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/auth"
-	"github.com/memohai/memoh/internal/db"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 const emailTriggerTokenTTL = 10 * time.Minute

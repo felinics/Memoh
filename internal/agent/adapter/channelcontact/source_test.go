@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/channel/route"
 )
 
 type fakeRouteLister struct {

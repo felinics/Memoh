@@ -9,15 +9,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type testACPSetupValidator struct{}
 
 func (testACPSetupValidator) ValidateACPSetup(agentID string, metadata map[string]any) ACPSetupValidation {
 	agentID = strings.ToLower(strings.TrimSpace(agentID))
-	if agentID != "codex" {
+	if agentID != "custom-agent" {
 		return ACPSetupValidation{}
 	}
 
@@ -47,7 +47,7 @@ func newACPTestService(queries dbstore.Queries) *Service {
 }
 
 func TestIsKnownTypeIncludesACPAgent(t *testing.T) {
-	for _, typ := range []string{TypeChat, TypeHeartbeat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent} {
+	for _, typ := range []string{TypeChat, TypeSchedule, TypeSubagent, TypeDiscuss, TypeACPAgent} {
 		if !IsKnownType(typ) {
 			t.Fatalf("IsKnownType(%q) = false", typ)
 		}
@@ -66,12 +66,6 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "conflicts with runtime_type") {
 		t.Fatalf("error = %v, want a 'conflicts with runtime_type' message", err)
 	}
-	if _, _, _, err := ResolveDescriptor(TypeSchedule, "", RuntimeACPAgent); err == nil {
-		t.Fatal("ResolveDescriptor(schedule, acp_agent) = nil error, want an unsupported combination error")
-	} else if !strings.Contains(err.Error(), "only supported") {
-		t.Fatalf("error = %v, want an 'only supported' message", err)
-	}
-
 	// Legitimate combinations must still resolve cleanly.
 	cases := []struct {
 		name                            string
@@ -82,6 +76,7 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 		{"concordant acp_agent+acp_agent", TypeACPAgent, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
 		{"chat + acp_agent -> chat ACP", TypeChat, "", RuntimeACPAgent, TypeACPAgent, TypeChat, RuntimeACPAgent},
 		{"discuss + acp_agent -> discuss ACP", TypeDiscuss, "", RuntimeACPAgent, TypeDiscuss, TypeDiscuss, RuntimeACPAgent},
+		{"schedule + acp_agent -> schedule ACP", TypeSchedule, "", RuntimeACPAgent, TypeSchedule, TypeSchedule, RuntimeACPAgent},
 		{"plain chat", TypeChat, "", "", TypeChat, TypeChat, RuntimeModel},
 	}
 	for _, c := range cases {
@@ -104,7 +99,7 @@ func TestValidateACPMetadata(t *testing.T) {
 	}{
 		{
 			name: "valid acp_agent_id",
-			meta: map[string]any{"acp_agent_id": "codex", "project_path": "/data", "runtime_owner_account_id": "owner-1"},
+			meta: map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data", "runtime_owner_account_id": "owner-1"},
 		},
 		{
 			name:    "missing agent",
@@ -113,12 +108,12 @@ func TestValidateACPMetadata(t *testing.T) {
 		},
 		{
 			name:    "missing project path",
-			meta:    map[string]any{"acp_agent_id": "codex", "runtime_owner_account_id": "owner-1"},
+			meta:    map[string]any{"acp_agent_id": "custom-agent", "runtime_owner_account_id": "owner-1"},
 			wantErr: "project_path is required",
 		},
 		{
 			name:    "missing runtime owner",
-			meta:    map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			meta:    map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
 			wantErr: "runtime_owner_account_id is required",
 		},
 	}
@@ -146,7 +141,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 		Metadata: mustSessionJSON(map[string]any{
 			"acp": map[string]any{
 				"agents": map[string]any{
-					"codex": map[string]any{"enabled": true, "setup_mode": "self"},
+					"custom-agent": map[string]any{"enabled": true, "setup_mode": "self"},
 				},
 			},
 		}),
@@ -155,7 +150,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 	disabledBot.Metadata = mustSessionJSON(map[string]any{
 		"acp": map[string]any{
 			"agents": map[string]any{
-				"codex": map[string]any{"enabled": false},
+				"custom-agent": map[string]any{"enabled": false},
 			},
 		},
 	})
@@ -170,7 +165,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 		{
 			name: "enabled",
 			bot:  enabledBot,
-			meta: map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			meta: map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
 		},
 		{
 			name: "enabled but missing managed configuration",
@@ -179,12 +174,12 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 				Metadata: mustSessionJSON(map[string]any{
 					"acp": map[string]any{
 						"agents": map[string]any{
-							"codex": map[string]any{"enabled": true, "setup_mode": "api_key"},
+							"custom-agent": map[string]any{"enabled": true, "setup_mode": "api_key"},
 						},
 					},
 				}),
 			},
-			meta:    map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			meta:    map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
 			wantErr: "is not configured",
 		},
 		{
@@ -196,7 +191,7 @@ func TestValidateACPCreatePolicy(t *testing.T) {
 		{
 			name:    "bot disabled",
 			bot:     disabledBot,
-			meta:    map[string]any{"acp_agent_id": "codex", "project_path": "/data"},
+			meta:    map[string]any{"acp_agent_id": "custom-agent", "project_path": "/data"},
 			wantErr: "is not enabled",
 		},
 	}
@@ -230,7 +225,7 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 			Metadata: mustSessionJSON(map[string]any{
 				"acp": map[string]any{
 					"agents": map[string]any{
-						"codex": map[string]any{"enabled": true, "setup_mode": "self"},
+						"custom-agent": map[string]any{"enabled": true, "setup_mode": "self"},
 					},
 				},
 			}),
@@ -244,7 +239,7 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 		Title:           "Codex",
 		CreatedByUserID: "00000000-0000-0000-0000-000000000003",
 		Metadata: map[string]any{
-			"acp_agent_id":             "codex",
+			"acp_agent_id":             "custom-agent",
 			"project_path":             "/data/app",
 			"runtime_owner_account_id": "00000000-0000-0000-0000-000000000099",
 		},
@@ -264,10 +259,10 @@ func TestCreateACPAgentSessionRunsValidationAndPersistsType(t *testing.T) {
 	if created.SessionMode != TypeChat || created.RuntimeType != RuntimeACPAgent {
 		t.Fatalf("created descriptor = %q/%q, want chat/acp_agent", created.SessionMode, created.RuntimeType)
 	}
-	if got := created.Metadata["acp_agent_id"]; got != "codex" {
+	if got := created.Metadata["acp_agent_id"]; got != "custom-agent" {
 		t.Fatalf("created metadata acp_agent_id = %#v", got)
 	}
-	if got := created.RuntimeMetadata["acp_agent_id"]; got != "codex" {
+	if got := created.RuntimeMetadata["acp_agent_id"]; got != "custom-agent" {
 		t.Fatalf("created runtime metadata acp_agent_id = %#v", got)
 	}
 	if got := created.RuntimeMetadata["runtime_owner_account_id"]; got != "00000000-0000-0000-0000-000000000003" {
@@ -284,7 +279,7 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 			Metadata: mustSessionJSON(map[string]any{
 				"acp": map[string]any{
 					"agents": map[string]any{
-						"codex": map[string]any{"enabled": true, "setup_mode": "self"},
+						"custom-agent": map[string]any{"enabled": true, "setup_mode": "self"},
 					},
 				},
 			}),
@@ -298,7 +293,7 @@ func TestCreateACPAgentSessionDefaultsProjectPath(t *testing.T) {
 		Title:           "Codex",
 		CreatedByUserID: "00000000-0000-0000-0000-000000000003",
 		Metadata: map[string]any{
-			"acp_agent_id": "codex",
+			"acp_agent_id": "custom-agent",
 		},
 	})
 	if err != nil {
@@ -323,7 +318,7 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 			Metadata: mustSessionJSON(map[string]any{
 				"acp": map[string]any{
 					"agents": map[string]any{
-						"codex": map[string]any{"enabled": true, "setup_mode": "self"},
+						"custom-agent": map[string]any{"enabled": true, "setup_mode": "self"},
 					},
 				},
 			}),
@@ -337,7 +332,7 @@ func TestUpdateTypeAndMetadataACPAgentRunsPolicy(t *testing.T) {
 	svc := newACPTestService(queries)
 
 	updated, err := svc.UpdateTypeAndMetadataWithOwner(context.Background(), sessionID, TypeACPAgent, map[string]any{
-		"acp_agent_id":             "codex",
+		"acp_agent_id":             "custom-agent",
 		"project_path":             "/data/app",
 		"runtime_owner_account_id": "00000000-0000-0000-0000-000000000099",
 	}, "00000000-0000-0000-0000-000000000003")
@@ -407,7 +402,7 @@ func TestNormalizeDescriptorAllowsDiscussACP(t *testing.T) {
 	t.Parallel()
 
 	desc, err := normalizeDescriptor(TypeDiscuss, TypeDiscuss, RuntimeACPAgent, map[string]any{
-		"acp_agent_id": "codex",
+		"acp_agent_id": "custom-agent",
 		"project_path": "/data/group",
 	}, nil)
 	if err != nil {
@@ -692,7 +687,6 @@ func TestThreadVisibilityIsDerivedFromMode(t *testing.T) {
 		{name: "chat", legacyType: TypeChat, mode: TypeChat, want: VisibilityUser},
 		{name: "discuss", legacyType: TypeDiscuss, mode: TypeDiscuss, want: VisibilityUser},
 		{name: "legacy acp", legacyType: TypeACPAgent, want: VisibilityUser},
-		{name: "heartbeat", legacyType: TypeHeartbeat, mode: TypeHeartbeat, want: VisibilityInternal},
 		{name: "schedule", legacyType: TypeSchedule, mode: TypeSchedule, want: VisibilityInternal},
 		{name: "subagent", legacyType: TypeSubagent, mode: TypeSubagent, want: VisibilityInternal},
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 func (h *Handler) buildSearchGroup() *CommandGroup {

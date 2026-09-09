@@ -2,9 +2,10 @@
 // which runs were admitted, who owns them, and how they ended.
 //
 // It deliberately holds no liveness. The owner lease lives only in the live
-// backend, so PostgreSQL receives exactly four kinds of write — admission,
-// ownership/fencing change, decision, terminal transition. Nothing here is a
-// heartbeat or a progress sample, which is why write volume is proportional to
+// backend, so PostgreSQL receives lifecycle writes only — admission,
+// ownership/fencing change, decision, terminal proposal, and terminal
+// transition. Nothing here is a
+// keepalive or a progress sample, which is why write volume is proportional to
 // the number of runs rather than to their duration or token rate. A reader
 // therefore cannot ask this store "is the owner still alive"; only the live
 // backend can answer that, and the reaper is built around that fact.
@@ -29,6 +30,11 @@ const (
 	StateRunning State = "running"
 	// StateWaitingDecision means execution is parked on a decision_id.
 	StateWaitingDecision State = "waiting_decision"
+	// StateFinishing means the final output is durable and a fenced terminal
+	// outcome has been proposed, but the terminal row/live projection handshake
+	// has not completed yet. It remains active so admission and lease renewal
+	// cannot pass it.
+	StateFinishing State = "finishing"
 
 	StateCompleted State = "completed"
 	StateAborted   State = "aborted"
@@ -41,7 +47,7 @@ const (
 // Active reports whether a run occupies its session's single active slot.
 func (s State) Active() bool {
 	switch s {
-	case StateAccepted, StateRunning, StateWaitingDecision:
+	case StateAccepted, StateRunning, StateWaitingDecision, StateFinishing:
 		return true
 	default:
 		return false
@@ -75,7 +81,38 @@ var (
 	// again once the session frees up and will then be admitted normally,
 	// because nothing was persisted for the rejected attempt.
 	ErrSessionBusy = errors.New("ledger: session already has an active run")
+	// ErrHistoryResetInProgress means admission reached the durable reset fence.
+	// Nothing was persisted and the same invocation may be retried after the
+	// lease expires or its owner releases it.
+	ErrHistoryResetInProgress = errors.New("ledger: session history reset is in progress")
+	// ErrResetScopeNotFound means the bot or session named by a reset lease no
+	// longer exists (deleted or soft-deleted). Acquire loops must fail fast on
+	// it instead of retrying: the scope can never become acquirable again.
+	ErrResetScopeNotFound = errors.New("ledger: reset scope no longer exists")
 )
+
+const (
+	ResetScopeSession = "session"
+	ResetScopeBot     = "bot"
+)
+
+// ResetLease is the PostgreSQL half of one crash-recoverable history reset.
+// Token-scoped renewal/release prevents an expired owner from disturbing a
+// successor that acquired the same scope.
+type ResetLease struct {
+	Scope     string
+	BotID     string
+	SessionID string
+	Token     string
+	ExpiresAt time.Time
+}
+
+func (l ResetLease) Valid() bool {
+	if l.BotID == "" || l.Token == "" || l.ExpiresAt.IsZero() {
+		return false
+	}
+	return l.Scope == ResetScopeBot || l.Scope == ResetScopeSession && l.SessionID != ""
+}
 
 // Run is one row of the durable ledger. Zero values mean "not set" rather than
 // "empty": OwnerID is empty until the run is claimed, and AbortRequestedAt is
@@ -104,11 +141,15 @@ type Run struct {
 	// cursor for the fail-closed recovery sweep.
 	LiveGeneration string
 
-	AbortRequestedAt time.Time
-	ErrorCode        string
-	ErrorMessage     string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	AbortRequestedAt     time.Time
+	ProposedState        State
+	ProposedErrorCode    string
+	ProposedErrorMessage string
+	FinishProposedAt     time.Time
+	ErrorCode            string
+	ErrorMessage         string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // AdmitParams is one durable admission. RunID and TurnID are minted by the
@@ -142,6 +183,19 @@ type FinalizeParams struct {
 	State        State
 	ErrorCode    string
 	ErrorMessage string
+}
+
+// PrepareFinishParams records the fenced, recoverable terminal proposal. A
+// proposal ordinarily starts from running. AllowWaitingDecision is reserved
+// for an explicit abort/failure that must terminalize a parked execution;
+// ordinary terminal stream events must leave waiting_decision parked.
+type PrepareFinishParams struct {
+	RunID                string
+	FencingToken         int64
+	State                State
+	ErrorCode            string
+	ErrorMessage         string
+	AllowWaitingDecision bool
 }
 
 // Cursor is a keyset position in the stale-generation sweep. The zero Cursor
@@ -199,6 +253,7 @@ type Store interface {
 	Claim(ctx context.Context, params ClaimParams) (run Run, applied bool, err error)
 	SetWaitingDecision(ctx context.Context, runID string, fencingToken int64) (run Run, applied bool, err error)
 	Resume(ctx context.Context, runID string, fencingToken int64) (run Run, applied bool, err error)
+	PrepareFinish(ctx context.Context, params PrepareFinishParams) (run Run, applied bool, err error)
 	Finalize(ctx context.Context, params FinalizeParams) (run Run, applied bool, err error)
 
 	// RequestAbort records the intent, which is not fenced: an abort may arrive
@@ -207,4 +262,22 @@ type Store interface {
 
 	StaleGenerationRuns(ctx context.Context, query StaleGenerationQuery) ([]Run, error)
 	OrphanedRuns(ctx context.Context, query OrphanQuery) ([]Run, error)
+}
+
+// ResetStore is the durable admission/reset arbiter implemented by PostgreSQL.
+// It stays separate from Store so focused runtime tests and non-admission
+// embedders do not need to fake lifecycle mutation they never exercise.
+type ResetStore interface {
+	AcquireReset(ctx context.Context, lease ResetLease, ttl time.Duration) (ResetLease, bool, error)
+	RenewReset(ctx context.Context, lease ResetLease, ttl time.Duration) (ResetLease, bool, error)
+	ReleaseReset(ctx context.Context, lease ResetLease) (bool, error)
+	EffectiveReset(ctx context.Context, botID, sessionID string) (ResetLease, bool, error)
+	ActiveRunsByBot(ctx context.Context, botID string) ([]Run, error)
+}
+
+// OrphanResetStore atomically invalidates a disappeared owner's persistence
+// token and terminalizes its active run while the same reset lease is still
+// valid. PostgreSQL implements this as one parent-locked transaction.
+type OrphanResetStore interface {
+	FenceAndFinalizeOrphan(ctx context.Context, reset ResetLease, run Run) (Run, bool, error)
 }

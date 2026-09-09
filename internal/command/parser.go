@@ -1,6 +1,6 @@
 package command
 
-import "github.com/memohai/memoh/internal/commandsyntax"
+import "github.com/felinics/memoh/internal/commandsyntax"
 
 // ParsedCommand remains an alias so command handlers and callers can migrate to
 // the shared syntax package without duplicating the parser implementation.

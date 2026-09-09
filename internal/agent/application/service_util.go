@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db"
 )
 
 func sanitizeMessages(messages []ModelMessage) []ModelMessage {

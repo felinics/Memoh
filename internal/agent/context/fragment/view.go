@@ -4,7 +4,11 @@ package contextfrag
 // rendered into. One intent may fan out to several render targets.
 type Intent string
 
-const IntentRunConfigPreProvider Intent = "run_config_pre_provider"
+const (
+	IntentRunConfigPreProvider Intent = "run_config_pre_provider"
+	IntentDiscussReply         Intent = "discuss_reply"
+	IntentExternalAgentPrompt  Intent = "external_agent_prompt"
+)
 
 func (i Intent) ManifestView() ManifestView {
 	return ManifestView(i)
@@ -12,7 +16,10 @@ func (i Intent) ManifestView() ManifestView {
 
 type RenderTarget string
 
-const RenderSDKMessages RenderTarget = "sdk_messages"
+const (
+	RenderSDKMessages        RenderTarget = "sdk_messages"
+	RenderRuntimeFullContext RenderTarget = "runtime_full_context"
+)
 
 // NormalizeContextRefs fills durable refs and canonical hashes for fragments
 // coming from collectors, mirroring what Compile does for legacy inputs.
@@ -25,4 +32,5 @@ type CachePlan struct {
 	StablePrefixHash          string `json:"stable_prefix_hash,omitempty"`
 	StableMessageCount        int    `json:"stable_message_count,omitempty"`
 	StablePrefixTokenEstimate int    `json:"stable_prefix_token_estimate,omitempty"`
+	MidStableMessageCount     int    `json:"mid_stable_message_count,omitempty"`
 }

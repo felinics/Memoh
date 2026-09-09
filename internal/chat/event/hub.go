@@ -30,6 +30,8 @@ const (
 	EventTypeSessionTitleUpdated EventType = "session_title_updated"
 	// EventTypeBackgroundTask is emitted for live background task updates.
 	EventTypeBackgroundTask EventType = "background_task"
+	// EventTypeCompactionChanged invalidates the bot's live compaction snapshot.
+	EventTypeCompactionChanged EventType = "compaction_changed"
 )
 
 // Event is the normalized payload emitted by the in-process message event hub.

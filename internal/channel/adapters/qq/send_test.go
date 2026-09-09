@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/channeltest"
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/channeltest"
+	"github.com/felinics/memoh/internal/media"
 )
 
 func sendPreparedQQ(t *testing.T, adapter *QQAdapter, cfg channel.ChannelConfig, store channel.OutboundAttachmentStore, msg channel.OutboundMessage) error {

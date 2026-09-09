@@ -25,7 +25,7 @@ func (s *Service) AdvanceText(ctx context.Context, input AdvanceTextInput) (Adva
 		ReplyExternalMessageID: input.ReplyExternalMessageID,
 	}
 	for attempt := 0; attempt < maxTextInteractionRetries; attempt++ {
-		req, err := s.ResolveTarget(ctx, resolve)
+		req, err := s.resolveInteractionTarget(ctx, resolve)
 		if errors.Is(err, ErrNotFound) {
 			return AdvanceTextResult{Handled: false}, nil
 		}
@@ -76,6 +76,9 @@ func advanceTextState(payload UIPayload, state TextInteractionState, raw string)
 	question := payload.Questions[state.QuestionIndex]
 	answer := QuestionAnswer{QuestionID: question.ID}
 	if isSkipCommand(command) {
+		if questionIsExplicitlyRequired(question) {
+			return state, true, false, nil
+		}
 		answer.Skipped = true
 	} else {
 		var err error
@@ -86,7 +89,7 @@ func advanceTextState(payload UIPayload, state TextInteractionState, raw string)
 	}
 	state.Answers = putTextAnswer(state.Answers, answer)
 	if state.QuestionIndex == len(payload.Questions)-1 {
-		state.Completed = true
+		state = completeOrFocusRequired(payload, state)
 	} else {
 		state.QuestionIndex++
 	}
@@ -120,6 +123,35 @@ func normalizeTextInteraction(payload UIPayload, state TextInteractionState) Tex
 	return state
 }
 
+func completeOrFocusRequired(payload UIPayload, state TextInteractionState) TextInteractionState {
+	for index, question := range payload.Questions {
+		if !questionIsExplicitlyRequired(question) {
+			continue
+		}
+		answer, ok := state.Answer(question.ID)
+		if !ok || answer.Skipped {
+			state.QuestionIndex = index
+			state.Completed = false
+			return state
+		}
+	}
+	have := make(map[string]struct{}, len(state.Answers))
+	for _, answer := range state.Answers {
+		have[answer.QuestionID] = struct{}{}
+	}
+	for _, question := range payload.Questions {
+		if _, ok := have[question.ID]; !ok && !questionIsExplicitlyRequired(question) {
+			state.Answers = append(state.Answers, QuestionAnswer{QuestionID: question.ID, Skipped: true})
+		}
+	}
+	state.Completed = true
+	return state
+}
+
+func questionIsExplicitlyRequired(question UIQuestion) bool {
+	return question.Required != nil && *question.Required
+}
+
 func parseTextAnswer(question UIQuestion, raw string) (QuestionAnswer, error) {
 	text := strings.TrimSpace(raw)
 	if text == "" {
@@ -140,6 +172,9 @@ func parseTextAnswer(question UIQuestion, raw string) (QuestionAnswer, error) {
 	case QuestionKindMultiSelect:
 		parts := splitTextSelections(text)
 		if len(parts) == 0 {
+			if question.AllowCustom {
+				return QuestionAnswer{QuestionID: question.ID, CustomText: text}, nil
+			}
 			return QuestionAnswer{}, errors.New("at least one selection is required")
 		}
 		seen := map[string]struct{}{}
@@ -151,9 +186,10 @@ func parseTextAnswer(question UIQuestion, raw string) (QuestionAnswer, error) {
 				}
 				continue
 			}
-			if question.AllowCustom && answer.CustomText == "" {
-				answer.CustomText = part
-				continue
+			if question.AllowCustom {
+				// A sentence may contain commas or option words. If it is not
+				// entirely a selection list, return the whole reply to the LLM.
+				return QuestionAnswer{QuestionID: question.ID, CustomText: text}, nil
 			}
 			return QuestionAnswer{}, fmt.Errorf("selection %q does not match an option", part)
 		}

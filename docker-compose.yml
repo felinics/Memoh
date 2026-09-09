@@ -61,9 +61,14 @@ services:
     container_name: memoh-server
     privileged: true
     pid: host
+    # Explicit memory ceiling (CM-PRC-001): the Go runtime backs off at
+    # GOMEMLIMIT instead of running into the container's OOM kill. Keep
+    # GOMEMLIMIT at roughly 85% of mem_limit when overriding either.
+    mem_limit: ${MEMOH_SERVER_MEMORY_LIMIT:-8g}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      GOMEMLIMIT: "${MEMOH_SERVER_GOMEMLIMIT:-7GiB}"
       # Proxy: use host.docker.internal for localhost proxies, e.g.
       #   HTTP_PROXY=http://host.docker.internal:7890 docker compose up -d
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
@@ -73,12 +78,12 @@ services:
       https_proxy: "${https_proxy:-${HTTPS_PROXY:-}}"
       no_proxy: "${no_proxy:-${NO_PROXY:-127.0.0.1,localhost}},postgres,pgvector,server,channel,web,migrate,webhook-tunnel,connect-it,memoh-postgres,memoh-pgvector,memoh-server,memoh-channel,memoh-web,memoh-migrate,memoh-webhook-tunnel,memoh-connect-it"
       MEMOH_INTERNAL_RPC_SHARED_SECRET: "${MEMOH_INTERNAL_RPC_SHARED_SECRET:?MEMOH_INTERNAL_RPC_SHARED_SECRET is required}"
+      MEMOH_AGENT_CREDENTIALS_ENCRYPTION_KEY: "${MEMOH_AGENT_CREDENTIALS_ENCRYPTION_KEY:-}"
       MEMOH_INTERNAL_RPC_SERVER_TARGET: "server:9090"
       MEMOH_INTERNAL_RPC_CHANNEL_TARGET: "channel:9091"
       MEMOH_CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_BASE_URL:-}"
       MEMOH_CONNECT_IT_API_TOKEN: "${MEMOH_CONNECT_IT_API_TOKEN:-}"
-      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}"
-      MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}"
+      MEMOH_DISPLAY_WEBRTC_UDP_PORT: "${MEMOH_DISPLAY_WEBRTC_UDP_PORT:-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}}"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
       - ./conf/providers:/app/conf/providers:ro
@@ -92,7 +97,7 @@ services:
     ports:
       - "8080:8080"
       - "1455:8080"
-      - "${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}:${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MAX:-30100}/udp"
+      - "${MEMOH_DISPLAY_WEBRTC_UDP_PORT:-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}}:${MEMOH_DISPLAY_WEBRTC_UDP_PORT:-${MEMOH_DISPLAY_WEBRTC_UDP_PORT_MIN:-30000}}/udp"
     expose:
       - "9090"
     depends_on:
@@ -175,7 +180,7 @@ services:
   # Connect-It at startup and presented by the Memoh server as its bearer
   # token — the install script generates and persists all of these values.
   connect-it:
-    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/memohai/connect-it:0.1.1}"
+    image: "${MEMOH_CONNECT_IT_IMAGE:-ghcr.io/felinics/connect-it:0.3.0}"
     container_name: memoh-connect-it
     profiles: [connectors]
     environment:

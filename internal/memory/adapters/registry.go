@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/team"
+	"github.com/felinics/memoh/internal/team"
 )
 
 // Factory creates a Provider from a provider type string and JSON config.

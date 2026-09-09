@@ -19,16 +19,16 @@ Input: There are branches in trees.
 Output: {"facts" : []}
 
 Input: Hi, I am looking for a restaurant in San Francisco.
-Output: {"facts" : ["Looking for a restaurant in San Francisco"]}
+Output: {"facts" : [{"text":"Looking for a restaurant in San Francisco","message_indices":[0]}]}
 
 Input: Yesterday, I had a meeting with John at 3pm. We discussed the new project.
-Output: {"facts" : ["Had a meeting with John at 3pm", "Discussed the new project"]}
+Output: {"facts" : [{"text":"Had a meeting with John at 3pm","message_indices":[0]}, {"text":"Discussed the new project","message_indices":[0]}]}
 
 Input: Hi, my name is John. I am a software engineer.
-Output: {"facts" : ["Name is John", "Is a Software engineer"]}
+Output: {"facts" : [{"text":"Name is John","message_indices":[0]}, {"text":"Is a Software engineer","message_indices":[0]}]}
 
 Input: Me favourite movies are Inception and Interstellar.
-Output: {"facts" : ["Favourite movies are Inception and Interstellar"]}
+Output: {"facts" : [{"text":"Favourite movies are Inception and Interstellar","message_indices":[0]}]}
 
 Return the facts and preferences in a json format as shown above.
 
@@ -37,7 +37,8 @@ Remember the following:
 - Do not return anything from the custom few shot example prompts provided above.
 - If you do not find anything relevant in the below conversation, you can return an empty list corresponding to the "facts" key.
 - Create the facts based on the user and assistant messages only. Do not pick anything from the system messages.
-- Make sure to return the response in the format mentioned in the examples. The response should be in json with a key as "facts" and corresponding value will be a list of strings.
+- Input transcript lines are prefixed with `[message_index=N]`. Every fact must include the zero-based `message_indices` that directly support it. Never cite a message that does not support the fact.
+- Return JSON with a `facts` list of objects shaped as `{ "text": "...", "message_indices": [0] }`.
 - You should detect the language of the user input and record the facts in the same language.
 
 Following is a conversation between the user and the assistant. You have to extract the relevant facts and preferences about the user, if any, from the conversation and return them in the json format as shown above.

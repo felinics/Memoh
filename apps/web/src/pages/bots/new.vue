@@ -26,59 +26,84 @@
       />
     </div>
 
+    <!-- Settings cards, the shape every other surface in the app uses: a muted
+         section label over a card whose rows are label-left / control-right,
+         divided by the row hairline. Full-width controls are the exception here
+         (the avatar pairing, the ACP panel), and each says so where it sits. -->
     <form
       v-else
+      class="space-y-8"
       :aria-busy="isCreateFlowBlocked"
       :class="{ 'pointer-events-none select-none opacity-60': isCreateFlowBlocked }"
       @submit.prevent="handleSubmit"
     >
-      <!-- Basic Info -->
-      <div>
-        <h3 class="text-sm font-medium mb-4">
-          {{ $t('bots.steps.basicInfo') }}
-        </h3>
-        <div class="flex items-start gap-4">
-          <div class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden cursor-pointer">
-            <Avatar class="size-16 rounded-full">
-              <AvatarImage
-                v-if="form.avatar_url?.trim()"
-                :src="form.avatar_url.trim()"
-                :alt="form.display_name"
+      <SettingsSection :title="$t('bots.steps.basicInfo')">
+        <!-- Identity row: no label. The avatar and a placeholder reading "Give
+             your bot a name" already say what the field is, and a "Name" label
+             over them would only restate the card's own title. -->
+        <SettingsRow stack="always">
+          <template #content>
+            <div class="flex items-center gap-4">
+              <div class="group/avatar relative size-16 shrink-0 rounded-full overflow-hidden cursor-pointer">
+                <Avatar class="size-16 rounded-full">
+                  <AvatarImage
+                    v-if="form.avatar_url?.trim()"
+                    :src="form.avatar_url.trim()"
+                    :alt="form.display_name"
+                  />
+                  <AvatarFallback class="text-xl">
+                    {{ avatarFallback }}
+                  </AvatarFallback>
+                </Avatar>
+                <button
+                  type="button"
+                  class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
+                  :title="$t('common.edit')"
+                  :aria-label="$t('common.edit')"
+                  @click="avatarDialogOpen = true"
+                >
+                  <SquarePen class="size-6 text-white" />
+                </button>
+              </div>
+              <Input
+                v-model="form.display_name"
+                type="text"
+                class="min-w-0 flex-1"
+                :aria-label="$t('bots.displayName')"
+                :placeholder="$t('bots.displayNamePlaceholder')"
               />
-              <AvatarFallback class="text-xl">
-                {{ avatarFallback }}
-              </AvatarFallback>
-            </Avatar>
-            <button
-              type="button"
-              class="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover/avatar:opacity-100"
-              :title="$t('common.edit')"
-              :aria-label="$t('common.edit')"
-              @click="avatarDialogOpen = true"
-            >
-              <SquarePen class="size-6 text-white" />
-            </button>
-          </div>
-          <div class="flex-1 min-w-0">
-            <Label class="mb-2">
-              {{ $t('bots.displayName') }}
-              <span class="text-destructive">*</span>
-            </Label>
-            <Input
-              v-model="form.display_name"
-              type="text"
-              :placeholder="$t('bots.displayNamePlaceholder')"
-            />
-          </div>
-        </div>
+            </div>
+          </template>
+        </SettingsRow>
 
-        <div class="mt-4">
-          <Label class="mb-2">
-            {{ $t('bots.name') }}
-            <span class="text-destructive">*</span>
-          </Label>
-          <div class="relative">
+        <SettingsRow stack="sm">
+          <!-- Own body: the required marker rides with the label copy, and the
+               hint under it swaps to a success or error tone as availability
+               resolves — neither fits the bound label/description pair. -->
+          <template #content>
+            <div class="min-w-0">
+              <label
+                :for="BOT_NAME_ID"
+                class="flex items-center gap-1.5 text-control font-medium text-foreground"
+              >
+                {{ $t('bots.name') }}
+                <span class="text-destructive">*</span>
+              </label>
+              <p
+                class="mt-0.5 text-body"
+                :class="nameStatus === 'available'
+                  ? 'text-success-foreground'
+                  : (nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved')
+                    ? 'text-destructive'
+                    : 'text-muted-foreground'"
+              >
+                {{ nameStatusMessage || $t('bots.nameHint') }}
+              </p>
+            </div>
+          </template>
+          <div class="relative w-full sm:w-56">
             <Input
+              :id="BOT_NAME_ID"
               v-model="form.name"
               type="text"
               autocapitalize="off"
@@ -103,154 +128,178 @@
               />
             </span>
           </div>
-          <p
-            class="mt-1 text-xs"
-            :class="nameStatus === 'available'
-              ? 'text-success-foreground'
-              : (nameStatus === 'taken' || nameStatus === 'invalid' || nameStatus === 'reserved')
-                ? 'text-destructive'
-                : 'text-muted-foreground'"
-          >
-            {{ nameStatusMessage || $t('bots.nameHint') }}
-          </p>
-        </div>
-      </div>
+        </SettingsRow>
+      </SettingsSection>
 
-      <Separator class="my-6" />
-
-      <!-- Security Policy -->
-      <div>
-        <h3 class="text-sm font-medium mb-4">
-          {{ $t('bots.steps.security') }}
-        </h3>
-        <div class="flex flex-col gap-3">
-          <div class="mb-2 flex items-center gap-2">
-            <Label>
-              {{ $t('bots.aclPreset') }}
-              <span class="text-destructive">*</span>
-            </Label>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  class="size-5 text-muted-foreground hover:text-foreground"
-                >
-                  <CircleHelp class="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent class="max-w-80 text-left leading-relaxed">
-                {{ $t('bots.aclPresetHelp') }}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <Select v-model="form.acl_preset">
-            <SelectTrigger class="w-full">
-              <SelectValue :placeholder="$t('bots.aclPreset')" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="preset in aclPresetOptions"
-                :key="preset.value"
-                :value="preset.value"
-              >
-                {{ $t(preset.titleKey) }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p
-            v-if="aclDescription"
-            class="text-xs text-muted-foreground"
-          >
-            {{ aclDescription }}
-          </p>
-        </div>
-      </div>
-
-      <Separator class="my-6" />
-
-      <!-- Model / Agent -->
-      <div>
-        <h3 class="text-sm font-medium mb-4">
-          {{ selectedAcpProfile ? $t('bots.steps.agent') : $t('bots.steps.model') }}
-        </h3>
-        <p class="text-xs text-muted-foreground mb-3">
-          {{ selectedAcpProfile ? $t('bots.steps.agentDesc') : $t('bots.steps.modelDesc') }}
-        </p>
-        <!-- Agent-kind chooser (ACP 提权): hides itself when the server
-             publishes no hosted agents — the form then matches the pre-chooser
-             behavior exactly. -->
-        <AgentTypePill
-          v-model="agentType"
-          :profiles="acpProfiles"
-          class="mb-3"
-        />
-        <template v-if="!selectedAcpProfile">
-          <Label class="mb-2">{{ $t('bots.settings.chatModel') }}</Label>
-          <ModelSelect
-            v-model="form.chat_model_id"
-            v-model:reasoning-effort="form.reasoning_effort"
-            :models="models"
-            :providers="providers"
-            model-type="chat"
-            :placeholder="$t('common.none')"
-            show-reasoning
+      <!-- One card for what the bot runs on: the agent kind and its model, the
+           memory backend, and the clock it schedules against. Three cards for
+           three single-row concerns was three titles saying less than the rows
+           under them. -->
+      <SettingsSection :title="$t('bots.steps.settings')">
+        <SettingsRow
+          :label="$t('bots.steps.agent')"
+          stack="sm"
+        >
+          <AgentTypePill
+            v-model="agentType"
+            :profiles="acpProfiles"
           />
-        </template>
-        <AcpSetupPanel
+        </SettingsRow>
+
+        <!-- Direct runtimes need no setup fields at creation, so the row is the
+             sentence explaining where the credentials go instead. -->
+        <SettingsRow
+          v-if="selectedDirectRuntime"
+          stack="always"
+        >
+          <template #content>
+            <p class="text-body text-muted-foreground">
+              {{ $t('bots.agentCreate.directSetupHint') }}
+            </p>
+          </template>
+        </SettingsRow>
+
+        <!-- The ACP panel is a form of its own (setup mode, credentials), so it
+             takes the full row rather than the control column. -->
+        <SettingsRow
+          v-else-if="selectedAcpProfile"
+          stack="always"
+        >
+          <template #content>
+            <AcpSetupPanel
+              ref="acpSetupPanelRef"
+              v-model:error-message="acpError"
+              :profile="selectedAcpProfile"
+              :oauth-hint="$t('bots.agentCreate.oauthSettingsHint')"
+            />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow
           v-else
-          ref="acpSetupPanelRef"
-          v-model:error-message="acpError"
-          :profile="selectedAcpProfile"
-          :oauth-hint="$t('bots.agentCreate.oauthSettingsHint')"
+          :label="$t('bots.settings.chatModel')"
+          :description="$t('bots.steps.modelDesc')"
+          stack="sm"
+        >
+          <div class="w-full sm:w-56">
+            <ModelSelect
+              v-model="form.chat_model_id"
+              v-model:reasoning-effort="form.reasoning_effort"
+              :models="models"
+              :providers="providers"
+              model-type="chat"
+              :placeholder="$t('common.none')"
+              show-reasoning
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          :label="$t('bots.settings.memoryProvider')"
+          :description="$t('bots.steps.memoryDesc')"
+          stack="sm"
+        >
+          <div class="w-full sm:w-56">
+            <MemoryProviderSelect
+              v-model="form.memory_provider_id"
+              :providers="memoryProviders"
+              :placeholder="$t('common.none')"
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow stack="sm">
+          <template #content>
+            <div class="truncate text-control font-medium text-foreground">
+              {{ $t('bots.timezone') }}
+              <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
+            </div>
+          </template>
+          <div class="w-full sm:w-56">
+            <TimezoneSelect
+              v-model="form.timezone"
+              :placeholder="$t('bots.timezonePlaceholder')"
+              allow-empty
+              :empty-label="$t('bots.timezoneInherited')"
+            />
+          </div>
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection :title="$t('bots.access.title')">
+        <SettingsRow stack="sm">
+          <template #content>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <label
+                  :for="ACL_PRESET_ID"
+                  class="flex items-center gap-1.5 text-control font-medium text-foreground"
+                >
+                  {{ $t('bots.aclPreset') }}
+                  <span class="text-destructive">*</span>
+                </label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      class="size-5 text-muted-foreground hover:text-foreground"
+                    >
+                      <CircleHelp class="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-80 text-left leading-relaxed">
+                    {{ $t('bots.aclPresetHelp') }}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <p
+                v-if="aclDescription"
+                class="mt-0.5 text-body text-muted-foreground"
+              >
+                {{ aclDescription }}
+              </p>
+            </div>
+          </template>
+          <div class="w-full sm:w-56">
+            <Select v-model="form.acl_preset">
+              <SelectTrigger
+                :id="ACL_PRESET_ID"
+                class="w-full"
+              >
+                <SelectValue :placeholder="$t('bots.aclPreset')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="preset in aclPresetOptions"
+                  :key="preset.value"
+                  :value="preset.value"
+                >
+                  {{ $t(preset.titleKey) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </SettingsRow>
+
+        <!-- The same Workspace Members list the Access Control tab shows, in
+             draft mode: with no bot to write to yet it edits a local list that
+             starts as you alone, and the create flow grants the rest once the
+             bot exists. -->
+        <BotUserAccess
+          v-model:draft-grants="memberGrants"
+          embedded
         />
-      </div>
-
-      <Separator class="my-6" />
-
-      <!-- Memory -->
-      <div>
-        <h3 class="text-sm font-medium mb-4">
-          {{ $t('bots.steps.memory') }}
-        </h3>
-        <p class="text-xs text-muted-foreground mb-3">
-          {{ $t('bots.steps.memoryDesc') }}
-        </p>
-        <Label class="mb-2">{{ $t('bots.settings.memoryProvider') }}</Label>
-        <MemoryProviderSelect
-          v-model="form.memory_provider_id"
-          :providers="memoryProviders"
-          :placeholder="$t('common.none')"
-        />
-      </div>
-
-      <Separator class="my-6" />
-
-      <!-- Settings -->
-      <div>
-        <h3 class="text-sm font-medium mb-4">
-          {{ $t('bots.steps.settings') }}
-        </h3>
-        <Label class="mb-2">
-          {{ $t('bots.timezone') }}
-          <span class="text-muted-foreground text-xs ml-1">({{ $t('common.optional') }})</span>
-        </Label>
-        <TimezoneSelect
-          v-model="form.timezone"
-          :placeholder="$t('bots.timezonePlaceholder')"
-          allow-empty
-          :empty-label="$t('bots.timezoneInherited')"
-        />
-      </div>
+      </SettingsSection>
 
       <!-- Hint -->
-      <div class="rounded-md border bg-muted-soft px-3 py-2 text-xs text-muted-foreground mt-6">
+      <div class="rounded-md border bg-muted-soft px-3 py-2 text-xs text-muted-foreground">
         {{ $t('bots.createBotWaitHint') }}
       </div>
 
       <!-- Actions -->
-      <div class="flex justify-end gap-3 mt-6 pb-4">
+      <div class="flex justify-end gap-3 pb-4">
         <Button
           type="button"
           variant="outline"
@@ -284,13 +333,13 @@ import {
   AvatarFallback,
   Button,
   Input,
-  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Separator,
+  SettingsRow,
+  SettingsSection,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -309,14 +358,19 @@ import type { BotsCreateBotRequest, AcpprofilePublicProfile } from '@memohai/sdk
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
-import { normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { acpAgentDisplayName, normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
+import { useUserStore } from '@/store/user'
+import { BOT_PERMISSION_ORDER } from '@/utils/bot-permissions'
+import type { BotsUserGrant } from '@memohai/sdk'
 import ModelSelect from './components/model-select.vue'
 import AgentTypePill from './components/agent-type-pill.vue'
 import AcpSetupPanel from './components/acp-setup-panel.vue'
 import { MEMOH_AGENT_VALUE } from './components/agent-type'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
+import BotUserAccess from './components/bot-user-access.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import BotImportPanel from './components/bot-import-panel.vue'
 
@@ -325,6 +379,11 @@ const route = useRoute()
 const { t } = useI18n()
 
 const mode = ref<'create' | 'import'>(route.query.mode === 'import' ? 'import' : 'create')
+
+// Control ids, so a row's label focuses the field it names. Static rather than
+// useId(): this page is a route, never mounted twice at once.
+const BOT_NAME_ID = 'bot-create-name'
+const ACL_PRESET_ID = 'bot-create-acl-preset'
 
 const form = reactive({
   name: '',
@@ -411,6 +470,21 @@ const nameStatusMessage = computed(() => {
 const avatarDialogOpen = ref(false)
 const avatarFallback = useAvatarInitials(() => form.display_name || '')
 
+// Workspace members, drafted here and granted after the bot exists. The creator
+// seeds the list as its owner — the server makes that grant itself, so the row
+// is shown, not sent; only what the user adds below it is.
+const userStore = useUserStore()
+const memberGrants = ref<BotsUserGrant[]>([{
+  id: 'draft-owner',
+  subject_type: 'user',
+  user_id: userStore.userInfo.id,
+  user_username: userStore.userInfo.username,
+  user_display_name: userStore.userInfo.displayName || userStore.userInfo.username,
+  user_avatar_url: userStore.userInfo.avatarUrl,
+  permissions: [...BOT_PERMISSION_ORDER],
+  is_owner: true,
+}])
+
 // Data queries
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -462,10 +536,18 @@ const agentType = ref(MEMOH_AGENT_VALUE)
 const acpError = ref('')
 const acpSetupPanelRef = ref<InstanceType<typeof AcpSetupPanel> | null>(null)
 
+// codex / claude-code are direct runtimes with no ACP profile: they need no
+// setup fields at creation (credentials and login are configured on the Bot's
+// settings page afterwards).
+const selectedDirectRuntime = computed(() => {
+  const value = agentType.value
+  return value === BOT_AGENT_RUNTIME_CODEX || value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? value : ''
+})
+
 // Null for the built-in agent; the panel + metadata only exist when a hosted
 // agent is picked.
 const selectedAcpProfile = computed<AcpprofilePublicProfile | null>(() => {
-  if (agentType.value === MEMOH_AGENT_VALUE) return null
+  if (agentType.value === MEMOH_AGENT_VALUE || selectedDirectRuntime.value) return null
   return acpProfiles.value.find(profile => normalizeACPAgentID(profile.id) === agentType.value) ?? null
 })
 
@@ -499,6 +581,7 @@ function handleImported(botId: string) {
 // A hosted agent travels as bot metadata (same shape the onboarding bot step
 // builds); the built-in Memoh agent carries none.
 function buildAcpMetadata(): Record<string, unknown> | undefined {
+  if (selectedDirectRuntime.value) return undefined
   const panel = acpSetupPanelRef.value
   if (!selectedAcpProfile.value || !panel) return undefined
   const selection = panel.selection()
@@ -536,6 +619,13 @@ function createStartOptions() {
       name: form.name.trim(),
       avatar_url: form.avatar_url.trim() || undefined,
     },
+    grants: memberGrants.value
+      .filter(grant => !grant.is_owner)
+      .map(grant => ({
+        subject_type: grant.subject_type === 'everyone' ? 'everyone' as const : 'user' as const,
+        user_id: grant.subject_type === 'everyone' ? undefined : grant.user_id,
+        permissions: grant.permissions ?? [],
+      })),
     settings: {
       chat_model_id: form.chat_model_id || undefined,
       memory_provider_id: form.memory_provider_id || undefined,
@@ -543,6 +633,20 @@ function createStartOptions() {
       // from and the stored value would be a guess.
       reasoning_effort: form.chat_model_id ? form.reasoning_effort || undefined : undefined,
     },
+    ...(selectedDirectRuntime.value
+      ? {
+          agent: {
+            name: acpAgentDisplayName(selectedDirectRuntime.value, selectedDirectRuntime.value),
+            provider: selectedDirectRuntime.value,
+            metadata: directBotAgentMetadata(selectedDirectRuntime.value),
+          },
+        }
+      : selectedAcpProfile.value && {
+          agent: {
+            name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
+            provider: normalizeACPAgentID(selectedAcpProfile.value.id),
+          },
+        }),
   }
 }
 

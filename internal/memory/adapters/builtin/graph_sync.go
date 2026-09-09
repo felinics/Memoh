@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/migrate"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
 )
 
 // graphSync regenerates the agent-facing Markdown derived view for a bot from
@@ -151,13 +151,14 @@ func formatNodeTime(t time.Time) string {
 // shape used by the Runtime interface and search responses.
 func nodeSpecToMemoryItem(n migrate.NodeSpec) adapters.MemoryItem {
 	return adapters.MemoryItem{
-		ID:        n.ID,
-		Memory:    n.Body,
-		Hash:      n.Hash,
-		CreatedAt: formatNodeTime(n.CapturedAt),
-		UpdatedAt: formatNodeTime(n.CapturedAt),
-		Score:     0,
-		Metadata:  buildNodeMetadata(n),
-		BotID:     n.BotID,
+		ID:               n.ID,
+		Memory:           n.Body,
+		Hash:             n.Hash,
+		CreatedAt:        formatNodeTime(n.CapturedAt),
+		UpdatedAt:        formatNodeTime(n.CapturedAt),
+		Score:            0,
+		Metadata:         buildNodeMetadata(n),
+		BotID:            n.BotID,
+		SourceMessageIDs: adapters.NormalizeSourceRefs(n.SourceMessageIDs),
 	}
 }

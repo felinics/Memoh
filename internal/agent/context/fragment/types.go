@@ -2,7 +2,12 @@
 // describe context before it is rendered into provider-specific SDK inputs.
 package contextfrag
 
-import sdk "github.com/memohai/twilight-ai/sdk"
+import (
+	"errors"
+	"strings"
+
+	sdk "github.com/felinics/twilight/sdk"
+)
 
 // Kind identifies the semantic source and intent of a context fragment.
 type Kind string
@@ -20,14 +25,38 @@ const (
 	KindNativeImage          Kind = "native_image"
 	KindSkillsCatalog        Kind = "skills_catalog"
 	KindHookContext          Kind = "hook_context"
+	KindInjectedMessage      Kind = "injected_message"
 	KindBackgroundSummary    Kind = "background_summary"
-	KindACPContext           Kind = "acp_context"
+	KindRuntimeContext       Kind = "runtime_context"
 
 	// Reserved for the memory/compaction rewrites. Phase 1 keeps their existing
 	// resolver paths intact while making room for future collectors.
 	KindMemoryRecall        Kind = "memory_recall"
 	KindConversationSummary Kind = "conversation_summary"
 )
+
+// BackgroundSummaryMessagePrefix marks the per-step user message that carries
+// KindBackgroundSummary content. The agent rebuilds that message between steps
+// (remove by prefix, append the fresh summary) so running-task status never
+// rewrites the cached system prefix, and step reselection recognizes it as a
+// status notice rather than a conversation turn.
+const BackgroundSummaryMessagePrefix = "[Background tasks]\n"
+
+// IsBackgroundSummaryCarrier reports whether msg is the per-step background
+// summary carrier: a user message holding exactly one unadorned text part that
+// starts with BackgroundSummaryMessagePrefix. The agent's between-step removal
+// and step reselection share this single contract so a message one side would
+// remove is never content the other side protects.
+func IsBackgroundSummaryCarrier(msg sdk.Message) bool {
+	if msg.Role != sdk.MessageRoleUser || len(msg.Content) != 1 {
+		return false
+	}
+	part, ok := msg.Content[0].(sdk.TextPart)
+	return ok &&
+		part.CacheControl == nil &&
+		part.ProviderMetadata == nil &&
+		strings.HasPrefix(part.Text, BackgroundSummaryMessagePrefix)
+}
 
 // WorkspaceInstructionAnchor is the heading that marks where the workspace
 // instruction section begins in a flattened system prompt string; it must
@@ -133,6 +162,30 @@ const (
 	OverflowDrop      OverflowAction = "drop"
 )
 
+// RetentionTier groups fragments by how strongly a policy pass must retain
+// them. The zero value leaves the policy unspecified.
+type RetentionTier string
+
+const (
+	RetentionUnspecified RetentionTier = ""
+	RetentionRequired    RetentionTier = "required"
+	RetentionPreferred   RetentionTier = "preferred"
+	RetentionOptional    RetentionTier = "optional"
+)
+
+var (
+	ErrProtectedContextOverflow = errors.New("protected context exceeds its budget")
+	ErrBudgetUnsatisfied        = errors.New("context budget reserves exceed the available window")
+)
+
+// DropPriority orders fragments within one retention tier. Higher values drop
+// before lower values, so lower values survive longer under policy pressure.
+type DropPriority int
+
+func (p DropPriority) DropsBefore(other DropPriority) bool {
+	return p > other
+}
+
 // BudgetPolicy captures the budget behavior for a fragment: the selector
 // enforces MaxTokens/MaxChars via Trim or Drop, Summarize is not implemented
 // (deferred to compaction), and Keep marks the fragment as must-keep.
@@ -155,8 +208,30 @@ const (
 // RenderPolicy stores rendering hints. Anchor is used for sections such as
 // tool usage that must land before a known heading.
 type RenderPolicy struct {
-	Format RenderFormat `json:"format,omitempty"`
-	Anchor string       `json:"anchor,omitempty"`
+	Format      RenderFormat `json:"format,omitempty"`
+	Anchor      string       `json:"anchor,omitempty"`
+	GroupID     string       `json:"group_id,omitempty"`
+	GroupJoiner string       `json:"group_joiner,omitempty"`
+}
+
+func RenderText(text string, policy RenderPolicy) string {
+	if policy.GroupID != "" {
+		return strings.Trim(text, " \t\r")
+	}
+	return strings.TrimSpace(text)
+}
+
+func RenderSeparator(previous, current RenderPolicy) string {
+	if previous.GroupID == "" || previous.GroupID != current.GroupID {
+		return "\n\n"
+	}
+	if current.GroupJoiner != "" {
+		return current.GroupJoiner
+	}
+	if previous.GroupJoiner != "" {
+		return previous.GroupJoiner
+	}
+	return "\n\n"
 }
 
 // Provenance identifies where a fragment came from.
@@ -171,13 +246,12 @@ type Provenance struct {
 type AttentionReason string
 
 const (
-	AttentionDirect    AttentionReason = "direct"
-	AttentionMention   AttentionReason = "mention"
-	AttentionReply     AttentionReason = "reply"
-	AttentionCommand   AttentionReason = "command"
-	AttentionSchedule  AttentionReason = "schedule"
-	AttentionHeartbeat AttentionReason = "heartbeat"
-	AttentionPassive   AttentionReason = "passive"
+	AttentionDirect   AttentionReason = "direct"
+	AttentionMention  AttentionReason = "mention"
+	AttentionReply    AttentionReason = "reply"
+	AttentionCommand  AttentionReason = "command"
+	AttentionSchedule AttentionReason = "schedule"
+	AttentionPassive  AttentionReason = "passive"
 )
 
 // Scope preserves IM/group-chat topology separately from rendered text.
@@ -233,19 +307,22 @@ type Part struct {
 
 // ContextFrag is the typed context fragment abstraction.
 type ContextFrag struct {
-	ID            string          `json:"id"`
-	Ref           ContextRef      `json:"ref,omitempty"`
-	Kind          Kind            `json:"kind"`
-	Role          sdk.MessageRole `json:"role,omitempty"`
-	Slot          Slot            `json:"slot"`
-	Priority      int             `json:"priority,omitempty"`
-	CacheClass    CacheClass      `json:"cache_class,omitempty"`
-	Trust         TrustLevel      `json:"trust,omitempty"`
-	Scope         Scope           `json:"scope,omitempty"`
-	Budget        BudgetPolicy    `json:"budget,omitempty"`
-	Render        RenderPolicy    `json:"render,omitempty"`
-	Provenance    Provenance      `json:"provenance,omitempty"`
-	TokenEstimate int             `json:"token_estimate,omitempty"`
+	ID                 string          `json:"id"`
+	Ref                ContextRef      `json:"ref,omitempty"`
+	Kind               Kind            `json:"kind"`
+	Role               sdk.MessageRole `json:"role,omitempty"`
+	Slot               Slot            `json:"slot"`
+	Priority           int             `json:"priority,omitempty"`
+	RetentionTier      RetentionTier   `json:"retention_tier,omitempty"`
+	DropPriority       DropPriority    `json:"drop_priority,omitempty"`
+	RequiredCapability string          `json:"required_capability,omitempty"`
+	CacheClass         CacheClass      `json:"cache_class,omitempty"`
+	Trust              TrustLevel      `json:"trust,omitempty"`
+	Scope              Scope           `json:"scope,omitempty"`
+	Budget             BudgetPolicy    `json:"budget,omitempty"`
+	Render             RenderPolicy    `json:"render,omitempty"`
+	Provenance         Provenance      `json:"provenance,omitempty"`
+	TokenEstimate      int             `json:"token_estimate,omitempty"`
 	// ConflictKey groups fragments that are alternatives of one another: the
 	// selector keeps only the highest-precedence member (closest scope, then
 	// trust, then latest collected) and drops the rest.
@@ -280,7 +357,9 @@ type Manifest struct {
 	TrustBreakdown     []TrustBreakdown    `json:"trust_breakdown,omitempty"`
 	ToolDefs           []ToolDefAccounting `json:"tool_defs,omitempty"`
 	Items              []ManifestItem      `json:"items,omitempty"`
+	SelectionDecisions []SelectionDecision `json:"selection_decisions,omitempty"`
 	Selection          *SelectionTrace     `json:"selection,omitempty"`
+	BudgetPlan         *ContextBudgetPlan  `json:"budget_plan,omitempty"`
 	CachePlan          *CachePlan          `json:"cache_plan,omitempty"`
 	Mutations          *MutationLedger     `json:"mutations,omitempty"`
 }
@@ -290,6 +369,7 @@ type ManifestView string
 
 const (
 	ViewRunConfigPreProvider ManifestView = "run_config_pre_provider"
+	ViewExternalAgentPrompt  ManifestView = "external_agent_prompt"
 )
 
 // DynamicMutator names a later runtime transform that can change provider params
@@ -344,31 +424,79 @@ type ToolDefAccounting struct {
 	TokenEstimate int    `json:"token_estimate"`
 }
 
+// ContextBudgetPlan records the numeric input-envelope allocation used for one
+// provider-bound turn. Raw prompt content never enters this accounting view.
+type ContextBudgetPlan struct {
+	Estimator                    string `json:"estimator"`
+	EstimatorSafetyFactorPercent int    `json:"estimator_safety_factor_percent"`
+	Window                       int    `json:"window"`
+	OutputReserve                int    `json:"output_reserve"`
+	OutputReserveResolution      string `json:"output_reserve_resolution,omitempty"`
+	ToolDefsCost                 int    `json:"tool_defs_cost"`
+	CurrentRequestCost           int    `json:"current_request_cost"`
+	SystemBudget                 int    `json:"system_budget"`
+	ActualSystemCost             int    `json:"actual_system_cost"`
+	HistoryBudget                int    `json:"history_budget"`
+}
+
 type SelectionTrace struct {
 	Selected    int            `json:"selected"`
 	Dropped     int            `json:"dropped"`
+	Trimmed     int            `json:"trimmed,omitempty"`
 	DropReasons map[string]int `json:"drop_reasons,omitempty"`
+	// DropReasonTokens is the token estimate lost per drop reason, rolled up
+	// when the snapshot is built so readers never need the per-fragment audit.
+	DropReasonTokens map[string]int `json:"drop_reason_tokens,omitempty"`
+}
+
+type SelectionDecisionKind string
+
+const (
+	DecisionSelected SelectionDecisionKind = "selected"
+	DecisionTrimmed  SelectionDecisionKind = "trimmed"
+	DecisionDropped  SelectionDecisionKind = "dropped"
+)
+
+// SelectionDecision is the content-light per-fragment audit trail for
+// selection. It identifies sources and costs without retaining prompt text.
+type SelectionDecision struct {
+	ID            string                `json:"id"`
+	Ref           ContextRef            `json:"ref,omitempty"`
+	Slot          Slot                  `json:"slot"`
+	Source        string                `json:"source,omitempty"`
+	SourceID      string                `json:"source_id,omitempty"`
+	Decision      SelectionDecisionKind `json:"decision"`
+	Reason        string                `json:"reason,omitempty"`
+	TokenEstimate int                   `json:"token_estimate,omitempty"`
+	TextBytes     int                   `json:"text_bytes,omitempty"`
+	ImageCount    int                   `json:"image_count,omitempty"`
+	CacheClass    CacheClass            `json:"cache_class,omitempty"`
+	RetentionTier RetentionTier         `json:"retention_tier,omitempty"`
 }
 
 // ManifestItem is one non-sensitive fragment entry.
 type ManifestItem struct {
-	ID            string          `json:"id"`
-	Ref           ContextRef      `json:"ref,omitempty"`
-	Kind          Kind            `json:"kind"`
-	Slot          Slot            `json:"slot"`
-	Role          sdk.MessageRole `json:"role,omitempty"`
-	Priority      int             `json:"priority,omitempty"`
-	CacheClass    CacheClass      `json:"cache_class,omitempty"`
-	Trust         TrustLevel      `json:"trust,omitempty"`
-	Source        string          `json:"source,omitempty"`
-	SourceID      string          `json:"source_id,omitempty"`
-	Collector     string          `json:"collector,omitempty"`
-	ConflictKey   string          `json:"conflict_key,omitempty"`
-	PartTypes     []PartType      `json:"part_types,omitempty"`
-	TextBytes     int             `json:"text_bytes,omitempty"`
-	ImageCount    int             `json:"image_count,omitempty"`
-	TokenEstimate int             `json:"token_estimate,omitempty"`
-	Scope         Scope           `json:"scope,omitempty"`
+	ID                 string          `json:"id"`
+	Ref                ContextRef      `json:"ref,omitempty"`
+	Kind               Kind            `json:"kind"`
+	Slot               Slot            `json:"slot"`
+	Role               sdk.MessageRole `json:"role,omitempty"`
+	Priority           int             `json:"priority,omitempty"`
+	RetentionTier      RetentionTier   `json:"retention_tier,omitempty"`
+	DropPriority       DropPriority    `json:"drop_priority,omitempty"`
+	RequiredCapability string          `json:"required_capability,omitempty"`
+	CacheClass         CacheClass      `json:"cache_class,omitempty"`
+	Trust              TrustLevel      `json:"trust,omitempty"`
+	Source             string          `json:"source,omitempty"`
+	SourceID           string          `json:"source_id,omitempty"`
+	Collector          string          `json:"collector,omitempty"`
+	ConflictKey        string          `json:"conflict_key,omitempty"`
+	Render             RenderPolicy    `json:"render,omitempty"`
+	PartTypes          []PartType      `json:"part_types,omitempty"`
+	TextBytes          int             `json:"text_bytes,omitempty"`
+	ImageCount         int             `json:"image_count,omitempty"`
+	TokenEstimate      int             `json:"token_estimate,omitempty"`
+	Scope              Scope           `json:"scope,omitempty"`
 }
 
 type SlotRenderPolicy struct {

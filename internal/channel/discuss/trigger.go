@@ -3,8 +3,8 @@ package discuss
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type discussTriggerBuilder struct{}
@@ -17,11 +17,13 @@ type discussTurnPlan struct {
 }
 
 // Build composes the durable timeline and persisted turn responses into the
-// pure StartTurn command consumed by Agent.
-func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact) (discussTurnPlan, bool) {
-	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
+// pure StartTurn command consumed by Agent. The admission budget is applied
+// before materialization (CM-ADM-001); a ProtectedOverflow admission returns
+// ok=false so the caller fails closed instead of running the turn.
+func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
+	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, budget)
 	if composed == nil {
-		return discussTurnPlan{}, false
+		return discussTurnPlan{}, admission, false
 	}
 
 	isMentioned := wasRecentlyMentioned(rc, after)
@@ -66,7 +68,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 		consumed:        timeline.ConsumedDiscussCursor(rc),
 		messageCount:    len(composed.Messages),
 		estimatedTokens: composed.EstimatedTokens,
-	}, true
+	}, admission, true
 }
 
 // extractNewImageRefs collects image references from external RC segments

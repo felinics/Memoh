@@ -3,8 +3,8 @@ package mcp
 import (
 	"strings"
 
-	contextlimit "github.com/memohai/memoh/internal/agent/context/limit"
-	textprune "github.com/memohai/memoh/internal/prune"
+	contextlimit "github.com/felinics/memoh/internal/agent/context/limit"
+	textprune "github.com/felinics/memoh/internal/prune"
 )
 
 type ToolOutputLimit = contextlimit.ToolOutputLimit

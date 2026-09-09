@@ -6,8 +6,8 @@ import (
 
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
-	dbembed "github.com/memohai/memoh/db"
-	"github.com/memohai/memoh/internal/config"
+	dbembed "github.com/felinics/memoh/db"
+	"github.com/felinics/memoh/internal/config"
 )
 
 func TestEmbeddedMigrationsHaveUniqueVersions(t *testing.T) {

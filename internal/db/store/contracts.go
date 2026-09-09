@@ -20,12 +20,14 @@ type Page struct {
 }
 
 type UserRuntimeRecord struct {
-	ID        string
-	TeamID    string
-	UserID    string
-	Name      string
-	APIToken  string //nolint:gosec // owner-readable Remote Runtime credential by product design
-	CreatedAt time.Time
+	ID               string
+	TeamID           string
+	UserID           string
+	Name             string
+	APIToken         string //nolint:gosec // owner-readable Remote Runtime credential by product design
+	ActivatedAt      time.Time
+	PendingExpiresAt time.Time
+	CreatedAt        time.Time
 }
 
 type CreateUserRuntimeInput struct {
@@ -37,8 +39,15 @@ type CreateUserRuntimeInput struct {
 type UserRuntimeStore interface {
 	CreateUserRuntime(ctx context.Context, input CreateUserRuntimeInput) (UserRuntimeRecord, error)
 	GetUserRuntimeByAPIToken(ctx context.Context, apiToken string) (UserRuntimeRecord, error)
+	ActivateUserRuntime(ctx context.Context, runtimeID, apiToken string) (UserRuntimeRecord, error)
+	ExpirePendingUserRuntimes(ctx context.Context, userID string) error
 	ListUserRuntimes(ctx context.Context, userID string) ([]UserRuntimeRecord, error)
 	RevokeUserRuntime(ctx context.Context, runtimeID, userID string) error
+	// BackfillUserRuntimeName sets the display name only while the row still
+	// carries its creation-time default (or an empty name), so a user-chosen
+	// name is never overwritten by a later handshake. Returns false when the
+	// name no longer defaults (already backfilled or user-renamed).
+	BackfillUserRuntimeName(ctx context.Context, runtimeID, userID, name, defaultName string) (bool, error)
 }
 
 type BotRemoteRuntimeBindingRecord struct {
@@ -58,6 +67,10 @@ type BotRemoteRuntimeBindingRecord struct {
 type BotRemoteRuntimeBindingStore interface {
 	CreateOrUpdateMount(ctx context.Context, botID, runtimeID string) (BotRemoteRuntimeBindingRecord, error)
 	ListMounts(ctx context.Context, botID string) ([]BotRemoteRuntimeBindingRecord, error)
+	// ListGrantsByRuntimeOwner is the account-level reverse lookup: every live
+	// mount held by the owner's bots. Records carry only ID/BotID/RuntimeID/
+	// IsPrimary — the runtime/bot join fields stay zero.
+	ListGrantsByRuntimeOwner(ctx context.Context, ownerUserID string) ([]BotRemoteRuntimeBindingRecord, error)
 	GetMount(ctx context.Context, botID, targetID string) (BotRemoteRuntimeBindingRecord, error)
 	GetPrimaryMount(ctx context.Context, botID string) (BotRemoteRuntimeBindingRecord, error)
 	SetPrimary(ctx context.Context, botID, targetID string) error
@@ -357,15 +370,6 @@ type ScheduleStore interface {
 	ListLogsBySchedule(ctx context.Context, scheduleID ID, page Page) ([]Record, error)
 	CountLogsByBot(ctx context.Context, botID ID) (int64, error)
 	CountLogsBySchedule(ctx context.Context, scheduleID ID) (int64, error)
-	DeleteLogsByBot(ctx context.Context, botID ID) error
-}
-
-type HeartbeatStore interface {
-	ListEnabledBots(ctx context.Context) ([]Record, error)
-	CreateLog(ctx context.Context, input Input) (Record, error)
-	CompleteLog(ctx context.Context, id ID, input Patch) (Record, error)
-	ListLogsByBot(ctx context.Context, botID ID, page Page) ([]Record, error)
-	CountLogsByBot(ctx context.Context, botID ID) (int64, error)
 	DeleteLogsByBot(ctx context.Context, botID ID) error
 }
 

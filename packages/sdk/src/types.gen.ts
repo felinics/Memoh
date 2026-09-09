@@ -144,13 +144,33 @@ export type AclUpdateRuleRequest = {
 export type AcpagentRuntimeStatus = {
     acp_session_id?: string;
     agent_id?: string;
+    available_commands?: Array<AcpclientAvailableCommandInfo>;
     default_model_id?: string;
     models?: AcpclientModelState;
+    modes?: AcpclientModeState;
     project_path?: string;
     reasoning?: AcpclientReasoningState;
     runtime_id?: string;
     session_id?: string;
     state?: string;
+};
+
+export type AcpclientAvailableCommandInfo = {
+    description?: string;
+    input_hint?: string;
+    name?: string;
+};
+
+export type AcpclientModeInfo = {
+    description?: string;
+    id?: string;
+    name?: string;
+};
+
+export type AcpclientModeState = {
+    available_modes?: Array<AcpclientModeInfo>;
+    current_mode_id?: string;
+    supported?: boolean;
 };
 
 export type AcpclientModelInfo = {
@@ -363,6 +383,22 @@ export type AdaptersUsageResponse = {
     total_text_bytes?: number;
 };
 
+export type AgentcredentialPublicCredential = {
+    account_metadata?: {
+        [key: string]: unknown;
+    };
+    auth_kind?: string;
+    created_at?: string;
+    credential_version?: number;
+    expires_at?: string;
+    id?: string;
+    label?: string;
+    owner_user_id?: string;
+    provider?: string;
+    revoked?: boolean;
+    updated_at?: string;
+};
+
 export type ApperrorProblem = {
     args: {
         [key: string]: string;
@@ -511,6 +547,59 @@ export type AudioUpdateSpeechModelRequest = {
 export type AudioVoiceInfo = {
     id?: string;
     lang?: string;
+    name?: string;
+};
+
+export type BotagentsBotAgent = {
+    /**
+     * AgentCredentialID points at the encrypted credential this instance uses;
+     * empty means not connected (legacy metadata path).
+     */
+    agent_credential_id?: string;
+    bot_id?: string;
+    created_at?: string;
+    deleted_at?: string;
+    /**
+     * Dependency comes from the runtime driver at read time. It is not
+     * persisted and is omitted for runtimes without a declaration (ACP).
+     */
+    dependency?: BotagentsDependencyRequirement;
+    enabled?: boolean;
+    id?: string;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    runtime?: string;
+    updated_at?: string;
+};
+
+export type BotagentsCreateRequest = {
+    /**
+     * Enabled defaults to true when omitted. The web passes false for direct
+     * runtimes so the dependency preflight runs before the agent goes live.
+     */
+    enabled?: boolean;
+    metadata?: {
+        [key: string]: unknown;
+    };
+    name?: string;
+    runtime?: string;
+};
+
+export type BotagentsDependencyRequirement = {
+    dependency_id?: string;
+};
+
+export type BotagentsListResponse = {
+    items?: Array<BotagentsBotAgent>;
+};
+
+export type BotagentsUpdateRequest = {
+    enabled?: boolean;
+    metadata?: {
+        [key: string]: unknown;
+    };
     name?: string;
 };
 
@@ -1069,6 +1158,199 @@ export type ConnectorsListResponse = {
     items?: Array<ConnectorsConnector>;
 };
 
+export type ContextfragCacheClass = 'stable' | 'dynamic' | 'never';
+
+export type ContextfragCacheComparison = {
+    first_step_cache_read_tokens?: number;
+    outcome?: string;
+    prev_age_ms?: number;
+};
+
+export type ContextfragCacheUsageRecord = {
+    attempt?: number;
+    cache_read_tokens?: number;
+    cache_write_1h_tokens?: number;
+    cache_write_5m_tokens?: number;
+    cache_write_tokens?: number;
+    no_cache_tokens?: number;
+    step_index?: number;
+};
+
+export type ContextfragContentRange = {
+    end?: number;
+    start?: number;
+};
+
+export type ContextfragContextBudgetPlan = {
+    actual_system_cost?: number;
+    current_request_cost?: number;
+    estimator?: string;
+    estimator_safety_factor_percent?: number;
+    history_budget?: number;
+    output_reserve?: number;
+    output_reserve_resolution?: string;
+    system_budget?: number;
+    tool_defs_cost?: number;
+    window?: number;
+};
+
+export type ContextfragContextRef = {
+    content_hash?: string;
+    durability?: ContextfragRefDurability;
+    hash_algo?: string;
+    hash_scope?: string;
+    id?: string;
+    namespace?: string;
+    range?: ContextfragContentRange;
+    schema?: string;
+    version?: number;
+};
+
+export type ContextfragKind = 'system_prompt' | 'system_policy' | 'bot_identity' | 'workspace_instruction' | 'platform_identity' | 'tool_usage' | 'conversation_event' | 'current_user_message' | 'attachment_ref' | 'native_image' | 'skills_catalog' | 'hook_context' | 'injected_message' | 'background_summary' | 'runtime_context' | 'memory_recall' | 'conversation_summary';
+
+export type ContextfragKindBreakdown = {
+    fragments?: number;
+    images?: number;
+    kind?: ContextfragKind;
+    text_bytes?: number;
+    token_estimate?: number;
+};
+
+export type ContextfragLifecycleSnapshot = {
+    assistant_message_id?: string;
+    breakdown?: Array<ContextfragKindBreakdown>;
+    budget_plan?: ContextfragContextBudgetPlan;
+    cache_comparison?: ContextfragCacheComparison;
+    cache_read_tokens?: number;
+    cache_usage?: Array<ContextfragCacheUsageRecord>;
+    cache_write_tokens?: number;
+    client_type?: string;
+    counts?: ContextfragManifestCounts;
+    final_input_hash?: string;
+    loop_selection_mode?: string;
+    memory_recall?: ContextfragMemoryRecallTrace;
+    model?: string;
+    mutations?: Array<ContextfragMutationRecord>;
+    selection?: ContextfragSelectionTrace;
+    selection_decisions?: Array<ContextfragSelectionDecision>;
+    stable_message_count?: number;
+    stable_prefix_hash?: string;
+    stable_prefix_token_estimate?: number;
+    steps?: Array<ContextfragStepSnapshot>;
+    tool_defs?: Array<ContextfragToolDefAccounting>;
+    trust_breakdown?: Array<ContextfragTrustBreakdown>;
+    version?: number;
+    view?: ContextfragManifestView;
+};
+
+export type ContextfragManifestCounts = {
+    fragments?: number;
+    images?: number;
+    messages?: number;
+    text_bytes?: number;
+    token_estimate?: number;
+};
+
+export type ContextfragManifestView = 'run_config_pre_provider' | 'external_agent_prompt';
+
+export type ContextfragMemoryRecallQueryTrace = {
+    recent_messages?: number;
+    source?: string;
+    truncated?: boolean;
+};
+
+export type ContextfragMemoryRecallResultTrace = {
+    context_bytes?: number;
+    count?: number;
+    refs?: Array<string>;
+};
+
+export type ContextfragMemoryRecallTrace = {
+    cache_state?: string;
+    fallback_reason?: string;
+    memory_version?: string;
+    provider_id?: string;
+    query?: ContextfragMemoryRecallQueryTrace;
+    result?: ContextfragMemoryRecallResultTrace;
+    retrieval_mode?: string;
+};
+
+export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry' | 'run_abort_observed';
+
+export type ContextfragMutationRecord = {
+    detail?: string;
+    kind?: ContextfragMutationKind;
+};
+
+export type ContextfragRefDurability = 'durable' | 'synthetic' | 'debug';
+
+export type ContextfragRetentionTier = '' | 'required' | 'preferred' | 'optional';
+
+export type ContextfragSelectionDecision = {
+    cache_class?: ContextfragCacheClass;
+    decision?: ContextfragSelectionDecisionKind;
+    id?: string;
+    image_count?: number;
+    reason?: string;
+    ref?: ContextfragContextRef;
+    retention_tier?: ContextfragRetentionTier;
+    slot?: ContextfragSlot;
+    source?: string;
+    source_id?: string;
+    text_bytes?: number;
+    token_estimate?: number;
+};
+
+export type ContextfragSelectionDecisionKind = 'selected' | 'trimmed' | 'dropped';
+
+export type ContextfragSelectionTrace = {
+    /**
+     * DropReasonTokens is the token estimate lost per drop reason, rolled up
+     * when the snapshot is built so readers never need the per-fragment audit.
+     */
+    drop_reason_tokens?: {
+        [key: string]: number;
+    };
+    drop_reasons?: {
+        [key: string]: number;
+    };
+    dropped?: number;
+    selected?: number;
+    trimmed?: number;
+};
+
+export type ContextfragSlot = 'system' | 'before_history' | 'history' | 'after_history_before_current' | 'current_user' | 'after_current';
+
+export type ContextfragStepSnapshot = {
+    attempt?: number;
+    drop_reasons?: {
+        [key: string]: number;
+    };
+    dropped?: number;
+    post_prepare_input_hash?: string;
+    reselection_applied?: boolean;
+    reselection_outcome?: string;
+    step_index?: number;
+    truncated?: number;
+};
+
+export type ContextfragToolDefAccounting = {
+    bytes?: number;
+    name?: string;
+    provider?: string;
+    token_estimate?: number;
+};
+
+export type ContextfragTrustBreakdown = {
+    fragments?: number;
+    images?: number;
+    text_bytes?: number;
+    token_estimate?: number;
+    trust?: ContextfragTrustLevel;
+};
+
+export type ContextfragTrustLevel = 'system' | 'workspace' | 'user' | 'external';
+
 export type ConversationSkillActivation = {
     prompt?: string;
     skills?: Array<ConversationSkillActivationSkill>;
@@ -1129,8 +1411,18 @@ export type ConversationUiForwardRef = {
 
 export type ConversationUiMessage = {
     approval?: ConversationUiToolApproval;
+    /**
+     * Args are the machine-readable parameters of a notice block: the string
+     * values of the runtime_notice event metadata (dep_id and install_task_id
+     * for a workspace dependency notice, for instance). The client renders
+     * actions from them instead of parsing Content.
+     */
+    args?: {
+        [key: string]: string;
+    };
     attachments?: Array<ConversationUiAttachment>;
     background_task?: ConversationUiBackgroundTask;
+    code?: string;
     content?: string;
     execution_location?: ConversationUiExecutionLocation;
     id?: number;
@@ -1138,13 +1430,18 @@ export type ConversationUiMessage = {
     name?: string;
     output?: unknown;
     progress?: Array<unknown>;
+    reasoning_timing?: ConversationUiReasoningTiming;
     running?: boolean;
     tool_call_id?: string;
     type?: ConversationUiMessageType;
     user_input?: ConversationUiUserInput;
 };
 
-export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments';
+export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments' | 'error' | 'notice';
+
+export type ConversationUiReasoningTiming = {
+    duration_ms?: number;
+};
 
 export type ConversationUiReplyRef = {
     attachments?: Array<ConversationUiAttachment>;
@@ -1157,8 +1454,20 @@ export type ConversationUiToolApproval = {
     approval_id?: string;
     can_approve?: boolean;
     decision_reason?: string;
+    /**
+     * Options are the agent-provided permission options, verbatim; the client
+     * renders one action per option and answers with the chosen option id.
+     */
+    options?: Array<ConversationUiToolApprovalOption>;
+    selected_option_id?: string;
     short_id?: number;
     status?: string;
+};
+
+export type ConversationUiToolApprovalOption = {
+    id?: string;
+    kind?: string;
+    name?: string;
 };
 
 export type ConversationUiTurn = {
@@ -1306,6 +1615,41 @@ export type EmailUpdateProviderRequest = {
     provider?: string;
 };
 
+export type ExternalModelCatalog = {
+    configured_model_id?: string;
+    configured_reasoning_effort?: string;
+    models?: Array<ExternalModelOption>;
+};
+
+export type ExternalModelOption = {
+    default?: boolean;
+    default_reasoning_effort?: string;
+    description?: string;
+    id?: string;
+    name?: string;
+    reasoning_efforts?: Array<ExternalReasoningEffortOption>;
+};
+
+export type ExternalReasoningEffortOption = {
+    description?: string;
+    id?: string;
+    name?: string;
+};
+
+export type ExternalagentCodexDeviceLoginAuthorizeResponse = {
+    login_id: string;
+    user_code: string;
+    verification_url: string;
+};
+
+export type ExternalagentCodexDeviceLoginPollRequest = {
+    login_id: string;
+};
+
+export type ExternalagentCodexDeviceLoginPollResponse = {
+    status: 'pending' | 'success' | 'error' | 'unknown';
+};
+
 export type FetchprovidersCreateRequest = {
     config?: {
         [key: string]: unknown;
@@ -1358,7 +1702,7 @@ export type FetchprovidersUpdateRequest = {
     provider?: FetchprovidersProviderName;
 };
 
-export type GithubComMemohaiMemohInternalMcpConnection = {
+export type GithubComFelinicsMemohInternalMcpConnection = {
     auth_type?: string;
     bot_id?: string;
     config?: {
@@ -1368,66 +1712,12 @@ export type GithubComMemohaiMemohInternalMcpConnection = {
     id?: string;
     is_active?: boolean;
     last_probed_at?: string;
-    managed_by_plugin_installation_id?: string;
-    managed_resource_key?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
     name?: string;
     status?: string;
     status_message?: string;
     tools_cache?: Array<McpToolDescriptor>;
     type?: string;
     updated_at?: string;
-    visible?: boolean;
-};
-
-export type HandlersAcpClaudeCodeOAuthAuthorizeResponse = {
-    auth_url?: string;
-    session_id?: string;
-};
-
-export type HandlersAcpClaudeCodeOAuthExchangeRequest = {
-    code?: string;
-    session_id?: string;
-};
-
-export type HandlersAcpClaudeCodeOAuthStatus = {
-    configured?: boolean;
-    has_token?: boolean;
-};
-
-export type HandlersAcpCodexOAuthAuthorizeResponse = {
-    auth_url?: string;
-};
-
-export type HandlersAcpCodexOAuthDeviceAuthorizeResponse = {
-    expires_at?: string;
-    interval_seconds?: number;
-    session_id?: string;
-    user_code?: string;
-    verification_url?: string;
-};
-
-export type HandlersAcpCodexOAuthDeviceSessionRequest = {
-    session_id: string;
-};
-
-export type HandlersAcpCodexOAuthDeviceStatusResponse = {
-    account_id?: string;
-    error?: string;
-    expires_at?: string;
-    has_token?: boolean;
-    interval_seconds?: number;
-    next_poll_after?: string;
-    status?: string;
-};
-
-export type HandlersAcpCodexOAuthStatus = {
-    account_id?: string;
-    callback_url?: string;
-    configured?: boolean;
-    has_token?: boolean;
 };
 
 export type HandlersBatchDeleteRequest = {
@@ -1493,6 +1783,11 @@ export type HandlersCommandEventResponse = {
     session_id?: string;
     terminal?: boolean;
     type?: string;
+};
+
+export type HandlersCompactionInfo = {
+    auto_tokens?: number;
+    enabled?: boolean;
 };
 
 export type HandlersConnectorCredentialRequest = {
@@ -1575,8 +1870,62 @@ export type HandlersContainerStorageMetricsResponse = {
     used_bytes?: number;
 };
 
+export type HandlersContextLifecycleAggregates = {
+    drop_reasons?: {
+        [key: string]: number;
+    };
+    mutation_kinds?: {
+        [key: string]: number;
+    };
+    total_cache_read_tokens?: number;
+    total_cache_write_tokens?: number;
+    turns?: number;
+};
+
+export type HandlersContextLifecycleResponse = {
+    /**
+     * AggregateScope is always "returned_page": aggregates cover the returned
+     * turns, never the whole session.
+     */
+    aggregate_scope?: string;
+    aggregates?: HandlersContextLifecycleAggregates;
+    /**
+     * HasMore reports whether older lifecycle turns exist beyond this page.
+     */
+    has_more?: boolean;
+    /**
+     * LegacyHistoryMayExist reports that pre-run-table assistant metadata also
+     * exists for this session while the run-keyed table served the page, so
+     * this response does not cover the session's full history era.
+     */
+    legacy_history_may_exist?: boolean;
+    /**
+     * LegacySource reports that turns were recovered from pre-run-table
+     * assistant metadata instead of the run-keyed lifecycle table.
+     */
+    legacy_source?: boolean;
+    /**
+     * Limit is the page bound the turns and aggregates were computed over.
+     */
+    limit?: number;
+    turns?: Array<HandlersContextLifecycleTurn>;
+};
+
+export type HandlersContextLifecycleTurn = {
+    assistant_message_id?: string;
+    created_at?: string;
+    error_code?: string;
+    run_id?: string;
+    snapshot?: ContextfragLifecycleSnapshot;
+    status?: string;
+};
+
 export type HandlersContextUsage = {
+    breakdown?: Array<ContextfragKindBreakdown>;
+    budget_plan?: ContextfragContextBudgetPlan;
+    compaction?: HandlersCompactionInfo;
     context_window?: number;
+    tool_defs?: Array<HandlersToolDefBucket>;
     used_tokens?: number;
 };
 
@@ -1771,15 +2120,32 @@ export type HandlersHooksEventsResponse = {
     events?: Array<HandlersHookEventInfo>;
 };
 
-export type HandlersInstallPluginRequest = {
-    plugin_id?: string;
-    variables?: {
-        [key: string]: string;
-    };
+export type HandlersInstallPackageRequest = {
+    package_id: string;
+    registry_id: string;
+    revision: string;
+    workspace_target_id?: string;
 };
 
-export type HandlersInstallSkillRequest = {
-    skill_id?: string;
+export type HandlersInstallRegistryPackageResponse = {
+    installation: SkillpackagesInstallation;
+    ok: boolean;
+    package_id: string;
+    registry_id: string;
+    revision: string;
+    skills: Array<HandlersInstallRegistrySkillResponse>;
+    workspace_target_id: string;
+};
+
+export type HandlersInstallRegistrySkillResponse = {
+    artifact_digest: string;
+    files_written: number;
+    install_id: string;
+    ok: boolean;
+    package_id: string;
+    registry_id: string;
+    skill_id: string;
+    workspace_target_id: string;
 };
 
 export type HandlersListSnapshotsResponse = {
@@ -1884,14 +2250,19 @@ export type HandlersSessionInfoResponse = {
 
 export type HandlersSkillItem = {
     content?: string;
+    deletable?: boolean;
     description?: string;
+    editable?: boolean;
     managed?: boolean;
     metadata?: {
         [key: string]: unknown;
     };
     name?: string;
+    package_id?: string;
     raw?: string;
+    registry_id?: string;
     shadowed_by?: string;
+    skill_id?: string;
     source_kind?: string;
     source_path?: string;
     source_root?: string;
@@ -1904,7 +2275,11 @@ export type HandlersSkillsActionRequest = {
 };
 
 export type HandlersSkillsDeleteRequest = {
-    names?: Array<string>;
+    /**
+     * SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
+     * cannot address registry skills, which are nested by registry and package.
+     */
+    source_paths?: Array<string>;
 };
 
 export type HandlersSkillsResponse = {
@@ -1913,6 +2288,12 @@ export type HandlersSkillsResponse = {
 
 export type HandlersSkillsUpsertRequest = {
     skills?: Array<string>;
+    /**
+     * SourcePath is the existing SKILL.md being edited when saving a single skill.
+     * Empty means create (or overwrite by frontmatter name under
+     * /data/skills/user/personal/<name>/).
+     */
+    source_path?: string;
 };
 
 export type HandlersSnapshotInfo = {
@@ -1933,41 +2314,139 @@ export type HandlersSnapshotInfo = {
 };
 
 export type HandlersSupermarketAuthor = {
-    email?: string;
-    name?: string;
+    email: string;
+    name: string;
 };
 
-export type HandlersSupermarketPluginListResponse = {
-    data?: Array<PluginsManifest>;
-    limit?: number;
-    page?: number;
-    total?: number;
-};
-
-export type HandlersSupermarketSkillEntry = {
-    content?: string;
-    description?: string;
-    files?: Array<string>;
-    id?: string;
-    metadata?: HandlersSupermarketSkillMetadata;
-    name?: string;
-};
-
-export type HandlersSupermarketSkillListResponse = {
-    data?: Array<HandlersSupermarketSkillEntry>;
-    limit?: number;
-    page?: number;
-    total?: number;
-};
-
-export type HandlersSupermarketSkillMetadata = {
-    author?: HandlersSupermarketAuthor;
+export type HandlersSupermarketCatalogSkill = {
+    artifact: HandlersSupermarketSkillArtifact;
+    author: HandlersSupermarketAuthor;
+    category: string;
+    category_name: string;
+    description: string;
+    files: Array<string>;
     homepage?: string;
-    tags?: Array<string>;
+    icon?: HandlersSupermarketSkillIcon;
+    install_id: string;
+    name: string;
+    package_id: string;
+    registry_id: string;
+    schema_version: string;
+    skill_id: string;
+    source: HandlersSupermarketSkillSource;
+    source_category?: string;
+    tags: Array<string>;
 };
 
-export type HandlersSupermarketTagsResponse = {
-    tags?: Array<string>;
+export type HandlersSupermarketCatalogSkillListResponse = {
+    data: Array<HandlersSupermarketCatalogSkill>;
+    limit: number;
+    page: number;
+    total: number;
+};
+
+export type HandlersSupermarketRegistry = {
+    adapter: string;
+    category_count: number;
+    enabled: boolean;
+    id: string;
+    name: string;
+    package_count: number;
+    priority: number;
+    published_at?: string;
+    revision?: string;
+    skill_count: number;
+    skipped_package_count: number;
+};
+
+export type HandlersSupermarketRegistryListResponse = {
+    data: Array<HandlersSupermarketRegistry>;
+};
+
+export type HandlersSupermarketSkillArtifact = {
+    archive_size: number;
+    content_type: string;
+    digest: string;
+    download_url: string;
+    file_count: number;
+    format: string;
+    size: number;
+    uncompressed_size: number;
+};
+
+export type HandlersSupermarketSkillCategory = {
+    count: number;
+    id: string;
+    name: string;
+    registries: Array<HandlersSupermarketSkillCategoryRegistry>;
+};
+
+export type HandlersSupermarketSkillCategoryListResponse = {
+    data: Array<HandlersSupermarketSkillCategory>;
+};
+
+export type HandlersSupermarketSkillCategoryRegistry = {
+    count: number;
+    id: string;
+};
+
+export type HandlersSupermarketSkillIcon = {
+    brand_color?: string;
+    card?: HandlersSupermarketSkillIconAsset;
+    dark?: HandlersSupermarketSkillIconAsset;
+    detail?: HandlersSupermarketSkillIconAsset;
+};
+
+export type HandlersSupermarketSkillIconAsset = {
+    content_type: string;
+    digest: string;
+    size: number;
+};
+
+export type HandlersSupermarketSkillPackageCategory = {
+    id: string;
+    name: string;
+    skill_count: number;
+};
+
+export type HandlersSupermarketSkillPackageDescriptor = {
+    categories: Array<HandlersSupermarketSkillPackageCategory>;
+    description: string;
+    icon?: HandlersSupermarketSkillIcon;
+    name: string;
+    package_id: string;
+    registry_id: string;
+    revision: string;
+    schema_version: string;
+    skill_count: number;
+    skills: Array<HandlersSupermarketCatalogSkill>;
+    tags: Array<string>;
+};
+
+export type HandlersSupermarketSkillPackageListResponse = {
+    data: Array<HandlersSupermarketSkillPackageSummary>;
+    limit: number;
+    page: number;
+    total: number;
+};
+
+export type HandlersSupermarketSkillPackageSummary = {
+    categories: Array<HandlersSupermarketSkillPackageCategory>;
+    description: string;
+    icon?: HandlersSupermarketSkillIcon;
+    name: string;
+    package_id: string;
+    registry_id: string;
+    schema_version: string;
+    skill_count: number;
+    tags: Array<string>;
+};
+
+export type HandlersSupermarketSkillSource = {
+    path: string;
+    repository?: string;
+    revision: string;
+    type: string;
 };
 
 export type HandlersTokenUsageRecord = {
@@ -1995,13 +2474,27 @@ export type HandlersTokenUsageResponse = {
     by_model?: Array<HandlersModelTokenUsage>;
     chat?: Array<HandlersDailyTokenUsage>;
     discuss?: Array<HandlersDailyTokenUsage>;
-    heartbeat?: Array<HandlersDailyTokenUsage>;
     schedule?: Array<HandlersDailyTokenUsage>;
 };
 
 export type HandlersToolApprovalDecisionRequest = {
+    /**
+     * ControlID is the stable identity of one client mutation. New clients send
+     * it for exact retries; it remains optional for older Web/Desktop clients.
+     */
     control_id?: string;
+    /**
+     * OptionID selects one of the agent-provided permission options carried on
+     * the approval request; empty keeps the plain binary decision.
+     */
+    option_id?: string;
     reason?: string;
+};
+
+export type HandlersToolDefBucket = {
+    provider?: string;
+    token_estimate?: number;
+    tools?: number;
 };
 
 export type HandlersTriggerCompactResponse = {
@@ -2030,9 +2523,264 @@ export type HandlersUpdateContainerResourceLimitsRequest = {
     storage_bytes?: number;
 };
 
+export type HandlersWorkspaceDependencyCatalogItem = {
+    /**
+     * ActionsSupported lists the actions the catalog gives the dependency,
+     * before any workspace state is considered.
+     */
+    actions_supported?: Array<'install' | 'update' | 'reinstall' | 'remove' | 'rollback' | 'check_update'>;
+    /**
+     * Category is agent, runtime, or tool.
+     */
+    category?: 'agent' | 'runtime' | 'tool';
+    definition_revision?: string;
+    description?: string;
+    /**
+     * HasImageBaseline is set when the workspace image ships a copy of the
+     * dependency; removing a managed overlay returns to that copy.
+     */
+    has_image_baseline?: boolean;
+    icon?: string;
+    icon_url?: string;
+    id?: string;
+    /**
+     * Installable is set when the catalog has an install script for the
+     * dependency, i.e. it can be installed into a workspace (as a managed
+     * overlay when the image already ships it).
+     */
+    installable?: boolean;
+    name?: string;
+    platforms?: Array<HandlersWorkspaceDependencyCatalogPlatform>;
+    /**
+     * Provides lists the commands the dependency makes available.
+     */
+    provides?: Array<string>;
+    registry_id?: string;
+    retired?: boolean;
+    translations?: {
+        [key: string]: HandlersWorkspaceDependencyTranslation;
+    };
+    /**
+     * VersionPin is the version every install produces when the manifest
+     * locks one; omitted when installs follow the latest release.
+     */
+    version_pin?: string;
+};
+
+export type HandlersWorkspaceDependencyCatalogPlatform = {
+    arch?: Array<string>;
+    /**
+     * Libc is empty when the libc flavour does not matter for the OS.
+     */
+    libc?: string;
+    os?: string;
+};
+
+export type HandlersWorkspaceDependencyCatalogResponse = {
+    catalog_fetched_at?: string;
+    catalog_stale?: boolean;
+    items?: Array<HandlersWorkspaceDependencyCatalogItem>;
+};
+
+export type HandlersWorkspaceDependencyInstallRequest = {
+    definition_revision?: string;
+    /**
+     * SessionID optionally routes operation progress to its originating conversation.
+     */
+    session_id?: string;
+    /**
+     * Version to install. Empty (or no body) installs the latest version the
+     * catalog script resolves, or the manifest pin when the dependency has
+     * one. The version recorded afterwards is the one the script reports.
+     */
+    version?: string;
+};
+
+export type HandlersWorkspaceDependencyItem = {
+    /**
+     * Actions lists what may be requested right now.
+     */
+    actions?: Array<'install' | 'update' | 'reinstall' | 'remove' | 'rollback' | 'check_update'>;
+    /**
+     * Category is agent, runtime, or tool.
+     */
+    category?: 'agent' | 'runtime' | 'tool';
+    definition_revision?: string;
+    description?: string;
+    icon?: string;
+    icon_url?: string;
+    id?: string;
+    /**
+     * ImageVersion is the version of the copy the workspace image ships,
+     * omitted when the image has none. It is the baseline a managed overlay
+     * sits on and what remove returns to.
+     */
+    image_version?: string;
+    /**
+     * InstallPath is the dependency home when a managed copy is in effect or
+     * can be installed, and the discovered command path when the image copy
+     * is in effect.
+     */
+    install_path?: string;
+    /**
+     * InstalledVersion is the version of the copy in effect: the one the
+     * runtime launches and the one first on PATH (managed, then image, then
+     * PATH).
+     */
+    installed_version?: string;
+    last_checked_at?: string;
+    last_error?: string;
+    last_error_code?: string;
+    /**
+     * LatestVersion is the last upstream check result, omitted until a check
+     * ran.
+     */
+    latest_version?: string;
+    name?: string;
+    /**
+     * Overlay is set when the copy in effect is a managed one installed over
+     * an image copy.
+     */
+    overlay?: boolean;
+    platform_reason?: 'unsupported_platform';
+    /**
+     * PlatformSupported is false when the probed workspace platform is not
+     * listed by the catalog manifest; PlatformReason then says why.
+     */
+    platform_supported?: boolean;
+    /**
+     * PreviousVersion is the version rollback would switch back to.
+     */
+    previous_version?: string;
+    /**
+     * Provides lists the commands the dependency makes available.
+     */
+    provides?: Array<string>;
+    registry_id?: string;
+    retired?: boolean;
+    /**
+     * Source is image for dependencies shipped with the workspace image and
+     * managed for dependencies installed by catalog scripts.
+     */
+    source?: 'image' | 'managed';
+    /**
+     * Status is omitted when the dependency has no record and was not found
+     * in the workspace.
+     */
+    status?: 'installed' | 'installing' | 'updating' | 'removing' | 'missing' | 'failed';
+    translations?: {
+        [key: string]: HandlersWorkspaceDependencyTranslation;
+    };
+    /**
+     * UpdateAvailable is set for installed dependencies whose last upstream
+     * check reported a version other than the one in effect.
+     */
+    update_available?: boolean;
+};
+
+export type HandlersWorkspaceDependencyListResponse = {
+    catalog_fetched_at?: string;
+    catalog_stale?: boolean;
+    /**
+     * DiscoveryError is set when the workspace is running but could not be
+     * inspected (the discovery command was killed or timed out). Items then
+     * reflect the installation records alone, without workspace facts or
+     * actions; a refresh retries discovery.
+     */
+    discovery_error?: string;
+    items?: Array<HandlersWorkspaceDependencyItem>;
+    platform?: HandlersWorkspaceDependencyPlatform;
+    workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
+};
+
+export type HandlersWorkspaceDependencyOperationResponse = {
+    action?: string;
+    definition_revision?: string;
+    dependency_id?: string;
+    entrypoints?: {
+        [key: string]: string;
+    };
+    status?: string;
+    version?: string;
+};
+
+export type HandlersWorkspaceDependencyPlatform = {
+    arch?: string;
+    libc?: string;
+    os?: string;
+};
+
+export type HandlersWorkspaceDependencyPreflightItem = {
+    dependency_id?: string;
+    installed_version?: string;
+    name?: string;
+    state?: 'satisfied' | 'missing' | 'platform_unsupported' | 'unknown_dependency';
+};
+
+export type HandlersWorkspaceDependencyPreflightRequest = {
+    dependency_ids?: Array<string>;
+    /**
+     * WorkspaceTargetID overrides the query parameter of the same name.
+     */
+    workspace_target_id?: string;
+};
+
+export type HandlersWorkspaceDependencyPreflightResponse = {
+    items?: Array<HandlersWorkspaceDependencyPreflightItem>;
+    workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
+};
+
+export type HandlersWorkspaceDependencyScriptEnv = {
+    key?: string;
+    secret?: boolean;
+    /**
+     * Value is empty when Secret is set.
+     */
+    value?: string;
+};
+
+export type HandlersWorkspaceDependencyScriptResponse = {
+    action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
+    definition_revision?: string;
+    dependency_id?: string;
+    digest?: string;
+    env?: Array<HandlersWorkspaceDependencyScriptEnv>;
+    exec?: string;
+    script?: string;
+    timeout_seconds?: number;
+};
+
+export type HandlersWorkspaceDependencyStreamEvent = {
+    args?: {
+        [key: string]: string;
+    };
+    code?: string;
+    data?: string;
+    definition_revision?: string;
+    dependency_id?: string;
+    detail?: string;
+    entrypoints?: {
+        [key: string]: string;
+    };
+    message?: string;
+    request_id?: string;
+    stream?: 'stdout' | 'stderr';
+    type?: 'started' | 'log' | 'done' | 'error';
+    version?: string;
+};
+
+export type HandlersWorkspaceDependencyTranslation = {
+    description?: string;
+    name?: string;
+};
+
 export type HandlersAcpRuntimeCreateRequest = {
     acp_agent_id?: string;
     project_path?: string;
+};
+
+export type HandlersAcpRuntimeModeRequest = {
+    mode_id: string;
 };
 
 export type HandlersAcpRuntimeModelRequest = {
@@ -2041,6 +2789,13 @@ export type HandlersAcpRuntimeModelRequest = {
 
 export type HandlersAcpRuntimeReasoningRequest = {
     reasoning_effort?: string;
+};
+
+export type HandlersAgentCredentialPutRequest = {
+    auth_kind?: string;
+    secret?: {
+        [key: string]: string;
+    };
 };
 
 export type HandlersBrowserSessionCreateRequest = {
@@ -2066,10 +2821,19 @@ export type HandlersCreateSessionRequest = {
      * transient in-memory handle reference, never persisted in metadata.
      */
     acp_runtime_id?: string;
+    bot_agent_id?: string;
     channel_type?: string;
     metadata?: {
         [key: string]: unknown;
     };
+    /**
+     * PreferredChatModelID / PreferredReasoningEffort carry the first-send
+     * picker pair (issue #879 spec v2). The composer sends them only when the
+     * pair has an explicit source (user pick or remembered session); omitted
+     * fields leave the columns NULL so the session follows the bot default.
+     */
+    preferred_chat_model_id?: string;
+    preferred_reasoning_effort?: string;
     runtime_metadata?: {
         [key: string]: unknown;
     };
@@ -2128,8 +2892,15 @@ export type HandlersEmailOAuthStatusResponse = {
 };
 
 export type HandlersForkSessionRequest = {
-    message_id: string;
+    /**
+     * MessageID is the pre-turn spelling of TurnID, resolved server-side to the
+     * round that contains it. Deprecated: send turn_id. A client holds a turn id
+     * from admission onward, while a stored message id exists only once the
+     * round has been persisted.
+     */
+    message_id?: string;
     title?: string;
+    turn_id?: string;
 };
 
 export type HandlersFsOpResponse = {
@@ -2210,6 +2981,11 @@ export type HandlersMemoryUpdatePayload = {
     memory?: string;
 };
 
+export type HandlersModelPreferenceSeedResponse = {
+    model_id?: string;
+    reasoning_effort?: string;
+};
+
 export type HandlersOauthAuthorizeRequest = {
     callback_url?: string;
     client_id?: string;
@@ -2245,9 +3021,20 @@ export type HandlersTerminalInfoResponse = {
 };
 
 export type HandlersUpdateSessionRequest = {
+    bot_agent_id?: string;
+    expected_model_preference_revision?: string;
     metadata?: {
         [key: string]: unknown;
     };
+    /**
+     * PreferredChatModelID / PreferredReasoningEffort are the picker pair
+     * (issue #879). The composer always patches the pair together; either one
+     * alone is reconciled against the model the session would actually use.
+     * Changing either requires ExpectedModelPreferenceRevision ("" when the
+     * session has none yet): picker writes are always compare-and-set.
+     */
+    preferred_chat_model_id?: string;
+    preferred_reasoning_effort?: string;
     runtime_metadata?: {
         [key: string]: unknown;
     };
@@ -2257,25 +3044,9 @@ export type HandlersUpdateSessionRequest = {
     type?: string;
 };
 
-export type HeartbeatListLogsResponse = {
-    items?: Array<HeartbeatLog>;
-    total_count?: number;
-};
-
-export type HeartbeatLog = {
-    bot_id?: string;
-    completed_at?: string;
-    error_message?: string;
-    id?: string;
-    result_text?: string;
-    session_id?: string;
-    started_at?: string;
-    status?: string;
-    usage?: unknown;
-};
-
 export type HooksActionResult = {
     action_type?: string;
+    append_system_sections?: Array<HooksSystemSectionOutput>;
     decision?: string;
     error?: string;
     exit_code?: number;
@@ -2287,12 +3058,21 @@ export type HooksActionResult = {
     result?: unknown;
     stderr?: string;
     stdout?: string;
+    warnings?: Array<HooksOutputWarning>;
+};
+
+export type HooksOutputWarning = {
+    code?: string;
+    hook_name?: string;
+    message?: string;
+    section_id?: string;
 };
 
 export type HooksResult = {
     action_results?: Array<HooksActionResult>;
     actions_run?: number;
     append_context?: string;
+    append_system_sections?: Array<HooksSystemSectionOutput>;
     decision?: string;
     hooks_matched?: number;
     metadata?: {
@@ -2300,7 +3080,20 @@ export type HooksResult = {
     };
     reason?: string;
     runtime_supported?: boolean;
+    warnings?: Array<HooksOutputWarning>;
 };
+
+export type HooksSystemSectionCache = 'dynamic' | 'stable';
+
+export type HooksSystemSectionOutput = {
+    cache?: HooksSystemSectionCache;
+    hook_name?: string;
+    id?: string;
+    retention?: HooksSystemSectionRetention;
+    text?: string;
+};
+
+export type HooksSystemSectionRetention = 'optional' | 'preferred';
 
 export type HooksToolPayload = {
     call_id?: string;
@@ -2337,7 +3130,7 @@ export type McpImportRequest = {
 };
 
 export type McpListResponse = {
-    items?: Array<GithubComMemohaiMemohInternalMcpConnection>;
+    items?: Array<GithubComFelinicsMemohInternalMcpConnection>;
 };
 
 export type McpMcpServerEntry = {
@@ -2414,6 +3207,13 @@ export type ModelsGetResponse = {
     model_id?: string;
     name?: string;
     provider_id?: string;
+    /**
+     * Reasoning is the model's resolved thinking options, filled by the API layer
+     * (it depends on the provider's client type). Clients render this rather than
+     * deriving their own answer from ThinkingMode and ReasoningEfforts — the
+     * duplication that let the web picker and the wire disagree.
+     */
+    reasoning?: ReasoningOptions;
     type?: ModelsModelType;
 };
 
@@ -2423,7 +3223,39 @@ export type ModelsModelConfig = {
     context_window?: number;
     description?: string;
     dimensions?: number;
+    /**
+     * ReasoningDefaultOn reports whether omitting the thinking field leaves the
+     * model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
+     * defaults to off, while Opus 5 can be turned off but defaults to on, so
+     * omitting the field there keeps thinking running — billed, and invisible to a
+     * user who believes they turned it off. nil means unknown.
+     */
+    reasoning_default_on?: boolean;
+    /**
+     * ReasoningDialect declares the wire shape of this model's thinking control,
+     * which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
+     * token budget while 3.x takes a named level, and the two are mutually
+     * exclusive on the same request. Declared per model because the alternative is
+     * sniffing the model id, and an id is not a capability. Empty leaves provider
+     * policy in charge; Google's adaptor deliberately sends no thinking control so
+     * pre-dialect rows retain their safe pre-upgrade request shape.
+     */
+    reasoning_dialect?: string;
     reasoning_efforts?: Array<string>;
+    /**
+     * ReasoningOffSupport declares how the model answers an explicit request to
+     * stop thinking. Anthropic's per-model table splits models that share a
+     * thinking mode and an identical tier list, so this cannot be derived — see the
+     * reasoning package's OffSupport constants.
+     */
+    reasoning_off_support?: string;
+    thinking_budget_max?: number;
+    /**
+     * ThinkingBudgetMin/Max bound the budget dialect. The range is per model
+     * family, not per vendor: Gemini 2.5 Pro is 128..32768 and cannot be turned
+     * off, while Flash starts at 0 and can.
+     */
+    thinking_budget_min?: number;
     thinking_mode?: string;
 };
 
@@ -2445,127 +3277,6 @@ export type ModelsUpdateRequest = {
     name?: string;
     provider_id?: string;
     type?: ModelsModelType;
-};
-
-export type PluginsAuthRequirement = {
-    client_ref?: string;
-    key?: string;
-    scopes?: Array<string>;
-    type?: string;
-    variables?: Array<string>;
-};
-
-export type PluginsAuthor = {
-    email?: string;
-    name?: string;
-};
-
-export type PluginsConfigVar = {
-    defaultValue?: string;
-    description?: string;
-    key?: string;
-    required?: boolean;
-    secret?: boolean;
-};
-
-export type PluginsIcon = {
-    kind?: string;
-    name?: string;
-    url?: string;
-};
-
-export type PluginsInstallation = {
-    bot_id?: string;
-    config?: {
-        [key: string]: unknown;
-    };
-    enabled?: boolean;
-    id?: string;
-    installed_at?: string;
-    manifest?: PluginsManifest;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    plugin_id?: string;
-    plugin_name?: string;
-    resources?: Array<PluginsResource>;
-    status?: string;
-    updated_at?: string;
-    version?: string;
-};
-
-export type PluginsListResponse = {
-    items?: Array<PluginsInstallation>;
-};
-
-export type PluginsMcpResource = {
-    args?: Array<string>;
-    auth_ref?: string;
-    capabilities?: Array<string>;
-    command?: string;
-    cwd?: string;
-    description?: string;
-    display_name?: string;
-    env?: Array<PluginsConfigVar>;
-    headers?: Array<PluginsConfigVar>;
-    key?: string;
-    name?: string;
-    transport?: string;
-    url?: string;
-    visibility?: string;
-};
-
-export type PluginsManifest = {
-    auth_requirements?: Array<PluginsAuthRequirement>;
-    author?: PluginsAuthor;
-    bundled_skills?: Array<PluginsSkillEntry>;
-    capabilities?: Array<string>;
-    description?: string;
-    homepage?: string;
-    icon?: PluginsIcon;
-    id?: string;
-    install?: Array<string>;
-    mcps?: Array<PluginsMcpResource>;
-    name?: string;
-    schema_version?: string;
-    skills?: Array<PluginsSkillResource>;
-    tags?: Array<string>;
-    variables?: Array<PluginsConfigVar>;
-    version?: string;
-};
-
-export type PluginsOAuthAuthorizeRequest = {
-    callback_url?: string;
-};
-
-export type PluginsResource = {
-    created_at?: string;
-    id?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    resource_id?: string;
-    resource_key?: string;
-    resource_type?: string;
-    status?: string;
-    updated_at?: string;
-};
-
-export type PluginsSkillEntry = {
-    content?: string;
-    description?: string;
-    files?: Array<string>;
-    id?: string;
-    metadata?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-};
-
-export type PluginsSkillResource = {
-    key?: string;
-    name?: string;
-    path?: string;
 };
 
 export type ProvidersCountResponse = {
@@ -2665,7 +3376,7 @@ export type ProvidersTestResponse = {
     status?: ProvidersTestStatus;
 };
 
-export type ProvidersTestStatus = 'ok' | 'auth_error' | 'error';
+export type ProvidersTestStatus = 'ok' | 'auth_error' | 'error' | 'unverified';
 
 export type ProvidersUpdateRequest = {
     client_type?: string;
@@ -2719,13 +3430,125 @@ export type ProvidertemplatesModelResponse = {
     type?: string;
 };
 
+export type ReasoningOptions = {
+    /**
+     * CanDisable reports whether picking "off" actually reaches the model.
+     */
+    can_disable?: boolean;
+    /**
+     * DefaultEffort is the tier to use when nothing is stored, and the tier to fall
+     * back to when a stored value is no longer offered by the model.
+     */
+    default_effort?: string;
+    /**
+     * Efforts are the selectable active tiers, weakest to strongest as advertised.
+     */
+    efforts?: Array<string>;
+    /**
+     * EffortsWithoutOff are tiers that cannot be combined with off on this model.
+     * Opus 5 accepts an explicit disable only at effort high or below, so a client
+     * that lets a user hold both must know which tiers conflict.
+     */
+    efforts_without_off?: Array<string>;
+    /**
+     * Supported is false when the model has no thinking concept; the other fields
+     * are then empty and no control should be rendered at all.
+     */
+    supported?: boolean;
+};
+
 export type ScheduleCreateRequest = {
+    /**
+     * ACPAgentID names the ACP agent when RuntimeType is acp_agent.
+     */
+    acp_agent_id?: string;
+    /**
+     * ACPModelID is an agent-reported model identifier override for External
+     * Agent runs. Mutually exclusive with ModelID.
+     */
+    acp_model_id?: string;
+    /**
+     * BotAgentID selects one persisted BotAgent for a new session. Empty means
+     * the built-in Native runtime (or the legacy ACP fields below).
+     */
+    bot_agent_id?: string;
     command?: string;
     description?: string;
     enabled?: boolean;
     max_calls?: ScheduleNullableInt;
+    /**
+     * ModelID is a native model UUID override (models.id).
+     */
+    model_id?: string;
     name?: string;
     pattern?: string;
+    /**
+     * ReasoningEffort overrides the reasoning effort for this schedule.
+     */
+    reasoning_effort?: string;
+    /**
+     * RunTarget is new_session (default) or existing_session.
+     */
+    run_target?: string;
+    /**
+     * RuntimeType selects the runtime for new sessions: "" or "model" for
+     * the native model runtime, "acp_agent" for an ACP agent. Must be empty
+     * in existing_session mode (inherited from the target session).
+     */
+    runtime_type?: string;
+    /**
+     * TargetSessionID names the session reused by existing_session mode.
+     */
+    target_session_id?: string;
+    /**
+     * WorkdirID binds new sessions to a bot workdir. Must be empty in
+     * existing_session mode (inherited from the target session).
+     */
+    workdir_id?: string;
+};
+
+export type ScheduleExecutionConfig = {
+    /**
+     * ACPAgentID names the ACP agent when RuntimeType is acp_agent.
+     */
+    acp_agent_id?: string;
+    /**
+     * ACPModelID is an agent-reported model identifier override for External
+     * Agent runs. Mutually exclusive with ModelID.
+     */
+    acp_model_id?: string;
+    /**
+     * BotAgentID selects one persisted BotAgent for a new session. Empty means
+     * the built-in Native runtime (or the legacy ACP fields below).
+     */
+    bot_agent_id?: string;
+    /**
+     * ModelID is a native model UUID override (models.id).
+     */
+    model_id?: string;
+    /**
+     * ReasoningEffort overrides the reasoning effort for this schedule.
+     */
+    reasoning_effort?: string;
+    /**
+     * RunTarget is new_session (default) or existing_session.
+     */
+    run_target?: string;
+    /**
+     * RuntimeType selects the runtime for new sessions: "" or "model" for
+     * the native model runtime, "acp_agent" for an ACP agent. Must be empty
+     * in existing_session mode (inherited from the target session).
+     */
+    runtime_type?: string;
+    /**
+     * TargetSessionID names the session reused by existing_session mode.
+     */
+    target_session_id?: string;
+    /**
+     * WorkdirID binds new sessions to a bot workdir. Must be empty in
+     * existing_session mode (inherited from the target session).
+     */
+    workdir_id?: string;
 };
 
 export type ScheduleListLogsResponse = {
@@ -2756,6 +3579,20 @@ export type ScheduleNullableInt = {
 };
 
 export type ScheduleSchedule = {
+    /**
+     * ACPAgentID names the ACP agent when RuntimeType is acp_agent.
+     */
+    acp_agent_id?: string;
+    /**
+     * ACPModelID is an agent-reported model identifier override for External
+     * Agent runs. Mutually exclusive with ModelID.
+     */
+    acp_model_id?: string;
+    /**
+     * BotAgentID selects one persisted BotAgent for a new session. Empty means
+     * the built-in Native runtime (or the legacy ACP fields below).
+     */
+    bot_agent_id?: string;
     bot_id?: string;
     command?: string;
     created_at?: string;
@@ -2764,15 +3601,50 @@ export type ScheduleSchedule = {
     enabled?: boolean;
     id?: string;
     max_calls?: number;
+    /**
+     * ModelID is a native model UUID override (models.id).
+     */
+    model_id?: string;
     name?: string;
     pattern?: string;
+    /**
+     * ReasoningEffort overrides the reasoning effort for this schedule.
+     */
+    reasoning_effort?: string;
+    /**
+     * RunTarget is new_session (default) or existing_session.
+     */
+    run_target?: string;
+    /**
+     * RuntimeType selects the runtime for new sessions: "" or "model" for
+     * the native model runtime, "acp_agent" for an ACP agent. Must be empty
+     * in existing_session mode (inherited from the target session).
+     */
+    runtime_type?: string;
+    /**
+     * TargetSessionID names the session reused by existing_session mode.
+     */
+    target_session_id?: string;
     updated_at?: string;
+    /**
+     * WorkdirID binds new sessions to a bot workdir. Must be empty in
+     * existing_session mode (inherited from the target session).
+     */
+    workdir_id?: string;
 };
 
 export type ScheduleUpdateRequest = {
     command?: string;
     description?: string;
     enabled?: boolean;
+    /**
+     * Execution replaces the whole execution parameter block when present.
+     * Field-level patching is deliberately not offered: the block carries
+     * cross-field constraints (run target vs runtime vs workdir), so
+     * callers send the full desired state and the service validates it as
+     * one unit.
+     */
+    execution?: ScheduleExecutionConfig;
     max_calls?: ScheduleNullableInt;
     name?: string;
     pattern?: string;
@@ -2831,6 +3703,7 @@ export type SearchprovidersUpdateRequest = {
 };
 
 export type SessionSession = {
+    bot_agent_id?: string;
     bot_id?: string;
     channel_type?: string;
     created_at?: string;
@@ -2839,7 +3712,15 @@ export type SessionSession = {
     metadata?: {
         [key: string]: unknown;
     };
+    model_preference_revision?: string;
     parent_session_id?: string;
+    preferred_chat_model_id?: string;
+    /**
+     * Preferred* is the session's persisted (model, effort) pair (issue #879).
+     * Empty means "no memory"; the composer reseeds from it on open/repoint.
+     */
+    preferred_external_model_id?: string;
+    preferred_reasoning_effort?: string;
     route_conversation_type?: string;
     route_id?: string;
     route_metadata?: {
@@ -2868,12 +3749,10 @@ export type SettingsSettings = {
     compaction_model_id?: string;
     compaction_target_percent?: number | null;
     compaction_threshold?: number;
+    default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
     fetch_provider_id?: string;
-    heartbeat_enabled?: boolean;
-    heartbeat_interval?: number;
-    heartbeat_model_id?: string;
     image_model_id?: string;
     language?: string;
     memory_provider_id?: string;
@@ -2939,16 +3818,10 @@ export type SettingsUpsertRequest = {
     compaction_model_id?: string;
     compaction_target_percent?: number;
     compaction_threshold?: number;
+    default_bot_agent_id?: string;
     discuss_probe_model_id?: string;
     display_enabled?: boolean;
     fetch_provider_id?: string;
-    heartbeat_enabled?: boolean;
-    heartbeat_interval?: number;
-    /**
-     * HeartbeatModelID joins the pointer group above (nil/""/value) so the
-     * heartbeat tab's autosave can clear a model override.
-     */
-    heartbeat_model_id?: string;
     image_model_id?: string;
     /**
      * Language follows the same pointer rule; "" normalizes to DefaultLanguage
@@ -2972,12 +3845,28 @@ export type SettingsUpsertRequest = {
     video_model_id?: string;
 };
 
+export type SkillpackagesInstallation = {
+    bot_id: string;
+    id: string;
+    installed_at: string;
+    package_id: string;
+    registry_id: string;
+    revision: string;
+    updated_at: string;
+    workspace_target_id: string;
+};
+
 export type SkillsSafeCatalogItem = {
     description?: string;
     display_name?: string;
     name?: string;
     source_kind?: string;
     state?: string;
+};
+
+export type SupermarketUninstallPackageResponse = {
+    installation: SkillpackagesInstallation;
+    ok: boolean;
 };
 
 export type UserinputUiAnswer = {
@@ -2997,10 +3886,17 @@ export type UserinputUiOption = {
 
 export type UserinputUiQuestion = {
     allow_custom?: boolean;
+    custom_exclusive?: boolean;
     id?: string;
     kind?: string;
     options?: Array<UserinputUiOption>;
     placeholder?: string;
+    /**
+     * Required is tri-state for compatibility. Legacy/native ask_user payloads
+     * omit it and keep their existing surface semantics; ACP forms set it
+     * explicitly so false means an optional schema property.
+     */
+    required?: boolean;
     text?: string;
 };
 
@@ -3152,6 +4048,17 @@ export type WorkspaceWorkspaceTarget = {
     target_id?: string;
     tool_approval?: WorkspaceWorkspaceTargetToolApproval;
     tool_approval_config?: SettingsToolApprovalConfig;
+};
+
+export type WorkspaceWorkspaceTargetGrant = {
+    bot_id?: string;
+    primary?: boolean;
+    runtime_id?: string;
+    target_id?: string;
+};
+
+export type WorkspaceWorkspaceTargetGrantsResponse = {
+    grants?: Array<WorkspaceWorkspaceTargetGrant>;
 };
 
 export type WorkspaceWorkspaceTargetToolApproval = {
@@ -3464,6 +4371,44 @@ export type GetBotsNameAvailabilityResponses = {
 };
 
 export type GetBotsNameAvailabilityResponse = GetBotsNameAvailabilityResponses[keyof GetBotsNameAvailabilityResponses];
+
+export type GetBotsUserAccessCandidatesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Max results
+         */
+        limit?: number;
+    };
+    url: '/bots/user-access/candidates';
+};
+
+export type GetBotsUserAccessCandidatesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsUserAccessCandidatesError = GetBotsUserAccessCandidatesErrors[keyof GetBotsUserAccessCandidatesErrors];
+
+export type GetBotsUserAccessCandidatesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersBotUserCandidateListResponse;
+};
+
+export type GetBotsUserAccessCandidatesResponse = GetBotsUserAccessCandidatesResponses[keyof GetBotsUserAccessCandidatesResponses];
 
 export type GetBotsByBotIdAclChannelIdentitiesData = {
     body?: never;
@@ -3856,15 +4801,23 @@ export type PostBotsByBotIdAcpRuntimesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
     /**
      * Too Many Requests
      */
-    429: HandlersErrorResponse;
+    429: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdAcpRuntimesError = PostBotsByBotIdAcpRuntimesErrors[keyof PostBotsByBotIdAcpRuntimesErrors];
@@ -3898,15 +4851,23 @@ export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdAcpRuntimesByRuntimeIdError = DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof DeleteBotsByBotIdAcpRuntimesByRuntimeIdErrors];
@@ -3938,15 +4899,23 @@ export type GetBotsByBotIdAcpRuntimesByRuntimeIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
     404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAcpRuntimesByRuntimeIdError = GetBotsByBotIdAcpRuntimesByRuntimeIdErrors[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdErrors];
@@ -3959,6 +4928,63 @@ export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponses = {
 };
 
 export type GetBotsByBotIdAcpRuntimesByRuntimeIdResponse = GetBotsByBotIdAcpRuntimesByRuntimeIdResponses[keyof GetBotsByBotIdAcpRuntimesByRuntimeIdResponses];
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeData = {
+    /**
+     * Mode selection
+     */
+    body: HandlersAcpRuntimeModeRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Runtime ID
+         */
+        runtime_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/acp-runtimes/{runtime_id}/mode';
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeError = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeErrors];
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses = {
+    /**
+     * OK
+     */
+    200: AcpagentRuntimeStatus;
+};
+
+export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdModeResponses];
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelData = {
     /**
@@ -3987,7 +5013,7 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -3995,7 +5021,11 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdModelErrors = {
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
     /**
      * Bad Gateway
      */
@@ -4040,7 +5070,7 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -4048,7 +5078,11 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningErrors = {
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
     /**
      * Bad Gateway
      */
@@ -4066,7 +5100,7 @@ export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses = {
 
 export type PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponse = PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses[keyof PatchBotsByBotIdAcpRuntimesByRuntimeIdReasoningResponses];
 
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeData = {
+export type GetBotsByBotIdAgentsData = {
     body?: never;
     path: {
         /**
@@ -4075,36 +5109,32 @@ export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeData = {
         bot_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/claude-code/oauth/authorize';
+    url: '/bots/{bot_id}/agents';
 };
 
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors = {
+export type GetBotsByBotIdAgentsErrors = {
     /**
-     * Bad Request
+     * Forbidden
      */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
+    403: HandlersErrorResponse;
 };
 
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeError = GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors[keyof GetBotsByBotIdAcpClaudeCodeOauthAuthorizeErrors];
+export type GetBotsByBotIdAgentsError = GetBotsByBotIdAgentsErrors[keyof GetBotsByBotIdAgentsErrors];
 
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses = {
+export type GetBotsByBotIdAgentsResponses = {
     /**
      * OK
      */
-    200: HandlersAcpClaudeCodeOAuthAuthorizeResponse;
+    200: BotagentsListResponse;
 };
 
-export type GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponse = GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses[keyof GetBotsByBotIdAcpClaudeCodeOauthAuthorizeResponses];
+export type GetBotsByBotIdAgentsResponse = GetBotsByBotIdAgentsResponses[keyof GetBotsByBotIdAgentsResponses];
 
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeData = {
+export type PostBotsByBotIdAgentsData = {
     /**
-     * OAuth exchange request
+     * Agent payload
      */
-    body: HandlersAcpClaudeCodeOAuthExchangeRequest;
+    body: BotagentsCreateRequest;
     path: {
         /**
          * Bot ID
@@ -4112,112 +5142,179 @@ export type PostBotsByBotIdAcpClaudeCodeOauthExchangeData = {
         bot_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/claude-code/oauth/exchange';
+    url: '/bots/{bot_id}/agents';
 };
 
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors = {
+export type PostBotsByBotIdAgentsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
-     * Not Found
+     * Forbidden
      */
-    404: HandlersErrorResponse;
+    403: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
 };
 
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeError = PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors[keyof PostBotsByBotIdAcpClaudeCodeOauthExchangeErrors];
+export type PostBotsByBotIdAgentsError = PostBotsByBotIdAgentsErrors[keyof PostBotsByBotIdAgentsErrors];
 
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses = {
+export type PostBotsByBotIdAgentsResponses = {
     /**
-     * OK
+     * Created
      */
-    200: HandlersAcpClaudeCodeOAuthStatus;
+    201: BotagentsBotAgent;
 };
 
-export type PostBotsByBotIdAcpClaudeCodeOauthExchangeResponse = PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses[keyof PostBotsByBotIdAcpClaudeCodeOauthExchangeResponses];
+export type PostBotsByBotIdAgentsResponse = PostBotsByBotIdAgentsResponses[keyof PostBotsByBotIdAgentsResponses];
 
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusData = {
+export type DeleteBotsByBotIdAgentsByIdData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/claude-code/oauth/status';
+    url: '/bots/{bot_id}/agents/{id}';
 };
 
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusErrors = {
+export type DeleteBotsByBotIdAgentsByIdErrors = {
     /**
-     * Bad Request
+     * Forbidden
      */
-    400: HandlersErrorResponse;
+    403: HandlersErrorResponse;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusError = GetBotsByBotIdAcpClaudeCodeOauthStatusErrors[keyof GetBotsByBotIdAcpClaudeCodeOauthStatusErrors];
-
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponses = {
+    404: ApperrorProblem;
     /**
-     * OK
+     * Conflict
      */
-    200: HandlersAcpClaudeCodeOAuthStatus;
+    409: ApperrorProblem;
 };
 
-export type GetBotsByBotIdAcpClaudeCodeOauthStatusResponse = GetBotsByBotIdAcpClaudeCodeOauthStatusResponses[keyof GetBotsByBotIdAcpClaudeCodeOauthStatusResponses];
+export type DeleteBotsByBotIdAgentsByIdError = DeleteBotsByBotIdAgentsByIdErrors[keyof DeleteBotsByBotIdAgentsByIdErrors];
 
-export type GetBotsByBotIdAcpCodexOauthAuthorizeData = {
+export type DeleteBotsByBotIdAgentsByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdAgentsByIdData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/codex/oauth/authorize';
+    url: '/bots/{bot_id}/agents/{id}';
 };
 
-export type GetBotsByBotIdAcpCodexOauthAuthorizeErrors = {
+export type GetBotsByBotIdAgentsByIdErrors = {
     /**
-     * Bad Request
+     * Forbidden
      */
-    400: HandlersErrorResponse;
+    403: HandlersErrorResponse;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
-export type GetBotsByBotIdAcpCodexOauthAuthorizeError = GetBotsByBotIdAcpCodexOauthAuthorizeErrors[keyof GetBotsByBotIdAcpCodexOauthAuthorizeErrors];
+export type GetBotsByBotIdAgentsByIdError = GetBotsByBotIdAgentsByIdErrors[keyof GetBotsByBotIdAgentsByIdErrors];
 
-export type GetBotsByBotIdAcpCodexOauthAuthorizeResponses = {
+export type GetBotsByBotIdAgentsByIdResponses = {
     /**
      * OK
      */
-    200: HandlersAcpCodexOAuthAuthorizeResponse;
+    200: BotagentsBotAgent;
 };
 
-export type GetBotsByBotIdAcpCodexOauthAuthorizeResponse = GetBotsByBotIdAcpCodexOauthAuthorizeResponses[keyof GetBotsByBotIdAcpCodexOauthAuthorizeResponses];
+export type GetBotsByBotIdAgentsByIdResponse = GetBotsByBotIdAgentsByIdResponses[keyof GetBotsByBotIdAgentsByIdResponses];
 
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeData = {
+export type PatchBotsByBotIdAgentsByIdData = {
+    /**
+     * Agent changes
+     */
+    body: BotagentsUpdateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}';
+};
+
+export type PatchBotsByBotIdAgentsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdAgentsByIdError = PatchBotsByBotIdAgentsByIdErrors[keyof PatchBotsByBotIdAgentsByIdErrors];
+
+export type PatchBotsByBotIdAgentsByIdResponses = {
+    /**
+     * OK
+     */
+    200: BotagentsBotAgent;
+};
+
+export type PatchBotsByBotIdAgentsByIdResponse = PatchBotsByBotIdAgentsByIdResponses[keyof PatchBotsByBotIdAgentsByIdResponses];
+
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/codex/oauth/device/authorize';
+    url: '/bots/{bot_id}/agents/{id}/codex/login/device/authorize';
 };
 
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors = {
     /**
      * Bad Request
      */
@@ -4227,42 +5324,42 @@ export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors = {
      */
     403: HandlersErrorResponse;
     /**
-     * Not Found
+     * Service Unavailable
      */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeError = PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors[keyof PostBotsByBotIdAcpCodexOauthDeviceAuthorizeErrors];
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeError = PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors];
 
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponses = {
     /**
      * OK
      */
-    200: HandlersAcpCodexOAuthDeviceAuthorizeResponse;
+    200: ExternalagentCodexDeviceLoginAuthorizeResponse;
 };
 
-export type PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponse = PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses[keyof PostBotsByBotIdAcpCodexOauthDeviceAuthorizeResponses];
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponse = PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponses[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeResponses];
 
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelData = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelData = {
     /**
-     * Device authorization session
+     * Login reference
      */
-    body: HandlersAcpCodexOAuthDeviceSessionRequest;
+    body: ExternalagentCodexDeviceLoginPollRequest;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/codex/oauth/device/cancel';
+    url: '/bots/{bot_id}/agents/{id}/codex/login/device/cancel';
 };
 
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelErrors = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors = {
     /**
      * Bad Request
      */
@@ -4271,43 +5368,37 @@ export type PostBotsByBotIdAcpCodexOauthDeviceCancelErrors = {
      * Forbidden
      */
     403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
 };
 
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelError = PostBotsByBotIdAcpCodexOauthDeviceCancelErrors[keyof PostBotsByBotIdAcpCodexOauthDeviceCancelErrors];
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelError = PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors];
 
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelResponses = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelResponses = {
     /**
-     * OK
+     * No Content
      */
-    200: HandlersAcpCodexOAuthDeviceStatusResponse;
+    204: unknown;
 };
 
-export type PostBotsByBotIdAcpCodexOauthDeviceCancelResponse = PostBotsByBotIdAcpCodexOauthDeviceCancelResponses[keyof PostBotsByBotIdAcpCodexOauthDeviceCancelResponses];
-
-export type PostBotsByBotIdAcpCodexOauthDevicePollData = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollData = {
     /**
-     * Device authorization session
+     * Login reference
      */
-    body: HandlersAcpCodexOAuthDeviceSessionRequest;
+    body: ExternalagentCodexDeviceLoginPollRequest;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/codex/oauth/device/poll';
+    url: '/bots/{bot_id}/agents/{id}/codex/login/device/poll';
 };
 
-export type PostBotsByBotIdAcpCodexOauthDevicePollErrors = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors = {
     /**
      * Bad Request
      */
@@ -4316,60 +5407,175 @@ export type PostBotsByBotIdAcpCodexOauthDevicePollErrors = {
      * Forbidden
      */
     403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
 };
 
-export type PostBotsByBotIdAcpCodexOauthDevicePollError = PostBotsByBotIdAcpCodexOauthDevicePollErrors[keyof PostBotsByBotIdAcpCodexOauthDevicePollErrors];
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollError = PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors];
 
-export type PostBotsByBotIdAcpCodexOauthDevicePollResponses = {
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses = {
     /**
      * OK
      */
-    200: HandlersAcpCodexOAuthDeviceStatusResponse;
+    200: ExternalagentCodexDeviceLoginPollResponse;
 };
 
-export type PostBotsByBotIdAcpCodexOauthDevicePollResponse = PostBotsByBotIdAcpCodexOauthDevicePollResponses[keyof PostBotsByBotIdAcpCodexOauthDevicePollResponses];
+export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponse = PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses];
 
-export type GetBotsByBotIdAcpCodexOauthStatusData = {
+export type DeleteBotsByBotIdAgentsByIdCredentialData = {
     body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/acp/codex/oauth/status';
+    url: '/bots/{bot_id}/agents/{id}/credential';
 };
 
-export type GetBotsByBotIdAcpCodexOauthStatusErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
+export type DeleteBotsByBotIdAgentsByIdCredentialErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
-export type GetBotsByBotIdAcpCodexOauthStatusError = GetBotsByBotIdAcpCodexOauthStatusErrors[keyof GetBotsByBotIdAcpCodexOauthStatusErrors];
+export type DeleteBotsByBotIdAgentsByIdCredentialError = DeleteBotsByBotIdAgentsByIdCredentialErrors[keyof DeleteBotsByBotIdAgentsByIdCredentialErrors];
 
-export type GetBotsByBotIdAcpCodexOauthStatusResponses = {
+export type DeleteBotsByBotIdAgentsByIdCredentialResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetBotsByBotIdAgentsByIdCredentialData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/credential';
+};
+
+export type GetBotsByBotIdAgentsByIdCredentialErrors = {
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdCredentialError = GetBotsByBotIdAgentsByIdCredentialErrors[keyof GetBotsByBotIdAgentsByIdCredentialErrors];
+
+export type GetBotsByBotIdAgentsByIdCredentialResponses = {
     /**
      * OK
      */
-    200: HandlersAcpCodexOAuthStatus;
+    200: AgentcredentialPublicCredential;
 };
 
-export type GetBotsByBotIdAcpCodexOauthStatusResponse = GetBotsByBotIdAcpCodexOauthStatusResponses[keyof GetBotsByBotIdAcpCodexOauthStatusResponses];
+export type GetBotsByBotIdAgentsByIdCredentialResponse = GetBotsByBotIdAgentsByIdCredentialResponses[keyof GetBotsByBotIdAgentsByIdCredentialResponses];
+
+export type PutBotsByBotIdAgentsByIdCredentialData = {
+    /**
+     * Secret
+     */
+    body: HandlersAgentCredentialPutRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/credential';
+};
+
+export type PutBotsByBotIdAgentsByIdCredentialErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PutBotsByBotIdAgentsByIdCredentialError = PutBotsByBotIdAgentsByIdCredentialErrors[keyof PutBotsByBotIdAgentsByIdCredentialErrors];
+
+export type PutBotsByBotIdAgentsByIdCredentialResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialPublicCredential;
+};
+
+export type PutBotsByBotIdAgentsByIdCredentialResponse = PutBotsByBotIdAgentsByIdCredentialResponses[keyof PutBotsByBotIdAgentsByIdCredentialResponses];
+
+export type GetBotsByBotIdAgentsByIdModelsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/models';
+};
+
+export type GetBotsByBotIdAgentsByIdModelsErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdModelsError = GetBotsByBotIdAgentsByIdModelsErrors[keyof GetBotsByBotIdAgentsByIdModelsErrors];
+
+export type GetBotsByBotIdAgentsByIdModelsResponses = {
+    /**
+     * OK
+     */
+    200: ExternalModelCatalog;
+};
+
+export type GetBotsByBotIdAgentsByIdModelsResponse = GetBotsByBotIdAgentsByIdModelsResponses[keyof GetBotsByBotIdAgentsByIdModelsResponses];
 
 export type PostBotsByBotIdBackupExportData = {
     /**
@@ -6066,6 +7272,10 @@ export type DeleteBotsByBotIdContainerSkillsErrors = {
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
@@ -6094,7 +7304,12 @@ export type GetBotsByBotIdContainerSkillsData = {
          */
         bot_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Workspace target ID
+         */
+        workspace_target_id?: string;
+    };
     url: '/bots/{bot_id}/container/skills';
 };
 
@@ -6153,9 +7368,13 @@ export type PostBotsByBotIdContainerSkillsErrors = {
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -6197,6 +7416,10 @@ export type PostBotsByBotIdContainerSkillsActionsErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -6473,6 +7696,524 @@ export type GetBotsByBotIdContainerTerminalWsErrors = {
 
 export type GetBotsByBotIdContainerTerminalWsError = GetBotsByBotIdContainerTerminalWsErrors[keyof GetBotsByBotIdContainerTerminalWsErrors];
 
+export type GetBotsByBotIdDependenciesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+        /**
+         * Refresh definitions and workspace discovery
+         */
+        refresh?: boolean;
+    };
+    url: '/bots/{bot_id}/dependencies';
+};
+
+export type GetBotsByBotIdDependenciesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdDependenciesError = GetBotsByBotIdDependenciesErrors[keyof GetBotsByBotIdDependenciesErrors];
+
+export type GetBotsByBotIdDependenciesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyListResponse;
+};
+
+export type GetBotsByBotIdDependenciesResponse = GetBotsByBotIdDependenciesResponses[keyof GetBotsByBotIdDependenciesResponses];
+
+export type PostBotsByBotIdDependenciesCheckUpdatesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/check-updates';
+};
+
+export type PostBotsByBotIdDependenciesCheckUpdatesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesCheckUpdatesError = PostBotsByBotIdDependenciesCheckUpdatesErrors[keyof PostBotsByBotIdDependenciesCheckUpdatesErrors];
+
+export type PostBotsByBotIdDependenciesCheckUpdatesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyListResponse;
+};
+
+export type PostBotsByBotIdDependenciesCheckUpdatesResponse = PostBotsByBotIdDependenciesCheckUpdatesResponses[keyof PostBotsByBotIdDependenciesCheckUpdatesResponses];
+
+export type PostBotsByBotIdDependenciesPreflightData = {
+    /**
+     * Dependencies to check
+     */
+    body: HandlersWorkspaceDependencyPreflightRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/preflight';
+};
+
+export type PostBotsByBotIdDependenciesPreflightErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesPreflightError = PostBotsByBotIdDependenciesPreflightErrors[keyof PostBotsByBotIdDependenciesPreflightErrors];
+
+export type PostBotsByBotIdDependenciesPreflightResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyPreflightResponse;
+};
+
+export type PostBotsByBotIdDependenciesPreflightResponse = PostBotsByBotIdDependenciesPreflightResponses[keyof PostBotsByBotIdDependenciesPreflightResponses];
+
+export type DeleteBotsByBotIdDependenciesByDepIdData = {
+    /**
+     * Prepared definition revision (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}';
+};
+
+export type DeleteBotsByBotIdDependenciesByDepIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdDependenciesByDepIdError = DeleteBotsByBotIdDependenciesByDepIdErrors[keyof DeleteBotsByBotIdDependenciesByDepIdErrors];
+
+export type DeleteBotsByBotIdDependenciesByDepIdResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type DeleteBotsByBotIdDependenciesByDepIdResponse = DeleteBotsByBotIdDependenciesByDepIdResponses[keyof DeleteBotsByBotIdDependenciesByDepIdResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdInstallData = {
+    /**
+     * Version to install (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/install';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdInstallErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdInstallError = PostBotsByBotIdDependenciesByDepIdInstallErrors[keyof PostBotsByBotIdDependenciesByDepIdInstallErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdInstallResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdInstallResponse = PostBotsByBotIdDependenciesByDepIdInstallResponses[keyof PostBotsByBotIdDependenciesByDepIdInstallResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallData = {
+    /**
+     * Version to install (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/reinstall';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallError = PostBotsByBotIdDependenciesByDepIdReinstallErrors[keyof PostBotsByBotIdDependenciesByDepIdReinstallErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdReinstallResponse = PostBotsByBotIdDependenciesByDepIdReinstallResponses[keyof PostBotsByBotIdDependenciesByDepIdReinstallResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/rollback';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackError = PostBotsByBotIdDependenciesByDepIdRollbackErrors[keyof PostBotsByBotIdDependenciesByDepIdRollbackErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyOperationResponse;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRollbackResponse = PostBotsByBotIdDependenciesByDepIdRollbackResponses[keyof PostBotsByBotIdDependenciesByDepIdRollbackResponses];
+
+export type GetBotsByBotIdDependenciesByDepIdScriptData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Action
+         */
+        action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+        /**
+         * Keep a previously prepared definition revision
+         */
+        definition_revision?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/script';
+};
+
+export type GetBotsByBotIdDependenciesByDepIdScriptErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdDependenciesByDepIdScriptError = GetBotsByBotIdDependenciesByDepIdScriptErrors[keyof GetBotsByBotIdDependenciesByDepIdScriptErrors];
+
+export type GetBotsByBotIdDependenciesByDepIdScriptResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyScriptResponse;
+};
+
+export type GetBotsByBotIdDependenciesByDepIdScriptResponse = GetBotsByBotIdDependenciesByDepIdScriptResponses[keyof GetBotsByBotIdDependenciesByDepIdScriptResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateData = {
+    /**
+     * Version to update to (optional)
+     */
+    body?: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/dependencies/{dep_id}/update';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateError = PostBotsByBotIdDependenciesByDepIdUpdateErrors[keyof PostBotsByBotIdDependenciesByDepIdUpdateErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdUpdateResponse = PostBotsByBotIdDependenciesByDepIdUpdateResponses[keyof PostBotsByBotIdDependenciesByDepIdUpdateResponses];
+
 export type GetBotsByBotIdEmailBindingsData = {
     body?: never;
     path: {
@@ -6688,81 +8429,6 @@ export type GetBotsByBotIdEmailOutboxByIdResponses = {
 
 export type GetBotsByBotIdEmailOutboxByIdResponse = GetBotsByBotIdEmailOutboxByIdResponses[keyof GetBotsByBotIdEmailOutboxByIdResponses];
 
-export type DeleteBotsByBotIdHeartbeatLogsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/heartbeat/logs';
-};
-
-export type DeleteBotsByBotIdHeartbeatLogsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteBotsByBotIdHeartbeatLogsError = DeleteBotsByBotIdHeartbeatLogsErrors[keyof DeleteBotsByBotIdHeartbeatLogsErrors];
-
-export type DeleteBotsByBotIdHeartbeatLogsResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdHeartbeatLogsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Limit
-         */
-        limit?: number;
-        /**
-         * Offset
-         */
-        offset?: number;
-    };
-    url: '/bots/{bot_id}/heartbeat/logs';
-};
-
-export type GetBotsByBotIdHeartbeatLogsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdHeartbeatLogsError = GetBotsByBotIdHeartbeatLogsErrors[keyof GetBotsByBotIdHeartbeatLogsErrors];
-
-export type GetBotsByBotIdHeartbeatLogsResponses = {
-    /**
-     * OK
-     */
-    200: HeartbeatListLogsResponse;
-};
-
-export type GetBotsByBotIdHeartbeatLogsResponse = GetBotsByBotIdHeartbeatLogsResponses[keyof GetBotsByBotIdHeartbeatLogsResponses];
-
 export type GetBotsByBotIdHooksEventsData = {
     body?: never;
     path: {
@@ -6845,12 +8511,7 @@ export type PostBotsByBotIdHooksTestResponse = PostBotsByBotIdHooksTestResponses
 export type GetBotsByBotIdMcpData = {
     body?: never;
     path?: never;
-    query?: {
-        /**
-         * Include plugin-managed hidden MCP connections
-         */
-        include_managed?: boolean;
-    };
+    query?: never;
     url: '/bots/{bot_id}/mcp';
 };
 
@@ -6919,7 +8580,7 @@ export type PostBotsByBotIdMcpResponses = {
     /**
      * Created
      */
-    201: GithubComMemohaiMemohInternalMcpConnection;
+    201: GithubComFelinicsMemohInternalMcpConnection;
 };
 
 export type PostBotsByBotIdMcpResponse = PostBotsByBotIdMcpResponses[keyof PostBotsByBotIdMcpResponses];
@@ -6957,6 +8618,75 @@ export type PostBotsByBotIdMcpOpsBatchDeleteResponses = {
      */
     204: unknown;
 };
+
+export type GetBotsByBotIdMcpOpsExportData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/bots/{bot_id}/mcp-ops/export';
+};
+
+export type GetBotsByBotIdMcpOpsExportErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdMcpOpsExportError = GetBotsByBotIdMcpOpsExportErrors[keyof GetBotsByBotIdMcpOpsExportErrors];
+
+export type GetBotsByBotIdMcpOpsExportResponses = {
+    /**
+     * OK
+     */
+    200: McpExportResponse;
+};
+
+export type GetBotsByBotIdMcpOpsExportResponse = GetBotsByBotIdMcpOpsExportResponses[keyof GetBotsByBotIdMcpOpsExportResponses];
+
+export type PutBotsByBotIdMcpOpsImportData = {
+    /**
+     * mcpServers dict
+     */
+    body: McpImportRequest;
+    path?: never;
+    query?: never;
+    url: '/bots/{bot_id}/mcp-ops/import';
+};
+
+export type PutBotsByBotIdMcpOpsImportErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type PutBotsByBotIdMcpOpsImportError = PutBotsByBotIdMcpOpsImportErrors[keyof PutBotsByBotIdMcpOpsImportErrors];
+
+export type PutBotsByBotIdMcpOpsImportResponses = {
+    /**
+     * OK
+     */
+    200: McpListResponse;
+};
+
+export type PutBotsByBotIdMcpOpsImportResponse = PutBotsByBotIdMcpOpsImportResponses[keyof PutBotsByBotIdMcpOpsImportResponses];
 
 export type PostBotsByBotIdMcpStdioData = {
     /**
@@ -7048,75 +8778,6 @@ export type PostBotsByBotIdMcpStdioByConnectionIdResponses = {
 
 export type PostBotsByBotIdMcpStdioByConnectionIdResponse = PostBotsByBotIdMcpStdioByConnectionIdResponses[keyof PostBotsByBotIdMcpStdioByConnectionIdResponses];
 
-export type GetBotsByBotIdMcpExportData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/bots/{bot_id}/mcp/export';
-};
-
-export type GetBotsByBotIdMcpExportErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdMcpExportError = GetBotsByBotIdMcpExportErrors[keyof GetBotsByBotIdMcpExportErrors];
-
-export type GetBotsByBotIdMcpExportResponses = {
-    /**
-     * OK
-     */
-    200: McpExportResponse;
-};
-
-export type GetBotsByBotIdMcpExportResponse = GetBotsByBotIdMcpExportResponses[keyof GetBotsByBotIdMcpExportResponses];
-
-export type PutBotsByBotIdMcpImportData = {
-    /**
-     * mcpServers dict
-     */
-    body: McpImportRequest;
-    path?: never;
-    query?: never;
-    url: '/bots/{bot_id}/mcp/import';
-};
-
-export type PutBotsByBotIdMcpImportErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutBotsByBotIdMcpImportError = PutBotsByBotIdMcpImportErrors[keyof PutBotsByBotIdMcpImportErrors];
-
-export type PutBotsByBotIdMcpImportResponses = {
-    /**
-     * OK
-     */
-    200: McpListResponse;
-};
-
-export type PutBotsByBotIdMcpImportResponse = PutBotsByBotIdMcpImportResponses[keyof PutBotsByBotIdMcpImportResponses];
-
 export type DeleteBotsByBotIdMcpByIdData = {
     body?: never;
     path: {
@@ -7194,7 +8855,7 @@ export type GetBotsByBotIdMcpByIdResponses = {
     /**
      * OK
      */
-    200: GithubComMemohaiMemohInternalMcpConnection;
+    200: GithubComFelinicsMemohInternalMcpConnection;
 };
 
 export type GetBotsByBotIdMcpByIdResponse = GetBotsByBotIdMcpByIdResponses[keyof GetBotsByBotIdMcpByIdResponses];
@@ -7239,7 +8900,7 @@ export type PutBotsByBotIdMcpByIdResponses = {
     /**
      * OK
      */
-    200: GithubComMemohaiMemohInternalMcpConnection;
+    200: GithubComFelinicsMemohInternalMcpConnection;
 };
 
 export type PutBotsByBotIdMcpByIdResponse = PutBotsByBotIdMcpByIdResponses[keyof PutBotsByBotIdMcpByIdResponses];
@@ -8154,343 +9815,6 @@ export type GetBotsByBotIdMessagesLocateResponses = {
 
 export type GetBotsByBotIdMessagesLocateResponse = GetBotsByBotIdMessagesLocateResponses[keyof GetBotsByBotIdMessagesLocateResponses];
 
-export type GetBotsByBotIdPluginsData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins';
-};
-
-export type GetBotsByBotIdPluginsErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdPluginsError = GetBotsByBotIdPluginsErrors[keyof GetBotsByBotIdPluginsErrors];
-
-export type GetBotsByBotIdPluginsResponses = {
-    /**
-     * OK
-     */
-    200: PluginsListResponse;
-};
-
-export type GetBotsByBotIdPluginsResponse = GetBotsByBotIdPluginsResponses[keyof GetBotsByBotIdPluginsResponses];
-
-export type DeleteBotsByBotIdPluginsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Plugin installation ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins/{id}';
-};
-
-export type DeleteBotsByBotIdPluginsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type DeleteBotsByBotIdPluginsByIdError = DeleteBotsByBotIdPluginsByIdErrors[keyof DeleteBotsByBotIdPluginsByIdErrors];
-
-export type DeleteBotsByBotIdPluginsByIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetBotsByBotIdPluginsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Plugin installation ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins/{id}';
-};
-
-export type GetBotsByBotIdPluginsByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdPluginsByIdError = GetBotsByBotIdPluginsByIdErrors[keyof GetBotsByBotIdPluginsByIdErrors];
-
-export type GetBotsByBotIdPluginsByIdResponses = {
-    /**
-     * OK
-     */
-    200: PluginsInstallation;
-};
-
-export type GetBotsByBotIdPluginsByIdResponse = GetBotsByBotIdPluginsByIdResponses[keyof GetBotsByBotIdPluginsByIdResponses];
-
-export type PostBotsByBotIdPluginsByIdDisableData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Plugin installation ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins/{id}/disable';
-};
-
-export type PostBotsByBotIdPluginsByIdDisableErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdPluginsByIdDisableError = PostBotsByBotIdPluginsByIdDisableErrors[keyof PostBotsByBotIdPluginsByIdDisableErrors];
-
-export type PostBotsByBotIdPluginsByIdDisableResponses = {
-    /**
-     * OK
-     */
-    200: PluginsInstallation;
-};
-
-export type PostBotsByBotIdPluginsByIdDisableResponse = PostBotsByBotIdPluginsByIdDisableResponses[keyof PostBotsByBotIdPluginsByIdDisableResponses];
-
-export type PostBotsByBotIdPluginsByIdEnableData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Plugin installation ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins/{id}/enable';
-};
-
-export type PostBotsByBotIdPluginsByIdEnableErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdPluginsByIdEnableError = PostBotsByBotIdPluginsByIdEnableErrors[keyof PostBotsByBotIdPluginsByIdEnableErrors];
-
-export type PostBotsByBotIdPluginsByIdEnableResponses = {
-    /**
-     * OK
-     */
-    200: PluginsInstallation;
-};
-
-export type PostBotsByBotIdPluginsByIdEnableResponse = PostBotsByBotIdPluginsByIdEnableResponses[keyof PostBotsByBotIdPluginsByIdEnableResponses];
-
-export type PostBotsByBotIdPluginsByIdOauthAuthorizeData = {
-    /**
-     * OAuth authorize request
-     */
-    body?: PluginsOAuthAuthorizeRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Plugin installation ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins/{id}/oauth/authorize';
-};
-
-export type PostBotsByBotIdPluginsByIdOauthAuthorizeErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdPluginsByIdOauthAuthorizeError = PostBotsByBotIdPluginsByIdOauthAuthorizeErrors[keyof PostBotsByBotIdPluginsByIdOauthAuthorizeErrors];
-
-export type PostBotsByBotIdPluginsByIdOauthAuthorizeResponses = {
-    /**
-     * OK
-     */
-    200: McpAuthorizeResult;
-};
-
-export type PostBotsByBotIdPluginsByIdOauthAuthorizeResponse = PostBotsByBotIdPluginsByIdOauthAuthorizeResponses[keyof PostBotsByBotIdPluginsByIdOauthAuthorizeResponses];
-
-export type GetBotsByBotIdPluginsByIdOauthStatusData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Plugin installation ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins/{id}/oauth/status';
-};
-
-export type GetBotsByBotIdPluginsByIdOauthStatusErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetBotsByBotIdPluginsByIdOauthStatusError = GetBotsByBotIdPluginsByIdOauthStatusErrors[keyof GetBotsByBotIdPluginsByIdOauthStatusErrors];
-
-export type GetBotsByBotIdPluginsByIdOauthStatusResponses = {
-    /**
-     * OK
-     */
-    200: PluginsInstallation;
-};
-
-export type GetBotsByBotIdPluginsByIdOauthStatusResponse = GetBotsByBotIdPluginsByIdOauthStatusResponses[keyof GetBotsByBotIdPluginsByIdOauthStatusResponses];
-
-export type PostBotsByBotIdPluginsByIdUninstallData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Plugin installation ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/plugins/{id}/uninstall';
-};
-
-export type PostBotsByBotIdPluginsByIdUninstallErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type PostBotsByBotIdPluginsByIdUninstallError = PostBotsByBotIdPluginsByIdUninstallErrors[keyof PostBotsByBotIdPluginsByIdUninstallErrors];
-
-export type PostBotsByBotIdPluginsByIdUninstallResponses = {
-    /**
-     * OK
-     */
-    200: PluginsInstallation;
-};
-
-export type PostBotsByBotIdPluginsByIdUninstallResponse = PostBotsByBotIdPluginsByIdUninstallResponses[keyof PostBotsByBotIdPluginsByIdUninstallResponses];
-
 export type PostBotsByBotIdQuickActionsExecuteData = {
     /**
      * Quick action payload
@@ -8534,7 +9858,12 @@ export type PostBotsByBotIdQuickActionsExecuteResponse = PostBotsByBotIdQuickAct
 
 export type GetBotsByBotIdScheduleData = {
     body?: never;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/schedule';
 };
@@ -8566,7 +9895,12 @@ export type PostBotsByBotIdScheduleData = {
      * Schedule payload
      */
     body: ScheduleCreateRequest;
-    path?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
     query?: never;
     url: '/bots/{bot_id}/schedule';
 };
@@ -8672,6 +10006,10 @@ export type DeleteBotsByBotIdScheduleByIdData = {
     body?: never;
     path: {
         /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
          * Schedule ID
          */
         id: string;
@@ -8703,6 +10041,10 @@ export type DeleteBotsByBotIdScheduleByIdResponses = {
 export type GetBotsByBotIdScheduleByIdData = {
     body?: never;
     path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
         /**
          * Schedule ID
          */
@@ -8744,6 +10086,10 @@ export type PutBotsByBotIdScheduleByIdData = {
      */
     body: ScheduleUpdateRequest;
     path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
         /**
          * Schedule ID
          */
@@ -8952,6 +10298,40 @@ export type GetBotsByBotIdSessionsEventsResponses = {
 
 export type GetBotsByBotIdSessionsEventsResponse = GetBotsByBotIdSessionsEventsResponses[keyof GetBotsByBotIdSessionsEventsResponses];
 
+export type GetBotsByBotIdSessionsModelPreferenceSeedData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/model-preference-seed';
+};
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedError = GetBotsByBotIdSessionsModelPreferenceSeedErrors[keyof GetBotsByBotIdSessionsModelPreferenceSeedErrors];
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedResponses = {
+    /**
+     * OK
+     */
+    200: HandlersModelPreferenceSeedResponse;
+};
+
+export type GetBotsByBotIdSessionsModelPreferenceSeedResponse = GetBotsByBotIdSessionsModelPreferenceSeedResponses[keyof GetBotsByBotIdSessionsModelPreferenceSeedResponses];
+
 export type DeleteBotsByBotIdSessionsBySessionIdData = {
     body?: never;
     path: {
@@ -9062,6 +10442,10 @@ export type PatchBotsByBotIdSessionsBySessionIdErrors = {
      * Not Found
      */
     404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
 };
 
 export type PatchBotsByBotIdSessionsBySessionIdError = PatchBotsByBotIdSessionsBySessionIdErrors[keyof PatchBotsByBotIdSessionsBySessionIdErrors];
@@ -9095,15 +10479,23 @@ export type GetBotsByBotIdSessionsBySessionIdAcpRuntimeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdAcpRuntimeError = GetBotsByBotIdSessionsBySessionIdAcpRuntimeErrors[keyof GetBotsByBotIdSessionsBySessionIdAcpRuntimeErrors];
@@ -9137,15 +10529,27 @@ export type PostBotsByBotIdSessionsBySessionIdAcpRuntimeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdAcpRuntimeError = PostBotsByBotIdSessionsBySessionIdAcpRuntimeErrors[keyof PostBotsByBotIdSessionsBySessionIdAcpRuntimeErrors];
@@ -9158,6 +10562,63 @@ export type PostBotsByBotIdSessionsBySessionIdAcpRuntimeResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdAcpRuntimeResponse = PostBotsByBotIdSessionsBySessionIdAcpRuntimeResponses[keyof PostBotsByBotIdSessionsBySessionIdAcpRuntimeResponses];
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeData = {
+    /**
+     * ACP session mode selection
+     */
+    body: HandlersAcpRuntimeModeRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/acp-runtime/mode';
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeError = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeErrors[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeErrors];
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeResponses = {
+    /**
+     * OK
+     */
+    200: AcpagentRuntimeStatus;
+};
+
+export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeResponse = PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeResponses[keyof PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModeResponses];
 
 export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelData = {
     /**
@@ -9186,11 +10647,19 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeModelErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
     /**
      * Bad Gateway
      */
@@ -9235,11 +10704,19 @@ export type PatchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoningErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
     /**
      * Bad Gateway
      */
@@ -9295,9 +10772,64 @@ export type PostBotsByBotIdSessionsBySessionIdCompactResponses = {
 
 export type PostBotsByBotIdSessionsBySessionIdCompactResponse = PostBotsByBotIdSessionsBySessionIdCompactResponses[keyof PostBotsByBotIdSessionsBySessionIdCompactResponses];
 
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: {
+        /**
+         * Maximum number of turns to return (default 50, max 200)
+         */
+        limit?: number;
+    };
+    url: '/bots/{bot_id}/sessions/{session_id}/context-lifecycle';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Unauthorized
+     */
+    401: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleError = GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses = {
+    /**
+     * OK
+     */
+    200: HandlersContextLifecycleResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdContextLifecycleResponse = GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses[keyof GetBotsByBotIdSessionsBySessionIdContextLifecycleResponses];
+
 export type PostBotsByBotIdSessionsBySessionIdForkData = {
     /**
-     * Fork source message
+     * Fork source turn
      */
     body: HandlersForkSessionRequest;
     path: {
@@ -9476,11 +11008,15 @@ export type PostBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdSettingsError = PostBotsByBotIdSettingsErrors[keyof PostBotsByBotIdSettingsErrors];
@@ -9513,11 +11049,15 @@ export type PutBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
     500: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PutBotsByBotIdSettingsError = PutBotsByBotIdSettingsErrors[keyof PutBotsByBotIdSettingsErrors];
@@ -9573,11 +11113,11 @@ export type GetBotsByBotIdSkillsCatalogResponses = {
 
 export type GetBotsByBotIdSkillsCatalogResponse = GetBotsByBotIdSkillsCatalogResponses[keyof GetBotsByBotIdSkillsCatalogResponses];
 
-export type PostBotsByBotIdSupermarketInstallPluginData = {
+export type PostBotsByBotIdSupermarketInstallPackageData = {
     /**
-     * Install plugin request
+     * Install Package request
      */
-    body: HandlersInstallPluginRequest;
+    body: HandlersInstallPackageRequest;
     path: {
         /**
          * Bot ID
@@ -9585,10 +11125,10 @@ export type PostBotsByBotIdSupermarketInstallPluginData = {
         bot_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/supermarket/install-plugin';
+    url: '/bots/{bot_id}/supermarket/install-package';
 };
 
-export type PostBotsByBotIdSupermarketInstallPluginErrors = {
+export type PostBotsByBotIdSupermarketInstallPackageErrors = {
     /**
      * Bad Request
      */
@@ -9596,66 +11136,100 @@ export type PostBotsByBotIdSupermarketInstallPluginErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
-export type PostBotsByBotIdSupermarketInstallPluginError = PostBotsByBotIdSupermarketInstallPluginErrors[keyof PostBotsByBotIdSupermarketInstallPluginErrors];
+export type PostBotsByBotIdSupermarketInstallPackageError = PostBotsByBotIdSupermarketInstallPackageErrors[keyof PostBotsByBotIdSupermarketInstallPackageErrors];
 
-export type PostBotsByBotIdSupermarketInstallPluginResponses = {
+export type PostBotsByBotIdSupermarketInstallPackageResponses = {
     /**
      * OK
      */
-    200: PluginsInstallation;
+    200: HandlersInstallRegistryPackageResponse;
 };
 
-export type PostBotsByBotIdSupermarketInstallPluginResponse = PostBotsByBotIdSupermarketInstallPluginResponses[keyof PostBotsByBotIdSupermarketInstallPluginResponses];
+export type PostBotsByBotIdSupermarketInstallPackageResponse = PostBotsByBotIdSupermarketInstallPackageResponses[keyof PostBotsByBotIdSupermarketInstallPackageResponses];
 
-export type PostBotsByBotIdSupermarketInstallSkillData = {
-    /**
-     * Install skill request
-     */
-    body: HandlersInstallSkillRequest;
+export type GetBotsByBotIdSupermarketPackagesData = {
+    body?: never;
     path: {
         /**
          * Bot ID
          */
         bot_id: string;
     };
-    query?: never;
-    url: '/bots/{bot_id}/supermarket/install-skill';
+    query?: {
+        /**
+         * Workspace target ID
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/supermarket/packages';
 };
 
-export type PostBotsByBotIdSupermarketInstallSkillErrors = {
+export type GetBotsByBotIdSupermarketPackagesErrors = {
     /**
-     * Bad Request
+     * Internal Server Error
      */
-    400: HandlersErrorResponse;
+    500: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSupermarketPackagesError = GetBotsByBotIdSupermarketPackagesErrors[keyof GetBotsByBotIdSupermarketPackagesErrors];
+
+export type GetBotsByBotIdSupermarketPackagesResponses = {
+    /**
+     * OK
+     */
+    200: Array<SkillpackagesInstallation>;
+};
+
+export type GetBotsByBotIdSupermarketPackagesResponse = GetBotsByBotIdSupermarketPackagesResponses[keyof GetBotsByBotIdSupermarketPackagesResponses];
+
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Package installation ID
+         */
+        installation_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/supermarket/packages/{installation_id}';
+};
+
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdErrors = {
     /**
      * Not Found
      */
     404: HandlersErrorResponse;
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
 };
 
-export type PostBotsByBotIdSupermarketInstallSkillError = PostBotsByBotIdSupermarketInstallSkillErrors[keyof PostBotsByBotIdSupermarketInstallSkillErrors];
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdError = DeleteBotsByBotIdSupermarketPackagesByInstallationIdErrors[keyof DeleteBotsByBotIdSupermarketPackagesByInstallationIdErrors];
 
-export type PostBotsByBotIdSupermarketInstallSkillResponses = {
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponses = {
     /**
      * OK
      */
-    200: {
-        [key: string]: boolean;
-    };
+    200: SupermarketUninstallPackageResponse;
 };
 
-export type PostBotsByBotIdSupermarketInstallSkillResponse = PostBotsByBotIdSupermarketInstallSkillResponses[keyof PostBotsByBotIdSupermarketInstallSkillResponses];
+export type DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponse = DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponses[keyof DeleteBotsByBotIdSupermarketPackagesByInstallationIdResponses];
 
 export type GetBotsByBotIdTokenUsageData = {
     body?: never;
@@ -9679,7 +11253,7 @@ export type GetBotsByBotIdTokenUsageData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
          */
         session_type?: string;
     };
@@ -9734,7 +11308,7 @@ export type GetBotsByBotIdTokenUsageRecordsData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, heartbeat, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
          */
         session_type?: string;
         /**
@@ -9798,15 +11372,23 @@ export type PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdToolApprovalsByApprovalIdApproveError = PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors[keyof PostBotsByBotIdToolApprovalsByApprovalIdApproveErrors];
@@ -9845,15 +11427,23 @@ export type PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdToolApprovalsByApprovalIdRejectError = PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors[keyof PostBotsByBotIdToolApprovalsByApprovalIdRejectErrors];
@@ -13626,61 +15216,23 @@ export type GetSpeechProvidersByIdModelsResponses = {
 
 export type GetSpeechProvidersByIdModelsResponse = GetSpeechProvidersByIdModelsResponses[keyof GetSpeechProvidersByIdModelsResponses];
 
-export type GetSupermarketPluginsData = {
-    body?: never;
-    path?: never;
-    query?: {
-        /**
-         * Search query
-         */
-        q?: string;
-        /**
-         * Filter by tag
-         */
-        tag?: string;
-        /**
-         * Page number
-         */
-        page?: number;
-        /**
-         * Items per page
-         */
-        limit?: number;
-    };
-    url: '/supermarket/plugins';
-};
-
-export type GetSupermarketPluginsErrors = {
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
-};
-
-export type GetSupermarketPluginsError = GetSupermarketPluginsErrors[keyof GetSupermarketPluginsErrors];
-
-export type GetSupermarketPluginsResponses = {
-    /**
-     * OK
-     */
-    200: HandlersSupermarketPluginListResponse;
-};
-
-export type GetSupermarketPluginsResponse = GetSupermarketPluginsResponses[keyof GetSupermarketPluginsResponses];
-
-export type GetSupermarketPluginsByIdData = {
+export type GetSupermarketArtifactsIconByDigestData = {
     body?: never;
     path: {
         /**
-         * Plugin ID
+         * SHA-256 digest
          */
-        id: string;
+        digest: string;
     };
     query?: never;
-    url: '/supermarket/plugins/{id}';
+    url: '/supermarket/artifacts/icon/{digest}';
 };
 
-export type GetSupermarketPluginsByIdErrors = {
+export type GetSupermarketArtifactsIconByDigestErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
     /**
      * Not Found
      */
@@ -13691,18 +15243,16 @@ export type GetSupermarketPluginsByIdErrors = {
     502: HandlersErrorResponse;
 };
 
-export type GetSupermarketPluginsByIdError = GetSupermarketPluginsByIdErrors[keyof GetSupermarketPluginsByIdErrors];
+export type GetSupermarketArtifactsIconByDigestError = GetSupermarketArtifactsIconByDigestErrors[keyof GetSupermarketArtifactsIconByDigestErrors];
 
-export type GetSupermarketPluginsByIdResponses = {
+export type GetSupermarketArtifactsIconByDigestResponses = {
     /**
      * OK
      */
-    200: PluginsManifest;
+    200: unknown;
 };
 
-export type GetSupermarketPluginsByIdResponse = GetSupermarketPluginsByIdResponses[keyof GetSupermarketPluginsByIdResponses];
-
-export type GetSupermarketSkillsData = {
+export type GetSupermarketPackagesData = {
     body?: never;
     path?: never;
     query?: {
@@ -13711,7 +15261,15 @@ export type GetSupermarketSkillsData = {
          */
         q?: string;
         /**
-         * Filter by tag
+         * Registry ID
+         */
+        registry?: string;
+        /**
+         * Category ID
+         */
+        category?: string;
+        /**
+         * Exact tag
          */
         tag?: string;
         /**
@@ -13722,11 +15280,341 @@ export type GetSupermarketSkillsData = {
          * Items per page
          */
         limit?: number;
+        /**
+         * Sort order
+         */
+        sort?: string;
+    };
+    url: '/supermarket/packages';
+};
+
+export type GetSupermarketPackagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketPackagesError = GetSupermarketPackagesErrors[keyof GetSupermarketPackagesErrors];
+
+export type GetSupermarketPackagesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageListResponse;
+};
+
+export type GetSupermarketPackagesResponse = GetSupermarketPackagesResponses[keyof GetSupermarketPackagesResponses];
+
+export type GetSupermarketRegistriesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/supermarket/registries';
+};
+
+export type GetSupermarketRegistriesErrors = {
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesError = GetSupermarketRegistriesErrors[keyof GetSupermarketRegistriesErrors];
+
+export type GetSupermarketRegistriesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketRegistryListResponse;
+};
+
+export type GetSupermarketRegistriesResponse = GetSupermarketRegistriesResponses[keyof GetSupermarketRegistriesResponses];
+
+export type GetSupermarketRegistriesByRegistryIdCategoriesData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+    };
+    query?: never;
+    url: '/supermarket/registries/{registry_id}/categories';
+};
+
+export type GetSupermarketRegistriesByRegistryIdCategoriesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdCategoriesError = GetSupermarketRegistriesByRegistryIdCategoriesErrors[keyof GetSupermarketRegistriesByRegistryIdCategoriesErrors];
+
+export type GetSupermarketRegistriesByRegistryIdCategoriesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillCategoryListResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdCategoriesResponse = GetSupermarketRegistriesByRegistryIdCategoriesResponses[keyof GetSupermarketRegistriesByRegistryIdCategoriesResponses];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+    };
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Category ID
+         */
+        category?: string;
+        /**
+         * Exact tag
+         */
+        tag?: string;
+        /**
+         * Page number
+         */
+        page?: number;
+        /**
+         * Items per page
+         */
+        limit?: number;
+        /**
+         * Sort order
+         */
+        sort?: string;
+    };
+    url: '/supermarket/registries/{registry_id}/packages';
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesError = GetSupermarketRegistriesByRegistryIdPackagesErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesErrors];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageListResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesResponse = GetSupermarketRegistriesByRegistryIdPackagesResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesResponses];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+        /**
+         * Package ID
+         */
+        package_id: string;
+    };
+    query?: never;
+    url: '/supermarket/registries/{registry_id}/packages/{package_id}';
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageDescriptor;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+        /**
+         * Package ID
+         */
+        package_id: string;
+        /**
+         * Package revision
+         */
+        revision: string;
+    };
+    query?: never;
+    url: '/supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}';
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketSkillPackageDescriptor;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdData = {
+    body?: never;
+    path: {
+        /**
+         * Registry ID
+         */
+        registry_id: string;
+        /**
+         * Package ID
+         */
+        package_id: string;
+        /**
+         * Skill ID
+         */
+        skill_id: string;
+    };
+    query?: never;
+    url: '/supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}';
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdErrors];
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketCatalogSkill;
+};
+
+export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses];
+
+export type GetSupermarketSkillsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Registry ID
+         */
+        registry?: string;
+        /**
+         * Package ID
+         */
+        package?: string;
+        /**
+         * Category ID
+         */
+        category?: string;
+        /**
+         * Exact tag
+         */
+        tag?: string;
+        /**
+         * Page number
+         */
+        page?: number;
+        /**
+         * Items per page
+         */
+        limit?: number;
+        /**
+         * Sort order
+         */
+        sort?: string;
     };
     url: '/supermarket/skills';
 };
 
 export type GetSupermarketSkillsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
     /**
      * Bad Gateway
      */
@@ -13739,69 +15627,10 @@ export type GetSupermarketSkillsResponses = {
     /**
      * OK
      */
-    200: HandlersSupermarketSkillListResponse;
+    200: HandlersSupermarketCatalogSkillListResponse;
 };
 
 export type GetSupermarketSkillsResponse = GetSupermarketSkillsResponses[keyof GetSupermarketSkillsResponses];
-
-export type GetSupermarketSkillsByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Skill ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/supermarket/skills/{id}';
-};
-
-export type GetSupermarketSkillsByIdErrors = {
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
-};
-
-export type GetSupermarketSkillsByIdError = GetSupermarketSkillsByIdErrors[keyof GetSupermarketSkillsByIdErrors];
-
-export type GetSupermarketSkillsByIdResponses = {
-    /**
-     * OK
-     */
-    200: HandlersSupermarketSkillEntry;
-};
-
-export type GetSupermarketSkillsByIdResponse = GetSupermarketSkillsByIdResponses[keyof GetSupermarketSkillsByIdResponses];
-
-export type GetSupermarketTagsData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/supermarket/tags';
-};
-
-export type GetSupermarketTagsErrors = {
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
-};
-
-export type GetSupermarketTagsError = GetSupermarketTagsErrors[keyof GetSupermarketTagsErrors];
-
-export type GetSupermarketTagsResponses = {
-    /**
-     * OK
-     */
-    200: HandlersSupermarketTagsResponse;
-};
-
-export type GetSupermarketTagsResponse = GetSupermarketTagsResponses[keyof GetSupermarketTagsResponses];
 
 export type GetTranscriptionModelsData = {
     body?: never;
@@ -14429,6 +16258,35 @@ export type PutUsersMeChannelsByPlatformResponses = {
 
 export type PutUsersMeChannelsByPlatformResponse = PutUsersMeChannelsByPlatformResponses[keyof PutUsersMeChannelsByPlatformResponses];
 
+export type GetUsersMeComputerAccessData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/users/me/computer-access';
+};
+
+export type GetUsersMeComputerAccessErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: HandlersErrorResponse;
+};
+
+export type GetUsersMeComputerAccessError = GetUsersMeComputerAccessErrors[keyof GetUsersMeComputerAccessErrors];
+
+export type GetUsersMeComputerAccessResponses = {
+    /**
+     * OK
+     */
+    200: WorkspaceWorkspaceTargetGrantsResponse;
+};
+
+export type GetUsersMeComputerAccessResponse = GetUsersMeComputerAccessResponses[keyof GetUsersMeComputerAccessResponses];
+
 export type PutUsersMePasswordData = {
     /**
      * Password payload
@@ -14949,3 +16807,69 @@ export type GetWebhookTunnelStatusResponses = {
 };
 
 export type GetWebhookTunnelStatusResponse = GetWebhookTunnelStatusResponses[keyof GetWebhookTunnelStatusResponses];
+
+export type GetWorkspaceDependenciesCatalogData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Refresh the remote catalog
+         */
+        refresh?: boolean;
+    };
+    url: '/workspace-dependencies/catalog';
+};
+
+export type GetWorkspaceDependenciesCatalogErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetWorkspaceDependenciesCatalogError = GetWorkspaceDependenciesCatalogErrors[keyof GetWorkspaceDependenciesCatalogErrors];
+
+export type GetWorkspaceDependenciesCatalogResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyCatalogResponse;
+};
+
+export type GetWorkspaceDependenciesCatalogResponse = GetWorkspaceDependenciesCatalogResponses[keyof GetWorkspaceDependenciesCatalogResponses];
+
+export type GetWorkspaceDependenciesIconsByDigestData = {
+    body?: never;
+    path: {
+        /**
+         * SHA-256 digest
+         */
+        digest: string;
+    };
+    query?: never;
+    url: '/workspace-dependencies/icons/{digest}';
+};
+
+export type GetWorkspaceDependenciesIconsByDigestErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type GetWorkspaceDependenciesIconsByDigestError = GetWorkspaceDependenciesIconsByDigestErrors[keyof GetWorkspaceDependenciesIconsByDigestErrors];
+
+export type GetWorkspaceDependenciesIconsByDigestResponses = {
+    /**
+     * OK
+     */
+    200: unknown;
+};

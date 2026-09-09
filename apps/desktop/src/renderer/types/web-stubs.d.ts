@@ -45,6 +45,10 @@ declare module '@memohai/web/api-client' {
   export function setupApiClient(options?: SetupApiClientOptions): void
 }
 
+declare module '@memohai/web/lib/file-drop-guard' {
+  export function installFileDropGuard(): void
+}
+
 declare module '@memohai/web/lib/keyboard-commands' {
   export const appKeyboardCommands: {
     readonly closeCurrentWorkspaceTab: 'close-current-workspace-tab'

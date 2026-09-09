@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"testing"
 
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 // TestResolveExitCodeFromCommands runs real subprocesses via /bin/sh -c so we

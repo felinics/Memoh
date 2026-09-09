@@ -1,6 +1,6 @@
 package tailscale
 
-import netctl "github.com/memohai/memoh/internal/network"
+import netctl "github.com/felinics/memoh/internal/network"
 
 func schema() netctl.ConfigSchema {
 	return netctl.ConfigSchema{

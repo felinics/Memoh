@@ -1,8 +1,8 @@
 package application
 
 import (
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/turn"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // chatRequestFromCommand translates the pure-data command into the
@@ -81,6 +81,7 @@ func toolApprovalInputFromResponse(in turn.ToolApprovalResponse) ToolApprovalRes
 		ExplicitID:                 in.ExplicitID,
 		ReplyExternalMessageID:     in.ReplyExternalMessageID,
 		Decision:                   in.Decision,
+		OptionID:                   in.OptionID,
 		Reason:                     in.Reason,
 		ChatToken:                  in.ChatToken,
 		SuppressActivePromptAttach: in.SuppressActivePromptAttach,

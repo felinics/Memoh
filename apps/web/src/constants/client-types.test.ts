@@ -31,14 +31,14 @@ describe('LLM client type lists', () => {
     expect(isManagedModelCatalogClientType('anthropic-messages')).toBe(false)
   })
 
-  it('suggests tool calls only for manual agent protocol client types', () => {
+  it('suggests agent capabilities without implying vision for manual client types', () => {
     for (const clientType of [
       'openai-responses',
       'openai-completions',
       'anthropic-messages',
       'google-generative-ai',
     ]) {
-      expect(suggestedModelCompatibilities(clientType)).toEqual(['tool-call'])
+      expect(suggestedModelCompatibilities(clientType)).toEqual(['tool-call', 'reasoning'])
     }
 
     expect(suggestedModelCompatibilities('openai-codex')).toEqual([])

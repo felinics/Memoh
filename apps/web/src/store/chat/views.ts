@@ -38,8 +38,8 @@ export function createChatViews(deps: ChatViewsDeps) {
   let startSessionRuntime: (botId: string, sessionId: string) => void = () => {}
   let discardDraft: (view: ChatViewEntry) => void = () => {}
   let invalidateDraftCommand: (target: ChatViewTarget) => void = () => {}
-  let saveDraftACP: () => void = () => {}
-  let activateDraftACP: (target: ChatViewTarget) => void = () => {}
+  let saveDraftExternalAgent: () => void = () => {}
+  let activateDraftExternalAgent: (target: ChatViewTarget) => void = () => {}
   let ensureVisibleSummary: (botId: string, sessionId: string) => void = () => {}
   const projectionVersion = ref(0)
 
@@ -218,6 +218,23 @@ export function createChatViews(deps: ChatViewsDeps) {
     )?.sessionId ?? null
   })
 
+  // Stable reference while the set is unchanged, so watchers only fire when a
+  // session actually starts or finishes streaming.
+  let lastStreamingSessionIds: string[] = []
+  const streamingSessionIds = computed(() => {
+    void projectionVersion.value
+    const botId = (deps.currentBotId.value ?? '').trim()
+    const ids = chatViews.entries()
+      .filter(view => view.kind === 'session' && view.botId === botId && view.sessionId && isSessionStreaming(botId, view.sessionId))
+      .map(view => view.sessionId as string)
+      .sort()
+    if (ids.length === lastStreamingSessionIds.length && ids.every((id, index) => id === lastStreamingSessionIds[index])) {
+      return lastStreamingSessionIds
+    }
+    lastStreamingSessionIds = ids
+    return ids
+  })
+
   const streaming = computed(() => {
     const botId = (deps.currentBotId.value ?? '').trim()
     const sessionId = (deps.sessionId.value ?? '').trim()
@@ -307,7 +324,7 @@ export function createChatViews(deps: ChatViewsDeps) {
       ensureVisibleSummary(change.view.botId, change.view.sessionId)
     }
     if (change.view.kind === 'draft' && focusedViewId.value === change.view.viewId) {
-      activateDraftACP({
+      activateDraftExternalAgent({
         botId: change.view.botId,
         sessionId: null,
         viewId: change.view.viewId,
@@ -331,11 +348,11 @@ export function createChatViews(deps: ChatViewsDeps) {
   function focusChatView(viewId: string) {
     const id = viewId.trim()
     if (!id || id === focusedViewId.value) return
-    saveDraftACP()
+    saveDraftExternalAgent()
     focusedViewId.value = id
     const view = chatViews.getPanel(id)
     if (view?.kind === 'draft') {
-      activateDraftACP({ botId: view.botId, sessionId: null, viewId: view.viewId })
+      activateDraftExternalAgent({ botId: view.botId, sessionId: null, viewId: view.viewId })
     }
   }
 
@@ -354,8 +371,8 @@ export function createChatViews(deps: ChatViewsDeps) {
     stopSessionRuntime: (botId: string, sessionId: string) => void
     discardDraft: (view: ChatViewEntry) => void
     invalidateDraftCommand: (target: ChatViewTarget) => void
-    saveDraftACP: () => void
-    activateDraftACP: (target: ChatViewTarget) => void
+    saveDraftExternalAgent: () => void
+    activateDraftExternalAgent: (target: ChatViewTarget) => void
     refreshAppliedHook: typeof refreshAppliedHook
     ensureVisibleSummary: (botId: string, sessionId: string) => void
   }) {
@@ -364,8 +381,8 @@ export function createChatViews(deps: ChatViewsDeps) {
     stopSessionRuntime = options.stopSessionRuntime
     discardDraft = options.discardDraft
     invalidateDraftCommand = options.invalidateDraftCommand
-    saveDraftACP = options.saveDraftACP
-    activateDraftACP = options.activateDraftACP
+    saveDraftExternalAgent = options.saveDraftExternalAgent
+    activateDraftExternalAgent = options.activateDraftExternalAgent
     refreshAppliedHook = options.refreshAppliedHook
     ensureVisibleSummary = options.ensureVisibleSummary
   }
@@ -401,6 +418,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     locateMessageByExternalId,
     isSessionStreaming,
     streamingSessionId,
+    streamingSessionIds,
     streaming,
     isChatViewStreaming,
     workspaceTargetSelectionFor,

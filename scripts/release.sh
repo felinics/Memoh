@@ -122,14 +122,14 @@ build_archive() {
   CGO_ENABLED=0 GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" \
     go build \
     -trimpath \
-    -ldflags "-s -w -X github.com/memohai/memoh/internal/version.Version=${VERSION} -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
+    -ldflags "-s -w -X github.com/felinics/memoh/internal/version.Version=${VERSION} -X github.com/felinics/memoh/internal/version.CommitHash=${COMMIT_HASH} -X github.com/felinics/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o "$target_dir/$server_binary_name" \
     "$ROOT_DIR/cmd/agent"
 
   CGO_ENABLED=0 GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" \
     go build \
     -trimpath \
-    -ldflags "-s -w -X github.com/memohai/memoh/internal/version.Version=${VERSION} -X github.com/memohai/memoh/internal/version.CommitHash=${COMMIT_HASH} -X github.com/memohai/memoh/internal/version.BuildTime=${BUILD_TIME}" \
+    -ldflags "-s -w -X github.com/felinics/memoh/internal/version.Version=${VERSION} -X github.com/felinics/memoh/internal/version.CommitHash=${COMMIT_HASH} -X github.com/felinics/memoh/internal/version.BuildTime=${BUILD_TIME}" \
     -o "$target_dir/$channel_binary_name" \
     "$ROOT_DIR/cmd/channel"
 

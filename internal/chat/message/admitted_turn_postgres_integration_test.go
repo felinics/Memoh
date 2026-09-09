@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
 
 // Admission allocates turn_id and turn_position before any message exists
@@ -138,7 +138,7 @@ func TestPostgresToolTailRoundHonoursAdmittedTurnIdentity(t *testing.T) {
 	}
 }
 
-// Entry points with no admission — channel inbound, schedules, heartbeats —
+// Entry points with no admission — channel inbound and schedules —
 // still allocate their own turn here, so the counter must advance for them.
 func TestPostgresPersistAllocatesTurnWhenAdmissionSuppliedNone(t *testing.T) {
 	ctx := context.Background()

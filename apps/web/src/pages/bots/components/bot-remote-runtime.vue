@@ -4,10 +4,7 @@
     :title="t('bots.remoteRuntime.title')"
   >
     <div class="space-y-8">
-      <SettingsSection
-        v-if="!loadFailed"
-        :title="t('bots.remoteRuntime.primary')"
-      >
+      <SettingsSection v-if="!loadFailed">
         <InlineLoadingRow
           v-if="initialLoading"
           surface="card-row"
@@ -18,12 +15,9 @@
         <SettingsRow
           v-else
           stack="sm"
+          :label="t('bots.remoteRuntime.primary')"
+          :description="t('bots.remoteRuntime.primaryDescription')"
         >
-          <template #content>
-            <p class="text-xs text-muted-foreground">
-              {{ t('bots.remoteRuntime.primaryDescription') }}
-            </p>
-          </template>
           <Select
             :model-value="primaryTargetId"
             :disabled="primarySaving"
@@ -47,16 +41,6 @@
       </SettingsSection>
 
       <SettingsSection :title="t('bots.remoteRuntime.workspaceTitle')">
-        <template #actions>
-          <Button
-            size="sm"
-            @click="openAddDialog"
-          >
-            <Plus class="size-4" />
-            {{ t('bots.remoteRuntime.addComputer') }}
-          </Button>
-        </template>
-
         <InlineLoadingRow
           v-if="initialLoading"
           surface="card-row"
@@ -94,16 +78,17 @@
             </Button>
           </SettingsRow>
 
+          <!-- The native workspace is part of every bot — listed for the
+               primary/status readout, never switchable. -->
           <SettingsRow
-            v-for="target in validTargets"
-            :key="target.target_id"
+            v-if="nativeTarget"
             stack="sm"
-            :label="targetName(target)"
-            :description="target.kind === 'native' ? t('bots.remoteRuntime.serverDescription') : undefined"
+            :label="t('bots.remoteRuntime.nativeWorkspace')"
+            :description="t('bots.remoteRuntime.serverDescription')"
           >
             <div class="flex items-center gap-2">
               <Badge
-                v-if="target.primary"
+                v-if="nativeTarget.primary"
                 variant="secondary"
                 size="sm"
               >
@@ -112,114 +97,71 @@
               <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span
                   class="size-1.5 rounded-full"
-                  :class="statusDotClass(targetStatus(target))"
+                  :class="statusDotClass(targetStatus(nativeTarget))"
                 />
-                {{ statusLabel(targetStatus(target)) }}
+                {{ statusLabel(targetStatus(nativeTarget)) }}
               </span>
-
-              <DropdownMenu v-if="target.kind === 'remote'">
-                <DropdownMenuTrigger as-child>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    :aria-label="t('common.actions')"
-                  >
-                    <MoreHorizontal class="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    variant="destructive"
-                    @select="pendingDeleteTarget = target"
-                  >
-                    <Trash2 class="size-4" />
-                    {{ t('bots.remoteRuntime.removeFromBot') }}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </div>
           </SettingsRow>
+
+          <!-- Every account computer gets a row; the switch IS the ACL. -->
+          <SettingsRow
+            v-for="row in computerRows"
+            :key="row.key"
+            stack="sm"
+            :label="row.name"
+          >
+            <div class="flex items-center gap-2">
+              <Badge
+                v-if="row.primary"
+                variant="secondary"
+                size="sm"
+              >
+                {{ t('bots.remoteRuntime.defaultBadge') }}
+              </Badge>
+              <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  class="size-1.5 rounded-full"
+                  :class="statusDotClass(row.status)"
+                />
+                {{ statusLabel(row.status) }}
+              </span>
+              <Switch
+                :model-value="accessOverrides.get(row.key) ?? row.enabled"
+                :disabled="accessPending.has(row.key)"
+                :aria-label="row.name"
+                @update:model-value="toggleAccess(row, $event)"
+              />
+            </div>
+          </SettingsRow>
+
+          <SettingsRow
+            v-if="computerRows.length === 0"
+            stack="sm"
+            :label="t('bots.remoteRuntime.noComputers')"
+          />
         </template>
+      </SettingsSection>
+
+      <!-- Connect/disconnect is account-level work — its own card, not part of
+           the per-bot workspace list above. -->
+      <SettingsSection v-if="!initialLoading && !loadFailed">
+        <SettingsRow
+          stack="sm"
+          :label="t('bots.remoteRuntime.connectManage')"
+          :description="t('bots.remoteRuntime.connectManageDescription')"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            @click="openComputers"
+          >
+            {{ computerRows.length ? t('bots.remoteRuntime.manageComputers') : t('runtimes.connect') }}
+          </Button>
+        </SettingsRow>
       </SettingsSection>
     </div>
   </PageShell>
-
-  <Dialog v-model:open="mountDialogOpen">
-    <DialogContent>
-      <form @submit.prevent="saveMount">
-        <DialogHeader>
-          <DialogTitle>
-            {{ t('bots.remoteRuntime.addTitle') }}
-          </DialogTitle>
-          <DialogDescription>
-            {{ t('bots.remoteRuntime.mountDescription') }}
-          </DialogDescription>
-        </DialogHeader>
-
-        <FormStack class="mt-4">
-          <FieldStack
-            :label="t('bots.remoteRuntime.computer')"
-            :help="mountComputerHelp"
-          >
-            <Select
-              v-model="mountRuntimeId"
-              :disabled="runtimesLoading || mountSaving"
-            >
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="t('bots.remoteRuntime.selectComputer')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="runtime in dialogRuntimeItems"
-                  :key="runtime.id"
-                  :value="runtime.id"
-                >
-                  {{ runtime.name }} · {{ runtime.online ? t('runtimes.status.online') : t('runtimes.status.offline') }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </FieldStack>
-        </FormStack>
-
-        <DialogFooter class="mt-4">
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="mountSaving"
-            @click="mountDialogOpen = false"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            v-if="!runtimesLoading && availableRuntimeItems.length === 0"
-            type="button"
-            @click="openComputers"
-          >
-            {{ t('runtimes.connect') }}
-          </Button>
-          <Button
-            v-else
-            type="submit"
-            :disabled="!canSaveMount"
-            :loading="mountSaving"
-          >
-            {{ t('common.add') }}
-          </Button>
-        </DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>
-
-  <ConfirmDeleteDialog
-    :open="!!pendingDeleteTarget"
-    :title="t('bots.remoteRuntime.deleteTitle')"
-    :description="deleteDescription"
-    :cancel-label="t('common.cancel')"
-    :confirm-label="t('bots.remoteRuntime.removeFromBot')"
-    :loading="deletingTarget"
-    @update:open="(open) => { if (!open) pendingDeleteTarget = null }"
-    @confirm="deleteTarget"
-  />
 </template>
 
 <script setup lang="ts">
@@ -228,40 +170,28 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useMutation, useQuery } from '@pinia/colada'
 import {
-  deleteBotsByBotIdWorkspaceTargetsByTargetId,
   getBotsByBotIdWorkspaceTargets,
-  getUsersMeRuntimes,
   putBotsByBotIdWorkspaceTargetsPrimary,
-  putBotsByBotIdWorkspaceTargetsRemotesByRuntimeId,
   type WorkspaceWorkspaceTarget,
 } from '@memohai/sdk'
 import {
   Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Switch,
   toast,
 } from '@felinic/ui'
-import { MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
 import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
-import { ConfirmDeleteDialog, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
+import { InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useAccountRuntimes, useComputerAccessActions } from '@/components/computer/use-computer-access'
 
 const props = defineProps<{
   botId: string
@@ -272,10 +202,16 @@ type ValidWorkspaceTarget = WorkspaceWorkspaceTarget & {
   kind: string
 }
 
-type RuntimeOption = {
-  id: string
+// One row per account computer (mounted or not), plus stale mounts whose
+// runtime was revoked — those stay listed so access can still be switched off.
+type ComputerRow = {
+  key: string
+  runtimeId?: string
+  targetId?: string
   name: string
-  online: boolean
+  status: string
+  primary: boolean
+  enabled: boolean
 }
 
 const { t } = useI18n()
@@ -302,18 +238,11 @@ const {
 })
 
 const {
-  data: runtimes,
-  error: runtimesError,
+  runtimes,
   isLoading: runtimesLoading,
   refetch: refetchRuntimes,
-} = useQuery({
-  key: () => ['remote-runtimes'],
-  query: async () => {
-    const { data } = await getUsersMeRuntimes({ throwOnError: true })
-    return data
-  },
-  refetchOnWindowFocus: true,
-})
+} = useAccountRuntimes()
+const { grantAccess, revokeAccess } = useComputerAccessActions()
 
 const targetItems = ref<WorkspaceWorkspaceTarget[]>([])
 
@@ -334,17 +263,16 @@ const validTargets = computed<ValidWorkspaceTarget[]>(() => (
   ))
 ))
 
+const nativeTarget = computed(() => validTargets.value.find(target => target.kind === 'native'))
+
 const runtimeItems = computed(() => runtimes.value ?? [])
-const mountedRuntimeIds = computed(() => new Set(
-  validTargets.value.map(target => target.runtime_id).filter((value): value is string => !!value),
-))
-const availableRuntimeItems = computed(() => runtimeItems.value.filter(runtime => (
-  !!runtime.id && !mountedRuntimeIds.value.has(runtime.id)
-)))
 const primaryTargetId = computed(() => (
   validTargets.value.find(target => target.primary)?.target_id ?? 'native'
 ))
-const initialLoading = computed(() => workspaceTargetsLoading.value && !workspaceTargetsResponse.value)
+const initialLoading = computed(() => (
+  (workspaceTargetsLoading.value && !workspaceTargetsResponse.value)
+  || (runtimesLoading.value && !runtimes.value)
+))
 const loadFailed = computed(() => !!workspaceTargetsError.value && !workspaceTargetsResponse.value)
 const showThisComputerSetup = computed(() => (
   !!desktopRuntimeBridge
@@ -352,74 +280,48 @@ const showThisComputerSetup = computed(() => (
   && !desktopRuntimeState.value.enabled
 ))
 
-const mountDialogOpen = ref(false)
-const mountRuntimeId = ref('')
-const pendingDeleteTarget = ref<ValidWorkspaceTarget | null>(null)
-
-const dialogRuntimeItems = computed<RuntimeOption[]>(() => {
-  return availableRuntimeItems.value.flatMap((runtime): RuntimeOption[] => (
-    runtime.id
-      ? [{
-          id: runtime.id,
-          name: runtimeName(runtime),
-          online: runtime.online ?? false,
-        }]
-      : []
-  ))
-})
-
-const mountComputerHelp = computed(() => {
-  if (runtimesError.value && !runtimes.value) return t('runtimes.loadFailedDescription')
-  if (!runtimesLoading.value && availableRuntimeItems.value.length === 0) {
-    return t('bots.remoteRuntime.noAvailableComputers')
+const computerRows = computed<ComputerRow[]>(() => {
+  const rows: ComputerRow[] = []
+  const covered = new Set<string>()
+  for (const runtime of runtimeItems.value) {
+    if (!runtime.id) continue
+    covered.add(runtime.id)
+    const target = validTargets.value.find(item => item.runtime_id === runtime.id)
+    rows.push({
+      key: runtime.id,
+      runtimeId: runtime.id,
+      targetId: target?.target_id,
+      name: runtimeName(runtime),
+      status: target ? targetStatus(target) : (runtime.online ? 'online' : 'offline'),
+      primary: target?.primary ?? false,
+      enabled: !!target,
+    })
   }
-  return t('bots.remoteRuntime.computerDescription')
+  for (const target of validTargets.value) {
+    if (target.kind !== 'remote' || !target.runtime_id || covered.has(target.runtime_id)) continue
+    rows.push({
+      key: target.target_id,
+      runtimeId: target.runtime_id,
+      targetId: target.target_id,
+      name: targetName(target),
+      status: targetStatus(target),
+      primary: target.primary ?? false,
+      enabled: true,
+    })
+  }
+  return rows
 })
 
-const canSaveMount = computed(() => (
-  !!mountRuntimeId.value
-  && !runtimesLoading.value
-  && !mountSaving.value
-))
-
-const deleteDescription = computed(() => {
-  const target = pendingDeleteTarget.value
-  if (!target) return ''
-  return target.primary
-    ? t('bots.remoteRuntime.deletePrimaryDescription', { name: targetName(target) })
-    : t('bots.remoteRuntime.deleteDescription', { name: targetName(target) })
-})
+// Optimistic overlay: the switch flips immediately and holds until the
+// workspace-targets refetch lands; an error clears the overlay and reverts.
+const accessOverrides = ref(new Map<string, boolean>())
+const accessPending = ref(new Set<string>())
 
 const { mutateAsync: setPrimaryRequest, isLoading: primarySaving } = useMutation({
   mutation: async (targetId: string) => {
     await putBotsByBotIdWorkspaceTargetsPrimary({
       path: { bot_id: props.botId },
       body: { target_id: targetId },
-      throwOnError: true,
-    })
-  },
-})
-
-const { mutateAsync: saveMountRequest, isLoading: mountSaving } = useMutation({
-  mutation: async (runtimeId: string) => {
-    const { data } = await putBotsByBotIdWorkspaceTargetsRemotesByRuntimeId({
-      path: {
-        bot_id: props.botId,
-        runtime_id: runtimeId,
-      },
-      throwOnError: true,
-    })
-    return data
-  },
-})
-
-const { mutateAsync: deleteTargetRequest, isLoading: deletingTarget } = useMutation({
-  mutation: async (targetId: string) => {
-    await deleteBotsByBotIdWorkspaceTargetsByTargetId({
-      path: {
-        bot_id: props.botId,
-        target_id: targetId,
-      },
       throwOnError: true,
     })
   },
@@ -487,49 +389,28 @@ function setLocalPrimary(targetId: string): void {
   }))
 }
 
-function openAddDialog(): void {
-  mountRuntimeId.value = availableRuntimeItems.value[0]?.id ?? ''
-  mountDialogOpen.value = true
-}
-
-async function saveMount(): Promise<void> {
-  if (!canSaveMount.value) return
+async function toggleAccess(row: ComputerRow, enabled: boolean): Promise<void> {
+  if (accessPending.value.has(row.key)) return
+  if (!enabled && !row.targetId) return
+  if (enabled && !row.runtimeId) return
+  accessPending.value = new Set(accessPending.value).add(row.key)
+  accessOverrides.value = new Map(accessOverrides.value).set(row.key, enabled)
   try {
-    const saved = await saveMountRequest(mountRuntimeId.value)
-    if (saved?.target_id) {
-      const index = targetItems.value.findIndex(target => target.target_id === saved.target_id)
-      if (index >= 0) {
-        targetItems.value = targetItems.value.map((target, itemIndex) => (
-          itemIndex === index ? saved : target
-        ))
-      } else {
-        targetItems.value = [...targetItems.value, saved]
-      }
+    if (enabled) {
+      await grantAccess({ botId: props.botId, runtimeId: row.runtimeId! })
+    } else {
+      await revokeAccess({ botId: props.botId, targetId: row.targetId! })
     }
-    mountDialogOpen.value = false
-    toast.success(t('bots.remoteRuntime.addSuccess'))
-    void refetchWorkspaceTargets()
+    await refetchWorkspaceTargets()
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.remoteRuntime.saveFailed')))
-  }
-}
-
-async function deleteTarget(): Promise<void> {
-  const target = pendingDeleteTarget.value
-  if (!target) return
-  try {
-    await deleteTargetRequest(target.target_id)
-    targetItems.value = targetItems.value
-      .filter(item => item.target_id !== target.target_id)
-      .map(item => ({
-        ...item,
-        primary: target.primary ? item.target_id === 'native' : item.primary,
-      }))
-    pendingDeleteTarget.value = null
-    toast.success(t('bots.remoteRuntime.deleteSuccess'))
-    void refetchWorkspaceTargets()
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.remoteRuntime.deleteFailed')))
+    toast.error(resolveApiErrorMessage(error, t('computerAccess.updateFailed')))
+  } finally {
+    const nextPending = new Set(accessPending.value)
+    nextPending.delete(row.key)
+    accessPending.value = nextPending
+    const nextOverrides = new Map(accessOverrides.value)
+    nextOverrides.delete(row.key)
+    accessOverrides.value = nextOverrides
   }
 }
 
@@ -538,7 +419,6 @@ async function retry(): Promise<void> {
 }
 
 function openComputers(): void {
-  mountDialogOpen.value = false
   void router.push({ name: 'runtimes' })
 }
 

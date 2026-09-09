@@ -5,14 +5,12 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 type ACPHandler struct{}
 
-func NewACPHandler() *ACPHandler {
-	return &ACPHandler{}
-}
+func NewACPHandler() *ACPHandler { return &ACPHandler{} }
 
 func (h *ACPHandler) Register(e *echo.Echo) {
 	e.GET("/acp/profiles", h.ListProfiles)

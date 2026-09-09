@@ -5,9 +5,9 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/memohai/memoh/internal/mcp"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/felinics/memoh/internal/mcp"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
 )
 
 const Mem0Type = "mem0"

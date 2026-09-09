@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 func makeItems(texts ...string) []adapters.MemoryItem {

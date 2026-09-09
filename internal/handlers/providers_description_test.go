@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"slices"
 	"testing"
 
-	"github.com/memohai/memoh/internal/models"
-	"github.com/memohai/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/reasoning"
 )
 
 func descriptionPointer(value string) *string { return &value }
@@ -73,9 +75,14 @@ func TestMergeManagedDiscoveredConfigReplacesCapabilities(t *testing.T) {
 	t.Parallel()
 
 	existing := models.ModelConfig{
-		Compatibilities:  []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning},
-		ReasoningEfforts: []string{models.ReasoningEffortHigh},
-		ThinkingMode:     models.ThinkingModeToggle,
+		Compatibilities:     []string{models.CompatVision, models.CompatToolCall, models.CompatReasoning},
+		ReasoningEfforts:    []string{models.ReasoningEffortDisable, models.ReasoningEffortHigh},
+		ThinkingMode:        models.ThinkingModeToggle,
+		ReasoningDialect:    reasoning.DialectTier,
+		ReasoningOffSupport: reasoning.OffSupportAccepted,
+		ReasoningDefaultOn:  boolPointer(true),
+		ThinkingBudgetMin:   intPointer(128),
+		ThinkingBudgetMax:   intPointer(32768),
 	}
 	discovered := models.ModelConfig{
 		Compatibilities: []string{models.CompatToolCall},
@@ -95,4 +102,52 @@ func TestMergeManagedDiscoveredConfigReplacesCapabilities(t *testing.T) {
 	if got.ThinkingMode != models.ThinkingModeNone {
 		t.Fatalf("thinking mode = %q, want none", got.ThinkingMode)
 	}
+	if got.ReasoningDialect != "" || got.ReasoningOffSupport != "" || got.ReasoningDefaultOn != nil ||
+		got.ThinkingBudgetMin != nil || got.ThinkingBudgetMax != nil {
+		t.Fatalf("managed refresh kept revoked wire metadata: %+v", got)
+	}
 }
+
+func TestMergeDiscoveredConfigRefreshesTrustedReasoningMetadata(t *testing.T) {
+	t.Parallel()
+
+	existing := models.ModelConfig{
+		Compatibilities:  []string{models.CompatReasoning},
+		ReasoningEfforts: []string{models.ReasoningEffortDisable, models.ReasoningEffortLow},
+	}
+	discovered := models.ModelConfig{
+		ReasoningEfforts:    []string{models.ReasoningEffortLow, models.ReasoningEffortHigh},
+		ThinkingMode:        models.ThinkingModeToggle,
+		ReasoningDialect:    reasoning.DialectBudget,
+		ReasoningOffSupport: reasoning.OffSupportRejected,
+		ReasoningDefaultOn:  boolPointer(false),
+		ThinkingBudgetMin:   intPointer(0),
+		ThinkingBudgetMax:   intPointer(24576),
+	}
+
+	got, changed := mergeDiscoveredConfig(existing, discovered)
+	if !changed {
+		t.Fatal("expected trusted metadata refresh to report a change")
+	}
+	// Generic discovery cannot report out-of-band off support, so the template's
+	// disable declaration survives while the active tiers refresh.
+	if !slices.Equal(got.ReasoningEfforts, []string{
+		models.ReasoningEffortDisable,
+		models.ReasoningEffortLow,
+		models.ReasoningEffortHigh,
+	}) {
+		t.Fatalf("reasoning efforts = %#v", got.ReasoningEfforts)
+	}
+	if got.ReasoningDialect != reasoning.DialectBudget || got.ReasoningOffSupport != reasoning.OffSupportRejected {
+		t.Fatalf("wire declarations = dialect %q, off %q", got.ReasoningDialect, got.ReasoningOffSupport)
+	}
+	if got.ReasoningDefaultOn == nil || *got.ReasoningDefaultOn {
+		t.Fatalf("reasoning_default_on = %v, want false", got.ReasoningDefaultOn)
+	}
+	if got.ThinkingBudgetMin == nil || *got.ThinkingBudgetMin != 0 || got.ThinkingBudgetMax == nil || *got.ThinkingBudgetMax != 24576 {
+		t.Fatalf("budget range = %v..%v, want 0..24576", got.ThinkingBudgetMin, got.ThinkingBudgetMax)
+	}
+}
+
+func boolPointer(value bool) *bool { return &value }
+func intPointer(value int) *int    { return &value }

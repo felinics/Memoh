@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
-	anthropicmessages "github.com/memohai/twilight-ai/provider/anthropic/messages"
-	googlegenerative "github.com/memohai/twilight-ai/provider/google/generativeai"
-	openaicodex "github.com/memohai/twilight-ai/provider/openai/codex"
-	openaicompletions "github.com/memohai/twilight-ai/provider/openai/completions"
-	openairesponses "github.com/memohai/twilight-ai/provider/openai/responses"
-	sdk "github.com/memohai/twilight-ai/sdk"
+	anthropicmessages "github.com/felinics/twilight/provider/anthropic/messages"
+	googlegenerative "github.com/felinics/twilight/provider/google/generativeai"
+	openaicodex "github.com/felinics/twilight/provider/openai/codex"
+	openaicompletions "github.com/felinics/twilight/provider/openai/completions"
+	openairesponses "github.com/felinics/twilight/provider/openai/responses"
+	sdk "github.com/felinics/twilight/sdk"
 
-	memohcopilot "github.com/memohai/memoh/internal/copilot"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	memohcopilot "github.com/felinics/memoh/internal/copilot"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 const probeTimeout = DefaultProviderProbeTimeout
@@ -67,12 +67,19 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 			Message:   providerResult.Message,
 		}, nil
 	case sdk.ProviderStatusUnhealthy:
-		return TestResponse{
-			Status:    TestStatusAuthError,
-			Reachable: true,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   providerResult.Message,
-		}, nil
+		// Only an auth failure justifies an early verdict. Any other
+		// unhealthy result (e.g. 404 because the provider does not implement
+		// the models list at all) must not be reported as "Invalid API key" —
+		// fall through to the real-model generation probe, which is the only
+		// check that can give a definitive answer for such providers (#1087).
+		if strings.Contains(providerResult.Message, "authentication failed") {
+			return TestResponse{
+				Status:    TestStatusAuthError,
+				Reachable: true,
+				LatencyMs: time.Since(start).Milliseconds(),
+				Message:   providerResult.Message,
+			}, nil
+		}
 	}
 
 	modelResult, err := sdkProvider.TestModel(ctx, model.ModelID)
@@ -168,7 +175,7 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientTyp
 			anthropicmessages.WithAPIKey(apiKey),
 			anthropicmessages.WithHTTPClient(httpClient),
 		}
-		if baseURL != "" {
+		if baseURL := anthropicMessagesBaseURL(baseURL); baseURL != "" {
 			opts = append(opts, anthropicmessages.WithBaseURL(baseURL))
 		}
 		return anthropicmessages.New(opts...)

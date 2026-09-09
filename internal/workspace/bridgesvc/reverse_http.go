@@ -15,13 +15,20 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (
-	reverseHTTPTimeout       = 2 * time.Minute
 	reverseHTTPRouteMetadata = "x-memoh-reverse-http-route"
 )
+
+// ReverseHTTPTimeout caps one proxied tools request end to end. Memoh tools
+// can legitimately block on a human decision (approval cards, ask_user) for
+// up to their 10-minute wait windows, so the tunnel ceiling sits above the
+// longest decision wait (pinned by the toolmount timeout-ladder guard test);
+// a dead server-side handler is still bounded, and a vanished caller
+// releases the slot early through the request context.
+const ReverseHTTPTimeout = 16 * time.Minute
 
 type ReverseHTTPBroker struct {
 	nextID uint64
@@ -80,7 +87,7 @@ func (b *ReverseHTTPBroker) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	timer := time.NewTimer(reverseHTTPTimeout)
+	timer := time.NewTimer(ReverseHTTPTimeout)
 	defer timer.Stop()
 	select {
 	case frame := <-responseCh:

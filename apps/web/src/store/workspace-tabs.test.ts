@@ -35,6 +35,9 @@ vi.hoisted(() => {
 
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>()
   const storage = new MemoryStorage()
+  // Keep real i18n active so terminal-title assertions catch missing or
+  // misspelled keys, while making the expected English fallback deterministic.
+  storage.setItem('language', 'en')
   // Layout/selection now live in sessionStorage (per-Tab), so the store's
   // restore path reads it, not localStorage. A separate instance mirrors the
   // real browser split (two distinct areas under the same key names).
@@ -114,14 +117,6 @@ const mobileBreakpoint = vi.hoisted(() => {
   }
 })
 
-// workspace-tabs imports @/i18n to localize the desktop panel title; that
-// module reads localStorage at load to pick the initial locale, which isn't
-// polyfilled in this test's environment. Mock it so the import stays
-// side-effect free here.
-vi.mock('@/i18n', () => ({
-  default: { global: { t: (key: string) => key } },
-}))
-
 const chatStoreMock = vi.hoisted(() => ({
   sessionId: null as string | null,
   hasExplicitSessionSelection: false,
@@ -130,7 +125,7 @@ const chatStoreMock = vi.hoisted(() => ({
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>>,
-  pendingACPSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
+  pendingExternalAgentSessionInput: undefined as unknown as ReturnType<typeof ref<Record<string, unknown> | null>>,
   draftViewRequested: undefined as unknown as ReturnType<typeof ref<{
     botId: string
     viewId: string
@@ -177,7 +172,7 @@ const chatStoreMock = vi.hoisted(() => ({
     chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
   }),
   resetToEmptyComposer: vi.fn((options?: {
-    clearPendingACP?: boolean
+    clearPendingExternalAgent?: boolean
     explicitSelection?: boolean
     draftIntent?: boolean
   }) => {
@@ -212,8 +207,8 @@ vi.mock('@/store/chat-list', () => ({
     get guiToolUseRequested() {
       return chatStoreMock.guiToolUseRequested.value
     },
-    get pendingACPSessionInput() {
-      return chatStoreMock.pendingACPSessionInput.value
+    get pendingExternalAgentSessionInput() {
+      return chatStoreMock.pendingExternalAgentSessionInput.value
     },
     get draftViewRequested() {
       return chatStoreMock.draftViewRequested.value
@@ -663,7 +658,7 @@ describe('workspace layout store', () => {
     chatStoreMock.hasExplicitSessionSelection = false
     chatStoreMock.loadingChats = false
     chatStoreMock.deletedSession = ref(null)
-    chatStoreMock.pendingACPSessionInput = ref(null)
+    chatStoreMock.pendingExternalAgentSessionInput = ref(null)
     chatStoreMock.draftViewRequested = ref(null)
     chatStoreMock.forkedSessionRequested = ref(null)
     chatStoreMock.userSentInSession = ref(null)
@@ -688,7 +683,7 @@ describe('workspace layout store', () => {
       chatStoreMock.hasExplicitSessionSelection = options?.explicitSelection === true
     })
     chatStoreMock.resetToEmptyComposer.mockImplementation((options?: {
-      clearPendingACP?: boolean
+      clearPendingExternalAgent?: boolean
       explicitSelection?: boolean
       draftIntent?: boolean
     }) => {
@@ -844,13 +839,85 @@ describe('workspace layout store', () => {
     store.registerApi(dock as never)
 
     store.openTerminal()
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
     store.openTerminal()
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
     store.closeTab('terminal:1')
     store.openTerminal()
 
     expect(dock.getPanel('terminal:1')).toBeUndefined()
     expect(dock.getPanel('terminal:2')).toBeTruthy()
     expect(dock.getPanel('terminal:3')).toBeTruthy()
+  })
+
+  it('repairs legacy terminal titles when restoring a layout', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            'terminal:1': {
+              id: 'terminal:1',
+              contentComponent: 'terminal',
+              title: 'zsh',
+            },
+            'terminal:2': {
+              id: 'terminal:2',
+              contentComponent: 'terminal',
+              title: '',
+            },
+          },
+        },
+        terminalCounter: 2,
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
+  })
+
+  it('updates only the intended terminal title and ignores invalid or repeated events', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+    store.openTerminal()
+
+    const first = dock.getPanel('terminal:1')!
+    const second = dock.getPanel('terminal:2')!
+    const setTitle = vi.spyOn(first.api, 'setTitle')
+
+    store.updateTerminalTitle(first.id, '  python  ')
+
+    expect(first.title).toBe('python')
+    expect(second.title).toBe('Terminal 2')
+    expect(setTitle).toHaveBeenCalledTimes(1)
+
+    store.updateTerminalTitle(first.id, 'python')
+    store.updateTerminalTitle(first.id, '   ')
+    store.updateTerminalTitle(first.id, null)
+
+    expect(first.title).toBe('python')
+    expect(setTitle).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts a split terminal with its own fallback title', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+
+    const first = dock.getPanel('terminal:1')!
+    store.updateTerminalTitle(first.id, 'node')
+    store.splitGroup(first.group!.id, 'right')
+
+    expect(first.title).toBe('node')
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
   })
 
   it('duplicates the active file into a split pane with a unique panel id', () => {
@@ -914,22 +981,6 @@ describe('workspace layout store', () => {
     expect(store.ephemeralPanels[rightDraft.id]).toBeUndefined()
   })
 
-  it('marks sidebar-created draft chats as non-explicit so default ACP can stage', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openDraftChat({ title: 'New Session', explicitSelection: false })
-
-    const draft = dock.panels.find((p) => p.component === 'chat')
-    expect(draft?.params).toMatchObject({ sessionId: null, explicitSelection: false })
-
-    store.openTerminal()
-    store.openDraftChat({ title: 'New Session', explicitSelection: false })
-
-    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
-  })
-
   it('keeps a non-explicit draft non-explicit after an explicit session was active', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
@@ -943,29 +994,6 @@ describe('workspace layout store', () => {
     expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: false })
     expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
     expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
-  })
-
-  it('switches the active stale chat tab to draft when default ACP stages later', async () => {
-    const selection = useChatSelectionStore()
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-
-    store.openSessionChat({ sessionId: 'native-session', title: 'Native Session' })
-    expect(dock.activePanel?.params.sessionId).toBe('native-session')
-
-    chatStoreMock.sessionId = null
-    chatStoreMock.hasExplicitSessionSelection = false
-    selection.setSession(null, { explicitSelection: false })
-    await nextTick()
-    expect(dock.activePanel?.params.sessionId).toBe('native-session')
-
-    chatStoreMock.pendingACPSessionInput.value = { agentId: 'codex' }
-    await nextTick()
-
-    expect(dock.activePanel?.component).toBe('chat')
-    expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: false })
-    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: false })
   })
 
   it('opens an explicit draft from a stale active chat session', async () => {
@@ -1155,7 +1183,7 @@ describe('workspace layout store', () => {
     expect(dock.panels.map(panel => panel.component).sort()).toEqual(['file', 'preview'])
     expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
     expect(chatStoreMock.resetToEmptyComposer).toHaveBeenCalledWith({
-      clearPendingACP: false,
+      clearPendingExternalAgent: false,
       explicitSelection: false,
       draftIntent: false,
     })
@@ -2376,6 +2404,33 @@ describe('workspace layout store', () => {
 
       expect(dock.panels.filter(panel => panel.id.startsWith('browser:'))).toHaveLength(1)
       expect(dock.activePanel?.id).toBe('browser:1')
+    })
+
+    it('never opens or focuses Desktop when a GUI tool starts on mobile', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+
+      // The runtime fires one guiToolUseRequested per GUI tool CALL, so a turn
+      // with several calls used to re-open/re-focus the viewer every time —
+      // on the single stack each focus steals the whole screen from chat.
+      const chatPanelId = dock.activePanel?.id
+      emitGuiToolUse()
+      emitGuiToolUse('computer_observe')
+
+      expect(dock.getPanel('display:1')).toBeUndefined()
+      expect(dock.activePanel?.id).toBe(chatPanelId)
+
+      // Even a Desktop the user opened MANUALLY must not be re-focused by
+      // later tool calls: after going back to chat, chat stays on top.
+      store.openDisplay()
+      expect(dock.activePanel?.id).toBe('display:1')
+      store.activateChatPanel()
+      emitGuiToolUse()
+      expect(dock.activePanel?.id).not.toBe('display:1')
+      expect(dock.activePanel?.id).toBe(chatPanelId)
     })
   })
 })

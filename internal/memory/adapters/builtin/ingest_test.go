@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/memory/migrate"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/felinics/memoh/internal/memory/migrate"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
 )
 
 // ingestFakeStore is a minimal memoryStore for ingest tests: it serves a

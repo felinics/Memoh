@@ -15,19 +15,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	postgresstore "github.com/memohai/memoh/internal/db/postgres/store"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/hooks"
-	"github.com/memohai/memoh/internal/identity"
-	netctl "github.com/memohai/memoh/internal/network"
-	"github.com/memohai/memoh/internal/settings"
-	skillset "github.com/memohai/memoh/internal/skills"
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	workspacetemplates "github.com/memohai/memoh/templates"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/identity"
+	netctl "github.com/felinics/memoh/internal/network"
+	"github.com/felinics/memoh/internal/settings"
+	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	workspacetemplates "github.com/felinics/memoh/templates"
 )
 
 const (
@@ -39,6 +39,13 @@ const (
 	LegacyContainerPrefix       = "mcp-"
 	DisplayRFBSocketName        = "display.rfb.sock"
 	ACPToolsProxyHTTPURL        = bridge.ACPToolsProxyHTTPURL
+
+	// WorkspaceInitPath and WorkspaceBridgePath are the container start
+	// parameters used by buildWorkspaceContainerSpec: the image's init and the
+	// mount point of the Server-supplied bridge binary. A container missing
+	// either never starts, so WaitForWorkspaceReady surfaces that on its own.
+	WorkspaceInitPath   = "/usr/bin/tini"
+	WorkspaceBridgePath = "/opt/memoh/bridge"
 
 	legacyGRPCPort           = 9090
 	bridgeReadyTimeout       = 45 * time.Second
@@ -104,6 +111,8 @@ type Manager struct {
 	setupDiagnostics  WorkspaceSetupDiagnostics
 	legacyMu          sync.RWMutex
 	legacyIPs         map[string]string // botID → IP for pre-bridge containers
+	bridgeResetMu     sync.Mutex
+	bridgeResetFns    []func(botID string) // see OnBridgeReset
 }
 
 func NewManager(log *slog.Logger, service runtimeService, networkController netctl.Controller, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
@@ -242,7 +251,7 @@ func (m *Manager) ClearLegacyIP(botID string) {
 // gRPC dials use the bridge container's Unix socket.
 func (m *Manager) clearLegacyRoute(botID string) {
 	m.ClearLegacyIP(botID)
-	m.grpcPool.Remove(botID)
+	m.resetBridge(botID)
 }
 
 func (m *Manager) nativeMCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
@@ -266,6 +275,9 @@ func (m *Manager) NativeMCPClient(ctx context.Context, botID string) (*bridge.Cl
 // override before falling back to the Bot's persisted Primary target.
 func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		if targetID == WorkspaceTargetNative {
+			return m.nativeMCPClient(ctx, botID)
+		}
 		target, err := m.ResolveWorkspaceTarget(ctx, botID, targetID)
 		return target.Client, err
 	}
@@ -275,6 +287,25 @@ func (m *Manager) MCPClient(ctx context.Context, botID string) (*bridge.Client, 
 		}
 	}
 	return m.nativeMCPClient(ctx, botID)
+}
+
+// CurrentWorkspaceTargetID resolves only the request or persisted target ID.
+// It intentionally avoids connecting to a runtime or loading target settings.
+func (m *Manager) CurrentWorkspaceTargetID(ctx context.Context, botID string) (string, error) {
+	if targetID := WorkspaceTargetFromContext(ctx); targetID != "" {
+		return targetID, nil
+	}
+	if m.remote == nil {
+		return WorkspaceTargetNative, nil
+	}
+	record, err := m.remote.getPrimaryRecord(ctx, botID)
+	if errors.Is(err, ErrRemoteWorkspaceNotBound) {
+		return WorkspaceTargetNative, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return record.ID, nil
 }
 
 func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (ResolvedWorkspaceTarget, error) {
@@ -340,7 +371,7 @@ func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error
 			return nil
 		}
 		lastErr = err
-		m.grpcPool.Remove(botID)
+		m.resetBridge(botID)
 		if time.Now().After(deadline) {
 			return fmt.Errorf("workspace bridge not ready for bot %s after %s: %w", botID, bridgeReadyTimeout, lastErr)
 		}
@@ -359,9 +390,6 @@ func (m *Manager) InitializeNativeWorkspace(ctx context.Context, botID string) e
 	client, err := m.nativeMCPClient(ctx, botID)
 	if err != nil {
 		return fmt.Errorf("%w: resolve native workspace filesystem: %w", ErrWorkspaceTemplateBootstrapFailed, err)
-	}
-	if err := validateWorkspaceContract(ctx, client); err != nil {
-		return err
 	}
 	if m.templateBootstrap == nil {
 		return fmt.Errorf("%w: template bootstrapper is not configured", ErrWorkspaceTemplateBootstrapFailed)

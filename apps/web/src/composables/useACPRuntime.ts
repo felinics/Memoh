@@ -2,7 +2,8 @@ import { computed, ref, shallowRef, toValue, watch, type MaybeRefOrGetter } from
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/store/chat-list'
 import type { ChatViewTarget } from '@/store/chat/types'
-import type { AcpagentRuntimeStatus, AcpclientModelInfo, AcpclientReasoningEffortInfo } from '@memohai/sdk'
+import { acpRuntimeMatchesConfiguration } from '@/utils/acp-slash-commands'
+import type { AcpagentRuntimeStatus, AcpclientAvailableCommandInfo, AcpclientModeInfo, AcpclientModelInfo, AcpclientReasoningEffortInfo } from '@memohai/sdk'
 
 interface UseACPRuntimeOptions {
   target: MaybeRefOrGetter<ChatViewTarget>
@@ -26,7 +27,7 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   })
   const pendingState = computed(() => {
     if (!toValue(options.enabled) || !toValue(options.pending)) return null
-    return chatStore.pendingACPStateFor(target.value)
+    return chatStore.pendingExternalAgentStateFor(target.value)
   })
   const agentId = computed(() => toValue(options.agentId).trim())
   const projectPath = computed(() => toValue(options.projectPath).trim())
@@ -38,12 +39,7 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   })
 
   function belongsToRuntime(status: AcpagentRuntimeStatus | undefined) {
-    if (!status) return false
-    const expected = agentId.value
-    const expectedProjectPath = projectPath.value
-    return !!expected
-      && status.agent_id?.trim() === expected
-      && (!expectedProjectPath || status.project_path?.trim() === expectedProjectPath)
+    return acpRuntimeMatchesConfiguration(status, agentId.value, projectPath.value)
   }
 
   const observedRuntime = computed(() => {
@@ -54,9 +50,9 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
         : undefined
     return belongsToRuntime(status) ? status : undefined
   })
-  // The registry snapshot is shared by every pane showing a Session. Keep one
-  // target-capability snapshot per composable instance so another pane's live
-  // model switch cannot invalidate this pane's reasoning selection.
+  // The registry is the canonical full snapshot for this Session. Composer
+  // drafts (model/reasoning overrides) live separately; never splice controls
+  // from a replacement runtime into the previous runtime identity.
   const runtime = shallowRef<AcpagentRuntimeStatus>()
   const isPreparing = ref(false)
   let requestVersion = 0
@@ -67,6 +63,14 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   })
   const models = computed<AcpclientModelInfo[]>(() => runtime.value?.models?.available_models ?? [])
   const currentModelId = computed(() => runtime.value?.models?.current_model_id ?? '')
+  const modes = computed<Array<AcpclientModeInfo & { id: string }>>(() =>
+    (runtime.value?.modes?.available_modes ?? []).filter(
+      (mode): mode is AcpclientModeInfo & { id: string } =>
+        typeof mode.id === 'string' && mode.id.trim() !== '',
+    ),
+  )
+  const currentModeId = computed(() => runtime.value?.modes?.current_mode_id ?? '')
+  const availableCommands = computed<AcpclientAvailableCommandInfo[]>(() => runtime.value?.available_commands ?? [])
   const reasoningEfforts = computed<AcpclientReasoningEffortInfo[]>(() => runtime.value?.reasoning?.available_efforts ?? [])
   const currentReasoningEffort = computed(() => runtime.value?.reasoning?.current_effort ?? '')
 
@@ -101,6 +105,13 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
     if (toValue(options.pending)) return chatStore.setPendingACPModel(modelId, target.value)
     const sid = target.value.sessionId ?? ''
     return chatStore.setACPRuntimeModel(modelId, sid)
+  }
+
+  async function setObservedMode(modeId: string) {
+    if (toValue(options.pending)) return chatStore.setPendingACPMode(modeId, target.value)
+    const sid = target.value.sessionId ?? ''
+    if (!sid) return undefined
+    return chatStore.setACPRuntimeMode(modeId, sid)
   }
 
   async function setObservedReasoning(effort: string) {
@@ -161,6 +172,17 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
     }
   }
 
+  async function setMode(modeId: string) {
+    const version = ++requestVersion
+    const scope = requestScope()
+    try {
+      return adopt(await setObservedMode(modeId), version, scope)
+    } catch (error) {
+      if (!requestIsCurrent(version, scope)) return undefined
+      throw error
+    }
+  }
+
   async function setReasoning(effort: string) {
     const version = ++requestVersion
     const scope = requestScope()
@@ -181,12 +203,14 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   }, { immediate: true })
 
   watch(observedRuntime, (status) => {
-    if (!toValue(options.enabled) || runtime.value || !status) return
-    runtime.value = status
+    runtime.value = toValue(options.enabled) ? status : undefined
   }, { immediate: true })
 
   return {
     runtime,
+    modes,
+    currentModeId,
+    availableCommands,
     models,
     currentModelId,
     reasoningEfforts,
@@ -194,6 +218,7 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
     isEnsuring,
     isPreparing,
     ensure,
+    setMode,
     setModel,
     setReasoning,
   }

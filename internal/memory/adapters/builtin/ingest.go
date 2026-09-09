@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/memory/migrate"
-	storefs "github.com/memohai/memoh/internal/memory/storefs"
+	"github.com/felinics/memoh/internal/memory/migrate"
+	storefs "github.com/felinics/memoh/internal/memory/storefs"
 )
 
 var (

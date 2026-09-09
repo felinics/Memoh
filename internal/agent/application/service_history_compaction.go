@@ -9,10 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/agent/context/compaction"
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	"github.com/memohai/memoh/internal/db"
+	"github.com/felinics/memoh/internal/agent/context/compaction"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/db"
 )
 
 func historyContextFragsForMessages(messages []ModelMessage, records []historyfrag.HistoryRecord) []contextfrag.ContextFrag {
@@ -64,8 +64,9 @@ func historySourceMessageIDsForMessages(messages []ModelMessage, records []histo
 		if strings.TrimSpace(record.DBMessageID) == "" {
 			continue
 		}
-		key := modelMessageSourceKey(record.ModelMessage)
-		positions[key] = append(positions[key], i)
+		for _, key := range modelMessageSourceKeys(record.ModelMessage) {
+			positions[key] = append(positions[key], i)
+		}
 	}
 	cursors := make(map[string]int, len(positions))
 	lastMatched := -1
@@ -90,6 +91,22 @@ func historySourceMessageIDsForMessages(messages []ModelMessage, records []histo
 
 func modelMessageSourceKey(message ModelMessage) string {
 	return strings.ToLower(strings.TrimSpace(message.Role)) + "\x00" + string(message.Content)
+}
+
+// modelMessageSourceKeys returns every key a record's message can be recognised
+// by. Context assembly caps replayed reasoning, so a durable assistant turn
+// reaches the model with its reasoning dropped or projected to text; indexing
+// the record under that shape as well keeps the message resolvable to its DB row
+// instead of silently losing provenance for fork sources and context accounting.
+func modelMessageSourceKeys(message ModelMessage) []string {
+	keys := []string{modelMessageSourceKey(message)}
+	if !strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
+		return keys
+	}
+	if stripped := dropReasoning(message); string(stripped.Content) != string(message.Content) {
+		keys = append(keys, modelMessageSourceKey(stripped))
+	}
+	return keys
 }
 
 func stripToolMessagesWhenCompactionSummaryIsActive(messages []ModelMessage, records []historyfrag.HistoryRecord) []ModelMessage {

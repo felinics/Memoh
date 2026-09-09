@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/media"
+	"github.com/felinics/memoh/internal/media"
 )
 
 type storedAsset struct {
@@ -97,7 +97,7 @@ func (s *MemoryAttachmentStore) GetByStorageKey(_ context.Context, botID, storag
 }
 
 func (*MemoryAttachmentStore) AccessPath(_ context.Context, asset media.Asset) string {
-	return "/data/media/" + strings.TrimSpace(asset.StorageKey)
+	return "/data/.memoh/media/" + strings.TrimSpace(asset.StorageKey)
 }
 
 func (s *MemoryAttachmentStore) IngestContainerFile(_ context.Context, botID, containerPath string) (media.Asset, error) {

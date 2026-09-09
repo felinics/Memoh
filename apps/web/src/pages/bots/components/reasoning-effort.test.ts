@@ -1,48 +1,90 @@
+import type { ReasoningOptions } from '@memohai/sdk'
 import { describe, expect, it } from 'vitest'
-import { REASONING_EFFORT_DISABLE, availableEffortsForMode, nearestEffortToMedium, resolveEffortLevels } from './reasoning-effort'
+import {
+  REASONING_EFFORT_DISABLE,
+  REASONING_EFFORT_LEGACY_OFF,
+  reconcileStoredEffort,
+  selectableEfforts,
+} from './reasoning-effort'
 
-describe('resolveEffortLevels', () => {
-  it('preserves max for Codex and filters client-only efforts', () => {
-    expect(resolveEffortLevels({
-      reasoning_efforts: ['low', 'xhigh', 'max', 'ultra'],
-    }, 'openai-codex')).toEqual(['low', 'xhigh', 'max'])
+// The capability questions these used to answer — which tiers a model offers,
+// whether off is reachable, how max normalizes — now live in internal/reasoning
+// and arrive resolved on the model's `reasoning` field. What is left to test is
+// rendering the answer and migrating a stored value, which is all this file does.
+
+// Tiers stay literals: they are the server's answer arriving over the wire, not a
+// vocabulary this module owns. The two tokens it does own are named — the off
+// value it writes back, and the legacy spelling it still has to read.
+const TIERS = ['low', 'medium', 'high']
+const DEFAULT_TIER = 'medium'
+
+function options(overrides: Partial<ReasoningOptions> = {}): ReasoningOptions {
+  return {
+    supported: true,
+    can_disable: true,
+    efforts: TIERS,
+    default_effort: DEFAULT_TIER,
+    ...overrides,
+  }
+}
+
+const NO_THINKING: ReasoningOptions = { supported: false }
+
+describe('selectableEfforts', () => {
+  it('offers off at the front when the server says off is reachable', () => {
+    expect(selectableEfforts(options())).toEqual([REASONING_EFFORT_DISABLE, ...TIERS])
   })
 
-  it('filters max for generic OpenAI-format clients', () => {
-    expect(resolveEffortLevels({
-      reasoning_efforts: ['low', 'xhigh', 'max'],
-    }, 'openai-responses')).toEqual(['low', 'xhigh'])
+  it('offers no off for a model that cannot be turned off', () => {
+    expect(selectableEfforts(options({ can_disable: false }))).toEqual(TIERS)
+  })
+
+  it('offers nothing for a model with no thinking concept', () => {
+    expect(selectableEfforts(NO_THINKING)).toEqual([])
+  })
+
+  it('offers nothing when the field is absent, as it is for non-chat models', () => {
+    expect(selectableEfforts(undefined)).toEqual([])
+    expect(selectableEfforts(null)).toEqual([])
   })
 })
 
-describe('nearestEffortToMedium', () => {
-  it('prefers medium when the model offers it', () => {
-    expect(nearestEffortToMedium(['low', 'medium', 'high'])).toBe('medium')
+describe('reconcileStoredEffort', () => {
+  it('keeps a tier the model still offers', () => {
+    expect(reconcileStoredEffort('high', options())).toBe('high')
   })
 
-  it('picks the closest tier on either side of medium', () => {
-    expect(nearestEffortToMedium(['minimal', 'low'])).toBe('low')
-    expect(nearestEffortToMedium(['high', 'max'])).toBe('high')
+  it('lands a stranded tier on the model default', () => {
+    expect(reconcileStoredEffort('xhigh', options())).toBe(DEFAULT_TIER)
   })
 
-  it('breaks ties toward the weaker tier', () => {
-    expect(nearestEffortToMedium(['low', 'high'])).toBe('low')
+  it('keeps off when off is still reachable', () => {
+    expect(reconcileStoredEffort(REASONING_EFFORT_DISABLE, options())).toBe(REASONING_EFFORT_DISABLE)
   })
 
-  it('resolves by tier distance, not by position in the input', () => {
-    expect(nearestEffortToMedium(['max', 'high', 'low', 'none'])).toBe('low')
+  it('reads the legacy off spelling as off', () => {
+    expect(reconcileStoredEffort(REASONING_EFFORT_LEGACY_OFF, options())).toBe(REASONING_EFFORT_DISABLE)
   })
 
-  it('never returns the disable sentinel that availableEffortsForMode prepends', () => {
-    // The old fallback took efforts[0], which is always "disable" — silently
-    // turning reasoning off whenever a model lacked the selected tier.
-    const selectable = availableEffortsForMode('toggle', ['low', 'high'])
-    expect(selectable[0]).toBe(REASONING_EFFORT_DISABLE)
-    expect(nearestEffortToMedium(selectable)).toBe('low')
+  it('moves off to the default when the new model cannot be turned off', () => {
+    expect(reconcileStoredEffort(REASONING_EFFORT_DISABLE, options({ can_disable: false }))).toBe(DEFAULT_TIER)
   })
 
-  it('returns empty when no known tier is present', () => {
-    expect(nearestEffortToMedium([REASONING_EFFORT_DISABLE, 'turbo'])).toBe('')
-    expect(nearestEffortToMedium([])).toBe('')
+  it('falls back to the default when nothing is stored', () => {
+    expect(reconcileStoredEffort('', options())).toBe(DEFAULT_TIER)
+  })
+
+  it('clears the value for a model with no thinking concept', () => {
+    expect(reconcileStoredEffort('high', NO_THINKING)).toBe('')
+  })
+
+  it('keeps a dormant preference for an always-on model with no controls', () => {
+    const alwaysOn = options({
+      can_disable: false,
+      efforts: [],
+      default_effort: undefined,
+    })
+    expect(reconcileStoredEffort('high', alwaysOn)).toBe('high')
+    expect(reconcileStoredEffort('none', alwaysOn)).toBe('disable')
   })
 })

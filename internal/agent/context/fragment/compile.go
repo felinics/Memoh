@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 const (
@@ -190,56 +190,63 @@ func systemFrags(system string, toolUsage string, scope Scope, source string) []
 
 func systemTextFrag(id string, kind Kind, text string, priority int, cacheClass CacheClass, scope Scope, source string, index int) ContextFrag {
 	return TextFrag(TextFragInput{
-		ID:         id,
-		Kind:       kind,
-		Role:       sdk.MessageRoleSystem,
-		Slot:       SlotSystem,
-		Text:       text,
-		Priority:   priority,
-		CacheClass: cacheClass,
-		Trust:      TrustSystem,
-		Scope:      scope,
-		Source:     source,
-		Collector:  CollectorRunConfigFields,
-		Index:      index,
-		Render:     RenderPolicy{Format: RenderMarkdown},
+		ID:            id,
+		Kind:          kind,
+		Role:          sdk.MessageRoleSystem,
+		Slot:          SlotSystem,
+		Text:          text,
+		Priority:      priority,
+		RetentionTier: RetentionRequired,
+		CacheClass:    cacheClass,
+		Trust:         TrustSystem,
+		Scope:         scope,
+		Source:        source,
+		Collector:     CollectorRunConfigFields,
+		Index:         index,
+		Render:        RenderPolicy{Format: RenderMarkdown},
 	})
 }
 
 // TextFragInput describes a text fragment to construct.
 type TextFragInput struct {
-	ID          string
-	Kind        Kind
-	Role        sdk.MessageRole
-	Slot        Slot
-	Text        string
-	Priority    int
-	CacheClass  CacheClass
-	Trust       TrustLevel
-	Scope       Scope
-	Source      string
-	SourceID    string
-	Collector   string
-	Index       int
-	Render      RenderPolicy
-	Budget      BudgetPolicy
-	ConflictKey string
+	ID                 string
+	Kind               Kind
+	Role               sdk.MessageRole
+	Slot               Slot
+	Text               string
+	Priority           int
+	RetentionTier      RetentionTier
+	DropPriority       DropPriority
+	RequiredCapability string
+	CacheClass         CacheClass
+	Trust              TrustLevel
+	Scope              Scope
+	Source             string
+	SourceID           string
+	Collector          string
+	Index              int
+	Render             RenderPolicy
+	Budget             BudgetPolicy
+	ConflictKey        string
 }
 
 // TextFrag creates a text-backed fragment.
 func TextFrag(input TextFragInput) ContextFrag {
 	return ContextFrag{
-		ID:          strings.TrimSpace(input.ID),
-		Kind:        input.Kind,
-		Role:        input.Role,
-		Slot:        input.Slot,
-		Priority:    input.Priority,
-		CacheClass:  input.CacheClass,
-		Trust:       input.Trust,
-		Scope:       normalizeScope(input.Scope),
-		Budget:      input.Budget,
-		Render:      input.Render,
-		ConflictKey: input.ConflictKey,
+		ID:                 strings.TrimSpace(input.ID),
+		Kind:               input.Kind,
+		Role:               input.Role,
+		Slot:               input.Slot,
+		Priority:           input.Priority,
+		RetentionTier:      input.RetentionTier,
+		DropPriority:       input.DropPriority,
+		RequiredCapability: strings.TrimSpace(input.RequiredCapability),
+		CacheClass:         input.CacheClass,
+		Trust:              input.Trust,
+		Scope:              normalizeScope(input.Scope),
+		Budget:             input.Budget,
+		Render:             input.Render,
+		ConflictKey:        input.ConflictKey,
 		Provenance: Provenance{
 			Source:    strings.TrimSpace(input.Source),
 			SourceID:  strings.TrimSpace(input.SourceID),
@@ -248,44 +255,55 @@ func TextFrag(input TextFragInput) ContextFrag {
 		},
 		Parts: []Part{{
 			Type: PartText,
-			Text: strings.TrimSpace(input.Text),
+			Text: RenderText(input.Text, input.Render),
 		}},
 	}
 }
 
 // MessageFragInput describes an SDK message fragment.
 type MessageFragInput struct {
-	ID            string
-	Message       sdk.Message
-	Kind          Kind
-	Slot          Slot
-	Priority      int
-	CacheClass    CacheClass
-	Trust         TrustLevel
-	Scope         Scope
-	Source        string
-	SourceID      string
-	Collector     string
-	Index         int
-	TokenEstimate int
-	Budget        BudgetPolicy
+	ID                 string
+	Message            sdk.Message
+	Kind               Kind
+	Slot               Slot
+	Priority           int
+	RetentionTier      RetentionTier
+	DropPriority       DropPriority
+	RequiredCapability string
+	CacheClass         CacheClass
+	Trust              TrustLevel
+	Scope              Scope
+	Source             string
+	SourceID           string
+	Collector          string
+	Index              int
+	TokenEstimate      int
+	Budget             BudgetPolicy
+	Render             RenderPolicy
 }
 
 // MessageFrag creates a message-backed fragment.
 func MessageFrag(input MessageFragInput) ContextFrag {
 	msg := cloneMessage(input.Message)
+	renderPolicy := input.Render
+	if renderPolicy.Format == "" {
+		renderPolicy.Format = RenderSDKMessage
+	}
 	return ContextFrag{
-		TokenEstimate: input.TokenEstimate,
-		Budget:        input.Budget,
-		ID:            strings.TrimSpace(input.ID),
-		Kind:          input.Kind,
-		Role:          input.Message.Role,
-		Slot:          input.Slot,
-		Priority:      input.Priority,
-		CacheClass:    input.CacheClass,
-		Trust:         input.Trust,
-		Scope:         normalizeScope(input.Scope),
-		Render:        RenderPolicy{Format: RenderSDKMessage},
+		TokenEstimate:      input.TokenEstimate,
+		Budget:             input.Budget,
+		ID:                 strings.TrimSpace(input.ID),
+		Kind:               input.Kind,
+		Role:               input.Message.Role,
+		Slot:               input.Slot,
+		Priority:           input.Priority,
+		RetentionTier:      input.RetentionTier,
+		DropPriority:       input.DropPriority,
+		RequiredCapability: strings.TrimSpace(input.RequiredCapability),
+		CacheClass:         input.CacheClass,
+		Trust:              input.Trust,
+		Scope:              normalizeScope(input.Scope),
+		Render:             renderPolicy,
 		Provenance: Provenance{
 			Source:    strings.TrimSpace(input.Source),
 			SourceID:  strings.TrimSpace(input.SourceID),
@@ -417,9 +435,12 @@ func PriorityForMessage(msg sdk.Message) int {
 
 func cacheForMessage(msg sdk.Message) CacheClass {
 	switch msg.Role {
-	case sdk.MessageRoleSystem:
-		return CacheDynamic
-	case sdk.MessageRoleUser, sdk.MessageRoleAssistant, sdk.MessageRoleTool:
+	case sdk.MessageRoleSystem, sdk.MessageRoleUser, sdk.MessageRoleAssistant, sdk.MessageRoleTool:
+		// History messages render from the append-only timeline and are frozen
+		// at persistence; a system event row (session_created and friends) is
+		// as byte-stable within the session as a user row. Classifying it
+		// dynamic truncated the stable prefix at history position 0, which
+		// kept Anthropic message breakpoints off the conversation entirely.
 		return CacheStable
 	default:
 		return CacheNever

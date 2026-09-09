@@ -43,10 +43,15 @@
               v-for="item in items"
               :key="`${item.kind || 'item'}:${item.id || item.title}`"
               :value="`${item.kind || 'item'}:${item.id || item.title}`"
+              :disabled="isCommandResultItemDisplayOnly(item)"
               @select="emit('select', item)"
             >
               <Sparkles
                 v-if="item.kind === 'skill'"
+                class="size-3.5 shrink-0 text-muted-foreground"
+              />
+              <Check
+                v-else-if="isCommandResultItemDisplayOnly(item)"
                 class="size-3.5 shrink-0 text-muted-foreground"
               />
               <List
@@ -77,8 +82,9 @@
 // the slash picker.
 import { ref } from 'vue'
 import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList } from '@felinic/ui'
-import { CircleAlert, List, Sparkles, X } from 'lucide-vue-next'
+import { Check, CircleAlert, List, Sparkles, X } from 'lucide-vue-next'
 import type { CommandActionListItem } from '@/composables/api/useChat'
+import { isCommandResultItemDisplayOnly } from './slash-command-result'
 
 defineProps<{
   isError: boolean

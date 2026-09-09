@@ -14,19 +14,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/bots"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/bots"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 type sessionCreateQueries struct {
 	dbstore.Queries
 	bot          sqlc.GetBotByIDRow
 	permissions  []byte
+	botAgent     sqlc.BotAgent
 	createCalled bool
 	createParams sqlc.CreateSessionParams
+}
+
+func (q *sessionCreateQueries) GetBotAgentByID(_ context.Context, _ sqlc.GetBotAgentByIDParams) (sqlc.BotAgent, error) {
+	return q.botAgent, nil
 }
 
 func (q *sessionCreateQueries) GetBotByID(_ context.Context, _ pgtype.UUID) (sqlc.GetBotByIDRow, error) {
@@ -49,14 +56,18 @@ func (q *sessionCreateQueries) CreateSession(_ context.Context, arg sqlc.CreateS
 	q.createCalled = true
 	q.createParams = arg
 	return sqlc.BotSession{
-		ID:          testUUID("22222222-2222-2222-2222-222222222222"),
-		BotID:       arg.BotID,
-		ChannelType: arg.ChannelType,
-		Type:        arg.Type,
-		Title:       arg.Title,
-		Metadata:    arg.Metadata,
-		CreatedAt:   pgtype.Timestamptz{Valid: true},
-		UpdatedAt:   pgtype.Timestamptz{Valid: true},
+		ID:              testUUID("22222222-2222-2222-2222-222222222222"),
+		BotID:           arg.BotID,
+		BotAgentID:      arg.BotAgentID,
+		ChannelType:     arg.ChannelType,
+		Type:            arg.Type,
+		SessionMode:     arg.SessionMode,
+		RuntimeType:     arg.RuntimeType,
+		RuntimeMetadata: arg.RuntimeMetadata,
+		Title:           arg.Title,
+		Metadata:        arg.Metadata,
+		CreatedAt:       pgtype.Timestamptz{Valid: true},
+		UpdatedAt:       pgtype.Timestamptz{Valid: true},
 	}, nil
 }
 
@@ -113,7 +124,7 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+					acpprofile.AgentACPID: map[string]any{"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"command": "my-agent-acp"}},
 				},
 			},
 		}),
@@ -126,7 +137,7 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 		newTestAdminAccountService("admin"),
 	)
 
-	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex","project_path":"/data/app","runtime_owner_account_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}`
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"acp","project_path":"/data/app","runtime_owner_account_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}}`
 	if err := callCreateSession(handler, botID, body); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
@@ -136,7 +147,7 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	if queries.createParams.Type != session.TypeACPAgent {
 		t.Fatalf("CreateSession type = %q, want acp_agent", queries.createParams.Type)
 	}
-	if got := string(queries.createParams.Metadata); !strings.Contains(got, `"acp_agent_id":"codex"`) || !strings.Contains(got, `"project_path":"/data/app"`) {
+	if got := string(queries.createParams.Metadata); !strings.Contains(got, `"acp_agent_id":"acp"`) || !strings.Contains(got, `"project_path":"/data/app"`) {
 		t.Fatalf("CreateSession metadata = %s", got)
 	}
 	var metadata map[string]any
@@ -155,13 +166,66 @@ func TestCreateSessionAcceptsACPAgentType(t *testing.T) {
 	}
 }
 
+func TestCreateSessionResolvesPersistedBotAgentDescriptor(t *testing.T) {
+	const (
+		botID      = "11111111-1111-1111-1111-111111111111"
+		botAgentID = "33333333-3333-3333-3333-333333333333"
+	)
+	queries := &sessionCreateQueries{
+		bot: testBotRow(botID, nil),
+		botAgent: sqlc.BotAgent{
+			ID:                testUUID(botAgentID),
+			BotID:             testUUID(botID),
+			Name:              "Primary Codex",
+			Runtime:           botagents.RuntimeCodex,
+			Enabled:           true,
+			Metadata:          []byte(`{"provider":"codex","auth":"api_key"}`),
+			AgentCredentialID: testUUID("44444444-4444-4444-4444-444444444444"),
+			CreatedAt:         pgtype.Timestamptz{Valid: true},
+			UpdatedAt:         pgtype.Timestamptz{Valid: true},
+		},
+	}
+	handler := NewSessionHandler(
+		slog.Default(),
+		newThreadServiceForTest(queries),
+		nil,
+		bots.NewService(nil, queries),
+		newTestAdminAccountService("admin"),
+	)
+	agents := botagents.NewService(slog.Default(), queries)
+	agents.SetCredentialResolver(func(context.Context, string, string) string {
+		return agentcredential.AuthKindOpenAIAPIKey
+	})
+	handler.SetBotAgents(agents)
+
+	if err := callCreateSession(handler, botID, `{"type":"chat","bot_agent_id":"`+botAgentID+`","title":"Codex"}`); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if queries.createParams.BotAgentID.String() != botAgentID {
+		t.Fatalf("bot_agent_id = %q, want %q", queries.createParams.BotAgentID.String(), botAgentID)
+	}
+	if queries.createParams.RuntimeType != session.RuntimeCodex {
+		t.Fatalf("runtime_type = %q, want %q", queries.createParams.RuntimeType, session.RuntimeCodex)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(queries.createParams.Metadata, &metadata); err != nil {
+		t.Fatalf("metadata json = %v", err)
+	}
+	if metadata["project_path"] != session.DefaultACPProjectPath {
+		t.Fatalf("metadata = %#v, want external runtime defaults", metadata)
+	}
+	if metadata["acp_agent_id"] != nil {
+		t.Fatalf("metadata = %#v, direct runtime sessions carry no acp_agent_id", metadata)
+	}
+}
+
 func TestCreateSessionRejectsSystemACPRuntime(t *testing.T) {
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := &sessionCreateQueries{
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+					acpprofile.AgentACPID: map[string]any{"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"command": "my-agent-acp"}},
 				},
 			},
 		}),
@@ -175,7 +239,7 @@ func TestCreateSessionRejectsSystemACPRuntime(t *testing.T) {
 		newTestAdminAccountService("user"),
 	)
 
-	body := `{"type":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"codex"}}`
+	body := `{"type":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"acp"}}`
 	err := callCreateSession(handler, botID, body)
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
@@ -215,7 +279,7 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+					acpprofile.AgentACPID: map[string]any{"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"command": "my-agent-acp"}},
 				},
 			},
 		}),
@@ -228,7 +292,7 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 		newTestAdminAccountService("admin"),
 	)
 
-	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex"}}`
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"acp"}}`
 	if err := callCreateSession(handler, botID, body); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
@@ -242,24 +306,32 @@ func TestCreateSessionDefaultsACPProjectPath(t *testing.T) {
 }
 
 type recordingRuntimeBinder struct {
+	bindCtx  context.Context
 	bindArgs []string
 	bindErr  error
 }
 
 func (*recordingRuntimeBinder) CloseSession(string) error { return nil }
 
-func (b *recordingRuntimeBinder) BindRuntime(botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+func (*recordingRuntimeBinder) BeginSessionHistoryReset(ctx context.Context, _, _ string) (context.Context, func(), error) {
+	return ctx, func() {}, nil
+}
+
+func (b *recordingRuntimeBinder) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
+	b.bindCtx = ctx
 	b.bindArgs = []string{botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID}
 	return b.bindErr
 }
 
 func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
+	type contextKey struct{}
+
 	botID := "11111111-1111-1111-1111-111111111111"
 	queries := &sessionCreateQueries{
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+					acpprofile.AgentACPID: map[string]any{"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"command": "my-agent-acp"}},
 				},
 			},
 		}),
@@ -273,13 +345,21 @@ func TestCreateSessionBindsWarmACPRuntime(t *testing.T) {
 		newTestAdminAccountService("admin"),
 	)
 
-	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex"},"acp_runtime_id":"rt_warm"}`
-	if err := callCreateSession(handler, botID, body); err != nil {
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"acp"},"acp_runtime_id":"rt_warm"}`
+	requestCtx := context.WithValue(context.Background(), contextKey{}, "create-session-scope")
+	req := httptest.NewRequestWithContext(requestCtx, http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
+	if err := callCreateSessionRequest(handler, botID, req); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
-	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "codex", session.DefaultACPProjectPath, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
+	want := []string{botID, "rt_warm", "22222222-2222-2222-2222-222222222222", "acp", session.DefaultACPProjectPath, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
 	if len(binder.bindArgs) != len(want) {
 		t.Fatalf("bind args = %#v, want %#v", binder.bindArgs, want)
+	}
+	if binder.bindCtx == nil {
+		t.Fatal("BindRuntime context is nil")
+	}
+	if got := binder.bindCtx.Value(contextKey{}); got != "create-session-scope" {
+		t.Fatalf("BindRuntime context value = %v, want create-session-scope", got)
 	}
 	for i := range want {
 		if binder.bindArgs[i] != want[i] {
@@ -294,7 +374,7 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 		bot: testBotRow(botID, map[string]any{
 			acpprofile.MetadataKeyACP: map[string]any{
 				"agents": map[string]any{
-					acpprofile.AgentCodexID: map[string]any{"enabled": true, "setup_mode": "self"},
+					acpprofile.AgentACPID: map[string]any{"enabled": true, "setup_mode": "api_key", "managed": map[string]any{"command": "my-agent-acp"}},
 				},
 			},
 		}),
@@ -310,7 +390,7 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 
 	// A failed bind must not fail session creation: the first prompt cold
 	// starts instead.
-	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"codex"},"acp_runtime_id":"rt_gone"}`
+	body := `{"type":"acp_agent","title":"Codex","metadata":{"acp_agent_id":"acp"},"acp_runtime_id":"rt_gone"}`
 	if err := callCreateSession(handler, botID, body); err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
@@ -320,8 +400,12 @@ func TestCreateSessionToleratesFailedRuntimeBind(t *testing.T) {
 }
 
 func callCreateSession(handler *SessionHandler, botID string, body string) error {
-	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/sessions", bytes.NewBufferString(body))
+	return callCreateSessionRequest(handler, botID, req)
+}
+
+func callCreateSessionRequest(handler *SessionHandler, botID string, req *http.Request) error {
+	e := echo.New()
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(e, req, rec, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

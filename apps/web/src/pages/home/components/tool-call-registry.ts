@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   ArrowRight,
   AudioLines,
+  Bot,
+  Boxes,
   Braces,
   Brain,
   Cable,
@@ -21,9 +23,11 @@ import {
   FileText,
   Film,
   FolderOpen,
+  FolderTree,
   Focus,
   Globe,
   Heading,
+  Image as ImageIcon,
   ImagePlus,
   Inbox,
   Keyboard,
@@ -32,24 +36,35 @@ import {
   Mail,
   MailOpen,
   MailPlus,
+  MessageSquareReply,
+  MessageSquareText,
   MessagesSquare,
   Monitor,
   MousePointer2,
   MousePointerClick,
   Move,
+  MoveDown,
+  MoveLeft,
+  MoveRight,
+  MoveUp,
   MoveVertical,
+  Paperclip,
   Plug,
   Plus,
+  Power,
+  PowerOff,
   RotateCw,
   ScanEye,
   Search,
   SearchCheck,
   Send,
+  ShieldQuestion,
   Smile,
   Sparkles,
   Square,
   SquareCheck,
   SquareTerminal,
+  Split,
   TextCursorInput,
   Timer,
   Unplug,
@@ -87,18 +102,36 @@ export interface ToolDisplay {
   actionKey: string
   actionParams?: Record<string, unknown>
   target: string
+  // Native `title` tooltip completing a truncated `target` — only for short,
+  // single-line values (full path, URL, query). Never a long or multi-line blob
+  // (a whole exec command, a message body): a native tooltip can't scroll or be
+  // copied, so such content renders as an unreadable wall; the expandable detail
+  // is the channel for full content. Consumers bind `title` only when this is set.
   fullTarget?: string
   detail?: Component
-  isError?: boolean
-  errorSuffix?: string
   expandable?: boolean
   defaultOpen?: boolean
   diffAdd?: number
   diffRemove?: number
   hideAction?: boolean
-  // 'card' = output/diff/file content in a grayscale card; 'inline' = a
-  // half-embedded key:value list (params), no card. Defaults to 'card'.
-  detailVariant?: 'card' | 'inline'
+}
+
+// Missing input marks argument streaming; an empty object is a complete,
+// valid argument set for tools such as list_models.
+export function getToolTitle(
+  block: ToolCallBlock,
+  translate: (key: string, params: Record<string, unknown>) => string,
+) {
+  const display = getToolDisplay(block)
+  const pending = !block.done && block.input == null
+  const pendingKey = ['write', 'edit', 'apply_patch'].includes(display.actionKey)
+    ? display.actionKey : 'generic'
+  const action = pending
+    ? translate(`chat.tools.pending.${pendingKey}`, {})
+    : translate(`chat.tools.${display.actionKey}`, display.actionParams ?? {})
+  const showAction = pending || !display.hideAction
+  const label = [showAction ? action : '', display.target].filter(Boolean).join(' ')
+  return { display, pending, action, showAction, label }
 }
 
 const FILE_PATH_TOOLS = new Set(['read', 'write', 'edit', 'list'])
@@ -111,10 +144,7 @@ export function isDirPathTool(toolName: string): boolean {
   return toolName === 'list'
 }
 
-// Read-only / no-side-effect tools form an "explore" segment; everything else
-// (write, edit, exec, send, schedule mutations, …) is an "action" segment.
-// Consecutive tools of the same category are grouped together; reasoning rides
-// along with whichever segment it sits next to.
+// Read-only tools contribute lookup counts to the process summary.
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
   'list_execution_locations',
@@ -127,34 +157,76 @@ export function isReadOnlyTool(toolName: string): boolean {
   return READONLY_TOOLS.has(toolName)
 }
 
-// GUI tools (browser + computer) interleave read-only "observe" and
-// side-effecting "action" calls as one continuous browsing activity. Splitting
-// them on every observe↔action flip would strand each step in its own segment,
-// so they share a single category and stay grouped together.
-export type ToolSegmentCategory = 'explore' | 'action' | 'gui'
+// Buckets used to summarize a finished multi-tool run in the collapsed group
+// header. They live here, next to the tool catalog itself, so the header and
+// the per-row registry cannot drift apart as tools are added.
+export type ToolBucket = 'browse' | 'edit' | 'run' | 'message' | 'schedule' | 'media' | 'agent' | 'other'
+
+// Listed in the order the summary joins them ("Read 3 files · Ran 2 commands").
+// The sets are disjoint, so this order is presentation only.
+const BUCKETS: Array<[ToolBucket, Set<string>]> = [
+  ['browse', new Set([
+    'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages', 'get_messages',
+    'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
+    'list_schedule', 'get_schedule', 'list_skills', 'list_models', 'list_workdirs',
+    'list_acp_agents', 'list_execution_locations',
+  ])],
+  ['edit', new Set(['write', 'edit', 'apply_patch'])],
+  ['run', new Set(['exec'])],
+  ['message', new Set(['send', 'react', 'send_email', 'speak'])],
+  ['schedule', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
+  ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
+  ['agent', new Set(['spawn_agent', 'send_message', 'list_agents'])],
+]
+
+export const SUMMARY_BUCKET_ORDER: ToolBucket[] = BUCKETS.map(([bucket]) => bucket)
+
+export function toolBucket(toolName: string): ToolBucket {
+  for (const [bucket, names] of BUCKETS) {
+    if (names.has(toolName)) return bucket
+  }
+  return 'other'
+}
+
+// Fragment kinds for the group header's details half — the bare counts that
+// follow the phase verb ("Explored 12 file operations, 4 searches, ran 3 commands").
+// Finer-grained than ToolBucket on purpose: 'browse' lumps reads and searches
+// together, but a research run reporting "8 file operations" when 6 calls
+// were web searches is the header lying. File tools deliberately count calls,
+// not unique files: one patch may touch several files and repeated reads may
+// target the same path. Anything not listed falls to 'steps' so the header
+// degrades to a plain step count instead of inventing a noun.
+export type SummaryFragment = 'fileOperations' | 'searches' | 'commands' | 'messages' | 'schedules' | 'media' | 'agents' | 'steps'
+
+const FRAGMENT_TOOLS: Array<[SummaryFragment, Set<string>]> = [
+  ['fileOperations', new Set(['read', 'list', 'write', 'edit', 'apply_patch'])],
+  ['commands', new Set(['exec'])],
+  ['messages', new Set(['send', 'react', 'send_email', 'speak'])],
+  ['schedules', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
+  ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
+  ['agents', new Set(['spawn_agent', 'send_message', 'list_agents'])],
+]
+
+export const SUMMARY_FRAGMENT_ORDER: SummaryFragment[] = [
+  'fileOperations', 'searches', 'commands', 'messages', 'schedules', 'media', 'agents', 'steps',
+]
+
+export function toolFragmentKind(toolName: string): SummaryFragment {
+  for (const [kind, names] of FRAGMENT_TOOLS) {
+    if (names.has(toolName)) return kind
+  }
+  // Read-only lookups (web/memory/message search, list_*/get_*, email reads,
+  // bg status, waits) all read to the user as "it looked something up" — one
+  // 'searches' counter keeps the header to one clause instead of a taxonomy.
+  return isReadOnlyTool(toolName) ? 'searches' : 'steps'
+}
 
 export function isGuiTool(toolName: string): boolean {
   return isGuiToolName(toolName)
 }
 
-// Segment category used to group consecutive tool calls in a process run.
-export function toolSegmentCategory(toolName: string): ToolSegmentCategory {
-  if (isGuiToolName(toolName)) return 'gui'
-  return isReadOnlyTool(toolName) ? 'explore' : 'action'
-}
-
-// An image read (e.g. the path a browser/computer screenshot was saved to) is
-// the model looking at a picture — an observation that belongs with the
-// surrounding GUI activity, not a standalone file-exploration read. Folding it
-// in keeps the "navigate → screenshot → look" loop as one browsing segment.
 const IMAGE_READ_EXT = /\.(png|jpe?g|gif|webp|bmp|avif)$/i
-
-export function toolSegmentCategoryForBlock(block: ToolCallBlock): ToolSegmentCategory {
-  if (block.toolName === 'read' && IMAGE_READ_EXT.test(pickString(asObject(block.input), 'path'))) {
-    return 'gui'
-  }
-  return toolSegmentCategory(block.toolName)
-}
+const PDF_READ_EXT = /\.pdf$/i
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
@@ -172,6 +244,20 @@ function firstQuestionText(input: Record<string, unknown>): string {
   const questions = input.questions
   if (!Array.isArray(questions) || questions.length === 0) return ''
   return pickString(asObject(questions[0]), 'text')
+}
+
+// A bounded read names its slice: an open-ended tail and an explicit range are
+// different enough to warrant their own label.
+function readRangeVariant(lineOffset: number, nLines: number): { actionKey: string; actionParams: Record<string, unknown> } {
+  const from = lineOffset > 0 ? lineOffset : 1
+  if (nLines > 0) return { actionKey: 'read_range', actionParams: { from, to: from + nLines - 1 } }
+  return { actionKey: 'read_from', actionParams: { from } }
+}
+
+function firstQuestionKind(input: Record<string, unknown>): string {
+  const questions = input.questions
+  if (!Array.isArray(questions) || questions.length === 0) return ''
+  return pickString(asObject(questions[0]), 'kind')
 }
 
 function pickNumber(obj: Record<string, unknown>, ...keys: string[]): number {
@@ -205,7 +291,8 @@ function firstLine(s: string, max = 80): string {
 
 function lineCount(s: string): number {
   if (!s) return 0
-  return s.split('\n').length
+  const lines = s.split('\n')
+  return lines.at(-1) === '' ? lines.length - 1 : lines.length
 }
 
 function resultObject(block: ToolCallBlock): Record<string, unknown> {
@@ -219,6 +306,14 @@ interface PatchFileTarget {
   path: string
 }
 
+// Same marks the apply_patch detail panel uses, so the row tooltip and the
+// expanded list read as one vocabulary — and neither needs translating.
+const PATCH_OPERATION_MARK: Record<PatchFileTarget['operation'], string> = {
+  add: 'A',
+  modify: 'M',
+  delete: 'D',
+}
+
 function normalizePatchOperation(value: unknown): PatchFileTarget['operation'] | '' {
   if (value === 'add' || value === 'added') return 'add'
   if (value === 'modify' || value === 'modified' || value === 'update') return 'modify'
@@ -226,8 +321,22 @@ function normalizePatchOperation(value: unknown): PatchFileTarget['operation'] |
   return ''
 }
 
+function patchFilesFromChanges(value: unknown): PatchFileTarget[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => {
+      const obj = asObject(item)
+      const path = pickString(obj, 'path')
+      const operation = normalizePatchOperation(asObject(obj.kind).type ?? obj.kind ?? obj.operation)
+      return path && operation ? { operation, path } : null
+    })
+    .filter((item): item is PatchFileTarget => Boolean(item))
+}
+
 function patchFilesFromResult(block: ToolCallBlock): PatchFileTarget[] {
   const result = resultObject(block)
+  const changes = patchFilesFromChanges(result.changes)
+  if (changes.length > 0) return changes
   const rawFiles = result.files
   if (Array.isArray(rawFiles)) {
     return rawFiles
@@ -286,6 +395,25 @@ function patchLineCounts(patch: string): { add: number; remove: number } {
   return { add, remove }
 }
 
+function changeLineCounts(value: unknown): { add: number; remove: number } {
+  if (!Array.isArray(value)) return { add: 0, remove: 0 }
+  let add = 0
+  let remove = 0
+  for (const item of value) {
+    const obj = asObject(item)
+    const diff = pickString(obj, 'diff')
+    const operation = normalizePatchOperation(asObject(obj.kind).type ?? obj.kind ?? obj.operation)
+    if (operation === 'add') add += lineCount(diff)
+    else if (operation === 'delete') remove += lineCount(diff)
+    else {
+      const counts = patchLineCounts(diff)
+      add += counts.add
+      remove += counts.remove
+    }
+  }
+  return { add, remove }
+}
+
 function hostnameOrUrl(url: string): string {
   if (!url) return ''
   try {
@@ -297,10 +425,70 @@ function hostnameOrUrl(url: string): string {
   }
 }
 
-// Compatibility aliases accepted by the backend browser/computer tools.
+const WEB_FETCH_FORMATS = new Set(['markdown', 'json', 'xml', 'text'])
+
+// Tools that can detach accept the flag under either spelling depending on how
+// the call was serialized.
+function isBackgroundInput(input: Record<string, unknown>): boolean {
+  return input.run_in_background === true || input.runInBackground === true
+}
+
+// Forking inherits the parent's context and backgrounding detaches the run:
+// two independent switches, four genuinely different outcomes.
+function spawnAgentActionKey(fork: boolean, background: boolean): string {
+  if (fork && background) return 'spawn_agent_fork_background'
+  if (fork) return 'spawn_agent_fork'
+  if (background) return 'spawn_agent_background'
+  return 'spawn_agent'
+}
+
+// For a keystroke the key itself is the subject; a selector would say nothing.
+function guiKeyTarget(action: string, input: Record<string, unknown>): string {
+  if (action !== 'press' && action !== 'key' && action !== 'keydown' && action !== 'keyup') return ''
+  return pickString(input, 'key')
+}
+
+// Flipping a schedule on or off, and replacing its whole execution block, are
+// the two updates a user reads the row to spot.
+function updateScheduleVariant(input: Record<string, unknown>): { icon: Component; actionKey: string } {
+  if (input.enabled === true) return { icon: Power, actionKey: 'update_schedule_enable' }
+  if (input.enabled === false) return { icon: PowerOff, actionKey: 'update_schedule_disable' }
+  if (input.update_execution === true || input.updateExecution === true) {
+    return { icon: CalendarCog, actionKey: 'update_schedule_execution' }
+  }
+  return { icon: CalendarCog, actionKey: 'update_schedule' }
+}
+
+// `send` accepts either a text shortcut or a structured message object; the
+// row shows whichever one carries the body.
+function sendText(input: Record<string, unknown>): string {
+  const shortcut = pickString(input, 'text')
+  if (shortcut) return shortcut
+  const message = asObject(input.message)
+  const structured = pickString(message, 'text')
+  if (structured) return structured
+  return pickString(input, 'message')
+}
+
+// Replying to a message and shipping files are separate acts from posting
+// text, so they get their own verb instead of hiding in the params.
+function sendVariant(input: Record<string, unknown>): { icon: Component; actionKey: string } {
+  if (pickString(input, 'reply_to', 'replyTo')) return { icon: MessageSquareReply, actionKey: 'send_reply' }
+  const attachments = input.attachments
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    return { icon: Paperclip, actionKey: 'send_attachments' }
+  }
+  return { icon: Send, actionKey: 'send' }
+}
+
+// Compatibility aliases accepted by the backend browser/computer tools. The
+// keyboard_* spellings reach the same insert-text path as `type`, so they read
+// as typing rather than as an unlabeled action.
 const GUI_ACTION_ALIASES: Record<string, string> = {
   dblclick: 'double_click',
   scrollintoview: 'scroll_into_view',
+  keyboard_type: 'type',
+  keyboard_inserttext: 'type',
 }
 
 function normalizeGuiAction(raw: string): string {
@@ -321,10 +509,16 @@ const BROWSER_ACTION_ICONS: Record<string, Component> = {
   check: SquareCheck,
   uncheck: Square,
   scroll: MoveVertical,
+  scroll_up: MoveUp,
+  scroll_down: MoveDown,
+  scroll_left: MoveLeft,
+  scroll_right: MoveRight,
   scroll_into_view: MoveVertical,
   drag: Move,
   upload: Upload,
   wait: Timer,
+  keydown: Keyboard,
+  keyup: Keyboard,
   go_back: ArrowLeft,
   go_forward: ArrowRight,
   reload: RotateCw,
@@ -353,11 +547,17 @@ const COMPUTER_OBSERVE_ICONS: Record<string, Component> = {
 
 const COMPUTER_ACTION_ICONS: Record<string, Component> = {
   click: MousePointerClick,
+  click_right: MousePointerClick,
+  click_middle: MousePointerClick,
   double_click: MousePointerClick,
   type: Keyboard,
   fill: TextCursorInput,
   key: Keyboard,
   scroll: MoveVertical,
+  scroll_up: MoveUp,
+  scroll_down: MoveDown,
+  scroll_left: MoveLeft,
+  scroll_right: MoveRight,
   drag: Move,
   wait: Timer,
   mouse_move: MousePointer2,
@@ -380,15 +580,40 @@ function resolveGuiAction(
   fallbackIcon: Component,
   fallbackKey: string,
   rawAction: string,
-): { icon: Component; actionKey: string; actionParams?: Record<string, unknown> } {
+  input: Record<string, unknown> = {},
+): { icon: Component; actionKey: string; actionParams?: Record<string, unknown>; action: string } {
   const action = normalizeGuiAction(rawAction)
-  const icon = icons[action]
-  if (icon) {
-    return { icon, actionKey: `${namespace}.${action}` }
+  if (icons[action]) {
+    const variant = guiActionVariant(action, input)
+    // A variant only wins when it has its own icon and label; an unknown
+    // modifier value quietly keeps the plain action.
+    const resolved = variant && icons[variant] ? variant : action
+    return { icon: icons[resolved]!, actionKey: `${namespace}.${resolved}`, action }
   }
-  return { icon: fallbackIcon, actionKey: fallbackKey, actionParams: { action: rawAction } }
+  return { icon: fallbackIcon, actionKey: fallbackKey, actionParams: { action: rawAction }, action }
 }
 
+const GUI_SCROLL_DIRECTIONS = new Set(['up', 'down', 'left', 'right'])
+const GUI_NON_LEFT_BUTTONS = new Set(['right', 'middle'])
+
+// Some GUI actions mean materially different things depending on one modifier
+// argument: a right click is not a click, and a bare "Scroll" drops the single
+// detail the user is reading the row for. Those get their own label; every
+// other argument stays in the expanded detail.
+function guiActionVariant(action: string, input: Record<string, unknown>): string {
+  if (action === 'scroll') {
+    const direction = pickString(input, 'direction').toLowerCase()
+    return GUI_SCROLL_DIRECTIONS.has(direction) ? `scroll_${direction}` : ''
+  }
+  if (action === 'click') {
+    const button = pickString(input, 'button').toLowerCase()
+    return GUI_NON_LEFT_BUTTONS.has(button) ? `click_${button}` : ''
+  }
+  return ''
+}
+
+// 工具结果中的错误供 Agent 自行检查和恢复，不代表用户任务失败。
+// 不把 isError / 非零退出码提升成标题状态；原始结果仍交给详情组件展示。
 export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
   const input = asObject(block.input)
 
@@ -397,9 +622,11 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       // pickString covers pre-v2 history where input was { question: "..." }.
       const question = block.userInput?.questions?.[0]?.text || firstQuestionText(input) || pickString(input, 'question')
       const showQuestionInBody = block.userInput?.status === 'pending'
+      const kind = block.userInput?.questions?.[0]?.kind || firstQuestionKind(input)
+      const isChoice = kind === 'single_select' || kind === 'multi_select'
       return {
-        icon: TextCursorInput,
-        actionKey: 'ask_user',
+        icon: isChoice ? ListChecks : TextCursorInput,
+        actionKey: isChoice ? 'ask_user_choice' : 'ask_user',
         target: showQuestionInBody ? '' : truncate(question, 80),
         fullTarget: showQuestionInBody ? '' : question,
         expandable: true,
@@ -407,9 +634,37 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     }
     case 'read': {
       const path = pickString(input, 'path')
-      return { icon: FileText, actionKey: 'read', target: basename(path), fullTarget: path, detail: ToolCallDetailOutput }
+      const lineOffset = pickNumber(input, 'line_offset', 'lineOffset')
+      const nLines = pickNumber(input, 'n_lines', 'nLines')
+      const partial = lineOffset > 1 || nLines > 0
+      const variant = IMAGE_READ_EXT.test(path)
+        ? { icon: ImageIcon, actionKey: 'read_image' }
+        : PDF_READ_EXT.test(path)
+          ? { icon: FileText, actionKey: 'read_document' }
+          : partial
+            ? { icon: FileText, ...readRangeVariant(lineOffset, nLines) }
+            : { icon: FileText, actionKey: 'read' }
+      return { ...variant, target: basename(path), fullTarget: path, detail: ToolCallDetailOutput }
     }
     case 'write': {
+      const result = resultObject(block)
+      const changes = patchFilesFromChanges(input.changes)
+      const files = changes.length > 0 ? changes : patchFilesFromResult(block)
+      if (files.length > 0) {
+        const target = files.length === 1 ? basename(files[0]!.path) : `${files.length} files`
+        const fullTarget = files.map(file => `${PATCH_OPERATION_MARK[file.operation]} ${file.path}`).join('\n')
+        const counts = changeLineCounts(Array.isArray(input.changes) ? input.changes : result.changes)
+        return {
+          icon: FilePen,
+          actionKey: 'write',
+          target,
+          fullTarget,
+          detail: ToolCallDetailApplyPatch,
+          defaultOpen: true,
+          diffAdd: counts.add,
+          diffRemove: counts.remove,
+        }
+      }
       const path = pickString(input, 'path')
       const content = pickString(input, 'content')
       const contentLineCount = pickNumber(input, 'content_line_count')
@@ -448,7 +703,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
           ? `${fileTargets.length} files`
           : ''
       const fullTarget = fileTargets
-        .map(file => `${file.operation} ${file.path}`)
+        .map(file => `${PATCH_OPERATION_MARK[file.operation]} ${file.path}`)
         .join('\n')
       const counts = patchLineCounts(patch)
       return {
@@ -464,41 +719,44 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     }
     case 'list': {
       const path = pickString(input, 'path')
-      return { icon: FolderOpen, actionKey: 'list', target: basename(path), fullTarget: path, detail: ToolCallDetailOutput }
+      return { icon: FolderOpen, actionKey: 'list', target: path, fullTarget: path, detail: ToolCallDetailOutput }
     }
     case 'list_execution_locations':
-      return { icon: Monitor, actionKey: 'list_execution_locations', target: '' }
+      return { icon: Monitor, actionKey: 'list_execution_locations', target: '', expandable: true }
     case 'exec': {
       const cmd = pickString(input, 'command')
+      const description = pickString(input, 'description').trim()
+      const background = input.run_in_background === true || input.runInBackground === true
       return {
         icon: SquareTerminal,
-        actionKey: 'exec',
-        target: firstLine(cmd, 80),
-        fullTarget: cmd,
+        actionKey: background ? 'exec_background' : 'exec',
+        // No fullTarget: the full command lives in the exec detail, not a tooltip.
+        target: firstLine(description || cmd, 80),
+        hideAction: Boolean(description),
         detail: ToolCallDetailExec,
       }
     }
     case 'bg_status': {
       const action = pickString(input, 'action') || 'list'
-      return { icon: ListChecks, actionKey: 'bg_status', target: action }
+      return { icon: ListChecks, actionKey: 'bg_status', target: action, expandable: true }
     }
     case 'list_background':
-      return { icon: ListChecks, actionKey: 'list_background' }
+      return { icon: ListChecks, actionKey: 'list_background', target: '', expandable: true }
     case 'get_background_status': {
       const taskId = pickString(input, 'task_id', 'taskId')
-      return { icon: SearchCheck, actionKey: 'get_background_status', target: taskId }
+      return { icon: SearchCheck, actionKey: 'get_background_status', target: taskId, expandable: true }
     }
     case 'kill_background': {
       const taskId = pickString(input, 'task_id', 'taskId')
-      return { icon: X, actionKey: 'kill_background', target: taskId }
+      return { icon: X, actionKey: 'kill_background', target: taskId, expandable: true }
     }
     case 'wait': {
       const duration = pickNumber(input, 'duration')
-      return { icon: Timer, actionKey: 'wait', target: duration ? `${duration}s` : '' }
+      return { icon: Timer, actionKey: 'wait', target: duration ? `${duration}s` : '', expandable: true }
     }
     case 'wait_until': {
       const taskId = pickString(input, 'task_id', 'taskId')
-      return { icon: Timer, actionKey: 'wait_until', target: taskId }
+      return { icon: Timer, actionKey: 'wait_until', target: taskId, expandable: true }
     }
     case 'web_search': {
       const query = pickString(input, 'query')
@@ -512,9 +770,12 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     }
     case 'web_fetch': {
       const url = pickString(input, 'url')
+      const format = pickString(input, 'format').toLowerCase()
+      const named = format && format !== 'auto' && WEB_FETCH_FORMATS.has(format)
       return {
         icon: Globe,
-        actionKey: 'web_fetch',
+        actionKey: named ? 'web_fetch_as' : 'web_fetch',
+        actionParams: named ? { format: format.toUpperCase() } : undefined,
         target: hostnameOrUrl(url),
         fullTarget: url,
         detail: ToolCallDetailWebFetch,
@@ -532,11 +793,11 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     }
     case 'send': {
       const target = pickString(input, 'target')
-      const text = pickString(input, 'text', 'message')
+      const text = sendText(input)
       const display = target || truncate(text, 60)
+      const variant = sendVariant(input)
       return {
-        icon: Send,
-        actionKey: 'send',
+        ...variant,
         target: display,
         fullTarget: text || target,
         detail: ToolCallDetailSend,
@@ -550,9 +811,10 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
           icon: Smile,
           actionKey: 'react_remove',
           target: pickString(input, 'message_id'),
+          expandable: true,
         }
       }
-      return { icon: Smile, actionKey: 'react', target: emoji }
+      return { icon: Smile, actionKey: 'react', target: emoji, expandable: true }
     }
     case 'get_contacts': {
       return {
@@ -563,39 +825,80 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       }
     }
     case 'list_sessions': {
-      const target = pickString(input, 'platform') || pickString(input, 'type')
-      return { icon: MessagesSquare, actionKey: 'list_sessions', target }
+      const type = pickString(input, 'type')
+      const actionKey = type === 'chat' || type === 'schedule' ? `list_sessions_${type}` : 'list_sessions'
+      return {
+        icon: type === 'schedule' ? Calendar : MessagesSquare,
+        actionKey,
+        target: pickString(input, 'platform'),
+        expandable: true,
+      }
     }
     case 'search_messages': {
       const keyword = pickString(input, 'keyword')
+      const role = pickString(input, 'role')
+      const actionKey = role === 'user' || role === 'assistant' ? `search_messages_${role}` : 'search_messages'
       return {
         icon: SearchCheck,
-        actionKey: 'search_messages',
+        actionKey,
         target: keyword ? `"${keyword}"` : '',
         fullTarget: keyword,
+        expandable: true,
+      }
+    }
+    case 'get_messages': {
+      const messageId = pickString(input, 'message_id', 'messageId')
+      const sessionId = pickString(input, 'session_id', 'sessionId')
+      return {
+        icon: MessageSquareText,
+        actionKey: messageId ? 'get_messages_one' : 'get_messages',
+        target: messageId || sessionId,
+        expandable: true,
+      }
+    }
+    case 'list_models':
+      return { icon: Boxes, actionKey: 'list_models', target: '', expandable: true }
+    case 'list_workdirs':
+      return { icon: FolderTree, actionKey: 'list_workdirs', target: '', expandable: true }
+    case 'list_acp_agents': {
+      const agentId = pickString(input, 'agent_id', 'agentId')
+      return {
+        icon: Bot,
+        // Naming an agent also boots it to fetch models/efforts — a slower,
+        // materially different call than reading the catalog.
+        actionKey: agentId ? 'list_acp_agents_one' : 'list_acp_agents',
+        target: agentId,
+        expandable: true,
       }
     }
     case 'list_schedule':
       return { icon: Calendar, actionKey: 'list_schedule', target: '', detail: ToolCallDetailSchedule }
     case 'get_schedule':
-      return { icon: Calendar, actionKey: 'get_schedule', target: pickString(input, 'id') }
+      return {
+        icon: Calendar,
+        actionKey: 'get_schedule',
+        target: pickString(input, 'id'),
+        expandable: true,
+      }
     case 'create_schedule':
       return {
         icon: CalendarPlus,
         actionKey: 'create_schedule',
         target: pickString(input, 'name'),
+        expandable: true,
       }
     case 'update_schedule':
       return {
-        icon: CalendarCog,
-        actionKey: 'update_schedule',
+        ...updateScheduleVariant(input),
         target: pickString(input, 'name', 'id'),
+        expandable: true,
       }
     case 'delete_schedule':
       return {
         icon: CalendarMinus,
         actionKey: 'delete_schedule',
         target: pickString(input, 'id'),
+        expandable: true,
       }
     case 'list_email_accounts':
       return {
@@ -612,6 +915,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         actionKey: 'send_email',
         target: subject || to,
         fullTarget: subject ? `${to} — ${subject}` : to,
+        expandable: true,
       }
     }
     case 'list_email':
@@ -638,6 +942,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         actionKey: 'speak',
         target: truncate(text, 60),
         fullTarget: text,
+        expandable: true,
       }
     }
     case 'transcribe_audio': {
@@ -649,7 +954,12 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         'url',
         'audio_url',
       )
-      return { icon: AudioLines, actionKey: 'transcribe_audio', target }
+      return {
+        icon: AudioLines,
+        actionKey: 'transcribe_audio',
+        target,
+        expandable: true,
+      }
     }
     case 'generate_image': {
       const prompt = pickString(input, 'prompt')
@@ -673,9 +983,11 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
     }
     case 'spawn_agent': {
       const task = pickString(input, 'task')
+      const fork = input.fork === true
+      const background = isBackgroundInput(input)
       return {
-        icon: Workflow,
-        actionKey: 'spawn_agent',
+        icon: fork ? Split : Workflow,
+        actionKey: spawnAgentActionKey(fork, background),
         target: pickString(input, 'id') || truncate(task, 60),
         fullTarget: task,
         detail: ToolCallDetailSpawn,
@@ -685,7 +997,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       const message = pickString(input, 'message')
       return {
         icon: MessagesSquare,
-        actionKey: 'send_message',
+        actionKey: isBackgroundInput(input) ? 'send_message_background' : 'send_message',
         target: pickString(input, 'id'),
         fullTarget: message,
         detail: ToolCallDetailSpawn,
@@ -703,16 +1015,18 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         icon: Sparkles,
         actionKey: 'use_skill',
         target: pickString(input, 'skillName'),
+        expandable: true,
       }
     case 'list_skills':
       return {
         icon: Sparkles,
         actionKey: 'list_skills',
         target: '',
+        expandable: true,
       }
     case 'browser_action': {
-      const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser_action', pickString(input, 'action'))
-      const target = pickString(input, 'url', 'ref', 'selector')
+      const resolved = resolveGuiAction(BROWSER_ACTION_ICONS, 'browserAction', MousePointerClick, 'browser_action', pickString(input, 'action'), input)
+      const target = guiKeyTarget(resolved.action, input) || pickString(input, 'url', 'ref', 'selector')
       return {
         ...resolved,
         target,
@@ -737,13 +1051,13 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       }
     }
     case 'computer_action': {
-      const resolved = resolveGuiAction(COMPUTER_ACTION_ICONS, 'computerAction', MousePointer2, 'computer_action', pickString(input, 'action'))
+      const resolved = resolveGuiAction(COMPUTER_ACTION_ICONS, 'computerAction', MousePointer2, 'computer_action', pickString(input, 'action'), input)
       const x = input.x
       const y = input.y
       const coords = typeof x === 'number' && typeof y === 'number' ? `${x}, ${y}` : ''
       return {
         ...resolved,
-        target: pickString(input, 'ref') || coords,
+        target: guiKeyTarget(resolved.action, input) || pickString(input, 'ref') || coords,
         detail: ToolCallDetailComputer,
       }
     }
@@ -755,13 +1069,26 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         detail: ToolCallDetailRemoteSession,
       }
     }
+    case 'permission': {
+      // An agent permission question that maps to no concrete tool (network
+      // access, mode switch, elicitation fallback): the agent's own title is
+      // the subject, so show it rather than the synthetic tool name.
+      const title = pickString(input, 'title')
+      const request = pickString(input, 'request')
+      return {
+        icon: ShieldQuestion,
+        actionKey: 'permission',
+        target: truncate(title || request, 80),
+        fullTarget: title || request,
+        expandable: true,
+      }
+    }
     default:
       return {
         icon: Wrench,
         actionKey: 'generic',
         target: block.toolName,
         expandable: true,
-        detailVariant: 'inline',
       }
   }
 }

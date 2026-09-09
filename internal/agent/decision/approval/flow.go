@@ -55,6 +55,10 @@ type FlowRequest struct {
 	UndeliveredReason string
 	// AbortReason is recorded when the caller is cancelled while waiting.
 	AbortReason string
+	// CancelOnAbort optionally supplies a runtime-specific cancellation path.
+	// ACP uses it to persist the distinct cancelled status for a stopped turn;
+	// other callers retain the existing rejected-on-abort behavior.
+	CancelOnAbort func(context.Context, Request, string) (Request, error)
 }
 
 // FlowResult describes how the approval flow concluded.
@@ -69,6 +73,10 @@ type FlowResult struct {
 	// leave it false so callers can distinguish "user said no" from "nobody
 	// was there to ask".
 	DecidedByUser bool
+	// SelectedOptionID is the agent-provided permission option the decider
+	// picked, when the request carried options and the decision named one.
+	// Callers answering an ACP request_permission should return it verbatim.
+	SelectedOptionID string
 }
 
 // RunFlow executes the pending-approval state machine shared by the native
@@ -190,7 +198,13 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 			}
 			rejectCtx, rejectCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer rejectCancel()
-			rejected, rejectErr := svc.Reject(rejectCtx, req.ID, "", reason)
+			var rejected Request
+			var rejectErr error
+			if flow.CancelOnAbort != nil {
+				rejected, rejectErr = flow.CancelOnAbort(rejectCtx, req, reason)
+			} else {
+				rejected, rejectErr = svc.Reject(rejectCtx, req.ID, "", reason)
+			}
 			if rejectErr != nil {
 				if recovered, ok := recoverTerminalDecision(rejectCtx, svc, req.ID, rejectErr); ok {
 					return resultFromDecision(req, recovered, emit), nil
@@ -200,10 +214,14 @@ func RunFlow(ctx context.Context, svc FlowService, flow FlowRequest) (FlowResult
 			if recorded := strings.TrimSpace(rejected.DecisionReason); recorded != "" {
 				reason = recorded
 			}
-			abortReq := req
-			abortReq.Status = StatusRejected
-			abortReq.DecisionReason = reason
-			_ = emit(abortReq)
+			if strings.TrimSpace(rejected.DecisionReason) == "" {
+				rejected.DecisionReason = reason
+			}
+			// Preserve the actual durable terminal status. A Service with the
+			// session-cancellation capability returns cancelled; a legacy FlowService
+			// may return rejected. resultFromDecision overlays either result onto the
+			// original request so the emitted snapshot keeps its tool metadata.
+			_ = resultFromDecision(req, rejected, emit)
 			return FlowResult{}, err
 		}
 		return FlowResult{}, err
@@ -231,6 +249,10 @@ func resultFromDecision(req Request, decided Request, emit func(Request) bool) F
 		decisionReq.Status = StatusRejected
 	}
 	decisionReq.DecisionReason = decided.DecisionReason
+	// The terminal snapshot is what live viewers see; without the selection a
+	// second tab (or a channel surface) cannot tell which scope was granted
+	// until a history refetch.
+	decisionReq.SelectedOptionID = decided.SelectedOptionID
 	if decided.DecidedAt != nil {
 		decisionReq.DecidedAt = decided.DecidedAt
 	}
@@ -243,10 +265,11 @@ func resultFromDecision(req Request, decided Request, emit func(Request) bool) F
 	decidedByUser := decided.DecidedByUser && strings.TrimSpace(decided.Status) != "" &&
 		(strings.EqualFold(decisionReq.Status, StatusApproved) || strings.EqualFold(decisionReq.Status, StatusRejected))
 	return FlowResult{
-		Approved:       strings.EqualFold(decisionReq.Status, StatusApproved),
-		Status:         decisionReq.Status,
-		DecisionReason: decisionReq.DecisionReason,
-		DecidedByUser:  decidedByUser,
+		Approved:         strings.EqualFold(decisionReq.Status, StatusApproved),
+		Status:           decisionReq.Status,
+		DecisionReason:   decisionReq.DecisionReason,
+		DecidedByUser:    decidedByUser,
+		SelectedOptionID: decided.SelectedOptionID,
 	}
 }
 
@@ -295,6 +318,12 @@ func RequestMetadata(req Request) map[string]any {
 	}
 	if operation := strings.TrimSpace(req.Operation); operation != "" {
 		metadata["operation"] = operation
+	}
+	if len(req.Options) > 0 {
+		metadata["options"] = req.Options
+	}
+	if strings.TrimSpace(req.SelectedOptionID) != "" {
+		metadata["selected_option_id"] = req.SelectedOptionID
 	}
 	if reason := strings.TrimSpace(req.DecisionReason); reason != "" {
 		metadata["decision_reason"] = reason

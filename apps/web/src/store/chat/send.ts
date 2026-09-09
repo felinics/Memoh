@@ -62,6 +62,7 @@ export class CommandStreamError extends StreamFailureError {
 }
 
 interface TrackStreamInput {
+  onModelPreferenceSettled?: () => void
   invocationId: string
   assistantTurn: ChatAssistantTurn
   botId: string
@@ -74,13 +75,12 @@ export interface ChatSendDeps {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
   focusedChatViewId: Ref<string>
-  overrideModelId: Ref<string>
-  overrideReasoningEffort: Ref<string>
   normalizeTarget: (target?: Partial<ChatViewTarget>) => ChatViewTarget
   chatView: (target?: Partial<ChatViewTarget>) => ChatViewEntry
   transcriptForTarget: (target?: Partial<ChatViewTarget>) => Transcript
   isWebSlashInput: (text: string) => boolean
   quickActionIDForSlash: (text: string) => string
+  isExternalAgentTarget: (target: ChatViewTarget) => boolean
   handleWebNewCommand: (
     text: string,
     attachments: ChatAttachment[] | undefined,
@@ -106,14 +106,17 @@ export interface ChatSendDeps {
   chatReadOnlyFor: (target: ChatViewTarget) => boolean
   isChatViewStreaming: (target: ChatViewTarget, composerScope?: string) => boolean
   isChatViewCreatingSession: (target: ChatViewTarget) => boolean
-  pendingACPStateFor: (target: ChatViewTarget) => unknown
+  pendingExternalAgentStateFor: (target: ChatViewTarget) => unknown
   ensureChatViewSession: (
     target: ChatViewTarget,
     firstPrompt?: string,
+    pair?: { modelId?: string, reasoningEffort?: string },
   ) => Promise<ChatViewTarget>
   startSessionRuntime: (botId: string, sessionId: string) => void
   recordUserSent: (target: ChatViewTarget, sessionId: string, wasDraft: boolean) => void
-  ensureWebSocketConnected: (botId: string) => boolean
+  // True when a socket handle exists for the bot; the ws layer queues until
+  // open, so sends are not refused during the first-open handshake.
+  ensureWebSocket: (botId: string) => boolean
   trackAssistantStream: (input: TrackStreamInput) => Promise<void>
   sendWebSocketMessage: (botId: string, message: WSClientMessage) => boolean
   createdSessionIdForInvocation: (invocationId: string) => string
@@ -169,6 +172,7 @@ export function createChatSend(deps: ChatSendDeps) {
       sessionId: viewTarget.sessionId ?? undefined,
       composerScope,
     }
+    const isExternalAgent = deps.isExternalAgentTarget(viewTarget)
     if (!trimmed && !attachments?.length && requestedSkills.length === 0) {
       return { ok: false, stage: 'startup' }
     }
@@ -186,7 +190,11 @@ export function createChatSend(deps: ChatSendDeps) {
       }
     }
 
-    if (deps.isWebSlashInput(trimmed) && attachments?.length) {
+    if (
+      deps.isWebSlashInput(trimmed)
+      && attachments?.length
+      && (!isExternalAgent || deps.quickActionIDForSlash(trimmed) !== '')
+    ) {
       const message = deps.commandErrorMessage('slash_attachments_unsupported')
       deps.showCommandError('slash_attachments_unsupported', message, commandScope)
       return {
@@ -250,8 +258,9 @@ export function createChatSend(deps: ChatSendDeps) {
     const wasDraft = !viewTarget.sessionId
     const serverSlashActivation = deps.isWebSlashInput(trimmed)
       && deps.quickActionIDForSlash(trimmed) === ''
+      && !isExternalAgent
     const serverSkillActivation = requestedSkills.length > 0 || serverSlashActivation
-    if (serverSkillActivation && wasDraft && deps.pendingACPStateFor(viewTarget)) {
+    if (serverSkillActivation && wasDraft && deps.pendingExternalAgentStateFor(viewTarget)) {
       const message = deps.commandErrorMessage('unsupported_skill_slash_context')
       deps.showCommandError('unsupported_skill_slash_context', message, commandScope)
       return {
@@ -267,12 +276,19 @@ export function createChatSend(deps: ChatSendDeps) {
 
     const deferSessionCreation = serverSkillActivation && wasDraft
     try {
-      const modelId = options.modelId?.trim() || deps.overrideModelId.value || undefined
+      options.onBeforeMessageSend?.()
+      // The pair comes from options only (spec v2 §3.4): the composer passes
+      // it when the pair has an explicit source (user/session) and omits it
+      // for default-sourced pairs, which is how the server tells "never
+      // picked" apart from "picked the default".
+      const modelId = options.modelId?.trim() || undefined
       const reasoningEffort = options.reasoningEffort?.trim()
-        || deps.overrideReasoningEffort.value
         || undefined
       if (!deferSessionCreation) {
-        viewTarget = await deps.ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined)
+        viewTarget = await deps.ensureChatViewSession(viewTarget, wasDraft ? trimmed : undefined, {
+          modelId,
+          reasoningEffort,
+        })
       }
 
       const botId = viewTarget.botId
@@ -289,7 +305,7 @@ export function createChatSend(deps: ChatSendDeps) {
 
       assistantTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
       turnAppendStarted = true
-      options.onBeforeTurnAppend?.()
+      options.onBeforeTurnAppend?.({ ...viewTarget })
       if (!serverSkillActivation) {
         userTurn = transcript.createOptimisticUserTurn(
           trimmed,
@@ -299,10 +315,11 @@ export function createChatSend(deps: ChatSendDeps) {
         transcript.appendToView(userTurn, assistantTurn)
       }
 
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
+        onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId: sendInvocationId,
         assistantTurn,
         botId,
@@ -334,7 +351,7 @@ export function createChatSend(deps: ChatSendDeps) {
       deps.forgetCreatedSession(sendInvocationId)
       if (refreshSessionId) await deps.refreshCurrentSession(botId, refreshSessionId)
 
-      return { ok: true }
+      return { ok: true, messageSent: true }
     } catch (error) {
       const failure = error instanceof Error ? error : new Error('Unknown error')
       const isAbort = failure.name === 'AbortError'
@@ -426,28 +443,30 @@ export function createChatSend(deps: ChatSendDeps) {
   }
 
   async function retryLatestAssistant(
-    messageId: string,
+    turnId: string,
     options: {
       target?: ChatViewTarget
       modelId?: string
       reasoningEffort?: string
       workspaceTargetId?: string
+      /** See SendMessageOptions.onModelPreferenceSettled. */
+      onModelPreferenceSettled?: () => void
     } = {},
   ): Promise<SendMessageResult> {
     const viewTarget = deps.normalizeTarget(options.target)
     const botId = viewTarget.botId
     const targetSessionId = viewTarget.sessionId ?? ''
     const transcript = deps.transcriptForTarget(viewTarget)
-    const targetId = messageId.trim()
+    const targetTurnId = turnId.trim()
     if (
       !botId
       || !targetSessionId
-      || !targetId
+      || !targetTurnId
       || deps.chatReadOnlyFor(viewTarget)
       || deps.isChatViewStreaming(viewTarget)
       || transcript.loadingMessages.value
     ) return { ok: false, stage: 'startup' }
-    const target = transcript.findTurnByServerId(targetId)
+    const target = transcript.findTurnByTurnId(targetTurnId, 'assistant')
     if (!target || !transcript.isLatestVisibleAssistantTurn(target)) {
       return { ok: false, stage: 'startup' }
     }
@@ -461,10 +480,11 @@ export function createChatSend(deps: ChatSendDeps) {
     )
     const replacedTurns = transcript.replaceTailFromTurn(target, [assistantTurn])
     try {
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
+        onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId,
         assistantTurn,
         botId,
@@ -474,10 +494,9 @@ export function createChatSend(deps: ChatSendDeps) {
         type: 'retry_message',
         invocation_id: invocationId,
         session_id: targetSessionId,
-        message_id: targetId,
-        model_id: options.modelId?.trim() || deps.overrideModelId.value || undefined,
+        turn_id: targetTurnId,
+        model_id: options.modelId?.trim() || undefined,
         reasoning_effort: options.reasoningEffort?.trim()
-          || deps.overrideReasoningEffort.value
           || undefined,
         workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')
@@ -509,13 +528,15 @@ export function createChatSend(deps: ChatSendDeps) {
   }
 
   async function editLatestUser(
-    messageId: string,
+    turnId: string,
     text: string,
     options: {
       target?: ChatViewTarget
       modelId?: string
       reasoningEffort?: string
       workspaceTargetId?: string
+      /** See SendMessageOptions.onModelPreferenceSettled. */
+      onModelPreferenceSettled?: () => void
     } = {},
   ): Promise<SendMessageResult> {
     const trimmed = text.trim()
@@ -523,17 +544,17 @@ export function createChatSend(deps: ChatSendDeps) {
     const botId = viewTarget.botId
     const targetSessionId = viewTarget.sessionId ?? ''
     const transcript = deps.transcriptForTarget(viewTarget)
-    const targetId = messageId.trim()
+    const targetTurnId = turnId.trim()
     if (
       !botId
       || !targetSessionId
-      || !targetId
+      || !targetTurnId
       || !trimmed
       || deps.chatReadOnlyFor(viewTarget)
       || deps.isChatViewStreaming(viewTarget)
       || transcript.loadingMessages.value
     ) return { ok: false, stage: 'startup' }
-    const target = transcript.findTurnByServerId(targetId)
+    const target = transcript.findTurnByTurnId(targetTurnId, 'user')
     if (!target || !transcript.isLatestVisibleUserTurn(target) || hasUserAttachments(target)) {
       return { ok: false, stage: 'startup' }
     }
@@ -548,10 +569,11 @@ export function createChatSend(deps: ChatSendDeps) {
     )
     const replacedTurns = transcript.replaceTailFromTurn(target, [userTurn, assistantTurn])
     try {
-      if (!deps.ensureWebSocketConnected(botId)) {
+      if (!deps.ensureWebSocket(botId)) {
         throw new StreamFailureError('WebSocket is not connected', 'startup')
       }
       const completion = deps.trackAssistantStream({
+        onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId,
         assistantTurn,
         botId,
@@ -561,11 +583,10 @@ export function createChatSend(deps: ChatSendDeps) {
         type: 'edit_message',
         invocation_id: invocationId,
         session_id: targetSessionId,
-        message_id: targetId,
+        turn_id: targetTurnId,
         text: trimmed,
-        model_id: options.modelId?.trim() || deps.overrideModelId.value || undefined,
+        model_id: options.modelId?.trim() || undefined,
         reasoning_effort: options.reasoningEffort?.trim()
-          || deps.overrideReasoningEffort.value
           || undefined,
         workspace_target_id: options.workspaceTargetId?.trim() || undefined,
       })) throw new StreamFailureError('WebSocket is not connected', 'startup')

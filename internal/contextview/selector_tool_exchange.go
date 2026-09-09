@@ -3,10 +3,10 @@ package contextview
 import (
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 )
 
 const toolExchangeDropReason = "tool_exchange:stripped"
@@ -16,9 +16,10 @@ func applyToolExchangePolicy(frags []contextfrag.ContextFrag, policy *contextfra
 		return frags, nil, nil
 	}
 	kept = make([]contextfrag.ContextFrag, 0, len(frags))
-	for _, frag := range frags {
+	openTurnStart := openTurnTailStart(frags)
+	for i, frag := range frags {
 		msg := contextfrag.FragMessage(frag)
-		if msg == nil || frag.Slot != contextfrag.SlotHistory {
+		if msg == nil || frag.Slot != contextfrag.SlotHistory || (openTurnStart >= 0 && i > openTurnStart) {
 			kept = append(kept, frag)
 			continue
 		}
@@ -52,6 +53,53 @@ func applyToolExchangePolicy(frags []contextfrag.ContextFrag, policy *contextfra
 		}
 	}
 	return kept, dropped, edits
+}
+
+// openTurnTailStart reports the slice index of the last history user message
+// when the history ends in a turn that is still being answered, or -1.
+//
+// A continuation resumed after a deferred tool call (tool approval, ask_user)
+// carries no current user message: the request replays the persisted history
+// and ends with the parked step's tool call and the result it produced. Those
+// messages are the live turn, not tool noise from an earlier exchange. Stripping
+// them leaves the model a trailing assistant text with no tool call, no result
+// and no reasoning, so it cannot see what the tool returned and re-issues the
+// call; DeepSeek thinking mode additionally rejects the request because that
+// trailing assistant message carries no reasoning_content. The tail is exempt
+// only when no current user frag exists and the last history message is a tool
+// result or an assistant message that still holds tool calls; a turn that
+// concluded with plain assistant text is finished history and strips as usual.
+func openTurnTailStart(frags []contextfrag.ContextFrag) int {
+	lastUser := -1
+	lastHistory := -1
+	for i, frag := range frags {
+		if frag.Slot == contextfrag.SlotCurrentUser || frag.Kind == contextfrag.KindCurrentUserMessage {
+			return -1
+		}
+		msg := contextfrag.FragMessage(frag)
+		if msg == nil || frag.Slot != contextfrag.SlotHistory {
+			continue
+		}
+		lastHistory = i
+		if msg.Role == sdk.MessageRoleUser {
+			lastUser = i
+		}
+	}
+	if lastUser < 0 || lastHistory <= lastUser {
+		return -1
+	}
+	last := contextfrag.FragMessage(frags[lastHistory])
+	if last.Role == sdk.MessageRoleTool {
+		return lastUser
+	}
+	if last.Role == sdk.MessageRoleAssistant {
+		for _, part := range last.Content {
+			if _, ok := part.(sdk.ToolCallPart); ok {
+				return lastUser
+			}
+		}
+	}
+	return -1
 }
 
 func countMessageFrags(frags []contextfrag.ContextFrag) int {

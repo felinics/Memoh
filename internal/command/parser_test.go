@@ -131,7 +131,7 @@ func TestParse_Flags(t *testing.T) {
 		// Invalid int-flag values must not leak the flag name OR the value as
 		// stray positional args (would pollute provider/name matching downstream).
 		{"/model list --prov -1", "model", "list", nil, 0, -1, "", ""},
-		{"/heartbeat logs --page -5", "heartbeat", "logs", nil, 0, -1, "", ""},
+		{"/schedule logs --page -5", "schedule", "logs", nil, 0, -1, "", ""},
 		{"/model list --prov abc", "model", "list", nil, 0, -1, "", ""},
 		// A following --flag is not eaten as the prior flag's value.
 		{"/model list --page --prov 2", "model", "list", nil, 0, 2, "", ""},

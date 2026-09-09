@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	ctr "github.com/memohai/memoh/internal/container"
+	ctr "github.com/felinics/memoh/internal/container"
 )
 
 type containerRuntimeService interface {

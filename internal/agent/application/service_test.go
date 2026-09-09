@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	acpfeedback "github.com/memohai/memoh/internal/agent/decision/feedback"
-	"github.com/memohai/memoh/internal/models"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/models"
 )
 
 type fakeGatewayAssetLoader struct {
@@ -71,7 +71,7 @@ func TestPrepareGatewayAttachments_InlineAssetToBase64(t *testing.T) {
 	}
 }
 
-func TestPrepareACPImages_InlineStoredAsset(t *testing.T) {
+func TestPrepareRuntimeImagesInlineStoredAsset(t *testing.T) {
 	t.Parallel()
 
 	resolver := &Service{
@@ -85,7 +85,7 @@ func TestPrepareACPImages_InlineStoredAsset(t *testing.T) {
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "image",
@@ -94,13 +94,13 @@ func TestPrepareACPImages_InlineStoredAsset(t *testing.T) {
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
 	images := prepared.Images
 	if len(images) != 1 {
-		t.Fatalf("prepareACPAttachments().Images = %#v, want one image", images)
+		t.Fatalf("prepareRuntimeAttachments().Images = %#v, want one image", images)
 	}
-	if images[0].Data != base64.StdEncoding.EncodeToString([]byte("image-binary")) || images[0].MimeType != "image/png" {
+	if !bytes.Equal(images[0].Data, []byte("image-binary")) || images[0].MimeType != "image/png" {
 		t.Fatalf("prepared image = %#v, want inline PNG", images[0])
 	}
 }
@@ -170,7 +170,7 @@ func TestRouteAndMergeAttachments_ImagePathOnlyFallsBackToFile(t *testing.T) {
 		Attachments: []ChatAttachment{
 			{
 				Type: "image",
-				Path: "/data/media/image/demo.png",
+				Path: "/data/.memoh/media/image/demo.png",
 			},
 		},
 	}
@@ -189,7 +189,7 @@ func TestRouteAndMergeAttachments_ImagePathOnlyFallsBackToFile(t *testing.T) {
 	if item.Transport != gatewayTransportToolFileRef {
 		t.Fatalf("expected tool_file_ref transport, got %q", item.Transport)
 	}
-	if item.Payload != "/data/media/image/demo.png" {
+	if item.Payload != "/data/.memoh/media/image/demo.png" {
 		t.Fatalf("unexpected fallback payload: %q", item.Payload)
 	}
 }
@@ -224,7 +224,7 @@ func TestPrepareGatewayAttachments_ResolvesStoredFileAccessPath(t *testing.T) {
 				if botID != "bot-1" || contentHash != "asset-pdf" {
 					t.Fatalf("unexpected asset lookup: bot=%q hash=%q", botID, contentHash)
 				}
-				return "/data/media/aa/asset.pdf", nil
+				return "/data/.memoh/media/aa/asset.pdf", nil
 			},
 		},
 	}
@@ -238,7 +238,7 @@ func TestPrepareGatewayAttachments_ResolvesStoredFileAccessPath(t *testing.T) {
 	}
 
 	prepared := resolver.prepareGatewayAttachments(context.Background(), req)
-	if len(prepared) != 1 || prepared[0].FallbackPath != "/data/media/aa/asset.pdf" {
+	if len(prepared) != 1 || prepared[0].FallbackPath != "/data/.memoh/media/aa/asset.pdf" {
 		t.Fatalf("prepared attachments = %#v, want reachable PDF path", prepared)
 	}
 	merged := resolver.routeAndMergeAttachments(context.Background(), models.GetResponse{}, req)
@@ -246,7 +246,7 @@ func TestPrepareGatewayAttachments_ResolvesStoredFileAccessPath(t *testing.T) {
 		t.Fatalf("routeAndMergeAttachments() length = %d, want 1", len(merged))
 	}
 	item, ok := merged[0].(gatewayAttachment)
-	if !ok || item.Transport != gatewayTransportToolFileRef || item.Payload != "/data/media/aa/asset.pdf" {
+	if !ok || item.Transport != gatewayTransportToolFileRef || item.Payload != "/data/.memoh/media/aa/asset.pdf" {
 		t.Fatalf("merged attachment = %#v, want tool file reference", merged[0])
 	}
 }
@@ -261,11 +261,11 @@ func TestPrepareACPAttachments_UsesFileAndReplyReferences(t *testing.T) {
 				if contentHash != "asset-pdf" {
 					t.Fatalf("unexpected content hash: %s", contentHash)
 				}
-				return "/data/media/aa/asset.pdf", nil
+				return "/data/.memoh/media/aa/asset.pdf", nil
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "file",
@@ -280,12 +280,12 @@ func TestPrepareACPAttachments_UsesFileAndReplyReferences(t *testing.T) {
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
 	if len(prepared.Images) != 0 || len(prepared.Context) != 2 || len(prepared.References) != 2 {
 		t.Fatalf("prepared attachments = %#v, want two file references", prepared)
 	}
-	if prepared.Context[0].Path != "/data/media/aa/asset.pdf" || prepared.Context[1].URL != "https://example.com/old.png" {
+	if prepared.Context[0].Path != "/data/.memoh/media/aa/asset.pdf" || prepared.Context[1].URL != "https://example.com/old.png" {
 		t.Fatalf("context attachments = %#v, want PDF path and reply URL", prepared.Context)
 	}
 }
@@ -300,11 +300,11 @@ func TestPrepareACPAttachments_PreservesLongPasteFile(t *testing.T) {
 				if contentHash != "pasted-text-hash" {
 					t.Fatalf("unexpected content hash: %s", contentHash)
 				}
-				return "/data/media/aa/pasted-text.txt", nil
+				return "/data/.memoh/media/aa/pasted-text.txt", nil
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "file",
@@ -314,9 +314,9 @@ func TestPrepareACPAttachments_PreservesLongPasteFile(t *testing.T) {
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
-	if len(prepared.References) != 1 || prepared.Context[0].Path != "/data/media/aa/pasted-text.txt" {
+	if len(prepared.References) != 1 || prepared.Context[0].Path != "/data/.memoh/media/aa/pasted-text.txt" {
 		t.Fatalf("prepared attachments = %#v, want pasted text path", prepared)
 	}
 }
@@ -331,11 +331,11 @@ func TestPrepareACPAttachments_FallsBackWhenStoredImageCannotInline(t *testing.T
 				return nil, "", errors.New("asset too large")
 			},
 			accessPathFn: func(context.Context, string, string) (string, error) {
-				return "/data/media/aa/large.png", nil
+				return "/data/.memoh/media/aa/large.png", nil
 			},
 		},
 	}
-	prepared, err := resolver.prepareACPAttachments(context.Background(), ChatRequest{
+	prepared, err := resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 		BotID: "bot-1",
 		Attachments: []ChatAttachment{{
 			Type:        "image",
@@ -344,9 +344,9 @@ func TestPrepareACPAttachments_FallsBackWhenStoredImageCannotInline(t *testing.T
 		}},
 	})
 	if err != nil {
-		t.Fatalf("prepareACPAttachments() error = %v", err)
+		t.Fatalf("prepareRuntimeAttachments() error = %v", err)
 	}
-	if len(prepared.Images) != 0 || len(prepared.References) != 1 || prepared.Context[0].Path != "/data/media/aa/large.png" {
+	if len(prepared.Images) != 0 || len(prepared.References) != 1 || prepared.Context[0].Path != "/data/.memoh/media/aa/large.png" {
 		t.Fatalf("prepared attachments = %#v, want image file fallback", prepared)
 	}
 }
@@ -368,7 +368,7 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				Name:   "broken.png",
 				Base64: "data:image/png;base64,not-valid***",
 			},
-			wantCode: acpfeedback.CodeAttachmentInvalid,
+			wantCode: agentfeedback.CodeAttachmentInvalid,
 		},
 		{
 			name: "stored file without reachable path",
@@ -385,17 +385,17 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				Name:        "missing.pdf",
 				ContentHash: "missing",
 			},
-			wantCode: acpfeedback.CodeAttachmentUnavailable,
+			wantCode: agentfeedback.CodeAttachmentUnavailable,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := tt.resolver.prepareACPAttachments(context.Background(), ChatRequest{
+			_, err := tt.resolver.prepareRuntimeAttachments(context.Background(), ChatRequest{
 				BotID:       "bot-1",
 				Attachments: []ChatAttachment{tt.input},
 			})
-			var feedback *acpfeedback.Error
+			var feedback *agentfeedback.Error
 			if !errors.As(err, &feedback) || feedback.Code != tt.wantCode || feedback.HTTPStatus != 400 {
 				t.Fatalf("error = %#v, want feedback code %q with status 400", err, tt.wantCode)
 			}

@@ -50,7 +50,7 @@ export function createChatRuntimeLayer(deps: ChatRuntimeLayerDeps) {
     transcriptForTarget: deps.transcriptForTarget,
     currentRun: sessionId =>
       realtime.runtimeProjection(sessionId)?.currentRunView ?? null,
-    ensureConnected: realtime.ensureWebSocketConnected,
+    ensureWebSocket: realtime.ensureWebSocket,
     send: realtime.sendWebSocketMessage,
     createControlId: deps.createControlId,
     connectionLostMessage: deps.connectionLostMessage,

@@ -3,9 +3,9 @@
 package acpprofile
 
 import (
-	runtimeprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/chat/thread"
+	runtimeprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/chat/thread"
 )
 
 // Catalog exposes the channel-safe subset of the ACP runtime profile registry.
@@ -50,6 +50,9 @@ func (*Catalog) ResolveACPSetupPreflight(agentID string, metadata map[string]any
 }
 
 func (*Catalog) ValidateACPSetup(agentID string, metadata map[string]any) thread.ACPSetupValidation {
+	// The built-in external agents left the ACP pool for their direct runtimes
+	// (migration 0144) and are no longer registered profiles, so new ACP
+	// sessions for them are refused as unknown here.
 	profile, ok := runtimeprofile.Lookup(agentID)
 	if !ok {
 		return thread.ACPSetupValidation{}

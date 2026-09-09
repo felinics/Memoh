@@ -4,7 +4,7 @@
 
 Memoh is a multi-member, structured long-memory AI agent platform with isolated workspace runtimes. Users can create AI bots and chat with them via Telegram, Discord, Lark (Feishu), DingTalk, WeChat, Matrix, Email, and more. Each bot can use an independent container workspace to edit files, execute commands, run tools, and build itself while keeping runtime ownership explicit.
 
-The public documentation site is maintained separately in `memohai/memoh-docs`.
+The public documentation site is maintained separately in `felinics/memoh-docs`.
 
 ## Architecture Overview
 
@@ -28,7 +28,7 @@ Infrastructure dependencies:
 ### Backend (Go)
 - **Framework**: Echo (HTTP)
 - **Dependency Injection**: Uber FX
-- **AI SDK**: [Twilight AI](https://github.com/memohai/twilight-ai) (Go LLM SDK — OpenAI, Anthropic, Google)
+- **AI SDK**: [Twilight AI](https://github.com/felinics/twilight) (Go LLM SDK — OpenAI, Anthropic, Google)
 - **Database Driver**: pgx/v5 (PostgreSQL)
 - **Code Generation**: sqlc (SQL → Go)
 - **API Docs**: Swagger/OpenAPI (swaggo)
@@ -81,9 +81,14 @@ Memoh/
 │   │   ├── decision/           #     User input, tool approval, and stable user-facing feedback
 │   │   ├── event/              #     Agent events and transport payload vocabulary
 │   │   ├── runtime/            #     Runtime implementations
-│   │   │   ├── acp/            #       ACP pool, client process manager, and profiles
+│   │   │   ├── acp/            #       ACP pool, client process manager, and the generic custom-agent profile
+│   │   │   ├── claudecode/     #       Claude Code direct runtime (external.Driver)
+│   │   │   ├── codex/          #       Codex direct runtime (external.Driver)
+│   │   │   ├── external/       #       Neutral Driver port between the application layer and external runtimes
 │   │   │   ├── native/         #       Twilight AI native runtime, prompts, streaming, hooks, and guards
-│   │   │   └── session/        #       Per-thread runtime state and control
+│   │   │   ├── agentstate/     #       External Agent session publication heads and state storage port
+│   │   │   ├── session/        #       Per-thread runtime state and control
+│   │   │   └── toolmount/      #       Memoh tool gateway mounts for direct runtimes
 │   │   ├── sessionmode/        #     Session mode resolution
 │   │   ├── tool/               #     Native tool providers (package name remains tools)
 │   │       ├── message.go      #       Send message tool
@@ -145,7 +150,6 @@ Memoh/
 │   ├── fetchproviders/         #   Web-fetch provider management (native, Jina, Cloudflare Markdown)
 │   ├── handlers/               #   HTTP request handlers (REST API endpoints)
 │   ├── healthcheck/            #   Health check adapter system (MCP, channel checkers)
-│   ├── heartbeat/              #   Heartbeat scheduling service (cron-based)
 │   ├── hooks/                  #   Bot-defined lifecycle hooks (PreToolUse, TurnEnd, … from hooks.json)
 │   ├── identity/               #   Identity type utilities (human vs bot)
 │   ├── i18n/                   #   Command and message internationalization
@@ -158,7 +162,6 @@ Memoh/
 │   ├── network/                #   Workspace container network configuration
 │   ├── oauthclients/           #   Built-in OAuth client registry (TOML)
 │   ├── oauthctx/               #   OAuth context helpers
-│   ├── plugins/                #   Plugin system (manifests, installations, lifecycle)
 │   ├── policy/                 #   Access policy resolution (guest access)
 │   ├── providers/              #   LLM provider management (OpenAI, Anthropic, etc.)
 │   ├── prune/                  #   Text pruning utilities (truncation with head/tail)
@@ -168,9 +171,11 @@ Memoh/
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
 │   ├── settings/               #   Bot settings management
+│   ├── skillpackages/          #   Installed Supermarket Package state
 │   ├── skills/                 #   Skill registry and activation
 │   ├── slash/                  #   Slash-command classification and metadata (channel + web surfaces)
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
+│   ├── supermarket/            #   Supermarket protocol client and Package installer
 │   ├── team/                   #   Singleton team identity (DefaultTeamID)
 │   ├── textutil/               #   UTF-8 safe text utilities
 │   ├── timezone/               #   Timezone utilities
@@ -188,7 +193,7 @@ Memoh/
 │   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC
 │   └── web/                    #   Main web app (@memohai/web, Vue 3) — see apps/web/AGENTS.md
 ├── packages/                   # Shared TypeScript libraries
-│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/memohai/ui; its AGENTS.md routes agents to the UI-owned Web guidance
+│   ├── ui/                     #   Shared UI component library (@felinic/ui) — git submodule → github.com/felinics/ui; its AGENTS.md routes agents to the UI-owned Web guidance
 │   ├── sdk/                    #   TypeScript SDK (@memohai/sdk, auto-generated from OpenAPI)
 │   ├── icons/                  #   Brand/provider icon library (@memohai/icon)
 │   └── config/                 #   Shared configuration utilities (@memohai/config)
@@ -377,8 +382,8 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 
 - Each bot can have an isolated **workspace container** for file editing, command execution, MCP tool hosting, and optional headed browser/desktop display sessions.
 - Container workspaces communicate with the host via a **gRPC bridge** over Unix Domain Sockets (UDS), not TCP.
-- The bridge binary (`cmd/bridge/`) runs inside each container as a read-only file mount, with UDS sockets under `/run/memoh/`. Toolkit binaries, display dependencies, and runtime scripts come from the versioned workspace image contract. When display is enabled the bridge can supervise Xvnc and a headed Chrome/Chromium process with CDP on port `9222`; the web UI then exposes a Display pane backed by screenshots/WebRTC/input forwarding. Treat VNC as the container desktop transport, not as the whole browser automation feature.
-- The canonical workspace image is built from `docker/Dockerfile.workspace`. Compatible custom/provider images must expose the same `/opt/memoh/workspace-contract.json`, toolkit, and script paths.
+- The bridge binary (`cmd/bridge/`) runs inside each container as a read-only file mount, with UDS sockets under `/run/memoh/`. Toolkit binaries (node, python, uv), display dependencies, and runtime scripts come from the workspace image; agent CLIs and other managed dependencies are installed per bot into `/data` by the workspace dependency manager (`internal/workspacedeps/`). When display is enabled the bridge can supervise Xvnc and a headed Chrome/Chromium process with CDP on port `9222`; the web UI then exposes a Display pane backed by screenshots/WebRTC/input forwarding. Treat VNC as the container desktop transport, not as the whole browser automation feature.
+- The canonical workspace image is built from `docker/Dockerfile.workspace`. There is no image-level compatibility check: custom/provider images that expose the same toolkit and script paths (`/opt/memoh/toolkit`, `/opt/memoh/scripts`) get the same base capabilities, and anything missing is reported at the point of use or discovered as an installable dependency.
 - `internal/workspace/` manages workspace lifecycle (create, start, stop, reconcile) and maintains a bridge gRPC connection pool for container runtimes.
 - `internal/container/` provides the container runtime abstraction layer and adapter subpackages (`docker`, `containerd`, `apple`). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker or archive-backed flows.
 - SSE-based progress feedback is provided during container image pull and creation.
@@ -387,8 +392,9 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 
 The codebase has grown beyond the original agent/channel/container core. When working near these areas, read the local `AGENTS.md` and treat the corresponding `internal/` package as the source of truth; do not guess tool or schema details.
 
-- **ACP (`internal/agent/runtime/acp/`)** — runtime pool, client process manager, profiles, and OAuth integration for external ACP agents such as Claude Code and Codex. Stable user-facing ACP errors live in `internal/agent/decision/feedback/`.
-- **Plugin system (`internal/plugins/`)** — plugin manifests, installations, enable/disable lifecycle, and OAuth client bindings. The web Supermarket pages (`apps/web/src/pages/supermarket/`) consume this API to discover and install plugins/skills.
+- **External coding-agent runtimes (`internal/agent/runtime/external/`, `codex/`, `claudecode/`)** — the neutral `external.Driver` port plus the direct Codex and Claude Code runtimes (pinned protocol assets, device-code/OAuth login, native thread resume/fork, Memoh tool gateway mounts via `toolmount/`). **ACP (`internal/agent/runtime/acp/`)** is the generic channel for custom user-supplied ACP agents (single generic profile with a managed launch command), folded into the same driver port. Stable user-facing runtime errors live in `internal/agent/decision/feedback/`.
+- **Workspace dependencies (`internal/workspacedeps/`)** — launcher resolution is read-only and must discover existing CLIs without a warm Supermarket cache. Chat and device-code login do not authorize installation: a Manage-authorized action confirms a frozen recipe revision. Direct Codex and Claude Code execution currently requires a native workspace; remote dependency management does not imply remote runtime support. Keep the Server/image upgrade boundary documented in `docs/workspace-dependencies-upgrade.md`.
+- **Skill Packages (`internal/skillpackages/`, `internal/supermarket/`)** — Supermarket Package discovery and installation state. Installed Packages expand into immutable Registry Skills in the selected workspace target.
 - **User input / `ask_user` (`internal/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
 - **Bot backup / import / export (`internal/botbackup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.
 - **Workspace resource limits (`internal/workspace/resource_limits.go`)** — per-bot CPU/memory/storage quotas and runtime metrics.
@@ -431,9 +437,8 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `mcp_connections` — MCP connection configurations per bot
 - `mcp_oauth_tokens` — MCP OAuth tokens
 
-**Plugins**
-- `bot_plugin_installations` — Installed plugins per bot and their enabled state
-- `bot_plugin_resources` — Plugin-scoped resources and OAuth client bindings
+**Skill Packages**
+- `bot_skill_package_installations` — Installed Registry Package revision per bot and workspace target
 
 **Containers**
 - `containers` — Bot container instances
@@ -451,7 +456,6 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 **Scheduling & Automation**
 - `schedule` — Scheduled tasks (cron)
 - `schedule_logs` — Schedule execution logs
-- `bot_heartbeat_logs` — Heartbeat execution records
 **Storage**
 - `storage_providers` — Pluggable object storage backends
 - `bot_storage_bindings` — Per-bot storage backend selection

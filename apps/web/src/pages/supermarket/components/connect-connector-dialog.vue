@@ -107,7 +107,7 @@
         <DialogClose as-child>
           <Button
             variant="outline"
-            :disabled="connecting"
+            :disabled="phase === 'submitting'"
           >
             {{ t('common.cancel') }}
           </Button>
@@ -115,9 +115,9 @@
         <Button
           form="connector-connect-form"
           type="submit"
-          :loading="connecting"
+          :loading="phase !== 'idle'"
         >
-          {{ t('connectors.connect') }}
+          {{ phase === 'awaiting-oauth' ? t('connectors.awaitingAuthorization') : t('connectors.connect') }}
         </Button>
       </DialogFooter>
     </DialogPanel>
@@ -154,6 +154,8 @@ import {
   toast,
 } from '@felinic/ui'
 import {
+  deleteBotsByBotIdConnectorsByConnectionId,
+  getBotsByBotIdConnectorsByConnectionId,
   postBotsByBotIdConnectorsApiKey,
   postBotsByBotIdConnectorsOauth,
   type ConnectitAuthMethod,
@@ -162,6 +164,7 @@ import {
 import BotSelect from '@/components/bot-select/index.vue'
 import {
   connectorOAuthErrorKey,
+  isConnectorOAuthCancelled,
   openConnectorOAuthURL,
   prepareConnectorOAuthPopup,
   waitForConnectorOAuth,
@@ -276,15 +279,47 @@ const createCredentialMutation = useMutation({
   },
 })
 
-const connecting = ref(false)
+// 'submitting' is an un-undoable write in flight (a few hundred ms), so the
+// dialog stays locked for it. 'awaiting-oauth' waits on the user finishing the
+// flow in another window — up to the 2-minute poll timeout — and must stay
+// dismissable, or coming back to this page leaves a dialog nothing can close.
+const phase = ref<'idle' | 'submitting' | 'awaiting-oauth'>('idle')
+// Non-null while an attempt is in flight; aborting it is how a dismiss ends
+// the OAuth wait and keeps the resolved attempt from toasting afterwards.
+let attempt: AbortController | null = null
 
 function updateOpen(open: boolean) {
-  if (!open && connecting.value) return
+  if (!open) {
+    if (phase.value === 'submitting') return
+    attempt?.abort()
+  }
   emit('update:open', open)
 }
 
+// BeginOAuth creates the connection upstream before the user authorizes, so a
+// cancelled flow would otherwise leave a `pending` connector on the bot. Best
+// effort only: the user already walked away, and the connector page can still
+// disconnect a leftover row.
+async function discardPendingConnection(botId: string, connectionId: string) {
+  try {
+    const { data } = await getBotsByBotIdConnectorsByConnectionId({
+      path: { bot_id: botId, connection_id: connectionId },
+      throwOnError: true,
+    })
+    // The callback can land in the instant between the abort and this check;
+    // don't delete a connection that ended up working.
+    if (data?.status === 'active') return
+    await deleteBotsByBotIdConnectorsByConnectionId({
+      path: { bot_id: botId, connection_id: connectionId },
+      throwOnError: true,
+    })
+  } catch {
+    // Cleanup failures are not worth a toast on a dialog the user just closed.
+  }
+}
+
 async function connect() {
-  if (connecting.value) return
+  if (phase.value !== 'idle') return
   const method = selectedMethod.value
   const connectorType = props.connector?.type
   const oauthPopup = method?.type === 'oauth2'
@@ -297,7 +332,9 @@ async function connect() {
     toast.error(t('connectors.oauthPopupBlocked'))
     return
   }
-  connecting.value = true
+  const flow = new AbortController()
+  attempt = flow
+  phase.value = 'submitting'
   try {
     const validation = await form.validate()
     if (!validation.valid || !connectorType || !method?.key) {
@@ -336,8 +373,20 @@ async function connect() {
       })
       const connectionId = result.connection_id
       if (!result.authorization_url || !connectionId) throw new Error('oauth_failed')
+      if (flow.signal.aborted) {
+        // Dismissed while the create POST was still in flight.
+        void discardPendingConnection(botId, connectionId)
+        return
+      }
+      phase.value = 'awaiting-oauth'
       await openConnectorOAuthURL(result.authorization_url, oauthPopup)
-      await waitForConnectorOAuth(botId, connectionId, oauthPopup)
+      try {
+        await waitForConnectorOAuth(botId, connectionId, oauthPopup, flow.signal)
+      } catch (error) {
+        if (!isConnectorOAuthCancelled(error)) throw error
+        void discardPendingConnection(botId, connectionId)
+        return
+      }
     } else {
       await createCredentialMutation.mutateAsync({
         botId,
@@ -353,10 +402,17 @@ async function connect() {
     emit('connected', botId)
   } catch (error) {
     oauthPopup?.close()
+    if (flow.signal.aborted) return
     const oauthKey = connectorOAuthErrorKey(error)
     toast.error(oauthKey ? t(oauthKey) : resolveApiErrorMessage(error, t('connectors.connectFailed')))
   } finally {
-    connecting.value = false
+    if (flow.signal.aborted) oauthPopup?.close()
+    // Only the current attempt owns the phase — a reopened dialog may already
+    // have started a new one by the time a cancelled attempt unwinds.
+    if (attempt === flow) {
+      attempt = null
+      phase.value = 'idle'
+    }
   }
 }
 </script>

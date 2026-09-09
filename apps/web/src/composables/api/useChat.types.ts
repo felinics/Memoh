@@ -5,6 +5,7 @@ export type Bot = BotsBot
 export interface SessionSummary {
   id: string
   bot_id: string
+  bot_agent_id?: string
   route_id?: string
   channel_type?: string
   type?: string
@@ -20,6 +21,11 @@ export interface SessionSummary {
   updated_at?: string
   route_metadata?: Record<string, unknown>
   route_conversation_type?: string
+  /** Session's persisted (model, effort) pair (issue #879); empty = no memory. */
+  preferred_external_model_id?: string
+  model_preference_revision?: string
+  preferred_chat_model_id?: string
+  preferred_reasoning_effort?: string
 }
 
 // Bot-wide activity SSE: `/bots/{bot_id}/sessions/events`. Carries identifier
@@ -28,6 +34,8 @@ export interface SessionTouchedEvent {
   type: 'session_touched'
   session_id: string
   updated_at?: string
+  /** A persisted background notification may arrive without a live turn. */
+  reason?: 'background_task'
 }
 
 export interface SessionTitleChangedEvent {
@@ -54,12 +62,19 @@ export interface BotSessionActivityPingEvent {
   type: 'ping'
 }
 
+export interface SessionCompactionEvent {
+  type: 'session_compaction'
+  /** Complete, permission-filtered set of sessions currently compacting. */
+  session_ids: string[]
+}
+
 export type BotSessionActivityEvent =
   | SessionTouchedEvent
   | SessionTitleChangedEvent
   | SessionCreatedEvent
   | BotSessionActivityDroppedEvent
   | BotSessionActivityPingEvent
+  | SessionCompactionEvent
 
 export interface FetchMessagesOptions {
   limit?: number
@@ -157,6 +172,11 @@ export interface UIReasoningMessage {
   id: number
   type: 'reasoning'
   content: string
+  reasoning_timing?: UIReasoningTiming
+}
+
+export interface UIReasoningTiming {
+  duration_ms: number
 }
 
 export interface UIToolMessage {
@@ -198,12 +218,21 @@ export interface UIBackgroundTask {
   stalled?: boolean
 }
 
+/** One agent-provided answer to a permission request, preserved verbatim. */
+export interface UIToolApprovalOption {
+  id: string
+  name?: string
+  kind?: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always' | (string & {})
+}
+
 export interface UIToolApproval {
   approval_id: string
   short_id?: number
   status: string
   decision_reason?: string
   can_approve?: boolean
+  options?: UIToolApprovalOption[]
+  selected_option_id?: string
 }
 
 export interface UIUserInput {
@@ -230,6 +259,8 @@ export interface UIUserInputQuestion {
   kind: 'single_select' | 'multi_select' | 'text'
   options?: UIUserInputOption[]
   allow_custom?: boolean
+  custom_exclusive?: boolean
+  required?: boolean
   placeholder?: string
 }
 
@@ -248,10 +279,26 @@ export interface UIAttachmentsMessage {
 export interface UIErrorMessage {
   id: number
   type: 'error'
+  code?: string
   content: string
+  // Machine-readable parameters of the feedback behind `code` (e.g. dep_id,
+  // required_version, install_task_id for agent_dependency_missing).
+  args?: Record<string, string>
 }
 
-export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage
+// Runtime degradation notice (tools unavailable, an interaction declined).
+// `name` carries the machine code, `content` the human-readable text.
+export interface UINoticeMessage {
+  id: number
+  type: 'notice'
+  name?: string
+  content: string
+  // Machine-readable parameters of the notice (the runtime_notice event's
+  // string metadata), for renderers that act on a specific `name`.
+  args?: Record<string, string>
+}
+
+export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage | UINoticeMessage
 
 export interface UISkillActivationSkill {
   name: string
@@ -343,6 +390,7 @@ export interface UIStreamErrorEvent {
   run_id?: string
   invocation_id?: string
   session_id?: string
+  code?: string
   message: string
   feedback?: unknown
 }
@@ -358,6 +406,7 @@ export type RuntimeRunStatus =
   | 'running'
   | 'waiting_decision'
   | 'aborting'
+  | 'finishing'
   | 'completed'
   | 'aborted'
   | 'errored'
@@ -397,7 +446,10 @@ export interface RuntimeCurrentRunView {
   updated_at: string
   messages: UIMessage[]
   request_user_turn?: UIUserTurn
+  error_code?: string
   error?: string
+  proposed_terminal_status?: RuntimeRunStatus
+  finish_proposed_at?: string
   steer?: RuntimeSteerState
   operation?: RuntimeRunOperation
 }
@@ -414,6 +466,7 @@ export interface RuntimeSnapshot {
 export interface RuntimeCurrentRunPatch {
   run_id: string
   status?: RuntimeRunStatus
+  error_code?: string
   error?: string
   steer?: RuntimeSteerState
   updated_at?: string
@@ -480,7 +533,15 @@ export type UIRuntimeEvent =
   | UIRuntimeDeltaEvent
   | UIRuntimeDroppedEvent
 
+export interface UIStreamModelPreferenceSettledEvent {
+  type: 'model_preference_settled'
+  invocation_id: string
+  run_id: string
+  session_id: string
+}
+
 export type UIStreamEvent =
+  | UIStreamModelPreferenceSettledEvent
   | UIStreamRunAcceptedEvent
   | UIStreamRunRejectedEvent
   | UIStreamErrorEvent

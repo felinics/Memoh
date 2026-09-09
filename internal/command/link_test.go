@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/channelaccess"
+	"github.com/felinics/memoh/internal/channelaccess"
 )
 
 // fakeLinkConsumer records ConsumeLinkCode calls and returns a configured result.
@@ -24,7 +24,7 @@ func (f *fakeLinkConsumer) ConsumeLinkCode(_ context.Context, token, channelIden
 }
 
 func newLinkTestHandler(consumer LinkConsumer) *Handler {
-	h := NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetLinkConsumer(consumer)
 	return h
 }
@@ -141,7 +141,7 @@ func TestLink_ConsumedCode(t *testing.T) {
 }
 
 func TestLink_ConsumerUnavailable(t *testing.T) {
-	h := NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// linkConsumer is nil → unavailable
 	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
 		BotID:             "bot-1",

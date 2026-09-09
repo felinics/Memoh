@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 type memoryQueryMessageService struct {
@@ -18,6 +18,18 @@ type memoryQueryMessageService struct {
 
 func (s *memoryQueryMessageService) ListActiveSinceBySession(context.Context, string, time.Time) ([]messagepkg.Message, error) {
 	return append([]messagepkg.Message(nil), s.messages...), nil
+}
+
+func (s *memoryQueryMessageService) ListActiveSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return append([]messagepkg.Message(nil), s.messages...), nil
+}
+
+func (s *memoryQueryMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return append([]messagepkg.Message(nil), s.messages...), nil
+}
+
+func (*memoryQueryMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
+	return messagepkg.ActiveMessagesMeasure{}, nil
 }
 
 func TestMemoryQueryBuilderCombinesRecentUserMessages(t *testing.T) {

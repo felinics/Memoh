@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 func (a *Adapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, _ channel.StreamOptions) (channel.PreparedOutboundStream, error) {

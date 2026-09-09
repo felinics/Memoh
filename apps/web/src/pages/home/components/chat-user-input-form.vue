@@ -189,6 +189,10 @@ function optionIcon(question: UIUserInputQuestion, selected: boolean) {
 function toggleOption(question: UIUserInputQuestion, optionId: string) {
   const draft = ensureDraft(question.id)
   if (question.kind === 'multi_select') {
+    if (question.custom_exclusive && !draft.optionIds.includes(optionId)) {
+      draft.customSelected = false
+      draft.customText = ''
+    }
     draft.optionIds = draft.optionIds.includes(optionId)
       ? draft.optionIds.filter(id => id !== optionId)
       : [...draft.optionIds, optionId]
@@ -204,6 +208,9 @@ function toggleCustom(question: UIUserInputQuestion) {
   const draft = ensureDraft(question.id)
   if (question.kind === 'multi_select') {
     draft.customSelected = !draft.customSelected
+    if (draft.customSelected && question.custom_exclusive) {
+      draft.optionIds = []
+    }
   } else {
     draft.customSelected = true
     draft.optionIds = []
@@ -226,6 +233,9 @@ function setDraftText(question: UIUserInputQuestion, value: string) {
     return
   }
   draft.customText = value
+  if (value.trim() && question.custom_exclusive) {
+    draft.optionIds = []
+  }
 }
 
 function setFooterText(value: string) {
@@ -241,10 +251,14 @@ function setFooterText(value: string) {
 }
 
 function answerFor(question: UIUserInputQuestion): WSUserInputAnswer | null {
+  // Existing native ask_user payloads omit required and have always required
+  // every Web answer. ACP forms explicitly send false for optional properties.
+  const required = question.required !== false
   const draft = drafts.value[question.id]
   if (question.kind === 'text') {
     const text = draft?.text.trim() ?? ''
-    return text ? { question_id: question.id, text } : null
+    if (text) return { question_id: question.id, text }
+    return required ? null : { question_id: question.id, skipped: true }
   }
   const optionIds = draft?.optionIds ?? []
   let customText = ''
@@ -257,15 +271,19 @@ function answerFor(question: UIUserInputQuestion): WSUserInputAnswer | null {
     customText = customSelected ? (draft?.customText.trim() ?? '') : ''
     if (customSelected && !customText) return null
   }
+  if (optionIds.length === 0 && !customText) {
+    return required ? null : { question_id: question.id, skipped: true }
+  }
   if (question.kind === 'single_select' && optionIds.length + (customText ? 1 : 0) !== 1) return null
-  if (optionIds.length === 0 && !customText) return null
+  if (question.custom_exclusive && optionIds.length > 0 && customText) return null
   const answer: WSUserInputAnswer = { question_id: question.id }
   if (optionIds.length > 0) answer.option_ids = [...optionIds]
   if (customText) answer.custom_text = customText
   return answer
 }
 
-// All questions must be answered per kind before submit; null means incomplete.
+// Required questions must be answered per kind. Unanswered optional questions
+// are sent as explicit skips so the ACP form result can omit those properties.
 const answers = computed<WSUserInputAnswer[] | null>(() => {
   if (!questions.value.length) return null
   const out: WSUserInputAnswer[] = []

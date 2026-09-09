@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/models"
 )
 
 // TestFormatProvidersSummary pins the text body that no-button channels see

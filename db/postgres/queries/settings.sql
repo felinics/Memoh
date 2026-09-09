@@ -3,19 +3,16 @@ SELECT
   bots.id AS bot_id,
   bots.language,
   bots.reasoning_effort,
-  bots.heartbeat_enabled,
-  bots.heartbeat_interval,
-  bots.heartbeat_prompt,
   bots.compaction_enabled,
   bots.compaction_threshold,
   bots.compaction_target_percent,
   bots.timezone,
   chat_models.id AS chat_model_id,
+  bots.default_bot_agent_id,
   bots.chat_runtime,
   bots.chat_acp_agent_id,
   bots.chat_acp_project_path,
   bots.chat_acp_project_mode,
-  heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
@@ -34,7 +31,6 @@ SELECT
   bots.command_ui_language
 FROM bots
 LEFT JOIN models AS chat_models ON chat_models.id = bots.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = bots.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = bots.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = bots.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = bots.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
@@ -50,9 +46,6 @@ WITH updated AS (
   UPDATE bots
   SET language = sqlc.arg(language),
       reasoning_effort = sqlc.arg(reasoning_effort),
-      heartbeat_enabled = sqlc.arg(heartbeat_enabled),
-      heartbeat_interval = sqlc.arg(heartbeat_interval),
-      heartbeat_prompt = sqlc.arg(heartbeat_prompt),
       compaction_enabled = sqlc.arg(compaction_enabled),
       compaction_threshold = sqlc.arg(compaction_threshold),
       compaction_target_percent = CASE
@@ -65,14 +58,14 @@ WITH updated AS (
         WHEN sqlc.arg(chat_model_id_set)::boolean THEN sqlc.narg(chat_model_id)::uuid
         ELSE bots.chat_model_id
       END,
+      default_bot_agent_id = CASE
+        WHEN sqlc.arg(default_bot_agent_id_set)::boolean THEN sqlc.narg(default_bot_agent_id)::uuid
+        ELSE bots.default_bot_agent_id
+      END,
       chat_runtime = sqlc.arg(chat_runtime),
       chat_acp_agent_id = sqlc.narg(chat_acp_agent_id)::text,
       chat_acp_project_path = sqlc.arg(chat_acp_project_path),
       chat_acp_project_mode = sqlc.arg(chat_acp_project_mode),
-      heartbeat_model_id = CASE
-        WHEN sqlc.arg(heartbeat_model_id_set)::boolean THEN sqlc.narg(heartbeat_model_id)::uuid
-        ELSE bots.heartbeat_model_id
-      END,
       compaction_model_id = CASE
         WHEN sqlc.arg(compaction_model_id_set)::boolean THEN sqlc.narg(compaction_model_id)::uuid
         ELSE bots.compaction_model_id
@@ -115,25 +108,22 @@ WITH updated AS (
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.heartbeat_enabled, bots.heartbeat_interval, bots.heartbeat_prompt, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.heartbeat_model_id, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  RETURNING bots.id, bots.language, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
   updated.language,
   updated.reasoning_effort,
-  updated.heartbeat_enabled,
-  updated.heartbeat_interval,
-  updated.heartbeat_prompt,
   updated.compaction_enabled,
   updated.compaction_threshold,
   updated.compaction_target_percent,
   updated.timezone,
   chat_models.id AS chat_model_id,
+  updated.default_bot_agent_id,
   updated.chat_runtime,
   updated.chat_acp_agent_id,
   updated.chat_acp_project_path,
   updated.chat_acp_project_mode,
-  heartbeat_models.id AS heartbeat_model_id,
   compaction_models.id AS compaction_model_id,
   search_providers.id AS search_provider_id,
   fetch_providers.id AS fetch_provider_id,
@@ -152,7 +142,6 @@ SELECT
   updated.command_ui_language
 FROM updated
 LEFT JOIN models AS chat_models ON chat_models.id = updated.chat_model_id AND chat_models.team_id = public.memoh_current_team_id()
-LEFT JOIN models AS heartbeat_models ON heartbeat_models.id = updated.heartbeat_model_id AND heartbeat_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS compaction_models ON compaction_models.id = updated.compaction_model_id AND compaction_models.team_id = public.memoh_current_team_id()
 LEFT JOIN models AS image_models ON image_models.id = updated.image_model_id AND image_models.team_id = public.memoh_current_team_id()
 LEFT JOIN search_providers ON search_providers.id = updated.search_provider_id AND search_providers.team_id = public.memoh_current_team_id()
@@ -167,18 +156,15 @@ UPDATE bots
 SET language = 'auto',
     command_ui_language = 'auto',
     reasoning_effort = 'medium',
-    heartbeat_enabled = false,
-    heartbeat_interval = 1440,
-    heartbeat_prompt = '',
     compaction_enabled = true,
     compaction_threshold = 0,
     compaction_target_percent = NULL,
     chat_model_id = NULL,
+    default_bot_agent_id = NULL,
     chat_runtime = 'model',
     chat_acp_agent_id = NULL,
     chat_acp_project_path = '/data',
     chat_acp_project_mode = 'project',
-    heartbeat_model_id = NULL,
     compaction_model_id = NULL,
     image_model_id = NULL,
     search_provider_id = NULL,

@@ -27,9 +27,12 @@ describe('onboarding provider setup', () => {
       { id: 'pro-id', model_id: 'deepseek-v4-pro', type: 'chat', enable: false },
     ]
 
-    expect(mergeOnboardingModels(enabled, providerModels).map(model => model.id)).toEqual([
-      'flash-id',
-      'pro-id',
+    expect(mergeOnboardingModels(enabled, providerModels).map(model => ({
+      id: model.id,
+      enable: model.enable,
+    }))).toEqual([
+      { id: 'flash-id', enable: true },
+      { id: 'pro-id', enable: false },
     ])
   })
 })

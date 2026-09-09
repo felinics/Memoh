@@ -7,9 +7,12 @@
       v-if="expandable"
       :open="open"
       nested
-      :tone="display.isError ? 'error' : 'cop'"
       @toggle="toggleOpen"
     >
+      <ConnectorLogo
+        v-if="connector"
+        :connector="connector"
+      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -19,7 +22,7 @@
         v-if="display.target && canOpenInFiles"
         class="truncate min-w-0 hover:underline cursor-pointer"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
         @click.stop="handleOpenInFiles"
       >
         {{ display.target }}
@@ -28,7 +31,7 @@
         v-else-if="display.target"
         class="truncate min-w-0"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
       >{{ display.target }}</span>
       <span
         v-if="executionLocationLabel"
@@ -43,10 +46,6 @@
         v-if="display.diffRemove"
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
-      <span
-        v-if="display.errorSuffix"
-        class="font-mono shrink-0"
-      >{{ display.errorSuffix }}</span>
       <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
@@ -66,6 +65,10 @@
       class="flex items-center gap-1.5 w-full py-px"
       :class="rowClass"
     >
+      <ConnectorLogo
+        v-if="connector"
+        :connector="connector"
+      />
       <span
         v-if="showActionLabel"
         class="shrink-0"
@@ -75,7 +78,7 @@
         v-if="display.target && canOpenInFiles"
         class="truncate min-w-0 hover:underline cursor-pointer"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
         @click="handleOpenInFiles"
       >
         {{ display.target }}
@@ -84,7 +87,7 @@
         v-else-if="display.target"
         class="truncate min-w-0"
         :class="targetClass"
-        :title="display.fullTarget || display.target"
+        :title="display.fullTarget || undefined"
       >{{ display.target }}</span>
       <span
         v-if="executionLocationLabel"
@@ -100,10 +103,6 @@
         class="font-mono shrink-0 text-destructive"
       >-{{ display.diffRemove }}</span>
       <span
-        v-if="display.errorSuffix"
-        class="font-mono shrink-0"
-      >{{ display.errorSuffix }}</span>
-      <span
         v-if="approvalLabel"
         class="font-mono shrink-0 text-xs text-warning-foreground"
       >{{ approvalLabel }}</span>
@@ -117,33 +116,17 @@
       v-if="expandable"
       :open="open && !isPending"
     >
-      <!-- 'inline' detail (half-embedded key:value list) is not the capsule
-           shape — just indentation, no filled surface. -->
-      <div
-        v-if="display.detailVariant === 'inline'"
-        class="mt-1 pl-3 font-[400]"
-      >
-        <component
-          :is="display.detail"
-          v-if="display.detail"
-          :block="block"
-        />
-        <ToolCallDetailGeneric
-          v-else
-          :block="block"
-        />
-      </div>
       <!-- inGroup: a card nested inside the group's own muted capsule needs a
            visibly different fill (bg-card, not bg-muted) so it reads as one
            layer up — a genuinely different surface, not a padding drift of
            the capsule shape below, so it stays hand-written. -->
       <div
-        v-else-if="inGroup"
+        v-if="inGroup"
         class="mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]"
       >
         <component
-          :is="display.detail"
-          v-if="display.detail"
+          :is="detailComponent"
+          v-if="detailComponent"
           :block="block"
         />
         <ToolCallDetailGeneric
@@ -157,8 +140,8 @@
         class="mt-1.5 font-[400]"
       >
         <component
-          :is="display.detail"
-          v-if="display.detail"
+          :is="detailComponent"
+          v-if="detailComponent"
           :block="block"
         />
         <ToolCallDetailGeneric
@@ -175,25 +158,40 @@ import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
 import { openInFileManagerKey } from '../composables/useFileManagerProvider'
+import { useConnectorLogos } from '../composables/useConnectorLogos'
 import {
-  getToolDisplay,
+  getToolTitle,
   isDirPathTool,
   isFilePathTool,
 } from './tool-call-registry'
+import ConnectorLogo from './tool-detail/connector-logo.vue'
 import ToolCallDetailGeneric from './tool-call-detail-generic.vue'
+import { hasToolResultError } from './tool-result-error'
+import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import CollapseSection from './collapse-section.vue'
 import { getCollapseOpen, setCollapseOpen, toolCollapseKey } from './process-collapse'
 import HeaderRow from './tool-detail/header-row.vue'
 import ExpandChevron from './tool-detail/expand-chevron.vue'
 import Capsule from './tool-detail/capsule.vue'
 
-const props = defineProps<{ block: ToolCallBlock, inGroup?: boolean }>()
+const props = defineProps<{ block: ToolCallBlock, messageId: string, inGroup?: boolean, showExecutionLocation?: boolean }>()
 const { t } = useI18n()
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 
-const display = computed(() => getToolDisplay(props.block))
+const title = computed(() => getToolTitle(props.block, t))
+const display = computed(() => title.value.display)
+// Specialized panels describe successful results or attempted inputs. Failed
+// results use the shared diagnostic detail, without changing the neutral title.
+const resultFailed = computed(() => hasToolResultError(props.block))
+const detailComponent = computed(() => resultFailed.value ? ToolCallDetailGeneric : display.value.detail)
+
+// A Connect-It tool carries its binding's alias in the tool name; when that
+// alias resolves to one of the bot's connectors the row leads with its logo.
+const connectorLookup = useConnectorLogos()
+const connector = computed(() => connectorLookup.value(props.block.toolName))
 const executionLocationLabel = computed(() => {
+  if (!props.showExecutionLocation) return ''
   const location = props.block.execution_location
   if (!location) return ''
   if (location.kind === 'native') return t('bots.remoteRuntime.nativeWorkspace')
@@ -201,63 +199,33 @@ const executionLocationLabel = computed(() => {
 })
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
-const collapseKey = computed(() => toolCollapseKey(props.block))
-const open = ref(getCollapseOpen(collapseKey.value) || display.value.defaultOpen === true)
+const collapseKey = computed(() => toolCollapseKey(props.messageId, props.block))
+const open = ref(getCollapseOpen(collapseKey.value) ?? (display.value.defaultOpen === true))
 watch(collapseKey, (key) => {
-  open.value = getCollapseOpen(key) || display.value.defaultOpen === true
+  open.value = getCollapseOpen(key) ?? (display.value.defaultOpen === true)
 })
 
-const expandable = computed(
-  () => Boolean(display.value.detail) || display.value.expandable === true,
-)
-
-const actionLabel = computed(() => {
-  const key = `chat.tools.${display.value.actionKey}`
-  return t(key, display.value.actionParams ?? {})
+const expandable = computed(() => {
+  if (isPending.value) return false
+  if (resultFailed.value) return true
+  if (display.value.detail === ToolCallDetailWrite) {
+    const input = props.block.input as Record<string, unknown> | undefined
+    return (typeof input?.content === 'string' && input.content.length > 0)
+      || input?.content_truncated === true
+  }
+  return Boolean(display.value.detail) || display.value.expandable === true
 })
 
-// A tool is "pending" while it is running and its input arguments have not
-// streamed in yet (tool_call_input_start fires before the full call). In that
-// window tools like write/edit hide their action label and have no target, so
-// only a bare icon would show. We surface a placeholder label instead.
-const isPending = computed(() => {
-  if (props.block.done) return false
-  const input = props.block.input
-  return !(
-    input
-    && typeof input === 'object'
-    && Object.keys(input as Record<string, unknown>).length > 0
-  )
-})
+const isPending = computed(() => title.value.pending)
+const showPendingLabel = computed(() => title.value.pending)
+const showActionLabel = computed(() => title.value.showAction)
+const renderedActionLabel = computed(() => title.value.action)
 
-const showsBareIconWhenPending = computed(
-  () => display.value.hideAction === true && !display.value.target,
-)
-
-const showPendingLabel = computed(
-  () => isPending.value && showsBareIconWhenPending.value,
-)
-
-const pendingLabel = computed(
-  () => t(`chat.tools.pending.${display.value.actionKey}`, t('chat.tools.pending.generic')),
-)
-
-const showActionLabel = computed(
-  () => showPendingLabel.value || !display.value.hideAction,
-)
-
-const renderedActionLabel = computed(
-  () => (showPendingLabel.value ? pendingLabel.value : actionLabel.value),
-)
-
-// Every row is gray at rest and animates to near-black (foreground) on hover:
-// one neutral material, with color expressing interaction. Rest ink matches the
-// process/thinking headers (--cop-title) so a lone tool row and a collapsed
-// group read at the same weight.
-const rowClass = computed(() => {
-  if (display.value.isError) return 'text-destructive transition-colors duration-75'
-  return 'text-cop-title hover:text-foreground transition-colors duration-75'
-})
+// 工具标题是执行过程摘要。Agent 在虚拟机中试错、检查并修复命令是正常的
+// 长任务行为；非零退出码（包括 -1）或工具 isError 不等于用户任务失败。
+// 标题保持中性色，不附加退出码或错误染色；诊断留在展开详情中，真正的
+// 任务失败由回合级错误反馈表达，不能从某一次工具调用推导。
+const rowClass = 'text-cop-title hover:text-foreground transition-colors duration-75'
 
 // Brief tools (e.g. send/memory) finish in <100ms. Showing the running
 // shimmer for them flickers, so we only display it after a short delay.
@@ -292,7 +260,6 @@ onBeforeUnmount(clearRunningTimer)
 
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
-  if (display.value.isError) return 'text-destructive'
   return '' // inherit the row's gray→black hover color
 })
 

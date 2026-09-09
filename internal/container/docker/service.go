@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"syscall"
@@ -19,11 +20,12 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	dockermount "github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
-	"github.com/memohai/memoh/internal/config"
-	containerapi "github.com/memohai/memoh/internal/container"
+	"github.com/felinics/memoh/internal/config"
+	containerapi "github.com/felinics/memoh/internal/container"
 )
 
 const (
@@ -36,13 +38,19 @@ const (
 var invalidSnapshotTagChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 
 type Service struct {
-	client *client.Client
-	logger *slog.Logger
+	client           *client.Client
+	logger           *slog.Logger
+	workspaceNetwork string
 }
 
-func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
+func NewService(ctx context.Context, log *slog.Logger, cfg config.Config) (*Service, error) {
 	if log == nil {
 		log = slog.Default()
+	}
+	workspaceNetwork := strings.TrimSpace(cfg.Docker.Network)
+	serverContainer := strings.TrimSpace(cfg.Docker.ServerContainer)
+	if err := validateWorkspaceNetwork(workspaceNetwork, serverContainer, runningInContainer(), cfg.BridgeTLS.Strict()); err != nil {
+		return nil, err
 	}
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 	if host := strings.TrimSpace(cfg.Docker.Host); host != "" {
@@ -52,9 +60,17 @@ func NewService(log *slog.Logger, cfg config.Config) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
+	if workspaceNetwork != "" {
+		err = validateServerNetworkMembership(ctx, cli, serverContainer, workspaceNetwork)
+		if err != nil {
+			_ = cli.Close()
+			return nil, err
+		}
+	}
 	return &Service{
-		client: cli,
-		logger: log.With(slog.String("service", "docker")),
+		client:           cli,
+		logger:           log.With(slog.String("service", "docker")),
+		workspaceNetwork: workspaceNetwork,
 	}, nil
 }
 
@@ -132,6 +148,10 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 	if req.StorageRef.Key != "" {
 		labels[containerapi.StorageKeyLabel] = req.StorageRef.Key
 	}
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		return containerapi.ContainerInfo{}, err
+	}
 	hostCfg := &container.HostConfig{
 		Mounts: toDockerMounts(req.Spec.Mounts),
 		DNS:    req.Spec.DNS,
@@ -139,6 +159,7 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 			nat.Port(bridgeTCPPort + "/tcp"): []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: ""}},
 		},
 	}
+	var networkingCfg *network.NetworkingConfig
 	if req.ResourceLimits.MemoryBytes > 0 {
 		hostCfg.Memory = req.ResourceLimits.MemoryBytes
 	}
@@ -147,6 +168,14 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 	}
 	if req.Spec.NetworkJoinTarget.Value != "" {
 		hostCfg.NetworkMode = container.NetworkMode("none")
+	} else if workspaceNetwork != "" {
+		hostCfg.NetworkMode = container.NetworkMode(workspaceNetwork)
+		hostCfg.PortBindings = nil
+		networkingCfg = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				workspaceNetwork: {},
+			},
+		}
 	}
 	cfg := &container.Config{
 		Image:      req.ImageRef,
@@ -160,7 +189,7 @@ func (s *Service) CreateContainer(ctx context.Context, req containerapi.CreateCo
 			nat.Port(bridgeTCPPort + "/tcp"): struct{}{},
 		},
 	}
-	resp, err := s.client.ContainerCreate(ctx, cfg, hostCfg, nil, nil, req.ID)
+	resp, err := s.client.ContainerCreate(ctx, cfg, hostCfg, networkingCfg, nil, req.ID)
 	if err != nil {
 		return containerapi.ContainerInfo{}, mapDockerErr(err)
 	}
@@ -173,9 +202,20 @@ func (s *Service) BridgeTarget(botID string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		s.logger.Warn("resolve Docker workspace network", slog.Any("error", err))
+		return ""
+	}
 	info, err := s.client.ContainerInspect(ctx, workspaceContainerPref+strings.TrimSpace(botID))
 	if err != nil {
 		return ""
+	}
+	if workspaceNetwork != "" {
+		if containerNetworkIP(info, workspaceNetwork) == "" {
+			return ""
+		}
+		return net.JoinHostPort(workspaceContainerPref+strings.TrimSpace(botID), bridgeTCPPort)
 	}
 	if host := firstHostPort(info, bridgeTCPPort); host != "" {
 		return host
@@ -203,6 +243,113 @@ func firstHostPort(info container.InspectResponse, port string) string {
 		return net.JoinHostPort(hostIP, hostPort)
 	}
 	return ""
+}
+
+func (s *Service) resolveWorkspaceNetwork(ctx context.Context) (string, error) {
+	if s.workspaceNetwork != "" {
+		return s.workspaceNetwork, nil
+	}
+	if !runningInContainer() {
+		return "", nil
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("%w: read server container hostname: %w", containerapi.ErrInvalidArgument, err)
+	}
+	info, err := s.client.ContainerInspect(ctx, hostname)
+	if err != nil {
+		return "", fmt.Errorf("%w: inspect server container %q: %w; set [docker].network explicitly", containerapi.ErrInvalidArgument, hostname, err)
+	}
+	if info.HostConfig != nil && info.HostConfig.NetworkMode.IsHost() {
+		return "", nil
+	}
+	return "", fmt.Errorf("%w: Docker backend inside a container requires [docker].network to name a dedicated user-defined network shared with workspace containers", containerapi.ErrInvalidArgument)
+}
+
+func runningInContainer() bool {
+	for _, marker := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := os.Stat(marker); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func isUserDefinedDockerNetwork(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	switch name {
+	case "bridge", "default", "host", "nat", "none":
+		return false
+	default:
+		return !container.NetworkMode(name).IsContainer()
+	}
+}
+
+func validateWorkspaceNetwork(name, serverContainer string, serverInContainer, bridgeTLSStrict bool) error {
+	if name == "" {
+		return nil
+	}
+	if !isUserDefinedDockerNetwork(name) {
+		return fmt.Errorf("docker network %q does not provide container-name DNS; configure a user-defined network", name)
+	}
+	if !serverInContainer {
+		return fmt.Errorf("docker network %q requires the Memoh server to run in a container; host deployments use the loopback workspace bridge", name)
+	}
+	if !bridgeTLSStrict {
+		return fmt.Errorf("docker network %q requires [bridge_tls].mode = %q to isolate workspace bridge access", name, config.BridgeTLSModeStrict)
+	}
+	if strings.TrimSpace(serverContainer) == "" {
+		return fmt.Errorf("docker network %q requires [docker].server_container to identify this Memoh server on the configured Docker daemon", name)
+	}
+	return nil
+}
+
+func validateServerNetworkMembership(ctx context.Context, cli *client.Client, serverContainer, networkName string) error {
+	info, err := cli.ContainerInspect(ctx, serverContainer)
+	if err != nil {
+		mappedErr := mapDockerErr(err)
+		if containerapi.IsNotFound(mappedErr) {
+			return fmt.Errorf(
+				"%w: Memoh server container %q does not exist on Docker daemon %q: %w",
+				containerapi.ErrInvalidArgument,
+				serverContainer,
+				cli.DaemonHost(),
+				err,
+			)
+		}
+		return fmt.Errorf("inspect Memoh server container %q on Docker daemon %q: %w", serverContainer, cli.DaemonHost(), mappedErr)
+	}
+	if containerNetworkEndpoint(info, networkName) != nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: Memoh server container %q is not attached to Docker network %q on Docker daemon %q",
+		containerapi.ErrInvalidArgument,
+		serverContainer,
+		networkName,
+		cli.DaemonHost(),
+	)
+}
+
+func containerNetworkIP(info container.InspectResponse, networkName string) string {
+	endpoint := containerNetworkEndpoint(info, networkName)
+	if endpoint == nil {
+		return ""
+	}
+	if ip := strings.TrimSpace(endpoint.IPAddress); ip != "" {
+		return ip
+	}
+	return strings.TrimSpace(endpoint.GlobalIPv6Address)
+}
+
+func containerNetworkEndpoint(info container.InspectResponse, networkName string) *network.EndpointSettings {
+	if info.NetworkSettings == nil {
+		return nil
+	}
+	return info.NetworkSettings.Networks[strings.TrimSpace(networkName)]
 }
 
 func (s *Service) GetContainer(ctx context.Context, id string) (containerapi.ContainerInfo, error) {
@@ -349,20 +496,76 @@ func (s *Service) ListTasks(ctx context.Context, _ *containerapi.ListTasksOption
 }
 
 func (s *Service) SetupNetwork(ctx context.Context, req containerapi.NetworkRequest) (containerapi.NetworkResult, error) {
+	if strings.TrimSpace(req.ContainerID) == "" {
+		return containerapi.NetworkResult{}, containerapi.ErrInvalidArgument
+	}
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		return containerapi.NetworkResult{}, err
+	}
 	info, err := s.client.ContainerInspect(ctx, req.ContainerID)
 	if err != nil {
 		return containerapi.NetworkResult{}, mapDockerErr(err)
 	}
+	if workspaceNetwork != "" {
+		if containerNetworkEndpoint(info, workspaceNetwork) == nil {
+			connectErr := s.client.NetworkConnect(ctx, workspaceNetwork, req.ContainerID, nil)
+			info, err = s.client.ContainerInspect(ctx, req.ContainerID)
+			if err != nil {
+				return containerapi.NetworkResult{}, mapDockerErr(err)
+			}
+			if containerNetworkIP(info, workspaceNetwork) == "" {
+				if connectErr != nil {
+					return containerapi.NetworkResult{}, fmt.Errorf("connect container %q to Docker network %q: %w", req.ContainerID, workspaceNetwork, mapDockerErr(connectErr))
+				}
+				return containerapi.NetworkResult{}, errors.Join(containerapi.ErrRuntime, fmt.Errorf("container %q joined Docker network %q without an IP address", req.ContainerID, workspaceNetwork))
+			}
+		}
+		return containerapi.NetworkResult{IP: containerNetworkIP(info, workspaceNetwork)}, nil
+	}
 	return containerapi.NetworkResult{IP: firstContainerIP(info)}, nil
 }
 
-func (*Service) RemoveNetwork(context.Context, containerapi.NetworkRequest) error {
+func (s *Service) RemoveNetwork(ctx context.Context, req containerapi.NetworkRequest) error {
+	if strings.TrimSpace(req.ContainerID) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		return err
+	}
+	if workspaceNetwork == "" {
+		return nil
+	}
+	info, err := s.client.ContainerInspect(ctx, req.ContainerID)
+	if err != nil {
+		return mapDockerErr(err)
+	}
+	if containerNetworkEndpoint(info, workspaceNetwork) == nil {
+		return nil
+	}
+	if err := s.client.NetworkDisconnect(ctx, workspaceNetwork, req.ContainerID, false); err != nil {
+		return fmt.Errorf("disconnect container %q from Docker network %q: %w", req.ContainerID, workspaceNetwork, mapDockerErr(err))
+	}
 	return nil
 }
 
 func (s *Service) CheckNetwork(ctx context.Context, req containerapi.NetworkRequest) error {
-	_, err := s.client.ContainerInspect(ctx, req.ContainerID)
-	return mapDockerErr(err)
+	if strings.TrimSpace(req.ContainerID) == "" {
+		return containerapi.ErrInvalidArgument
+	}
+	workspaceNetwork, err := s.resolveWorkspaceNetwork(ctx)
+	if err != nil {
+		return err
+	}
+	info, err := s.client.ContainerInspect(ctx, req.ContainerID)
+	if err != nil {
+		return mapDockerErr(err)
+	}
+	if workspaceNetwork != "" && containerNetworkIP(info, workspaceNetwork) == "" {
+		return errors.Join(containerapi.ErrRuntime, fmt.Errorf("container %q is detached from Docker network %q", req.ContainerID, workspaceNetwork))
+	}
+	return nil
 }
 
 func (s *Service) CommitSnapshot(ctx context.Context, req containerapi.CommitSnapshotRequest) error {

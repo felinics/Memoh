@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 // AdaptInbound converts a channel.InboundMessage into a timeline.CanonicalEvent.

@@ -38,6 +38,7 @@ email = "admin@memoh.local"
 [auth]
 jwt_secret = "YZq8kXrW5dFpNt9mLxQvHbRjKsMnOePw"
 jwt_expires_in = "168h"
+agent_credentials_encryption_key = ""
 
 timezone = "UTC"
 
@@ -51,7 +52,7 @@ driver = "postgres"
 # runtime bind mounts and Docker socket access.
 backend = "containerd"
 # registry = "memoh.cn"  # Uncomment for China mainland mirror
-default_image = "memohai/workspace:debian"
+default_image = "memohai/workspace:debian-latest"
 image_pull_policy = "if_not_present"
 # containerd snapshotter and CNI settings for bot workspace containers.
 snapshotter = "overlayfs"
@@ -68,6 +69,13 @@ namespace = "default"
 # Used only when [container].backend = "docker"; the official Compose stack
 # uses containerd above.
 host = ""
+# Dedicated user-defined network shared by a custom containerized
+# Docker-backend server and its workspace containers. Requires
+# [bridge_tls].mode = "strict".
+network = ""
+# Container ID or unique name of this Memoh server on the configured Docker
+# daemon. Required together with network.
+server_container = ""
 
 ## Postgres configuration.
 [postgres]
@@ -110,3 +118,12 @@ config_path = "conf/oauth-clients.toml"
 [web]
 host = "127.0.0.1"
 port = 8082
+
+# Dependency maintenance; use offline=true to disable registry refresh/update
+# checks. Recipe scripts still use their own network access when manually run.
+[workspace_dependencies]
+offline = false
+catalog_refresh_interval_seconds = 600
+update_check_interval_seconds = 86400
+reap_interval_seconds = 60
+discovery_cache_ttl_seconds = 600

@@ -32,6 +32,7 @@ email = "dev@memoh.local"
 [auth]
 jwt_secret = "memoh-dev-secret-do-not-use-in-production"
 jwt_expires_in = "168h"
+agent_credentials_encryption_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 timezone = "UTC"
 
@@ -43,7 +44,7 @@ driver = "postgres"
 # Apple backend uses socktainer and the Apple Containerization framework.
 # It is local-macOS oriented and does not support provider sidecar overlays.
 backend = "apple"
-default_image = "memohai/workspace:debian"
+default_image = "memohai/workspace:debian-latest"
 image_pull_policy = "if_not_present"
 # Workspace state and bridge sockets.
 data_root = "data"
@@ -80,3 +81,12 @@ base_url = "https://supermarket.memoh.ai"
 
 [oauth_clients]
 config_path = "conf/oauth-clients.toml"
+
+# Dependency maintenance; use offline=true to disable registry refresh/update
+# checks. Recipe scripts still use their own network access when manually run.
+[workspace_dependencies]
+offline = false
+catalog_refresh_interval_seconds = 600
+update_check_interval_seconds = 86400
+reap_interval_seconds = 60
+discovery_cache_ttl_seconds = 600

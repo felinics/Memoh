@@ -7,14 +7,15 @@ import (
 	"io"
 	"log/slog"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
-	sdk "github.com/memohai/twilight-ai/sdk"
 
-	"github.com/memohai/memoh/internal/audio/adapter"
-	"github.com/memohai/memoh/internal/db"
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/memohai/memoh/internal/db/store"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/audio/adapter"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/providers"
 )
 
 type Service struct {
@@ -634,7 +635,7 @@ func maskSpeechProviderConfig(cfg map[string]any) map[string]any {
 	out := make(map[string]any, len(cfg))
 	for key, value := range cfg {
 		if s, ok := value.(string); ok && s != "" && isSpeechSecretKey(key) {
-			out[key] = maskSpeechSecret(s)
+			out[key] = providers.MaskAPIKey(s)
 			continue
 		}
 		out[key] = value
@@ -642,20 +643,18 @@ func maskSpeechProviderConfig(cfg map[string]any) map[string]any {
 	return out
 }
 
+// The mask shape is the providers package's single contract
+// (providers.MaskAPIKey + providers.SecretConfigKeys): the settings UI
+// round-trips what we return here through PUT /providers/:id, whose masked-
+// secret preservation only recognizes that one shape. A speech-local shape
+// used to corrupt the stored key on every save.
 func isSpeechSecretKey(key string) bool {
-	switch key {
-	case "api_key", "access_key", "secret_key", "app_key":
-		return true
-	default:
-		return false
+	for _, secretKey := range providers.SecretConfigKeys {
+		if key == secretKey {
+			return true
+		}
 	}
-}
-
-func maskSpeechSecret(value string) string {
-	if len(value) <= 8 {
-		return "********"
-	}
-	return value[:4] + "****" + value[len(value)-4:]
+	return false
 }
 
 func toSpeechModelFromListRow(row sqlc.ListSpeechModelsRow) SpeechModelResponse {

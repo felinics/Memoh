@@ -8,7 +8,7 @@
 // session by reading that key directly, without unwrapping nested objects.
 package payload
 
-import "github.com/memohai/memoh/internal/agent/background"
+import "github.com/felinics/memoh/internal/agent/background"
 
 // BackgroundTask builds the wire payload for a background task event. The
 // publisher in the core composition root marshals this map and hands it to the

@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 )
 
 type AskUserProvider struct{}
@@ -32,7 +31,7 @@ func (*AskUserProvider) Usage(_ context.Context, session SessionContext, availab
 		"Each question's `kind` decides the interaction: `single_select` for exactly one choice, `multi_select` for select-all-that-apply or multi-answer questions, `text` for open input. Put only the question in `text` and every answer choice in `options`; never duplicate A/B/C choices inside the question text.",
 		"For `multi_select`, make the interaction clear in the question text itself, for example by appending `（多选）` in Chinese or `(select all that apply)` in English. Channel renderers do not add this hint for you.",
 		"Several related questions can go into one call as separate `questions` entries instead of multiple calls.",
-		"Use `allow_custom: true` on a select question to let the user type their own answer alongside the options.",
+		"Select options are shortcuts: users can always reply in their own words. Interpret custom_text in the tool result as their answer, and ask a follow-up if its meaning is unclear.",
 		"Wait for the tool result before grading or explaining answers. If the latest user message asks for another question, another quiz, or another choice, create the new question with " + ref + "; do not treat that request itself as the user's answer.",
 		"Do not simulate an " + ref + " interaction in ordinary text when the tool is available.",
 	})
@@ -88,7 +87,7 @@ func (*AskUserProvider) Tools(_ context.Context, session SessionContext) ([]sdk.
 							},
 							"allow_custom": map[string]any{
 								"type":        "boolean",
-								"description": "Select kinds only: also offer an \"Other\" free-text entry alongside the options.",
+								"description": "Select kinds only: retained for compatibility; Memoh always offers and accepts custom answers.",
 							},
 							"placeholder": map[string]any{
 								"type":        "string",
@@ -121,9 +120,7 @@ func canExposeAskUserTool(session SessionContext) bool {
 	if session.CanAskUser() {
 		return true
 	}
-	// ACP agents such as Hermes discover MCP tools before a prompt is active,
-	// then cache that tool surface for later prompt turns. Let discovery see
-	// ask_user for interactive ACP sessions; execution still requires
-	// CanRequestUserInput so non-active/background calls cannot hang.
-	return session.CanListUserInput && strings.EqualFold(strings.TrimSpace(session.SessionType), sessionmode.ACPAgent)
+	// External agents can cache MCP tools before a prompt is active. Execution
+	// still requires CanRequestUserInput so an idle tool call cannot block.
+	return session.CanListUserInput && sessionmode.IsInteractive(session.SessionType)
 }

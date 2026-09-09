@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const defaultReadMediaMaxBytes = 20 * 1024 * 1024

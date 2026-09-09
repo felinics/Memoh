@@ -1,10 +1,10 @@
 package audio
 
 import (
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/audio/adapter/alibabacloud"
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/audio/adapter/alibabacloud"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func alibabaTranscriptionDefinition() ProviderDefinition {

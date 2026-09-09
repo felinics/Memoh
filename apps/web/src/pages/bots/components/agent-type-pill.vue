@@ -1,8 +1,6 @@
 <script setup lang="ts">
-// Agent-kind chooser for bot-creation surfaces: built-in Memoh agent vs a
-// hosted ACP agent (Claude Code / Codex / …). Data-driven from getAcpProfiles —
-// when the server publishes no ACP profiles the pill renders nothing, so the
-// surface behaves exactly as before the chooser existed (fail-closed).
+// Agent-kind chooser for bot creation: built-in Memoh, direct external
+// runtimes, and generic ACP profiles.
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { SegmentedControl } from '@felinic/ui'

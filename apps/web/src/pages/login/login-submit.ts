@@ -21,6 +21,32 @@ export interface SubmitLoginDependencies {
   applyLogin: (userData: UserInfo, token: string) => void
   navigateHome: () => Promise<unknown> | unknown
   notifyInvalidCredentials: () => void
+  // Browser-timezone auto-report (login boundary only). All optional: when any
+  // piece is missing the sync is skipped and login proceeds unchanged.
+  readBrowserTimezone?: () => string | null
+  syncTimezone?: (timezone: string) => Promise<{ timezone?: string | null } | null | undefined>
+  applySyncedTimezone?: (timezone: string) => void
+  notifyTimezoneSyncFailed?: (error: unknown) => void
+}
+
+// Runs strictly after applyLogin so the SDK auth interceptor already has the
+// fresh token. A sync failure must never be reclassified as a credential
+// failure — login already succeeded — so it is reported through its own
+// callback and navigation continues.
+async function syncBrowserTimezone(
+  currentTimezone: string,
+  dependencies: SubmitLoginDependencies,
+): Promise<void> {
+  const browserTimezone = dependencies.readBrowserTimezone?.() ?? null
+  if (!browserTimezone || browserTimezone === currentTimezone) return
+  if (!dependencies.syncTimezone) return
+
+  try {
+    const result = await dependencies.syncTimezone(browserTimezone)
+    dependencies.applySyncedTimezone?.(result?.timezone || browserTimezone)
+  } catch (error) {
+    dependencies.notifyTimezoneSyncFailed?.(error)
+  }
 }
 
 export async function submitLogin(
@@ -55,6 +81,7 @@ export async function submitLogin(
       timezone: data.timezone ?? 'UTC',
     }, data.access_token)
 
+    await syncBrowserTimezone(data.timezone ?? 'UTC', dependencies)
     await dependencies.navigateHome()
     return true
   } finally {

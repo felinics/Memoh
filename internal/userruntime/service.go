@@ -9,7 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	dbstore "github.com/memohai/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/db"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 var (
@@ -23,8 +24,9 @@ const maxRuntimeNameBytes = 255
 
 type ConnectionCommitGuard func() error
 
-// Service owns the small persistent credential registry and the in-memory
-// reverse-RPC connections. Bot/session routing belongs outside this package.
+// Service owns the persistent pending/activated credential registry and the
+// in-memory reverse-RPC connections. Bot/session routing belongs outside this
+// package.
 type Service struct {
 	store          dbstore.UserRuntimeStore
 	hub            *Hub
@@ -39,21 +41,39 @@ func NewService(store dbstore.UserRuntimeStore, hub *Hub) *Service {
 	}
 }
 
+// DefaultRuntimeName is the placeholder assigned at credential creation when
+// the caller does not pick a name. It is derived from the credential key (not
+// user input), so the first handshake can safely replace it with the
+// machine's hostname without ever touching a user-chosen name.
+func DefaultRuntimeName(key string) string {
+	tail := strings.TrimPrefix(key, "mrk_")
+	if len(tail) > 6 {
+		tail = tail[:6]
+	}
+	return "Computer " + tail
+}
+
 func (s *Service) CreateRuntime(ctx context.Context, userID string, req CreateRuntimeRequest) (Runtime, error) {
 	if s == nil || s.store == nil {
 		return Runtime{}, errors.New("user runtime service not configured")
 	}
 	userID = strings.TrimSpace(userID)
 	name := strings.TrimSpace(req.Name)
-	if userID == "" || name == "" {
+	if userID == "" {
 		return Runtime{}, ErrInvalidInput
 	}
 	if len(name) > maxRuntimeNameBytes || strings.ContainsRune(name, '\x00') || !utf8.ValidString(name) {
 		return Runtime{}, fmt.Errorf("%w: name must be valid UTF-8 of at most %d bytes", ErrInvalidInput, maxRuntimeNameBytes)
 	}
+	if err := s.store.ExpirePendingUserRuntimes(ctx, userID); err != nil {
+		return Runtime{}, err
+	}
 	key, err := NewKey()
 	if err != nil {
 		return Runtime{}, err
+	}
+	if name == "" {
+		name = DefaultRuntimeName(key)
 	}
 	row, err := s.store.CreateUserRuntime(ctx, dbstore.CreateUserRuntimeInput{
 		UserID: userID, Name: name, APIToken: key,
@@ -72,13 +92,23 @@ func (s *Service) ListRuntimes(ctx context.Context, userID string) ([]Runtime, e
 	if userID == "" {
 		return nil, ErrInvalidInput
 	}
+	if err := s.store.ExpirePendingUserRuntimes(ctx, userID); err != nil {
+		return nil, err
+	}
 	rows, err := s.store.ListUserRuntimes(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]Runtime, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, runtimeFromRecord(row, s.connection(row.ID)))
+		runtime := runtimeFromRecord(row, s.connection(row.ID))
+		// A credential becomes a manageable computer only after a ready
+		// connection consumes its short-lived pending state. Persisting that
+		// boundary keeps listing correct across restarts and browser failures.
+		if row.ActivatedAt.IsZero() {
+			continue
+		}
+		items = append(items, runtime)
 	}
 	return items, nil
 }
@@ -132,8 +162,10 @@ func (s *Service) authenticateKeyRecord(ctx context.Context, key string) (dbstor
 	return row, nil
 }
 
-// ActivateConnection rechecks the credential at the publication boundary so
-// a concurrent revoke can never leave a newly published connection alive.
+// ActivateConnection rechecks the credential and transport readiness before
+// consuming the pending state, then checks readiness again at the publication
+// boundary. The lifecycle lock prevents a concurrent revoke from publishing a
+// replacement connection after it returns.
 func (s *Service) ActivateConnection(ctx context.Context, key, runtimeID string, info HandshakeInfo, connection *Connection, guard ConnectionCommitGuard) error {
 	if s == nil || s.store == nil || s.hub == nil || s.lifecycleLocks == nil || connection == nil || connection.Client == nil || strings.TrimSpace(connection.ConnectionID) == "" || guard == nil {
 		return errors.New("runtime connection service not configured")
@@ -163,12 +195,57 @@ func (s *Service) ActivateConnection(ctx context.Context, key, runtimeID string,
 		ClientVersion: info.ClientVersion,
 		Capabilities:  append([]string(nil), info.Capabilities...),
 	}
-	return s.hub.registerGuarded(connection, func() error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := guard(); err != nil {
+		return err
+	}
+	activatedRow, err := s.store.ActivateUserRuntime(ctx, runtimeID, key)
+	if err != nil {
+		return err
+	}
+	if err := s.hub.registerGuarded(connection, func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		return guard()
-	})
+	}); err != nil {
+		return err
+	}
+	s.backfillRuntimeName(ctx, activatedRow, info.Hostname)
+	return nil
+}
+
+// backfillRuntimeName adopts the connecting machine's hostname as the display
+// name while the runtime still carries its creation default. A name the user
+// chose (or one already backfilled) is left untouched; a hostname that
+// collides with another of the user's computers gets a numeric suffix.
+func (s *Service) backfillRuntimeName(ctx context.Context, row dbstore.UserRuntimeRecord, hostname string) {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return
+	}
+	defaultName := DefaultRuntimeName(row.APIToken)
+	candidate := hostname
+	for attempt := range 10 {
+		if attempt > 0 {
+			candidate = fmt.Sprintf("%s (%d)", hostname, attempt+1)
+		}
+		if len(candidate) > maxRuntimeNameBytes {
+			return
+		}
+		updated, err := s.store.BackfillUserRuntimeName(ctx, row.ID, row.UserID, candidate, defaultName)
+		if err == nil {
+			// Either adopted, or the name no longer defaults (user renamed /
+			// earlier handshake already backfilled) — both are terminal.
+			_ = updated
+			return
+		}
+		if !db.IsUniqueViolation(err) {
+			return
+		}
+	}
 }
 
 func (s *Service) DeactivateConnection(runtimeID string, connection *Connection, reason string) {

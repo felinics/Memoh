@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/memohai/memoh/internal/providertemplates"
+	"github.com/felinics/memoh/internal/providertemplates"
 )
 
 func TestAlibabaASRTemplate(t *testing.T) {

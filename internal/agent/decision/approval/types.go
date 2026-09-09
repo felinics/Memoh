@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -13,9 +14,18 @@ const (
 	StatusExpired   = "expired"
 	StatusCancelled = "cancelled"
 
-	OperationRead  = "read"
-	OperationWrite = "write"
-	OperationExec  = "exec"
+	OperationRead       = "read"
+	OperationWrite      = "write"
+	OperationExec       = "exec"
+	OperationPermission = "permission"
+
+	// Option kinds mirror the ACP PermissionOptionKind vocabulary. They are
+	// stored verbatim so a decision can be validated against the agent's
+	// offered options and the original option id returned to the agent.
+	OptionKindAllowOnce    = "allow_once"
+	OptionKindAllowAlways  = "allow_always"
+	OptionKindRejectOnce   = "reject_once"
+	OptionKindRejectAlways = "reject_always"
 
 	DecisionBypass        = "bypass"
 	DecisionNeedsApproval = "needs_approval"
@@ -27,11 +37,46 @@ const (
 )
 
 var (
-	ErrNotFound       = errors.New("tool approval request not found")
-	ErrAlreadyDecided = errors.New("tool approval request already decided")
-	ErrForbidden      = errors.New("tool approval forbidden")
-	ErrAmbiguous      = errors.New("tool approval request is ambiguous")
+	ErrNotFound          = errors.New("tool approval request not found")
+	ErrAlreadyDecided    = errors.New("tool approval request already decided")
+	ErrForbidden         = errors.New("tool approval forbidden")
+	ErrAmbiguous         = errors.New("tool approval request is ambiguous")
+	ErrOptionUnavailable = errors.New("tool approval option is unavailable")
 )
+
+// PermissionOption is one agent-provided answer to a permission request. The
+// agent's id, display name, and kind are preserved verbatim: the user picks
+// among them and the agent receives its own option id back, so agent-side
+// semantics (once vs session vs always scopes) survive the round trip without
+// Memoh interpreting them.
+type PermissionOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	Kind string `json:"kind,omitempty"`
+}
+
+// Approves reports whether selecting this option grants the request.
+func (o PermissionOption) Approves() bool {
+	switch strings.ToLower(strings.TrimSpace(o.Kind)) {
+	case OptionKindAllowOnce, OptionKindAllowAlways:
+		return true
+	default:
+		return false
+	}
+}
+
+// FindOption returns the option with the given id.
+func FindOption(options []PermissionOption, id string) (PermissionOption, bool) {
+	if id == "" {
+		return PermissionOption{}, false
+	}
+	for _, option := range options {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return PermissionOption{}, false
+}
 
 type CreatePendingInput struct {
 	BotID                        string
@@ -44,11 +89,16 @@ type CreatePendingInput struct {
 	ToolCallID                   string
 	ToolName                     string
 	ToolInput                    any
-	SourcePlatform               string
-	ReplyTarget                  string
-	ConversationType             string
-	WorkspaceTargeted            bool
-	ExecutionLocation            *ExecutionLocation
+	Options                      []PermissionOption
+	// ForceReview routes the request to the user even when the approval
+	// policy is disabled. Set for consent-semantic requests (MCP elicitation
+	// fallbacks): auto-answering one would report a consent no user gave.
+	ForceReview       bool
+	SourcePlatform    string
+	ReplyTarget       string
+	ConversationType  string
+	WorkspaceTargeted bool
+	ExecutionLocation *ExecutionLocation
 }
 
 type WorkspaceTargetPolicy struct {
@@ -95,6 +145,8 @@ type Request struct {
 	ToolName                string             `json:"tool_name"`
 	Operation               string             `json:"operation"`
 	ToolInput               map[string]any     `json:"tool_input,omitempty"`
+	Options                 []PermissionOption `json:"options,omitempty"`
+	SelectedOptionID        string             `json:"selected_option_id,omitempty"`
 	ShortID                 int                `json:"short_id"`
 	Status                  string             `json:"status"`
 	DecisionReason          string             `json:"decision_reason,omitempty"`

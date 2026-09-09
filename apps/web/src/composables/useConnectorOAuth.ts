@@ -2,6 +2,8 @@ import { getBotsByBotIdConnectorsByConnectionId } from '@memohai/sdk'
 
 const oauthTimeoutMs = 120_000
 
+const oauthCancelledCode = 'oauth_cancelled'
+
 // The OAuth helpers below throw bare internal codes; map them to i18n keys at
 // the toast site so Error.message is never surfaced verbatim to the user.
 export function connectorOAuthErrorKey(error: unknown): string | null {
@@ -9,6 +11,12 @@ export function connectorOAuthErrorKey(error: unknown): string | null {
   if (error.message === 'oauth_popup_blocked') return 'connectors.oauthPopupBlocked'
   if (error.message === 'oauth_failed') return 'connectors.oauthFailed'
   return null
+}
+
+// A caller-initiated abort is not a failure: the caller swallows it instead of
+// toasting, so it needs to be distinguishable from a real 'oauth_failed'.
+export function isConnectorOAuthCancelled(error: unknown): boolean {
+  return error instanceof Error && error.message === oauthCancelledCode
 }
 
 export function prepareConnectorOAuthPopup(loadingMessage: string): Window | null {
@@ -50,6 +58,10 @@ export function waitForConnectorOAuth(
   botId: string,
   connectionId: string,
   popup: Window | null,
+  // Without a signal the wait can only end by success, by the popup closing,
+  // or by the 2-minute timeout — none of which the user can trigger from the
+  // page they came back to. The signal is how Cancel/Esc/overlay-click end it.
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let completed = false
@@ -60,9 +72,15 @@ export function waitForConnectorOAuth(
       if (completed) return
       completed = true
       if (pollTimer) clearTimeout(pollTimer)
+      signal?.removeEventListener('abort', onAbort)
       popup?.close()
       if (error) reject(new Error(error))
       else resolve()
+    }
+
+    // Hoisted so finish() above can unsubscribe it.
+    function onAbort() {
+      finish(oauthCancelledCode)
     }
 
     const poll = async () => {
@@ -94,6 +112,11 @@ export function waitForConnectorOAuth(
       pollTimer = setTimeout(() => void poll(), 2000)
     }
 
+    if (signal?.aborted) {
+      finish(oauthCancelledCode)
+      return
+    }
+    signal?.addEventListener('abort', onAbort)
     void poll()
   })
 }

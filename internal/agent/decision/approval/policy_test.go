@@ -1,6 +1,7 @@
 package approval
 
 import (
+	"context"
 	"testing"
 )
 
@@ -33,6 +34,72 @@ func TestPolicyDecisionExplicitModes(t *testing.T) {
 	cfg.Exec.BypassCommands = []string{"go test *"}
 	if got := policyDecision(cfg, "exec", map[string]any{"command": "go test ./..."}); got != DecisionBypass {
 		t.Fatalf("exec ask bypass decision = %q, want bypass", got)
+	}
+}
+
+// The generic permission lane must never be weaker than the classified
+// equivalent: a declared ACP kind whose path/command failed to parse still
+// honors the matching explicit deny, and nothing on this lane auto-allows.
+func TestPolicyDecisionPermissionHonorsDeclaredKindDeny(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultPolicyConfig()
+	cfg.Enabled = true
+	cfg.Read.Mode = PolicyModeDeny
+	cfg.Write.Mode = PolicyModeDeny
+	cfg.Exec.Mode = PolicyModeDeny
+
+	for _, kind := range []string{"execute", "read", "edit"} {
+		if got := policyDecision(cfg, "permission", map[string]any{"policy_kind": kind}); got != DecisionDeny {
+			t.Fatalf("permission kind %q decision = %q, want deny", kind, got)
+		}
+	}
+
+	cfg.Exec.Mode = PolicyModeAllow
+	if got := policyDecision(cfg, "permission", map[string]any{"policy_kind": "execute"}); got != DecisionNeedsApproval {
+		t.Fatalf("permission with allow-mode kind = %q, want needs approval (never auto-allow)", got)
+	}
+	if got := policyDecision(cfg, "permission", map[string]any{"title": "Grant network access"}); got != DecisionNeedsApproval {
+		t.Fatalf("permission without kind = %q, want needs approval", got)
+	}
+	if got := policyDecision(cfg, "permission", map[string]any{"policy_kind": "switch_mode"}); got != DecisionNeedsApproval {
+		t.Fatalf("permission with unmapped kind = %q, want needs approval", got)
+	}
+}
+
+type staticPolicyProvider struct{ cfg PolicyConfig }
+
+func (p staticPolicyProvider) ToolApprovalPolicy(context.Context, string) (PolicyConfig, error) {
+	return p.cfg, nil
+}
+
+// ForceReview keeps "the user decides" true when the policy is disabled, but
+// an explicit admin deny still outranks it: auto-declining is honest, while
+// showing the card would let a user approve what the policy hard-blocks.
+func TestEvaluatePolicyForceReviewOrdering(t *testing.T) {
+	t.Parallel()
+
+	disabled := DefaultPolicyConfig()
+	disabled.Enabled = false
+	svc := &Service{policies: staticPolicyProvider{cfg: disabled}}
+	eval, err := svc.EvaluatePolicy(context.Background(), CreatePendingInput{
+		BotID: "bot-1", ToolName: "permission", ForceReview: true,
+		ToolInput: map[string]any{"title": "Use tool from another server"},
+	})
+	if err != nil || eval.Decision != DecisionNeedsApproval {
+		t.Fatalf("disabled policy + force review = (%q, %v), want needs approval", eval.Decision, err)
+	}
+
+	denyExec := DefaultPolicyConfig()
+	denyExec.Enabled = true
+	denyExec.Exec.Mode = PolicyModeDeny
+	svc = &Service{policies: staticPolicyProvider{cfg: denyExec}}
+	eval, err = svc.EvaluatePolicy(context.Background(), CreatePendingInput{
+		BotID: "bot-1", ToolName: "permission", ForceReview: true,
+		ToolInput: map[string]any{"policy_kind": "execute"},
+	})
+	if err != nil || eval.Decision != DecisionDeny {
+		t.Fatalf("explicit deny + force review = (%q, %v), want deny", eval.Decision, err)
 	}
 }
 

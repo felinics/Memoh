@@ -3,8 +3,8 @@ package matrix
 import (
 	"testing"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/partsfixture"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/partsfixture"
 )
 
 func TestCanonicalPartsRendering(t *testing.T) {

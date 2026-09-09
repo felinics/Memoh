@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 func TestParseJSONStringArray_Valid(t *testing.T) {
@@ -106,11 +106,25 @@ func TestParseExtractResponse_EmptyFacts(t *testing.T) {
 	}
 }
 
+func TestParseExtractResponseWithSources(t *testing.T) {
+	t.Parallel()
+	result := parseExtractResponseWithSources(`{"facts":[
+		{"text":"Likes tea","message_indices":[0,2]},
+		{"text":"Lives in Berlin","message_indices":[1]}
+	]}`)
+	if len(result) != 2 || result[0].Text != "Likes tea" {
+		t.Fatalf("unexpected extracted facts: %+v", result)
+	}
+	if len(result[0].MessageIndices) != 2 || result[0].MessageIndices[1] != 2 {
+		t.Fatalf("unexpected source indices: %+v", result[0].MessageIndices)
+	}
+}
+
 func TestParseUpdateResponse_Mem0Format(t *testing.T) {
 	t.Parallel()
 	input := `{"memory": [
 		{"id": "0", "text": "User is a software engineer", "event": "NONE"},
-		{"id": "1", "text": "Name is John", "event": "ADD"},
+		{"id": "1", "text": "Name is John", "event": "ADD", "source_fact_indices":[0]},
 		{"id": "2", "text": "Loves cheese pizza", "event": "DELETE"},
 		{"id": "3", "text": "Moved to Berlin", "event": "UPDATE", "old_memory": "Lives in Tokyo"}
 	]}`
@@ -123,6 +137,9 @@ func TestParseUpdateResponse_Mem0Format(t *testing.T) {
 	}
 	if result[1].Event != "ADD" || result[1].Text != "Name is John" {
 		t.Fatalf("unexpected ADD action: %+v", result[1])
+	}
+	if len(result[1].SourceFactIndices) != 1 || result[1].SourceFactIndices[0] != 0 {
+		t.Fatalf("unexpected ADD provenance: %+v", result[1].SourceFactIndices)
 	}
 	if result[2].Event != "DELETE" || result[2].ID != "2" {
 		t.Fatalf("unexpected DELETE action: %+v", result[2])

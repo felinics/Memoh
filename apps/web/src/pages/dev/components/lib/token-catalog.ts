@@ -68,7 +68,6 @@ export const tokenGroups: TokenGroup[] = [
     label: 'Event',
     tokens: [
       'event-schedule', 'event-schedule-foreground', 'event-schedule-soft', 'event-schedule-border',
-      'event-heartbeat', 'event-heartbeat-foreground', 'event-heartbeat-soft', 'event-heartbeat-border',
       'event-subagent', 'event-subagent-foreground', 'event-subagent-soft', 'event-subagent-border',
       'event-discuss', 'event-discuss-foreground', 'event-discuss-soft', 'event-discuss-border',
     ],

@@ -10,10 +10,10 @@
   <p>すべての AI Agent に専用のクラウドコンピューターを。オープンソース。<br>
   Desktop、Browser、ネットワーク、長期記憶 — ノートパソコンを閉じても Agent は止まりません。</p>
   <div align="center">
-    <img src="https://img.shields.io/github/package-json/v/memohai/Memoh" alt="Version" />
-    <img src="https://img.shields.io/github/stars/memohai/Memoh?style=social" alt="Stars" />
-    <img src="https://img.shields.io/github/forks/memohai/Memoh?style=social" alt="Forks" />
-    <a href="https://deepwiki.com/memohai/Memoh">
+    <img src="https://img.shields.io/github/package-json/v/felinics/Memoh" alt="Version" />
+    <img src="https://img.shields.io/github/stars/felinics/Memoh?style=social" alt="Stars" />
+    <img src="https://img.shields.io/github/forks/felinics/Memoh?style=social" alt="Forks" />
+    <a href="https://deepwiki.com/felinics/Memoh">
       <img src="https://deepwiki.com/badge.svg" alt="DeepWiki" />
     </a>
     <a href="https://t.me/memohai">
@@ -55,7 +55,7 @@ curl -fsSL https://memoh.sh | sh
 手動でデプロイする場合:
 
 ```bash
-git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/memohai/Memoh.git
+git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/felinics/Memoh.git
 cd Memoh
 cp conf/app.docker.toml config.toml
 # config.toml を編集
@@ -98,31 +98,30 @@ GitHub が自動生成する「Source code」
 - **Built-in memory**: セッションやプラットフォームをまたいだ長期記憶を標準搭載。[Mem0](https://mem0.ai) や OpenViking も利用できます。
 - **10+ channels**: Telegram、Discord、Lark、WeChat、QQ、Email などに対応しています。
 - **MCP**: 外部 Tool server に接続できます。各 Bot が自分の接続を管理します。
-- **Plugins**: パッケージ化された Skill、Tool、連携をインストールして、Bot の能力を拡張できます。
 - **Agent Hosting**: ACP 経由で外部 Agent を Memoh Workspace にホストできます。現在は Codex と Claude Code に対応し、Bot ごとに設定できます。
 - **Browser Use**: Workspace 内の Browser を操作できます。
 - **Computer Use**: GUI が必要な作業のために Workspace の Desktop を操作できます。
 - **Skills & Supermarket**: モジュール化された Skill、Supermarket からの curated template インストール、sub-agent への委譲に対応します。
-- **Automation**: スケジュールタスクと周期的な heartbeat を実行できます。
+- **Automation**: スケジュールタスクで定期的なワークフローを実行できます。
 
 ## Sub-projects
 
-- [**Twilight AI**](https://github.com/memohai/twilight-ai) — Go 向けの軽量で idiomatic な AI SDK。[Vercel AI SDK](https://sdk.vercel.ai/) に着想を得ており、Provider 非依存で、streaming、tool calling、MCP、embeddings を first-class に扱えます。
-- [**Connect It**](https://github.com/memohai/connect-it) — SaaS の認証情報を安全に保管し、単一の MCP endpoint を通じて Agent に各種連携を提供するセルフホスト型 connector gateway です。
-- [**UI**](https://github.com/memohai/ui) — AI Agent の管理画面向け Vue 3 design system。component library、design token、および Agent に正しい使い方を教える Skill を含みます。
+- [**Twilight AI**](https://github.com/felinics/twilight) — Go 向けの軽量で idiomatic な AI SDK。[Vercel AI SDK](https://sdk.vercel.ai/) に着想を得ており、Provider 非依存で、streaming、tool calling、MCP、embeddings を first-class に扱えます。
+- [**Connect It**](https://github.com/felinics/connect-it) — SaaS の認証情報を安全に保管し、単一の MCP endpoint を通じて Agent に各種連携を提供するセルフホスト型 connector gateway です。
+- [**UI**](https://github.com/felinics/ui) — AI Agent の管理画面向け Vue 3 design system。component library、design token、および Agent に正しい使い方を教える Skill を含みます。
 
 ## Project Status
 
-![License](https://img.shields.io/github/license/memohai/Memoh) ![Last Commit](https://img.shields.io/github/last-commit/memohai/Memoh) ![Commit Activity](https://img.shields.io/github/commit-activity/m/memohai/Memoh) ![Issues](https://img.shields.io/github/issues/memohai/Memoh) ![Pull Requests](https://img.shields.io/github/issues-pr/memohai/Memoh)
+![License](https://img.shields.io/github/license/felinics/Memoh) ![Last Commit](https://img.shields.io/github/last-commit/felinics/Memoh) ![Commit Activity](https://img.shields.io/github/commit-activity/m/felinics/Memoh) ![Issues](https://img.shields.io/github/issues/felinics/Memoh) ![Pull Requests](https://img.shields.io/github/issues-pr/felinics/Memoh)
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=memohai/Memoh&type=date&legend=top-left)](https://www.star-history.com/#memohai/Memoh&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=felinics/Memoh&type=date&legend=top-left)](https://star-history.dera.page/#felinics/Memoh&type=date&legend=top-left)
 
 ## Contributors
 
-<a href="https://github.com/memohai/Memoh/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=memohai/Memoh" />
+<a href="https://github.com/felinics/Memoh/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=felinics/Memoh" />
 </a>
 
 ## Community
@@ -130,7 +129,7 @@ GitHub が自動生成する「Source code」
 - 🌐 [**Website**](https://memoh.ai)
 - 📚 [**Documentation**](https://docs.memoh.ai)
 - 💬 [**Telegram Group**](https://t.me/memohai)
-- 🛒 [**Supermarket**](https://github.com/memohai/supermarket)
+- 🛒 [**Supermarket**](https://github.com/felinics/supermarket)
 - 🤝 [**Cooperation**](mailto:business@memoh.net) — business@memoh.net
 
 ---

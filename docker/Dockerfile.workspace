@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# The workspace image is the complete bot runtime contract. The Server only
-# supplies the bridge binary; tools, display dependencies, and runtime scripts
-# are immutable image content.
+# The workspace image is the bot runtime base. The Server only supplies the
+# bridge binary; base tools (node, python, uv), display dependencies, and
+# runtime scripts are immutable image content. Agent CLIs are not part of the
+# image: the workspace dependency manager installs them into /data per bot.
+# Upgrade and rollback ordering: docs/workspace-dependencies-upgrade.md.
 
 FROM rust:1.90-alpine AS a11y-cli-builder
 RUN apk add --no-cache musl-dev
@@ -25,7 +27,7 @@ RUN apt-get update \
     wget \
     xz-utils \
   && rm -rf /var/lib/apt/lists/*
-COPY docker/toolkit/install.sh /tmp/memoh-toolkit/install.sh
+COPY docker/toolkit/install.sh docker/toolkit/install-wrappers.sh /tmp/memoh-toolkit/
 COPY docker/toolkit/bin /tmp/memoh-toolkit/bin
 RUN MEMOH_TOOLKIT_GLIBC_ONLY=1 \
     MEMOH_TOOLKIT_SKIP_DISPLAY=1 \
@@ -72,6 +74,7 @@ RUN set -eux; \
     . /tmp/memoh-desktop-install.sh; \
     export MEMOH_DISPLAY_INSTALL_ASSETS_GLOBAL=1; \
     install_debian; \
+    apt_get install -y --no-install-recommends util-linux; \
     rm -rf /var/lib/apt/lists/* /root/.cache/memoh-display-themes /tmp/memoh-desktop-install.sh; \
     mkdir -p /data /tmp/.X11-unix /opt/memoh/scripts; \
     chmod 0755 /data; \
@@ -79,13 +82,16 @@ RUN set -eux; \
 
 COPY --from=toolkit-builder /opt/memoh/toolkit /opt/memoh/toolkit
 COPY scripts/desktop-style.sh scripts/display-apply-style.sh scripts/display-prepare.sh /opt/memoh/scripts/
-COPY docker/workspace-contract.json /opt/memoh/workspace-contract.json
-RUN chmod 0755 /opt/memoh/scripts/*.sh \
+RUN printf '%s\n' 'export PATH="/opt/memoh/toolkit/bin:$PATH"' > /etc/profile.d/memoh-toolkit.sh \
+  && chmod 0755 /opt/memoh/scripts/*.sh \
   && test -x /usr/bin/tini \
+  && flock -n -E 75 /tmp/memoh-workspace-lock-check true \
+  && rm -f /tmp/memoh-workspace-lock-check \
   && test -x /opt/memoh/toolkit/bin/node \
   && test -x /opt/memoh/toolkit/bin/python3 \
   && test -x /opt/memoh/toolkit/bin/uv \
-  && test -x /opt/memoh/toolkit/display/bin/a11y-cli
+  && test -x /opt/memoh/toolkit/display/bin/a11y-cli \
+  && /bin/bash -lc 'node --version >/dev/null && npm --version >/dev/null'
 
 # Standalone bridge-over-TCP image used only by live ACP tests.
 FROM workspace AS toolkit-acp-bridge-live

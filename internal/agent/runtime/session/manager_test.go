@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/turn"
-	chatview "github.com/memohai/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/agent/turn"
+	chatview "github.com/felinics/memoh/internal/agent/view"
 )
 
 const (
@@ -97,6 +98,17 @@ type blockingCommandResultLoadBackend struct {
 type closeErrorBackend struct {
 	Backend
 	err error
+}
+
+type runRefLoadCountingBackend struct {
+	DistributedBackend
+	LivenessBackend
+	loads atomic.Int32
+}
+
+func (b *runRefLoadCountingBackend) LoadRunRef(ctx context.Context, key Key, runID string) (RunRef, bool, error) {
+	b.loads.Add(1)
+	return b.DistributedBackend.LoadRunRef(ctx, key, runID)
 }
 
 func (b closeErrorBackend) Close() error {
@@ -626,6 +638,40 @@ func TestActiveCommandPayloadHashUsesResponseSemantics(t *testing.T) {
 	}
 }
 
+// Rows decided by pre-option_id binaries keep their persisted payload hashes,
+// so the canonical form of a payload without the new fields must stay
+// byte-identical to what those binaries computed. Zero values (empty
+// option_id, skipped=false) must not change a legacy hash; only real
+// selections and real skips may.
+func TestActiveCommandPayloadHashKeepsLegacyCanonicalForm(t *testing.T) {
+	t.Parallel()
+
+	legacyApproval := activeCommandPayloadHash(CommandToolApprovalResponse, []byte(`{"decision":"approve"}`))
+	if want := commandPayloadHash([]byte(`{"decision":"approved","reason":""}`)); legacyApproval != want {
+		t.Fatalf("legacy approval canonical form changed: %q != %q", legacyApproval, want)
+	}
+	if zeroOption := activeCommandPayloadHash(CommandToolApprovalResponse, []byte(`{"decision":"approve","option_id":""}`)); zeroOption != legacyApproval {
+		t.Fatalf("empty option_id changed the legacy hash: %q != %q", zeroOption, legacyApproval)
+	}
+	if blankOption := activeCommandPayloadHash(CommandToolApprovalResponse, []byte(`{"decision":"approve","option_id":"  "}`)); blankOption != legacyApproval {
+		t.Fatalf("whitespace option_id changed the legacy hash: %q != %q", blankOption, legacyApproval)
+	}
+	if selected := activeCommandPayloadHash(CommandToolApprovalResponse, []byte(`{"decision":"approve","option_id":"allow-once"}`)); selected == legacyApproval {
+		t.Fatal("a selected option must change the payload hash")
+	}
+
+	legacyAnswer := activeCommandPayloadHash(CommandUserInputResponse, []byte(`{"answers":[{"question_id":"q1","option_ids":["o1"]}]}`))
+	if want := commandPayloadHash([]byte(`{"answers":[{"custom_text":"","option_ids":["o1"],"question_id":"q1","text":""}],"canceled":false}`)); legacyAnswer != want {
+		t.Fatalf("legacy answer canonical form changed: %q != %q", legacyAnswer, want)
+	}
+	if zeroSkip := activeCommandPayloadHash(CommandUserInputResponse, []byte(`{"answers":[{"question_id":"q1","option_ids":["o1"],"skipped":false}]}`)); zeroSkip != legacyAnswer {
+		t.Fatalf("skipped=false changed the legacy hash: %q != %q", zeroSkip, legacyAnswer)
+	}
+	if skipped := activeCommandPayloadHash(CommandUserInputResponse, []byte(`{"answers":[{"question_id":"q1","option_ids":["o1"],"skipped":true}]}`)); skipped == legacyAnswer {
+		t.Fatal("a real skip must change the payload hash")
+	}
+}
+
 func TestActiveCommandContextAccountsForBackendTimeLatency(t *testing.T) {
 	t.Parallel()
 
@@ -1018,7 +1064,7 @@ func runManagerDoesNotRetryFinishAfterOwnershipLoss(t *testing.T, suite distribu
 	if err := manager.StartRun(context.Background(), testBotID, testSessionID, "stream-expired-finish", make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	manager.stopLeaseRenewal(manager.localControl("stream-expired-finish"))
+	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControl("stream-expired-finish"))
 	time.Sleep(leaseTTL + leaseTTL/2)
 	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, "stream-expired-finish"), RunStatusCompleted, ""); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("finish expired run error = %v, want ErrRunOwnershipLost", err)
@@ -1472,6 +1518,10 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 		t.Parallel()
 		runRuntimeManagerReleasesOwnedRunOnClose(t, suite)
 	})
+	t.Run("preserves a prepared terminal outcome when the manager closes", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerPreservesPreparedOutcomeOnClose(t, suite)
+	})
 	t.Run("does not block command results behind slow handlers", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerDoesNotBlockCommandResultsBehindSlowHandlers(t, suite)
@@ -1560,6 +1610,12 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 	t.Run("does not retry finish after ownership loss", func(t *testing.T) {
 		runManagerDoesNotRetryFinishAfterOwnershipLoss(t, suite)
 	})
+	t.Run("hands exhausted durable finish retries to the reaper", func(t *testing.T) {
+		runRuntimeManagerHandsExhaustedDurableFinishToReaper(t, suite)
+	})
+	t.Run("does not reconcile released live state on owner happy path", func(t *testing.T) {
+		runRuntimeManagerSkipsHappyPathTerminalReconciliation(t, suite)
+	})
 	t.Run("close waits for run admission and cancels control", func(t *testing.T) {
 		runManagerCloseWaitsForStartRunAndCancelsControl(t, suite)
 	})
@@ -1590,6 +1646,129 @@ func runDistributedRuntimeManagerContract(t *testing.T, suite distributedRuntime
 	t.Run("expired snapshot cleanup cannot cancel a reused stream generation", func(t *testing.T) {
 		runRuntimeManagerExpiredCleanupScopesLocalControlToGeneration(t, suite)
 	})
+}
+
+func runRuntimeManagerSkipsHappyPathTerminalReconciliation(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+	t.Helper()
+	rawBackend := suite.newBackend(t)
+	liveness, ok := rawBackend.(LivenessBackend)
+	if !ok {
+		t.Fatal("distributed backend does not expose liveness")
+	}
+	backend := &runRefLoadCountingBackend{DistributedBackend: rawBackend, LivenessBackend: liveness}
+	manager := NewManager(backend, Options{
+		OwnerID:       "owner-terminal-observer-cost",
+		StateTTL:      time.Minute,
+		OwnerLeaseTTL: time.Second,
+		Ledger:        newFakeLedger(),
+		Fence:         &fakeFence{},
+	})
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatalf("start manager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	admission, err := manager.Admit(context.Background(), AdmitInput{
+		BotID: testBotID, SessionID: "session-terminal-observer-cost",
+		InvocationID: "inv-terminal-observer-cost",
+		Payload:      []byte(`{"text":"hi"}`),
+		Execution: Execution{
+			Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+				return RunAdmissionView{}, nil
+			},
+			AbortCh: make(chan struct{}, 1), Cancel: func() {}, InjectCh: make(chan turn.InjectMessage, 1),
+		},
+	})
+	if err != nil {
+		t.Fatalf("admit run: %v", err)
+	}
+	loadsBeforeFinish := backend.loads.Load()
+	if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	if got := backend.loads.Load(); got != loadsBeforeFinish {
+		t.Fatalf("LoadRunRef calls during owner happy-path finish = %d, want 0", got-loadsBeforeFinish)
+	}
+}
+
+func runRuntimeManagerHandsExhaustedDurableFinishToReaper(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+	t.Helper()
+	for _, phase := range []string{"prepare", "finalize"} {
+		phase := phase
+		t.Run(phase, func(t *testing.T) {
+			const (
+				leaseTTL = 150 * time.Millisecond
+				budget   = 30 * time.Millisecond
+			)
+			backend := suite.newBackend(t)
+			runs := newFakeLedger()
+			manager := NewManager(backend, Options{
+				OwnerID:                  "owner-durable-budget-" + phase,
+				StateTTL:                 time.Minute,
+				OwnerLeaseTTL:            leaseTTL,
+				durableFinishRetryBudget: budget,
+				Ledger:                   runs,
+				Fence:                    &fakeFence{},
+			})
+			if err := manager.Start(context.Background()); err != nil {
+				t.Fatalf("start manager: %v", err)
+			}
+			t.Cleanup(func() { _ = manager.Close() })
+
+			sessionID := "session-durable-budget-" + phase
+			admission, err := manager.Admit(context.Background(), AdmitInput{
+				BotID: testBotID, SessionID: sessionID,
+				InvocationID: "inv-durable-budget-" + phase,
+				Payload:      []byte(`{"text":"hi"}`),
+				Execution: Execution{
+					Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+						return RunAdmissionView{}, nil
+					},
+					AbortCh:  make(chan struct{}, 1),
+					Cancel:   func() {},
+					InjectCh: make(chan turn.InjectMessage, 1),
+				},
+			})
+			if err != nil {
+				t.Fatalf("admit run: %v", err)
+			}
+
+			transient := errors.New("database remains unavailable")
+			if phase == "prepare" {
+				runs.setPrepareErr(transient)
+			} else {
+				if _, err := manager.HandleAgentEvent(context.Background(), admission.Handle, native.StreamEvent{Type: native.EventAgentEnd}); err != nil {
+					t.Fatalf("prepare terminal event: %v", err)
+				}
+				runs.setFinalizeErr(transient)
+			}
+			if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+				t.Fatal("FinishRun() error = nil, want initial durable failure")
+			}
+
+			controlDeadline := time.Now().Add(time.Second)
+			for manager.localControlForHandle(admission.Handle) != nil && time.Now().Before(controlDeadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if manager.localControlForHandle(admission.Handle) != nil {
+				t.Fatal("durable retry budget expired without releasing local control")
+			}
+			runs.setPrepareErr(nil)
+			runs.setFinalizeErr(nil)
+
+			want := ledger.StateLost
+			if phase == "finalize" {
+				want = ledger.StateCompleted
+			}
+			reaperDeadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(reaperDeadline) {
+				if got := runs.state(admission.RunID); got == want {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			t.Fatalf("reaper state = %q, want %q after %s retry timeout", runs.state(admission.RunID), want, phase)
+		})
+	}
 }
 
 func runRuntimeManagerReconcilesResponseAfterOwnerControlLoss(t *testing.T, suite distributedRuntimeBackendContractSuite) {
@@ -1923,7 +2102,7 @@ func runRuntimeManagerExpiredCleanupScopesLocalControlToGeneration(t *testing.T,
 		t.Fatalf("start old generation: %v", err)
 	}
 	backend.targetGeneration = oldHandle.Generation
-	manager.stopLeaseRenewal(manager.localControlForHandle(oldHandle))
+	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControlForHandle(oldHandle))
 	time.Sleep(leaseTTL + 30*time.Millisecond)
 
 	snapshotDone := make(chan error, 1)
@@ -1989,7 +2168,7 @@ func runRuntimeManagerRejectsValidationAfterLocalLeaseDeadline(t *testing.T, sui
 	if err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	manager.stopLeaseRenewal(manager.localControlForHandle(handle))
+	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControlForHandle(handle))
 
 	result := make(chan error, 1)
 	go func() {
@@ -2128,7 +2307,7 @@ func runRuntimeManagerRejectsExpiredLeaseRevivalContract(t *testing.T, suite dis
 	if ctrl == nil {
 		t.Fatal("local run control is missing")
 	}
-	manager.stopLeaseRenewal(ctrl)
+	_ = manager.stopLeaseRenewalContext(context.Background(), ctrl)
 
 	initial, ok, err := backend.Load(context.Background(), Key{BotID: testBotID, SessionID: testSessionID})
 	if err != nil || !ok || initial.CurrentRunView == nil {
@@ -2630,10 +2809,20 @@ func runRuntimeManagerRejectsQueuedSteerOnAgentTerminalContract(t *testing.T, su
 				t.Fatalf("agent-terminal steer error = %q", snapshot.CurrentRunView.Steer.Error)
 			}
 			event := waitRuntimeEvent(t, sub.C, func(event Event) bool {
-				return event.Delta != nil && event.Delta.Run != nil && event.Delta.Run.Status != nil && *event.Delta.Run.Status == tc.wantStatus
+				return event.Delta != nil && event.Delta.Run != nil && event.Delta.Run.Status != nil && *event.Delta.Run.Status == RunStatusFinishing
 			})
 			if event.Delta.Run.Steer == nil || event.Delta.Run.Steer.Status != SteerStatusRejected {
 				t.Fatalf("agent-terminal delta = %#v, want rejected steer", event.Delta)
+			}
+			if snapshot.CurrentRunView.ProposedTerminalStatus != tc.wantStatus || snapshot.CurrentRunView.FinishProposedAt == nil {
+				t.Fatalf("agent-terminal proposal = %#v, want %s", snapshot.CurrentRunView, tc.wantStatus)
+			}
+			if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+				t.Fatalf("finalize agent %s: %v", tc.name, err)
+			}
+			snapshot, err = manager.Snapshot(context.Background(), testBotID, testSessionID)
+			if err != nil || snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != tc.wantStatus {
+				t.Fatalf("final agent status = %#v, err %v, want %s", snapshot.CurrentRunView, err, tc.wantStatus)
 			}
 		})
 	}
@@ -3418,7 +3607,7 @@ func runRuntimeManagerFencesStaleOwnerEventsContract(t *testing.T, suite distrib
 		t.Fatalf("start stale owner run: %v", err)
 	}
 	staleControl := oldOwner.localControl("stream-stale")
-	oldOwner.stopLeaseRenewal(staleControl)
+	_ = oldOwner.stopLeaseRenewalContext(context.Background(), staleControl)
 	time.Sleep(80 * time.Millisecond)
 
 	lost, err := newOwner.Snapshot(context.Background(), testBotID, testSessionID)
@@ -3533,7 +3722,7 @@ func runRuntimeManagerNotifiesLeaseLostContract(t *testing.T, suite distributedR
 	if err := owner.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	owner.stopLeaseRenewal(owner.localControl(testRunID))
+	_ = owner.stopLeaseRenewalContext(context.Background(), owner.localControl(testRunID))
 
 	deadline := time.After(5 * time.Second)
 	for {
@@ -3873,6 +4062,93 @@ func runRuntimeManagerReleasesOwnedRunOnClose(t *testing.T, suite distributedRun
 	}
 }
 
+func runRuntimeManagerPreservesPreparedOutcomeOnClose(t *testing.T, suite distributedRuntimeBackendContractSuite) {
+	t.Helper()
+
+	backends := suite.newSharedBackends(t, 2)
+	runs := newFakeLedger()
+	owner := NewManager(backends[0], Options{
+		OwnerID: "owner-finishing-close", StateTTL: time.Hour, OwnerLeaseTTL: 30 * time.Second,
+		Ledger: runs, Fence: &fakeFence{},
+	})
+	if err := owner.Start(context.Background()); err != nil {
+		t.Fatalf("start owner: %v", err)
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = owner.Close()
+		}
+	})
+
+	const sessionID = "session-finishing-close"
+	admission, err := owner.Admit(context.Background(), AdmitInput{
+		BotID: testBotID, SessionID: sessionID, InvocationID: "invocation-finishing-close",
+		Payload: []byte(`{"text":"finish before close"}`),
+		Execution: Execution{Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+			return RunAdmissionView{}, nil
+		}},
+	})
+	if err != nil {
+		t.Fatalf("admit run: %v", err)
+	}
+	if _, err := owner.HandleAgentEvent(context.Background(), admission.Handle, native.StreamEvent{Type: native.EventAgentEnd}); err != nil {
+		t.Fatalf("prepare terminal event: %v", err)
+	}
+	if got := runs.state(admission.RunID); got != ledger.StateFinishing {
+		t.Fatalf("ledger before close = %q, want finishing", got)
+	}
+	const activeSessionID = "session-running-close"
+	activeCanceled := make(chan struct{}, 1)
+	activeAdmission, err := owner.Admit(context.Background(), AdmitInput{
+		BotID: testBotID, SessionID: activeSessionID, InvocationID: "invocation-running-close",
+		Payload: []byte(`{"text":"still running"}`),
+		Execution: Execution{
+			Admission: func(context.Context, RunHandle) (RunAdmissionView, error) {
+				return RunAdmissionView{}, nil
+			},
+			Cancel: func() {
+				select {
+				case activeCanceled <- struct{}{}:
+				default:
+				}
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("admit active run: %v", err)
+	}
+
+	if err := owner.CloseContext(context.Background()); err != nil {
+		t.Fatalf("close owner: %v", err)
+	}
+	closed = true
+	if got := runs.state(admission.RunID); got != ledger.StateCompleted {
+		t.Fatalf("ledger after close = %q, want completed", got)
+	}
+	if got := runs.state(activeAdmission.RunID); got != ledger.StateLost {
+		t.Fatalf("active ledger after close = %q, want lost", got)
+	}
+	receiveTestResult(t, "active run cancellation", activeCanceled)
+	snapshot, ok, err := backends[1].Load(context.Background(), Key{BotID: testBotID, SessionID: sessionID})
+	if err != nil || !ok {
+		t.Fatalf("load reconciled snapshot = ok:%v err:%v", ok, err)
+	}
+	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusCompleted || snapshot.CurrentRunView.OwnerLeaseExpiresAt != nil {
+		t.Fatalf("reconciled snapshot = %#v", snapshot.CurrentRunView)
+	}
+	if _, ok, err := backends[1].LoadRunRef(context.Background(), Key{BotID: testBotID, SessionID: sessionID}, admission.RunID); err != nil || ok {
+		t.Fatalf("reconciled run ref = ok:%v err:%v", ok, err)
+	}
+	activeSnapshot, ok, err := backends[1].Load(context.Background(), Key{BotID: testBotID, SessionID: activeSessionID})
+	if err != nil || !ok {
+		t.Fatalf("load active shutdown snapshot = ok:%v err:%v", ok, err)
+	}
+	if activeSnapshot.CurrentRunView == nil || activeSnapshot.CurrentRunView.Status != RunStatusLost || activeSnapshot.CurrentRunView.Error != runtimeOwnerShutdownError {
+		t.Fatalf("active shutdown snapshot = %#v", activeSnapshot.CurrentRunView)
+	}
+}
+
 func runRuntimeManagerDoesNotBlockCommandResultsBehindSlowHandlers(t *testing.T, suite distributedRuntimeBackendContractSuite) {
 	t.Helper()
 
@@ -3968,6 +4244,30 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	}
 }
 
+func TestRuntimeManagerPublishesStableStreamErrorCode(t *testing.T) {
+	manager := testRuntimeManager(t, NewMemoryBackend(), "owner-coded-error")
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, testSessionID, testRunID)
+	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
+		Type: native.EventError, Code: "agent.response_timeout", Error: "public timeout",
+	}); err != nil {
+		t.Fatalf("handle error event: %v", err)
+	}
+
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CurrentRunView == nil {
+		t.Fatal("current run is nil")
+	}
+	if snapshot.CurrentRunView.ErrorCode != "agent.response_timeout" || snapshot.CurrentRunView.Error != "public timeout" {
+		t.Fatalf("runtime error = code:%q detail:%q", snapshot.CurrentRunView.ErrorCode, snapshot.CurrentRunView.Error)
+	}
+}
+
 func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, suite runtimeBackendContractSuite) {
 	t.Helper()
 
@@ -3986,6 +4286,17 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, su
 		Type: native.EventAgentEnd,
 	}); err != nil {
 		t.Fatalf("handle end terminal event: %v", err)
+	}
+	prepared, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("prepared snapshot: %v", err)
+	}
+	if prepared.CurrentRunView == nil || prepared.CurrentRunView.Status != RunStatusFinishing ||
+		prepared.CurrentRunView.ProposedTerminalStatus != RunStatusErrored {
+		t.Fatalf("prepared run = %#v, want finishing -> errored", prepared.CurrentRunView)
+	}
+	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+		t.Fatalf("finish errored run: %v", err)
 	}
 
 	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
@@ -4025,6 +4336,17 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 		Type: native.EventAgentEnd,
 	}); err != nil {
 		t.Fatalf("handle end terminal event: %v", err)
+	}
+	prepared, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("prepared snapshot: %v", err)
+	}
+	if prepared.CurrentRunView == nil || prepared.CurrentRunView.Status != RunStatusFinishing ||
+		prepared.CurrentRunView.ProposedTerminalStatus != RunStatusCompleted {
+		t.Fatalf("prepared run = %#v, want finishing -> completed", prepared.CurrentRunView)
+	}
+	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+		t.Fatalf("finish recovered run: %v", err)
 	}
 
 	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func TestModelMessageToSDKMessageText(t *testing.T) {
@@ -62,6 +62,24 @@ func TestSDKMessagesToModelMessagesPreservesUsage(t *testing.T) {
 	}
 	if usage.InputTokens != 3 || usage.OutputTokens != 4 || usage.TotalTokens != 7 {
 		t.Fatalf("usage = %#v, want input/output/total 3/4/7", usage)
+	}
+}
+
+func TestModelMessageToSDKMessageDoesNotInterpretLegacyEnvelopeFields(t *testing.T) {
+	t.Parallel()
+
+	got := ModelMessageToSDKMessage(turn.ModelMessage{
+		Role:    "assistant",
+		Content: json.RawMessage(`""`),
+		ToolCalls: []turn.ToolCall{{
+			ID: "legacy-call", Function: turn.ToolCallFunction{Name: "lookup", Arguments: `{"q":"memoh"}`},
+		}},
+	})
+	if len(got.Content) != 1 {
+		t.Fatalf("content parts = %d, want only the encoded content: %#v", len(got.Content), got.Content)
+	}
+	if _, ok := got.Content[0].(sdk.TextPart); !ok {
+		t.Fatalf("content part = %T, want TextPart", got.Content[0])
 	}
 }
 

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/config"
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
-	"github.com/memohai/memoh/internal/memory/migrate"
-	"github.com/memohai/memoh/internal/memory/wikistore"
+	"github.com/felinics/memoh/internal/config"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/memory/migrate"
+	"github.com/felinics/memoh/internal/memory/wikistore"
 )
 
 // ModeGraph is the memory mode identifier for the graph runtime. It is the
@@ -135,12 +135,13 @@ func (r *graphRuntime) Add(ctx context.Context, req adapters.AddRequest) (adapte
 	}
 	now := time.Now().UTC()
 	spec := memoryItemToNodeSpec(adapters.MemoryItem{
-		ID:        runtimeMemoryID(botID, now),
-		Memory:    text,
-		Hash:      runtimeHash(text),
-		CreatedAt: now.Format(time.RFC3339),
-		UpdatedAt: now.Format(time.RFC3339),
-		Metadata:  req.Metadata,
+		ID:               runtimeMemoryID(botID, now),
+		Memory:           text,
+		Hash:             runtimeHash(text),
+		CreatedAt:        now.Format(time.RFC3339),
+		UpdatedAt:        now.Format(time.RFC3339),
+		Metadata:         req.Metadata,
+		SourceMessageIDs: adapters.NormalizeSourceRefs(req.SourceMessageIDs),
 	}, botID)
 
 	saved, err := r.store.UpsertNode(ctx, spec)
@@ -378,6 +379,7 @@ func (r *graphRuntime) Update(ctx context.Context, req adapters.UpdateRequest) (
 	existing.ID = memoryID
 	existing.Body = text
 	existing.Hash = runtimeHash(text)
+	existing.SourceMessageIDs = adapters.MergeSourceRefs(existing.SourceMessageIDs, req.SourceMessageIDs)
 	saved, err := r.store.UpsertNode(ctx, existing)
 	if err != nil {
 		return adapters.MemoryItem{}, fmt.Errorf("graph runtime: update node: %w", err)
@@ -625,17 +627,18 @@ func memoryItemToNodeSpec(item adapters.MemoryItem, botID string) migrate.NodeSp
 		profileRef = metadataStringVal(item.Metadata, "profile_user_id")
 	}
 	return migrate.NodeSpec{
-		ID:         strings.TrimSpace(item.ID),
-		BotID:      botID,
-		Body:       body,
-		Hash:       strings.TrimSpace(item.Hash),
-		Layer:      layer,
-		Subject:    metadataStringVal(item.Metadata, "subject"),
-		Confidence: metadataFloatVal(item.Metadata, "confidence", 0.5),
-		Metadata:   item.Metadata,
-		ProfileRef: profileRef,
-		Topic:      metadataStringVal(item.Metadata, "topic"),
-		CapturedAt: parseGraphTime(item.CreatedAt),
+		ID:               strings.TrimSpace(item.ID),
+		BotID:            botID,
+		Body:             body,
+		Hash:             strings.TrimSpace(item.Hash),
+		Layer:            layer,
+		Subject:          metadataStringVal(item.Metadata, "subject"),
+		Confidence:       metadataFloatVal(item.Metadata, "confidence", 0.5),
+		Metadata:         item.Metadata,
+		SourceMessageIDs: adapters.NormalizeSourceRefs(item.SourceMessageIDs),
+		ProfileRef:       profileRef,
+		Topic:            metadataStringVal(item.Metadata, "topic"),
+		CapturedAt:       parseGraphTime(item.CreatedAt),
 	}
 }
 

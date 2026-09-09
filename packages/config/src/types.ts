@@ -51,6 +51,8 @@ export interface ContainerdConfig {
 
 export interface DockerConfig {
   host?: string;
+  network?: string;
+  server_container?: string;
 }
 
 export interface AppleConfig {

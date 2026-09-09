@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	native "github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 const platformIdentitiesIntro = "## Platform Identities\n\nThese XML tags describe your own known account identities across connected platforms.\n"
@@ -18,16 +20,32 @@ type identityAttr struct {
 }
 
 func buildPlatformIdentitiesSection(configs []PlatformIdentity) string {
-	xmlBlock := buildPlatformIdentitiesXML(configs)
-	if xmlBlock == "" {
+	return buildPlatformIdentitiesSectionFromItems(buildPlatformIdentityPromptItems(configs))
+}
+
+func buildPlatformIdentitiesSectionFromItems(items []native.SystemPromptItem) string {
+	if len(items) == 0 {
 		return ""
 	}
-	return platformIdentitiesIntro + "\n" + xmlBlock
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		lines = append(lines, item.Text)
+	}
+	return platformIdentitiesIntro + "\n" + strings.Join(lines, "\n")
 }
 
 func buildPlatformIdentitiesXML(configs []PlatformIdentity) string {
+	items := buildPlatformIdentityPromptItems(configs)
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		lines = append(lines, item.Text)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildPlatformIdentityPromptItems(configs []PlatformIdentity) []native.SystemPromptItem {
 	if len(configs) == 0 {
-		return ""
+		return nil
 	}
 	sorted := make([]PlatformIdentity, len(configs))
 	copy(sorted, configs)
@@ -43,15 +61,15 @@ func buildPlatformIdentitiesXML(configs []PlatformIdentity) string {
 		return strings.Compare(left.ID, right.ID) < 0
 	})
 
-	lines := make([]string, 0, len(sorted))
+	items := make([]native.SystemPromptItem, 0, len(sorted))
 	for _, cfg := range sorted {
 		line := buildPlatformIdentityLine(cfg)
 		if line == "" {
 			continue
 		}
-		lines = append(lines, line)
+		items = append(items, native.SystemPromptItem{ID: strings.TrimSpace(cfg.ID), Text: line})
 	}
-	return strings.Join(lines, "\n")
+	return items
 }
 
 func buildPlatformIdentityLine(cfg PlatformIdentity) string {

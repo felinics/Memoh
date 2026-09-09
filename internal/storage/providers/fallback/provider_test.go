@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/storage"
+	"github.com/felinics/memoh/internal/storage"
 )
 
 type memoryProvider struct {
@@ -60,7 +60,7 @@ func TestProviderEnsureAccessPathPromotesSecondaryToPrimary(t *testing.T) {
 	t.Parallel()
 
 	const key = "bot-1/aa/asset.pdf"
-	primary := newMemoryProvider("/data/media")
+	primary := newMemoryProvider("/data/.memoh/media")
 	primary.putErr = errors.New("workspace unavailable")
 	secondary := newMemoryProvider("/host/media")
 	provider := New(primary, secondary)
@@ -73,7 +73,7 @@ func TestProviderEnsureAccessPathPromotesSecondaryToPrimary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureAccessPath() error = %v", err)
 	}
-	if want := "/data/media/" + key; got != want {
+	if want := "/data/.memoh/media/" + key; got != want {
 		t.Fatalf("EnsureAccessPath() = %q, want %q", got, want)
 	}
 	if got := string(primary.values[key]); got != "pdf" {
@@ -88,13 +88,13 @@ func TestProviderAccessPathPrefersReachablePrimary(t *testing.T) {
 	t.Parallel()
 
 	const key = "bot-1/aa/asset.png"
-	primary := newMemoryProvider("/data/media")
+	primary := newMemoryProvider("/data/.memoh/media")
 	secondary := newMemoryProvider("/host/media")
 	primary.values[key] = []byte("primary")
 	secondary.values[key] = []byte("secondary")
 	provider := New(primary, secondary)
 
-	if got, want := provider.AccessPath(context.Background(), key), "/data/media/"+key; got != want {
+	if got, want := provider.AccessPath(context.Background(), key), "/data/.memoh/media/"+key; got != want {
 		t.Fatalf("AccessPath() = %q, want %q", got, want)
 	}
 }
@@ -103,7 +103,7 @@ func TestProviderAccessPathReturnsEmptyWithoutReachablePath(t *testing.T) {
 	t.Parallel()
 
 	const key = "bot-1/aa/missing.txt"
-	primary := newMemoryProvider("/data/media")
+	primary := newMemoryProvider("/data/.memoh/media")
 	secondary := newMemoryProvider("/host/media")
 	provider := New(primary, secondary)
 
@@ -126,7 +126,7 @@ func TestProviderAccessPathDoesNotExposeSecondaryWhenPromotionFails(t *testing.T
 	t.Parallel()
 
 	const key = "bot-1/aa/asset.pdf"
-	primary := newMemoryProvider("/data/media")
+	primary := newMemoryProvider("/data/.memoh/media")
 	primary.putErr = errors.New("workspace unavailable")
 	secondary := newMemoryProvider("/host/media")
 	secondary.values[key] = []byte("pdf")
@@ -144,7 +144,7 @@ func TestProviderDeleteCleansBothStores(t *testing.T) {
 	t.Parallel()
 
 	const key = "bot-1/aa/asset.pdf"
-	primary := newMemoryProvider("/data/media")
+	primary := newMemoryProvider("/data/.memoh/media")
 	secondary := newMemoryProvider("/host/media")
 	primary.values[key] = []byte("primary")
 	secondary.values[key] = []byte("secondary")

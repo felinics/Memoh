@@ -4,7 +4,7 @@ import { toast } from '@felinic/ui'
 import i18n from '@/i18n'
 import { useCapabilitiesStore } from './capabilities'
 
-const GITHUB_REPO = 'memohai/memoh'
+const GITHUB_REPO = 'felinics/memoh'
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases/latest`
 
 function normalizeVersion(version?: string | null): string {

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	adapters "github.com/memohai/memoh/internal/memory/adapters"
+	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 // contextPackerConfig controls how memory items are packed into a context

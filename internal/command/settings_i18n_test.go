@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/i18n"
-	"github.com/memohai/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 // TestReasoningResultZhLocalizesProseNotTokens proves the migration is
@@ -13,7 +13,7 @@ import (
 // but the level button labels and their dispatched Args stay canonical tokens.
 func TestReasoningResultZhLocalizesProseNotTokens(t *testing.T) {
 	t.Parallel()
-	res := reasoningResult(i18n.New("zh"), "xhigh")
+	res := reasoningResult(i18n.New("zh"), "xhigh", fullLadderOptions())
 	title := res.Interactive.Choices.Title
 	if !strings.Contains(title, "🧠 推理") {
 		t.Errorf("zh header missing, title=%q", title)

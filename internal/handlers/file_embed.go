@@ -11,7 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/embedded"
+	"github.com/felinics/memoh/internal/embedded"
 )
 
 type EmbeddedWebHandler struct {

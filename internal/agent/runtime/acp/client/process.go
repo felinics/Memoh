@@ -11,13 +11,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/workspace/bridge"
-	pb "github.com/memohai/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/bridge"
+	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
 const (
-	stderrTailLimit      = 8 * 1024
-	defaultContainerPath = "/opt/memoh/toolkit/bin:/usr/local/bin:/usr/bin:/bin"
+	stderrTailLimit = 8 * 1024
+	// defaultContainerPath is the PATH ACP agents run with. The managed
+	// dependency shim directory comes first so a managed overlay
+	// of an image runtime (node, python, uv) wins over the toolkit copy.
+	defaultContainerPath = dataMountPath + "/.memoh/deps/bin:" + containerToolkitBin + ":/usr/local/bin:/usr/bin:/bin"
 	containerToolkitBin  = "/opt/memoh/toolkit/bin"
 	noProjectWorkDirPart = "/.memoh/acp-work/no-project/"
 )
@@ -42,28 +45,29 @@ const (
 )
 
 type processOptions struct {
-	Backend   WorkspaceBackend
-	BotID     string
-	AgentID   string
-	SetupMode SetupMode
-	Env       []string
-	CleanEnv  bool
-	UnsetEnv  []string
-	NoTimeout bool
-	Logger    *slog.Logger
+	Backend          WorkspaceBackend
+	BotID            string
+	AgentID          string
+	SetupMode        SetupMode
+	Env              []string
+	UnsetEnv         []string
+	NoTimeout        bool
+	Logger           *slog.Logger
+	RuntimeSyncGuard RuntimeSyncGuard
 }
 
 type bridgeProcess struct {
-	stream   *bridge.ExecStream
-	stdin    *io.PipeWriter
-	stdout   *io.PipeReader
-	tail     *stderrTail
-	done     chan struct{}
-	env      []string
-	toolEnv  []string
-	unsetEnv []string
-	lease    *runtimeLease
-	logger   *slog.Logger
+	stream       *bridge.ExecStream
+	stdin        *io.PipeWriter
+	stdout       *io.PipeReader
+	tail         *stderrTail
+	done         chan struct{}
+	lifecycleCtx context.Context
+	env          []string
+	toolEnv      []string
+	unsetEnv     []string
+	lease        *runtimeLease
+	logger       *slog.Logger
 
 	stateMu      sync.Mutex
 	activated    bool
@@ -105,20 +109,19 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 	if err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_ = lease.finalize(cleanupCtx, false)
+		_ = lease.finalize(cleanupCtx)
 		return nil, err
 	}
 
 	shellCommand := buildShellCommand(resolvedCommand, args)
 	execStream, err := client.ExecStreamWithOptions(ctx, shellCommand, workDir, timeoutSeconds, bridge.ExecOptions{
 		Env:      env,
-		CleanEnv: runtimeOpts.CleanEnv,
 		UnsetEnv: runtimeOpts.UnsetEnv,
 	})
 	if err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_ = lease.finalize(cleanupCtx, false)
+		_ = lease.finalize(cleanupCtx)
 		return nil, err
 	}
 
@@ -130,6 +133,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		stdout:       stdoutR,
 		tail:         &stderrTail{},
 		done:         make(chan struct{}),
+		lifecycleCtx: ctx,
 		env:          append([]string(nil), env...),
 		toolEnv:      append([]string(nil), lease.toolEnv...),
 		unsetEnv:     append([]string(nil), lease.unsetEnv...),
@@ -207,7 +211,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 		if resolved != "" || err != nil {
 			return resolved, err
 		}
-		return "", commandNotAvailableError(command, lastResult, opts.Backend)
+		return "", commandNotAvailableError(command, lastResult)
 	}
 
 	deadline := time.Now().Add(commandResolveWindow)
@@ -231,7 +235,7 @@ func resolveCommand(ctx context.Context, client *bridge.Client, command, workDir
 			return resolved, nil
 		}
 	}
-	return "", commandNotAvailableError(command, lastResult, opts.Backend)
+	return "", commandNotAvailableError(command, lastResult)
 }
 
 func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, workDir string, env []string, opts processOptions) (string, *bridge.ExecResult, error) {
@@ -273,12 +277,11 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts processOptions) (*bridge.ExecResult, error) {
 	return client.ExecWithOptions(ctx, check, workDir, 10, nil, bridge.ExecOptions{
 		Env:      env,
-		CleanEnv: opts.CleanEnv,
 		UnsetEnv: opts.UnsetEnv,
 	})
 }
 
-func commandNotAvailableError(command string, result *bridge.ExecResult, _ WorkspaceBackend) error {
+func commandNotAvailableError(command string, result *bridge.ExecResult) error {
 	detail := ""
 	if result != nil {
 		detail = strings.TrimSpace(result.Stderr)
@@ -298,28 +301,6 @@ func isPlainCommand(command string) bool {
 		return false
 	}
 	return !strings.ContainsAny(command, " \t\n'\"\\$&;|<>*?()[]{}!`")
-}
-
-func HermesManagedUnsetEnvKeys() []string {
-	return []string{
-		"HERMES_HOME",
-		"HERMES_*",
-		hermesManagedCustomProviderEnvKey,
-		"OPENAI_API_KEY",
-		"OPENAI_BASE_URL",
-		"OPENAI_API_BASE",
-		"OPENROUTER_API_KEY",
-		"OPENROUTER_BASE_URL",
-		"ANTHROPIC_API_KEY",
-		"ANTHROPIC_BASE_URL",
-		"ANTHROPIC_API_BASE",
-		"GOOGLE_API_KEY",
-		"GOOGLE_BASE_URL",
-		"GOOGLE_API_BASE",
-		"GEMINI_API_KEY",
-		"GEMINI_BASE_URL",
-		"GEMINI_API_BASE",
-	}
 }
 
 func (p *bridgeProcess) Read(b []byte) (int, error) {
@@ -356,52 +337,15 @@ func (p *bridgeProcess) Close() error {
 	return p.finalizeErr
 }
 
-// Activate marks a fully initialized ACP process as eligible to synchronize
-// durable artifacts. Startup failures call Close before activation and only
-// remove their process-local directory.
+// Activate marks a fully initialized ACP process. Startup failures call
+// Close before activation and only remove their process-local directory.
 func (p *bridgeProcess) Activate() {
 	if p == nil {
 		return
 	}
 	p.stateMu.Lock()
-	if !p.activated {
-		p.activated = true
-		go p.syncLoop()
-	}
+	p.activated = true
 	p.stateMu.Unlock()
-}
-
-func (p *bridgeProcess) syncLoop() {
-	if p == nil || p.lease == nil {
-		return
-	}
-	ticker := time.NewTicker(runtimeSyncInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-p.done:
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			err := p.lease.syncLiveState(ctx)
-			cancel()
-			if err != nil && p.logger != nil {
-				p.logger.Warn("failed to refresh ACP runtime lease",
-					slog.String("agent_id", p.lease.agentID),
-					slog.String("bot_id", p.lease.botID),
-					slog.Any("error", err))
-			}
-		}
-	}
-}
-
-func (p *bridgeProcess) SyncPromptState(ctx context.Context) error {
-	if p == nil || p.lease == nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	return p.lease.syncLiveState(ctx)
 }
 
 func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {
@@ -410,12 +354,9 @@ func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {
 	}
 	p.finalizeOnce.Do(func() {
 		defer close(p.finalizeDone)
-		p.stateMu.Lock()
-		commit := p.activated
-		p.stateMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 15*time.Second)
 		defer cancel()
-		p.finalizeErr = p.lease.finalize(ctx, commit)
+		p.finalizeErr = p.lease.finalize(ctx)
 		if p.finalizeErr != nil && p.logger != nil {
 			p.logger.Warn("failed to finalize ACP runtime state",
 				slog.String("agent_id", p.lease.agentID),

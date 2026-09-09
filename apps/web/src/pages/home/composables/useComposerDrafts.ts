@@ -10,12 +10,9 @@ export interface ComposerDraftsDeps {
   currentBotId: Ref<string | null>
   tabId: () => string
   inputText: Ref<string>
-  // Fired when the composer text is swapped wholesale by a draft-key change,
-  // so the layout can snap (skip the height morph) instead of animating.
-  onDraftKeySwap?: () => void
 }
 
-export function useComposerDrafts({ currentBotId, tabId, inputText, onDraftKeySwap }: ComposerDraftsDeps) {
+export function useComposerDrafts({ currentBotId, tabId, inputText }: ComposerDraftsDeps) {
   const inputDrafts = useStorage<Record<string, string>>('chat-input-drafts', {})
 
   const inputDraftKey = computed(() => {
@@ -45,7 +42,6 @@ export function useComposerDrafts({ currentBotId, tabId, inputText, onDraftKeySw
       saveInputDraft(previousKey, inputText.value)
     }
     inputText.value = nextKey ? inputDrafts.value[nextKey] ?? '' : ''
-    onDraftKeySwap?.()
   }, { immediate: true })
 
   watch(inputText, (text) => {

@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/config"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/config"
 )
 
 const (

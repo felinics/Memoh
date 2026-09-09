@@ -59,7 +59,7 @@ function isRuntimeEvent(event: UIStreamEvent): event is UIRuntimeEvent {
 }
 
 // Owns chat transport lifecycles. The WebSocket carries both turn commands and
-// session runtime subscriptions; the bot-wide SSE remains sidebar metadata only.
+// session runtime subscriptions; the bot-wide SSE carries lightweight activity.
 export function createChatRealtimeController(
   callbacks: ChatRealtimeCallbacks,
   transport: ChatRealtimeTransport = defaultTransport,
@@ -131,15 +131,20 @@ export function createChatRealtimeController(
     }
   }
 
-  function ensureWebSocketConnected(botId: string): boolean {
+  // A live socket handle is enough, even mid-handshake or between reconnect
+  // attempts: the ws layer queues messages and flushes them on open, so a send
+  // only fails when no socket exists for the bot at all. Failing fast while
+  // the first-open handshake was still in flight used to sacrifice the user's
+  // first message with "WebSocket is not connected" (#1070).
+  function ensureWebSocket(botId: string): boolean {
     const bid = botId.trim()
     if (!bid) return false
     if (!activeWebSocket || activeWebSocketBotId !== bid) startWebSocket(bid)
-    return activeWebSocket?.connected === true
+    return activeWebSocket !== null
   }
 
   function sendWebSocketMessage(botId: string, message: WSClientMessage): boolean {
-    if (!ensureWebSocketConnected(botId)) return false
+    if (!ensureWebSocket(botId)) return false
     activeWebSocket!.send(message)
     return true
   }
@@ -242,10 +247,18 @@ export function createChatRealtimeController(
     const generation = botSessionsActivityGeneration
     botSessionsActivityStream.start(async (signal) => {
       if (generation !== botSessionsActivityGeneration || signal.aborted) return
-      await transport.streamBotSessionsActivityEvents(bid, signal, (event) => {
-        if (generation !== botSessionsActivityGeneration) return
-        callbacks.onBotSessionsActivityEvent(bid, event)
-      })
+      try {
+        await transport.streamBotSessionsActivityEvents(bid, signal, (event) => {
+          if (generation !== botSessionsActivityGeneration) return
+          callbacks.onBotSessionsActivityEvent(bid, event)
+        })
+      } finally {
+        // A disconnected stream cannot vouch for a still-running compaction.
+        // The server sends a fresh snapshot when this stream reconnects.
+        if (generation === botSessionsActivityGeneration) {
+          callbacks.onBotSessionsActivityEvent(bid, { type: 'session_compaction', session_ids: [] })
+        }
+      }
     })
   }
 
@@ -258,7 +271,7 @@ export function createChatRealtimeController(
   return {
     startWebSocket,
     stopWebSocket,
-    ensureWebSocketConnected,
+    ensureWebSocket,
     sendWebSocketMessage,
     abortWebSocketRun,
     startSessionRuntime,

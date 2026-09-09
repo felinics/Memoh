@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	"github.com/memohai/memoh/internal/agent/runtime/native"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	session "github.com/memohai/memoh/internal/chat/thread"
-	"github.com/memohai/memoh/internal/workspace"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type denyToolApprovalPolicyProvider struct{}
@@ -42,7 +42,7 @@ func TestIsInteractiveApprovalSession(t *testing.T) {
 		}
 	}
 
-	for _, sessionType := range []string{sessionmode.Discuss, sessionmode.Schedule, sessionmode.Heartbeat, sessionmode.Subagent} {
+	for _, sessionType := range []string{sessionmode.Discuss, sessionmode.Schedule, sessionmode.Subagent} {
 		if isInteractiveApprovalSession(sessionType) {
 			t.Fatalf("expected %q to reject interactive approvals", sessionType)
 		}
@@ -163,12 +163,11 @@ func TestAgentSessionModesMatchPersistedSessionTypes(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		sessionmode.Chat:      session.TypeChat,
-		sessionmode.Heartbeat: session.TypeHeartbeat,
-		sessionmode.Schedule:  session.TypeSchedule,
-		sessionmode.Subagent:  session.TypeSubagent,
-		sessionmode.Discuss:   session.TypeDiscuss,
-		sessionmode.ACPAgent:  session.TypeACPAgent,
+		sessionmode.Chat:     session.TypeChat,
+		sessionmode.Schedule: session.TypeSchedule,
+		sessionmode.Subagent: session.TypeSubagent,
+		sessionmode.Discuss:  session.TypeDiscuss,
+		sessionmode.ACPAgent: session.TypeACPAgent,
 	}
 	for got, want := range cases {
 		if got != want {

@@ -10,8 +10,11 @@ import {
   postBotsByBotIdSessionsBySessionIdAcpRuntime,
   deleteBotsByBotIdSessionsBySessionId,
   patchBotsByBotIdAcpRuntimesByRuntimeIdModel,
+  patchBotsByBotIdAcpRuntimesByRuntimeIdMode,
   patchBotsByBotIdAcpRuntimesByRuntimeIdReasoning,
   patchBotsByBotIdSessionsBySessionId,
+  getBotsByBotIdSessionsModelPreferenceSeed,
+  patchBotsByBotIdSessionsBySessionIdAcpRuntimeMode,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel,
   patchBotsByBotIdSessionsBySessionIdAcpRuntimeReasoning,
 } from '@memohai/sdk'
@@ -19,6 +22,7 @@ import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 import type { Bot, SessionSummary } from './useChat.types'
 
 export interface CreateSessionOptions {
+  botAgentId?: string
   title?: string
   type?: string
   sessionMode?: string
@@ -32,6 +36,14 @@ export interface CreateSessionOptions {
    * workdir pins the session's workspace target and working directory.
    */
   workdirId?: string
+  /**
+   * First-send picker pair (issue #879). Carried only when the pair has an
+   * explicit source (user pick / remembered session); when omitted the
+   * session is born with NULL preference columns and follows the bot default.
+   * The server reconciles both before the INSERT.
+   */
+  preferredChatModelId?: string
+  preferredReasoningEffort?: string
 }
 
 export interface CreateACPRuntimeOptions {
@@ -105,6 +117,7 @@ export async function createSession(botId: string, options?: string | CreateSess
     ? { title: options, channel_type: 'local' }
     : {
         title: options?.title ?? '',
+        bot_agent_id: options?.botAgentId?.trim() || undefined,
         channel_type: 'local',
         type: options?.type,
         session_mode: options?.sessionMode,
@@ -113,6 +126,8 @@ export async function createSession(botId: string, options?: string | CreateSess
         runtime_metadata: options?.runtimeMetadata,
         acp_runtime_id: options?.acpRuntimeId?.trim() || undefined,
         workdir_id: options?.workdirId?.trim() || undefined,
+        preferred_chat_model_id: options?.preferredChatModelId?.trim() || undefined,
+        preferred_reasoning_effort: options?.preferredReasoningEffort?.trim() || undefined,
       }
   const { data } = await postBotsByBotIdSessions({
     path: { bot_id: id },
@@ -126,18 +141,18 @@ export interface ForkSessionOptions {
   title?: string
 }
 
-export async function forkSessionFromMessage(botId: string, sessionId: string, messageId: string, options?: ForkSessionOptions): Promise<SessionSummary> {
+export async function forkSessionFromTurn(botId: string, sessionId: string, turnId: string, options?: ForkSessionOptions): Promise<SessionSummary> {
   const bid = botId.trim()
   const sid = sessionId.trim()
-  const mid = messageId.trim()
+  const tid = turnId.trim()
   const title = options?.title?.trim() ?? ''
   if (!bid) throw new Error('bot id is required')
   if (!sid) throw new Error('session id is required')
-  if (!mid) throw new Error('message id is required')
+  if (!tid) throw new Error('turn id is required')
   const { data } = await postBotsByBotIdSessionsBySessionIdFork({
     path: { bot_id: bid, session_id: sid },
     body: {
-      message_id: mid,
+      turn_id: tid,
       ...(title ? { title } : {}),
     },
     throwOnError: true,
@@ -154,7 +169,40 @@ export async function updateSessionTitle(botId: string, sessionId: string, title
   return data as SessionSummary
 }
 
+// Picker pair persistence (issue #879): best-effort PATCH from the composer.
+// The caller treats failures as silent — the next sent message writes the
+// resolved pair back server-side, so a dropped PATCH only loses the
+// pick-until-send window.
+export async function updateSessionModelPreference(botId: string, sessionId: string, modelId: string, reasoningEffort: string, expectedRevision: string): Promise<SessionSummary> {
+  const { data } = await patchBotsByBotIdSessionsBySessionId({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    body: {
+      expected_model_preference_revision: expectedRevision,
+      preferred_chat_model_id: modelId,
+      preferred_reasoning_effort: reasoningEffort,
+    },
+    throwOnError: true,
+  })
+  return data as SessionSummary
+}
+
+export interface ModelPreferenceSeed {
+  model_id?: string
+  reasoning_effort?: string
+}
+
+// Welcome composer seed (issue #879): the pair of the bot's most recent
+// native session. Empty fields mean "no seed" — fall back to the bot default.
+export async function fetchModelPreferenceSeed(botId: string): Promise<ModelPreferenceSeed> {
+  const { data } = await getBotsByBotIdSessionsModelPreferenceSeed({
+    path: { bot_id: botId.trim() },
+    throwOnError: true,
+  })
+  return data as ModelPreferenceSeed
+}
+
 export interface UpdateSessionAgentOptions {
+  botAgentId?: string
   type?: string
   sessionMode?: string
   runtimeType?: string
@@ -166,6 +214,7 @@ export async function updateSessionAgent(botId: string, sessionId: string, optio
   const { data } = await patchBotsByBotIdSessionsBySessionId({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
     body: {
+      bot_agent_id: options.botAgentId,
       type: options.type,
       session_mode: options.sessionMode,
       runtime_type: options.runtimeType,
@@ -189,6 +238,15 @@ export async function setACPRuntimeModel(botId: string, sessionId: string, model
   const { data } = await patchBotsByBotIdSessionsBySessionIdAcpRuntimeModel({
     path: { bot_id: botId.trim(), session_id: sessionId.trim() },
     body: { model_id: modelId },
+    throwOnError: true,
+  })
+  return data as AcpagentRuntimeStatus
+}
+
+export async function setACPRuntimeMode(botId: string, sessionId: string, modeId: string): Promise<AcpagentRuntimeStatus> {
+  const { data } = await patchBotsByBotIdSessionsBySessionIdAcpRuntimeMode({
+    path: { bot_id: botId.trim(), session_id: sessionId.trim() },
+    body: { mode_id: modeId },
     throwOnError: true,
   })
   return data as AcpagentRuntimeStatus
@@ -228,6 +286,15 @@ export async function setACPRuntimeModelByID(botId: string, runtimeId: string, m
     path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
     // An empty model_id resets the runtime to the agent default model.
     body: { model_id: modelId.trim() },
+    throwOnError: true,
+  })
+  return data as AcpagentRuntimeStatus
+}
+
+export async function setACPRuntimeModeByID(botId: string, runtimeId: string, modeId: string): Promise<AcpagentRuntimeStatus> {
+  const { data } = await patchBotsByBotIdAcpRuntimesByRuntimeIdMode({
+    path: { bot_id: botId.trim(), runtime_id: runtimeId.trim() },
+    body: { mode_id: modeId },
     throwOnError: true,
   })
   return data as AcpagentRuntimeStatus

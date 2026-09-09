@@ -1,13 +1,17 @@
 package native
 
 import (
+	"context"
+	"errors"
+	"reflect"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	tools "github.com/memohai/memoh/internal/agent/tool"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestSpawnRunConfigClassifiesRawQueryAsCurrentUser(t *testing.T) {
@@ -35,6 +39,115 @@ func TestSpawnRunConfigClassifiesRawQueryAsCurrentUser(t *testing.T) {
 	}
 	if current != 1 {
 		t.Fatalf("current fragment count = %d, want 1", current)
+	}
+}
+
+func TestSpawnRunConfigCarriesContextBudgetAndToolExchangePolicy(t *testing.T) {
+	t.Parallel()
+
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 10}
+	rc := runConfigFromSpawnRunConfig(tools.SpawnRunConfig{
+		ContextBudgetMaxTokens:    128000,
+		ContextToolExchangePolicy: policy,
+	})
+
+	if rc.ContextBudgetMaxTokens != 128000 {
+		t.Fatalf("ContextBudgetMaxTokens = %d, want 128000", rc.ContextBudgetMaxTokens)
+	}
+	if rc.ContextToolExchangePolicy != policy {
+		t.Fatalf("ContextToolExchangePolicy = %p, want same pointer %p", rc.ContextToolExchangePolicy, policy)
+	}
+}
+
+func TestSpawnAdapterGenerateWithWatchdogFailsOnStreamError(t *testing.T) {
+	t.Parallel()
+
+	plan := contextfrag.ContextBudgetPlan{
+		Window:           4096,
+		OutputReserve:    8192,
+		ActualSystemCost: 123,
+	}
+	a := New(Deps{
+		ContextViewApplier: spawnFailingBudgetApplier(plan, contextfrag.ErrBudgetUnsatisfied),
+	})
+	adapter := NewSpawnAdapter(a)
+	provider := &preflightCountingProvider{}
+
+	result, err := adapter.GenerateWithWatchdog(context.Background(), tools.SpawnRunConfig{
+		Model: &sdk.Model{
+			ID:       "spawn-preflight-error",
+			Provider: provider,
+			Type:     sdk.ModelTypeChat,
+		},
+		Query: "do the task",
+	}, func() {})
+
+	if result == nil || result.ContextLifecycle == nil {
+		t.Fatalf("GenerateWithWatchdog result = %#v, want failure lifecycle audit", result)
+	}
+	if got := result.ContextLifecycle.BudgetPlan; got == nil || !reflect.DeepEqual(*got, plan) {
+		t.Fatalf("failure lifecycle budget plan = %#v, want %#v", got, plan)
+	}
+	definition, ok := apperror.Lookup(apperror.CodeContextBudgetUnsatisfied)
+	if !ok {
+		t.Fatal("budget error missing from public catalog")
+	}
+	if err == nil || err.Error() != definition.Detail {
+		t.Fatalf("GenerateWithWatchdog error = %v, want public context-budget failure", err)
+	}
+	if generateCalls, streamCalls := provider.calls(); generateCalls != 0 || streamCalls != 0 {
+		t.Fatalf("provider calls = generate:%d stream:%d, want zero after preflight failure", generateCalls, streamCalls)
+	}
+}
+
+func TestSpawnAdapterGenerateFailureCarriesContextLifecycle(t *testing.T) {
+	t.Parallel()
+
+	plan := contextfrag.ContextBudgetPlan{
+		Window:           4096,
+		OutputReserve:    8192,
+		ActualSystemCost: 321,
+	}
+	a := New(Deps{
+		ContextViewApplier: spawnFailingBudgetApplier(plan, contextfrag.ErrBudgetUnsatisfied),
+	})
+	adapter := NewSpawnAdapter(a)
+	provider := &preflightCountingProvider{}
+
+	result, err := adapter.Generate(context.Background(), tools.SpawnRunConfig{
+		Model: &sdk.Model{
+			ID:       "spawn-generate-preflight-error",
+			Provider: provider,
+			Type:     sdk.ModelTypeChat,
+		},
+		Query: "do the task",
+	})
+
+	if !errors.Is(err, contextfrag.ErrBudgetUnsatisfied) {
+		t.Fatalf("Generate error = %v, want ErrBudgetUnsatisfied", err)
+	}
+	if result == nil || result.ContextLifecycle == nil {
+		t.Fatalf("Generate result = %#v, want failure lifecycle audit", result)
+	}
+	if got := result.ContextLifecycle.BudgetPlan; got == nil || !reflect.DeepEqual(*got, plan) {
+		t.Fatalf("failure lifecycle budget plan = %#v, want %#v", got, plan)
+	}
+	if generateCalls, streamCalls := provider.calls(); generateCalls != 0 || streamCalls != 0 {
+		t.Fatalf("provider calls = generate:%d stream:%d, want zero after preflight failure", generateCalls, streamCalls)
+	}
+}
+
+func spawnFailingBudgetApplier(plan contextfrag.ContextBudgetPlan, err error) ContextViewApplier {
+	return func(_ context.Context, cfg RunConfig) (RunConfig, error) {
+		manifest := contextfrag.Manifest{
+			View:       contextfrag.ViewRunConfigPreProvider,
+			BudgetPlan: &plan,
+		}
+		cfg.ContextManifest = manifest
+		if cfg.ContextLifecycle != nil {
+			cfg.ContextLifecycle.SetManifest(manifest)
+		}
+		return cfg, err
 	}
 }
 

@@ -1,5 +1,14 @@
 <template>
   <PageShell :title="t('runtimes.title')">
+    <template #actions>
+      <Button
+        :loading="creatingRuntime"
+        @click="startConnect"
+      >
+        <Plus class="size-4" />
+        {{ desktopRuntimeBridge ? t('runtimes.connectOther') : t('runtimes.connect') }}
+      </Button>
+    </template>
     <div class="space-y-8">
       <SettingsSection
         v-if="desktopRuntimeBridge"
@@ -50,17 +59,10 @@
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection :title="desktopRuntimeBridge ? t('runtimes.otherComputers') : t('runtimes.computers')">
-        <template #actions>
-          <Button
-            size="sm"
-            @click="connectDialogOpen = true"
-          >
-            <Plus class="size-4" />
-            {{ desktopRuntimeBridge ? t('runtimes.connectOther') : t('runtimes.connect') }}
-          </Button>
-        </template>
-
+      <!-- Single-group page: PageShell owns the title + action, so this
+           section carries no label of its own (only the desktop split case
+           names it "Other computers"). -->
+      <SettingsSection :title="desktopRuntimeBridge ? t('runtimes.otherComputers') : ''">
         <InlineLoadingRow
           v-if="runtimesLoading && runtimes === undefined"
           surface="card-row"
@@ -98,63 +100,65 @@
           v-for="runtime in runtimeItems"
           v-else
           :key="runtime.id"
-          align="start"
           stack="sm"
         >
-          <template #leading>
-            <Laptop class="size-4 text-muted-foreground" />
-          </template>
           <template #content>
-            <p class="truncate text-sm font-medium text-foreground">
-              {{ runtime.name }}
-            </p>
-            <p class="mt-0.5 truncate text-xs text-muted-foreground">
-              {{ runtimeSummary(runtime) }}
-            </p>
-            <div
-              v-if="!runtime.online && runtime.key"
-              class="mt-3 flex min-w-0 items-start gap-2 rounded-md border border-border bg-muted-soft p-2"
-            >
-              <code class="min-w-0 flex-1 break-all font-mono text-xs leading-relaxed text-foreground">{{ runtimeCommand(runtime) }}</code>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                class="shrink-0"
-                :aria-label="t('runtimes.copyCommand')"
-                @click="copyCommand(runtimeCommand(runtime))"
-              >
-                <Copy class="size-4" />
-              </Button>
-            </div>
-          </template>
-          <div class="flex items-center gap-2">
-            <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span
-                class="size-1.5 rounded-full"
-                :class="runtime.online ? 'bg-success' : 'bg-accent-gray-border'"
-              />
-              {{ runtime.online ? t('runtimes.status.online') : t('runtimes.status.offline') }}
-            </span>
-            <ConfirmPopover
-              :title="t('runtimes.revokeTitle')"
-              :message="t('runtimes.revokeDescription', { name: runtime.name })"
-              :cancel-text="t('common.cancel')"
-              :confirm-text="t('runtimes.revoke')"
-              variant="destructive"
-              @confirm="revokeRuntime(runtime)"
-            >
-              <template #trigger>
+            <div class="flex items-center justify-between gap-3">
+              <p class="flex min-w-0 items-center gap-2 text-sm">
+                <span class="truncate font-medium text-foreground">{{ runtime.name }}</span>
+                <Badge
+                  v-if="accessCount(runtime) > 0"
+                  variant="secondary"
+                  size="sm"
+                  class="shrink-0"
+                >
+                  {{ t('runtimes.botAccess', { count: accessCount(runtime), total: botAccessTotal }) }}
+                </Badge>
+                <span
+                  v-else
+                  class="shrink-0 text-xs text-muted-foreground"
+                >
+                  {{ t('runtimes.noBotAccess') }}
+                </span>
+              </p>
+              <div class="flex shrink-0 items-center gap-2">
+                <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span
+                    class="size-1.5 rounded-full"
+                    :class="runtime.online ? 'bg-success' : 'bg-accent-gray-border'"
+                  />
+                  {{ runtime.online ? t('runtimes.status.online') : t('runtimes.status.offline') }}
+                </span>
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  :aria-label="t('runtimes.revoke')"
+                  :aria-label="t('runtimes.manageAccess')"
+                  :title="t('runtimes.manageAccess')"
+                  @click="openAccessDialog(runtime)"
                 >
-                  <Trash2 class="size-4" />
+                  <Settings class="size-4" />
                 </Button>
-              </template>
-            </ConfirmPopover>
-          </div>
+                <ConfirmPopover
+                  :title="t('runtimes.revokeTitle')"
+                  :message="revokeMessage(runtime)"
+                  :cancel-text="t('common.cancel')"
+                  :confirm-text="t('runtimes.revoke')"
+                  variant="destructive"
+                  @confirm="revokeRuntime(runtime)"
+                >
+                  <template #trigger>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      :aria-label="t('runtimes.revoke')"
+                    >
+                      <Trash2 class="size-4" />
+                    </Button>
+                  </template>
+                </ConfirmPopover>
+              </div>
+            </div>
+          </template>
         </SettingsRow>
       </SettingsSection>
     </div>
@@ -211,96 +215,15 @@
     </DialogContent>
   </Dialog>
 
-  <Dialog v-model:open="connectDialogOpen">
-    <DialogContent>
-      <form
-        v-if="!createdCredential"
-        @submit.prevent="createRuntimeCredential"
-      >
-        <DialogHeader>
-          <DialogTitle>{{ t('runtimes.connectDialog.title') }}</DialogTitle>
-          <DialogDescription>
-            {{ t('runtimes.connectDialog.description') }}
-          </DialogDescription>
-        </DialogHeader>
+  <ConnectComputerDialog
+    v-model:open="connectDialogOpen"
+    :credential="createdCredential"
+  />
 
-        <FormStack class="mt-4">
-          <FormField
-            v-slot="{ componentField }"
-            name="name"
-          >
-            <FieldStack
-              :label="t('runtimes.connectDialog.name')"
-              :help="t('runtimes.connectDialog.nameHelp')"
-            >
-              <FormControl>
-                <Input
-                  v-bind="componentField"
-                  autofocus
-                  autocomplete="off"
-                  :placeholder="t('runtimes.connectDialog.namePlaceholder')"
-                />
-              </FormControl>
-            </FieldStack>
-          </FormField>
-        </FormStack>
-
-        <DialogFooter class="mt-4">
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="creatingRuntime"
-            @click="connectDialogOpen = false"
-          >
-            {{ t('common.cancel') }}
-          </Button>
-          <Button
-            type="submit"
-            :loading="creatingRuntime"
-          >
-            {{ t('runtimes.connectDialog.create') }}
-          </Button>
-        </DialogFooter>
-      </form>
-
-      <template v-else>
-        <DialogHeader>
-          <DialogTitle>{{ t('runtimes.connectDialog.runTitle') }}</DialogTitle>
-          <DialogDescription>
-            {{ t('runtimes.connectDialog.runDescription') }}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div class="mt-4 space-y-3">
-          <div class="relative min-w-0 overflow-hidden rounded-md border border-border bg-muted-soft">
-            <pre
-              class="max-h-40 min-w-0 overflow-auto whitespace-pre-wrap break-all p-3 pr-12 font-mono text-xs leading-relaxed text-foreground"
-              :aria-label="t('runtimes.connectDialog.command')"
-            ><code>{{ connectCommand }}</code></pre>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              class="absolute right-2 top-2"
-              :aria-label="t('common.copy')"
-              @click="copyCommand(connectCommand)"
-            >
-              <Copy class="size-4" />
-            </Button>
-          </div>
-          <p class="text-xs leading-relaxed text-muted-foreground">
-            {{ t('runtimes.connectDialog.keyOnce') }}
-          </p>
-        </div>
-
-        <DialogFooter class="mt-4">
-          <Button @click="connectDialogOpen = false">
-            {{ t('runtimes.connectDialog.done') }}
-          </Button>
-        </DialogFooter>
-      </template>
-    </DialogContent>
-  </Dialog>
+  <BotComputerAccessDialog
+    v-model:open="accessDialogOpen"
+    :runtime="accessRuntime"
+  />
 </template>
 
 <script setup lang="ts">
@@ -312,11 +235,12 @@ import z from 'zod'
 import { useMutation, useQuery } from '@pinia/colada'
 import {
   deleteUsersMeRuntimesById,
-  getUsersMeRuntimes,
   postUsersMeRuntimes,
   type UserruntimeRuntime,
 } from '@memohai/sdk'
+import { getBotsQuery } from '@memohai/sdk/colada'
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -330,32 +254,58 @@ import {
   Switch,
   toast,
 } from '@felinic/ui'
-import { Copy, Laptop, Plus, Trash2 } from 'lucide-vue-next'
-import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, useClipboard } from '@felinic/ui'
-import { sdkApiBaseUrl } from '@/lib/api-client'
+import { Plus, Settings, Trash2 } from 'lucide-vue-next'
+import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
+import BotComputerAccessDialog from '@/components/computer/bot-computer-access-dialog.vue'
+import ConnectComputerDialog from '@/components/computer/connect-computer-dialog.vue'
+import { useAccountRuntimes, useComputerAccessGrants } from '@/components/computer/use-computer-access'
 import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { buildRuntimeConnectCommand } from './command'
 
 const { t } = useI18n()
-const { copyText } = useClipboard()
 const desktopRuntimeBridge = inject(DesktopRuntimeKey, undefined)
 
 const {
-  data: runtimes,
+  runtimes,
   error: runtimesError,
   isLoading: runtimesLoading,
   refetch: refetchRuntimes,
-} = useQuery({
-  key: () => ['remote-runtimes'],
-  query: async () => {
-    const { data } = await getUsersMeRuntimes({ throwOnError: true })
-    return data
-  },
+} = useAccountRuntimes()
+
+const { grants } = useComputerAccessGrants()
+const { data: botsData } = useQuery(getBotsQuery())
+const botAccessTotal = computed(() => botsData.value?.items?.length ?? 0)
+
+function accessCount(runtime: UserruntimeRuntime): number {
+  return grants.value.filter(grant => grant.runtime_id === runtime.id).length
+}
+
+const accessDialogOpen = ref(false)
+// The dialog's subject is just an id: the display name resolves live from the
+// runtimes list, so a handshake backfill (default name → device hostname)
+// re-titles the dialog while it is open.
+const accessRuntimeId = ref('')
+const accessRuntime = computed<{ id: string, name: string } | null>(() => {
+  const id = accessRuntimeId.value
+  if (!id) return null
+  const runtime = (runtimes.value ?? []).find(item => item.id === id)
+  return { id, name: runtime?.name || runtime?.hostname || id }
 })
+
+function openAccessDialog(runtime: UserruntimeRuntime): void {
+  if (!runtime.id) return
+  accessRuntimeId.value = runtime.id
+  accessDialogOpen.value = true
+}
+
+function revokeMessage(runtime: UserruntimeRuntime): string {
+  const base = t('runtimes.revokeDescription', { name: runtime.name })
+  const count = accessCount(runtime)
+  return count > 0 ? `${base} ${t('runtimes.revokeAccessWarning', { count })}` : base
+}
 
 const desktopRuntimeState = ref<DesktopRuntimeState>()
 const desktopRuntimeLoading = ref(!!desktopRuntimeBridge)
@@ -516,33 +466,17 @@ const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
   }
 })
 
-function commandForCredential(
-  credential: Pick<UserruntimeRuntime, 'key' | 'team_id'> | null | undefined,
-): string {
-  return buildRuntimeConnectCommand(sdkApiBaseUrl(), credential)
-}
-
-const connectCommand = computed(() => commandForCredential(createdCredential.value))
-
-function runtimeCommand(runtime: UserruntimeRuntime): string {
-  return commandForCredential(runtime)
-}
-
-const createRuntimeCredential = connectForm.handleSubmit(async (values) => {
+// One click creates the credential and the stepper takes over (command →
+// connected → permissions). The computer adopts its machine hostname on
+// first connect (handshake backfill).
+async function startConnect(): Promise<void> {
+  if (creatingRuntime.value) return
   try {
-    createdCredential.value = await createRuntime(values.name.trim())
+    createdCredential.value = await createRuntime('')
+    connectDialogOpen.value = true
     void refetchRuntimes()
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('runtimes.connectDialog.createFailed')))
-  }
-})
-
-async function copyCommand(command: string): Promise<void> {
-  const copied = await copyText(command)
-  if (copied) {
-    toast.success(t('common.copied'))
-  } else {
-    toast.error(t('common.copyFailed'))
   }
 }
 
@@ -555,12 +489,6 @@ async function revokeRuntime(runtime: UserruntimeRuntime): Promise<void> {
   } catch (error) {
     toast.error(resolveApiErrorMessage(error, t('runtimes.revokeFailed')))
   }
-}
-
-function runtimeSummary(runtime: UserruntimeRuntime): string {
-  if (!runtime.online) return t('runtimes.waitingForConnection')
-  const machine = [runtime.hostname, runtime.os, runtime.arch].filter(Boolean).join(' · ')
-  return machine || t('runtimes.connected')
 }
 
 watch(connectDialogOpen, (open) => {

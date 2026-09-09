@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/memohai/memoh/internal/email"
+	"github.com/felinics/memoh/internal/email"
 )
 
 type EmailProvider struct {

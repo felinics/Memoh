@@ -64,6 +64,26 @@ const (
 	DecisionAppendContext = "append_context"
 )
 
+type SystemSectionRetention string
+
+const (
+	SystemSectionRetentionOptional  SystemSectionRetention = "optional"
+	SystemSectionRetentionPreferred SystemSectionRetention = "preferred"
+)
+
+type SystemSectionCache string
+
+const (
+	SystemSectionCacheDynamic SystemSectionCache = "dynamic"
+	SystemSectionCacheStable  SystemSectionCache = "stable"
+)
+
+const (
+	WarningInvalidAppendSystemSection       = "invalid_append_system_section"
+	WarningAppendSystemSectionOutputLimited = "hook_system_section_output_limited"
+	WarningSystemSectionRequiredClamped     = "hook_system_section_required_clamped"
+)
+
 const (
 	OnErrorIgnore = "ignore"
 	OnErrorFail   = "fail"
@@ -125,11 +145,7 @@ type Hook struct {
 }
 
 type hookSource struct {
-	Kind           string
-	PluginID       string
-	PluginDir      string
-	Env            map[string]string
-	MaxOutputBytes int
+	Kind string
 }
 
 type Condition struct {
@@ -178,34 +194,63 @@ type ToolPayload struct {
 	Error  string `json:"error,omitempty"`
 }
 
+type SystemSectionOutput struct {
+	HookName  string                 `json:"hook_name,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	Text      string                 `json:"text"`
+	Retention SystemSectionRetention `json:"retention"`
+	Cache     SystemSectionCache     `json:"cache"`
+
+	WarningCodes []string `json:"-"`
+	hookOrder    int
+	sectionOrder int
+}
+
+type OutputWarning struct {
+	Code      string `json:"code"`
+	Message   string `json:"message,omitempty"`
+	HookName  string `json:"hook_name,omitempty"`
+	SectionID string `json:"section_id,omitempty"`
+
+	hookOrder    int
+	sectionOrder int
+}
+
 type ActionResult struct {
-	ActionType string         `json:"action_type,omitempty"`
-	Name       string         `json:"name,omitempty"`
-	Decision   string         `json:"decision,omitempty"`
-	Reason     string         `json:"reason,omitempty"`
-	Stdout     string         `json:"stdout,omitempty"`
-	Stderr     string         `json:"stderr,omitempty"`
-	ExitCode   int32          `json:"exit_code,omitempty"`
-	Result     any            `json:"result,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	Error      string         `json:"error,omitempty"`
+	ActionType           string                `json:"action_type,omitempty"`
+	Name                 string                `json:"name,omitempty"`
+	Decision             string                `json:"decision,omitempty"`
+	Reason               string                `json:"reason,omitempty"`
+	Stdout               string                `json:"stdout,omitempty"`
+	Stderr               string                `json:"stderr,omitempty"`
+	ExitCode             int32                 `json:"exit_code,omitempty"`
+	Result               any                   `json:"result,omitempty"`
+	AppendSystemSections []SystemSectionOutput `json:"append_system_sections,omitempty"`
+	Warnings             []OutputWarning       `json:"warnings,omitempty"`
+	Metadata             map[string]any        `json:"metadata,omitempty"`
+	Error                string                `json:"error,omitempty"`
 
 	appendContextRaw   string
 	appendContextLimit int
+	appendSystemLimit  int
 }
 
 type Result struct {
-	Decision         string         `json:"decision,omitempty"`
-	Reason           string         `json:"reason,omitempty"`
-	AppendContext    string         `json:"append_context,omitempty"`
-	HooksMatched     int            `json:"hooks_matched"`
-	ActionsRun       int            `json:"actions_run"`
-	RuntimeSupported bool           `json:"runtime_supported"`
-	ActionResults    []ActionResult `json:"action_results,omitempty"`
-	Metadata         map[string]any `json:"metadata,omitempty"`
+	Decision             string                `json:"decision,omitempty"`
+	Reason               string                `json:"reason,omitempty"`
+	AppendContext        string                `json:"append_context,omitempty"`
+	AppendSystemSections []SystemSectionOutput `json:"append_system_sections,omitempty"`
+	Warnings             []OutputWarning       `json:"warnings,omitempty"`
+	HooksMatched         int                   `json:"hooks_matched"`
+	ActionsRun           int                   `json:"actions_run"`
+	RuntimeSupported     bool                  `json:"runtime_supported"`
+	ActionResults        []ActionResult        `json:"action_results,omitempty"`
+	Metadata             map[string]any        `json:"metadata,omitempty"`
 
 	appendContextRaw   string
 	appendContextLimit int
+	appendSystemLimit  int
+	appendSystemOrder  int
 }
 
 func ParseConfig(data []byte) (Config, error) {

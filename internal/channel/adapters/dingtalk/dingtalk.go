@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/dingtalk-stream-sdk-go/chatbot"
-	dtsdk "github.com/memohai/dingtalk-stream-sdk-go/client"
+	"github.com/felinics/dingtalk-stream-sdk-go/chatbot"
+	dtsdk "github.com/felinics/dingtalk-stream-sdk-go/client"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 // DingTalkAdapter implements the Memoh channel adapter for DingTalk bots.

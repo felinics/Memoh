@@ -39,6 +39,39 @@ func TestBuildPlatformIdentitiesXML(t *testing.T) {
 	}
 }
 
+func TestBuildPlatformIdentityPromptItemsPreserveSortedIDs(t *testing.T) {
+	t.Parallel()
+
+	items := buildPlatformIdentityPromptItems([]PlatformIdentity{
+		{
+			ID:               "telegram-2",
+			Platform:         "telegram",
+			ExternalIdentity: "2",
+			SelfIdentity:     map[string]any{"username": "second"},
+		},
+		{
+			ID:               "discord-1",
+			Platform:         "discord",
+			ExternalIdentity: "1",
+			SelfIdentity:     map[string]any{"username": "first"},
+		},
+	})
+
+	if len(items) != 2 {
+		t.Fatalf("items = %#v, want 2", items)
+	}
+	if items[0].ID != "discord-1" || !strings.Contains(items[0].Text, `channel="discord"`) {
+		t.Fatalf("first item = %#v, want sorted discord identity with stable ID", items[0])
+	}
+	if items[1].ID != "telegram-2" || !strings.Contains(items[1].Text, `channel="telegram"`) {
+		t.Fatalf("second item = %#v, want sorted telegram identity with stable ID", items[1])
+	}
+	wantSection := platformIdentitiesIntro + "\n" + items[0].Text + "\n" + items[1].Text
+	if got := buildPlatformIdentitiesSectionFromItems(items); got != wantSection {
+		t.Fatalf("section = %q, want byte-equivalent %q", got, wantSection)
+	}
+}
+
 func TestBuildPlatformIdentityLineNormalizesAttrs(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,6 @@
 package channel
 
-import "github.com/memohai/memoh/internal/slash"
+import "github.com/felinics/memoh/internal/slash"
 
 // RejectReservedSkillMetadata rejects client-supplied reserved skill metadata
 // anywhere it can ride on a message: top-level metadata, content parts,

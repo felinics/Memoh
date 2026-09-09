@@ -12,6 +12,7 @@ on:
       - "db/postgres/migrations/**/*.sql"
       - "db/pgvector/queries/**/*.sql"
       - "db/pgvector/migrations/**/*.sql"
+      - "internal/workspacedeps/catalog/**"
       - ".github/workflows/go-ci.yml"
   pull_request:
     branches: ["main"]
@@ -24,6 +25,7 @@ on:
       - "db/postgres/migrations/**/*.sql"
       - "db/pgvector/queries/**/*.sql"
       - "db/pgvector/migrations/**/*.sql"
+      - "internal/workspacedeps/catalog/**"
       - ".github/workflows/go-ci.yml"
   workflow_dispatch:
 

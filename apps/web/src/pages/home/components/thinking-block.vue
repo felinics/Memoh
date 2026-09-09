@@ -3,24 +3,26 @@
     class="font-[400]"
     :class="inGroup ? '' : 'text-[0.90625rem]'"
   >
-    <button
-      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 cursor-pointer py-px text-cop-title hover:text-foreground select-none"
+    <component
+      :is="bodyText ? 'button' : 'div'"
+      class="group/h flex items-center gap-1.5 w-full text-left transition-colors duration-75 py-px text-cop-title select-none"
+      :class="bodyText ? 'cursor-pointer hover:text-foreground' : ''"
       @click="toggleOpen"
     >
       <span
-        class="min-w-0 truncate tracking-[0.01em]"
+        class="min-w-0 truncate"
         :class="streaming ? 'tool-shimmer-text' : ''"
       >{{ label }}</span>
       <ChevronDown
-        v-if="open"
+        v-if="bodyText && open"
         class="size-3.5 shrink-0 ml-0.5 opacity-50 group-hover/h:opacity-100"
       />
       <ChevronRight
-        v-else
+        v-else-if="bodyText"
         class="size-3.5 shrink-0 ml-0.5 opacity-50 group-hover/h:opacity-100"
       />
-    </button>
-    <CollapseSection :open="open">
+    </component>
+    <CollapseSection :open="open && Boolean(bodyText)">
       <div
         class="mt-1 whitespace-pre-wrap text-muted-foreground"
         :class="inGroup ? 'leading-snug' : 'leading-relaxed'"
@@ -37,10 +39,11 @@ import { useI18n } from 'vue-i18n'
 import type { ThinkingBlock } from '@/store/chat-list'
 import CollapseSection from './collapse-section.vue'
 import { getReasoningDuration } from './reasoning-timing'
-import { getCollapseOpen, migrateCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './process-collapse'
+import { getCollapseOpen, reasoningCollapseKey, setCollapseOpen } from './process-collapse'
 
 const props = defineProps<{
   block: ThinkingBlock
+  messageId: string
   streaming: boolean
   // True when nested inside a multi-step process card: inherit the card's smaller
   // type scale + tighter leading instead of the root-level cop size.
@@ -50,32 +53,42 @@ const props = defineProps<{
 const { t } = useI18n()
 
 // Persisted, user-driven toggle (survives the post-turn refetch/remount).
-const collapseKey = computed(() => reasoningCollapseKey(props.block.content ?? ''))
-const open = ref(getCollapseOpen(collapseKey.value))
-watch(collapseKey, (key, previousKey) => {
-  migrateCollapseOpen(previousKey, key, open.value)
+const collapseKey = computed(() => reasoningCollapseKey(props.messageId, props.block))
+const open = ref(getCollapseOpen(collapseKey.value) ?? false)
+watch(collapseKey, (key) => {
+  open.value = getCollapseOpen(key) ?? false
 })
 
 // Trimmed so the expanded body doesn't open with leading blank lines/space.
 const bodyText = computed(() => (props.block.content ?? '').trim())
 
-// Duration is measured centrally in message-item (every reasoning block, not
-// just the streaming tail) and cached by content, so the re-mounted "done"
-// block recovers it here. Historical blocks (never streamed this session) have
-// no timing and fall back to a plain "Thought".
-const durationMs = computed(() => getReasoningDuration(props.block.content ?? ''))
+// Settled/history blocks prefer the server-observed duration persisted on the
+// assistant row. The client timer remains a compatibility fallback for legacy
+// rows, older servers, and the live interval before the settled row arrives.
+const durationMs = computed(() => {
+  const persisted = props.block.reasoning_timing?.duration_ms
+  if (typeof persisted === 'number' && Number.isFinite(persisted) && persisted >= 0) {
+    return persisted
+  }
+  return getReasoningDuration(props.messageId, props.block)
+})
 
 const label = computed(() => {
   if (props.streaming) return t('chat.thinkingInProgress')
-  if (durationMs.value > 0) {
-    return t('chat.process.thoughtSeconds', { seconds: Math.max(1, Math.round(durationMs.value / 1000)) })
+  // The floor is thoughtBriefly, not 1s: a sub-second duration means the
+  // provider buffered the reasoning and delivered it in one burst, so the
+  // measured interval is delivery time, not thinking time. Rounding it up to
+  // "1s" overstates a thought that may have taken the model far longer.
+  if (durationMs.value >= 1000) {
+    return t('chat.process.thoughtSeconds', { seconds: Math.round(durationMs.value / 1000) })
   }
-  // No measured duration (historical block, or a sub-second thought) — a worded
+  // No measured duration (historical block) or a sub-second thought — a worded
   // phrase reads more naturally than a bare "Thought" or a fake "0s".
   return t('chat.process.thoughtBriefly')
 })
 
 function toggleOpen() {
+  if (!bodyText.value) return
   open.value = !open.value
   setCollapseOpen(collapseKey.value, open.value)
 }

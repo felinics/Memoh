@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	historyfrag "github.com/memohai/memoh/internal/agent/context/history"
-	messagepkg "github.com/memohai/memoh/internal/chat/message"
-	"github.com/memohai/memoh/internal/chat/timeline"
+	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type preparedHistoryContext struct {
@@ -22,11 +22,12 @@ func (s *Service) prepareHistoryContext(
 	fallback historyfrag.ScopeFallback,
 	contextTokenBudget int,
 ) (preparedHistoryContext, error) {
-	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, defaultMaxContextMinutes)
+	loaded, err := s.loadHistoryRecords(ctx, fallback, req.ThreadID, defaultMaxContextMinutes, contextTokenBudget)
 	if err != nil {
 		return preparedHistoryContext{}, err
 	}
 	loaded = pruneHistoryForGateway(loaded)
+	loaded = dropEmptyHistoryFailures(loaded)
 	boundary := s.loadCompactionArtifactBoundary(ctx, loaded, req.ThreadID, req.HistoryCutoffBeforeMessageID)
 	loaded = filterMessagesBeforeID(loaded, req.HistoryCutoffBeforeMessageID)
 	loaded = dedupePersistedCurrentUserMessage(loaded, req)
@@ -60,6 +61,33 @@ func (s *Service) prepareHistoryContext(
 // reasoning part; this projection covers the non-DCP fallback and providers that
 // ignore reasoning_content in prior messages. Checkpoints a completed answer
 // already superseded stay hidden, same as on the DCP path.
+func historyErrorCode(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	code, _ := meta[messagepkg.HistoryErrorCodeMetadataKey].(string)
+	return strings.TrimSpace(code)
+}
+
+// dropEmptyHistoryFailures removes empty assistant rows that exist only to
+// mark a timeout/interrupt. They stay in the UI, but replaying them as
+// empty assistant turns is what made the next provider call 400.
+func dropEmptyHistoryFailures(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
+	if len(records) == 0 {
+		return records
+	}
+	out := make([]historyfrag.HistoryRecord, 0, len(records))
+	for _, rec := range records {
+		if strings.EqualFold(strings.TrimSpace(rec.ModelMessage.Role), "assistant") &&
+			historyErrorCode(rec.Metadata) != "" &&
+			isEmptyAssistantMessage(rec.ModelMessage) {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
 func projectInterruptedHistoryReasoning(records []historyfrag.HistoryRecord) []historyfrag.HistoryRecord {
 	checkpoint := messagepkg.LatestInterruptedCheckpoint(len(records), func(i int) (bool, bool) {
 		return strings.EqualFold(strings.TrimSpace(records[i].ModelMessage.Role), "assistant"),

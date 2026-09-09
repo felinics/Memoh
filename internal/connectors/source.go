@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
-	connectsdk "github.com/memohai/connect-it/sdk/go"
+	connectsdk "github.com/felinics/connect-it/sdk/go"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	mcpgw "github.com/memohai/memoh/internal/mcp"
+	mcpgw "github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/toolcontext"
 )
 
 const (
@@ -159,7 +160,7 @@ func (s *Source) CallTool(
 	}
 	callCtx, cancel := context.WithTimeout(ctx, connectorCallTimeout)
 	defer cancel()
-	if err := mcpgw.ValidateRuntimeGuard(callCtx, session); err != nil {
+	if err := toolcontext.ValidateRuntimeGuard(callCtx, session); err != nil {
 		return nil, err
 	}
 	clientSession, ok, err := s.connect(callCtx, strings.TrimSpace(session.BotID))

@@ -9,7 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
@@ -28,28 +28,18 @@ func TestACPProfilesResponseIsSafeMetadata(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(resp.Items) != 3 {
-		t.Fatalf("profiles len = %d, want 3", len(resp.Items))
+	if len(resp.Items) != 1 {
+		t.Fatalf("profiles len = %d, want 1", len(resp.Items))
 	}
-	profile := resp.Items[0]
-	if profile.ID != acpprofile.AgentClaudeCodeID {
-		t.Fatalf("first profile id = %q, want %q", profile.ID, acpprofile.AgentClaudeCodeID)
+	if resp.Items[0].ID != acpprofile.AgentACPID {
+		t.Fatalf("profile id = %q, want %q", resp.Items[0].ID, acpprofile.AgentACPID)
 	}
-	profile = resp.Items[1]
-	if profile.ID != acpprofile.AgentCodexID {
-		t.Fatalf("profile id = %q", profile.ID)
-	}
-	if len(profile.ManagedFields) == 0 {
+	if len(resp.Items[0].ManagedFields) == 0 {
 		t.Fatalf("managed fields should be exposed for schema-driven UI")
 	}
 
 	raw := rec.Body.String()
-	profile = resp.Items[2]
-	if profile.ID != acpprofile.AgentHermesID {
-		t.Fatalf("profile id = %q", profile.ID)
-	}
-
-	for _, forbidden := range []string{"codex-acp", "claude-agent-acp", "hermes-acp", "npx", "uvx", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "HERMES_HOME"} {
+	for _, forbidden := range []string{"codex-acp", "claude-agent-acp", "npx", "uvx", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
 		if jsonContainsSubstring(raw, forbidden) {
 			t.Fatalf("profiles response leaked unsafe implementation detail %q: %s", forbidden, raw)
 		}

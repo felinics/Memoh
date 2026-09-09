@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue'
 import { fetchSessions, type SessionSummary } from '@/composables/api/useChat'
-import type { ACPAgentSessionInput } from './types'
+import type { ExternalAgentSessionInput } from './types'
 
 export interface ChatBootstrapDeps {
   currentBotId: Ref<string | null>
@@ -19,14 +19,14 @@ export interface ChatBootstrapDeps {
   replaceSessions: (sessions: SessionSummary[]) => SessionSummary[]
   sessionsCursor: Ref<string | null>
   hasMoreSessions: Ref<boolean>
-  defaultRuntimeIsACP: (botId: string) => Promise<boolean>
+  defaultRuntimeIsExternalAgent: (botId: string) => Promise<boolean>
   ensureSessionSummary: (
     botId: string,
     sessionId: string,
     requestId?: number,
   ) => Promise<SessionSummary | null>
-  pendingACPSessionInput: Ref<ACPAgentSessionInput | null>
-  clearPendingACPSession: () => void
+  pendingExternalAgentSessionInput: Ref<ExternalAgentSessionInput | null>
+  clearPendingExternalAgentSession: () => void
   clearHistoryView: () => void
   markHistoryEmpty: () => void
   knownSessionSummary: (sessionId: string) => SessionSummary | null | undefined
@@ -39,11 +39,11 @@ export interface ChatBootstrapDeps {
   clearFsForBotSwitch: () => void
   clearRememberedSessions: () => void
   resetToEmptyComposer: (options: {
-    clearPendingACP?: boolean
+    clearPendingExternalAgent?: boolean
     explicitSelection?: boolean
     draftIntent?: boolean
   }) => void
-  stageDefaultACPFromSettings: (requestId: number) => Promise<void>
+  stageDefaultExternalAgentFromSettings: (requestId: number) => Promise<void>
 }
 
 export function createChatBootstrap(deps: ChatBootstrapDeps) {
@@ -87,18 +87,18 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
             deps.sessionsCursor.value = null
             deps.hasMoreSessions.value = false
             deps.sessionId.value = null
-            deps.clearPendingACPSession()
+            deps.clearPendingExternalAgentSession()
             deps.clearHistoryView()
             continue
           }
           initializingBotId = botId
 
           let response: Awaited<ReturnType<typeof fetchSessions>>
-          let defaultIsACP = false
+          let defaultIsExternalAgent = false
           try {
-            ;[response, defaultIsACP] = await Promise.all([
+            ;[response, defaultIsExternalAgent] = await Promise.all([
               fetchSessions(botId),
-              deps.defaultRuntimeIsACP(botId),
+              deps.defaultRuntimeIsExternalAgent(botId),
             ])
           } catch (error) {
             if (generation !== deps.userScopeGeneration()) return
@@ -128,22 +128,22 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
             rerunRequested = true
             continue
           }
-          const preservePendingACPStage = !!deps.pendingACPSessionInput.value
+          const preservePendingExternalAgentStage = !!deps.pendingExternalAgentSessionInput.value
             && !deps.sessionId.value
           const preserveExplicitEmptyComposer = deps.explicitSessionSelection.value
             && !deps.sessionId.value
-          const preferDefaultACP = defaultIsACP
-            && !preservePendingACPStage
+          const preferDefaultExternalAgent = defaultIsExternalAgent
+            && !preservePendingExternalAgentStage
             && !preserveExplicitEmptyComposer
             && !deps.explicitSessionSelection.value
 
-          if (preservePendingACPStage) {
+          if (preservePendingExternalAgentStage) {
             deps.sessionId.value = null
             deps.markHistoryEmpty()
           } else if (preserveExplicitEmptyComposer) {
             deps.sessionId.value = null
             deps.clearHistoryView()
-          } else if (preferDefaultACP) {
+          } else if (preferDefaultExternalAgent) {
             deps.sessionId.value = null
             deps.explicitSessionSelection.value = false
             deps.draftIntent.value = false
@@ -205,7 +205,7 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
     deps.bumpSelectSessionRequest()
     deps.abort()
     deps.abortAllAssistantStreams()
-    deps.clearPendingACPSession()
+    deps.clearPendingExternalAgentSession()
     deps.clearFsForBotSwitch()
     deps.resetSessionActivity()
     deps.replaceSessions([])
@@ -229,7 +229,7 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
     const sameSession = sessionId === previousSessionId
     const requestId = deps.bumpSelectSessionRequest()
     const botId = (deps.currentBotId.value ?? '').trim()
-    deps.clearPendingACPSession()
+    deps.clearPendingExternalAgentSession()
     deps.sessionId.value = sessionId
     deps.draftIntent.value = false
     deps.explicitSessionSelection.value = options.explicitSelection !== false
@@ -249,12 +249,12 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
   function selectDraft(options: { explicitSelection?: boolean } = {}) {
     const explicitSelection = options.explicitSelection === true
     deps.resetToEmptyComposer({
-      clearPendingACP: false,
+      clearPendingExternalAgent: false,
       explicitSelection,
       draftIntent: true,
     })
     if (!explicitSelection) {
-      void deps.stageDefaultACPFromSettings(deps.currentSelectSessionRequest())
+      void deps.stageDefaultExternalAgentFromSettings(deps.currentSelectSessionRequest())
     }
   }
 

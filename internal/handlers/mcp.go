@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/mcp"
 )
 
 type MCPHandler struct {
@@ -53,7 +53,6 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 // @Summary List MCP connections
 // @Description List MCP connections for a bot
 // @Tags mcp
-// @Param include_managed query bool false "Include plugin-managed hidden MCP connections"
 // @Success 200 {object} mcp.ListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
@@ -75,16 +74,6 @@ func (h *MCPHandler) List(c echo.Context) error {
 	items, err := h.service.ListByBot(c.Request().Context(), botID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	if strings.TrimSpace(strings.ToLower(c.QueryParam("include_managed"))) != "true" {
-		visible := make([]mcp.Connection, 0, len(items))
-		for _, item := range items {
-			if item.ManagedByPluginInstallationID != "" && !item.Visible {
-				continue
-			}
-			visible = append(visible, item)
-		}
-		items = visible
 	}
 	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
 }
@@ -324,7 +313,7 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/import [put].
+// @Router /bots/{bot_id}/mcp-ops/import [put].
 func (h *MCPHandler) Import(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {
@@ -396,7 +385,7 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /bots/{bot_id}/mcp/export [get].
+// @Router /bots/{bot_id}/mcp-ops/export [get].
 func (h *MCPHandler) Export(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
 	if err != nil {

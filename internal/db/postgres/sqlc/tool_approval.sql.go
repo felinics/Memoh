@@ -15,19 +15,21 @@ const approveToolApprovalRequest = `-- name: ApproveToolApprovalRequest :one
 UPDATE tool_approval_requests
 SET status = 'approved',
     decision_reason = $1,
-    decided_by_channel_identity_id = $2,
-    response_control_id = $3::text,
-    response_payload_hash = $4::text,
+    selected_option_id = $2,
+    decided_by_channel_identity_id = $3,
+    response_control_id = $4::text,
+    response_payload_hash = $5::text,
     decided_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND id = $5
+  AND id = $6
   AND status = 'pending'
-  AND (runtime_fencing_token IS NULL OR runtime_fencing_token = $6::bigint)
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+  AND (runtime_fencing_token IS NULL OR runtime_fencing_token = $7::bigint)
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 `
 
 type ApproveToolApprovalRequestParams struct {
 	Reason                     string      `json:"reason"`
+	SelectedOptionID           string      `json:"selected_option_id"`
 	DecidedByChannelIdentityID pgtype.UUID `json:"decided_by_channel_identity_id"`
 	ResponseControlID          pgtype.Text `json:"response_control_id"`
 	ResponsePayloadHash        pgtype.Text `json:"response_payload_hash"`
@@ -38,6 +40,7 @@ type ApproveToolApprovalRequestParams struct {
 func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg ApproveToolApprovalRequestParams) (ToolApprovalRequest, error) {
 	row := q.db.QueryRow(ctx, approveToolApprovalRequest,
 		arg.Reason,
+		arg.SelectedOptionID,
 		arg.DecidedByChannelIdentityID,
 		arg.ResponseControlID,
 		arg.ResponsePayloadHash,
@@ -56,6 +59,8 @@ func (q *Queries) ApproveToolApprovalRequest(ctx context.Context, arg ApproveToo
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -89,7 +94,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = $3
   AND status = 'pending'
   AND (runtime_fencing_token IS NULL OR runtime_fencing_token = $4::bigint)
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 `
 
 type CancelPendingToolApprovalsBySessionParams struct {
@@ -124,6 +129,8 @@ func (q *Queries) CancelPendingToolApprovalsBySession(ctx context.Context, arg C
 			&i.ToolName,
 			&i.Operation,
 			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
@@ -163,7 +170,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = $4
   AND status = 'pending'
   AND (runtime_fencing_token IS NULL OR runtime_fencing_token <= $1)
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 `
 
 type ClaimToolApprovalRequestForRuntimeParams struct {
@@ -192,6 +199,8 @@ func (q *Queries) ClaimToolApprovalRequestForRuntime(ctx context.Context, arg Cl
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -235,11 +244,11 @@ runtime_scope AS (
   WHERE session_runs.team_id = public.memoh_current_team_id()
     AND session_runs.bot_id = $1
     AND session_runs.session_id = $2
-    AND session_runs.fencing_token = $10::bigint
+    AND session_runs.fencing_token = $11::bigint
     AND session_runs.state IN ('running', 'waiting_decision')
   UNION ALL
   SELECT NULL::uuid, NULL::uuid
-  WHERE $10::bigint IS NULL
+  WHERE $11::bigint IS NULL
 )
 INSERT INTO tool_approval_requests (
   bot_id,
@@ -253,6 +262,7 @@ INSERT INTO tool_approval_requests (
   tool_name,
   operation,
   tool_input,
+  options,
   short_id,
   runtime_fencing_token,
   requested_by_channel_identity_id,
@@ -272,13 +282,14 @@ INSERT INTO tool_approval_requests (
   $7,
   $8,
   $9,
+  COALESCE($10::jsonb, '[]'::jsonb),
   next_short_id.short_id,
-  $10,
   $11,
   $12,
   $13,
   $14,
-  $15
+  $15,
+  $16
 FROM locked_session
 CROSS JOIN next_short_id
 CROSS JOIN runtime_scope
@@ -291,8 +302,9 @@ WHERE tool_approval_requests.status = 'pending'
   AND tool_approval_requests.tool_name = EXCLUDED.tool_name
   AND tool_approval_requests.operation = EXCLUDED.operation
   AND tool_approval_requests.tool_input = EXCLUDED.tool_input
+  AND tool_approval_requests.options = EXCLUDED.options
   AND tool_approval_requests.workspace_target_id = EXCLUDED.workspace_target_id
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 `
 
 type CreateToolApprovalRequestParams struct {
@@ -305,6 +317,7 @@ type CreateToolApprovalRequestParams struct {
 	ToolName                     string      `json:"tool_name"`
 	Operation                    string      `json:"operation"`
 	ToolInput                    []byte      `json:"tool_input"`
+	Options                      []byte      `json:"options"`
 	RuntimeFencingToken          pgtype.Int8 `json:"runtime_fencing_token"`
 	RequestedByChannelIdentityID pgtype.UUID `json:"requested_by_channel_identity_id"`
 	RequestedMessageID           pgtype.UUID `json:"requested_message_id"`
@@ -324,6 +337,7 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 		arg.ToolName,
 		arg.Operation,
 		arg.ToolInput,
+		arg.Options,
 		arg.RuntimeFencingToken,
 		arg.RequestedByChannelIdentityID,
 		arg.RequestedMessageID,
@@ -343,6 +357,8 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -367,7 +383,7 @@ func (q *Queries) CreateToolApprovalRequest(ctx context.Context, arg CreateToolA
 }
 
 const getLatestPendingToolApprovalBySession = `-- name: GetLatestPendingToolApprovalBySession :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -396,6 +412,8 @@ func (q *Queries) GetLatestPendingToolApprovalBySession(ctx context.Context, arg
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -420,7 +438,7 @@ func (q *Queries) GetLatestPendingToolApprovalBySession(ctx context.Context, arg
 }
 
 const getPendingToolApprovalByReplyMessage = `-- name: GetPendingToolApprovalByReplyMessage :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -451,53 +469,8 @@ func (q *Queries) GetPendingToolApprovalByReplyMessage(ctx context.Context, arg 
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
-		&i.ShortID,
-		&i.Status,
-		&i.RuntimeFencingToken,
-		&i.ResponseControlID,
-		&i.ResponsePayloadHash,
-		&i.DecisionReason,
-		&i.RequestedByChannelIdentityID,
-		&i.DecidedByChannelIdentityID,
-		&i.RequestedMessageID,
-		&i.PromptMessageID,
-		&i.PromptExternalMessageID,
-		&i.SourcePlatform,
-		&i.ReplyTarget,
-		&i.ConversationType,
-		&i.CreatedAt,
-		&i.DecidedAt,
-		&i.TeamID,
-		&i.RunID,
-		&i.TurnID,
-	)
-	return i, err
-}
-
-const getPendingToolApprovalByRun = `-- name: GetPendingToolApprovalByRun :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
-FROM tool_approval_requests
-WHERE team_id = public.memoh_current_team_id()
-  AND run_id = $1
-  AND status = 'pending'
-ORDER BY created_at DESC, short_id DESC
-LIMIT 1
-`
-
-func (q *Queries) GetPendingToolApprovalByRun(ctx context.Context, runID pgtype.UUID) (ToolApprovalRequest, error) {
-	row := q.db.QueryRow(ctx, getPendingToolApprovalByRun, runID)
-	var i ToolApprovalRequest
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.SessionID,
-		&i.RouteID,
-		&i.ChannelIdentityID,
-		&i.WorkspaceTargetID,
-		&i.ToolCallID,
-		&i.ToolName,
-		&i.Operation,
-		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -522,7 +495,7 @@ func (q *Queries) GetPendingToolApprovalByRun(ctx context.Context, runID pgtype.
 }
 
 const getPendingToolApprovalBySessionShortID = `-- name: GetPendingToolApprovalBySessionShortID :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -551,6 +524,8 @@ func (q *Queries) GetPendingToolApprovalBySessionShortID(ctx context.Context, ar
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -575,7 +550,7 @@ func (q *Queries) GetPendingToolApprovalBySessionShortID(ctx context.Context, ar
 }
 
 const getToolApprovalRequest = `-- name: GetToolApprovalRequest :one
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id() AND id = $1
 `
@@ -594,6 +569,8 @@ func (q *Queries) GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (T
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -617,8 +594,69 @@ func (q *Queries) GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (T
 	return i, err
 }
 
+const listPendingToolApprovalsByRun = `-- name: ListPendingToolApprovalsByRun :many
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+FROM tool_approval_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+  AND status = 'pending'
+ORDER BY created_at ASC, short_id ASC
+`
+
+func (q *Queries) ListPendingToolApprovalsByRun(ctx context.Context, runID pgtype.UUID) ([]ToolApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingToolApprovalsByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ToolApprovalRequest
+	for rows.Next() {
+		var i ToolApprovalRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.SessionID,
+			&i.RouteID,
+			&i.ChannelIdentityID,
+			&i.WorkspaceTargetID,
+			&i.ToolCallID,
+			&i.ToolName,
+			&i.Operation,
+			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
+			&i.ShortID,
+			&i.Status,
+			&i.RuntimeFencingToken,
+			&i.ResponseControlID,
+			&i.ResponsePayloadHash,
+			&i.DecisionReason,
+			&i.RequestedByChannelIdentityID,
+			&i.DecidedByChannelIdentityID,
+			&i.RequestedMessageID,
+			&i.PromptMessageID,
+			&i.PromptExternalMessageID,
+			&i.SourcePlatform,
+			&i.ReplyTarget,
+			&i.ConversationType,
+			&i.CreatedAt,
+			&i.DecidedAt,
+			&i.TeamID,
+			&i.RunID,
+			&i.TurnID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingToolApprovalsBySession = `-- name: ListPendingToolApprovalsBySession :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -652,6 +690,8 @@ func (q *Queries) ListPendingToolApprovalsBySession(ctx context.Context, arg Lis
 			&i.ToolName,
 			&i.Operation,
 			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
@@ -683,7 +723,7 @@ func (q *Queries) ListPendingToolApprovalsBySession(ctx context.Context, arg Lis
 }
 
 const listToolApprovalsBySession = `-- name: ListToolApprovalsBySession :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -716,6 +756,8 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg ListToolAp
 			&i.ToolName,
 			&i.Operation,
 			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
@@ -747,7 +789,7 @@ func (q *Queries) ListToolApprovalsBySession(ctx context.Context, arg ListToolAp
 }
 
 const listToolApprovalsBySessionToolCalls = `-- name: ListToolApprovalsBySessionToolCalls :many
-SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+SELECT id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 FROM tool_approval_requests
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -782,6 +824,8 @@ func (q *Queries) ListToolApprovalsBySessionToolCalls(ctx context.Context, arg L
 			&i.ToolName,
 			&i.Operation,
 			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
@@ -816,19 +860,21 @@ const rejectToolApprovalRequest = `-- name: RejectToolApprovalRequest :one
 UPDATE tool_approval_requests
 SET status = 'rejected',
     decision_reason = $1,
-    decided_by_channel_identity_id = $2,
-    response_control_id = $3::text,
-    response_payload_hash = $4::text,
+    selected_option_id = $2,
+    decided_by_channel_identity_id = $3,
+    response_control_id = $4::text,
+    response_payload_hash = $5::text,
     decided_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND id = $5
+  AND id = $6
   AND status = 'pending'
-  AND (runtime_fencing_token IS NULL OR runtime_fencing_token = $6::bigint)
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+  AND (runtime_fencing_token IS NULL OR runtime_fencing_token = $7::bigint)
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 `
 
 type RejectToolApprovalRequestParams struct {
 	Reason                     string      `json:"reason"`
+	SelectedOptionID           string      `json:"selected_option_id"`
 	DecidedByChannelIdentityID pgtype.UUID `json:"decided_by_channel_identity_id"`
 	ResponseControlID          pgtype.Text `json:"response_control_id"`
 	ResponsePayloadHash        pgtype.Text `json:"response_payload_hash"`
@@ -839,6 +885,7 @@ type RejectToolApprovalRequestParams struct {
 func (q *Queries) RejectToolApprovalRequest(ctx context.Context, arg RejectToolApprovalRequestParams) (ToolApprovalRequest, error) {
 	row := q.db.QueryRow(ctx, rejectToolApprovalRequest,
 		arg.Reason,
+		arg.SelectedOptionID,
 		arg.DecidedByChannelIdentityID,
 		arg.ResponseControlID,
 		arg.ResponsePayloadHash,
@@ -857,6 +904,8 @@ func (q *Queries) RejectToolApprovalRequest(ctx context.Context, arg RejectToolA
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,
@@ -890,15 +939,15 @@ WHERE team_id = public.memoh_current_team_id()
   AND session_id = $3
   AND status = 'pending'
   AND runtime_fencing_token IS NOT NULL
-  AND id IS DISTINCT FROM $4::uuid
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+  AND id != ALL($4::uuid[])
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 `
 
 type SupersedePendingToolApprovalsBySessionParams struct {
-	Reason     string      `json:"reason"`
-	BotID      pgtype.UUID `json:"bot_id"`
-	SessionID  pgtype.UUID `json:"session_id"`
-	PreserveID pgtype.UUID `json:"preserve_id"`
+	Reason      string        `json:"reason"`
+	BotID       pgtype.UUID   `json:"bot_id"`
+	SessionID   pgtype.UUID   `json:"session_id"`
+	PreserveIds []pgtype.UUID `json:"preserve_ids"`
 }
 
 func (q *Queries) SupersedePendingToolApprovalsBySession(ctx context.Context, arg SupersedePendingToolApprovalsBySessionParams) ([]ToolApprovalRequest, error) {
@@ -906,7 +955,7 @@ func (q *Queries) SupersedePendingToolApprovalsBySession(ctx context.Context, ar
 		arg.Reason,
 		arg.BotID,
 		arg.SessionID,
-		arg.PreserveID,
+		arg.PreserveIds,
 	)
 	if err != nil {
 		return nil, err
@@ -926,6 +975,8 @@ func (q *Queries) SupersedePendingToolApprovalsBySession(ctx context.Context, ar
 			&i.ToolName,
 			&i.Operation,
 			&i.ToolInput,
+			&i.Options,
+			&i.SelectedOptionID,
 			&i.ShortID,
 			&i.Status,
 			&i.RuntimeFencingToken,
@@ -961,7 +1012,7 @@ UPDATE tool_approval_requests
 SET prompt_message_id = $1,
     prompt_external_message_id = $2
 WHERE team_id = public.memoh_current_team_id() AND id = $3
-RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
+RETURNING id, bot_id, session_id, route_id, channel_identity_id, workspace_target_id, tool_call_id, tool_name, operation, tool_input, options, selected_option_id, short_id, status, runtime_fencing_token, response_control_id, response_payload_hash, decision_reason, requested_by_channel_identity_id, decided_by_channel_identity_id, requested_message_id, prompt_message_id, prompt_external_message_id, source_platform, reply_target, conversation_type, created_at, decided_at, team_id, run_id, turn_id
 `
 
 type UpdateToolApprovalPromptMessageParams struct {
@@ -984,6 +1035,8 @@ func (q *Queries) UpdateToolApprovalPromptMessage(ctx context.Context, arg Updat
 		&i.ToolName,
 		&i.Operation,
 		&i.ToolInput,
+		&i.Options,
+		&i.SelectedOptionID,
 		&i.ShortID,
 		&i.Status,
 		&i.RuntimeFencingToken,

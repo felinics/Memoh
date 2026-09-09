@@ -6,8 +6,8 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	"github.com/memohai/memoh/internal/agent/event"
-	acpprofile "github.com/memohai/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/event"
+	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
 func TestACPGenericExecuteToolMapsToNativeExecEvents(t *testing.T) {
@@ -101,7 +101,7 @@ func TestACPGenericExecuteTerminalTitles(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.title, func(t *testing.T) {
 			t.Parallel()
-			mapper := newACPToolEventMapper(acpprofile.QuirksFor(acpprofile.AgentHermesID))
+			mapper := newACPToolEventMapper(acpprofile.QuirksFor(acpprofile.AgentACPID))
 			events := mapper.eventsFromNotification(acp.SessionNotification{
 				Update: acp.StartToolCall(
 					acp.ToolCallId("call-1"),

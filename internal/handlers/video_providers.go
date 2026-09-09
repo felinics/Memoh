@@ -9,8 +9,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/models"
-	videopkg "github.com/memohai/memoh/internal/video"
+	"github.com/felinics/memoh/internal/models"
+	videopkg "github.com/felinics/memoh/internal/video"
 )
 
 type VideoHandler struct {

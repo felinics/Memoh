@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memohai/memoh/internal/logger"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/logger"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func startACPToolsProxy(ctx context.Context, handler http.Handler) {

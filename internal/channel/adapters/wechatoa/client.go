@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/memohai/memoh/internal/channel"
-	"github.com/memohai/memoh/internal/channel/common"
-	"github.com/memohai/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel/common"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 type apiResponse struct {

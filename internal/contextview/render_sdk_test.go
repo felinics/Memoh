@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	contextfrag "github.com/memohai/memoh/internal/agent/context/fragment"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 func TestSDKRendererPreservesSystemSectionBytes(t *testing.T) {
@@ -33,6 +33,60 @@ func TestSDKRendererPreservesSystemSectionBytes(t *testing.T) {
 	payload, _ := renderSDKPayload(t, frags, placementFor(frags))
 	if payload.System != "  first\n\n\n\n\n hook tail " {
 		t.Fatalf("system = %q", payload.System)
+	}
+}
+
+func TestSDKRendererSystemRenderGroupsUseDeclaredJoiners(t *testing.T) {
+	t.Parallel()
+
+	frags := []contextfrag.ContextFrag{
+		textFrag("system.prompt", contextfrag.SlotSystem, contextfrag.KindSystemPrompt, sdk.MessageRoleSystem, "prompt"),
+		groupedSystemTextFrag(
+			"system.platform_identity.header",
+			"system.platform_identity",
+			"\n",
+			"## Platform Identities\n\nKnown identities.\n",
+		),
+		groupedSystemTextFrag(
+			"system.platform_identity.telegram",
+			"system.platform_identity",
+			"\n",
+			`<identity channel="telegram" username="@memoh"/>`,
+		),
+		groupedSystemTextFrag(
+			"system.platform_identity.微信",
+			"system.platform_identity",
+			"\n",
+			`<identity channel="weixin" username="小明"/>`,
+		),
+		groupedSystemTextFrag(
+			"system.skills.header",
+			"system.skills",
+			"\n",
+			"## Skills\n\n2 skill(s) available:",
+		),
+		groupedSystemTextFrag("system.skill.alpha", "system.skills", "\n", "- **alpha**: first"),
+		groupedSystemTextFrag("system.skill.技能", "system.skills", "\n", "- **技能**: 第二"),
+		textFrag(
+			"system.workspace_file.AGENTS.md",
+			contextfrag.SlotSystem,
+			contextfrag.KindWorkspaceInstruction,
+			sdk.MessageRoleSystem,
+			"## AGENTS.md\n\ninstructions",
+		),
+	}
+
+	payload, _ := renderSDKPayload(t, frags, placementFor(frags))
+	want := "prompt\n\n" +
+		"## Platform Identities\n\nKnown identities.\n\n" +
+		"<identity channel=\"telegram\" username=\"@memoh\"/>\n" +
+		"<identity channel=\"weixin\" username=\"小明\"/>\n\n" +
+		"## Skills\n\n2 skill(s) available:\n" +
+		"- **alpha**: first\n" +
+		"- **技能**: 第二\n\n" +
+		"## AGENTS.md\n\ninstructions"
+	if payload.System != want {
+		t.Fatalf("system = %q, want grouped system bytes %q", payload.System, want)
 	}
 }
 
@@ -118,4 +172,18 @@ func assertMessagesEqual(t *testing.T, got, want []sdk.Message) {
 	if string(gotJSON) != string(wantJSON) {
 		t.Fatalf("messages = %s, want %s", gotJSON, wantJSON)
 	}
+}
+
+func groupedSystemTextFrag(id, groupID, joiner, text string) contextfrag.ContextFrag {
+	return contextfrag.TextFrag(contextfrag.TextFragInput{
+		ID: id, Kind: contextfrag.KindSystemPrompt, Role: sdk.MessageRoleSystem,
+		Slot: contextfrag.SlotSystem, Text: text, Priority: 20,
+		CacheClass: contextfrag.CacheStable, Trust: contextfrag.TrustSystem,
+		Source: "test", Collector: "test",
+		Render: contextfrag.RenderPolicy{
+			Format:      contextfrag.RenderMarkdown,
+			GroupID:     groupID,
+			GroupJoiner: joiner,
+		},
+	})
 }

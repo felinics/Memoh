@@ -20,7 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/memohai/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/audio"
 )
 
 // Edge TTS WebSocket client.

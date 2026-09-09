@@ -17,6 +17,6 @@ describe('shortenImageRef', () => {
   })
 
   it('preserves non-docker-hub registries', () => {
-    expect(shortenImageRef('ghcr.io/memohai/memoh:latest')).toBe('ghcr.io/memohai/memoh:latest')
+    expect(shortenImageRef('ghcr.io/felinics/memoh:latest')).toBe('ghcr.io/felinics/memoh:latest')
   })
 })

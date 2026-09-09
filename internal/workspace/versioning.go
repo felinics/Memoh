@@ -13,11 +13,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/db"
-	dbsqlc "github.com/memohai/memoh/internal/db/postgres/sqlc"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/db"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -435,7 +435,7 @@ func (m *Manager) replaceContainerSnapshot(ctx context.Context, botID, container
 	}
 	// Container process was recreated — evict the stale gRPC connection
 	// unconditionally so the next call dials fresh to the new process.
-	m.grpcPool.Remove(botID)
+	m.resetBridge(botID)
 
 	// Recreate the task and restore the container network before the next
 	// workspace operation.
@@ -454,9 +454,9 @@ func (m *Manager) commitSnapshotAndReplaceContainer(ctx context.Context, ref *lo
 		Target: ctr.SnapshotRef{Driver: ref.info.StorageRef.Driver, Key: runtimeSnapshotName, Kind: "committed"},
 	}); err != nil {
 		if errors.Is(err, ctr.ErrNotSupported) {
-			m.grpcPool.Remove(ref.botID)
+			m.resetBridge(ref.botID)
 			_ = m.startTaskAndEnsureNetwork(ctx, ref.botID, ref.containerID)
-			m.grpcPool.Remove(ref.botID)
+			m.resetBridge(ref.botID)
 		}
 		return err
 	}

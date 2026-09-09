@@ -15,16 +15,16 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/memohai/memoh/internal/accounts"
-	"github.com/memohai/memoh/internal/apperror"
-	"github.com/memohai/memoh/internal/bots"
-	"github.com/memohai/memoh/internal/config"
-	ctr "github.com/memohai/memoh/internal/container"
-	displaypkg "github.com/memohai/memoh/internal/display"
-	"github.com/memohai/memoh/internal/httpx"
-	"github.com/memohai/memoh/internal/mcp"
-	"github.com/memohai/memoh/internal/policy"
-	"github.com/memohai/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
+	displaypkg "github.com/felinics/memoh/internal/display"
+	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type ContainerdHandler struct {
@@ -40,9 +40,9 @@ type ContainerdHandler struct {
 	botService       *bots.Service
 	accountService   *accounts.Service
 	policyService    *policy.Service
-	pluginService    PluginInstallationLister
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
+	workspaceDeps    workspaceDependencyService
 }
 
 type ContainerGPURequest struct {
@@ -113,8 +113,6 @@ type createContainerErrorEvent struct {
 func newWorkspaceSetupAppError(setupErr error, requestID string) (createContainerErrorEvent, bool) {
 	var code apperror.Code
 	switch {
-	case errors.Is(setupErr, workspace.ErrWorkspaceImageIncompatible):
-		code = apperror.CodeWorkspaceImageIncompatible
 	case errors.Is(setupErr, workspace.ErrWorkspaceTemplateBootstrapFailed):
 		code = apperror.CodeWorkspaceTemplateBootstrapFailed
 	default:
@@ -275,7 +273,7 @@ type ListSnapshotsResponse struct {
 	Snapshots   []SnapshotInfo `json:"snapshots"`
 }
 
-func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg config.WorkspaceConfig, containerBackend string, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
+func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg config.WorkspaceConfig, containerBackend string, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service) *ContainerdHandler {
 	h := &ContainerdHandler{
 		manager:          manager,
 		cfg:              cfg,
@@ -287,7 +285,7 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 		policyService:    policyService,
 		browserSessions:  newBrowserSessionStore(browserSessionIdleTTL),
 	}
-	h.displayService = displaypkg.NewService(h.logger, manager)
+	h.displayService = displayService
 	return h
 }
 
@@ -341,6 +339,20 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/mcp-stdio", h.CreateMCPStdio)
 	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
 	root.POST("/tools", h.HandleMCPTools)
+	// Workspace dependency routes.
+	// The catalog is bot independent and needs only a signed-in user.
+	e.GET("/workspace-dependencies/catalog", h.ListWorkspaceDependencyCatalog)
+	e.GET("/workspace-dependencies/icons/:digest", h.GetWorkspaceDependencyIcon)
+	deps := e.Group("/bots/:bot_id/dependencies")
+	deps.GET("", h.ListWorkspaceDependencies)
+	deps.POST("/preflight", h.PreflightWorkspaceDependencies)
+	deps.POST("/check-updates", h.CheckWorkspaceDependencyUpdates)
+	deps.GET("/:dep_id/script", h.GetWorkspaceDependencyScript)
+	deps.POST("/:dep_id/install", h.InstallWorkspaceDependency)
+	deps.POST("/:dep_id/update", h.UpdateWorkspaceDependency)
+	deps.POST("/:dep_id/reinstall", h.ReinstallWorkspaceDependency)
+	deps.POST("/:dep_id/rollback", h.RollbackWorkspaceDependency)
+	deps.DELETE("/:dep_id", h.RemoveWorkspaceDependency)
 }
 
 // CreateContainer godoc

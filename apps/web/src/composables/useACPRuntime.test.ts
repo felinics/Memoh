@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, defineStore, setActivePinia } from 'pinia'
 import { computed, ref } from 'vue'
-import type { AcpagentRuntimeStatus } from '@memohai/sdk'
+import type { AcpagentRuntimeStatus, AcpclientAvailableCommandInfo } from '@memohai/sdk'
 import { useACPRuntime } from './useACPRuntime'
 
 const chatStoreMock = vi.hoisted(() => ({
@@ -17,12 +17,14 @@ function runtime(
   effort: string,
   agentId = 'codex',
   sessionId = 'session-1',
+  availableCommands: AcpclientAvailableCommandInfo[] = [],
 ): AcpagentRuntimeStatus {
   return {
     runtime_id: 'runtime-1',
     session_id: sessionId,
     agent_id: agentId,
     state: 'idle',
+    available_commands: availableCommands,
     models: {
       current_model_id: model,
       available_models: [
@@ -45,9 +47,10 @@ function deferred<T>() {
 
 function makeStore(initial?: AcpagentRuntimeStatus) {
   const ensureACPRuntime = vi.fn<() => Promise<AcpagentRuntimeStatus | undefined>>()
+  const setACPRuntimeMode = vi.fn<(modeId: string) => Promise<AcpagentRuntimeStatus | undefined>>()
   const setACPRuntimeModel = vi.fn<(modelId: string) => Promise<AcpagentRuntimeStatus | undefined>>()
   const setACPRuntimeReasoning = vi.fn<(effort: string) => Promise<AcpagentRuntimeStatus | undefined>>()
-  const pendingACPStateFor = vi.fn(() => null as unknown)
+  const pendingExternalAgentStateFor = vi.fn(() => null as unknown)
   const useStore = defineStore(`acp-runtime-test-${Math.random()}`, () => {
     const acpRuntimeStatuses = ref<Record<string, AcpagentRuntimeStatus | undefined>>({
       ...(initial ? { 'bot-1:session-1': initial } : {}),
@@ -57,18 +60,19 @@ function makeStore(initial?: AcpagentRuntimeStatus) {
       acpRuntimeStatuses,
       acpRuntimePending,
       acpRuntimeKey: (botId: string, sessionId: string) => `${botId.trim()}:${sessionId.trim()}`,
-      pendingACPStateFor,
+      pendingExternalAgentStateFor,
       ensurePendingACPRuntime: vi.fn(),
       setPendingACPModel: vi.fn(),
       setPendingACPReasoning: vi.fn(),
       ensureACPRuntime,
+      setACPRuntimeMode,
       setACPRuntimeModel,
       setACPRuntimeReasoning,
     }
   })
   const store = useStore()
   chatStoreMock.use.mockReturnValue(store)
-  return { store, ensureACPRuntime, setACPRuntimeModel, setACPRuntimeReasoning, pendingACPStateFor }
+  return { store, ensureACPRuntime, setACPRuntimeModel, setACPRuntimeReasoning, pendingExternalAgentStateFor }
 }
 
 function useSessionRuntime() {
@@ -87,24 +91,23 @@ describe('useACPRuntime', () => {
     chatStoreMock.use.mockReset()
   })
 
-  it('keeps capability snapshots isolated between panes sharing one Session', async () => {
-    const { store, setACPRuntimeModel } = makeStore(runtime('model-a', 'high'))
-    const paneA = useSessionRuntime()
-    const paneB = useSessionRuntime()
-    setACPRuntimeModel.mockResolvedValueOnce(runtime('model-b', 'low'))
+  it('exposes Agent commands only for the current runtime target', async () => {
+    makeStore(runtime('model-a', 'high', 'codex', 'session-1', [
+      { name: 'review', description: 'Review' },
+    ]))
+    const sessionId = ref('session-1')
+    const pane = useACPRuntime({
+      target: computed(() => ({ botId: 'bot-1', sessionId: sessionId.value, viewId: 'chat' })),
+      pending: false,
+      enabled: true,
+      agentId: 'codex',
+      projectPath: '',
+    })
 
-    await paneB.setModel('model-b')
-    expect(paneB.currentModelId.value).toBe('model-b')
-    expect(paneB.currentReasoningEffort.value).toBe('low')
-
-    store.acpRuntimeStatuses = {
-      'bot-1:session-1': runtime('model-a', 'high'),
-    }
+    expect(pane.availableCommands.value.map(command => command.name)).toEqual(['review'])
+    sessionId.value = 'session-2'
     await Promise.resolve()
-
-    expect(paneA.currentModelId.value).toBe('model-a')
-    expect(paneB.currentModelId.value).toBe('model-b')
-    expect(paneB.currentReasoningEffort.value).toBe('low')
+    expect(pane.availableCommands.value).toEqual([])
   })
 
   it('adopts only the latest model response', async () => {
@@ -139,10 +142,10 @@ describe('useACPRuntime', () => {
   })
 
   it('rebinds draft capability to the target Session on promotion or navigation', async () => {
-    const { store, pendingACPStateFor } = makeStore()
+    const { store, pendingExternalAgentStateFor } = makeStore()
     const pending = ref(true)
     const sessionId = ref<string | null>(null)
-    pendingACPStateFor.mockReturnValue({
+    pendingExternalAgentStateFor.mockReturnValue({
       runtimeStatus: runtime('model-b', 'low'),
       ensuring: false,
     })

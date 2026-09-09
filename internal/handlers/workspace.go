@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 
-	ctr "github.com/memohai/memoh/internal/container"
-	"github.com/memohai/memoh/internal/workspace"
-	"github.com/memohai/memoh/internal/workspace/bridge"
+	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 // containerWorkspace captures the subset of workspace capabilities required by

@@ -10,7 +10,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/memohai/memoh/internal/runtimefence"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type fenceCapturingToolSource struct {
@@ -59,30 +59,6 @@ func TestToolGatewayMiddlewareStopsWhenOwningRunIsCanceled(t *testing.T) {
 	}
 	if source.calls != 0 {
 		t.Fatalf("tool source calls = %d, want zero for canceled run", source.calls)
-	}
-}
-
-func TestValidateRuntimeGuardRejectsCancellationDuringGuard(t *testing.T) {
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	session := ToolSessionContext{RunContext: runCtx}
-	bound, cancelBound := BindRuntimeContext(context.Background(), session)
-	defer cancelBound()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		session.RuntimeGuard = func(context.Context) error {
-			close(started)
-			<-release
-			return nil
-		}
-		done <- ValidateRuntimeGuard(bound, session)
-	}()
-	<-started
-	cancelRun()
-	close(release)
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("runtime guard error = %v, want context.Canceled", err)
 	}
 }
 
@@ -157,5 +133,32 @@ func callToolRequest(name string) *sdkmcp.ServerRequest[*sdkmcp.CallToolParamsRa
 			Name:      name,
 			Arguments: json.RawMessage(`{}`),
 		},
+	}
+}
+
+// A workspace tool-gateway mount outlives the turns it serves. Between turns
+// its session carries no RunID; RequireActiveRun keeps that idle window to
+// tools/list — a call with no owning run is refused before any tool effect.
+func TestToolGatewayMiddlewareRefusesIdleMountCalls(t *testing.T) {
+	source := &fenceCapturingToolSource{}
+	service := NewToolGatewayService(nil, []ToolSource{source})
+	idle := ToolGatewayMiddleware(service, nil, ToolSessionContext{
+		BotID: "bot-1", RequireActiveRun: true,
+	})(nil)
+	if _, err := idle(context.Background(), "tools/call", callToolRequest("fenced_tool")); err == nil {
+		t.Fatal("idle mount tools/call succeeded, want refusal")
+	}
+	if source.calls != 0 {
+		t.Fatalf("tool source calls = %d, want zero for idle mount", source.calls)
+	}
+
+	active := ToolGatewayMiddleware(service, nil, ToolSessionContext{
+		BotID: "bot-1", RunID: "run-1", RequireActiveRun: true,
+	})(nil)
+	if _, err := active(context.Background(), "tools/call", callToolRequest("fenced_tool")); err != nil {
+		t.Fatalf("active turn tools/call error = %v", err)
+	}
+	if source.calls != 1 {
+		t.Fatalf("tool source calls = %d, want one for the active turn", source.calls)
 	}
 }

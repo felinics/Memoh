@@ -73,25 +73,15 @@ func firstNonEmptyHTTPHeader(req *http.Request, names ...string) string {
 	return ""
 }
 
+// ServeToolMCPHTTP serves a tool MCP request using the request-carried
+// session context. Callers that own richer per-run context (the ACP session
+// pool) overlay it onto the session before calling.
 func ServeToolMCPHTTP(w http.ResponseWriter, req *http.Request, log *slog.Logger, gateway *ToolGatewayService, contexts *ToolSessionContextStore, session ToolSessionContext) {
-	serveToolMCPHTTP(w, req, log, gateway, contexts, session, true)
-}
-
-// ServeToolMCPHTTPWithoutContextMerge serves a tool MCP request using the
-// request-carried session context without merging long-lived ACP session state.
-func ServeToolMCPHTTPWithoutContextMerge(w http.ResponseWriter, req *http.Request, log *slog.Logger, gateway *ToolGatewayService, contexts *ToolSessionContextStore, session ToolSessionContext) {
-	serveToolMCPHTTP(w, req, log, gateway, contexts, session, false)
-}
-
-func serveToolMCPHTTP(w http.ResponseWriter, req *http.Request, log *slog.Logger, gateway *ToolGatewayService, contexts *ToolSessionContextStore, session ToolSessionContext, mergeContext bool) {
 	if gateway == nil {
 		http.Error(w, "tool gateway not configured", http.StatusServiceUnavailable)
 		return
 	}
 	EnsureStreamableAcceptHeader(req)
-	if contexts != nil && mergeContext {
-		session = contexts.Merge(session)
-	}
 	handler := sdkmcp.NewStreamableHTTPHandler(
 		func(*http.Request) *sdkmcp.Server {
 			return BuildToolMCPServer(gateway, contexts, session)
@@ -165,11 +155,25 @@ func ToolGatewayMiddleware(gateway *ToolGatewayService, contexts *ToolSessionCon
 					return nil, err
 				}
 				return &sdkmcp.ListToolsResult{
+					// Tool availability is scoped by the authenticated bot/session/runtime.
+					// Set the v1.7 cache metadata explicitly because this middleware bypasses
+					// the SDK's built-in tools/list handler and its default initialization.
+					Cacheable: sdkmcp.Cacheable{
+						TTLMs:      0,
+						CacheScope: "private",
+					},
 					Tools: ConvertGatewayToolsToSDK(tools),
 				}, nil
 			case "tools/call":
 				if strings.TrimSpace(session.RuntimeID) != "" && !session.RuntimeActive {
 					return nil, errors.New("ACP runtime is not processing a prompt")
+				}
+				if session.RequireActiveRun && strings.TrimSpace(session.RunID) == "" {
+					// A workspace mount outlives the turns it serves; between
+					// turns it must answer tools/list (runtimes probe it at
+					// startup) but never execute tools with no run to own the
+					// call.
+					return nil, errors.New("tool gateway mount is idle: no active turn")
 				}
 				callReq, ok := req.(*sdkmcp.ServerRequest[*sdkmcp.CallToolParamsRaw])
 				if !ok || callReq == nil || callReq.Params == nil {

@@ -261,7 +261,7 @@ import {
   TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@felinic/ui'
 import { ChevronLeft, ChevronRight, Globe, Plus, Search, Terminal, Upload } from 'lucide-vue-next'
-import { getBotsByBotIdMcp, putBotsByBotIdMcpImport } from '@memohai/sdk'
+import { getBotsByBotIdMcp, putBotsByBotIdMcpOpsImport } from '@memohai/sdk'
 import type { McpImportRequest, McpToolDescriptor } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import McpServerDetail from './mcp-server-detail.vue'
@@ -426,7 +426,7 @@ async function executeImport() {
     if (!parsed.mcpServers && typeof parsed === 'object') {
       parsed = { mcpServers: parsed as McpImportRequest['mcpServers'] }
     }
-    await putBotsByBotIdMcpImport({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body: parsed, throwOnError: true })
+    await putBotsByBotIdMcpOpsImport({ path: { bot_id: props.botId } as unknown as { bot_id: string }, body: parsed, throwOnError: true })
     importOpen.value = false
     await loadList()
     toast.success(t('mcp.importSuccess'))

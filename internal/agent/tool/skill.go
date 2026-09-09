@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"sort"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 type SkillProvider struct {

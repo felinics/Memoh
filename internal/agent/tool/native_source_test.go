@@ -8,13 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 
-	toolapproval "github.com/memohai/memoh/internal/agent/decision/approval"
-	userinput "github.com/memohai/memoh/internal/agent/decision/input"
-	"github.com/memohai/memoh/internal/agent/sessionmode"
-	"github.com/memohai/memoh/internal/mcp"
-	sched "github.com/memohai/memoh/internal/schedule"
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/mcp"
+	sched "github.com/felinics/memoh/internal/schedule"
 )
 
 func TestNativeToolSourceAllowlistAndCall(t *testing.T) {
@@ -46,9 +47,11 @@ func TestNativeToolSourceAllowlistAndCall(t *testing.T) {
 		AllowTools: map[string]bool{ToolRead().String(): true},
 	})
 	session := mcp.ToolSessionContext{
-		BotID:     "bot-1",
-		ChatID:    "chat-1",
-		SessionID: "session-1",
+		BotID:                    "bot-1",
+		ChatID:                   "chat-1",
+		SessionID:                "session-1",
+		ReasoningStoredEffort:    "low",
+		ReasoningRequestedEffort: "high",
 	}
 
 	tools, err := source.ListTools(context.Background(), session)
@@ -60,6 +63,10 @@ func TestNativeToolSourceAllowlistAndCall(t *testing.T) {
 	}
 	if provider.session.BotID != "bot-1" || provider.session.ChatID != "chat-1" || provider.session.SessionID != "session-1" {
 		t.Fatalf("provider session = %#v", provider.session)
+	}
+	if provider.session.ReasoningStoredEffort != "low" || provider.session.ReasoningRequestedEffort != "high" {
+		t.Fatalf("provider reasoning intent = stored %q, requested %q",
+			provider.session.ReasoningStoredEffort, provider.session.ReasoningRequestedEffort)
 	}
 
 	result, err := source.CallTool(context.Background(), session, ToolRead().String(), map[string]any{"value": "ok"})
@@ -73,6 +80,22 @@ func TestNativeToolSourceAllowlistAndCall(t *testing.T) {
 
 	if _, err := source.CallTool(context.Background(), session, "exec", map[string]any{}); !errors.Is(err, mcp.ErrToolNotFound) {
 		t.Fatalf("CallTool(exec) error = %v, want ErrToolNotFound", err)
+	}
+}
+
+func TestMCPSessionRoundTripPreservesReasoningIntent(t *testing.T) {
+	t.Parallel()
+
+	want := SessionContext{
+		BotID:                    "bot-1",
+		ReasoningStoredEffort:    "high",
+		ReasoningRequestedEffort: "disable",
+	}
+	got := sessionFromMCP(toMCPSession(want))
+	if got.ReasoningStoredEffort != want.ReasoningStoredEffort ||
+		got.ReasoningRequestedEffort != want.ReasoningRequestedEffort {
+		t.Fatalf("reasoning intent round trip = stored %q, requested %q",
+			got.ReasoningStoredEffort, got.ReasoningRequestedEffort)
 	}
 }
 
@@ -246,6 +269,37 @@ func TestNativeToolSourcePassesSupportsImageInputToProviders(t *testing.T) {
 	}
 	if !strings.Contains(descriptors[0].Description, "Also supports reading image files") {
 		t.Fatalf("read description missing image support hint:\n%s", descriptors[0].Description)
+	}
+}
+
+func TestNativeToolSourcePassesContextBudgetToProviders(t *testing.T) {
+	provider := &nativeSourceTestProvider{
+		tools: []sdk.Tool{{
+			Name:       ToolRead().String(),
+			Parameters: map[string]any{"type": "object"},
+			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+				return "ok", nil
+			},
+		}},
+	}
+	source := NewNativeToolSource(nil, []ToolProvider{provider}, NativeToolSourceOptions{
+		AllowTools: map[string]bool{ToolRead().String(): true},
+	})
+	policy := &contextfrag.ToolExchangePolicy{MinMessages: 7}
+
+	_, err := source.ListTools(context.Background(), mcp.ToolSessionContext{
+		BotID:                     "bot-1",
+		ContextBudgetMaxTokens:    12345,
+		ContextToolExchangePolicy: policy,
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if provider.session.ContextBudgetMaxTokens != 12345 {
+		t.Fatalf("provider.session.ContextBudgetMaxTokens = %d, want 12345", provider.session.ContextBudgetMaxTokens)
+	}
+	if provider.session.ContextToolExchangePolicy != policy {
+		t.Fatalf("provider.session.ContextToolExchangePolicy = %#v, want %#v", provider.session.ContextToolExchangePolicy, policy)
 	}
 }
 

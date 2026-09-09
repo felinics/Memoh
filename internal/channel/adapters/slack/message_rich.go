@@ -3,7 +3,7 @@ package slack
 import (
 	"strings"
 
-	"github.com/memohai/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/channel"
 )
 
 // Security model: Slack mrkdwn has no `\` escape, so we rely on entity

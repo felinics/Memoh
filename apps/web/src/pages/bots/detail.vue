@@ -200,6 +200,14 @@
                           class="size-4 shrink-0"
                         />
                         <span class="whitespace-nowrap">{{ $t(tab.label) }}</span>
+                        <!-- NavItem's root is already a flex row, so the count
+                             pushes itself to the trailing edge without a slot. -->
+                        <BadgeCount
+                          v-if="tab.value === 'dependencies' && dependencyAttentionCount > 0"
+                          :count="dependencyAttentionCount"
+                          variant="destructive"
+                          class="ml-auto"
+                        />
                       </NavItem>
                     </SidebarMenuItem>
                   </SidebarMenu>
@@ -265,12 +273,12 @@ import {
 } from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
-  BrainCircuit, ShieldAlert, HeartPulse, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, PackageOpen, ChevronLeft, Workflow, Laptop, Plug
+  BrainCircuit, ShieldAlert, Database, Mail, Link, Clock, Server, FileBox, Zap,
+  Monitor, Globe, Bot as BotIcon, ChevronLeft, Workflow, Laptop, Plug, Package
 } from 'lucide-vue-next'
-import { computed, ref, watch, onMounted, toValue, nextTick, inject } from 'vue'
+import { computed, ref, watch, onMounted, toValue, nextTick, inject, type Ref } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { NavItem, toast } from '@felinic/ui'
+import { BadgeCount, NavItem, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
@@ -295,9 +303,7 @@ import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotConnectors from './components/bot-connectors.vue'
 import BotMemory from './components/bot-memory.vue'
-import BotPlugins from './components/bot-plugins.vue'
 import BotSkills from './components/bot-skills.vue'
-import BotHeartbeat from './components/bot-heartbeat.vue'
 import BotCompaction from './components/bot-compaction.vue'
 import BotEmail from './components/bot-email.vue'
 import BotOverview from './components/bot-overview.vue'
@@ -305,7 +311,8 @@ import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
 import BotRemoteRuntime from './components/bot-remote-runtime.vue'
 import BotAccess from './components/bot-access.vue'
-import BotAcp from './components/bot-acp.vue'
+import BotAgents from './components/bot-agents.vue'
+import BotDependencies from './components/bot-dependencies.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -318,6 +325,8 @@ import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
+import { useBotDependenciesQuery } from '@/composables/api/useWorkspaceDependencies'
+import { dependencyNeedsAttention } from '@/utils/workspace-dependency'
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
@@ -394,6 +403,14 @@ const canManageBot = computed(() => {
 
 const capabilitiesStore = useCapabilitiesStore()
 
+// Sidebar count for the Dependencies tab: rows that need a hand (missing,
+// failed, version to align, update available). Same query key as the tab
+// itself (bot + the Server-resolved primary target), so opening the tab reuses
+// this fetch; chat-only members never see the tab, so they never fetch.
+const dependencyBadgeBotId = computed(() => (canManageBot.value ? botId.value : '')) as Ref<string>
+const { data: dependencyList } = useBotDependenciesQuery(dependencyBadgeBotId, ref(''))
+const dependencyAttentionCount = computed(() => (dependencyList.value?.items ?? []).filter(dependencyNeedsAttention).length)
+
 const tabList = computed(() => {
   const bot_id = toValue(botId)
   const tabs = [
@@ -408,14 +425,13 @@ const tabList = computed(() => {
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'tool-approval', label: 'bots.tabs.toolApproval', icon: Zap, component: BotToolApproval, params: { 'bot-id': bot_id } },
     { value: 'hooks', label: 'bots.tabs.hooks', icon: Workflow, component: BotHooks, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
-    { value: 'acp', label: 'bots.tabs.acp', icon: BotIcon, component: BotAcp, params: { 'bot-id': bot_id } },
+    { value: 'agents', label: 'bots.tabs.agents', icon: BotIcon, component: BotAgents, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
-    { value: 'plugins', label: 'bots.tabs.plugins', icon: PackageOpen, component: BotPlugins, params: { 'bot-id': bot_id } },
     ...(capabilitiesStore.loaded && capabilitiesStore.connectors
       ? [{ value: 'connectors', label: 'bots.tabs.connectors', icon: Plug, component: BotConnectors, params: { 'bot-id': bot_id } }]
       : []),
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
-    { value: 'heartbeat', label: 'bots.tabs.heartbeat', icon: HeartPulse, component: BotHeartbeat, params: { 'bot-id': bot_id } },
+    { value: 'dependencies', label: 'bots.tabs.dependencies', icon: Package, component: BotDependencies, params: { 'bot-id': bot_id } },
     { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
@@ -442,20 +458,19 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
+    { tab: 'dependencies', key: 'bots.tabs.dependencies', keywords: ['codex', 'claude code', 'node', 'python', 'uv', 'install', 'version', '依赖', '安装', '版本', '依存', 'インストール'] },
     { tab: 'remote-runtime', key: 'bots.remoteRuntime.title', keywords: ['files', 'commands', 'computer', 'server', '文件', '命令', '电脑', '服务器', 'ファイル', 'コマンド'] },
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
     { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
     { tab: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
-    { tab: 'acp', key: 'bots.tabs.acp', keywords: ['codex', 'claude code', 'coding agent', 'acp'] },
+    { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'external agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
-    { tab: 'plugins', key: 'bots.plugins.title', keywords: ['plugin', 'marketplace', 'mcp', 'oauth', 'skills'] },
     ...(capabilitiesStore.loaded && capabilitiesStore.connectors
       ? [{ tab: 'connectors', key: 'bots.tabs.connectors', keywords: ['providers', 'apps', 'oauth', 'api', '连接器', 'コネクター'] }]
       : []),
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
-    { tab: 'heartbeat', key: 'bots.heartbeat.title', keywords: ['cron', 'ping', 'alive'] },
     { tab: 'compaction', key: 'bots.compaction.title', keywords: ['compress', 'summarize', 'context window'] },
     { tab: 'schedule', key: 'bots.schedule.title', keywords: ['cron', 'jobs', 'tasks', 'automation'] },
     { tab: 'skills', key: 'bots.skills.title', keywords: ['prompts', 'instructions', 'system prompt'] },
@@ -499,7 +514,7 @@ function selectTab(value: string): void {
 }
 
 // Mobile stack state for MasterDetailSidebarLayout, derived from the URL so a
-// refresh / deep link (?tab=heartbeat) opens straight on the content and the
+// refresh / deep link (for example, ?tab=schedule) opens straight on the content and the
 // KeepAlive'd page can never inherit a stale stack state from another bot.
 const mobileDetailOpen = computed(() => {
   const tab = route.query.tab
@@ -528,8 +543,8 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['plugins', 'skills', 'hooks', 'tool-approval', 'acp', 'connectors', 'mcp', 'memory']
-  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction', 'heartbeat']
+  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'dependencies', 'memory']
+  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
   const securityKeys = ['access', 'email']
 
   return [
@@ -593,6 +608,10 @@ watch(bot, (val) => {
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
 watch([tabList, activeTab], ([tabs, tab]) => {
+  if (tab === 'acp') {
+    activeTab.value = 'agents'
+    return
+  }
   if (tabs.some(item => item.value === tab)) return
   // 'connectors' only joins the list once the capability ping lands; don't
   // bounce a deep link / refresh to overview while that's still in flight.

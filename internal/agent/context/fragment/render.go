@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	sdk "github.com/memohai/twilight-ai/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // BuildManifest creates a non-sensitive summary from fragments.
@@ -22,19 +22,23 @@ func BuildManifest(frags []ContextFrag) Manifest {
 		}
 		manifest.ValidationWarnings = append(manifest.ValidationWarnings, ContextRefWarnings(ref)...)
 		item := ManifestItem{
-			ID:          frag.ID,
-			Ref:         ref,
-			Kind:        frag.Kind,
-			Slot:        frag.Slot,
-			Role:        frag.Role,
-			Priority:    frag.Priority,
-			CacheClass:  frag.CacheClass,
-			Trust:       frag.Trust,
-			Source:      frag.Provenance.Source,
-			SourceID:    frag.Provenance.SourceID,
-			Collector:   frag.Provenance.Collector,
-			ConflictKey: frag.ConflictKey,
-			Scope:       frag.Scope,
+			ID:                 frag.ID,
+			Ref:                ref,
+			Kind:               frag.Kind,
+			Slot:               frag.Slot,
+			Role:               frag.Role,
+			Priority:           frag.Priority,
+			RetentionTier:      frag.RetentionTier,
+			DropPriority:       frag.DropPriority,
+			RequiredCapability: frag.RequiredCapability,
+			CacheClass:         frag.CacheClass,
+			Trust:              frag.Trust,
+			Source:             frag.Provenance.Source,
+			SourceID:           frag.Provenance.SourceID,
+			Collector:          frag.Provenance.Collector,
+			ConflictKey:        frag.ConflictKey,
+			Render:             frag.Render,
+			Scope:              frag.Scope,
 		}
 		for _, part := range frag.Parts {
 			item.PartTypes = append(item.PartTypes, part.Type)
@@ -130,17 +134,21 @@ func breakdownFromItems(items []ManifestItem) []KindBreakdown {
 // Render builds the legacy SDK-shaped view from fragments.
 func Render(frags []ContextFrag) AssembledContext {
 	var out AssembledContext
+	var previousSystemRender RenderPolicy
+	hasRenderedSystem := false
 	for _, frag := range frags {
 		switch frag.Slot {
 		case SlotSystem:
 			for _, part := range frag.Parts {
-				if part.Type != PartText || strings.TrimSpace(part.Text) == "" {
+				if part.Type != PartText || RenderText(part.Text, frag.Render) == "" {
 					continue
 				}
-				if out.System != "" {
-					out.System += "\n\n"
+				if hasRenderedSystem {
+					out.System += RenderSeparator(previousSystemRender, frag.Render)
 				}
-				out.System += strings.TrimSpace(part.Text)
+				out.System += RenderText(part.Text, frag.Render)
+				previousSystemRender = frag.Render
+				hasRenderedSystem = true
 			}
 		case SlotCurrentUser:
 			for _, part := range frag.Parts {

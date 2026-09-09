@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/memohai/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
 type absorbedSegmentSource string

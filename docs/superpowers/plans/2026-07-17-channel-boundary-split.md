@@ -274,8 +274,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/conversation"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/conversation"
 )
 
 type fakeRunner struct {
@@ -387,9 +387,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memohai/memoh/internal/agent/turn"
-	"github.com/memohai/memoh/internal/conversation"
-	"github.com/memohai/memoh/internal/conversation/flow"
+	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/conversation"
+	"github.com/felinics/memoh/internal/conversation/flow"
 )
 
 type Adapter struct {
@@ -616,7 +616,7 @@ git add -A && git commit -m "refactor(channel): split package root into gateway 
 
 **搬家清单:**
 - `channelmodule.Module()`：`provideChannelRegistry`、`provideCommandHandler`、`provideChannelRouter`、`provideChannelManager`、`provideChannelLifecycleService`、`providePipeline`、`provideEventStore`、`provideDiscussDriver`、`local.NewRouteHub`、`gateway.NewStore`、email全组（`provideEmailRegistry`等7个）、`webhooktunnel.NewManager`；Invoke：`startChannelManager`、`startEmailManager`、`startWebhookTunnelListener`、`startWebhookTunnel`。
-- `coremodule.Module()`：`cmd/agent/app.go`其余非`provideServerHandler`、非server的providers（config、logger、db、workspace、agent、flow、schedule、heartbeat等）＋对应Invoke（`startScheduleService`等）＋新增`provideTurnService`（`inprocess.New(resolver, WithDiscuss(agent, resolver))`绑定`turn.Service`）。
+- `coremodule.Module()`：`cmd/agent/app.go`其余非`provideServerHandler`、非server的providers（config、logger、db、workspace、agent、flow、schedule等）＋对应Invoke（`startScheduleService`等）＋新增`provideTurnService`（`inprocess.New(resolver, WithDiscuss(agent, resolver))`绑定`turn.Service`）。
 - `cmd/agent/module.go`最终形态：`fx.Options(coremodule.Module(), channelmodule.Module(), fx.Provide(全部provideServerHandler…, provideServer), fx.Invoke(startServer, injectToolProviders, …HTTP相关))`。
 
 - [ ] **Step 1: 机械搬函数**（函数体原样移动、改导出、更新package与import；`provideConfig`等cmd专属flag解析留cmd，以参数注入）
@@ -651,8 +651,8 @@ package main
 import (
 	"go.uber.org/fx"
 
-	channelmodule "github.com/memohai/memoh/cmd/internal/channel"
-	coremodule "github.com/memohai/memoh/cmd/internal/core"
+	channelmodule "github.com/felinics/memoh/cmd/internal/channel"
+	coremodule "github.com/felinics/memoh/cmd/internal/core"
 )
 
 // cmd/channel is a single-instance assembly-closure verification binary

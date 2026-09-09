@@ -2,14 +2,18 @@
   <form @submit.prevent="submitDraft">
     <SettingsSection
       v-if="!isManagedOAuthProvider"
+      class="provider-configuration"
       :title="$t('provider.configurationTitle')"
     >
       <!-- Field rows are grouped so the LAST one keeps its `last:border-b-0`
            (no trailing inset hairline) — the footer below owns the only divider,
            and it spans full width. -->
       <div>
-        <SettingsRow :label="$t('common.name')">
-          <div class="w-80">
+        <SettingsRow
+          stack="sm"
+          :label="$t('common.name')"
+        >
+          <div class="w-full sm:w-80">
             <!-- Free-typing draft committed on blur/Enter (appearance-page
                  idiom): autosave must fire once per edit, not per keystroke. -->
             <Input
@@ -33,8 +37,11 @@
           </div>
         </SettingsRow>
 
-        <SettingsRow :label="$t('provider.clientType')">
-          <div class="w-80">
+        <SettingsRow
+          stack="sm"
+          :label="$t('provider.clientType')"
+        >
+          <div class="w-full sm:w-80">
             <Select
               :model-value="form.client_type"
               @update:model-value="(value) => updateClientType(String(value ?? ''))"
@@ -57,9 +64,10 @@
 
         <SettingsRow
           v-if="form.client_type !== 'github-copilot'"
+          stack="sm"
           :label="$t('provider.url')"
         >
-          <div class="w-80">
+          <div class="w-full sm:w-80">
             <Input
               type="text"
               :model-value="baseUrlDraft"
@@ -83,9 +91,10 @@
 
         <SettingsRow
           v-if="!isManagedOAuthClientType(form.client_type)"
+          stack="sm"
           :label="$t('provider.apiKey')"
         >
-          <div class="w-80">
+          <div class="w-full sm:w-80">
             <!-- The key is write-only: the box starts empty, commits only a
                  non-empty value, and clears itself once stored. An empty
                  commit is a no-op so autosave can never wipe a secret. -->
@@ -112,6 +121,7 @@
 
         <SettingsRow
           v-if="supportsPromptCache(form.client_type)"
+          stack="sm"
           :label="$t('provider.promptCache.label')"
           :description="cacheDescription"
         >
@@ -121,7 +131,7 @@
           >
             <SelectTrigger
               size="sm"
-              class="min-w-36"
+              class="w-full sm:w-auto sm:min-w-36"
             >
               <SelectValue :placeholder="$t('provider.promptCache.label')" />
             </SelectTrigger>
@@ -165,6 +175,10 @@
                 class="size-4 text-success"
               />
               <AlertCircle
+                v-else-if="testStatus === 'unverified'"
+                class="size-4 text-warning"
+              />
+              <AlertCircle
                 v-else-if="testStatus === 'error'"
                 class="size-4 text-destructive"
               />
@@ -177,9 +191,20 @@
           </HoverCardTrigger>
           <HoverCardContent
             v-if="testError"
-            class="w-80 text-xs text-destructive whitespace-pre-wrap break-words"
+            class="w-80 text-xs whitespace-pre-wrap break-words"
+            :class="testStatus === 'unverified' ? '' : 'text-destructive'"
           >
-            {{ testError }}
+            <!-- unverified 不是失败:引导文案为主信息(正文色),上游细节
+                 降为次要点色自成一行,不和文案挤在一句里。 -->
+            <template v-if="testStatus === 'unverified'">
+              <p>{{ $t('provider.testUnverifiedHint') }}</p>
+              <p class="mt-1.5 text-muted-foreground">
+                {{ testError }}
+              </p>
+            </template>
+            <template v-else>
+              {{ testError }}
+            </template>
           </HoverCardContent>
         </HoverCard>
 
@@ -404,6 +429,8 @@ let oauthStatusLoadGeneration = 0
 
 const testStatus = computed(() => {
   if (testResult.value?.status === 'ok') return 'ok'
+  // unverified(#1087)必须先于 error 判断:它不是失败,是"无法确认"。
+  if (testResult.value?.status === 'unverified') return 'unverified'
   if (testError.value) return 'error'
   // Any non-ok probe result is an error state (the ok case returned above).
   if (testResult.value) return 'error'
@@ -421,22 +448,19 @@ function truncateError(text: string): string {
 }
 
 // The probe detail can embed the raw upstream response inside `[body: …]`. When
-// a Base URL points at a website instead of an API the body is a full HTML
-// page, so strip the markup down to its visible text (often near-empty) and
-// keep only a short, actionable hint instead of dumping the document.
+// a Base URL points at a website instead of an API the body is a full HTML page;
+// its visible text is page prose ("Example Domain … Learn more"), never an
+// actionable API error — and stripping tags leaves dead, unclickable text. Drop
+// HTML bodies entirely and keep only the status head; non-HTML bodies (real
+// JSON API errors) are still shown.
 function formatTestError(raw: string | undefined): string {
   const text = (raw ?? '').trim()
   if (!text) return t('provider.unreachable')
   const bodyStart = text.indexOf('[body:')
   if (bodyStart === -1) return truncateError(text)
   const head = text.slice(0, bodyStart).trim()
-  let body = text.slice(bodyStart + '[body:'.length).replace(/\]\s*$/, '').trim()
-  if (/<!doctype|<\/?[a-z][^>]*>/i.test(body)) {
-    body = body
-      .replace(/<(script|style)[^>]*>[\s\S]*?(<\/\1>|$)/gi, ' ')
-      .replace(/<[^>]*>/g, ' ')
-  }
-  body = body.replace(/\s+/g, ' ').trim()
+  const body = text.slice(bodyStart + '[body:'.length).replace(/\]\s*$/, '').trim()
+  if (/<!doctype|<\/?[a-z][^>]*>/i.test(body)) return truncateError(head)
   return truncateError(body ? `${head} · ${body}` : head)
 }
 

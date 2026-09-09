@@ -6,8 +6,9 @@ import "time"
 // lives here as a constant instead of in config.toml. Tests lower it through
 // Options to observe that recovery really is batched.
 const (
-	defaultScanBatchSize         = 200
-	defaultMaxScanBatchesPerTick = 5
+	defaultScanBatchSize            = 200
+	defaultMaxScanBatchesPerTick    = 5
+	defaultDurableFinishRetryBudget = time.Minute
 )
 
 // tuning holds every session runtime timing that is derived rather than
@@ -34,6 +35,10 @@ type tuning struct {
 	// as abandoned. The window between the durable insert and the live
 	// reservation is milliseconds, so this only needs to clear normal latency.
 	orphanGrace time.Duration
+	// durableFinishRetryBudget bounds how long an owner keeps renewing a run
+	// while PostgreSQL terminal writes fail. After it expires the owner drops
+	// local control so lease expiry hands convergence to the reaper.
+	durableFinishRetryBudget time.Duration
 
 	scanBatchSize         int32
 	maxScanBatchesPerTick int
@@ -53,13 +58,14 @@ func newTuning(ownerLeaseTTL, backendLossGrace time.Duration, scanBatchSize int3
 		maxScanBatchesPerTick = defaultMaxScanBatchesPerTick
 	}
 	return tuning{
-		ownerLeaseTTL:         ownerLeaseTTL,
-		backendLossGrace:      backendLossGrace,
-		reaperTick:            leaseRenewInterval(ownerLeaseTTL),
-		reaperLeaderLeaseTTL:  ownerLeaseTTL,
-		orphanGrace:           orphanGraceFactor * ownerLeaseTTL,
-		scanBatchSize:         scanBatchSize,
-		maxScanBatchesPerTick: maxScanBatchesPerTick,
+		ownerLeaseTTL:            ownerLeaseTTL,
+		backendLossGrace:         backendLossGrace,
+		reaperTick:               leaseRenewInterval(ownerLeaseTTL),
+		reaperLeaderLeaseTTL:     ownerLeaseTTL,
+		orphanGrace:              orphanGraceFactor * ownerLeaseTTL,
+		durableFinishRetryBudget: defaultDurableFinishRetryBudget,
+		scanBatchSize:            scanBatchSize,
+		maxScanBatchesPerTick:    maxScanBatchesPerTick,
 	}
 }
 

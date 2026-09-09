@@ -225,19 +225,11 @@ const routes = [
             component: () => import('@/pages/supermarket/index.vue'),
           },
           {
-            name: 'supermarket-plugin-detail',
-            path: 'plugins/:pluginId',
-            component: () => import('@/pages/supermarket/plugin-detail.vue'),
+            name: 'supermarket-package-detail',
+            path: 'skills/:registryId/:packageId',
+            component: () => import('@/pages/supermarket/package-detail.vue'),
             meta: {
-              breadcrumb: (route: RouteLocationNormalized) => route.params.pluginId,
-            },
-          },
-          {
-            name: 'supermarket-skill-detail',
-            path: 'skills/:skillId',
-            component: () => import('@/pages/supermarket/skill-detail.vue'),
-            meta: {
-              breadcrumb: (route: RouteLocationNormalized) => route.params.skillId,
+              breadcrumb: (route: RouteLocationNormalized) => route.params.packageId,
             },
           },
         ],

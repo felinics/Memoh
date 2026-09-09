@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memohai/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models"
 )
 
 func TestListGitHubCopilotRemoteModels(t *testing.T) {
@@ -42,7 +42,19 @@ func TestListGitHubCopilotRemoteModels(t *testing.T) {
 							"supports": map[string]any{
 								"tool_calls":       true,
 								"vision":           true,
-								"reasoning_effort": []string{"low", "max", "ultra", "low"},
+								"reasoning_effort": []string{" none ", "low", "max", "ultra", "none", "low"},
+							},
+						},
+					},
+					{
+						"id":                   "off-only-model",
+						"name":                 "Off-only Model",
+						"model_picker_enabled": true,
+						"supported_endpoints":  []string{"/chat/completions"},
+						"capabilities": map[string]any{
+							"type": "chat",
+							"supports": map[string]any{
+								"reasoning_effort": []string{"none"},
 							},
 						},
 					},
@@ -74,8 +86,8 @@ func TestListGitHubCopilotRemoteModels(t *testing.T) {
 		if err != nil {
 			t.Fatalf("list GitHub Copilot models: %v", err)
 		}
-		if len(remoteModels) != 1 {
-			t.Fatalf("models = %d, want 1: %#v", len(remoteModels), remoteModels)
+		if len(remoteModels) != 2 {
+			t.Fatalf("models = %d, want 2: %#v", len(remoteModels), remoteModels)
 		}
 		model := remoteModels[0]
 		if model.ID != "reasoning-model" || model.Name != "Reasoning Model" || model.OwnedBy != "Example" {
@@ -84,7 +96,7 @@ func TestListGitHubCopilotRemoteModels(t *testing.T) {
 		if got := strings.Join(model.Compatibilities, ","); got != "tool-call,vision,reasoning" {
 			t.Fatalf("compatibilities = %q", got)
 		}
-		if got := strings.Join(model.ReasoningEfforts, ","); got != "low,max" {
+		if got := strings.Join(model.ReasoningEfforts, ","); got != "disable,low,max" {
 			t.Fatalf("reasoning efforts = %q", got)
 		}
 		if model.ThinkingMode != models.ThinkingModeToggle {
@@ -95,6 +107,16 @@ func TestListGitHubCopilotRemoteModels(t *testing.T) {
 		}
 		if !model.CapabilitiesKnown {
 			t.Fatal("Copilot catalog capabilities should be authoritative")
+		}
+		offOnlyModel := remoteModels[1]
+		if got := strings.Join(offOnlyModel.ReasoningEfforts, ","); got != "disable" {
+			t.Fatalf("off-only reasoning efforts = %q", got)
+		}
+		if got := strings.Join(offOnlyModel.Compatibilities, ","); got != "reasoning" {
+			t.Fatalf("off-only compatibilities = %q", got)
+		}
+		if offOnlyModel.ThinkingMode != models.ThinkingModeToggle {
+			t.Fatalf("off-only thinking mode = %q", offOnlyModel.ThinkingMode)
 		}
 	})
 

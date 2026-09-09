@@ -13,7 +13,10 @@ models:
       compatibilities: [tool-call, reasoning]
       context_window: 1000000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      # disable is hand-maintained: LiteLLM has no off signal for DeepSeek, but the
+      # chat_completions_compat layer maps a disabled toggle onto thinking-off
+      # (models.dev and OpenRouter both confirm V4 can be turned off).
+      reasoning_efforts: [disable, low, medium, high]
 
   - model_id: deepseek-v4-pro
     name: DeepSeek V4 Pro
@@ -22,7 +25,7 @@ models:
       compatibilities: [tool-call, reasoning]
       context_window: 1000000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      reasoning_efforts: [disable, low, medium, high]
 
   - model_id: deepseek-chat
     name: DeepSeek V4 Flash (legacy non-thinking)

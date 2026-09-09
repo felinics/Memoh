@@ -26,9 +26,13 @@ export function createChatBots(deps: {
       deps.currentBotId.value = (ready?.id ?? list[0]?.id ?? '').trim() || null
       return deps.currentBotId.value
     } catch (error) {
+      // Stale run (user scope changed mid-flight): resolve quietly. A live
+      // failure must surface so bootstrap recovery retries it — swallowing it
+      // here used to read as "account has no bots", letting initialize()
+      // complete "successfully" with no WebSocket and no recovery (#1070).
       if (generation !== deps.userScopeGeneration()) return null
       console.error('Failed to fetch bots:', error)
-      return deps.currentBotId.value
+      throw error
     }
   }
 
