@@ -15,10 +15,12 @@
 
 记录时两个 PR 都是 Open Draft：
 
-| 仓库 | PR | 远端 head（本次提交前核实） |
+| 仓库 | PR | 远端 head（2026-09-08 复核） |
 | --- | --- | --- |
 | Memoh | https://github.com/felinics/Memoh/pull/1177 | `efb0f6821a575d883fa0de50064176f9e9615f57` |
-| UI | https://github.com/felinics/ui/pull/19 | `4f199290df1f1a00478109a3631dc695d88a2406` |
+| UI | https://github.com/felinics/ui/pull/19 | `2a8a7ba31c147588c0600ecd92c3ba33b0e4fdb8` |
+
+> 修订说明：本表此前 UI 行写作 `4f199290`，复核远端后实际 head 为 `2a8a7ba`（`4f199290` 是其前两个提交的祖先）。#1177 推送的 gitlink 与 UI 分支 head 一致，配对无缺口。
 
 本次用户要求提交，未要求推送或合并。因此本轮只创建本地提交，PR 尚不包含全部最新代码。此前本地 checkpoint `7768dec6d`（Memoh）和 `6015560`（UI）也尚未推送。以后若授权推送，先推 UI 子模块分支，确保 gitlink 对应 commit 在远端可获取，再推主仓库分支；不要仅推主仓库。
 

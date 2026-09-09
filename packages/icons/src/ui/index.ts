@@ -25,6 +25,10 @@ export const ConnectorIcon = withUiStroke(createLucideIcon('Connector', [
 // Consumers choose semantics; glyph direction and geometry stay in this module.
 export const UploadIcon = withUiStroke(Paperclip)
 // Monitor and cloud silhouette, composed in the shared 24-unit icon frame.
+// Semantics: this marks the bot's NATIVE workspace ("Cloud Computer" in the
+// composer target selector — hosted by Memoh, as opposed to a user's remote
+// computer, which uses the plain monitor ComputerIcon below). The name is
+// about the hosting side, not about "cloud storage".
 export const CloudIcon = withUiStroke(createLucideIcon('CloudComputer', [
   ['path', { d: 'M8 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v7M8 21h3M10 17v4' }],
   ['path', { d: 'M16 21a4 4 0 1 1 3.77-5.33H20a2.67 2.67 0 0 1 0 5.33Z' }],
