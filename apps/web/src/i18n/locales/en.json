@@ -3656,14 +3656,6 @@
     "packageNotFound": "Package not found",
     "noDescription": "No description",
     "unnamedSkill": "Unnamed skill",
-    "componentFilter": "Filter by component",
-    "component": {
-      "all": "All",
-      "skills": "Skills",
-      "dependencies": "Dependencies",
-      "connectors": "Connectors"
-    },
-    "allCategories": "All categories",
     "includedDependencies": "Included dependencies",
     "dependenciesHint": "Installed into the bot's workspace and shared with other Packages that need them.",
     "dependencyPending": "Loading…",
@@ -3677,7 +3669,8 @@
     "installPreview": "Installing will",
     "installPreviewDependency": "install into the workspace if missing",
     "installPreviewConnector": "need your authorization",
-    "installPreviewConnectorOptional": "can be authorized later (optional)"
+    "installPreviewConnectorOptional": "can be authorized later (optional)",
+    "viewAll": "View all"
   },
   "connectors": {
     "title": "Connectors",

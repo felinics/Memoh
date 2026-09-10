@@ -3656,14 +3656,6 @@
     "packageNotFound": "未找到 Package",
     "noDescription": "暂无描述",
     "unnamedSkill": "未命名 Skill",
-    "componentFilter": "按组件筛选",
-    "component": {
-      "all": "全部",
-      "skills": "Skills",
-      "dependencies": "依赖",
-      "connectors": "连接器"
-    },
-    "allCategories": "全部分类",
     "includedDependencies": "包含的依赖",
     "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他扩展包共享。",
     "dependencyPending": "加载中…",
@@ -3677,7 +3669,8 @@
     "installPreview": "安装将会",
     "installPreviewDependency": "缺失时安装到工作区",
     "installPreviewConnector": "需要你授权",
-    "installPreviewConnectorOptional": "可稍后授权（可选）"
+    "installPreviewConnectorOptional": "可稍后授权（可选）",
+    "viewAll": "查看全部"
   },
   "connectors": {
     "title": "连接器",

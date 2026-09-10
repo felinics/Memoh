@@ -225,6 +225,14 @@ const routes = [
             component: () => import('@/pages/supermarket/index.vue'),
           },
           {
+            name: 'supermarket-category',
+            path: 'category/:categoryId',
+            component: () => import('@/pages/supermarket/category.vue'),
+            meta: {
+              breadcrumb: (route: RouteLocationNormalized) => route.params.categoryId,
+            },
+          },
+          {
             name: 'supermarket-package-detail',
             path: ':registryId/:packageId',
             component: () => import('@/pages/supermarket/package-detail.vue'),

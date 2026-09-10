@@ -535,7 +535,7 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'dependencies', 'memory']
+  const capabilityKeys = ['skills', 'packages', 'hooks', 'tool-approval', 'agents', 'mcp', 'memory']
   const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
   const securityKeys = ['access', 'email']
 
