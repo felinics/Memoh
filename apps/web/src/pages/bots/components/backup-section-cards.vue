@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Checkbox } from '@felinic/ui'
 import {
-  Check,
   ChevronDown,
   TriangleAlert,
   SlidersHorizontal,
@@ -212,16 +212,13 @@ const visibleSections = computed(() => props.sections.filter(s => iconMap[s.key]
         </button>
 
         <!-- Include check -->
-        <div
+        <Checkbox
           v-if="mode === 'include' && isAvailable(item)"
-          class="flex size-4 shrink-0 items-center justify-center rounded-full border"
-          :class="stateOf(item.key) !== 'skip' ? 'border-foreground bg-foreground text-background' : 'border-border'"
-        >
-          <Check
-            v-if="stateOf(item.key) !== 'skip'"
-            class="size-3"
-          />
-        </div>
+          :model-value="stateOf(item.key) !== 'skip'"
+          :disabled="disabled"
+          :aria-label="t(`bots.backup.sections.${item.key}`)"
+          @update:model-value="(checked) => setState(item, checked === true ? 'merge' : 'skip')"
+        />
       </div>
 
       <!-- Detail list -->

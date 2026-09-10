@@ -19,6 +19,7 @@ export default defineConfig({
         root: webRoot,
         plugins: [vue()],
         resolve: {
+          dedupe: ['vue'],
           alias: {
             '@': fileURLToPath(new URL('./apps/web/src', import.meta.url)),
             '#': fileURLToPath(new URL('./packages/ui/src', import.meta.url)),
@@ -26,6 +27,7 @@ export default defineConfig({
         },
         test: {
           name: 'web',
+          server: { deps: { inline: ['reka-ui', /@vueuse\//] } },
           globals: true,
           include: ['src/**/*.test.ts'],
           env: process.env,
