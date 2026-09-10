@@ -64,13 +64,13 @@ var _ sdk.TranscriptionProvider = (*Provider)(nil)
 // Keep transport diagnostics private even when a legacy handler uses Error().
 type requestError struct{ cause error }
 
-func (e *requestError) Error() string { return "Alibaba Cloud ASR request failed" }
+func (*requestError) Error() string   { return "alibaba cloud ASR request failed" }
 func (e *requestError) Unwrap() error { return e.cause }
 
 func New(apiKey, baseURL string) (*Provider, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
-		return nil, errors.New("Alibaba Cloud ASR requires an API key")
+		return nil, errors.New("alibaba cloud ASR requires an API key")
 	}
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
@@ -78,7 +78,7 @@ func New(apiKey, baseURL string) (*Provider, error) {
 	}
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, errors.New("Alibaba Cloud ASR base URL must be an HTTP(S) API base URL")
+		return nil, errors.New("alibaba cloud ASR base URL must be an HTTP(S) API base URL")
 	}
 	return &Provider{apiKey: apiKey, baseURL: baseURL, client: &http.Client{
 		Timeout:       90 * time.Second,
@@ -99,7 +99,7 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 		return nil, err
 	}
 	if len(params.Audio) == 0 {
-		return nil, errors.New("Alibaba Cloud ASR requires a non-empty audio file")
+		return nil, errors.New("alibaba cloud ASR requires a non-empty audio file")
 	}
 	// Keep the entire data URL within DashScope's 10 MB encoded input limit.
 	audioPrefix := "data:" + audioContentType(params) + ";base64,"
@@ -161,7 +161,7 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Upstream error bodies can echo submitted audio or credentials. Do not expose them.
-		return nil, fmt.Errorf("Alibaba Cloud ASR returned HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("alibaba cloud ASR returned HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
