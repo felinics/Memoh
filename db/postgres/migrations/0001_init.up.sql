@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS providers (
     'minimax-speech',
     'volcengine-speech',
     'alibabacloud-speech',
+    'alibabacloud-transcription',
     'microsoft-speech',
     'google-speech',
     'google-transcription',

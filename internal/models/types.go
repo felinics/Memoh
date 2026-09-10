@@ -40,6 +40,7 @@ const (
 	ClientTypeMiniMaxSpeech           ClientType = "minimax-speech"
 	ClientTypeVolcengineSpeech        ClientType = "volcengine-speech"
 	ClientTypeAlibabaSpeech           ClientType = "alibabacloud-speech"
+	ClientTypeAlibabaTranscription    ClientType = "alibabacloud-transcription"
 	ClientTypeMicrosoftSpeech         ClientType = "microsoft-speech"
 	ClientTypeGoogleSpeech            ClientType = "google-speech"
 	ClientTypeGoogleTranscription     ClientType = "google-transcription"
