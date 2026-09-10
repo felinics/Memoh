@@ -1,0 +1,9 @@
+name: Alibaba Cloud Transcription
+client_type: alibabacloud-transcription
+icon: bailian-color
+base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+models:
+  - model_id: qwen3-asr-flash
+    name: Qwen3 ASR Flash
+    type: transcription
