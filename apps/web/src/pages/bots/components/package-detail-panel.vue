@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// The page of one Package on the bot: what it is, the one action its state
-// calls for, and its components. Skills are read-only; dependency rows reuse
+// The page of one Package on the bot, laid out like the Supermarket detail
+// page: a back / actions row, the icon box and title, the description, then
+// its components. Skills are read-only; dependency rows reuse
 // the dependency row (update / reinstall / rollback / script); connector rows
 // offer authorization and the enabled switch. Nothing here starts an
 // operation — every choice is emitted and the panel owns confirmation and
@@ -8,6 +9,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  ArrowLeft,
   ExternalLink,
   MoreHorizontal,
   Package as PackageIcon,
@@ -69,6 +71,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
+  back: []
   action: [action: PackageRowAction]
   dependencyPrimary: [dependency: DependencyItem, action: DependencyPrimaryAction]
   dependencyMenu: [dependency: DependencyItem, action: DependencyMenuAction]
@@ -77,6 +80,9 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+
+// Same icon box as the Supermarket detail header.
+const iconBoxClass = 'flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background shadow-sm' /* ui-allow-style */
 
 const name = computed(() => packageDisplayName(props.item, locale.value))
 const description = computed(() => packageDisplayDescription(props.item, locale.value))
@@ -122,40 +128,19 @@ function dependencyName(dep: PackageDependencyItem): string {
 </script>
 
 <template>
-  <div class="space-y-8">
-    <div class="flex items-start gap-4">
-      <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-accent">
-        <SkillIcon
-          v-if="item.icon"
-          :icon="item.icon"
-          variant="detail"
-        />
-        <PackageIcon
-          v-else
-          class="size-6 text-muted-foreground"
-        />
-      </span>
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <h2 class="truncate text-lg font-semibold">
-            {{ name }}
-          </h2>
-          <Spinner v-if="inProgress" />
-        </div>
-        <p
-          v-if="description"
-          class="mt-1 text-body text-muted-foreground"
-        >
-          {{ description }}
-        </p>
-        <p
-          v-if="item.last_error && (item.status === 'failed' || item.status === 'partial')"
-          class="mt-2 break-all font-mono text-caption text-destructive"
-        >
-          {{ item.last_error }}
-        </p>
-      </div>
-      <div class="flex shrink-0 items-center gap-2">
+  <div>
+    <div class="mb-6 flex items-center justify-between gap-3">
+      <Button
+        variant="ghost"
+        size="sm"
+        class="-ml-2"
+        @click="emit('back')"
+      >
+        <ArrowLeft class="size-4" />
+        {{ t('common.back') }}
+      </Button>
+      <div class="flex items-center gap-2">
+        <Spinner v-if="inProgress" />
         <Button
           v-if="primary"
           size="sm"
@@ -196,9 +181,38 @@ function dependencyName(dep: PackageDependencyItem): string {
       </div>
     </div>
 
+    <header class="flex items-start gap-4">
+      <div :class="iconBoxClass">
+        <SkillIcon
+          v-if="item.icon"
+          :icon="item.icon"
+          variant="detail"
+        />
+        <PackageIcon
+          v-else
+          class="size-8 text-muted-foreground"
+        />
+      </div>
+      <div class="min-w-0 flex-1">
+        <h1 class="break-words text-3xl font-semibold leading-tight">
+          {{ name }}
+        </h1>
+      </div>
+    </header>
+
+    <p class="mt-8 max-w-4xl text-base leading-7 text-muted-foreground">
+      {{ description || t('supermarket.noDescription') }}
+    </p>
+    <p
+      v-if="item.last_error && (item.status === 'failed' || item.status === 'partial')"
+      class="mt-2 break-all font-mono text-caption text-destructive"
+    >
+      {{ item.last_error }}
+    </p>
+
     <section
       v-if="skills.length"
-      class="space-y-3"
+      class="mt-8 space-y-3"
     >
       <h3 class="text-base font-semibold">
         {{ t('packages.sections.skills') }}
@@ -232,7 +246,7 @@ function dependencyName(dep: PackageDependencyItem): string {
 
     <section
       v-if="dependencies.length"
-      class="space-y-3"
+      class="mt-8 space-y-3"
     >
       <h3 class="text-base font-semibold">
         {{ t('packages.sections.dependencies') }}
@@ -267,7 +281,7 @@ function dependencyName(dep: PackageDependencyItem): string {
 
     <section
       v-if="connectors.length"
-      class="space-y-3"
+      class="mt-8 space-y-3"
     >
       <h3 class="text-base font-semibold">
         {{ t('packages.sections.connectors') }}

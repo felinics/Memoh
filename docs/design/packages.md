@@ -251,7 +251,7 @@ RLS 策略与现有表一致。
 ### 5.2 Bot 详情页
 
 - `pages/bots/detail.vue`：删除 `connectors`、`dependencies` 两个 tab，新增 `packages` tab；`skills` tab 保留，只管理用户自建、发现的 skill 与发现路径。
-- 新增 `pages/bots/components/bot-packages.vue`：package 行只显示图标、名称、描述，点击进入二级页（`package-detail-panel.vue`）展示 Skills / 依赖 / 连接器；有可用更新时行上直接显示 Update，点击弹出多选对话框（`package-update-dialog.vue`）批量更新；其余操作为检查更新、继续安装、删除。
+- 新增 `pages/bots/components/bot-packages.vue`：package 以两列卡片网格显示（复用市场页的 `market-item-card.vue`，只有图标、名称、描述），点击进入二级页（`package-detail-panel.vue`，版式同市场详情页：返回/操作行、大图标与标题、描述）展示 Skills / 依赖 / 连接器；有可用更新时行上直接显示 Update，点击弹出多选对话框（`package-update-dialog.vue`）批量更新；其余操作为检查更新、继续安装、删除。
 - 子项组件：`package-dependency-item.vue` 复用现有 `dependency-row.vue` 的状态与动作决策，去掉 remove；`package-connector-item.vue` 提供授权、重新授权、启停；`package-skill-item.vue` 提供查看。
 - 删除确认框显示删除预览，含“同时移除仅被它使用的自动安装包”勾选。
 - `store/dependency-operations.ts` 泛化为 `store/package-operations.ts`，以安装记录为 key 持有 SSE 流，`step` 事件驱动进度对话框分组显示。

@@ -1,18 +1,11 @@
 <template>
-  <PageShell
-    variant="tab"
-    :title="t('packages.title')"
-  >
-    <template #actions>
-      <Button
-        v-if="selected"
-        variant="outline"
-        @click="closeDetail"
-      >
-        <ArrowLeft />
-        {{ t('common.back') }}
-      </Button>
-      <template v-else>
+  <div>
+    <PageShell
+      v-if="!selected"
+      variant="tab"
+      :title="t('packages.title')"
+    >
+      <template #actions>
         <Select
           v-if="targets.length > 1"
           :model-value="displayTargetId"
@@ -54,101 +47,123 @@
           {{ t('packages.browse') }}
         </Button>
       </template>
-    </template>
 
-    <div class="space-y-8">
-      <CalloutBanner
-        v-if="data?.dependency_catalog_stale"
-        :title="t('bots.dependencies.catalogStaleTitle')"
-        :description="t('bots.dependencies.catalogStaleDescription')"
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          :loading="retrying"
-          @click="retryDiscovery"
-        >
-          {{ t('common.retry') }}
-        </Button>
-      </CalloutBanner>
-
-      <CalloutBanner
-        v-if="banner"
-        tone="warning"
-        :title="banner.title"
-        :description="banner.description"
-      >
-        <Button
-          v-if="banner.action === 'start'"
-          size="sm"
-          :loading="starting"
-          @click="startWorkspace"
-        >
-          {{ t('bots.dependencies.workspace.start') }}
-        </Button>
-        <Button
-          v-else-if="banner.action === 'container'"
-          size="sm"
-          variant="outline"
-          @click="goToContainer"
-        >
-          {{ t('bots.dependencies.workspace.goToContainer') }}
-        </Button>
-      </CalloutBanner>
-
-      <SettingsSection v-if="loading">
-        <SettingsRow
-          v-for="n in 3"
-          :key="n"
-        >
-          <template #leading>
-            <Skeleton class="size-9 rounded-md" />
-          </template>
-          <template #content>
-            <div class="space-y-2">
-              <Skeleton class="h-4 w-40" />
-              <Skeleton class="h-3 w-56" />
-            </div>
-          </template>
-          <Skeleton class="h-5 w-16 rounded-full" />
-        </SettingsRow>
-      </SettingsSection>
-
-      <SettingsSection v-else-if="loadFailed">
-        <SettingsRow
-          :label="t('packages.loadFailed')"
-          :description="resolveApiErrorMessage(error, t('common.loadFailed'))"
+      <div class="space-y-8">
+        <CalloutBanner
+          v-if="data?.dependency_catalog_stale"
+          :title="t('bots.dependencies.catalogStaleTitle')"
+          :description="t('bots.dependencies.catalogStaleDescription')"
         >
           <Button
             variant="outline"
             size="sm"
-            @click="refetchPackages()"
+            :loading="retrying"
+            @click="retryDiscovery"
           >
             {{ t('common.retry') }}
           </Button>
-        </SettingsRow>
-      </SettingsSection>
+        </CalloutBanner>
 
-      <SettingsSection v-else-if="items.length === 0">
-        <Empty class="py-12">
-          <EmptyHeader>
-            <EmptyTitle>{{ t('packages.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ t('packages.emptyDescription') }}</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
+        <CalloutBanner
+          v-if="banner"
+          tone="warning"
+          :title="banner.title"
+          :description="banner.description"
+        >
+          <Button
+            v-if="banner.action === 'start'"
+            size="sm"
+            :loading="starting"
+            @click="startWorkspace"
+          >
+            {{ t('bots.dependencies.workspace.start') }}
+          </Button>
+          <Button
+            v-else-if="banner.action === 'container'"
+            size="sm"
+            variant="outline"
+            @click="goToContainer"
+          >
+            {{ t('bots.dependencies.workspace.goToContainer') }}
+          </Button>
+        </CalloutBanner>
+
+        <SettingsSection v-if="loading">
+          <SettingsRow
+            v-for="n in 3"
+            :key="n"
+          >
+            <template #leading>
+              <Skeleton class="size-9 rounded-md" />
+            </template>
+            <template #content>
+              <div class="space-y-2">
+                <Skeleton class="h-4 w-40" />
+                <Skeleton class="h-3 w-56" />
+              </div>
+            </template>
+            <Skeleton class="h-5 w-16 rounded-full" />
+          </SettingsRow>
+        </SettingsSection>
+
+        <SettingsSection v-else-if="loadFailed">
+          <SettingsRow
+            :label="t('packages.loadFailed')"
+            :description="resolveApiErrorMessage(error, t('common.loadFailed'))"
+          >
             <Button
               variant="outline"
-              @click="goToSupermarket"
+              size="sm"
+              @click="refetchPackages()"
             >
-              {{ t('packages.emptyAction') }}
-              <ArrowRight />
+              {{ t('common.retry') }}
             </Button>
-          </EmptyContent>
-        </Empty>
-      </SettingsSection>
+          </SettingsRow>
+        </SettingsSection>
 
+        <SettingsSection v-else-if="items.length === 0">
+          <Empty class="py-12">
+            <EmptyHeader>
+              <EmptyTitle>{{ t('packages.emptyTitle') }}</EmptyTitle>
+              <EmptyDescription>{{ t('packages.emptyDescription') }}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button
+                variant="outline"
+                @click="goToSupermarket"
+              >
+                {{ t('packages.emptyAction') }}
+                <ArrowRight />
+              </Button>
+            </EmptyContent>
+          </Empty>
+        </SettingsSection>
+
+
+        <div
+          v-else
+          class="grid grid-cols-1 gap-4 sm:grid-cols-2"
+        >
+          <BotPackageCard
+            v-for="item in items"
+            :key="packageKey(item)"
+            :item="item"
+            :workspace-state="workspaceState"
+            :busy="running || dependencyRunning"
+            :owns-stream="ownsPackageStream(item.registry_id, item.package_id)"
+            @action="onPackageAction(item, $event)"
+          />
+        </div>
+      </div>
+    </PageShell>
+
+    <!-- The Package page mirrors PageShell's tab frame without its title
+       block: like the Supermarket detail, it owns its back / actions row. -->
+    <div
+      v-else
+      class="mx-auto max-w-3xl pt-6 pb-8"
+    >
       <PackageDetailPanel
-        v-else-if="selected"
         :item="selected"
         :workspace-state="workspaceState"
         :busy="running || dependencyRunning"
@@ -162,19 +177,8 @@
         @dependency-menu="onDependencyMenu"
         @connector="onSelectedConnector"
         @connector-enabled="setConnectorEnabled"
+        @back="closeDetail"
       />
-
-      <SettingsSection v-else>
-        <PackageRow
-          v-for="item in items"
-          :key="packageKey(item)"
-          :item="item"
-          :workspace-state="workspaceState"
-          :busy="running || dependencyRunning"
-          :owns-stream="ownsPackageStream(item.registry_id, item.package_id)"
-          @action="onPackageAction(item, $event)"
-        />
-      </SettingsSection>
     </div>
 
     <PackageProgressDialog
@@ -260,7 +264,7 @@
       @update:open="(value) => { if (!value && !rollingBack) rollbackTarget = null }"
       @confirm="onRollbackConfirmed"
     />
-  </PageShell>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -287,7 +291,7 @@ import {
   Skeleton,
   toast,
 } from '@felinic/ui'
-import { ArrowLeft, ArrowRight, Plus, RefreshCw } from 'lucide-vue-next'
+import { ArrowRight, Plus, RefreshCw } from 'lucide-vue-next'
 import {
   getBotsByBotIdWorkspaceTargets,
   getConnectorsCatalog,
@@ -305,7 +309,7 @@ import PackageConnectorAuthDialog from './package-connector-auth-dialog.vue'
 import PackageProgressDialog from './package-progress-dialog.vue'
 import PackageRemoveDialog from './package-remove-dialog.vue'
 import PackageDetailPanel, { type PackageConnectorAction } from './package-detail-panel.vue'
-import PackageRow from './package-row.vue'
+import BotPackageCard from './bot-package-card.vue'
 import type { PackageRowAction } from './package-actions'
 import PackageUpdateDialog, { type PackageUpdateChoice } from './package-update-dialog.vue'
 import { useDependencyOperation } from '../composables/useDependencyOperation'
