@@ -15779,27 +15779,11 @@ export type PostTranscriptionModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: ApperrorProblem;
-    /**
-     * Request Entity Too Large
-     */
-    413: ApperrorProblem;
-    /**
-     * Too Many Requests
-     */
-    429: ApperrorProblem;
+    400: HandlersErrorResponse;
     /**
      * Internal Server Error
      */
-    500: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ApperrorProblem;
+    500: HandlersErrorResponse;
 };
 
 export type PostTranscriptionModelsByIdTestError = PostTranscriptionModelsByIdTestErrors[keyof PostTranscriptionModelsByIdTestErrors];

@@ -240,7 +240,6 @@ import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from '@/pages/speech/components/model-config-editor.vue'
 import CreateModel from '@/components/create-model/index.vue'
 import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
-import { resolveApiErrorMessage } from '@/utils/api-error'
 
 interface FieldSchema { key: string, type: string, title?: string, description?: string, enum?: string[], order?: number }
 interface ConfigSchema { fields?: FieldSchema[] }
@@ -545,19 +544,15 @@ async function handleImportModels() {
 }
 
 async function handleTestModel(modelId: string, file: File, config: Record<string, unknown>) {
-  try {
-    const { data } = await postTranscriptionModelsByIdTest({
-      path: { id: modelId },
-      body: {
-        file,
-        config: JSON.stringify(config),
-      },
-      throwOnError: true,
-    })
-    return (data ?? {}) as AudioTestTranscriptionResponse
-  } catch (error) {
-    throw new Error(resolveApiErrorMessage(error, t('transcription.test.failed')))
-  }
+  const { data } = await postTranscriptionModelsByIdTest({
+    path: { id: modelId },
+    body: {
+      file,
+      config: JSON.stringify(config),
+    },
+    throwOnError: true,
+  })
+  return (data ?? {}) as AudioTestTranscriptionResponse
 }
 
 function sanitizeConfig(input: Record<string, unknown>) {

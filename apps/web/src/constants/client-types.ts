@@ -123,11 +123,6 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
     label: 'Alibaba Cloud Speech',
     hint: 'DashScope CosyVoice TTS',
   },
-  'alibabacloud-transcription': {
-    value: 'alibabacloud-transcription',
-    label: 'Alibaba Cloud Transcription',
-    hint: 'DashScope Qwen ASR',
-  },
   'microsoft-speech': {
     value: 'microsoft-speech',
     label: 'Microsoft Speech',

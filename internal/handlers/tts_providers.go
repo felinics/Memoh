@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,9 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/felinics/memoh/internal/apperror"
 	audiopkg "github.com/felinics/memoh/internal/audio"
-	"github.com/felinics/memoh/internal/audio/adapter"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -509,25 +506,21 @@ func (h *AudioHandler) TestModel(c echo.Context) error {
 // @Param file formData file true "Audio file"
 // @Param config formData string false "Optional JSON config"
 // @Success 200 {object} audiopkg.TestTranscriptionResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 413 {object} apperror.Problem
-// @Failure 429 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
 // @Router /transcription-models/{id}/test [post].
 func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		return apperror.New(apperror.CodeTranscriptionRequestInvalid, nil)
+		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
 	}
 	file, err := c.FormFile("file")
 	if err != nil {
-		return apperror.Wrap(apperror.CodeTranscriptionRequestInvalid, err, nil)
+		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
 	}
 	src, err := file.Open()
 	if err != nil {
-		return apperror.Wrap(apperror.CodeTranscriptionRequestInvalid, err, nil)
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	defer func(src multipart.File) {
 		err := src.Close()
@@ -537,17 +530,17 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	}(src)
 	audio, err := io.ReadAll(src)
 	if err != nil {
-		return apperror.Wrap(apperror.CodeTranscriptionRequestInvalid, err, nil)
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	var cfg map[string]any
 	if raw := strings.TrimSpace(c.FormValue("config")); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-			return apperror.Wrap(apperror.CodeTranscriptionRequestInvalid, err, nil)
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid config")
 		}
 	}
 	result, err := h.service.Transcribe(c.Request().Context(), id, audio, file.Filename, file.Header.Get("Content-Type"), cfg)
 	if err != nil {
-		return transcriptionHTTPError(err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	resp := audiopkg.TestTranscriptionResponse{
 		Text:            result.Text,
@@ -567,21 +560,4 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusOK, resp)
-}
-
-func transcriptionHTTPError(err error) error {
-	code := apperror.CodeTranscriptionFailed
-	switch {
-	case errors.Is(err, adapter.ErrInvalidInput):
-		code = apperror.CodeTranscriptionRequestInvalid
-	case errors.Is(err, adapter.ErrAudioTooLarge):
-		code = apperror.CodeTranscriptionAudioTooLarge
-	case errors.Is(err, adapter.ErrRequestRejected):
-		code = apperror.CodeTranscriptionRequestRejected
-	case errors.Is(err, adapter.ErrRateLimited):
-		code = apperror.CodeTranscriptionRateLimited
-	case errors.Is(err, adapter.ErrUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		code = apperror.CodeTranscriptionUnavailable
-	}
-	return apperror.Wrap(code, err, nil)
 }

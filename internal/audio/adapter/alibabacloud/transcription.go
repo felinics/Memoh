@@ -17,15 +17,13 @@ import (
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
-
-	"github.com/felinics/memoh/internal/audio/adapter"
 )
 
 const (
-	DefaultBaseURL   = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-	DefaultModel     = "qwen3-asr-flash"
-	maxAudioBytes    = 10 * 1024 * 1024
-	maxResponseBytes = 8 * 1024 * 1024
+	DefaultBaseURL    = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	DefaultModel      = "qwen3-asr-flash"
+	maxAudioDataBytes = 10_000_000
+	maxResponseBytes  = 8 * 1024 * 1024
 )
 
 type asrRequest struct {
@@ -63,10 +61,16 @@ type Provider struct {
 
 var _ sdk.TranscriptionProvider = (*Provider)(nil)
 
+// Keep transport diagnostics private even when a legacy handler uses Error().
+type requestError struct{ cause error }
+
+func (e *requestError) Error() string { return "Alibaba Cloud ASR request failed" }
+func (e *requestError) Unwrap() error { return e.cause }
+
 func New(apiKey, baseURL string) (*Provider, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
-		return nil, fmt.Errorf("%w: Alibaba Cloud ASR requires an API key", adapter.ErrInvalidInput)
+		return nil, errors.New("Alibaba Cloud ASR requires an API key")
 	}
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
@@ -74,7 +78,7 @@ func New(apiKey, baseURL string) (*Provider, error) {
 	}
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("%w: Alibaba Cloud ASR base URL must be an HTTP(S) API base URL", adapter.ErrInvalidInput)
+		return nil, errors.New("Alibaba Cloud ASR base URL must be an HTTP(S) API base URL")
 	}
 	return &Provider{apiKey: apiKey, baseURL: baseURL, client: &http.Client{
 		Timeout:       90 * time.Second,
@@ -95,10 +99,13 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 		return nil, err
 	}
 	if len(params.Audio) == 0 {
-		return nil, fmt.Errorf("%w: Alibaba Cloud ASR requires a non-empty audio file", adapter.ErrInvalidInput)
+		return nil, errors.New("Alibaba Cloud ASR requires a non-empty audio file")
 	}
+	// Keep the entire data URL within DashScope's 10 MB encoded input limit.
+	audioPrefix := "data:" + audioContentType(params) + ";base64,"
+	maxAudioBytes := (maxAudioDataBytes - len(audioPrefix)) / 4 * 3
 	if len(params.Audio) > maxAudioBytes {
-		return nil, fmt.Errorf("%w: audio file must be at most 10 MiB", adapter.ErrAudioTooLarge)
+		return nil, errors.New("audio file must fit within 10 MB after Base64 encoding")
 	}
 	modelID := DefaultModel
 	if params.Model != nil && strings.TrimSpace(params.Model.ID) != "" {
@@ -112,11 +119,19 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 	if err != nil {
 		return nil, err
 	}
+	prompt, err := optionalString(params.Config, "prompt")
+	if err != nil {
+		return nil, err
+	}
+	// The Agent tool's per-call prompt takes precedence over saved Qwen context.
+	if prompt != "" {
+		contextText = prompt
+	}
 	options := asrOptions{Language: language}
 	if v, ok := params.Config["enable_itn"]; ok && v != nil {
 		flag, valid := v.(bool)
 		if !valid {
-			return nil, fmt.Errorf("%w: enable_itn must be a boolean", adapter.ErrInvalidInput)
+			return nil, errors.New("enable_itn must be a boolean")
 		}
 		options.EnableITN = &flag
 	}
@@ -126,38 +141,31 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 	}
 	messages = append(messages, asrMessage{Role: "user", Content: []asrAudioContent{{
 		Type:       "input_audio",
-		InputAudio: asrInputAudio{Data: "data:" + audioContentType(params) + ";base64," + base64.StdEncoding.EncodeToString(params.Audio)},
+		InputAudio: asrInputAudio{Data: audioPrefix + base64.StdEncoding.EncodeToString(params.Audio)},
 	}}})
 	body, err := json.Marshal(asrRequest{Model: modelID, Messages: messages, Options: options})
 	if err != nil {
-		return nil, fmt.Errorf("encode Alibaba Cloud ASR request: %w", err)
+		return nil, &requestError{cause: err}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create Alibaba Cloud ASR request: %w", err)
+		return nil, &requestError{cause: err}
 	}
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	// #nosec G704 -- The endpoint is administrator-configured; redirects are disabled.
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: Alibaba Cloud ASR request: %w", adapter.ErrUnavailable, err)
+		return nil, &requestError{cause: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Upstream error bodies can echo submitted audio or credentials. Do not expose them.
-		kind := adapter.ErrRequestRejected
-		switch {
-		case resp.StatusCode == http.StatusTooManyRequests:
-			kind = adapter.ErrRateLimited
-		case resp.StatusCode >= http.StatusInternalServerError, resp.StatusCode == http.StatusRequestTimeout:
-			kind = adapter.ErrUnavailable
-		}
-		return nil, fmt.Errorf("%w: Alibaba Cloud ASR returned HTTP %d", kind, resp.StatusCode)
+		return nil, fmt.Errorf("Alibaba Cloud ASR returned HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("%w: read Alibaba Cloud ASR response: %w", adapter.ErrUnavailable, err)
+		return nil, &requestError{cause: err}
 	}
 	if len(data) > maxResponseBytes {
 		return nil, errors.New("alibaba cloud ASR response exceeds size limit")
@@ -167,7 +175,7 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
-				Content     json.RawMessage `json:"content"`
+				Content     *string `json:"content"`
 				Annotations []struct {
 					Type     string `json:"type"`
 					Language string `json:"language"`
@@ -185,15 +193,11 @@ func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionPar
 		return nil, errors.New("alibaba cloud ASR response has no transcription choice")
 	}
 	message := result.Choices[0].Message
-	var text string
-	if len(message.Content) == 0 || bytes.Equal(message.Content, []byte("null")) {
+	if message.Content == nil {
 		return nil, errors.New("alibaba cloud ASR response has no transcription content")
 	}
-	if err := json.Unmarshal(message.Content, &text); err != nil {
-		return nil, errors.New("alibaba cloud ASR transcription content must be text")
-	}
 	out := &sdk.TranscriptionResult{
-		Text: text, DurationSeconds: result.Usage.Seconds,
+		Text: *message.Content, DurationSeconds: result.Usage.Seconds,
 		ProviderMetadata: map[string]any{"id": result.ID, "model": result.Model},
 	}
 	for _, annotation := range message.Annotations {
@@ -212,7 +216,7 @@ func optionalString(config map[string]any, key string) (string, error) {
 	}
 	text, ok := value.(string)
 	if !ok {
-		return "", fmt.Errorf("%w: %s must be a string", adapter.ErrInvalidInput, key)
+		return "", fmt.Errorf("%s must be a string", key)
 	}
 	return strings.TrimSpace(text), nil
 }
