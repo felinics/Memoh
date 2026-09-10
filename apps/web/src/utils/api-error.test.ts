@@ -80,6 +80,28 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
+    '<html><head><title>413 Request Entity Too Large</title></head></html>',
+    '\n<!DOCTYPE html><html><body>Bad gateway</body></html>',
+    new Error('<html><body>nginx</body></html>'),
+    { response: { data: { detail: '<HTML><BODY>nginx</BODY></HTML>' } } },
+  ])('does not display an HTML error page: %s', (error) => {
+    expect(resolveApiErrorMessage(error, '无法预览备份')).toBe('无法预览备份')
+    expect(resolveApiErrorMessage(error, '无法预览备份', { prefixFallback: true })).toBe('无法预览备份')
+  })
+
+  it('keeps prefixing plain error details', () => {
+    expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback', { prefixFallback: true }))
+      .toBe('fallback: plain detail')
+  })
+
+  it('prefers a known error code over an HTML detail', () => {
+    expect(resolveApiErrorMessage({
+      code: 'agent.response_timeout',
+      detail: '<html><body>Gateway timeout</body></html>',
+    }, 'fallback')).toBe('The model did not respond in time. Please try again.')
+  })
+
+  it.each([
     ['en', 'Network connection failed. Check your connection and try again.'],
     ['zh', '网络连接失败，请检查网络后重试。'],
     ['ja', 'ネットワークに接続できません。接続を確認してもう一度お試しください。'],

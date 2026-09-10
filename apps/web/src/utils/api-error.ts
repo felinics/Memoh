@@ -169,7 +169,7 @@ export function resolveApiErrorMessage(
   const detail = pickApiFeedbackMessage(error)
     || pickNetworkErrorMessage(error)
     || pickErrorDetail(error)
-  if (!detail) {
+  if (!detail || /^(?:<!doctype\s+html\b|<html\b)/i.test(detail)) {
     return fallback
   }
 
