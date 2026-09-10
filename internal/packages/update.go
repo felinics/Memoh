@@ -2,12 +2,137 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
+	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
 )
+
+// UpdateRequest selects what to update for one Package on a workspace target.
+type UpdateRequest struct {
+	RegistryID        string
+	PackageID         string
+	WorkspaceTargetID string
+	// Release moves the installation to the registry's current release.
+	Release bool
+	// Dependencies are updated to their latest version. Each must be one the
+	// Package references or, for a discovered canonical Package, its own id.
+	Dependencies []string
+}
+
+// UpdateSelection runs the chosen updates of one Package as one stream:
+// the dependencies first, each to its latest version, then the release.
+// A dependency that fails does not stop the others; the release step only
+// runs when it was selected.
+func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateRequest, sink EventSink) (OperationResult, error) {
+	sink = nonNilSink(sink)
+	registryID := strings.TrimSpace(req.RegistryID)
+	packageID := strings.TrimSpace(req.PackageID)
+	if !skillset.IsValidRegistryID(registryID) || !skillset.IsValidRegistryComponent(packageID) {
+		return OperationResult{}, ErrInvalidRequest
+	}
+	depIDs := uniqueDependencyIDs(req.Dependencies)
+	if !req.Release && len(depIDs) == 0 {
+		return OperationResult{}, fmt.Errorf("%w: nothing selected to update", ErrInvalidRequest)
+	}
+	if len(depIDs) > 0 && registryID != DependencyRegistryID {
+		return OperationResult{}, fmt.Errorf("%w: dependencies are only supported in the %s registry", ErrInvalidRequest, DependencyRegistryID)
+	}
+	if len(depIDs) > 0 && s.dependencies == nil {
+		return OperationResult{}, ErrDependenciesUnavailable
+	}
+	targetID, err := s.skills.ResolveTargetID(ctx, botID, req.WorkspaceTargetID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	unlock, err := lockInstallation(ctx, botID, targetID, registryID, packageID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer unlock()
+	inst, err := s.store.Get(ctx, botID, targetID, registryID, packageID)
+	installed := err == nil
+	if err != nil && !errors.Is(err, ErrNotInstalled) {
+		return OperationResult{}, fmt.Errorf("packages: read installation: %w", err)
+	}
+	if req.Release && !installed {
+		return OperationResult{}, ErrNotInstalled
+	}
+	// Only the Package's own dependencies may be updated through it. A
+	// discovered Package is the canonical one of a single dependency.
+	allowed := map[string]bool{packageID: !installed}
+	if installed {
+		release, err := s.releaseFor(ctx, inst)
+		if err != nil {
+			return OperationResult{}, err
+		}
+		for _, id := range release.Dependencies {
+			allowed[id] = true
+		}
+	}
+	for _, id := range depIDs {
+		if !allowed[id] {
+			return OperationResult{}, fmt.Errorf("%w: %s does not reference dependency %s", ErrInvalidRequest, packageID, id)
+		}
+	}
+
+	result := OperationResult{Installation: inst}
+	sink.Send(Event{Type: EventStarted, Kind: KindPackage, ID: packageID, Version: inst.Version})
+	var firstErr error
+	failed := 0
+	for _, depID := range depIDs {
+		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
+		step := StepResult{Kind: KindDependency, ID: depID}
+		res, err := s.dependencies.Update(ctx, botID, targetID, depID, "", logSink(sink, KindDependency, depID))
+		if err != nil {
+			step.Status, step.Error = StepFailed, err.Error()
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+		} else {
+			step.Status, step.Version = StepUpdated, res.Version
+		}
+		result.Steps = append(result.Steps, step)
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
+	}
+	if req.Release {
+		releaseResult, err := s.updateRelease(ctx, botID, inst, sink, true)
+		result.Steps = append(result.Steps, releaseResult.Steps...)
+		if releaseResult.Installation.ID != "" {
+			result.Installation = releaseResult.Installation
+		}
+		return result, err
+	}
+	if failed == len(depIDs) {
+		return result, fmt.Errorf("packages: update dependencies of %s: %w", packageID, firstErr)
+	}
+	// The handler reports a Package without an installation as discovered.
+	status := "discovered"
+	if installed {
+		status = string(inst.Status)
+	}
+	sink.Send(Event{Type: EventDone, Kind: KindPackage, ID: packageID, Status: status, Version: inst.Version})
+	return result, nil
+}
+
+func uniqueDependencyIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		unique = append(unique, id)
+	}
+	return unique
+}
 
 // Update moves an installation to the registry's current release. Skills
 // are replaced atomically, new references are linked or installed, and
@@ -29,6 +154,12 @@ func (s *Service) Update(ctx context.Context, botID, installationID string, sink
 	if err != nil {
 		return OperationResult{}, err
 	}
+	return s.updateRelease(ctx, botID, inst, sink, false)
+}
+
+// updateRelease is the body of Update once the installation is locked.
+// announced is set when the caller already sent the started event.
+func (s *Service) updateRelease(ctx context.Context, botID string, inst Installation, sink EventSink, announced bool) (OperationResult, error) {
 	current, err := s.registry.FetchCurrentPackage(ctx, inst.RegistryID, inst.PackageID)
 	if err != nil {
 		return OperationResult{}, err
@@ -55,7 +186,7 @@ func (s *Service) Update(ctx context.Context, botID, installationID string, sink
 	if err != nil {
 		return OperationResult{}, fmt.Errorf("packages: list connector references: %w", err)
 	}
-	result, err := s.materialize(ctx, botID, inst.WorkspaceTargetID, release, inst.Reason, StatusUpdating, sink)
+	result, err := s.materialize(ctx, botID, inst.WorkspaceTargetID, release, inst.Reason, StatusUpdating, sink, announced)
 	if err != nil {
 		return result, err
 	}

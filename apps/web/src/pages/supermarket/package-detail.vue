@@ -51,7 +51,8 @@
         class="mt-8"
       >
         <h2 class="mb-4 text-lg font-semibold">
-          {{ $t('supermarket.includedSkills') }}
+          {{ $t('packages.sections.skills') }}
+          <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.skills.length }}</span>
         </h2>
         <SettingsSection>
           <SettingsRow
@@ -82,7 +83,8 @@
         class="mt-8"
       >
         <h2 class="mb-1 text-lg font-semibold">
-          {{ $t('supermarket.includedDependencies') }}
+          {{ $t('packages.sections.dependencies') }}
+          <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.dependencies.length }}</span>
         </h2>
         <p class="mb-4 text-xs text-muted-foreground">
           {{ $t('supermarket.dependenciesHint') }}
@@ -130,7 +132,8 @@
         class="mt-8"
       >
         <h2 class="mb-1 text-lg font-semibold">
-          {{ $t('supermarket.includedConnectors') }}
+          {{ $t('packages.sections.connectors') }}
+          <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.connectors.length }}</span>
         </h2>
         <p class="mb-4 text-xs text-muted-foreground">
           {{ capabilitiesStore.connectors ? $t('supermarket.connectorsHint') : $t('supermarket.connectorsUnavailableHint') }}

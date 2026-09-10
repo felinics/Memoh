@@ -16,6 +16,7 @@ import {
   type HandlersSupermarketPackageCategory,
   type HandlersSupermarketPackageTranslation,
 } from '@memohai/sdk'
+import { dependencyUpdateAvailable } from '@/utils/workspace-dependency'
 
 // Domain aliases over the generated SDK types for the Package surfaces: the
 // Supermarket, the bot's Packages tab, and the install / progress dialogs.
@@ -171,7 +172,17 @@ export function packageUpdateAvailable(item: Pick<PackageItem, 'available_revisi
 
 /** Drives the tab count badge: Packages the user should act on. */
 export function packageNeedsAttention(item: PackageItem): boolean {
-  return item.status === 'partial' || item.status === 'failed' || packageUpdateAvailable(item)
+  return item.status === 'partial' || item.status === 'failed' || packageHasUpdates(item)
+}
+
+/** Dependencies of the Package with a newer version known. */
+export function packageDependencyUpdates(item: Pick<PackageItem, 'dependencies'>): PackageDependencyItem[] {
+  return (item.dependencies ?? []).filter(dep => !!dep.dependency && dependencyUpdateAvailable(dep.dependency))
+}
+
+/** Something on the Package can be updated: its release or one of its dependencies. */
+export function packageHasUpdates(item: PackageItem): boolean {
+  return packageUpdateAvailable(item) || packageDependencyUpdates(item).length > 0
 }
 
 /** Stable identity of a Package on a bot, independent of the installation record. */

@@ -3652,14 +3652,11 @@
     "website": "Website",
     "instructions": "Instructions",
     "backToSupermarket": "Back to Supermarket",
-    "includedSkills": "Included Skills",
     "packageNotFound": "Package not found",
     "noDescription": "No description",
     "unnamedSkill": "Unnamed skill",
-    "includedDependencies": "Included dependencies",
     "dependenciesHint": "Installed into the bot's workspace and shared with other Packages that need them.",
     "dependencyPending": "Loading…",
-    "includedConnectors": "Included connectors",
     "connectorsHint": "Each connector needs your authorization after the Package is installed.",
     "connectorsUnavailableHint": "Connect-It is not configured on this server; these connectors will stay unauthorized.",
     "connectorAuthHint": "Authorize after installing.",
@@ -3916,7 +3913,8 @@
       "skipped": "Skipped",
       "removed": "Removed",
       "kept": "Kept",
-      "disconnected": "Disconnected"
+      "disconnected": "Disconnected",
+      "updated": "Updated"
     },
     "background": {
       "installed": "{name} installed",
@@ -3927,6 +3925,18 @@
     },
     "enableFlow": {
       "installDescription": "Installs the {name} Package into the workspace, then enables the agent."
+    },
+    "sections": {
+      "skills": "Skills",
+      "dependencies": "Dependencies",
+      "connectors": "Connectors"
+    },
+    "update": {
+      "title": "Update {name}",
+      "description": "Choose what to update. Dependencies move to their latest version; the Package release replaces its Skills.",
+      "release": "Package release",
+      "confirm": "Update {count} item | Update {count} items",
+      "none": "Nothing to update."
     }
   }
 }

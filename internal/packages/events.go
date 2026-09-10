@@ -21,6 +21,7 @@ const (
 // Step outcomes.
 const (
 	StepInstalled    = "installed"
+	StepUpdated      = "updated"
 	StepLinked       = "linked"
 	StepNeedsAuth    = "needs_auth"
 	StepFailed       = "failed"

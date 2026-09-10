@@ -337,6 +337,7 @@ type fakeDeps struct {
 	present    map[string]workspacedeps.Entry
 	installErr map[string]error
 	installed  []string
+	updated    []string
 	removed    []string
 }
 
@@ -375,6 +376,21 @@ func (f *fakeDeps) Install(_ context.Context, _, _, depID, _ string, sink worksp
 	entry.InstalledVersion = "1.0.0"
 	f.present[depID] = entry
 	return workspacedeps.OperationResult{DependencyID: depID, Version: "1.0.0"}, nil
+}
+
+func (f *fakeDeps) Update(_ context.Context, _, _, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
+	if err := f.installErr[depID]; err != nil {
+		return workspacedeps.OperationResult{}, err
+	}
+	if sink != nil {
+		sink.Log("stdout", "updating "+depID)
+	}
+	f.updated = append(f.updated, depID)
+	entry := f.present[depID]
+	entry.Observed.Version = "2.0.0"
+	entry.InstalledVersion = "2.0.0"
+	f.present[depID] = entry
+	return workspacedeps.OperationResult{DependencyID: depID, Version: "2.0.0"}, nil
 }
 
 func (f *fakeDeps) Remove(_ context.Context, _, _, depID string, _ workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
@@ -821,5 +837,94 @@ func TestRemoveUnreferencedRequiredPackages(t *testing.T) {
 	}
 	if strings.Join(h.deps.removed, ",") != "node" {
 		t.Fatalf("removed dependencies = %v", h.deps.removed)
+	}
+}
+
+func TestUpdateSelectionUpdatesOnlyTheReferencedDependencies(t *testing.T) {
+	h := newHarness()
+	h.deps.present["node"] = presentDep("node", workspacedeps.SourceManaged)
+	h.deps.present["python"] = presentDep("python", workspacedeps.SourceToolkit)
+	pkg := release("memoh", "codex", "a", "1.0.0", []string{"codex"}, []string{"node"}, nil)
+	h.publish(pkg)
+	h.install(t, pkg)
+
+	rec := &recorder{}
+	result, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", PackageID: "codex", Dependencies: []string{"node", "node"}}, rec)
+	if err != nil {
+		t.Fatalf("UpdateSelection: %v", err)
+	}
+	if strings.Join(h.deps.updated, ",") != "node" {
+		t.Fatalf("updated dependencies = %v, want node once", h.deps.updated)
+	}
+	if len(result.Steps) != 1 || result.Steps[0].Status != StepUpdated || result.Steps[0].Version != "2.0.0" {
+		t.Fatalf("steps = %+v", result.Steps)
+	}
+	if !strings.HasPrefix(rec.types(), "started") || !strings.Contains(rec.types(), "step_done:dependency:node=updated") || !strings.HasSuffix(rec.types(), "done=installed") {
+		t.Fatalf("events = %s", rec.types())
+	}
+	if len(h.publisher.published) != 1 {
+		t.Fatalf("a dependency-only update must not republish Skills: %d", len(h.publisher.published))
+	}
+
+	// A dependency the Package does not reference is refused before anything runs.
+	_, err = h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", PackageID: "codex", Dependencies: []string{"python"}}, nil)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("unreferenced dependency: err = %v, want ErrInvalidRequest", err)
+	}
+	// Selecting nothing is an error, not a no-op stream.
+	_, err = h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", PackageID: "codex"}, nil)
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("empty selection: err = %v, want ErrInvalidRequest", err)
+	}
+}
+
+func TestUpdateSelectionUpdatesTheDependencyOfADiscoveredPackage(t *testing.T) {
+	h := newHarness()
+	h.deps.present["uv"] = presentDep("uv", workspacedeps.SourceToolkit)
+
+	rec := &recorder{}
+	_, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", PackageID: "uv", Dependencies: []string{"uv"}}, rec)
+	if err != nil {
+		t.Fatalf("UpdateSelection: %v", err)
+	}
+	if strings.Join(h.deps.updated, ",") != "uv" {
+		t.Fatalf("updated dependencies = %v", h.deps.updated)
+	}
+	if !strings.HasSuffix(rec.types(), "done=discovered") {
+		t.Fatalf("events = %s", rec.types())
+	}
+	// The release of a Package that is not installed cannot be updated.
+	_, err = h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", PackageID: "uv", Release: true}, nil)
+	if !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("release of discovered Package: err = %v, want ErrNotInstalled", err)
+	}
+}
+
+func TestUpdateSelectionRunsDependenciesBeforeTheRelease(t *testing.T) {
+	h := newHarness()
+	h.deps.present["node"] = presentDep("node", workspacedeps.SourceManaged)
+	v1 := release("memoh", "codex", "a", "1.0.0", []string{"codex"}, []string{"node"}, nil)
+	h.publish(v1)
+	h.install(t, v1)
+	v2 := release("memoh", "codex", "b", "1.1.0", []string{"codex"}, []string{"node"}, nil)
+	h.publish(v2)
+
+	rec := &recorder{}
+	result, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", PackageID: "codex", Release: true, Dependencies: []string{"node"}}, rec)
+	if err != nil {
+		t.Fatalf("UpdateSelection: %v", err)
+	}
+	if result.Installation.Revision != v2.Revision || result.Installation.Version != "1.1.0" {
+		t.Fatalf("installation = %+v, want release b", result.Installation)
+	}
+	types := rec.types()
+	if strings.Count(types, "started") != 1 {
+		t.Fatalf("started must be sent once: %s", types)
+	}
+	if strings.Index(types, "step_done:dependency:node=updated") > strings.Index(types, "step_done:skills:codex=installed") {
+		t.Fatalf("dependencies must update before the release: %s", types)
+	}
+	if !strings.HasSuffix(types, "done=installed") {
+		t.Fatalf("events = %s", types)
 	}
 }

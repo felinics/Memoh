@@ -3652,14 +3652,11 @@
     "website": "网站",
     "instructions": "说明",
     "backToSupermarket": "返回市场",
-    "includedSkills": "包含的 Skills",
     "packageNotFound": "未找到 Package",
     "noDescription": "暂无描述",
     "unnamedSkill": "未命名 Skill",
-    "includedDependencies": "包含的依赖",
     "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他扩展包共享。",
     "dependencyPending": "加载中…",
-    "includedConnectors": "包含的连接器",
     "connectorsHint": "安装扩展包后，每个连接器都需要你授权。",
     "connectorsUnavailableHint": "服务器未配置 Connect-It，这些连接器将保持未授权状态。",
     "connectorAuthHint": "安装后授权。",
@@ -3916,7 +3913,8 @@
       "skipped": "已跳过",
       "removed": "已移除",
       "kept": "已保留",
-      "disconnected": "已断开"
+      "disconnected": "已断开",
+      "updated": "已更新"
     },
     "background": {
       "installed": "{name} 已安装",
@@ -3927,6 +3925,18 @@
     },
     "enableFlow": {
       "installDescription": "将 {name} 扩展包安装到工作区，然后启用该 Agent。"
+    },
+    "sections": {
+      "skills": "Skills",
+      "dependencies": "依赖",
+      "connectors": "连接器"
+    },
+    "update": {
+      "title": "更新 {name}",
+      "description": "选择要更新的项目。依赖会更新到最新版本，扩展包发布会替换其 Skills。",
+      "release": "扩展包发布",
+      "confirm": "更新 {count} 项",
+      "none": "没有可更新的项目。"
     }
   }
 }

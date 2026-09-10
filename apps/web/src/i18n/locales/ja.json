@@ -3647,14 +3647,11 @@
     "website": "Webサイト",
     "instructions": "説明書",
     "backToSupermarket": "スーパーマーケットに戻る",
-    "includedSkills": "含まれるスキル",
     "packageNotFound": "Package が見つかりません",
     "noDescription": "説明なし",
     "unnamedSkill": "名前のないスキル",
-    "includedDependencies": "含まれる依存関係",
     "dependenciesHint": "Bot のワークスペースにインストールされ、必要とする他のパッケージと共有されます。",
     "dependencyPending": "読み込み中…",
-    "includedConnectors": "含まれるコネクター",
     "connectorsHint": "パッケージをインストールした後、各コネクターの認証が必要です。",
     "connectorsUnavailableHint": "このサーバーでは Connect-It が設定されていないため、これらのコネクターは未認証のままになります。",
     "connectorAuthHint": "インストール後に認証します。",
@@ -3911,7 +3908,8 @@
       "skipped": "スキップ",
       "removed": "削除済み",
       "kept": "保持",
-      "disconnected": "切断済み"
+      "disconnected": "切断済み",
+      "updated": "更新済み"
     },
     "background": {
       "installed": "{name} をインストールしました",
@@ -3922,6 +3920,18 @@
     },
     "enableFlow": {
       "installDescription": "{name} パッケージをワークスペースにインストールしてからエージェントを有効にします。"
+    },
+    "sections": {
+      "skills": "スキル",
+      "dependencies": "依存関係",
+      "connectors": "コネクター"
+    },
+    "update": {
+      "title": "{name} を更新",
+      "description": "更新する項目を選択してください。依存関係は最新バージョンに更新され、パッケージのリリースはスキルを置き換えます。",
+      "release": "パッケージのリリース",
+      "confirm": "{count} 件を更新",
+      "none": "更新できる項目はありません。"
     }
   }
 }

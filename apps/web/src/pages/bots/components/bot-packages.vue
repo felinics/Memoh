@@ -4,46 +4,56 @@
     :title="t('packages.title')"
   >
     <template #actions>
-      <Select
-        v-if="targets.length > 1"
-        :model-value="displayTargetId"
-        :disabled="running"
-        @update:model-value="onTargetChange"
-      >
-        <SelectTrigger class="w-44">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent align="end">
-          <SelectItem
-            v-for="target in targets"
-            :key="target.target_id"
-            :value="target.target_id"
-            :disabled="!workspaceTargetAvailable(target)"
-          >
-            {{ workspaceTargetName(target, t) }}
-            <span
-              v-if="!workspaceTargetAvailable(target)"
-              class="text-caption text-muted-foreground"
-            >
-              {{ workspaceTargetStatusLabel(target, t) }}
-            </span>
-          </SelectItem>
-        </SelectContent>
-      </Select>
-
       <Button
+        v-if="selected"
         variant="outline"
-        :loading="checking"
-        :disabled="running || !items.length"
-        @click="checkUpdates"
+        @click="closeDetail"
       >
-        <RefreshCw />
-        {{ t('packages.checkUpdates') }}
+        <ArrowLeft />
+        {{ t('common.back') }}
       </Button>
-      <Button @click="goToSupermarket">
-        <Plus />
-        {{ t('packages.browse') }}
-      </Button>
+      <template v-else>
+        <Select
+          v-if="targets.length > 1"
+          :model-value="displayTargetId"
+          :disabled="running"
+          @update:model-value="onTargetChange"
+        >
+          <SelectTrigger class="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem
+              v-for="target in targets"
+              :key="target.target_id"
+              :value="target.target_id"
+              :disabled="!workspaceTargetAvailable(target)"
+            >
+              {{ workspaceTargetName(target, t) }}
+              <span
+                v-if="!workspaceTargetAvailable(target)"
+                class="text-caption text-muted-foreground"
+              >
+                {{ workspaceTargetStatusLabel(target, t) }}
+              </span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Button
+          variant="outline"
+          :loading="checking"
+          :disabled="running || !items.length"
+          @click="checkUpdates"
+        >
+          <RefreshCw />
+          {{ t('packages.checkUpdates') }}
+        </Button>
+        <Button @click="goToSupermarket">
+          <Plus />
+          {{ t('packages.browse') }}
+        </Button>
+      </template>
     </template>
 
     <div class="space-y-8">
@@ -137,6 +147,23 @@
         </Empty>
       </SettingsSection>
 
+      <PackageDetailPanel
+        v-else-if="selected"
+        :item="selected"
+        :workspace-state="workspaceState"
+        :busy="running || dependencyRunning"
+        :owns-stream="ownsPackageStream(selected.registry_id, selected.package_id)"
+        :dependency-owns-stream="dependencyOwnsStream"
+        :connector-catalog="connectorCatalog"
+        :connectors-enabled="capabilitiesStore.connectors"
+        :connector-pending="connectorPending"
+        @action="onPackageAction(selected, $event)"
+        @dependency-primary="onDependencyPrimary"
+        @dependency-menu="onDependencyMenu"
+        @connector="onSelectedConnector"
+        @connector-enabled="setConnectorEnabled"
+      />
+
       <SettingsSection v-else>
         <PackageRow
           v-for="item in items"
@@ -145,15 +172,7 @@
           :workspace-state="workspaceState"
           :busy="running || dependencyRunning"
           :owns-stream="ownsPackageStream(item.registry_id, item.package_id)"
-          :dependency-owns-stream="dependencyOwnsStream"
-          :connector-catalog="connectorCatalog"
-          :connectors-enabled="capabilitiesStore.connectors"
-          :connector-pending="connectorPending"
           @action="onPackageAction(item, $event)"
-          @dependency-primary="onDependencyPrimary"
-          @dependency-menu="onDependencyMenu"
-          @connector="(connector, action) => onConnector(item, connector, action)"
-          @connector-enabled="setConnectorEnabled"
         />
       </SettingsSection>
     </div>
@@ -179,6 +198,13 @@
       :error="removePreviewError"
       @update:open="(value) => { if (!value) removeTarget = null }"
       @confirm="onRemoveConfirmed"
+    />
+
+    <PackageUpdateDialog
+      :open="!!updateTarget"
+      :item="updateTarget"
+      @update:open="(value) => { if (!value) updateTarget = null }"
+      @confirm="onUpdateConfirmed"
     />
 
     <PackageConnectorAuthDialog
@@ -261,11 +287,10 @@ import {
   Skeleton,
   toast,
 } from '@felinic/ui'
-import { ArrowRight, Plus, RefreshCw } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Plus, RefreshCw } from 'lucide-vue-next'
 import {
   getBotsByBotIdWorkspaceTargets,
   getConnectorsCatalog,
-  getSupermarketRegistriesByRegistryIdPackagesByPackageId,
   patchBotsByBotIdConnectorsByConnectionId,
   postBotsByBotIdConnectorsByConnectionIdReauth,
   postBotsByBotIdContainerStart,
@@ -279,7 +304,10 @@ import DependencyScriptDialog from './dependency-script-dialog.vue'
 import PackageConnectorAuthDialog from './package-connector-auth-dialog.vue'
 import PackageProgressDialog from './package-progress-dialog.vue'
 import PackageRemoveDialog from './package-remove-dialog.vue'
-import PackageRow, { type PackageConnectorAction, type PackageRowAction } from './package-row.vue'
+import PackageDetailPanel, { type PackageConnectorAction } from './package-detail-panel.vue'
+import PackageRow from './package-row.vue'
+import type { PackageRowAction } from './package-actions'
+import PackageUpdateDialog, { type PackageUpdateChoice } from './package-update-dialog.vue'
 import { useDependencyOperation } from '../composables/useDependencyOperation'
 import { usePackageOperation } from '../composables/usePackageOperation'
 import {
@@ -401,6 +429,22 @@ const workspaceState = computed<DependencyWorkspaceState | undefined>(() => {
 })
 const loadFailed = computed(() => !!error.value && !data.value && !workspaceState.value)
 
+// ---- Package page (second level) --------------------------------------------
+// The open Package lives in the route query so a reload or the browser's
+// back button land where the user was.
+
+const selectedKey = computed(() => (typeof route.query.package === 'string' ? route.query.package : ''))
+const selected = computed<PackageItem | null>(() => items.value.find(item => packageKey(item) === selectedKey.value) ?? null)
+
+function openDetail(item: PackageItem) {
+  void router.replace({ query: { ...route.query, package: packageKey(item) } }).catch(() => {})
+}
+
+function closeDetail() {
+  const { package: _drop, ...rest } = route.query
+  void router.replace({ query: rest }).catch(() => {})
+}
+
 const retrying = ref(false)
 async function retryDiscovery() {
   if (retrying.value) return
@@ -463,9 +507,12 @@ const {
   setProgressOpen: setPackageProgressOpen,
 } = usePackageOperation(botIdRef, 'bot-packages')
 
-async function onPackageAction(item: PackageItem, action: PackageRowAction) {
+function onPackageAction(item: PackageItem, action: PackageRowAction) {
   switch (action) {
     case 'open':
+      openDetail(item)
+      return
+    case 'openSupermarket':
       void router.push({
         name: 'supermarket-package-detail',
         params: { registryId: item.registry_id ?? '', packageId: item.package_id ?? '' },
@@ -474,9 +521,6 @@ async function onPackageAction(item: PackageItem, action: PackageRowAction) {
       return
     case 'viewProgress':
       viewPackageProgress(item.registry_id, item.package_id)
-      return
-    case 'install':
-      await installDiscovered(item)
       return
     case 'resume':
     case 'retry':
@@ -491,15 +535,7 @@ async function onPackageAction(item: PackageItem, action: PackageRowAction) {
       })
       return
     case 'update':
-      if (!item.installation_id) return
-      startPackage({
-        targetId: selectedTargetId.value,
-        registryId: item.registry_id ?? '',
-        packageId: item.package_id ?? '',
-        installationId: item.installation_id,
-        name: packageDisplayName(item, locale.value),
-        action: 'update',
-      })
+      updateTarget.value = item
       return
     case 'remove':
       void openRemove(item)
@@ -509,32 +545,23 @@ async function onPackageAction(item: PackageItem, action: PackageRowAction) {
   }
 }
 
-// A discovered Package has no revision yet: the registry's current release
-// is what installing it means.
-async function installDiscovered(item: PackageItem) {
-  if (!item.registry_id || !item.package_id) return
-  try {
-    const { data } = await getSupermarketRegistriesByRegistryIdPackagesByPackageId({
-      path: { registry_id: item.registry_id, package_id: item.package_id },
-      throwOnError: true,
-    })
-    if (!data.revision) throw new Error('missing revision')
-    startPackage({
-      targetId: selectedTargetId.value,
-      registryId: item.registry_id,
-      packageId: item.package_id,
-      name: packageDisplayName(item, locale.value),
-      action: 'install',
-      install: {
-        registryId: item.registry_id,
-        packageId: item.package_id,
-        revision: data.revision,
-        workspaceTargetId: selectedTargetId.value || undefined,
-      },
-    })
-  } catch (err) {
-    toast.error(resolveApiErrorMessage(err, t('supermarket.loadError')))
-  }
+// ---- Update -----------------------------------------------------------------
+
+const updateTarget = ref<PackageItem | null>(null)
+
+function onUpdateConfirmed(choice: PackageUpdateChoice) {
+  const item = updateTarget.value
+  updateTarget.value = null
+  if (!item) return
+  startPackage({
+    targetId: selectedTargetId.value,
+    registryId: item.registry_id ?? '',
+    packageId: item.package_id ?? '',
+    installationId: item.installation_id ?? undefined,
+    name: packageDisplayName(item, locale.value),
+    action: 'update',
+    update: { ...choice, workspaceTargetId: selectedTargetId.value || undefined },
+  })
 }
 
 // ---- Removal ----------------------------------------------------------------
@@ -578,6 +605,10 @@ function onRemoveConfirmed(options: { removeUnreferencedRequired: boolean }) {
 
 const authTarget = ref<{ installationId: string; packageName: string; connector: PackageConnectorItem } | null>(null)
 const connectorPending = ref(new Set<string>())
+
+function onSelectedConnector(connector: PackageConnectorItem, action: PackageConnectorAction) {
+  if (selected.value) void onConnector(selected.value, connector, action)
+}
 
 async function onConnector(item: PackageItem, connector: PackageConnectorItem, action: PackageConnectorAction) {
   if (!item.installation_id) return
@@ -785,6 +816,7 @@ function switchScriptAction(action: ScriptAction) {
 watch([botIdRef, selectedTargetId], () => {
   confirm.open = false
   removeTarget.value = null
+  updateTarget.value = null
   authTarget.value = null
   script.open = false
   scriptSequence++

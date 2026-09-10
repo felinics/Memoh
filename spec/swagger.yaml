@@ -4040,6 +4040,26 @@ definitions:
       version:
         type: string
     type: object
+  handlers.PackageUpdateRequest:
+    properties:
+      dependencies:
+        description: Dependencies are updated to their latest version.
+        items:
+          type: string
+        type: array
+      package_id:
+        type: string
+      registry_id:
+        type: string
+      release:
+        description: Release moves the installation to the registry's current release.
+        type: boolean
+      workspace_target_id:
+        type: string
+    required:
+    - package_id
+    - registry_id
+    type: object
   handlers.PingResponse:
     properties:
       commit_hash:
@@ -12046,44 +12066,6 @@ paths:
       summary: Continue a partial Package installation
       tags:
       - packages
-  /bots/{bot_id}/packages/{installation_id}/update:
-    post:
-      description: 'Replaces the Skills atomically, links or installs new references
-        and releases dropped ones. Dependency definitions keep their own update cycle.
-        Events: started, step, log, step_done, done, error.'
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package installation ID
-        in: path
-        name: installation_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream of operation events
-          schema:
-            $ref: '#/definitions/handlers.PackageStreamEvent'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Update a Package to the registry's current release
-      tags:
-      - packages
   /bots/{bot_id}/packages/check-updates:
     post:
       description: Compares every installed Package with the registry's current release,
@@ -12118,6 +12100,52 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Check installed Packages for newer releases
+      tags:
+      - packages
+  /bots/{bot_id}/packages/update:
+    post:
+      consumes:
+      - application/json
+      description: 'Updates the selected dependencies to their latest version and,
+        when release is set, moves the installation to the registry''s current release,
+        streaming progress. A discovered Package may update its own dependency. Events:
+        started, step, log, step_done, done, error.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: What to update
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.PackageUpdateRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.PackageStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Update parts of a Package on a bot workspace
       tags:
       - packages
   /bots/{bot_id}/quick-actions/execute:

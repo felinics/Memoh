@@ -2,7 +2,7 @@ import {
   deleteBotsByBotIdPackagesByInstallationId,
   postBotsByBotIdPackages,
   postBotsByBotIdPackagesByInstallationIdResume,
-  postBotsByBotIdPackagesByInstallationIdUpdate,
+  postBotsByBotIdPackagesUpdate,
 } from '@memohai/sdk'
 import {
   fetchSSEProblem,
@@ -36,13 +36,25 @@ export interface PackageInstallTarget {
   workspaceTargetId?: string
 }
 
+/** What an update touches: the release, the dependencies, or both. */
+export interface PackageUpdateSelection {
+  release: boolean
+  dependencies: string[]
+  /** Omitted → the Server uses the bot's current target. */
+  workspaceTargetId?: string
+}
+
 export interface PackageStreamOptions {
   botId: string
   action: PackageOperationAction
-  /** Required by update, resume and remove. */
+  /** Required by resume and remove. */
   installationId?: string
   /** Required by install. */
   install?: PackageInstallTarget
+  /** Required by update, together with registryId and packageId. */
+  update?: PackageUpdateSelection
+  registryId?: string
+  packageId?: string
   /** Remove: also drop auto-installed Packages that lose their last reference. */
   removeUnreferencedRequired?: boolean
   /**
@@ -121,12 +133,22 @@ export async function* streamPackageOperation(
       })
       break
     }
-    case 'update':
-      result = await postBotsByBotIdPackagesByInstallationIdUpdate({
+    case 'update': {
+      const update = options.update
+      if (!update || !options.registryId || !options.packageId) throw new Error('update selection is required')
+      result = await postBotsByBotIdPackagesUpdate({
         ...common,
-        path: { bot_id: options.botId, installation_id: requireInstallation(options) },
+        path: { bot_id: options.botId },
+        body: {
+          registry_id: options.registryId,
+          package_id: options.packageId,
+          workspace_target_id: update.workspaceTargetId || undefined,
+          release: update.release,
+          dependencies: update.dependencies,
+        },
       })
       break
+    }
     case 'resume':
       result = await postBotsByBotIdPackagesByInstallationIdResume({
         ...common,

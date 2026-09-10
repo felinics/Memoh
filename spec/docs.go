@@ -7137,6 +7137,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/packages/update": {
+            "post": {
+                "description": "Updates the selected dependencies to their latest version and, when release is set, moves the installation to the registry's current release, streaming progress. A discovered Package may update its own dependency. Events: started, step, log, step_done, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Update parts of a Package on a bot workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "What to update",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/packages/{installation_id}": {
             "get": {
                 "produces": [
@@ -7506,60 +7571,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/packages/{installation_id}/update": {
-            "post": {
-                "description": "Replaces the Skills atomically, links or installs new references and releases dropped ones. Dependency definitions keep their own update cycle. Events: started, step, log, step_done, done, error.",
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "packages"
-                ],
-                "summary": "Update a Package to the registry's current release",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Package installation ID",
-                        "name": "installation_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "SSE stream of operation events",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.PackageStreamEvent"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -22674,6 +22685,35 @@ const docTemplate = `{
                     ]
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageUpdateRequest": {
+            "type": "object",
+            "required": [
+                "package_id",
+                "registry_id"
+            ],
+            "properties": {
+                "dependencies": {
+                    "description": "Dependencies are updated to their latest version.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "release": {
+                    "description": "Release moves the installation to the registry's current release.",
+                    "type": "boolean"
+                },
+                "workspace_target_id": {
                     "type": "string"
                 }
             }

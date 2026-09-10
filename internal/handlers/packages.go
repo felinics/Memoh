@@ -30,7 +30,7 @@ type packageService interface {
 	Get(ctx context.Context, botID, installationID string) (packages.Item, error)
 	Install(ctx context.Context, botID string, req packages.InstallRequest, sink packages.EventSink) (packages.OperationResult, error)
 	Resume(ctx context.Context, botID, installationID string, sink packages.EventSink) (packages.OperationResult, error)
-	Update(ctx context.Context, botID, installationID string, sink packages.EventSink) (packages.OperationResult, error)
+	UpdateSelection(ctx context.Context, botID string, req packages.UpdateRequest, sink packages.EventSink) (packages.OperationResult, error)
 	Remove(ctx context.Context, botID, installationID string, opts packages.RemoveOptions, sink packages.EventSink) (packages.OperationResult, error)
 	RemovalPreview(ctx context.Context, botID, installationID string) (packages.RemovalPreview, error)
 	CheckUpdates(ctx context.Context, botID, targetID string) (packages.ListResult, error)
@@ -63,10 +63,10 @@ func (h *PackagesHandler) Register(e *echo.Echo) {
 	g.GET("", h.List)
 	g.POST("", h.Install)
 	g.POST("/check-updates", h.CheckUpdates)
+	g.POST("/update", h.UpdateSelection)
 	g.GET("/:installation_id", h.Get)
 	g.GET("/:installation_id/removal-preview", h.RemovalPreview)
 	g.DELETE("/:installation_id", h.Remove)
-	g.POST("/:installation_id/update", h.Update)
 	g.POST("/:installation_id/resume", h.Resume)
 	g.POST("/:installation_id/connectors/:connector_type/oauth", h.BeginConnectorOAuth)
 	g.POST("/:installation_id/connectors/:connector_type/api-key", h.CreateConnectorCredential)
@@ -154,6 +154,18 @@ type PackageInstallRequest struct {
 	PackageID         string `json:"package_id" validate:"required"`
 	Revision          string `json:"revision" validate:"required"`
 	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
+}
+
+// PackageUpdateRequest selects what to update for one Package on a workspace
+// target: its dependencies, its release, or both.
+type PackageUpdateRequest struct {
+	RegistryID        string `json:"registry_id" validate:"required"`
+	PackageID         string `json:"package_id" validate:"required"`
+	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
+	// Release moves the installation to the registry's current release.
+	Release bool `json:"release"`
+	// Dependencies are updated to their latest version.
+	Dependencies []string `json:"dependencies,omitempty"`
 }
 
 // PackageRemovalPreviewDependency says what removing a Package does to one
@@ -404,29 +416,37 @@ func (h *PackagesHandler) Resume(c echo.Context) error {
 	})
 }
 
-// Update godoc
-// @Summary Update a Package to the registry's current release
-// @Description Replaces the Skills atomically, links or installs new references and releases dropped ones. Dependency definitions keep their own update cycle. Events: started, step, log, step_done, done, error.
+// UpdateSelection godoc
+// @Summary Update parts of a Package on a bot workspace
+// @Description Updates the selected dependencies to their latest version and, when release is set, moves the installation to the registry's current release, streaming progress. A discovered Package may update its own dependency. Events: started, step, log, step_done, done, error.
 // @Tags packages
+// @Accept json
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
-// @Param installation_id path string true "Package installation ID"
+// @Param payload body PackageUpdateRequest true "What to update"
 // @Success 200 {object} PackageStreamEvent "SSE stream of operation events"
+// @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
-// @Router /bots/{bot_id}/packages/{installation_id}/update [post].
-func (h *PackagesHandler) Update(c echo.Context) error {
+// @Router /bots/{bot_id}/packages/update [post].
+func (h *PackagesHandler) UpdateSelection(c echo.Context) error {
 	botID, err := h.authorize(c)
 	if err != nil {
 		return err
 	}
-	installationID, err := packageInstallationParam(c)
-	if err != nil {
-		return err
+	var req PackageUpdateRequest
+	if err := c.Bind(&req); err != nil {
+		return apperror.Wrap(apperror.CodePackageRequestInvalid, err, nil)
+	}
+	if strings.TrimSpace(req.RegistryID) == "" || strings.TrimSpace(req.PackageID) == "" || (!req.Release && len(req.Dependencies) == 0) {
+		return apperror.New(apperror.CodePackageRequestInvalid, nil)
 	}
 	return h.stream(c, "update", func(ctx context.Context, sink packages.EventSink) (packages.OperationResult, error) {
-		return h.service.Update(ctx, botID, installationID, sink)
+		return h.service.UpdateSelection(ctx, botID, packages.UpdateRequest{
+			RegistryID: req.RegistryID, PackageID: req.PackageID, WorkspaceTargetID: req.WorkspaceTargetID,
+			Release: req.Release, Dependencies: req.Dependencies,
+		}, sink)
 	})
 }
 

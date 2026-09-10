@@ -9,7 +9,7 @@ const sseOperations = new Set([
   'post /bots/{bot_id}/dependencies/{dep_id}/update',
   'post /bots/{bot_id}/dependencies/{dep_id}/reinstall',
   'post /bots/{bot_id}/packages',
-  'post /bots/{bot_id}/packages/{installation_id}/update',
+  'post /bots/{bot_id}/packages/update',
   'post /bots/{bot_id}/packages/{installation_id}/resume',
   'delete /bots/{bot_id}/packages/{installation_id}',
 ])

@@ -2302,6 +2302,20 @@ export type HandlersPackageStreamEvent = {
     version?: string;
 };
 
+export type HandlersPackageUpdateRequest = {
+    /**
+     * Dependencies are updated to their latest version.
+     */
+    dependencies?: Array<string>;
+    package_id: string;
+    registry_id: string;
+    /**
+     * Release moves the installation to the registry's current release.
+     */
+    release?: boolean;
+    workspace_target_id?: string;
+};
+
 export type HandlersPingResponse = {
     commit_hash?: string;
     connectors?: boolean;
@@ -9856,6 +9870,51 @@ export type PostBotsByBotIdPackagesCheckUpdatesResponses = {
 
 export type PostBotsByBotIdPackagesCheckUpdatesResponse = PostBotsByBotIdPackagesCheckUpdatesResponses[keyof PostBotsByBotIdPackagesCheckUpdatesResponses];
 
+export type PostBotsByBotIdPackagesUpdateData = {
+    /**
+     * What to update
+     */
+    body: HandlersPackageUpdateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/packages/update';
+};
+
+export type PostBotsByBotIdPackagesUpdateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PostBotsByBotIdPackagesUpdateError = PostBotsByBotIdPackagesUpdateErrors[keyof PostBotsByBotIdPackagesUpdateErrors];
+
+export type PostBotsByBotIdPackagesUpdateResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersPackageStreamEvent;
+};
+
+export type PostBotsByBotIdPackagesUpdateResponse = PostBotsByBotIdPackagesUpdateResponses[keyof PostBotsByBotIdPackagesUpdateResponses];
+
 export type DeleteBotsByBotIdPackagesByInstallationIdData = {
     body?: never;
     path: {
@@ -10134,48 +10193,6 @@ export type PostBotsByBotIdPackagesByInstallationIdResumeResponses = {
 };
 
 export type PostBotsByBotIdPackagesByInstallationIdResumeResponse = PostBotsByBotIdPackagesByInstallationIdResumeResponses[keyof PostBotsByBotIdPackagesByInstallationIdResumeResponses];
-
-export type PostBotsByBotIdPackagesByInstallationIdUpdateData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Package installation ID
-         */
-        installation_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages/{installation_id}/update';
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdUpdateErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdUpdateError = PostBotsByBotIdPackagesByInstallationIdUpdateErrors[keyof PostBotsByBotIdPackagesByInstallationIdUpdateErrors];
-
-export type PostBotsByBotIdPackagesByInstallationIdUpdateResponses = {
-    /**
-     * SSE stream of operation events
-     */
-    200: HandlersPackageStreamEvent;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdUpdateResponse = PostBotsByBotIdPackagesByInstallationIdUpdateResponses[keyof PostBotsByBotIdPackagesByInstallationIdUpdateResponses];
 
 export type PostBotsByBotIdQuickActionsExecuteData = {
     /**

@@ -11,6 +11,7 @@ import {
   type PackageInstallTarget,
   type PackageOperationAction,
   type PackageStepKind,
+  type PackageUpdateSelection,
 } from '@/composables/api/usePackageStream'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { apiErrorStatus, resolveApiErrorMessage } from '@/utils/api-error'
@@ -44,6 +45,7 @@ export interface PackageOperation {
   name: string
   action: PackageOperationAction
   install?: PackageInstallTarget
+  update?: PackageUpdateSelection
   removeUnreferencedRequired: boolean
   status: DependencyProgressStatus
   /** Package status the Server reported in `done` (installed, partial, removed…). */
@@ -65,6 +67,7 @@ export interface StartPackageOperationInput {
   name: string
   action: PackageOperationAction
   install?: PackageInstallTarget
+  update?: PackageUpdateSelection
   removeUnreferencedRequired?: boolean
   /** Replaces the default success toast when the operation finishes unwatched. */
   onBackgroundDone?: (operation: PackageOperation) => void
@@ -223,6 +226,9 @@ export const usePackageOperationsStore = defineStore('package-operations', () =>
         action: operation.action,
         installationId: operation.installationId || undefined,
         install: operation.install,
+        update: operation.update,
+        registryId: operation.registryId,
+        packageId: operation.packageId,
         removeUnreferencedRequired: operation.removeUnreferencedRequired,
         signal,
       })
@@ -314,6 +320,7 @@ export const usePackageOperationsStore = defineStore('package-operations', () =>
       name: input.name,
       action: input.action,
       install: input.install,
+      update: input.update,
       removeUnreferencedRequired: input.removeUnreferencedRequired ?? false,
       status: 'running',
       result: '',

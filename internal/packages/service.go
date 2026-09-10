@@ -64,6 +64,7 @@ type DependencyManager interface {
 	Refresh(ctx context.Context, botID, targetID string) (workspacedeps.ListResult, error)
 	CheckUpdates(ctx context.Context, botID, targetID string) (workspacedeps.ListResult, error)
 	Install(ctx context.Context, botID, targetID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+	Update(ctx context.Context, botID, targetID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Remove(ctx context.Context, botID, targetID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 }
 
@@ -166,7 +167,7 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest,
 		return OperationResult{}, err
 	}
 	defer unlock()
-	return s.materialize(ctx, botID, targetID, release, reason, StatusInstalling, sink)
+	return s.materialize(ctx, botID, targetID, release, reason, StatusInstalling, sink, false)
 }
 
 // Resume continues a partial installation: dependencies that are still
@@ -186,7 +187,7 @@ func (s *Service) Resume(ctx context.Context, botID, installationID string, sink
 		return OperationResult{}, err
 	}
 	defer unlock()
-	return s.materialize(ctx, botID, inst.WorkspaceTargetID, release, inst.Reason, StatusInstalling, sink)
+	return s.materialize(ctx, botID, inst.WorkspaceTargetID, release, inst.Reason, StatusInstalling, sink, false)
 }
 
 func validateReferences(release supermarket.SkillPackageDescriptor) error {
@@ -234,8 +235,9 @@ func normalizeRelease(release supermarket.SkillPackageDescriptor) supermarket.Sk
 	return release
 }
 
-// materialize is the shared body of Install, Resume and Update.
-func (s *Service) materialize(ctx context.Context, botID, targetID string, release supermarket.SkillPackageDescriptor, reason Reason, transient Status, sink EventSink) (OperationResult, error) {
+// materialize is the shared body of Install, Resume and Update. announced
+// is set when the caller already sent the started event.
+func (s *Service) materialize(ctx context.Context, botID, targetID string, release supermarket.SkillPackageDescriptor, reason Reason, transient Status, sink EventSink, announced bool) (OperationResult, error) {
 	sink = nonNilSink(sink)
 	release = normalizeRelease(release)
 	releaseBytes, err := json.Marshal(release)
@@ -260,7 +262,9 @@ func (s *Service) materialize(ctx context.Context, botID, targetID string, relea
 	if err != nil {
 		return OperationResult{}, fmt.Errorf("packages: record installation: %w", err)
 	}
-	sink.Send(Event{Type: EventStarted, Kind: KindPackage, ID: release.PackageID, Version: release.Version})
+	if !announced {
+		sink.Send(Event{Type: EventStarted, Kind: KindPackage, ID: release.PackageID, Version: release.Version})
+	}
 	result := OperationResult{Installation: inst}
 	partial := false
 	var problems []string
