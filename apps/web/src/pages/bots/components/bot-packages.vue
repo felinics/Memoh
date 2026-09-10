@@ -113,7 +113,7 @@
           <Button
             variant="outline"
             size="sm"
-            @click="refetch()"
+            @click="refetchPackages()"
           >
             {{ t('common.retry') }}
           </Button>
@@ -392,6 +392,13 @@ watch(() => props.botId, () => {
 
 const forceRefresh = ref(false)
 const { data, error, isLoading, refetch } = useBotPackagesQuery(botIdRef, selectedTargetId, forceRefresh)
+
+// Pinia Colada's refetch ignores `enabled`, so manual refreshes must skip the
+// window before the bot id is known; otherwise they hit `/bots//packages`.
+function refetchPackages(): Promise<unknown> {
+  if (!botIdRef.value) return Promise.resolve()
+  return refetch()
+}
 const items = computed<PackageItem[]>(() => data.value?.items ?? [])
 const loading = computed(() => (isLoading.value || !botIdRef.value) && !data.value && !error.value)
 
@@ -410,7 +417,7 @@ async function retryDiscovery() {
   retrying.value = true
   try {
     forceRefresh.value = true
-    await refetch()
+    await refetchPackages()
   } finally {
     retrying.value = false
   }
@@ -864,7 +871,7 @@ function syncPolling() {
   const shouldPoll = tabActive && hasForeignProgress.value
   if (shouldPoll && !pollTimer) {
     pollTimer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') void refetch()
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') void refetchPackages()
     }, POLL_MS)
   } else if (!shouldPoll) {
     stopPolling()
@@ -876,7 +883,7 @@ watch(hasForeignProgress, syncPolling, { immediate: true })
 onActivated(() => {
   tabActive = true
   syncPolling()
-  void refetch()
+  void refetchPackages()
 })
 
 onDeactivated(() => {

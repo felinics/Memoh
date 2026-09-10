@@ -228,14 +228,14 @@ function dependencyName(dep: PackageDependencyItem): string {
                 class="transition-transform"
                 :class="{ 'rotate-90': open }"
               />
-              {{ t('packages.components', { count: componentCount }) }}
+              {{ t('packages.components', { count: componentCount }, componentCount) }}
             </TextButton>
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div class="mt-2 space-y-4 rounded-lg border border-border bg-muted-soft/40 p-3">
               <section v-if="skills.length">
                 <h4 class="mb-1 text-caption font-medium uppercase tracking-wide text-muted-foreground">
-                  {{ t('packages.section.skills', { count: skills.length }) }}
+                  {{ t('packages.section.skills', { count: skills.length }, skills.length) }}
                 </h4>
                 <ul class="space-y-1">
                   <li
@@ -259,7 +259,7 @@ function dependencyName(dep: PackageDependencyItem): string {
 
               <section v-if="dependencies.length">
                 <h4 class="mb-1 text-caption font-medium uppercase tracking-wide text-muted-foreground">
-                  {{ t('packages.section.dependencies', { count: dependencies.length }) }}
+                  {{ t('packages.section.dependencies', { count: dependencies.length }, dependencies.length) }}
                 </h4>
                 <div class="divide-y divide-border rounded-md border border-border bg-background">
                   <template
@@ -295,7 +295,7 @@ function dependencyName(dep: PackageDependencyItem): string {
 
               <section v-if="connectors.length">
                 <h4 class="mb-1 text-caption font-medium uppercase tracking-wide text-muted-foreground">
-                  {{ t('packages.section.connectors', { count: connectors.length }) }}
+                  {{ t('packages.section.connectors', { count: connectors.length }, connectors.length) }}
                 </h4>
                 <div class="divide-y divide-border rounded-md border border-border bg-background">
                   <div

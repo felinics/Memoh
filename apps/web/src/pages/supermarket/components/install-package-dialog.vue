@@ -60,7 +60,7 @@
               class="flex items-center gap-2"
             >
               <BrainCircuit class="size-3.5" />
-              {{ $t('packages.section.skills', { count: pkg.skills.length }) }}
+              {{ $t('packages.section.skills', { count: pkg.skills.length }, pkg.skills.length) }}
             </li>
             <li
               v-for="dep in pkg.dependencies"

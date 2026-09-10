@@ -27,7 +27,7 @@
       <span
         v-if="pkg.skill_count"
         class="inline-flex items-center gap-1 text-caption text-muted-foreground"
-        :title="$t('packages.section.skills', { count: pkg.skill_count })"
+        :title="$t('packages.section.skills', { count: pkg.skill_count ?? 0 }, pkg.skill_count ?? 0)"
       >
         <BrainCircuit class="size-3.5" />
         {{ pkg.skill_count }}
@@ -35,7 +35,7 @@
       <span
         v-if="pkg.dependency_count"
         class="inline-flex items-center gap-1 text-caption text-muted-foreground"
-        :title="$t('packages.section.dependencies', { count: pkg.dependency_count })"
+        :title="$t('packages.section.dependencies', { count: pkg.dependency_count ?? 0 }, pkg.dependency_count ?? 0)"
       >
         <Package class="size-3.5" />
         {{ pkg.dependency_count }}
@@ -43,7 +43,7 @@
       <span
         v-if="pkg.connector_count"
         class="inline-flex items-center gap-1 text-caption text-muted-foreground"
-        :title="$t('packages.section.connectors', { count: pkg.connector_count })"
+        :title="$t('packages.section.connectors', { count: pkg.connector_count ?? 0 }, pkg.connector_count ?? 0)"
       >
         <Plug class="size-3.5" />
         {{ pkg.connector_count }}

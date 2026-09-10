@@ -46,6 +46,8 @@ const removedDependencies = computed(() => (props.preview?.dependencies ?? []).f
 const keptDependencies = computed(() => (props.preview?.dependencies ?? []).filter(dep => dep.action === 'keep'))
 const disconnected = computed(() => (props.preview?.connectors ?? []).filter(conn => conn.action === 'disconnect'))
 const keptConnectors = computed(() => (props.preview?.connectors ?? []).filter(conn => conn.action === 'keep'))
+const dependencyCount = computed(() => removedDependencies.value.length + keptDependencies.value.length)
+const connectorCount = computed(() => disconnected.value.length + keptConnectors.value.length)
 const requiredPackages = computed(() => props.preview?.required_packages ?? [])
 
 function reasonLabel(reason?: string): string {
@@ -93,7 +95,7 @@ function reasonLabel(reason?: string): string {
         <template v-else-if="preview">
           <section v-if="removedDependencies.length || keptDependencies.length">
             <h4 class="mb-1 text-caption font-medium uppercase tracking-wide text-muted-foreground">
-              {{ t('packages.section.dependencies', { count: removedDependencies.length + keptDependencies.length }) }}
+              {{ t('packages.section.dependencies', { count: dependencyCount }, dependencyCount) }}
             </h4>
             <ul class="space-y-1 text-body">
               <li
@@ -117,7 +119,7 @@ function reasonLabel(reason?: string): string {
 
           <section v-if="disconnected.length || keptConnectors.length">
             <h4 class="mb-1 text-caption font-medium uppercase tracking-wide text-muted-foreground">
-              {{ t('packages.section.connectors', { count: disconnected.length + keptConnectors.length }) }}
+              {{ t('packages.section.connectors', { count: connectorCount }, connectorCount) }}
             </h4>
             <ul class="space-y-1 text-body">
               <li

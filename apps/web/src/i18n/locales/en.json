@@ -3853,7 +3853,7 @@
     "loadFailed": "Couldn't load Packages",
     "busy": "Another Package operation is still running in this workspace.",
     "viewBotPackages": "View bot Packages",
-    "components": "{count} components",
+    "components": "{count} component | {count} components",
     "workspaceNotRunningDescription": "Installing and updating Packages needs a running workspace. The list shows the last recorded state.",
     "status": {
       "installed": "Installed",
@@ -3877,9 +3877,9 @@
       "open": "View in Supermarket"
     },
     "section": {
-      "skills": "{count} Skills",
-      "dependencies": "{count} dependencies",
-      "connectors": "{count} connectors"
+      "skills": "{count} Skill | {count} Skills",
+      "dependencies": "{count} dependency | {count} dependencies",
+      "connectors": "{count} connector | {count} connectors"
     },
     "dependency": {
       "shared": "Shared",
