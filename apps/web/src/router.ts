@@ -226,7 +226,7 @@ const routes = [
           },
           {
             name: 'supermarket-package-detail',
-            path: 'skills/:registryId/:packageId',
+            path: ':registryId/:packageId',
             component: () => import('@/pages/supermarket/package-detail.vue'),
             meta: {
               breadcrumb: (route: RouteLocationNormalized) => route.params.packageId,

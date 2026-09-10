@@ -268,6 +268,12 @@
     "external_runtime": {
       "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。"
+    },
+    "package": {
+      "not_found": "このパッケージのインストールは見つかりませんでした。",
+      "request_invalid": "パッケージのリクエストが無効です。",
+      "busy": "このパッケージの別の操作が進行中です。",
+      "operation_failed": "パッケージの操作に失敗しました。"
     }
   },
   "auth": {
@@ -2312,18 +2318,17 @@
       "channels": "プラットフォーム",
       "remoteRuntime": "コンピューター",
       "container": "Workspace",
-      "dependencies": "依存関係",
       "mcp": "MCP",
       "compaction": "圧縮",
       "schedule": "スケジュール",
       "history": "歴史",
-      "connectors": "コネクター",
       "skills": "Skill",
       "email": "メール",
       "files": "ファイル",
       "access": "アクセス",
       "terminal": "Terminal",
-      "settings": "設定"
+      "settings": "設定",
+      "packages": "パッケージ"
     },
     "agent": {
       "add": "Agent を追加",
@@ -2394,7 +2399,8 @@
         "removing": "削除中",
         "updateAvailable": "{version} が利用可能",
         "unsupported": "非対応",
-        "unsupportedTooltip": "この Workspace のプラットフォームでは利用できません。"
+        "unsupportedTooltip": "この Workspace のプラットフォームでは利用できません。",
+        "retired": "提供終了"
       },
       "action": {
         "install": "インストール",
@@ -2433,7 +2439,8 @@
         "remoteWarningDescription": "スクリプトはそのコンピューター上でファイルをダウンロードして書き込みます。",
         "installConfirm": "インストール",
         "updateConfirm": "更新",
-        "installAndEnable": "インストールして有効化"
+        "installAndEnable": "インストールして有効化",
+        "versionInvalid": "1.2.3 や latest のようなリリース識別子を入力してください。"
       },
       "progress": {
         "installing": "{name} をインストール中",
@@ -2446,7 +2453,10 @@
         "failedHint": "失敗として記録されました。依存関係の一覧から再試行できます。ログはコピーできます。",
         "runInBackground": "バックグラウンドで実行",
         "version": "バージョン",
-        "entrypoint": "エントリーポイント"
+        "entrypoint": "エントリーポイント",
+        "log": "操作ログ",
+        "unknownTitle": "結果は未確認です",
+        "unknownHint": "操作結果はまだ確認されていません。依存関係を更新して状態を確認してください。"
       },
       "script": {
         "title": "Workspace で実行されるスクリプト",
@@ -3349,10 +3359,6 @@
       "openPackage": "Package を開く",
       "backToLibrary": "戻る",
       "viewSkill": "Skill を表示",
-      "uninstallPackage": "Package をアンインストール",
-      "uninstallPackageConfirm": "この Package をアンインストールしますか？",
-      "uninstallPackageSuccess": "Package をアンインストールしました",
-      "uninstallPackageFailed": "Package のアンインストールに失敗しました",
       "packageSkillsUnavailable": "Package の Skill は現在利用できません",
       "close": "閉じる",
       "emptyTitle": "アクティブSkillなし",
@@ -3386,7 +3392,8 @@
       "saveSuccess": "Skillが保存されました",
       "saveFailed": "Skillの保存に失敗しました",
       "loadFailed": "Skillのロードに失敗しました",
-      "intro": "このBotのカスタム能力を構成します。マネージド Skillが優先されます。"
+      "intro": "このBotのカスタム能力を構成します。マネージド Skillが優先されます。",
+      "managePackage": "パッケージを管理"
     },
     "compaction": {
       "advanced": "詳細設定",
@@ -3600,23 +3607,15 @@
   },
   "supermarket": {
     "title": "マーケットプレイス",
-    "searchPlaceholder": "スキルを検索...",
-    "searchPlaceholderWithConnectors": "スキルとコネクターを検索...",
+    "searchPlaceholder": "パッケージを検索...",
     "skillsSection": "スキル",
-    "packagesSection": "Package",
-    "connectorsSection": "コネクター",
-    "dependenciesSection": "依存関係",
     "noResults": "結果が見つかりませんでした",
     "noPackageResults": "Package が見つかりません",
-    "noConnectorResults": "コネクターが見つかりません",
-    "noDependencyResults": "依存関係が見つかりません",
     "install": "インストール",
     "installToBot": "Botにインストールする",
     "selectBot": "Botを選択してください",
     "selectBotPlaceholder": "インストールするBotを選択してください...",
     "selectWorkspaceTarget": "Workspace",
-    "dependencyInstallTitle": "{name} をインストール",
-    "viewBotDependencies": "Bot の依存関係を表示",
     "envVariables": "環境変数",
     "envDescription": "必要な環境変数を構成する",
     "installSuccess": "正常にインストールされました",
@@ -3651,7 +3650,29 @@
     "includedSkills": "含まれるスキル",
     "packageNotFound": "Package が見つかりません",
     "noDescription": "説明なし",
-    "unnamedSkill": "名前のないスキル"
+    "unnamedSkill": "名前のないスキル",
+    "componentFilter": "コンポーネントで絞り込む",
+    "component": {
+      "all": "すべて",
+      "skills": "スキル",
+      "dependencies": "依存関係",
+      "connectors": "コネクター"
+    },
+    "allCategories": "すべてのカテゴリ",
+    "includedDependencies": "含まれる依存関係",
+    "dependenciesHint": "Bot のワークスペースにインストールされ、必要とする他のパッケージと共有されます。",
+    "dependencyPending": "読み込み中…",
+    "includedConnectors": "含まれるコネクター",
+    "connectorsHint": "パッケージをインストールした後、各コネクターの認証が必要です。",
+    "connectorsUnavailableHint": "このサーバーでは Connect-It が設定されていないため、これらのコネクターは未認証のままになります。",
+    "connectorAuthHint": "インストール後に認証します。",
+    "license": "ライセンス",
+    "repository": "リポジトリ",
+    "revision": "リビジョン",
+    "installPreview": "インストールすると",
+    "installPreviewDependency": "未インストールならワークスペースにインストールします",
+    "installPreviewConnector": "認証が必要です",
+    "installPreviewConnectorOptional": "後で認証できます（任意）"
   },
   "connectors": {
     "title": "コネクター",
@@ -3812,5 +3833,117 @@
     "expiresIn": "{time}で期限切れになります",
     "codeExpired": "コードは期限切れです",
     "copyFailed": "コードをコピーできませんでした"
+  },
+  "packages": {
+    "title": "パッケージ",
+    "intro": "マーケットプレイスからインストールしたスキル、ワークスペースの依存関係、コネクターを、導入元のパッケージごとにまとめて表示します。",
+    "checkUpdates": "更新を確認",
+    "checkUpdatesDone": "更新の確認が完了しました",
+    "checkUpdatesFailed": "更新を確認できませんでした",
+    "lastChecked": "最終確認 {time}",
+    "browse": "マーケットプレイスを見る",
+    "emptyTitle": "パッケージはまだインストールされていません",
+    "emptyDescription": "スキル、依存関係、コネクターはマーケットプレイスからパッケージとしてインストールします。",
+    "emptyAction": "マーケットプレイスを開く",
+    "loadFailed": "パッケージを読み込めませんでした",
+    "busy": "このワークスペースでは別のパッケージ操作が実行中です。",
+    "viewBotPackages": "Bot のパッケージを表示",
+    "components": "{count} 個のコンポーネント",
+    "workspaceNotRunningDescription": "パッケージのインストールと更新には実行中のワークスペースが必要です。一覧は最後に記録された状態です。",
+    "status": {
+      "installed": "インストール済み",
+      "partial": "要対応",
+      "installing": "インストール中",
+      "updating": "更新中",
+      "removing": "削除中",
+      "failed": "失敗",
+      "discovered": "検出済み",
+      "updateAvailable": "{version} が利用可能"
+    },
+    "reason": {
+      "required": "自動インストール"
+    },
+    "action": {
+      "install": "インストール",
+      "resume": "セットアップを続行",
+      "update": "更新",
+      "remove": "削除",
+      "viewProgress": "進捗を表示",
+      "open": "マーケットプレイスで表示"
+    },
+    "section": {
+      "skills": "スキル {count} 件",
+      "dependencies": "依存関係 {count} 件",
+      "connectors": "コネクター {count} 件"
+    },
+    "dependency": {
+      "shared": "共有",
+      "unknown": "カタログにありません"
+    },
+    "connector": {
+      "needsAuth": "認証が必要",
+      "optional": "任意",
+      "shared": "全ワークスペースで共有",
+      "authorize": "認証する",
+      "authDescription": "{name} が使用するサービスに接続します。",
+      "unavailableTitle": "コネクターを利用できません",
+      "unavailableDescription": "設定された Connect-It にはこの種類のコネクターがありません。"
+    },
+    "remove": {
+      "title": "{name} を削除しますか？",
+      "description": "パッケージのスキルを削除します。依存関係と接続は、他のパッケージが参照していない場合にのみ解放されます。",
+      "willRemove": "削除されます",
+      "willKeep": "保持",
+      "willDisconnect": "切断されます",
+      "alsoRemoveRequired": "このパッケージだけが使用している自動インストール済みパッケージも削除する",
+      "reason": {
+        "shared": "他のパッケージが使用中",
+        "image": "ワークスペースイメージに同梱",
+        "absent": "未インストール"
+      }
+    },
+    "progress": {
+      "installing": "{name} をインストール中",
+      "updating": "{name} を更新中",
+      "resuming": "{name} のセットアップを続行中",
+      "removing": "{name} を削除中",
+      "doneTitle": "完了",
+      "partialTitle": "インストール済み（要対応の項目あり）",
+      "partialHint": "一部のコンポーネントが失敗したか、まだ認証が必要です。解決後にパッケージタブからセットアップを続行してください。",
+      "failedTitle": "操作に失敗しました",
+      "failedHint": "失敗として記録されました。パッケージタブから再試行できます。ログ全体をコピーできます。",
+      "unknownTitle": "結果は未確認です",
+      "unknownHint": "操作結果はまだ確認されていません。パッケージ一覧を更新して状態を確認してください。",
+      "preparing": "準備中…",
+      "noLog": "スクリプトの出力はありません。",
+      "log": "操作ログ",
+      "runInBackground": "バックグラウンドで実行"
+    },
+    "steps": {
+      "skills": "スキル",
+      "dependency": "依存関係 {name}",
+      "connector": "コネクター {name}"
+    },
+    "stepStatus": {
+      "running": "実行中",
+      "installed": "インストール済み",
+      "linked": "関連付け済み",
+      "needs_auth": "認証が必要",
+      "failed": "失敗",
+      "skipped": "スキップ",
+      "removed": "削除済み",
+      "kept": "保持",
+      "disconnected": "切断済み"
+    },
+    "background": {
+      "installed": "{name} をインストールしました",
+      "partial": "{name} をインストールしました（要対応の項目あり）",
+      "updated": "{name} を更新しました",
+      "removed": "{name} を削除しました",
+      "failed": "{name}: 操作に失敗しました"
+    },
+    "enableFlow": {
+      "installDescription": "{name} パッケージをワークスペースにインストールしてからエージェントを有効にします。"
+    }
   }
 }

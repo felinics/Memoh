@@ -5,6 +5,7 @@ import { defineConfig } from '@hey-api/openapi-ts';
 // `@Produce text/event-stream`.
 const sseOperations = new Set([
   'post /bots/{bot_id}/container/display/prepare',
+  'post /bots/{bot_id}/dependencies/{dep_id}/install',
   'post /bots/{bot_id}/dependencies/{dep_id}/update',
   'post /bots/{bot_id}/dependencies/{dep_id}/reinstall',
   'post /bots/{bot_id}/packages',

@@ -30,9 +30,24 @@
           <slot name="icon" />
         </div>
         <div class="min-w-0 flex-1">
-          <h1 class="break-words text-3xl font-semibold leading-tight">
-            {{ name }}
-          </h1>
+          <div class="flex flex-wrap items-center gap-3">
+            <h1 class="break-words text-3xl font-semibold leading-tight">
+              {{ name }}
+            </h1>
+            <Badge
+              v-if="version"
+              variant="secondary"
+              font="mono"
+            >
+              v{{ version }}
+            </Badge>
+          </div>
+          <p
+            v-if="subtitle"
+            class="mt-1 text-sm text-muted-foreground"
+          >
+            {{ subtitle }}
+          </p>
         </div>
       </div>
 
@@ -60,6 +75,8 @@ const iconBoxClass = 'flex size-16 shrink-0 items-center justify-center overflow
 defineProps<{
   name?: string
   tags?: string[]
+  version?: string
+  subtitle?: string
 }>()
 
 defineEmits<{

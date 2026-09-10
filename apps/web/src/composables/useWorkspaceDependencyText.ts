@@ -1,10 +1,9 @@
 import { useI18n } from 'vue-i18n'
-import type { HandlersWorkspaceDependencyCatalogItem } from '@memohai/sdk'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import { dependencyText } from '@/utils/workspace-dependency'
 import { sdkApiUrl } from '@/lib/api-client'
 
-type CatalogText = Pick<DependencyItem | HandlersWorkspaceDependencyCatalogItem, 'id' | 'name' | 'description' | 'translations' | 'icon_url'>
+type CatalogText = Pick<DependencyItem, 'id' | 'name' | 'description' | 'translations' | 'icon_url'>
 
 export function useWorkspaceDependencyText() {
   const { locale } = useI18n()

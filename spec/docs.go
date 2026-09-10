@@ -4487,6 +4487,89 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/dependencies/{dep_id}/install": {
+            "post": {
+                "description": "Runs the catalog install script for a dependency a Package references and streams its output: a retry after a failed Package step, or a managed overlay laid over the copy the workspace image ships. New dependencies reach a bot by installing the Package that references them. Events: started, log, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Install or reinstall a referenced workspace dependency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Version to install (optional)",
+                        "name": "payload",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/dependencies/{dep_id}/reinstall": {
             "post": {
                 "description": "Runs the catalog reinstall script, or remove followed by install, and streams the output. The optional body names the version to install; without one the script picks the latest version (or the manifest pin).",

@@ -2,12 +2,11 @@
 // Preflight runs before a direct agent can be enabled. Mounted once by
 // bot-agents.vue; `run(agent)` resolves true only when its declared dependency
 // is installed, and only then does the caller write `enabled: true`.
-// Cancellation, an unavailable workspace or platform, and failed or backgrounded
-// installation all leave the agent disabled. Installation errors keep their full
-// log in the progress dialog; background completion prompts the user to enable
-// the agent instead of enabling it while the user is away.
-// No dependency is pinned, so the only operation here is an install; the
-// confirm dialog lets the user name a version, blank meaning the latest.
+// A missing dependency is installed through its canonical Package (the
+// Package with the dependency's own ID), so the bot's Packages tab shows it
+// afterwards like anything else installed from the Supermarket. Cancellation,
+// an unavailable workspace or platform, and failed or backgrounded
+// installation all leave the agent disabled.
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -22,17 +21,21 @@ import {
   DialogTitle,
   toast,
 } from '@felinic/ui'
-import { postBotsByBotIdContainerStart, type BotagentsBotAgent } from '@memohai/sdk'
+import {
+  getSupermarketRegistriesByRegistryIdPackagesByPackageId,
+  postBotsByBotIdContainerStart,
+  type BotagentsBotAgent,
+} from '@memohai/sdk'
 import {
   preflightDependencies,
   type DependencyItem,
 } from '@/composables/api/useWorkspaceDependencies'
-import { useDependencyOperationsStore, type DependencyOperation } from '@/store/dependency-operations'
+import { packageDisplayName } from '@/composables/api/usePackages'
+import { usePackageOperationsStore, type PackageOperation } from '@/store/package-operations'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { dependencyDisplayName } from '@/utils/workspace-dependency'
-import DependencyConfirmDialog from './dependency-confirm-dialog.vue'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
-import DependencyProgressDialog from './dependency-progress-dialog.vue'
+import PackageProgressDialog from './package-progress-dialog.vue'
 import {
   agentDependencyRequirement,
   dependencyItemFromPreflight,
@@ -40,16 +43,15 @@ import {
   type EnableFlowRequirement,
 } from './dependency-enable-flow'
 
+const DEPENDENCY_REGISTRY = 'memoh'
+
 const props = defineProps<{ botId: string }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const store = useDependencyOperationsStore()
+const store = usePackageOperationsStore()
 
-// One run at a time: the resolver of the pending `run()` promise. Every path
-// out of the flow goes through `finish()` so a promise can never be left
-// dangling with a dialog closed underneath it.
 let settle: ((ok: boolean) => void) | null = null
 const requirement = ref<EnableFlowRequirement | null>(null)
 const item = ref<DependencyItem | null>(null)
@@ -63,13 +65,11 @@ const workspaceState = ref<'not_running' | 'missing'>('not_running')
 const starting = ref(false)
 
 const confirmOpen = ref(false)
-const OPERATION = 'install'
+const installing = ref(false)
 
 const VIEWER_ID = 'dependency-enable-flow'
 const progressOpen = ref(false)
-// Kept across close so the dialog fades out with its content intact even
-// after the store dropped the record.
-const displayed = shallowRef<DependencyOperation | null>(null)
+const displayed = shallowRef<PackageOperation | null>(null)
 
 const workspaceRows = computed<DependencyKvRow[]>(() => [
   { label: t('bots.dependencies.confirm.dependency'), value: item.value?.id, mono: true },
@@ -102,7 +102,6 @@ async function preflight() {
   checking.value = true
   let step
   try {
-    // Empty target = the bot's current one; the Server never starts it here.
     const response = await preflightDependencies(props.botId, '', [declared.dependencyId])
     step = resolveEnableFlowStep(declared, response)
   } catch (error) {
@@ -127,9 +126,7 @@ async function preflight() {
       return finish(false)
     case 'install': {
       item.value = step.item
-      // An install sent to the background earlier is still streaming: reopen
-      // its log rather than asking to confirm a second one.
-      const running = store.get(props.botId, step.item.id)
+      const running = store.get(props.botId, DEPENDENCY_REGISTRY, step.item.id)
       if (running?.status === 'running') {
         showProgress(running)
         return
@@ -153,8 +150,6 @@ function goToContainer() {
   void router.replace({ query: { ...route.query, tab: 'container' } }).catch(() => {})
 }
 
-// Start only after an explicit user action, then repeat the preflight once
-// the workspace is running.
 async function startAndContinue() {
   if (starting.value) return
   starting.value = true
@@ -171,41 +166,57 @@ async function startAndContinue() {
 }
 
 function onConfirmOpenChange(value: boolean) {
-  if (!value) finish(false)
+  if (!value && !installing.value) finish(false)
 }
 
-function onConfirmed(version: string) {
-  confirmOpen.value = false
+// The canonical Package of the dependency carries it; installing that
+// Package's current release installs the dependency.
+async function onConfirmed() {
   const current = item.value
-  if (!current) return finish(false)
-  const result = store.start({
-    botId: props.botId,
-    targetId: '',
-    item: current,
-    action: OPERATION,
-    version,
-    onBackgroundDone: onBackgroundDone,
-  })
-  switch (result.kind) {
-    case 'started':
-    case 'running':
-      showProgress(result.operation)
-      return
-    case 'busy':
-      toast.error(t('bots.dependencies.busy'))
-      return finish(false)
-    default:
-      return finish(false)
+  const depId = current?.id
+  if (!current || !depId) return finish(false)
+  installing.value = true
+  try {
+    const { data } = await getSupermarketRegistriesByRegistryIdPackagesByPackageId({
+      path: { registry_id: DEPENDENCY_REGISTRY, package_id: depId },
+      throwOnError: true,
+    })
+    if (!data.revision) throw new Error('missing revision')
+    const result = store.start({
+      botId: props.botId,
+      targetId: '',
+      registryId: DEPENDENCY_REGISTRY,
+      packageId: depId,
+      name: packageDisplayName(data, locale.value),
+      action: 'install',
+      install: { registryId: DEPENDENCY_REGISTRY, packageId: depId, revision: data.revision },
+      onBackgroundDone,
+    })
+    confirmOpen.value = false
+    switch (result.kind) {
+      case 'started':
+      case 'running':
+        showProgress(result.operation)
+        return
+      case 'busy':
+        toast.error(t('packages.busy'))
+        return finish(false)
+      default:
+        return finish(false)
+    }
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
+    return finish(false)
+  } finally {
+    installing.value = false
   }
 }
 
-// Background installation leaves the agent disabled; completion points the
-// user back at the switch instead of enabling the agent without them.
-function onBackgroundDone(operation: DependencyOperation) {
-  toast.success(t('bots.agent.dependencyInstalledEnableHint', { name: dependencyDisplayName(operation.item) }))
+function onBackgroundDone(operation: PackageOperation) {
+  toast.success(t('bots.agent.dependencyInstalledEnableHint', { name: operation.name }))
 }
 
-function showProgress(operation: DependencyOperation) {
+function showProgress(operation: PackageOperation) {
   displayed.value = operation
   progressOpen.value = true
   store.view(operation.key, VIEWER_ID)
@@ -221,11 +232,9 @@ function retryOperation() {
   if (displayed.value) store.retry(displayed.value.key)
 }
 
-// Closing a finished dialog is the verdict; closing a running one sends the
-// install to the background, which resolves the flow as "not enabled".
 function onProgressOpenChange(value: boolean) {
   if (value) return
-  finish(displayed.value?.status === 'done')
+  finish(displayed.value?.status === 'done' && displayed.value.result === 'installed')
 }
 
 onBeforeUnmount(hideProgress)
@@ -283,25 +292,52 @@ defineExpose({ run, checking })
     </DialogPanel>
   </Dialog>
 
-  <DependencyConfirmDialog
+  <Dialog
     :open="confirmOpen"
-    mode="install"
-    :item="item"
-    target-kind="native"
-    :confirm-label="t('bots.dependencies.confirm.installAndEnable')"
     @update:open="onConfirmOpenChange"
-    @confirm="onConfirmed"
-  />
+  >
+    <DialogPanel
+      width="lg"
+      footer
+    >
+      <DialogHeader class="min-w-0">
+        <DialogTitle class="break-words">
+          {{ t('bots.dependencies.confirm.installTitle', { name }) }}
+        </DialogTitle>
+        <DialogDescription class="break-words">
+          {{ t('packages.enableFlow.installDescription', { name }) }}
+        </DialogDescription>
+      </DialogHeader>
+      <DialogBody class="min-w-0">
+        <DependencyKvList :rows="workspaceRows" />
+      </DialogBody>
+      <DialogFooter class="min-w-0 items-center gap-2">
+        <Button
+          variant="outline"
+          :disabled="installing"
+          @click="finish(false)"
+        >
+          {{ t('common.cancel') }}
+        </Button>
+        <Button
+          :loading="installing"
+          @click="onConfirmed"
+        >
+          {{ t('bots.dependencies.confirm.installAndEnable') }}
+        </Button>
+      </DialogFooter>
+    </DialogPanel>
+  </Dialog>
 
-  <DependencyProgressDialog
+  <PackageProgressDialog
     :open="progressOpen"
-    :name="name"
-    :action="OPERATION"
+    :name="displayed?.name ?? name"
+    :action="displayed?.action ?? 'install'"
+    :steps="displayed?.steps ?? []"
     :lines="displayed?.lines ?? []"
     :status="displayed?.status ?? 'running'"
+    :result="displayed?.result"
     :error="displayed?.error"
-    :result-version="displayed?.resultVersion"
-    :entrypoint="displayed?.entrypoint"
     @update:open="onProgressOpenChange"
     @retry="retryOperation"
   />

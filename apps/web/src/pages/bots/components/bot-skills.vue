@@ -29,25 +29,15 @@
         <Plus class="size-4" />
         {{ $t('bots.skills.addSkill') }}
       </Button>
-      <ConfirmPopover
+      <Button
         v-if="selectedPackage"
-        :message="$t('bots.skills.uninstallPackageConfirm')"
-        :cancel-text="$t('common.cancel')"
-        :confirm-text="$t('common.confirm')"
-        :loading="isUninstallingPackage"
-        @confirm="handleUninstallPackage"
+        variant="outline"
+        size="sm"
+        @click="openPackagesTab"
       >
-        <template #trigger>
-          <Button
-            variant="destructive"
-            size="sm"
-            :disabled="isUninstallingPackage"
-          >
-            <Trash2 class="size-4" />
-            {{ $t('bots.skills.uninstallPackage') }}
-          </Button>
-        </template>
-      </ConfirmPopover>
+        <Box class="size-4" />
+        {{ $t('bots.skills.managePackage') }}
+      </Button>
     </template>
 
     <Button
@@ -484,17 +474,17 @@ import MonacoEditor from '@/components/monaco-editor/index.vue'
 import {
   getBotsById,
   getBotsByBotIdContainerSkills,
-  getBotsByBotIdSupermarketPackages,
+  getBotsByBotIdPackages,
   getBotsByBotIdWorkspaceTargets,
   postBotsByBotIdContainerSkills,
   postBotsByBotIdContainerSkillsActions,
   deleteBotsByBotIdContainerSkills,
-  deleteBotsByBotIdSupermarketPackagesByInstallationId,
   putBotsById,
   type HandlersSkillItem,
-  type SkillpackagesInstallation,
+  type HandlersPackageItem,
 } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
+import { useRoute, useRouter } from 'vue-router'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 type SkillItem = HandlersSkillItem & {
@@ -528,6 +518,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const route = useRoute()
+const router = useRouter()
 
 const MANAGED_SKILL_PATH = '/data/skills'
 const DEFAULT_DISCOVERY_ROOTS = ['/data/.agents/skills', '/root/.agents/skills']
@@ -538,13 +530,12 @@ const SKILL_DISCOVERY_ROOTS_METADATA_KEY = 'skill_discovery_roots'
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isDeleting = ref(false)
-const isUninstallingPackage = ref(false)
 const deletingPath = ref('')
 const isActioning = ref(false)
 const actionTargetPath = ref('')
 const actionName = ref('')
 const skills = ref<SkillItem[]>([])
-const installedPackages = ref<SkillpackagesInstallation[]>([])
+const installedPackages = ref<HandlersPackageItem[]>([])
 const packageLoadFailed = ref(false)
 const isSavingDiscoveryRoots = ref(false)
 const isDiscoveryDialogOpen = ref(false)
@@ -583,23 +574,25 @@ const skillPackages = computed<SkillPackage[]>(() => {
     skillsByPackage.set(key, members)
   }
   return installedPackages.value
+    .filter(item => item.installation_id && item.registry_id && item.package_id && (item.skills?.length || skillsByPackage.has(`${item.registry_id}/${item.package_id}`)))
     .map(item => {
       const identity = `${item.registry_id}/${item.package_id}`
-      const workspaceTargetId = item.workspace_target_id
       return {
-        key: `${workspaceTargetId}:${identity}`,
-        installationId: item.id,
-        registryId: item.registry_id,
-        packageId: item.package_id,
-        workspaceTargetId,
-        revision: item.revision,
+        key: `${installedPackagesTargetId.value}:${identity}`,
+        installationId: item.installation_id ?? '',
+        registryId: item.registry_id ?? '',
+        packageId: item.package_id ?? '',
+        workspaceTargetId: installedPackagesTargetId.value,
+        revision: item.revision ?? '',
         skills: skillsByPackage.get(identity) || [],
       }
     })
     .sort((left, right) => left.packageId.localeCompare(right.packageId))
 })
+const installedPackagesTargetId = ref('')
 const installedPackageIdentities = computed(() => new Set(
   installedPackages.value
+    .filter(item => item.installation_id)
     .map(item => `${item.registry_id}/${item.package_id}`),
 ))
 const standaloneSkills = computed(() => skills.value.filter((skill) => {
@@ -656,13 +649,14 @@ async function fetchInstalledPackages(workspaceTargetId = '') {
   const botID = props.botId
   const sequence = ++packagesLoadSequence
   try {
-    const { data } = await getBotsByBotIdSupermarketPackages({
+    const { data } = await getBotsByBotIdPackages({
       path: { bot_id: botID },
       query: workspaceTargetId ? { workspace_target_id: workspaceTargetId } : undefined,
       throwOnError: true,
     })
     if (props.botId !== botID || sequence !== packagesLoadSequence) return
-    installedPackages.value = data || []
+    installedPackages.value = data.items || []
+    installedPackagesTargetId.value = data.workspace_target_id || workspaceTargetId
     packageLoadFailed.value = false
   } catch (error) {
     if (props.botId !== botID || sequence !== packagesLoadSequence) return
@@ -853,23 +847,10 @@ function closePackage() {
   selectedPackageKey.value = ''
 }
 
-async function handleUninstallPackage() {
-  const pkg = selectedPackage.value
-  if (!pkg) return
-  isUninstallingPackage.value = true
-  try {
-    await deleteBotsByBotIdSupermarketPackagesByInstallationId({
-      path: { bot_id: props.botId, installation_id: pkg.installationId },
-      throwOnError: true,
-    })
-    toast.success(t('bots.skills.uninstallPackageSuccess'))
-    closePackage()
-    await fetchSkillLibrary()
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.skills.uninstallPackageFailed')))
-  } finally {
-    isUninstallingPackage.value = false
-  }
+// Packages are removed from the Packages tab, where the removal plan
+// (shared dependencies, connections) is shown before anything runs.
+function openPackagesTab() {
+  void router.replace({ query: { ...route.query, tab: 'packages' } }).catch(() => {})
 }
 
 function skillKey(skill: SkillItem) {

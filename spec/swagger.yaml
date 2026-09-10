@@ -9928,6 +9928,65 @@ paths:
       summary: List workspace dependencies
       tags:
       - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/install:
+    post:
+      consumes:
+      - application/json
+      description: 'Runs the catalog install script for a dependency a Package references
+        and streams its output: a retry after a failed Package step, or a managed
+        overlay laid over the copy the workspace image ships. New dependencies reach
+        a bot by installing the Package that references them. Events: started, log,
+        done, error.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      - description: Version to install (optional)
+        in: body
+        name: payload
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Install or reinstall a referenced workspace dependency
+      tags:
+      - containerd
   /bots/{bot_id}/dependencies/{dep_id}/reinstall:
     post:
       consumes:

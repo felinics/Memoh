@@ -389,6 +389,27 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 	})
 }
 
+// InstallWorkspaceDependency godoc
+// @Summary Install or reinstall a referenced workspace dependency
+// @Description Runs the catalog install script for a dependency a Package references and streams its output: a retry after a failed Package step, or a managed overlay laid over the copy the workspace image ships. New dependencies reach a bot by installing the Package that references them. Events: started, log, done, error.
+// @Tags containerd
+// @Accept json
+// @Produce text/event-stream
+// @Param bot_id path string true "Bot ID"
+// @Param dep_id path string true "Dependency ID"
+// @Param workspace_target_id query string false "Workspace target ID (defaults to the bot's current target)"
+// @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
+// @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 422 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
+// @Router /bots/{bot_id}/dependencies/{dep_id}/install [post].
+func (h *ContainerdHandler) InstallWorkspaceDependency(c echo.Context) error {
+	return h.streamWorkspaceDependencyOperation(c, catalog.ActionInstall, workspaceDependencyService.Install)
+}
+
 // UpdateWorkspaceDependency godoc
 // @Summary Update a workspace dependency
 // @Description Runs the catalog update script (or the install script when the manifest has none) and streams its output. The optional body names the version to update to; without one the script picks the latest version (or the manifest pin). The previous version is kept for rollback.
