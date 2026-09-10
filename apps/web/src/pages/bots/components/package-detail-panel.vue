@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The page of one Package on the bot, laid out like the Supermarket detail
-// page: a back / actions row, the icon box and title, the description, then
-// its components. Skills are read-only; dependency rows reuse
+// page: the icon box and title with the actions beside them, the
+// description, then its components. The back row belongs to DetailPane. Skills are read-only; dependency rows reuse
 // the dependency row (update / reinstall / rollback / script); connector rows
 // offer authorization and the enabled switch. Nothing here starts an
 // operation — every choice is emitted and the panel owns confirmation and
@@ -9,7 +9,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ArrowLeft,
   ExternalLink,
   MoreHorizontal,
   Package as PackageIcon,
@@ -72,7 +71,6 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  back: []
   action: [action: PackageRowAction]
   dependencyPrimary: [dependency: DependencyItem, action: DependencyPrimaryAction]
   dependencyMenu: [dependency: DependencyItem, action: DependencyMenuAction]
@@ -140,17 +138,30 @@ function dependencyName(dep: PackageDependencyItem): string {
 
 <template>
   <div>
-    <div class="mb-6 flex items-center justify-between gap-3">
-      <Button
-        variant="ghost"
-        size="sm"
-        class="-ml-2"
-        @click="emit('back')"
-      >
-        <ArrowLeft class="size-4" />
-        {{ t('common.back') }}
-      </Button>
-      <div class="flex items-center gap-2">
+    <header class="flex items-start gap-4">
+      <div :class="iconBoxClass">
+        <SkillIcon
+          v-if="item.icon"
+          :icon="item.icon"
+          variant="detail"
+        />
+        <img
+          v-else-if="fallbackIconUrl"
+          :src="fallbackIconUrl"
+          alt=""
+          class="size-8 object-contain"
+        >
+        <PackageIcon
+          v-else
+          class="size-8 text-muted-foreground"
+        />
+      </div>
+      <div class="min-w-0 flex-1">
+        <h1 class="break-words text-3xl font-semibold leading-tight">
+          {{ name }}
+        </h1>
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
         <Spinner v-if="inProgress" />
         <Button
           v-if="primary"
@@ -189,31 +200,6 @@ function dependencyName(dep: PackageDependencyItem): string {
             </template>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
-    </div>
-
-    <header class="flex items-start gap-4">
-      <div :class="iconBoxClass">
-        <SkillIcon
-          v-if="item.icon"
-          :icon="item.icon"
-          variant="detail"
-        />
-        <img
-          v-else-if="fallbackIconUrl"
-          :src="fallbackIconUrl"
-          alt=""
-          class="size-8 object-contain"
-        >
-        <PackageIcon
-          v-else
-          class="size-8 text-muted-foreground"
-        />
-      </div>
-      <div class="min-w-0 flex-1">
-        <h1 class="break-words text-3xl font-semibold leading-tight">
-          {{ name }}
-        </h1>
       </div>
     </header>
 

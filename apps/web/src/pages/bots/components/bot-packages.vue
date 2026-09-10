@@ -157,29 +157,30 @@
       </div>
     </PageShell>
 
-    <!-- The Package page mirrors PageShell's tab frame without its title
-       block: like the Supermarket detail, it owns its back / actions row. -->
-    <div
+    <DetailPane
       v-else
-      class="mx-auto max-w-3xl pt-6 pb-8"
+      width="narrow"
+      :back-label="t('packages.title')"
+      @back="closeDetail"
     >
-      <PackageDetailPanel
-        :item="selected"
-        :workspace-state="workspaceState"
-        :busy="running || dependencyRunning"
-        :owns-stream="ownsPackageStream(selected.registry_id, selected.package_id)"
-        :dependency-owns-stream="dependencyOwnsStream"
-        :connector-catalog="connectorCatalog"
-        :connectors-enabled="capabilitiesStore.connectors"
-        :connector-pending="connectorPending"
-        @action="onPackageAction(selected, $event)"
-        @dependency-primary="onDependencyPrimary"
-        @dependency-menu="onDependencyMenu"
-        @connector="onSelectedConnector"
-        @connector-enabled="setConnectorEnabled"
-        @back="closeDetail"
-      />
-    </div>
+      <SettingsShell width="narrow">
+        <PackageDetailPanel
+          :item="selected"
+          :workspace-state="workspaceState"
+          :busy="running || dependencyRunning"
+          :owns-stream="ownsPackageStream(selected.registry_id, selected.package_id)"
+          :dependency-owns-stream="dependencyOwnsStream"
+          :connector-catalog="connectorCatalog"
+          :connectors-enabled="capabilitiesStore.connectors"
+          :connector-pending="connectorPending"
+          @action="onPackageAction(selected, $event)"
+          @dependency-primary="onDependencyPrimary"
+          @dependency-menu="onDependencyMenu"
+          @connector="onSelectedConnector"
+          @connector-enabled="setConnectorEnabled"
+        />
+      </SettingsShell>
+    </DetailPane>
 
     <PackageProgressDialog
       :open="packageProgressOpen"
@@ -275,6 +276,7 @@ import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Button,
   CalloutBanner,
+  DetailPane,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -288,6 +290,7 @@ import {
   SelectValue,
   SettingsRow,
   SettingsSection,
+  SettingsShell,
   Skeleton,
   toast,
 } from '@felinic/ui'

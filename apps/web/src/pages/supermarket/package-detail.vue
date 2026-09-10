@@ -1,228 +1,233 @@
 <template>
-  <div class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
-    <InlineLoadingRow
-      v-if="loading"
-      class="justify-center py-16"
-    >
-      {{ $t('common.loading') }}
-    </InlineLoadingRow>
-
-    <div
-      v-else-if="!pkg"
-      class="py-16 text-center"
-    >
-      <p class="text-sm font-medium">
-        {{ $t('supermarket.packageNotFound') }}
-      </p>
-      <Button
-        variant="outline"
-        size="sm"
-        class="mt-4"
-        @click="router.push({ name: 'supermarket' })"
+  <DetailPane
+    width="narrow"
+    :back-label="$t('sidebar.supermarket')"
+    @back="router.push({ name: 'supermarket' })"
+  >
+    <SettingsShell width="narrow">
+      <InlineLoadingRow
+        v-if="loading"
+        class="justify-center py-16"
       >
-        <ArrowLeft class="size-4" />
-        {{ $t('supermarket.backToSupermarket') }}
-      </Button>
-    </div>
+        {{ $t('common.loading') }}
+      </InlineLoadingRow>
 
-    <template v-else>
-      <MarketDetailHeader
-        :name="name"
-        :version="pkg.version"
-        :subtitle="subtitle"
-        :tags="pkg.tags"
-        @back="router.push({ name: 'supermarket' })"
-        @install="installDialogOpen = true"
+      <div
+        v-else-if="!pkg"
+        class="py-16 text-center"
       >
-        <template #icon>
-          <SkillIcon
-            :icon="pkg.icon"
-            variant="detail"
-          />
-        </template>
-      </MarketDetailHeader>
-
-      <p class="mt-8 max-w-4xl text-base leading-7 text-muted-foreground">
-        {{ description || $t('supermarket.noDescription') }}
-      </p>
-
-      <section
-        v-if="pkg.skills.length"
-        class="mt-8"
-      >
-        <h2 class="mb-4 text-lg font-semibold">
-          {{ $t('packages.sections.skills') }}
-          <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.skills.length }}</span>
-        </h2>
-        <SettingsSection>
-          <SettingsRow
-            v-for="skill in pkg.skills"
-            :key="skill.skill_id"
-          >
-            <template #leading>
-              <div class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
-                <SkillIcon :icon="skill.icon" />
-              </div>
-            </template>
-            <template #content>
-              <p class="text-sm font-medium">
-                {{ skill.name || skill.skill_id }}
-              </p>
-              <p class="mt-1 text-xs text-muted-foreground">
-                {{ skill.description }}
-              </p>
-            </template>
-          </SettingsRow>
-        </SettingsSection>
-      </section>
-
-      <!-- Dependencies are shown through their canonical Packages: the same
-           name, icon and description a user sees when browsing them alone. -->
-      <section
-        v-if="pkg.dependencies.length"
-        class="mt-8"
-      >
-        <h2 class="mb-1 text-lg font-semibold">
-          {{ $t('packages.sections.dependencies') }}
-          <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.dependencies.length }}</span>
-        </h2>
-        <p class="mb-4 text-xs text-muted-foreground">
-          {{ $t('supermarket.dependenciesHint') }}
+        <p class="text-sm font-medium">
+          {{ $t('supermarket.packageNotFound') }}
         </p>
-        <SettingsSection>
-          <SettingsRow
-            v-for="dep in dependencyRows"
-            :key="dep.id"
-          >
-            <template #leading>
-              <div class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
-                <SkillIcon
-                  v-if="dep.summary?.icon"
-                  :icon="dep.summary.icon"
-                />
-                <Package
-                  v-else
-                  class="size-4 text-muted-foreground"
-                />
-              </div>
-            </template>
-            <template #content>
-              <p class="text-sm font-medium">
-                {{ dep.summary ? packageDisplayName(dep.summary, locale) : dep.id }}
-              </p>
-              <p class="mt-1 text-xs text-muted-foreground">
-                {{ dep.summary ? packageDisplayDescription(dep.summary, locale) : $t('supermarket.dependencyPending') }}
-              </p>
-            </template>
-            <Button
-              v-if="dep.summary"
-              variant="ghost"
-              size="sm"
-              @click="openPackage('memoh', dep.id)"
+        <Button
+          variant="outline"
+          size="sm"
+          class="mt-4"
+          @click="router.push({ name: 'supermarket' })"
+        >
+          <ArrowLeft class="size-4" />
+          {{ $t('supermarket.backToSupermarket') }}
+        </Button>
+      </div>
+
+      <template v-else>
+        <MarketDetailHeader
+          :name="name"
+          :version="pkg.version"
+          :subtitle="subtitle"
+          :tags="pkg.tags"
+          @install="installDialogOpen = true"
+        >
+          <template #icon>
+            <SkillIcon
+              :icon="pkg.icon"
+              variant="detail"
+            />
+          </template>
+        </MarketDetailHeader>
+
+        <p class="mt-8 max-w-4xl text-base leading-7 text-muted-foreground">
+          {{ description || $t('supermarket.noDescription') }}
+        </p>
+
+        <section
+          v-if="pkg.skills.length"
+          class="mt-8"
+        >
+          <h2 class="mb-4 text-lg font-semibold">
+            {{ $t('packages.sections.skills') }}
+            <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.skills.length }}</span>
+          </h2>
+          <SettingsSection>
+            <SettingsRow
+              v-for="skill in pkg.skills"
+              :key="skill.skill_id"
             >
-              {{ $t('supermarket.viewDetails') }}
-              <ChevronRight class="size-4" />
-            </Button>
-          </SettingsRow>
-        </SettingsSection>
-      </section>
-
-      <section
-        v-if="pkg.connectors.length"
-        class="mt-8"
-      >
-        <h2 class="mb-1 text-lg font-semibold">
-          {{ $t('packages.sections.connectors') }}
-          <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.connectors.length }}</span>
-        </h2>
-        <p class="mb-4 text-xs text-muted-foreground">
-          {{ capabilitiesStore.connectors ? $t('supermarket.connectorsHint') : $t('supermarket.connectorsUnavailableHint') }}
-        </p>
-        <SettingsSection>
-          <SettingsRow
-            v-for="connector in pkg.connectors"
-            :key="connector.type"
-          >
-            <template #leading>
-              <div class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
-                <ProviderIcon
-                  :icon="connectorCatalog.get(connector.type)?.icon_url || ''"
-                  class="size-5 object-contain"
-                >
-                  <Plug class="size-4 text-muted-foreground" />
-                </ProviderIcon>
-              </div>
-            </template>
-            <template #content>
-              <div class="flex flex-wrap items-center gap-2">
+              <template #leading>
+                <div class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
+                  <SkillIcon :icon="skill.icon" />
+                </div>
+              </template>
+              <template #content>
                 <p class="text-sm font-medium">
-                  {{ connectorCatalog.get(connector.type)?.name || connector.type }}
+                  {{ skill.name || skill.skill_id }}
                 </p>
-                <Badge
-                  v-if="!connector.required"
-                  variant="outline"
-                  size="sm"
-                >
-                  {{ $t('packages.connector.optional') }}
-                </Badge>
-              </div>
-              <p class="mt-1 text-xs text-muted-foreground">
-                {{ connectorCatalog.get(connector.type)?.description || $t('supermarket.connectorAuthHint') }}
-              </p>
-            </template>
-          </SettingsRow>
-        </SettingsSection>
-      </section>
+                <p class="mt-1 text-xs text-muted-foreground">
+                  {{ skill.description }}
+                </p>
+              </template>
+            </SettingsRow>
+          </SettingsSection>
+        </section>
 
-      <section class="mt-10">
-        <h2 class="text-lg font-semibold">
-          {{ $t('supermarket.information') }}
-        </h2>
-        <div class="mt-4 grid gap-x-12 gap-y-5 md:grid-cols-2">
-          <InfoItem
-            :label="$t('supermarket.version')"
-            :value="pkg.version || $t('common.none')"
-          />
-          <InfoItem
-            :label="$t('supermarket.category')"
-            :value="categoryLabel || $t('common.none')"
-          />
-          <InfoItem
-            :label="$t('supermarket.registry')"
-            :value="registryName || pkg.registry_id"
-          />
-          <InfoItem
-            :label="$t('supermarket.author')"
-            :value="pkg.author?.name || $t('common.none')"
-          />
-          <InfoItem
-            :label="$t('supermarket.license')"
-            :value="pkg.license || $t('common.none')"
-          />
-          <InfoItem
-            :label="$t('supermarket.revision')"
-            :value="pkg.revision.slice(0, 12)"
-          />
-          <InfoItem
-            v-if="pkg.homepage"
-            :label="$t('supermarket.homepage')"
-            :value="pkg.homepage"
-          />
-          <InfoItem
-            v-if="pkg.repository"
-            :label="$t('supermarket.repository')"
-            :value="pkg.repository"
-          />
-        </div>
-      </section>
-    </template>
+        <!-- Dependencies are shown through their canonical Packages: the same
+           name, icon and description a user sees when browsing them alone. -->
+        <section
+          v-if="pkg.dependencies.length"
+          class="mt-8"
+        >
+          <h2 class="mb-1 text-lg font-semibold">
+            {{ $t('packages.sections.dependencies') }}
+            <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.dependencies.length }}</span>
+          </h2>
+          <p class="mb-4 text-xs text-muted-foreground">
+            {{ $t('supermarket.dependenciesHint') }}
+          </p>
+          <SettingsSection>
+            <SettingsRow
+              v-for="dep in dependencyRows"
+              :key="dep.id"
+            >
+              <template #leading>
+                <div class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
+                  <SkillIcon
+                    v-if="dep.summary?.icon"
+                    :icon="dep.summary.icon"
+                  />
+                  <Package
+                    v-else
+                    class="size-4 text-muted-foreground"
+                  />
+                </div>
+              </template>
+              <template #content>
+                <p class="text-sm font-medium">
+                  {{ dep.summary ? packageDisplayName(dep.summary, locale) : dep.id }}
+                </p>
+                <p class="mt-1 text-xs text-muted-foreground">
+                  {{ dep.summary ? packageDisplayDescription(dep.summary, locale) : $t('supermarket.dependencyPending') }}
+                </p>
+              </template>
+              <Button
+                v-if="dep.summary"
+                variant="ghost"
+                size="sm"
+                @click="openPackage('memoh', dep.id)"
+              >
+                {{ $t('supermarket.viewDetails') }}
+                <ChevronRight class="size-4" />
+              </Button>
+            </SettingsRow>
+          </SettingsSection>
+        </section>
 
-    <InstallPackageDialog
-      v-model:open="installDialogOpen"
-      :pkg="pkg"
-      :default-bot-id="defaultBotId"
-    />
-  </div>
+        <section
+          v-if="pkg.connectors.length"
+          class="mt-8"
+        >
+          <h2 class="mb-1 text-lg font-semibold">
+            {{ $t('packages.sections.connectors') }}
+            <span class="ml-1.5 font-normal text-muted-foreground">{{ pkg.connectors.length }}</span>
+          </h2>
+          <p class="mb-4 text-xs text-muted-foreground">
+            {{ capabilitiesStore.connectors ? $t('supermarket.connectorsHint') : $t('supermarket.connectorsUnavailableHint') }}
+          </p>
+          <SettingsSection>
+            <SettingsRow
+              v-for="connector in pkg.connectors"
+              :key="connector.type"
+            >
+              <template #leading>
+                <div class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background">
+                  <ProviderIcon
+                    :icon="connectorCatalog.get(connector.type)?.icon_url || ''"
+                    class="size-5 object-contain"
+                  >
+                    <Plug class="size-4 text-muted-foreground" />
+                  </ProviderIcon>
+                </div>
+              </template>
+              <template #content>
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-sm font-medium">
+                    {{ connectorCatalog.get(connector.type)?.name || connector.type }}
+                  </p>
+                  <Badge
+                    v-if="!connector.required"
+                    variant="outline"
+                    size="sm"
+                  >
+                    {{ $t('packages.connector.optional') }}
+                  </Badge>
+                </div>
+                <p class="mt-1 text-xs text-muted-foreground">
+                  {{ connectorCatalog.get(connector.type)?.description || $t('supermarket.connectorAuthHint') }}
+                </p>
+              </template>
+            </SettingsRow>
+          </SettingsSection>
+        </section>
+
+        <section class="mt-10">
+          <h2 class="text-lg font-semibold">
+            {{ $t('supermarket.information') }}
+          </h2>
+          <div class="mt-4 grid gap-x-12 gap-y-5 md:grid-cols-2">
+            <InfoItem
+              :label="$t('supermarket.version')"
+              :value="pkg.version || $t('common.none')"
+            />
+            <InfoItem
+              :label="$t('supermarket.category')"
+              :value="categoryLabel || $t('common.none')"
+            />
+            <InfoItem
+              :label="$t('supermarket.registry')"
+              :value="registryName || pkg.registry_id"
+            />
+            <InfoItem
+              :label="$t('supermarket.author')"
+              :value="pkg.author?.name || $t('common.none')"
+            />
+            <InfoItem
+              :label="$t('supermarket.license')"
+              :value="pkg.license || $t('common.none')"
+            />
+            <InfoItem
+              :label="$t('supermarket.revision')"
+              :value="pkg.revision.slice(0, 12)"
+            />
+            <InfoItem
+              v-if="pkg.homepage"
+              :label="$t('supermarket.homepage')"
+              :value="pkg.homepage"
+            />
+            <InfoItem
+              v-if="pkg.repository"
+              :label="$t('supermarket.repository')"
+              :value="pkg.repository"
+            />
+          </div>
+        </section>
+      </template>
+
+      <InstallPackageDialog
+        v-model:open="installDialogOpen"
+        :pkg="pkg"
+        :default-bot-id="defaultBotId"
+      />
+    </SettingsShell>
+  </DetailPane>
 </template>
 
 <script setup lang="ts">
@@ -231,7 +236,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
 import { ArrowLeft, ChevronRight, Package, Plug } from 'lucide-vue-next'
-import { Badge, Button, InlineLoadingRow, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { Badge, Button, DetailPane, InlineLoadingRow, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import {
   getConnectorsCatalog,
   getSupermarketRegistries,

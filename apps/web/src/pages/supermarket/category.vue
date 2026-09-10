@@ -1,16 +1,16 @@
 <template>
-  <PageShell :title="title">
-    <template #actions>
-      <Button
-        variant="outline"
-        @click="goBack"
-      >
-        <ArrowLeft class="size-4" />
-        {{ $t('supermarket.backToSupermarket') }}
-      </Button>
-    </template>
+  <DetailPane
+    width="narrow"
+    :back-label="$t('sidebar.supermarket')"
+    @back="goBack"
+  >
+    <SettingsShell width="narrow">
+      <PageHeader
+        :title="title"
+        :level="2"
+        framed
+      />
 
-    <div class="space-y-6">
       <InlineLoadingRow
         v-if="loading"
         class="justify-center py-8"
@@ -39,7 +39,7 @@
 
       <div
         v-if="showPagination"
-        class="flex justify-end gap-2"
+        class="mt-6 flex justify-end gap-2"
       >
         <Button
           variant="outline"
@@ -60,16 +60,16 @@
           <ChevronRight class="size-4" />
         </Button>
       </div>
-    </div>
-  </PageShell>
+    </SettingsShell>
+  </DetailPane>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import { Button, InlineLoadingRow, PageShell, toast } from '@felinic/ui'
+import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { Button, DetailPane, InlineLoadingRow, PageHeader, SettingsShell, toast } from '@felinic/ui'
 import { getSupermarketPackages, type HandlersSupermarketSkillPackageSummary } from '@memohai/sdk'
 import { categoryDisplayName, usePackageCategoriesQuery } from '@/composables/api/usePackages'
 import { resolveApiErrorMessage } from '@/utils/api-error'
