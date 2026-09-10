@@ -116,13 +116,19 @@
             loading-mode="manual"
             @click="deviceLogin ? cancelDeviceLogin() : startDeviceLogin()"
           >
-            <template v-if="deviceLogin">
-              {{ $t('common.cancel') }}
-            </template>
-            <template v-else>
-              <KeyRound />
-              {{ credentialConnected ? $t('bots.agent.reconnect') : $t('provider.oauth.connect') }}
-            </template>
+            <LabelSwap :active="authorizing ? 'connecting' : deviceLogin ? 'cancel' : 'connect'">
+              <template #connect>
+                <KeyRound />
+                {{ credentialConnected ? $t('bots.agent.reconnect') : $t('provider.oauth.connect') }}
+              </template>
+              <template #connecting>
+                <Spinner />
+                {{ $t('provider.oauth.connecting') }}
+              </template>
+              <template #cancel>
+                {{ $t('common.cancel') }}
+              </template>
+            </LabelSwap>
           </Button>
           <ConfirmPopover
             v-if="credentialConnected"
@@ -177,6 +183,7 @@ import {
   ConfirmPopover,
   DeviceCodePanel,
   Input,
+  LabelSwap,
   Select,
   SelectContent,
   SelectItem,
@@ -184,6 +191,7 @@ import {
   SelectValue,
   SettingsRow,
   SettingsSection,
+  Spinner,
   toast,
 } from '@felinic/ui'
 import { KeyRound } from 'lucide-vue-next'
