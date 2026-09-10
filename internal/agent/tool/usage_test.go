@@ -253,7 +253,7 @@ func TestMessageProviderUsageGatesRegisteredTools(t *testing.T) {
 
 	currentSession := SessionContext{SessionType: sessionmode.Chat, CurrentPlatform: "telegram", ReplyTarget: "chat-1"}
 	got = provider.Usage(context.Background(), currentSession, availableToolsForTest(ToolSend(), ToolReact()))
-	if !strings.Contains(got, "Use ordinary assistant text for normal replies") || !strings.Contains(got, "Omit `target` to react") {
+	if !strings.Contains(got, "another conversation") || !strings.Contains(got, "Omit `target` to react") {
 		t.Fatalf("Usage with an explicit current conversation should distinguish normal replies from local reactions, got:\n%s", got)
 	}
 	for _, want := range []string{"`message.parts`", "link/code_block/mention", "list_item"} {
@@ -294,11 +294,11 @@ func TestMessageProviderToolDescriptionsGateCurrentConversationTarget(t *testing
 		t.Fatalf("Tools current session: %v", err)
 	}
 	currentSend := toolByNameForTest(t, currentTools, ToolSend())
-	if !strings.Contains(currentSend.Description, "Use ordinary assistant text for normal replies") {
+	if !strings.Contains(currentSend.Description, "another conversation") {
 		t.Fatalf("send description with explicit current conversation should reserve normal replies for assistant text, got:\n%s", currentSend.Description)
 	}
-	if requiredContainsForTest(requiredToolFieldsForTest(t, currentSend), "target") {
-		t.Fatalf("send should not require target when current conversation is explicit, required=%v", requiredToolFieldsForTest(t, currentSend))
+	if !requiredContainsForTest(requiredToolFieldsForTest(t, currentSend), "target") {
+		t.Fatalf("send must require a target even when the current conversation is explicit, required=%v", requiredToolFieldsForTest(t, currentSend))
 	}
 
 	backgroundTools, err := provider.Tools(context.Background(), SessionContext{
@@ -439,49 +439,9 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 		t.Fatalf("message reply schema missing message_id in %#v", replyProps)
 	}
 
-	topLevelAttachments, ok := props["attachments"].(map[string]any)
-	if !ok {
-		t.Fatalf("top-level attachments schema missing in %#v", props)
-	}
-	messageAttachments, ok := messageProps["attachments"].(map[string]any)
-	if !ok {
-		t.Fatalf("message.attachments schema missing in %#v", messageProps)
-	}
-	for label, attachments := range map[string]map[string]any{
-		"top-level attachments": topLevelAttachments,
-		"message.attachments":   messageAttachments,
-	} {
-		attachmentItems, ok := attachments["items"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s.items schema = %T, want map[string]any", label, attachments["items"])
-		}
-		anyOf, ok := attachmentItems["anyOf"].([]any)
-		if !ok || len(anyOf) != 2 {
-			t.Fatalf("%s.items should accept string or strict object, got %#v", label, attachmentItems["anyOf"])
-		}
-		objectSchema, ok := anyOf[1].(map[string]any)
-		if !ok {
-			t.Fatalf("%s object schema = %T, want map[string]any", label, anyOf[1])
-		}
-		if objectSchema["additionalProperties"] != false {
-			t.Fatalf("%s object schema should be strict, got %#v", label, objectSchema["additionalProperties"])
-		}
-		objectProps, ok := objectSchema["properties"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s object properties missing in %#v", label, objectSchema)
-		}
-		for _, field := range []string{"path", "url", "base64", "content_hash", "platform_key"} {
-			if _, ok := objectProps[field]; !ok {
-				t.Fatalf("%s object schema missing %q in %#v", label, field, objectProps)
-			}
-		}
-		attachmentType, ok := objectProps["type"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s object type schema missing in %#v", label, objectProps)
-		}
-		assertEnumContainsForTest(t, attachmentType["enum"], "image", "audio", "video", "voice", "file", "gif")
-		if _, ok := objectSchema["anyOf"].([]any); !ok {
-			t.Fatalf("%s object schema should require a reference field via anyOf, got %#v", label, objectSchema["anyOf"])
+	for _, schema := range []map[string]any{props, messageProps} {
+		if _, exists := schema["attachments"]; exists {
+			t.Fatal("media must be referenced in Markdown, not an attachment parameter")
 		}
 	}
 }

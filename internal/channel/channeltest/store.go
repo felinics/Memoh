@@ -179,3 +179,7 @@ func firstExtension(mimeType string) string {
 	}
 	return exts[0]
 }
+
+func (s *MemoryAttachmentStore) IngestWorkspaceFile(ctx context.Context, botID, containerPath string) (media.Asset, error) {
+	return s.IngestContainerFile(ctx, botID, containerPath)
+}

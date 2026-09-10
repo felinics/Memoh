@@ -1,4 +1,5 @@
 {
+  "media.reference_unavailable": "ファイルを共有できませんでした。Agent に再生成または再共有を依頼してください。",
   "chrome": {
     "close": "✕ 閉じる",
     "prev": "◀ 前へ",

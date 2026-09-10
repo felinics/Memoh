@@ -109,6 +109,7 @@
     "finish": "完了"
   },
   "errors": {
+    "media": { "reference_unavailable": "ファイルを共有できませんでした。Agent に再生成または再共有を依頼してください。" },
     "queue": {
       "steer_unsupported": "現在の実行にはメッセージを追加できません。終了してから新しいメッセージを送信してください。"
     },
@@ -640,6 +641,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "mediaPreparing": "メディアを準備中",
     "selectSession": "セッションを選択",
     "welcome": {
       "folder": "{name} で何をしましょうか？"

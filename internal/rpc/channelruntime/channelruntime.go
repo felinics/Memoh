@@ -12,6 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/email"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 )
@@ -111,6 +112,7 @@ func (c *Client) Status() webhooktunnel.Status {
 
 // reasonSentinels maps wire reason strings back to channel sentinels.
 var reasonSentinels = map[string]error{
+	"media.partial_delivery": markdownmedia.ErrPartialDelivery,
 	reasonConfigNotFound:     channel.ErrChannelConfigNotFound,
 	reasonDiscoveryFailed:    channel.ErrChannelDiscoveryFailed,
 	reasonEnableFailed:       channel.ErrEnableChannelFailed,
@@ -166,6 +168,8 @@ func restoreChannelError(err error) error {
 
 func safeChannelError(err error) error {
 	switch {
+	case errors.Is(err, markdownmedia.ErrPartialDelivery):
+		return status.Error(codes.FailedPrecondition, "media.partial_delivery")
 	case errors.Is(err, channel.ErrChannelConfigNotFound):
 		return reasonStatus(codes.NotFound, reasonConfigNotFound, err)
 	case errors.Is(err, channel.ErrChannelDiscoveryFailed):

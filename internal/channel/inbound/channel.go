@@ -34,6 +34,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/i18n"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimekind"
 	skillset "github.com/felinics/memoh/internal/skills"
@@ -1129,6 +1130,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	p.activeStreams.Store(streamKey, streamCancel)
 	defer p.activeStreams.Delete(streamKey)
 
+	publicationStart := time.Now()
 	handle, startErr := p.startTurnWithBusyRetry(streamCtx, cmd)
 	if startErr != nil {
 		if errors.Is(startErr, turn.ErrDuplicateTurn) {
@@ -1340,9 +1342,16 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		return nil
 	}
 
+	var published []messagepkg.Message
+	publishedLoaded := false
 	outputs := turn.ExtractAssistantOutputs(finalMessages)
 	for _, output := range outputs {
 		outMessage := buildChannelMessage(output, desc.Capabilities)
+		if len(markdownmedia.Parse(outMessage.Text)) > 0 && !publishedLoaded {
+			published = p.publishedMedia(ctx, sessionID, handle.RunID(), publicationStart.Add(-time.Minute))
+			publishedLoaded = true
+		}
+		outMessage = bindPublishedMedia(outMessage, &published, p.localizer(ctx, identity.BotID).Locale())
 		if outMessage.IsEmpty() {
 			continue
 		}

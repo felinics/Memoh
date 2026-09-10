@@ -202,3 +202,16 @@ func splitRoutingKey(key string) (botID, storageKey string) {
 	}
 	return key[:idx], key[idx+1:]
 }
+
+func (p *Provider) OpenWorkspaceFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error) {
+	clean := filepath.Clean(containerPath)
+	sub, ok := attachmentpkg.DataSubpath(clean)
+	if !ok || sub == "" {
+		return nil, errors.New("outside workspace")
+	}
+	client, err := p.clients.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	return client.ReadRawNoFollow(ctx, "/data", sub)
+}

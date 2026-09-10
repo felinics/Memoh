@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/markdownmedia"
 )
 
 // TestSafeChannelErrorRoundTripsSentinelAndCause pins the split-mode error
@@ -46,5 +47,11 @@ func TestSafeChannelErrorLeavesUnknownCauseForRuntimeSanitization(t *testing.T) 
 	cause := errors.New("private database detail")
 	if got := safeChannelError(cause); !errors.Is(got, cause) {
 		t.Fatalf("error = %v", got)
+	}
+}
+
+func TestPartialPublicationSurvivesSplitTransport(t *testing.T) {
+	if !errors.Is(restoreChannelError(safeChannelError(markdownmedia.ErrPartialDelivery)), markdownmedia.ErrPartialDelivery) {
+		t.Fatal("partial publication status lost")
 	}
 }

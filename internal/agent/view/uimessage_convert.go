@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/textutil"
 )
 
@@ -21,6 +22,7 @@ var (
 	uiMessageCollapsedNewlinesRe = regexp.MustCompile(`\n{3,}`)
 	uiTaskNotificationRe         = regexp.MustCompile(`(?s)<task-notification>\s*(.*?)\s*</task-notification>`)
 	uiMetadataParseKeys          = [][]byte{
+		[]byte(`"markdown_media"`),
 		[]byte(`"forward"`),
 		[]byte(`"model_requested_skills"`),
 		[]byte(`"platform"`),
@@ -307,6 +309,18 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			modelMessage := decodePersistedModelMessage(raw)
 			toolCalls := extractPersistedToolCalls(&modelMessage)
 			text := extractPersistedMessageText(raw, &modelMessage)
+			text = markdownmedia.Render(text, markdownmedia.Bindings(raw.Metadata), func(b markdownmedia.Binding) string {
+				label := strings.NewReplacer("[", "\\[", "]", "\\]").Replace(b.Label)
+				target := markdownmedia.AssetURL(b)
+				if b.ErrorCode != "" {
+					target = "memoh-media-error:" + b.ErrorCode
+				}
+				prefix := ""
+				if b.Image {
+					prefix = "!"
+				}
+				return prefix + "[" + label + "](" + target + ")"
+			})
 			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 
@@ -1059,6 +1073,9 @@ func uiAttachmentsFromMessageAssets(raw messagepkg.Message) []UIAttachment {
 
 	attachments := make([]UIAttachment, 0, len(raw.Assets))
 	for _, asset := range raw.Assets {
+		if asset.Role == "markdown" {
+			continue
+		}
 		attachments = append(attachments, UIAttachment{
 			ID:          strings.TrimSpace(asset.ContentHash),
 			Type:        normalizeUIAttachmentType("", asset.Mime),

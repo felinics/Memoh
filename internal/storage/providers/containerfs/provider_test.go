@@ -166,3 +166,25 @@ func TestProvider_OpenContainerFileSendsAbsolutePath(t *testing.T) {
 		t.Errorf("client received path %q, want absolute %q", server.path, "/data/repro935-big.png")
 	}
 }
+
+func (s *recordingReadServer) ReadRawNoFollow(req *pb.ReadRawNoFollowRequest, stream pb.ContainerService_ReadRawNoFollowServer) error {
+	s.path = req.Root + "/" + req.RelativePath
+	return stream.Send(&pb.DataChunk{Data: s.data})
+}
+
+func TestWorkspacePublicationUsesAnchoredRead(t *testing.T) {
+	server := &recordingReadServer{data: []byte("snapshot")}
+	provider := New(staticClientProvider{client: newRecordingClient(t, server)})
+	reader, err := provider.OpenWorkspaceFile(context.Background(), "bot-1", "/data/report.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil || string(data) != "snapshot" || server.path != "/data/report.txt" {
+		t.Fatalf("data=%q path=%q err=%v", data, server.path, err)
+	}
+	if _, err := provider.OpenWorkspaceFile(context.Background(), "bot-1", "/data/../etc/passwd"); err == nil {
+		t.Fatal("traversal accepted")
+	}
+}

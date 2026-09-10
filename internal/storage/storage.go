@@ -48,3 +48,9 @@ type ContainerFileOpener interface {
 type PrefixLister interface {
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
 }
+
+// WorkspaceFileOpener reads regular files within /data without following symlinks.
+// It is used for model-authored Markdown references at publication time.
+type WorkspaceFileOpener interface {
+	OpenWorkspaceFile(context.Context, string, string) (io.ReadCloser, error)
+}
