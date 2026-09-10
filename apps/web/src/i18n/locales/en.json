@@ -3897,7 +3897,8 @@
       "preparing": "Preparing…",
       "noLog": "No script output.",
       "log": "Operation log",
-      "runInBackground": "Run in background"
+      "runInBackground": "Run in background",
+      "reconnecting": "Connection to the server was lost; checking the result…"
     },
     "steps": {
       "skills": "Skills",

@@ -3892,7 +3892,8 @@
       "preparing": "準備中…",
       "noLog": "スクリプトの出力はありません。",
       "log": "操作ログ",
-      "runInBackground": "バックグラウンドで実行"
+      "runInBackground": "バックグラウンドで実行",
+      "reconnecting": "サーバーとの接続が切れました。結果を確認しています…"
     },
     "steps": {
       "skills": "スキル",

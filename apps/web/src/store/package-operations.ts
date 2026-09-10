@@ -4,7 +4,8 @@ import { useQueryCache } from '@pinia/colada'
 import { toast } from '@felinic/ui'
 import i18n from '@/i18n'
 import { useRouter } from 'vue-router'
-import { invalidateBotPackages } from '@/composables/api/usePackages'
+import { getBotsByBotIdPackages } from '@memohai/sdk'
+import { invalidateBotPackages, packageInProgress, type PackageItem } from '@/composables/api/usePackages'
 import { invalidateBotDependencies } from '@/composables/api/useWorkspaceDependencies'
 import {
   streamPackageOperation,
@@ -81,6 +82,11 @@ export type StartPackageOperationResult =
 
 const MAX_LOG_LINES = 2000
 const ACTIONABLE_TOAST_MS = 8000
+// A stream that ends without a terminal event (proxy hiccup, write deadline
+// on a stalled connection) says nothing about the operation: the Server keeps
+// running it. The outcome is read back from the Package list instead.
+const RECONCILE_POLL_MS = 3000
+const RECONCILE_MAX_MS = 10 * 60_000
 
 export function packageOperationKey(botId: string, registryId: string, packageId: string): string {
   return `${botId}/${registryId}/${packageId}`
@@ -219,6 +225,77 @@ export const usePackageOperationsStore = defineStore('package-operations', () =>
     return step
   }
 
+  function delay(ms: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms)
+      signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+    })
+  }
+
+  /** What a step that was still streaming ends up as once the Server confirms the operation. */
+  function settledStepStatus(action: PackageOperationAction): string {
+    switch (action) {
+      case 'update': return 'updated'
+      case 'remove': return 'removed'
+      default: return 'installed'
+    }
+  }
+
+  function applySettled(operation: PackageOperation, item: PackageItem | undefined) {
+    for (const step of operation.steps) {
+      if (step.status === 'running') step.status = settledStepStatus(operation.action)
+    }
+    if (operation.action === 'remove') {
+      operation.status = 'done'
+      operation.result = 'removed'
+      return
+    }
+    if (item?.status === 'failed') {
+      operation.status = 'error'
+      operation.error = item.last_error || t('packages.progress.failedTitle')
+      return
+    }
+    operation.status = 'done'
+    operation.result = item?.status ?? ''
+    if (item?.version) operation.version = item.version
+  }
+
+  /**
+   * Polls the Package list until the Server has recorded the outcome of an
+   * operation whose stream was lost. Returns false when it stays in progress
+   * past the deadline.
+   */
+  async function reconcile(operation: PackageOperation, signal: AbortSignal): Promise<boolean> {
+    pushLine(operation, 'stderr', t('packages.progress.reconnecting'))
+    const deadline = Date.now() + RECONCILE_MAX_MS
+    while (Date.now() < deadline && !signal.aborted) {
+      await delay(RECONCILE_POLL_MS, signal)
+      if (signal.aborted) return false
+      let items: PackageItem[]
+      try {
+        const { data } = await getBotsByBotIdPackages({
+          path: { bot_id: operation.botId },
+          query: operation.targetId ? { workspace_target_id: operation.targetId } : undefined,
+          signal,
+          throwOnError: true,
+        })
+        items = data.items ?? []
+      } catch {
+        continue
+      }
+      const item = items.find(entry => entry.registry_id === operation.registryId && entry.package_id === operation.packageId)
+      if (operation.action === 'remove') {
+        if (item?.installation_id && packageInProgress(item)) continue
+        applySettled(operation, item?.installation_id ? item : undefined)
+        return true
+      }
+      if (!item || packageInProgress(item)) continue
+      applySettled(operation, item)
+      return true
+    }
+    return false
+  }
+
   async function consume(operation: PackageOperation, signal: AbortSignal) {
     try {
       const stream = streamPackageOperation({
@@ -264,17 +341,20 @@ export const usePackageOperationsStore = defineStore('package-operations', () =>
             break
         }
       }
-      if (operation.status === 'running') {
+      if (operation.status === 'running' && !(await reconcile(operation, signal))) {
         operation.status = 'unknown'
         operation.error = t('packages.progress.unknownHint')
       }
     } catch (error) {
       if (signal.aborted) return
       if (operation.status !== 'running') return
-      operation.status = apiErrorStatus(error) ? 'error' : 'unknown'
-      operation.error = operation.status === 'unknown'
-        ? t('packages.progress.unknownHint')
-        : resolveApiErrorMessage(error, t('packages.progress.failedTitle'))
+      if (apiErrorStatus(error)) {
+        operation.status = 'error'
+        operation.error = resolveApiErrorMessage(error, t('packages.progress.failedTitle'))
+      } else if (!(await reconcile(operation, signal))) {
+        operation.status = 'unknown'
+        operation.error = t('packages.progress.unknownHint')
+      }
     } finally {
       if (!signal.aborted) settle(operation)
     }

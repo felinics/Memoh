@@ -3897,7 +3897,8 @@
       "preparing": "准备中…",
       "noLog": "没有脚本输出。",
       "log": "操作日志",
-      "runInBackground": "后台运行"
+      "runInBackground": "后台运行",
+      "reconnecting": "与服务器的连接中断，正在确认结果…"
     },
     "steps": {
       "skills": "Skills",

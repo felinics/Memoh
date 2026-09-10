@@ -41,6 +41,7 @@ import {
 } from '@/composables/api/usePackages'
 import type { DependencyItem, DependencyWorkspaceState } from '@/composables/api/useWorkspaceDependencies'
 import type { DependencyMenuAction, DependencyPrimaryAction } from '@/utils/workspace-dependency'
+import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import DependencyRow from './dependency-row.vue'
 import { packagePrimaryAction, type PackageRowAction } from './package-actions'
 
@@ -80,6 +81,16 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+const { dependencyIconUrl } = useWorkspaceDependencyText()
+
+// A discovered Package has no release, so no icon of its own; its dependency
+// carries the same artwork.
+const fallbackIconUrl = computed(() => {
+  if (props.item.icon) return ''
+  const deps = props.item.dependencies ?? []
+  const dep = deps.find(entry => entry.id === props.item.package_id) ?? deps[0]
+  return dep?.dependency ? dependencyIconUrl(dep.dependency) : ''
+})
 
 // Same icon box as the Supermarket detail header.
 const iconBoxClass = 'flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background shadow-sm' /* ui-allow-style */
@@ -188,6 +199,12 @@ function dependencyName(dep: PackageDependencyItem): string {
           :icon="item.icon"
           variant="detail"
         />
+        <img
+          v-else-if="fallbackIconUrl"
+          :src="fallbackIconUrl"
+          alt=""
+          class="size-8 object-contain"
+        >
         <PackageIcon
           v-else
           class="size-8 text-muted-foreground"

@@ -171,6 +171,8 @@ RLS 策略与现有表一致。
 
 ### 4.3 安装流程
 
+流式操作的 SSE 若在中途断开（代理抖动、5 秒写超时遇到卡顿的连接），服务端会继续执行；前端操作 store 改为轮询扩展包列表直到该包不再处于进行中状态，再按记录的结果收尾，只有超过 10 分钟仍未确认才显示“结果未确认”。
+
 输入 `(bot, workspace_target, registry, package, revision)`。
 
 1. 拉取并校验 release，检查 `dependencies` 与 `connectors` 非空时 registry 必须是 `memoh`。
@@ -201,7 +203,7 @@ RLS 策略与现有表一致。
 
 ### 4.6 发现的 dep 与规范包
 
-列表接口把 workspacedeps 报告的、未被任何安装记录引用的已安装或镜像自带 dep，合成为规范包 `memoh/<dep-id>` 的虚拟条目，`installation_id` 为空，`reason=discovered`。列表里与已安装包一样显示，不带状态标记，也不提供安装按钮（它已经可用）；只有从 Supermarket 详情页安装同 id 的规范包时才正式写入安装记录并建立引用。agent 启用流程的 preflight 与安装步骤改为安装规范包。launcher 绑定表 `BuiltinLauncherCommands` 与 `provides[0]` 校验不变。
+列表接口把 workspacedeps 报告的、未被任何安装记录引用的已安装或镜像自带 dep，合成为规范包 `memoh/<dep-id>` 的虚拟条目，`installation_id` 为空，`reason=discovered`。列表里与已安装包一样显示（图标借用该 dep 的图标），不带状态标记，也不提供安装按钮（它已经可用）；只有从 Supermarket 详情页安装同 id 的规范包时才正式写入安装记录并建立引用。agent 启用流程的 preflight 与安装步骤改为安装规范包。launcher 绑定表 `BuiltinLauncherCommands` 与 `provides[0]` 校验不变。
 
 ### 4.7 HTTP 接口
 

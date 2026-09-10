@@ -30,6 +30,7 @@ import {
   type PackageItem,
 } from '@/composables/api/usePackages'
 import type { DependencyWorkspaceState } from '@/composables/api/useWorkspaceDependencies'
+import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { packagePrimaryAction, type PackageRowAction } from './package-actions'
 
 const props = withDefaults(defineProps<{
@@ -50,6 +51,16 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+const { dependencyIconUrl } = useWorkspaceDependencyText()
+
+// A discovered Package has no release, so no icon of its own; its dependency
+// carries the same artwork.
+const fallbackIconUrl = computed(() => {
+  if (props.item.icon) return ''
+  const deps = props.item.dependencies ?? []
+  const dep = deps.find(entry => entry.id === props.item.package_id) ?? deps[0]
+  return dep?.dependency ? dependencyIconUrl(dep.dependency) : ''
+})
 
 const name = computed(() => packageDisplayName(props.item, locale.value))
 const description = computed(() => packageDisplayDescription(props.item, locale.value))
@@ -75,6 +86,12 @@ const failedText = computed(() => (
         v-if="item.icon"
         :icon="item.icon"
       />
+      <img
+        v-else-if="fallbackIconUrl"
+        :src="fallbackIconUrl"
+        alt=""
+        class="size-5 object-contain"
+      >
       <PackageIcon
         v-else
         class="size-5 text-muted-foreground"
