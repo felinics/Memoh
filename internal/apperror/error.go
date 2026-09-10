@@ -58,6 +58,10 @@ const (
 	CodeSkillBuiltinReadOnly                     Code = "skill.builtin_read_only"
 	CodeSkillNameTaken                           Code = "skill.name_taken"
 	CodeSkillSaveFailed                          Code = "skill.save_failed"
+	CodePackageNotFound                          Code = "package.not_found"
+	CodePackageRequestInvalid                    Code = "package.request_invalid"
+	CodePackageBusy                              Code = "package.busy"
+	CodePackageOperationFailed                   Code = "package.operation_failed"
 	CodeRegistryUnavailable                      Code = "registry.unavailable"
 	CodeRegistryPackageNotFound                  Code = "registry.package_not_found"
 	CodeRegistryPackageInvalid                   Code = "registry.package_invalid"
@@ -356,6 +360,22 @@ var catalog = map[Code]Definition{
 	CodeSkillSaveFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Skill could not be saved.",
+	},
+	CodePackageNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "This Package installation was not found.",
+	},
+	CodePackageRequestInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The Package request is invalid.",
+	},
+	CodePackageBusy: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Another operation on this Package is in progress.",
+	},
+	CodePackageOperationFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The Package operation failed.",
 	},
 	CodeRegistryUnavailable: {
 		HTTPStatus: http.StatusBadGateway,

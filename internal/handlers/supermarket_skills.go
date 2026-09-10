@@ -18,11 +18,17 @@ type SupermarketRegistryListResponse = supermarketclient.RegistryListResponse
 
 type SupermarketRegistry = supermarketclient.Registry
 
-type SupermarketSkillCategoryListResponse = supermarketclient.SkillCategoryListResponse
+type SupermarketPackageCategoryListResponse = supermarketclient.PackageCategoryListResponse
 
-type SupermarketSkillCategoryRegistry = supermarketclient.SkillCategoryRegistry
+type SupermarketPackageCategoryRegistry = supermarketclient.PackageCategoryRegistry
 
-type SupermarketSkillCategory = supermarketclient.SkillCategory
+type SupermarketPackageCategory = supermarketclient.PackageCategory
+
+type SupermarketPackageMetadata = supermarketclient.PackageMetadata
+
+type SupermarketPackageTranslation = supermarketclient.PackageTranslation
+
+type SupermarketPackageConnector = supermarketclient.PackageConnectorReference
 
 type SupermarketSkillSource = supermarketclient.SkillSource
 
@@ -48,8 +54,6 @@ type SupermarketSkillPackageRelease = supermarketclient.SkillPackageRelease
 
 type SupermarketSkillPackageListResponse = supermarketclient.SkillPackageListResponse
 
-type InstallRegistryPackageResponse = supermarketclient.InstallPackageResponse
-
 type InstallRegistrySkillResponse = supermarketclient.InstallSkillResponse
 
 // ListRegistries godoc
@@ -62,21 +66,17 @@ func (h *SupermarketHandler) ListRegistries(c echo.Context) error {
 	return h.proxy(c, "/api/registries")
 }
 
-// ListRegistryCategories godoc
-// @Summary List categories in a Skill Registry
+// ListCategories godoc
+// @Summary List Package categories with localized names
 // @Tags supermarket
-// @Param registry_id path string true "Registry ID"
-// @Success 200 {object} SupermarketSkillCategoryListResponse
+// @Param registry query string false "Registry ID"
+// @Success 200 {object} SupermarketPackageCategoryListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/registries/{registry_id}/categories [get].
-func (h *SupermarketHandler) ListRegistryCategories(c echo.Context) error {
-	registryID, err := requireRegistryComponent(c.Param("registry_id"), "registry_id")
-	if err != nil {
-		return err
-	}
-	return h.proxy(c, "/api/registries/"+url.PathEscape(registryID)+"/categories")
+// @Router /supermarket/categories [get].
+func (h *SupermarketHandler) ListCategories(c echo.Context) error {
+	return h.proxy(c, "/api/categories")
 }
 
 // ListSkills godoc
@@ -105,6 +105,7 @@ func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 // @Param registry query string false "Registry ID"
 // @Param category query string false "Category ID"
 // @Param tag query string false "Exact tag"
+// @Param component query string false "Component filter" Enums(skills, dependencies, connectors)
 // @Param page query int false "Page number"
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/felinics/memoh/internal/skillpackages"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -27,17 +26,22 @@ var installationResourceLocks = struct {
 	items map[string]*resourceLock
 }{items: make(map[string]*resourceLock)}
 
+// WorkspaceResolver is the slice of *workspace.Manager the installer needs.
+type WorkspaceResolver interface {
+	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspace.ResolvedWorkspaceTarget, error)
+}
+
+// Installer materializes the Skills of a Package release into a workspace.
+// It owns no installation records: the packages service records what it
+// installed and commits or rolls back the workspace change accordingly.
 type Installer struct {
 	client     *Client
-	packages   *skillpackages.Service
-	workspaces *workspace.Manager
+	workspaces WorkspaceResolver
 	logger     *slog.Logger
 }
 
-func NewInstaller(client *Client, packages *skillpackages.Service, workspaces *workspace.Manager, logger *slog.Logger) *Installer {
-	return &Installer{
-		client: client, packages: packages, workspaces: workspaces, logger: logger,
-	}
+func NewInstaller(client *Client, workspaces WorkspaceResolver, logger *slog.Logger) *Installer {
+	return &Installer{client: client, workspaces: workspaces, logger: logger}
 }
 
 type StatusError struct {
@@ -75,7 +79,10 @@ func (i *Installer) acquirePreparation(ctx context.Context) (func(), error) {
 	}
 }
 
-func acquireInstallationResources(ctx context.Context, keys ...string) (func(), error) {
+// AcquireInstallationResources serializes callers on the given keys. Keys are
+// taken in sorted order so two callers holding overlapping sets cannot
+// deadlock. The returned function releases every key once.
+func AcquireInstallationResources(ctx context.Context, keys ...string) (func(), error) {
 	keys = uniqueSortedStrings(keys)
 	releases := make([]func(), 0, len(keys))
 	for _, key := range keys {
@@ -151,6 +158,8 @@ func uniqueSortedStrings(values []string) []string {
 	return result
 }
 
-func packageInstallationLockKey(botID, targetID, registryID, packageID string) string {
+// PackageInstallationLockKey names the resource one Package installation on
+// one workspace target occupies.
+func PackageInstallationLockKey(botID, targetID, registryID, packageID string) string {
 	return strings.Join([]string{"package", botID, targetID, registryID, packageID}, "\x00")
 }

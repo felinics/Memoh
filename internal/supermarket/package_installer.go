@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/apperror"
-	"github.com/felinics/memoh/internal/skillpackages"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -27,28 +26,7 @@ const (
 	maxPackageArtifactFiles           = 10_000
 )
 
-type InstallPackageRequest struct {
-	RegistryID        string
-	PackageID         string
-	Revision          string
-	WorkspaceTargetID string
-}
-
-type InstallPackageResponse struct {
-	OK                bool                       `json:"ok" validate:"required"`
-	RegistryID        string                     `json:"registry_id" validate:"required"`
-	PackageID         string                     `json:"package_id" validate:"required"`
-	Revision          string                     `json:"revision" validate:"required"`
-	WorkspaceTargetID string                     `json:"workspace_target_id" validate:"required"`
-	Skills            []InstallSkillResponse     `json:"skills" validate:"required"`
-	Installation      skillpackages.Installation `json:"installation" validate:"required"`
-} // @name handlers.InstallRegistryPackageResponse
-
-type UninstallPackageResponse struct {
-	OK           bool                       `json:"ok" validate:"required"`
-	Installation skillpackages.Installation `json:"installation" validate:"required"`
-}
-
+// InstallSkillResponse describes one Skill written into the workspace.
 type InstallSkillResponse struct {
 	OK                bool   `json:"ok" validate:"required"`
 	RegistryID        string `json:"registry_id" validate:"required"`
@@ -71,173 +49,223 @@ type preparedPackage struct {
 	workspaceOS string
 }
 
-func (i *Installer) InstallPackage(ctx context.Context, botID string, req InstallPackageRequest) (InstallPackageResponse, error) {
-	registryID := strings.TrimSpace(req.RegistryID)
-	if !skillset.IsValidRegistryID(registryID) {
-		return InstallPackageResponse{}, &StatusError{Status: http.StatusBadRequest, Message: "registry_id is invalid"}
+// SkillPublication is a staged Skill change: the new Skills are in place but
+// the previous copy is kept until Commit. Rollback restores it. A Package
+// without Skills stages the removal of any Skills a previous revision left.
+type SkillPublication struct {
+	publication       *skillset.PackagePublication
+	removal           *skillset.PackageRemoval
+	Skills            []InstallSkillResponse
+	WorkspaceTargetID string
+}
+
+func (p *SkillPublication) Commit(ctx context.Context) error {
+	if p == nil {
+		return nil
 	}
-	packageID := strings.TrimSpace(req.PackageID)
-	if !skillset.IsValidRegistryComponent(packageID) {
-		return InstallPackageResponse{}, &StatusError{Status: http.StatusBadRequest, Message: "package_id is invalid"}
+	return errors.Join(p.publication.Commit(ctx), p.removal.Commit(ctx))
+}
+
+func (p *SkillPublication) Rollback(ctx context.Context) error {
+	if p == nil {
+		return nil
 	}
-	revision := strings.TrimSpace(req.Revision)
-	if !isCanonicalSHA256(revision) {
-		return InstallPackageResponse{}, &StatusError{Status: http.StatusBadRequest, Message: "revision is invalid"}
+	return errors.Join(p.publication.Rollback(ctx), p.removal.Rollback(ctx))
+}
+
+// SkillRemoval is a staged removal of a Package's Skills.
+type SkillRemoval struct {
+	removal           *skillset.PackageRemoval
+	WorkspaceTargetID string
+}
+
+func (r *SkillRemoval) Commit(ctx context.Context) error {
+	if r == nil {
+		return nil
 	}
-	if i.packages == nil || i.workspaces == nil {
-		return InstallPackageResponse{}, apperror.Wrap(apperror.CodeRegistryPackageInstallFailed, errors.New("skill Package installer is not configured"), nil)
+	return r.removal.Commit(ctx)
+}
+
+func (r *SkillRemoval) Rollback(ctx context.Context) error {
+	if r == nil {
+		return nil
 	}
-	targetCtx := workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
-	target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, req.WorkspaceTargetID)
+	return r.removal.Rollback(ctx)
+}
+
+// ResolveTargetID normalizes a workspace target reference to its ID.
+func (i *Installer) ResolveTargetID(ctx context.Context, botID, targetID string) (string, error) {
+	if i == nil || i.workspaces == nil {
+		return "", errors.New("supermarket installer is not configured")
+	}
+	target, err := i.workspaces.ResolveWorkspaceTarget(workspace.WithWorkspaceTarget(ctx, targetID), botID, targetID)
 	if err != nil {
-		return InstallPackageResponse{}, &WorkspaceTargetError{Err: err}
+		return "", &WorkspaceTargetError{Err: err}
+	}
+	return target.TargetID, nil
+}
+
+// FetchRelease downloads and validates one immutable Package release.
+func (i *Installer) FetchRelease(ctx context.Context, registryID, packageID, revision string) (SkillPackageDescriptor, error) {
+	registryID, packageID, err := validatePackageIdentity(registryID, packageID)
+	if err != nil {
+		return SkillPackageDescriptor{}, err
+	}
+	revision = strings.TrimSpace(revision)
+	if !isCanonicalSHA256(revision) {
+		return SkillPackageDescriptor{}, &StatusError{Status: http.StatusBadRequest, Message: "revision is invalid"}
+	}
+	pkg, err := i.fetchPackageRelease(ctx, registryID, packageID, revision)
+	if err != nil {
+		return SkillPackageDescriptor{}, err
+	}
+	if pkg.Revision != revision {
+		return SkillPackageDescriptor{}, invalidPackage(errors.New("registry Package revision does not match the request"))
+	}
+	if err := validatePackage(pkg, registryID, packageID); err != nil {
+		return SkillPackageDescriptor{}, invalidPackage(err)
+	}
+	if err := validatePackageBudget(pkg.Skills); err != nil {
+		return SkillPackageDescriptor{}, invalidPackage(err)
+	}
+	return pkg, nil
+}
+
+// FetchCurrentPackage reads the Package descriptor the registry currently
+// publishes, which names the newest revision.
+func (i *Installer) FetchCurrentPackage(ctx context.Context, registryID, packageID string) (SkillPackageDescriptor, error) {
+	registryID, packageID, err := validatePackageIdentity(registryID, packageID)
+	if err != nil {
+		return SkillPackageDescriptor{}, err
+	}
+	if i == nil || i.client == nil {
+		return SkillPackageDescriptor{}, errors.New("supermarket installer is not configured")
+	}
+	pkg, err := i.client.FetchCurrentPackage(ctx, registryID, packageID)
+	if err != nil {
+		return SkillPackageDescriptor{}, registryFetchError(err)
+	}
+	if err := validatePackage(pkg, registryID, packageID); err != nil {
+		return SkillPackageDescriptor{}, invalidPackage(err)
+	}
+	return pkg, nil
+}
+
+// PublishSkills downloads the Skills of a validated release and stages them
+// into the workspace target. expectedRevision is the revision the caller has
+// recorded for the Package, or empty when it is new; a workspace copy that
+// does not match it is replaced. The caller commits after recording the
+// installation, or rolls back.
+func (i *Installer) PublishSkills(ctx context.Context, botID, targetID string, pkg SkillPackageDescriptor, expectedRevision string) (*SkillPublication, error) {
+	if i == nil || i.workspaces == nil {
+		return nil, apperror.Wrap(apperror.CodeRegistryPackageInstallFailed, errors.New("skill Package installer is not configured"), nil)
+	}
+	targetCtx := workspace.WithWorkspaceTarget(ctx, targetID)
+	target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, targetID)
+	if err != nil {
+		return nil, &WorkspaceTargetError{Err: err}
+	}
+	if target.Client == nil {
+		return nil, apperror.Wrap(apperror.CodeRegistryPackageInstallFailed, errors.New("workspace is not reachable"), nil)
 	}
 	release, err := i.acquirePreparation(targetCtx)
 	if err != nil {
-		return InstallPackageResponse{}, err
+		return nil, err
 	}
 	defer release()
-	pkg, err := i.fetchPackageRelease(targetCtx, registryID, packageID, revision)
+	consistent, err := skillset.ReconcilePackage(targetCtx, target.Client, pkg.RegistryID, pkg.PackageID, expectedRevision)
 	if err != nil {
-		return InstallPackageResponse{}, err
-	}
-	prepared, err := i.preparePackage(targetCtx, target.Info.OS, pkg, registryID, packageID, revision)
-	if err != nil {
-		return InstallPackageResponse{}, err
-	}
-	releaseInstall, err := acquireInstallationResources(targetCtx, packageInstallationLockKey(
-		botID, target.TargetID, registryID, packageID,
-	))
-	if err != nil {
-		return InstallPackageResponse{}, err
-	}
-	defer releaseInstall()
-	expectedRevision := ""
-	current, err := i.packages.Get(targetCtx, botID, target.TargetID, registryID, packageID)
-	if err == nil {
-		expectedRevision = current.Revision
-	} else if !errors.Is(err, skillpackages.ErrNotInstalled) {
-		return InstallPackageResponse{}, packageLifecycleError(err)
-	}
-	consistent, err := skillset.ReconcilePackage(targetCtx, target.Client, registryID, packageID, expectedRevision)
-	if err != nil {
-		return InstallPackageResponse{}, apperror.Wrap(apperror.CodeRegistryPackageInstallFailed, fmt.Errorf("recover Registry Package state: %w", err), nil)
+		return nil, apperror.Wrap(apperror.CodeRegistryPackageInstallFailed, fmt.Errorf("recover Registry Package state: %w", err), nil)
 	}
 	if !consistent && i.logger != nil {
 		i.logger.Warn("Skill Package files did not match the recorded revision; replacing them",
-			slog.String("registry_id", registryID), slog.String("package_id", packageID),
+			slog.String("registry_id", pkg.RegistryID), slog.String("package_id", pkg.PackageID),
 			slog.String("workspace_target_id", target.TargetID), slog.String("recorded_revision", expectedRevision),
 		)
 	}
+	if len(pkg.Skills) == 0 {
+		removal, err := skillset.PreparePackageRemoval(targetCtx, target.Client, pkg.RegistryID, pkg.PackageID)
+		if err != nil {
+			return nil, apperror.Wrap(apperror.CodeRegistryPackageInstallFailed, fmt.Errorf("clear previous Registry Package Skills: %w", err), nil)
+		}
+		return &SkillPublication{removal: removal, Skills: []InstallSkillResponse{}, WorkspaceTargetID: target.TargetID}, nil
+	}
+	prepared, err := i.preparePackage(targetCtx, target.Info.OS, pkg)
+	if err != nil {
+		return nil, err
+	}
 	publication, published, err := publishPackage(targetCtx, target.Client, prepared, target.TargetID)
 	if err != nil {
-		return InstallPackageResponse{}, err
+		return nil, err
 	}
-	installation, err := i.packages.Record(targetCtx, botID, target.TargetID, skillpackages.Requirement{
-		RegistryID: registryID, PackageID: packageID, Revision: revision,
-	})
-	if err != nil {
-		return InstallPackageResponse{}, errors.Join(packageLifecycleError(err), publication.Rollback(targetCtx))
-	}
-	if err := publication.Commit(targetCtx); err != nil && i.logger != nil {
-		i.logger.Warn("cleanup replaced Skill Package failed", slog.Any("error", err))
-	}
-	return InstallPackageResponse{OK: true, RegistryID: registryID, PackageID: packageID, Revision: revision, WorkspaceTargetID: target.TargetID, Skills: published, Installation: installation}, nil
+	return &SkillPublication{publication: publication, Skills: published, WorkspaceTargetID: target.TargetID}, nil
 }
 
-func (i *Installer) UninstallPackage(ctx context.Context, botID, installationID string) (UninstallPackageResponse, error) {
-	if i.packages == nil || i.workspaces == nil {
-		return UninstallPackageResponse{}, errors.New("skill Package installer is not configured")
+// RemoveSkills stages the removal of a Package's Skills from the workspace.
+func (i *Installer) RemoveSkills(ctx context.Context, botID, targetID, registryID, packageID, revision string) (*SkillRemoval, error) {
+	if i == nil || i.workspaces == nil {
+		return nil, errors.New("skill Package installer is not configured")
 	}
-	installation, err := i.packages.GetByID(ctx, botID, installationID)
+	targetCtx := workspace.WithWorkspaceTarget(ctx, targetID)
+	target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, targetID)
 	if err != nil {
-		return UninstallPackageResponse{}, packageLifecycleError(err)
+		return nil, &WorkspaceTargetError{Err: err}
 	}
-	releaseInstall, err := acquireInstallationResources(ctx, packageInstallationLockKey(
-		botID, installation.WorkspaceTargetID, installation.RegistryID, installation.PackageID,
-	))
-	if err != nil {
-		return UninstallPackageResponse{}, err
+	if target.Client == nil {
+		return nil, apperror.Wrap(apperror.CodeRegistryPackageInstallFailed, errors.New("workspace is not reachable"), nil)
 	}
-	defer releaseInstall()
-	installation, err = i.packages.GetByID(ctx, botID, installationID)
+	consistent, err := skillset.ReconcilePackage(targetCtx, target.Client, registryID, packageID, revision)
 	if err != nil {
-		return UninstallPackageResponse{}, packageLifecycleError(err)
-	}
-	targetCtx := workspace.WithWorkspaceTarget(ctx, installation.WorkspaceTargetID)
-	target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, installation.WorkspaceTargetID)
-	if err != nil {
-		return UninstallPackageResponse{}, &WorkspaceTargetError{Err: err}
-	}
-	consistent, err := skillset.ReconcilePackage(
-		targetCtx,
-		target.Client,
-		installation.RegistryID,
-		installation.PackageID,
-		installation.Revision,
-	)
-	if err != nil {
-		return UninstallPackageResponse{}, fmt.Errorf("recover Skill Package state: %w", err)
+		return nil, fmt.Errorf("recover Skill Package state: %w", err)
 	}
 	if !consistent && i.logger != nil {
 		i.logger.Warn("Skill Package files did not match the recorded revision; removing the managed path",
-			slog.String("registry_id", installation.RegistryID), slog.String("package_id", installation.PackageID),
-			slog.String("workspace_target_id", target.TargetID), slog.String("recorded_revision", installation.Revision),
+			slog.String("registry_id", registryID), slog.String("package_id", packageID),
+			slog.String("workspace_target_id", target.TargetID), slog.String("recorded_revision", revision),
 		)
 	}
-	removal, err := skillset.PreparePackageRemoval(
-		targetCtx,
-		target.Client,
-		installation.RegistryID,
-		installation.PackageID,
-	)
+	removal, err := skillset.PreparePackageRemoval(targetCtx, target.Client, registryID, packageID)
 	if err != nil {
-		return UninstallPackageResponse{}, err
+		return nil, err
 	}
-	removed, err := i.packages.Delete(ctx, botID, installationID)
-	if err != nil {
-		return UninstallPackageResponse{}, errors.Join(packageLifecycleError(err), removal.Rollback(targetCtx))
-	}
-	if err := removal.Commit(targetCtx); err != nil && i.logger != nil {
-		i.logger.Warn("cleanup uninstalled Skill Package failed", slog.Any("error", err))
-	}
-	return UninstallPackageResponse{OK: true, Installation: removed}, nil
+	return &SkillRemoval{removal: removal, WorkspaceTargetID: target.TargetID}, nil
 }
 
-func packageLifecycleError(err error) error {
-	switch {
-	case errors.Is(err, skillpackages.ErrNotInstalled):
-		return &StatusError{Status: http.StatusNotFound, Message: "Skill Package installation was not found", Err: err}
-	default:
-		return err
+func validatePackageIdentity(registryID, packageID string) (string, string, error) {
+	registryID = strings.TrimSpace(registryID)
+	if !skillset.IsValidRegistryID(registryID) {
+		return "", "", &StatusError{Status: http.StatusBadRequest, Message: "registry_id is invalid"}
 	}
+	packageID = strings.TrimSpace(packageID)
+	if !skillset.IsValidRegistryComponent(packageID) {
+		return "", "", &StatusError{Status: http.StatusBadRequest, Message: "package_id is invalid"}
+	}
+	return registryID, packageID, nil
 }
 
 func (i *Installer) fetchPackageRelease(ctx context.Context, registryID, packageID, revision string) (SkillPackageDescriptor, error) {
+	if i == nil || i.client == nil {
+		return SkillPackageDescriptor{}, errors.New("supermarket installer is not configured")
+	}
 	pkg, err := i.client.FetchPackageRelease(ctx, registryID, packageID, revision)
 	if err == nil {
 		return pkg, nil
 	}
+	return SkillPackageDescriptor{}, registryFetchError(err)
+}
+
+func registryFetchError(err error) error {
 	switch ErrorKindOf(err) {
 	case ErrorNotFound:
-		return SkillPackageDescriptor{}, apperror.New(apperror.CodeRegistryPackageNotFound, nil)
+		return apperror.New(apperror.CodeRegistryPackageNotFound, nil)
 	case ErrorUnavailable:
-		return SkillPackageDescriptor{}, apperror.Wrap(apperror.CodeRegistryUnavailable, fmt.Errorf("fetch Registry Package release: %w", err), nil)
+		return apperror.Wrap(apperror.CodeRegistryUnavailable, fmt.Errorf("fetch Registry Package: %w", err), nil)
 	default:
-		return SkillPackageDescriptor{}, invalidPackage(fmt.Errorf("invalid Registry Package release: %w", err))
+		return invalidPackage(fmt.Errorf("invalid Registry Package: %w", err))
 	}
 }
 
-func (i *Installer) preparePackage(ctx context.Context, workspaceOS string, pkg SkillPackageDescriptor, registryID, packageID, revision string) (preparedPackage, error) {
-	if pkg.Revision != revision {
-		return preparedPackage{}, invalidPackage(errors.New("registry Package revision does not match the request"))
-	}
-	if err := validatePackage(pkg, registryID, packageID); err != nil {
-		return preparedPackage{}, invalidPackage(err)
-	}
-	if err := validatePackageBudget(pkg.Skills); err != nil {
-		return preparedPackage{}, invalidPackage(err)
-	}
+func (i *Installer) preparePackage(ctx context.Context, workspaceOS string, pkg SkillPackageDescriptor) (preparedPackage, error) {
 	prepared := preparedPackage{descriptor: pkg, skills: make([]preparedSkill, 0, len(pkg.Skills)), workspaceOS: workspaceOS}
 	for _, skill := range pkg.Skills {
 		item, err := i.prepareSkill(ctx, skill)
@@ -297,8 +325,11 @@ func publishPackage(ctx context.Context, client *bridge.Client, prepared prepare
 }
 
 func validatePackage(pkg SkillPackageDescriptor, registryID, packageID string) error {
-	if pkg.SchemaVersion != "1" || pkg.RegistryID != registryID || pkg.PackageID != packageID || !isCanonicalSHA256(pkg.Revision) || len(pkg.Skills) == 0 || len(pkg.Skills) > maxPackageSkills || pkg.SkillCount != len(pkg.Skills) {
+	if pkg.SchemaVersion != "1" || pkg.RegistryID != registryID || pkg.PackageID != packageID || !isCanonicalSHA256(pkg.Revision) || len(pkg.Skills) > maxPackageSkills || pkg.SkillCount != len(pkg.Skills) {
 		return errors.New("registry Package release is invalid")
+	}
+	if len(pkg.Skills) == 0 && len(pkg.Dependencies) == 0 && len(pkg.Connectors) == 0 {
+		return errors.New("registry Package release is empty")
 	}
 	seen := make(map[string]struct{}, len(pkg.Skills))
 	for _, skill := range pkg.Skills {
@@ -309,6 +340,26 @@ func validatePackage(pkg SkillPackageDescriptor, registryID, packageID string) e
 		if err := validateSkill(skill, registryID, packageID, skill.SkillID); err != nil {
 			return err
 		}
+	}
+	seenDependencies := make(map[string]struct{}, len(pkg.Dependencies))
+	for _, dependency := range pkg.Dependencies {
+		if strings.TrimSpace(dependency) == "" {
+			return errors.New("registry Package dependency reference is invalid")
+		}
+		if _, exists := seenDependencies[dependency]; exists {
+			return errors.New("registry Package contains duplicate dependency references")
+		}
+		seenDependencies[dependency] = struct{}{}
+	}
+	seenConnectors := make(map[string]struct{}, len(pkg.Connectors))
+	for _, connector := range pkg.Connectors {
+		if strings.TrimSpace(connector.Type) == "" {
+			return errors.New("registry Package connector reference is invalid")
+		}
+		if _, exists := seenConnectors[connector.Type]; exists {
+			return errors.New("registry Package contains duplicate connector references")
+		}
+		seenConnectors[connector.Type] = struct{}{}
 	}
 	return nil
 }

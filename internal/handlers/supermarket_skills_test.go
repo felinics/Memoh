@@ -1,32 +1,20 @@
 package handlers
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/felinics/memoh/internal/config"
-	"github.com/felinics/memoh/internal/db"
-	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
-	"github.com/felinics/memoh/internal/skillpackages"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
-	"github.com/felinics/memoh/internal/workspace"
 )
 
 const validSkillArtifactContent = "---\nname: skill\ndescription: Demo\n---\n\n# Demo\n"
@@ -132,144 +120,6 @@ func TestGetRegistryPackageReleaseReturnsPinnedDescriptor(t *testing.T) {
 	}
 }
 
-func TestInstallRegistryPackagePublishesMembersInOneMutation(t *testing.T) {
-	env := newSkillsTestEnv(t)
-	manager := workspace.NewManager(
-		slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
-	)
-	artifact := validSkillArtifact(t)
-	digest := sha256.Sum256(artifact)
-	pkg := validRegistryPackageDescriptor()
-	for index := range pkg.Skills {
-		pkg.Skills[index].Artifact.Digest = hex.EncodeToString(digest[:])
-		pkg.Skills[index].Artifact.Size = int64(len(artifact))
-	}
-	release := registryPackageReleaseBytes(t, pkg)
-	revision := sha256.Sum256(release)
-	pkg.Revision = hex.EncodeToString(revision[:])
-	obsoletePath := "/data/skills/registry/package/obsolete/SKILL.md"
-	env.writeSkillFile(t, obsoletePath, managedSkillRaw("obsolete", "Obsolete"))
-	handler := &SupermarketHandler{
-		upstream: supermarketclient.NewClient("https://supermarket.example", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if strings.HasPrefix(req.URL.Path, "/api/artifacts/skill/") {
-				return testHTTPResponse(req, http.StatusOK, artifact), nil
-			}
-			wantReleasePath := "/api/registries/registry/packages/package/releases/" + pkg.Revision
-			if req.URL.Path != wantReleasePath {
-				t.Fatalf("unexpected upstream request path %q, want %q", req.URL.Path, wantReleasePath)
-			}
-			return testHTTPResponse(req, http.StatusOK, release), nil
-		})}),
-	}
-
-	packageService := skillpackages.NewService(&directPackageStore{})
-	service := supermarketclient.NewInstaller(handler.upstream, packageService, manager, slog.New(slog.DiscardHandler))
-	result, err := service.InstallPackage(context.Background(), env.botID, supermarketclient.InstallPackageRequest{
-		RegistryID: pkg.RegistryID, PackageID: pkg.PackageID, Revision: pkg.Revision,
-	})
-	if err != nil || !result.OK || len(result.Skills) != len(pkg.Skills) {
-		t.Fatalf("installRegistryPackage() result=%+v error=%v", result, err)
-	}
-	if _, err := os.Stat(env.localPath(obsoletePath)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("obsolete Package member survived replacement: %v", err)
-	}
-	for _, skillID := range []string{"skill", "second"} {
-		installedPath := "/data/skills/registry/package/" + skillID + "/SKILL.md"
-		content, err := os.ReadFile(env.localPath(installedPath))
-		if err != nil || string(content) != validSkillArtifactContent {
-			t.Fatalf("installed Package member %q content=%q error=%v", skillID, content, err)
-		}
-	}
-	if _, err := os.Stat(env.localPath("/data/skills/.staging/registry/package")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Package staging was not cleaned: %v", err)
-	}
-}
-
-type directPackageStore struct {
-	skillpackages.Store
-}
-
-func (*directPackageStore) GetBotSkillPackageInstallation(context.Context, dbsqlc.GetBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error) {
-	return dbsqlc.BotSkillPackageInstallation{}, pgx.ErrNoRows
-}
-
-func (*directPackageStore) UpsertBotSkillPackageInstallation(_ context.Context, arg dbsqlc.UpsertBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error) {
-	return dbsqlc.BotSkillPackageInstallation{
-		ID:    pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9, 9, 9, 0x49, 9, 0x89, 9, 9, 9, 9, 9, 9, 9}, Valid: true},
-		BotID: arg.BotID, WorkspaceTargetID: arg.WorkspaceTargetID,
-		RegistryID: arg.RegistryID, PackageID: arg.PackageID, Revision: arg.Revision,
-	}, nil
-}
-
-type uninstallPackageStore struct {
-	skillpackages.Store
-	row       dbsqlc.BotSkillPackageInstallation
-	deleteErr error
-}
-
-func (s *uninstallPackageStore) GetBotSkillPackageInstallationByID(context.Context, dbsqlc.GetBotSkillPackageInstallationByIDParams) (dbsqlc.BotSkillPackageInstallation, error) {
-	return s.row, nil
-}
-
-func (s *uninstallPackageStore) DeleteBotSkillPackageInstallation(context.Context, dbsqlc.DeleteBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error) {
-	return s.row, s.deleteErr
-}
-
-func TestUninstallRegistryPackageRemovesDirectoryAndRollsBackOnDatabaseFailure(t *testing.T) {
-	for _, test := range []struct {
-		name      string
-		deleteErr error
-		wantFile  bool
-	}{
-		{name: "success"},
-		{name: "database failure", deleteErr: errors.New("injected database failure"), wantFile: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			env := newSkillsTestEnv(t)
-			manager := workspace.NewManager(
-				slog.Default(), nil, nil, config.WorkspaceConfig{DataRoot: env.dataRoot}, "", nil,
-			)
-			packageFile := "/data/skills/openai/documents/pdf/SKILL.md"
-			env.writeSkillFile(t, packageFile, validSkillArtifactContent)
-			botID, err := db.ParseUUID(env.botID)
-			if err != nil {
-				t.Fatalf("parse bot ID: %v", err)
-			}
-			installationID := pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9, 9, 9, 0x49, 9, 0x89, 9, 9, 9, 9, 9, 9, 9}, Valid: true}
-			store := &uninstallPackageStore{
-				row: dbsqlc.BotSkillPackageInstallation{
-					ID: installationID, BotID: botID, WorkspaceTargetID: "native", RegistryID: "openai", PackageID: "documents",
-					Revision: strings.Repeat("a", 64),
-				},
-				deleteErr: test.deleteErr,
-			}
-			installer := supermarketclient.NewInstaller(
-				nil,
-				skillpackages.NewService(store),
-				manager,
-				slog.New(slog.DiscardHandler),
-			)
-
-			result, uninstallErr := installer.UninstallPackage(context.Background(), env.botID, installationID.String())
-			if test.deleteErr == nil {
-				if uninstallErr != nil || !result.OK {
-					t.Fatalf("UninstallPackage() result=%+v error=%v", result, uninstallErr)
-				}
-			} else if !errors.Is(uninstallErr, test.deleteErr) {
-				t.Fatalf("UninstallPackage() error=%v, want %v", uninstallErr, test.deleteErr)
-			}
-			_, statErr := os.Stat(env.localPath(packageFile))
-			if test.wantFile {
-				if statErr != nil {
-					t.Fatalf("Package file was not restored: %v", statErr)
-				}
-			} else if !errors.Is(statErr, os.ErrNotExist) {
-				t.Fatalf("Package file still exists after uninstall: %v", statErr)
-			}
-		})
-	}
-}
-
 func TestProxySkillIconVerifiesDigestAndHeaders(t *testing.T) {
 	content := []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	digest := sha256.Sum256(content)
@@ -341,27 +191,6 @@ func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 	}
 }
 
-func validSkillArtifact(t *testing.T) []byte {
-	t.Helper()
-	var output bytes.Buffer
-	gz := gzip.NewWriter(&output)
-	tw := tar.NewWriter(gz)
-	content := []byte(validSkillArtifactContent)
-	if err := tw.WriteHeader(&tar.Header{Name: "SKILL.md", Mode: 0o644, Typeflag: tar.TypeReg, Size: int64(len(content))}); err != nil {
-		t.Fatalf("WriteHeader(SKILL.md): %v", err)
-	}
-	if _, err := tw.Write(content); err != nil {
-		t.Fatalf("Write(SKILL.md): %v", err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("tar Close: %v", err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatalf("gzip Close: %v", err)
-	}
-	return output.Bytes()
-}
-
 func validRegistrySkillDescriptor() SupermarketCatalogSkill {
 	return SupermarketCatalogSkill{
 		RegistryID: "registry", PackageID: "package", SkillID: "skill", InstallID: "registry+package+skill",
@@ -423,14 +252,4 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
-}
-
-func testHTTPResponse(req *http.Request, status int, content []byte) *http.Response {
-	return &http.Response{
-		StatusCode:    status,
-		Header:        make(http.Header),
-		Body:          io.NopCloser(bytes.NewReader(content)),
-		ContentLength: int64(len(content)),
-		Request:       req,
-	}
 }

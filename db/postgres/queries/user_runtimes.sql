@@ -71,7 +71,7 @@ RETURNING *;
 -- Revoking a runtime kills every bot mount of it in the same transaction:
 -- dead bindings would otherwise linger as ghost rows on every surface.
 WITH deleted_packages AS (
-  DELETE FROM bot_skill_package_installations AS package
+  DELETE FROM bot_package_installations AS package
   USING bot_remote_runtime_bindings AS binding
   WHERE package.team_id = public.memoh_current_team_id()
     AND package.bot_id = binding.bot_id
@@ -215,7 +215,7 @@ RETURNING id;
 
 -- name: DeleteBotRemoteRuntimeMount :one
 WITH deleted_packages AS (
-  DELETE FROM bot_skill_package_installations AS package
+  DELETE FROM bot_package_installations AS package
   USING bot_remote_runtime_bindings AS binding
   WHERE package.team_id = public.memoh_current_team_id()
     AND package.bot_id = binding.bot_id

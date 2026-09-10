@@ -1,6 +1,8 @@
 package core
 
 import (
+	"log/slog"
+
 	"go.uber.org/fx"
 
 	"github.com/felinics/memoh/internal/acl"
@@ -12,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channelaccess"
 	"github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/connectors"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/fetchproviders"
@@ -19,15 +22,17 @@ import (
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthclients"
+	"github.com/felinics/memoh/internal/packages"
 	"github.com/felinics/memoh/internal/policy"
 	"github.com/felinics/memoh/internal/providertemplates"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/searchproviders"
-	"github.com/felinics/memoh/internal/skillpackages"
+	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/userruntime"
 	videopkg "github.com/felinics/memoh/internal/video"
 	"github.com/felinics/memoh/internal/workdir"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
 // FoundationModule assembles process-neutral domain infrastructure shared by
@@ -100,7 +105,7 @@ func ServerModule() fx.Option {
 			mcp.NewConnectionService,
 			connectors.NewService,
 			connectors.NewSource,
-			provideSkillPackageService,
+			providePackageService,
 			mcp.NewToolSessionContextStore,
 			provideAudioRegistry,
 			audiopkg.NewService,
@@ -149,8 +154,17 @@ func ServerModule() fx.Option {
 	)
 }
 
-func provideSkillPackageService(queries dbstore.Queries) *skillpackages.Service {
-	return skillpackages.NewService(queries)
+func providePackageService(log *slog.Logger, cfg config.Config, queries dbstore.Queries, manager *workspace.Manager, workspaceDeps *workspacedeps.Service, connectorService *connectors.Service) *packages.Service {
+	upstream := supermarket.NewClient(cfg.Supermarket.GetBaseURL(), nil)
+	publisher := packages.NewSupermarketPublisher(supermarket.NewInstaller(upstream, manager, log))
+	return packages.NewService(packages.Options{
+		Store:        packages.NewPostgresStore(queries),
+		Registry:     publisher,
+		Skills:       publisher,
+		Dependencies: workspaceDeps,
+		Connectors:   connectorService,
+		Logger:       log,
+	})
 }
 
 // Module preserves the all-in-one composition API for tests and transitional

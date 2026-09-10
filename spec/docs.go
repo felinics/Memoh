@@ -2273,160 +2273,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/connectors/api-key": {
-            "post": {
-                "description": "Send credential fields to Connect-It and store only its connection ID in Memoh.",
-                "tags": [
-                    "connectors"
-                ],
-                "summary": "Connect an API credential provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Credential request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ConnectorCredentialRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/connectors.Connector"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/connectors/oauth": {
-            "post": {
-                "description": "Create a bot connector and return the end-user authorization URL.",
-                "tags": [
-                    "connectors"
-                ],
-                "summary": "Connect an OAuth provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "OAuth request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ConnectorOAuthRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/connectit.OAuthAuthorization"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
         "/bots/{bot_id}/connectors/{connection_id}": {
             "get": {
                 "description": "Get one Connect-It connection bound to a bot.",
@@ -2471,76 +2317,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete the Connect-It credential and remove its bot binding.",
-                "tags": [
-                    "connectors"
-                ],
-                "summary": "Disconnect a connector",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Connect-It connection ID",
-                        "name": "connection_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -4698,169 +4474,6 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/dependencies/{dep_id}": {
-            "delete": {
-                "description": "Runs the catalog remove script, deletes the generated shims, drops the installation record, and streams the output. For a dependency the image ships this removes the managed overlay only; the image copy becomes the one in effect again.",
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "Remove a workspace dependency",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Dependency ID",
-                        "name": "dep_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Workspace target ID (defaults to the bot's current target)",
-                        "name": "workspace_target_id",
-                        "in": "query"
-                    },
-                    {
-                        "description": "Prepared definition revision (optional)",
-                        "name": "payload",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "SSE stream of operation events",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/dependencies/{dep_id}/install": {
-            "post": {
-                "description": "Runs the catalog install script and streams its output. The optional body names the version to install; without one the script installs the latest version (or the manifest pin). For a dependency the image already ships this installs a managed overlay that takes precedence over the image copy. A stopped native workspace is started first. Events: started, log, done, error.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "Install a workspace dependency",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Dependency ID",
-                        "name": "dep_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Workspace target ID (defaults to the bot's current target)",
-                        "name": "workspace_target_id",
-                        "in": "query"
-                    },
-                    {
-                        "description": "Version to install (optional)",
-                        "name": "payload",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "SSE stream of operation events",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -7254,6 +6867,623 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/packages": {
+            "get": {
+                "description": "Every Package installed on the workspace target with its Skills, dependency references and connector references, plus the canonical Packages of dependencies the workspace carries that no Package references.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "List the Packages installed for a bot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Refresh workspace discovery",
+                        "name": "refresh",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Installs missing dependencies, publishes the Skills and links connectors, streaming progress. A dependency failure or an unauthorized required connector leaves the installation partial. Events: started, step, log, step_done, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Install a Package release into a bot workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Package release to install",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageInstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/packages/check-updates": {
+            "post": {
+                "description": "Compares every installed Package with the registry's current release, runs the dependency update checks, and returns the refreshed list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Check installed Packages for newer releases",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace target ID (defaults to the bot's current target)",
+                        "name": "workspace_target_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageListResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/packages/{installation_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Get one installed Package",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageItem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Removes the Skills, the dependencies no other Package references and the connections no other Package references, streaming progress. Events: started, step, log, step_done, done, error.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Remove a Package from a bot workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Also remove auto-installed Packages that lose their last reference",
+                        "name": "remove_unreferenced_required",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageStreamEvent"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/packages/{installation_id}/connectors/{connector_type}/api-key": {
+            "post": {
+                "description": "Sends the credential fields to Connect-It and links the resulting connection to the Package installation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Connect an API-key connector a Package references",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Connector type",
+                        "name": "connector_type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Credential request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageConnectorCredentialRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/connectors.Connector"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/packages/{installation_id}/connectors/{connector_type}/oauth": {
+            "post": {
+                "description": "Starts OAuth for the connector type and links the resulting Connect-It connection to the Package installation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Authorize a connector a Package references",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Connector type",
+                        "name": "connector_type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "OAuth request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageConnectorOAuthRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/connectit.OAuthAuthorization"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/packages/{installation_id}/removal-preview": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Preview what removing a Package would do",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageRemovalPreviewResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/packages/{installation_id}/resume": {
+            "post": {
+                "description": "Installs dependencies that are still missing, reconciles the Skills and links connectors that were authorized since. Events: started, step, log, step_done, done, error.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Continue a partial Package installation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageStreamEvent"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/packages/{installation_id}/update": {
+            "post": {
+                "description": "Replaces the Skills atomically, links or installs new references and releases dropped ones. Dependency definitions keep their own update cycle. Events: started, step, log, step_done, done, error.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "packages"
+                ],
+                "summary": "Update a Package to the registry's current release",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Package installation ID",
+                        "name": "installation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of operation events",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.PackageStreamEvent"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/quick-actions/execute": {
             "post": {
                 "description": "Runs a typed Web quick action such as help or skill.list and returns a command_result or command_error envelope.",
@@ -9480,148 +9710,6 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/supermarket/install-package": {
-            "post": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "Install an immutable Skill Package release to a bot workspace",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Install Package request",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.InstallPackageRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.InstallRegistryPackageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/supermarket/packages": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "List Skill Packages installed for a bot",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Workspace target ID",
-                        "name": "workspace_target_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/skillpackages.Installation"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/bots/{bot_id}/supermarket/packages/{installation_id}": {
-            "delete": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "Uninstall a Skill Package from a bot",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Bot ID",
-                        "name": "bot_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Package installation ID",
-                        "name": "installation_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/supermarket.UninstallPackageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -14674,6 +14762,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/supermarket/categories": {
+            "get": {
+                "tags": [
+                    "supermarket"
+                ],
+                "summary": "List Package categories with localized names",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Registry ID",
+                        "name": "registry",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SupermarketPackageCategoryListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/supermarket/packages": {
             "get": {
                 "tags": [
@@ -14703,6 +14833,17 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Exact tag",
                         "name": "tag",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "skills",
+                            "dependencies",
+                            "connectors"
+                        ],
+                        "type": "string",
+                        "description": "Component filter",
+                        "name": "component",
                         "in": "query"
                     },
                     {
@@ -14757,49 +14898,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.SupermarketRegistryListResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/supermarket/registries/{registry_id}/categories": {
-            "get": {
-                "tags": [
-                    "supermarket"
-                ],
-                "summary": "List categories in a Skill Registry",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Registry ID",
-                        "name": "registry_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SupermarketSkillCategoryListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "502": {
@@ -16519,46 +16617,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/webhooktunnel.Status"
-                        }
-                    }
-                }
-            }
-        },
-        "/workspace-dependencies/catalog": {
-            "get": {
-                "description": "Every dependency the catalog declares, as its manifest describes it: what it provides, where it installs, whether it can be installed and whether the workspace image ships a baseline copy. Reads no workspace and needs no bot; the Supermarket shows it before a bot is chosen.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "containerd"
-                ],
-                "summary": "List the workspace dependency catalog",
-                "parameters": [
-                    {
-                        "type": "boolean",
-                        "description": "Refresh the remote catalog",
-                        "name": "refresh",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
                         }
                     }
                 }
@@ -21257,23 +21315,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.ConnectorCredentialRequest": {
-            "type": "object",
-            "properties": {
-                "auth_method": {
-                    "type": "string"
-                },
-                "connector_type": {
-                    "type": "string"
-                },
-                "fields": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
         "handlers.ConnectorEnabledRequest": {
             "type": "object",
             "required": [
@@ -21283,17 +21324,6 @@ const docTemplate = `{
                 "enabled": {
                     "description": "Pointer so an empty or mistyped body fails validation instead of\nsilently disabling the connector.",
                     "type": "boolean"
-                }
-            }
-        },
-        "handlers.ConnectorOAuthRequest": {
-            "type": "object",
-            "properties": {
-                "auth_method": {
-                    "type": "string"
-                },
-                "connector_type": {
-                    "type": "string"
                 }
             }
         },
@@ -22019,105 +22049,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.InstallPackageRequest": {
-            "type": "object",
-            "required": [
-                "package_id",
-                "registry_id",
-                "revision"
-            ],
-            "properties": {
-                "package_id": {
-                    "type": "string"
-                },
-                "registry_id": {
-                    "type": "string"
-                },
-                "revision": {
-                    "type": "string"
-                },
-                "workspace_target_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.InstallRegistryPackageResponse": {
-            "type": "object",
-            "required": [
-                "installation",
-                "ok",
-                "package_id",
-                "registry_id",
-                "revision",
-                "skills",
-                "workspace_target_id"
-            ],
-            "properties": {
-                "installation": {
-                    "$ref": "#/definitions/skillpackages.Installation"
-                },
-                "ok": {
-                    "type": "boolean"
-                },
-                "package_id": {
-                    "type": "string"
-                },
-                "registry_id": {
-                    "type": "string"
-                },
-                "revision": {
-                    "type": "string"
-                },
-                "skills": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.InstallRegistrySkillResponse"
-                    }
-                },
-                "workspace_target_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.InstallRegistrySkillResponse": {
-            "type": "object",
-            "required": [
-                "artifact_digest",
-                "files_written",
-                "install_id",
-                "ok",
-                "package_id",
-                "registry_id",
-                "skill_id",
-                "workspace_target_id"
-            ],
-            "properties": {
-                "artifact_digest": {
-                    "type": "string"
-                },
-                "files_written": {
-                    "type": "integer"
-                },
-                "install_id": {
-                    "type": "string"
-                },
-                "ok": {
-                    "type": "boolean"
-                },
-                "package_id": {
-                    "type": "string"
-                },
-                "registry_id": {
-                    "type": "string"
-                },
-                "skill_id": {
-                    "type": "string"
-                },
-                "workspace_target_id": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.ListSnapshotsResponse": {
             "type": "object",
             "properties": {
@@ -22254,6 +22185,412 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "provider_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageConnectorCredentialRequest": {
+            "type": "object",
+            "required": [
+                "auth_method"
+            ],
+            "properties": {
+                "auth_method": {
+                    "type": "string"
+                },
+                "fields": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "handlers.PackageConnectorItem": {
+            "type": "object",
+            "properties": {
+                "connection_id": {
+                    "type": "string"
+                },
+                "connector": {
+                    "$ref": "#/definitions/connectors.Connector"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "status": {
+                    "description": "Status is linked once a connection is bound, otherwise needs_auth.",
+                    "type": "string",
+                    "enum": [
+                        "linked",
+                        "needs_auth"
+                    ]
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageConnectorOAuthRequest": {
+            "type": "object",
+            "required": [
+                "auth_method"
+            ],
+            "properties": {
+                "auth_method": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageDependencyItem": {
+            "type": "object",
+            "properties": {
+                "dependency": {
+                    "$ref": "#/definitions/handlers.WorkspaceDependencyItem"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "shared": {
+                    "description": "Shared is set when another installed Package references the same\ndependency on this workspace target.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.PackageInstallRequest": {
+            "type": "object",
+            "required": [
+                "package_id",
+                "registry_id",
+                "revision"
+            ],
+            "properties": {
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageItem": {
+            "type": "object",
+            "properties": {
+                "author": {
+                    "$ref": "#/definitions/handlers.SupermarketAuthor"
+                },
+                "available_revision": {
+                    "description": "AvailableRevision and AvailableVersion name the registry's newer\nrelease after a check found one.",
+                    "type": "string"
+                },
+                "available_version": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "category_name": {
+                    "type": "string"
+                },
+                "connectors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.PackageConnectorItem"
+                    }
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.PackageDependencyItem"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "homepage": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "installation_id": {
+                    "description": "InstallationID is empty for a discovered Package: a dependency the\nworkspace carries that no installed Package references, shown through\nits canonical Package.",
+                    "type": "string"
+                },
+                "installed_at": {
+                    "type": "string"
+                },
+                "last_checked_at": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "required"
+                    ]
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "repository": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.PackageSkillItem"
+                    }
+                },
+                "status": {
+                    "description": "Status is discovered for Packages without an installation record.",
+                    "type": "string",
+                    "enum": [
+                        "installed",
+                        "partial",
+                        "installing",
+                        "updating",
+                        "removing",
+                        "failed",
+                        "discovered"
+                    ]
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.SupermarketPackageTranslation"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageListResponse": {
+            "type": "object",
+            "properties": {
+                "dependency_catalog_stale": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.PackageItem"
+                    }
+                },
+                "workspace_state": {
+                    "type": "string",
+                    "enum": [
+                        "running",
+                        "not_running",
+                        "missing",
+                        "remote_offline"
+                    ]
+                },
+                "workspace_target_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageRemovalPreviewConnector": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "disconnect",
+                        "keep",
+                        "none"
+                    ]
+                },
+                "connection_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": [
+                        "shared"
+                    ]
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageRemovalPreviewDependency": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "remove",
+                        "keep"
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": [
+                        "shared",
+                        "image",
+                        "absent"
+                    ]
+                }
+            }
+        },
+        "handlers.PackageRemovalPreviewPackage": {
+            "type": "object",
+            "properties": {
+                "installation_id": {
+                    "type": "string"
+                },
+                "package_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageRemovalPreviewResponse": {
+            "type": "object",
+            "properties": {
+                "connectors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.PackageRemovalPreviewConnector"
+                    }
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.PackageRemovalPreviewDependency"
+                    }
+                },
+                "installation_id": {
+                    "type": "string"
+                },
+                "required_packages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.PackageRemovalPreviewPackage"
+                    }
+                }
+            }
+        },
+        "handlers.PackageSkillItem": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "icon": {
+                    "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "install_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "skill_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.PackageStreamEvent": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "code": {
+                    "type": "string"
+                },
+                "data": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "package",
+                        "dependency",
+                        "skills",
+                        "connector"
+                    ]
+                },
+                "message": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stream": {
+                    "type": "string",
+                    "enum": [
+                        "stdout",
+                        "stderr"
+                    ]
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "started",
+                        "step",
+                        "log",
+                        "step_done",
+                        "done",
+                        "error"
+                    ]
+                },
+                "version": {
                     "type": "string"
                 }
             }
@@ -22641,6 +22978,98 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.SupermarketPackageCategory": {
+            "type": "object",
+            "required": [
+                "id",
+                "name",
+                "names",
+                "order",
+                "package_count",
+                "registries"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "names": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "package_count": {
+                    "type": "integer"
+                },
+                "registries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketPackageCategoryRegistry"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketPackageCategoryListResponse": {
+            "type": "object",
+            "required": [
+                "data"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketPackageCategory"
+                    }
+                }
+            }
+        },
+        "handlers.SupermarketPackageCategoryRegistry": {
+            "type": "object",
+            "required": [
+                "count",
+                "id"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SupermarketPackageConnector": {
+            "type": "object",
+            "required": [
+                "required",
+                "type"
+            ],
+            "properties": {
+                "required": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SupermarketPackageTranslation": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.SupermarketRegistry": {
             "type": "object",
             "required": [
@@ -22743,61 +23172,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.SupermarketSkillCategory": {
-            "type": "object",
-            "required": [
-                "count",
-                "id",
-                "name",
-                "registries"
-            ],
-            "properties": {
-                "count": {
-                    "type": "integer"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "registries": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.SupermarketSkillCategoryRegistry"
-                    }
-                }
-            }
-        },
-        "handlers.SupermarketSkillCategoryListResponse": {
-            "type": "object",
-            "required": [
-                "data"
-            ],
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.SupermarketSkillCategory"
-                    }
-                }
-            }
-        },
-        "handlers.SupermarketSkillCategoryRegistry": {
-            "type": "object",
-            "required": [
-                "count",
-                "id"
-            ],
-            "properties": {
-                "count": {
-                    "type": "integer"
-                },
-                "id": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.SupermarketSkillIcon": {
             "type": "object",
             "properties": {
@@ -22857,6 +23231,12 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "categories",
+                "category",
+                "category_name",
+                "connector_count",
+                "connectors",
+                "dependencies",
+                "dependency_count",
                 "description",
                 "name",
                 "package_id",
@@ -22868,17 +23248,50 @@ const docTemplate = `{
                 "tags"
             ],
             "properties": {
+                "author": {
+                    "$ref": "#/definitions/handlers.SupermarketAuthor"
+                },
                 "categories": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
                     }
                 },
+                "category": {
+                    "type": "string"
+                },
+                "category_name": {
+                    "type": "string"
+                },
+                "connector_count": {
+                    "type": "integer"
+                },
+                "connectors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketPackageConnector"
+                    }
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "dependency_count": {
+                    "type": "integer"
+                },
                 "description": {
+                    "type": "string"
+                },
+                "homepage": {
                     "type": "string"
                 },
                 "icon": {
                     "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "license": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -22887,6 +23300,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "registry_id": {
+                    "type": "string"
+                },
+                "repository": {
                     "type": "string"
                 },
                 "revision": {
@@ -22909,6 +23325,15 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.SupermarketPackageTranslation"
+                    }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -22942,6 +23367,12 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "categories",
+                "category",
+                "category_name",
+                "connector_count",
+                "connectors",
+                "dependencies",
+                "dependency_count",
                 "description",
                 "name",
                 "package_id",
@@ -22951,17 +23382,50 @@ const docTemplate = `{
                 "tags"
             ],
             "properties": {
+                "author": {
+                    "$ref": "#/definitions/handlers.SupermarketAuthor"
+                },
                 "categories": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/handlers.SupermarketSkillPackageCategory"
                     }
                 },
+                "category": {
+                    "type": "string"
+                },
+                "category_name": {
+                    "type": "string"
+                },
+                "connector_count": {
+                    "type": "integer"
+                },
+                "connectors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.SupermarketPackageConnector"
+                    }
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "dependency_count": {
+                    "type": "integer"
+                },
                 "description": {
+                    "type": "string"
+                },
+                "homepage": {
                     "type": "string"
                 },
                 "icon": {
                     "$ref": "#/definitions/handlers.SupermarketSkillIcon"
+                },
+                "license": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -22970,6 +23434,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "registry_id": {
+                    "type": "string"
+                },
+                "repository": {
                     "type": "string"
                 },
                 "schema_version": {
@@ -22983,6 +23450,15 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "translations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/handlers.SupermarketPackageTranslation"
+                    }
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -23198,125 +23674,6 @@ const docTemplate = `{
                 },
                 "storage_bytes": {
                     "type": "integer"
-                }
-            }
-        },
-        "handlers.WorkspaceDependencyCatalogItem": {
-            "type": "object",
-            "properties": {
-                "actions_supported": {
-                    "description": "ActionsSupported lists the actions the catalog gives the dependency,\nbefore any workspace state is considered.",
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": [
-                            "install",
-                            "update",
-                            "reinstall",
-                            "remove",
-                            "rollback",
-                            "check_update"
-                        ]
-                    }
-                },
-                "category": {
-                    "description": "Category is agent, runtime, or tool.",
-                    "type": "string",
-                    "enum": [
-                        "agent",
-                        "runtime",
-                        "tool"
-                    ]
-                },
-                "definition_revision": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "has_image_baseline": {
-                    "description": "HasImageBaseline is set when the workspace image ships a copy of the\ndependency; removing a managed overlay returns to that copy.",
-                    "type": "boolean"
-                },
-                "icon": {
-                    "type": "string"
-                },
-                "icon_url": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "installable": {
-                    "description": "Installable is set when the catalog has an install script for the\ndependency, i.e. it can be installed into a workspace (as a managed\noverlay when the image already ships it).",
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "platforms": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogPlatform"
-                    }
-                },
-                "provides": {
-                    "description": "Provides lists the commands the dependency makes available.",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "registry_id": {
-                    "type": "string"
-                },
-                "retired": {
-                    "type": "boolean"
-                },
-                "translations": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/handlers.WorkspaceDependencyTranslation"
-                    }
-                },
-                "version_pin": {
-                    "description": "VersionPin is the version every install produces when the manifest\nlocks one; omitted when installs follow the latest release.",
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.WorkspaceDependencyCatalogPlatform": {
-            "type": "object",
-            "properties": {
-                "arch": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "libc": {
-                    "description": "Libc is empty when the libc flavour does not matter for the OS.",
-                    "type": "string"
-                },
-                "os": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.WorkspaceDependencyCatalogResponse": {
-            "type": "object",
-            "properties": {
-                "catalog_fetched_at": {
-                    "type": "string"
-                },
-                "catalog_stale": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.WorkspaceDependencyCatalogItem"
-                    }
                 }
             }
         },
@@ -26172,45 +26529,6 @@ const docTemplate = `{
                 }
             }
         },
-        "skillpackages.Installation": {
-            "type": "object",
-            "required": [
-                "bot_id",
-                "id",
-                "installed_at",
-                "package_id",
-                "registry_id",
-                "revision",
-                "updated_at",
-                "workspace_target_id"
-            ],
-            "properties": {
-                "bot_id": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "installed_at": {
-                    "type": "string"
-                },
-                "package_id": {
-                    "type": "string"
-                },
-                "registry_id": {
-                    "type": "string"
-                },
-                "revision": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "workspace_target_id": {
-                    "type": "string"
-                }
-            }
-        },
         "skills.SafeCatalogItem": {
             "type": "object",
             "properties": {
@@ -26228,21 +26546,6 @@ const docTemplate = `{
                 },
                 "state": {
                     "type": "string"
-                }
-            }
-        },
-        "supermarket.UninstallPackageResponse": {
-            "type": "object",
-            "required": [
-                "installation",
-                "ok"
-            ],
-            "properties": {
-                "installation": {
-                    "$ref": "#/definitions/skillpackages.Installation"
-                },
-                "ok": {
-                    "type": "boolean"
                 }
             }
         },

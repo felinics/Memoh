@@ -103,16 +103,69 @@ type SkillPackageCategory struct {
 	SkillCount int    `json:"skill_count" validate:"required"`
 } // @name handlers.SupermarketSkillPackageCategory
 
+// PackageTranslation is one localized name and description of a Package.
+type PackageTranslation struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+} // @name handlers.SupermarketPackageTranslation
+
+// PackageConnectorReference names a Connect-It connector type a Package uses.
+type PackageConnectorReference struct {
+	Type     string `json:"type" validate:"required"`
+	Required bool   `json:"required" validate:"required"`
+} // @name handlers.SupermarketPackageConnector
+
+// PackageMetadata is the reviewed Package manifest as published by the
+// registry: display metadata plus the workspace dependency and connector
+// references the Package carries. Dependency definitions are not embedded;
+// they stay in the dependency registry and are resolved by ID.
+type PackageMetadata struct {
+	Version      string                        `json:"version,omitempty"`
+	Author       *Author                       `json:"author,omitempty"`
+	Homepage     string                        `json:"homepage,omitempty"`
+	Repository   string                        `json:"repository,omitempty"`
+	License      string                        `json:"license,omitempty"`
+	Category     string                        `json:"category" validate:"required"`
+	CategoryName string                        `json:"category_name" validate:"required"`
+	Translations map[string]PackageTranslation `json:"translations,omitempty"`
+	Dependencies []string                      `json:"dependencies" validate:"required"`
+	Connectors   []PackageConnectorReference   `json:"connectors" validate:"required"`
+} // @name handlers.SupermarketPackageMetadata
+
+// PackageCategoryRegistry counts the Packages of one category in a Registry.
+type PackageCategoryRegistry struct {
+	ID    string `json:"id" validate:"required"`
+	Count int    `json:"count" validate:"required"`
+} // @name handlers.SupermarketPackageCategoryRegistry
+
+// PackageCategory is one entry of the shared category table with localized
+// names and per-registry Package counts.
+type PackageCategory struct {
+	ID           string                    `json:"id" validate:"required"`
+	Name         string                    `json:"name" validate:"required"`
+	Names        map[string]string         `json:"names" validate:"required"`
+	Order        int                       `json:"order" validate:"required"`
+	PackageCount int                       `json:"package_count" validate:"required"`
+	Registries   []PackageCategoryRegistry `json:"registries" validate:"required"`
+} // @name handlers.SupermarketPackageCategory
+
+type PackageCategoryListResponse struct {
+	Data []PackageCategory `json:"data" validate:"required"`
+} // @name handlers.SupermarketPackageCategoryListResponse
+
 type SkillPackageSummary struct {
-	SchemaVersion string                 `json:"schema_version" validate:"required"`
-	RegistryID    string                 `json:"registry_id" validate:"required"`
-	PackageID     string                 `json:"package_id" validate:"required"`
-	Name          string                 `json:"name" validate:"required"`
-	Description   string                 `json:"description" validate:"required"`
-	Tags          []string               `json:"tags" validate:"required"`
-	Categories    []SkillPackageCategory `json:"categories" validate:"required"`
-	SkillCount    int                    `json:"skill_count" validate:"required"`
-	Icon          *SkillIcon             `json:"icon,omitempty"`
+	SchemaVersion string   `json:"schema_version" validate:"required"`
+	RegistryID    string   `json:"registry_id" validate:"required"`
+	PackageID     string   `json:"package_id" validate:"required"`
+	Name          string   `json:"name" validate:"required"`
+	Description   string   `json:"description" validate:"required"`
+	Tags          []string `json:"tags" validate:"required"`
+	PackageMetadata
+	Categories      []SkillPackageCategory `json:"categories" validate:"required"`
+	SkillCount      int                    `json:"skill_count" validate:"required"`
+	DependencyCount int                    `json:"dependency_count" validate:"required"`
+	ConnectorCount  int                    `json:"connector_count" validate:"required"`
+	Icon            *SkillIcon             `json:"icon,omitempty"`
 } // @name handlers.SupermarketSkillPackageSummary
 
 type SkillPackageDescriptor struct {
@@ -141,14 +194,15 @@ type SkillPackageReleaseSkill struct {
 }
 
 type SkillPackageRelease struct {
-	SchemaVersion string                     `json:"schema_version"`
-	RegistryID    string                     `json:"registry_id"`
-	PackageID     string                     `json:"package_id"`
-	Name          string                     `json:"name"`
-	Description   string                     `json:"description"`
-	Tags          []string                   `json:"tags"`
-	Icon          *SkillIcon                 `json:"icon,omitempty"`
-	Skills        []SkillPackageReleaseSkill `json:"skills"`
+	SchemaVersion string     `json:"schema_version"`
+	RegistryID    string     `json:"registry_id"`
+	PackageID     string     `json:"package_id"`
+	Name          string     `json:"name"`
+	Description   string     `json:"description"`
+	Tags          []string   `json:"tags"`
+	Icon          *SkillIcon `json:"icon,omitempty"`
+	PackageMetadata
+	Skills []SkillPackageReleaseSkill `json:"skills"`
 }
 
 type SkillPackageListResponse struct {

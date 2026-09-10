@@ -8,7 +8,7 @@ import (
 )
 
 func TestInstallerPreparationLimit(t *testing.T) {
-	installer := NewInstaller(nil, nil, nil, nil)
+	installer := NewInstaller(nil, nil, nil)
 	first, err := installer.acquirePreparation(context.Background())
 	if err != nil {
 		t.Fatalf("acquire first preparation: %v", err)
@@ -31,7 +31,7 @@ func TestInstallerPreparationLimit(t *testing.T) {
 
 func TestInstallationResourceLocksSerializeOnlyMatchingResources(t *testing.T) {
 	ctx := context.Background()
-	first, err := acquireInstallationResources(ctx, "package\x00bot\x00native\x00openai\x00documents")
+	first, err := AcquireInstallationResources(ctx, "package\x00bot\x00native\x00openai\x00documents")
 	if err != nil {
 		t.Fatalf("acquire first resource: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestInstallationResourceLocksSerializeOnlyMatchingResources(t *testing.T) {
 
 	otherCtx, cancelOther := context.WithCancel(ctx)
 	defer cancelOther()
-	other, err := acquireInstallationResources(otherCtx, "package\x00bot\x00native\x00openai\x00spreadsheets")
+	other, err := AcquireInstallationResources(otherCtx, "package\x00bot\x00native\x00openai\x00spreadsheets")
 	if err != nil {
 		t.Fatalf("different resource was blocked: %v", err)
 	}
@@ -47,13 +47,13 @@ func TestInstallationResourceLocksSerializeOnlyMatchingResources(t *testing.T) {
 
 	waitCtx, cancelWait := context.WithCancel(ctx)
 	cancelWait()
-	blocked, err := acquireInstallationResources(waitCtx, "package\x00bot\x00native\x00openai\x00documents")
+	blocked, err := AcquireInstallationResources(waitCtx, "package\x00bot\x00native\x00openai\x00documents")
 	if blocked != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("matching resource acquire = (%v, %v), want canceled", blocked != nil, err)
 	}
 
 	first()
-	reacquired, err := acquireInstallationResources(ctx, "package\x00bot\x00native\x00openai\x00documents")
+	reacquired, err := AcquireInstallationResources(ctx, "package\x00bot\x00native\x00openai\x00documents")
 	if err != nil {
 		t.Fatalf("reacquire released resource: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestInstallationResourceLocksSerializeOnlyMatchingResources(t *testing.T) {
 }
 
 func TestInstallationResourceLocksSortAndDeduplicateKeys(t *testing.T) {
-	release, err := acquireInstallationResources(context.Background(), "b", "a", "b", " ")
+	release, err := AcquireInstallationResources(context.Background(), "b", "a", "b", " ")
 	if err != nil {
 		t.Fatalf("acquire resources: %v", err)
 	}

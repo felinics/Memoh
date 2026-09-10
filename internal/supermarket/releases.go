@@ -79,16 +79,54 @@ func (c *Client) FetchPackageRelease(
 			SourceCategory: member.SourceCategory, Files: member.Files, Icon: member.Icon, Artifact: member.Artifact,
 		})
 	}
+	metadata := release.PackageMetadata
+	if metadata.Dependencies == nil {
+		metadata.Dependencies = []string{}
+	}
+	if metadata.Connectors == nil {
+		metadata.Connectors = []PackageConnectorReference{}
+	}
 	return SkillPackageDescriptor{
 		SkillPackageSummary: SkillPackageSummary{
 			SchemaVersion: release.SchemaVersion,
 			RegistryID:    release.RegistryID, PackageID: release.PackageID,
 			Name: release.Name, Description: release.Description, Tags: release.Tags,
-			SkillCount: len(release.Skills), Icon: release.Icon,
+			PackageMetadata: metadata,
+			SkillCount:      len(release.Skills),
+			DependencyCount: len(metadata.Dependencies),
+			ConnectorCount:  len(metadata.Connectors),
+			Icon:            release.Icon,
 		},
 		Revision: revision,
 		Skills:   skills,
 	}, nil
+}
+
+// FetchCurrentPackage reads the mutable Package descriptor the registry
+// publishes for its newest release. Its revision names the immutable release
+// FetchPackageRelease can then verify.
+func (c *Client) FetchCurrentPackage(ctx context.Context, registryID, packageID string) (SkillPackageDescriptor, error) {
+	requestPath := "/api/registries/" + url.PathEscape(registryID) + "/packages/" + url.PathEscape(packageID)
+	var descriptor SkillPackageDescriptor
+	if err := c.getJSON(ctx, requestPath, maxPackageMetadataBytes, &descriptor); err != nil {
+		return SkillPackageDescriptor{}, err
+	}
+	if !isCanonicalSHA256(descriptor.Revision) {
+		return SkillPackageDescriptor{}, invalidResponse("decode Package descriptor", errors.New("revision is invalid"))
+	}
+	for index := range descriptor.Skills {
+		descriptor.Skills[index].Artifact.DownloadURL = "/api/artifacts/skill/" + descriptor.Skills[index].Artifact.Digest
+	}
+	if descriptor.Dependencies == nil {
+		descriptor.Dependencies = []string{}
+	}
+	if descriptor.Connectors == nil {
+		descriptor.Connectors = []PackageConnectorReference{}
+	}
+	if descriptor.Tags == nil {
+		descriptor.Tags = []string{}
+	}
+	return descriptor, nil
 }
 
 // DownloadArtifact retrieves and verifies one same-origin immutable Artifact.
@@ -135,42 +173,62 @@ func (c *Client) DownloadArtifact(ctx context.Context, artifact ArtifactDownload
 	return content, nil
 }
 
+func (c *Client) fetchJSONPayload(ctx context.Context, requestPath string, limit int64, op string) ([]byte, error) {
+	resp, err := c.Get(ctx, requestPath, "application/json")
+	if err != nil {
+		return nil, &ProtocolError{Kind: ErrorUnavailable, Op: op, Err: err}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, &ProtocolError{Kind: ErrorNotFound, Status: resp.StatusCode, Op: op}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &ProtocolError{
+			Kind: ErrorUnavailable, Status: resp.StatusCode, Op: op,
+			Err: fmt.Errorf("supermarket returned status %d", resp.StatusCode),
+		}
+	}
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, &ProtocolError{Kind: ErrorUnavailable, Op: op, Err: err}
+	}
+	if int64(len(payload)) > limit {
+		return nil, invalidResponse(op, errors.New("response is too large"))
+	}
+	return payload, nil
+}
+
+func decodeJSONPayload(payload []byte, target any, op string) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	if err := decoder.Decode(target); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return invalidResponse(op, errors.New("response is malformed"))
+	}
+	return nil
+}
+
+func (c *Client) getJSON(ctx context.Context, requestPath string, limit int64, target any) error {
+	payload, err := c.fetchJSONPayload(ctx, requestPath, limit, "fetch Package descriptor")
+	if err != nil {
+		return err
+	}
+	return decodeJSONPayload(payload, target, "decode Package descriptor")
+}
+
 func (c *Client) getImmutableJSON(
 	ctx context.Context,
 	requestPath, revision string,
 	limit int64,
 	target any,
 ) error {
-	resp, err := c.Get(ctx, requestPath, "application/json")
+	payload, err := c.fetchJSONPayload(ctx, requestPath, limit, "fetch immutable release")
 	if err != nil {
-		return &ProtocolError{Kind: ErrorUnavailable, Op: "fetch immutable release", Err: err}
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return &ProtocolError{Kind: ErrorNotFound, Status: resp.StatusCode, Op: "fetch immutable release"}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return &ProtocolError{
-			Kind: ErrorUnavailable, Status: resp.StatusCode, Op: "fetch immutable release",
-			Err: fmt.Errorf("supermarket returned status %d", resp.StatusCode),
-		}
-	}
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if err != nil {
-		return &ProtocolError{Kind: ErrorUnavailable, Op: "read immutable release", Err: err}
-	}
-	if int64(len(payload)) > limit {
-		return invalidResponse("read immutable release", errors.New("release is too large"))
+		return err
 	}
 	digest := sha256.Sum256(payload)
 	if hex.EncodeToString(digest[:]) != revision {
 		return invalidResponse("verify immutable release", errors.New("SHA-256 verification failed"))
 	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	if err := decoder.Decode(target); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return invalidResponse("decode immutable release", errors.New("release is malformed"))
-	}
-	return nil
+	return decodeJSONPayload(payload, target, "decode immutable release")
 }
 
 func invalidResponse(op string, err error) error {
