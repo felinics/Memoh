@@ -201,7 +201,7 @@ RLS 策略与现有表一致。
 
 ### 4.6 发现的 dep 与规范包
 
-列表接口把 workspacedeps 报告的、未被任何安装记录引用的已安装或镜像自带 dep，合成为规范包 `memoh/<dep-id>` 的虚拟条目，`installation_id` 为空，`reason=discovered`。用户点“安装”会正式写入安装记录并建立引用。agent 启用流程的 preflight 与安装步骤改为安装规范包。launcher 绑定表 `BuiltinLauncherCommands` 与 `provides[0]` 校验不变。
+列表接口把 workspacedeps 报告的、未被任何安装记录引用的已安装或镜像自带 dep，合成为规范包 `memoh/<dep-id>` 的虚拟条目，`installation_id` 为空，`reason=discovered`。列表里与已安装包一样显示，不带状态标记，也不提供安装按钮（它已经可用）；只有从 Supermarket 详情页安装同 id 的规范包时才正式写入安装记录并建立引用。agent 启用流程的 preflight 与安装步骤改为安装规范包。launcher 绑定表 `BuiltinLauncherCommands` 与 `provides[0]` 校验不变。
 
 ### 4.7 HTTP 接口
 

@@ -2,7 +2,6 @@
   <PageShell
     variant="tab"
     :title="t('packages.title')"
-    :description="t('packages.intro')"
   >
     <template #actions>
       <Select
@@ -156,14 +155,6 @@
           @connector="(connector, action) => onConnector(item, connector, action)"
           @connector-enabled="setConnectorEnabled"
         />
-        <template
-          v-if="lastChecked"
-          #footer
-        >
-          <span class="text-body text-muted-foreground">
-            {{ t('packages.lastChecked', { time: lastChecked }) }}
-          </span>
-        </template>
       </SettingsSection>
     </div>
 
@@ -323,7 +314,6 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
-import { formatRelativeTime } from '@/utils/date-time'
 import {
   dependencyAllows,
   formatDependencyVersion,
@@ -442,11 +432,6 @@ const banner = computed(() => {
     default:
       return null
   }
-})
-
-const lastChecked = computed(() => {
-  const latest = items.value.map(item => item.last_checked_at ?? '').filter(Boolean).sort().at(-1)
-  return latest ? formatRelativeTime(latest, { locale: locale.value }) : ''
 })
 
 // ---- Connect-It catalog -----------------------------------------------------

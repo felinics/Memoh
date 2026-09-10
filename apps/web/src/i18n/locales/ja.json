@@ -3829,11 +3829,9 @@
   },
   "packages": {
     "title": "パッケージ",
-    "intro": "マーケットプレイスからインストールしたスキル、ワークスペースの依存関係、コネクターを、導入元のパッケージごとにまとめて表示します。",
     "checkUpdates": "更新を確認",
     "checkUpdatesDone": "更新の確認が完了しました",
     "checkUpdatesFailed": "更新を確認できませんでした",
-    "lastChecked": "最終確認 {time}",
     "browse": "マーケットプレイスを見る",
     "emptyTitle": "パッケージはまだインストールされていません",
     "emptyDescription": "スキル、依存関係、コネクターはマーケットプレイスからパッケージとしてインストールします。",
@@ -3843,19 +3841,6 @@
     "viewBotPackages": "Bot のパッケージを表示",
     "components": "{count} 個のコンポーネント",
     "workspaceNotRunningDescription": "パッケージのインストールと更新には実行中のワークスペースが必要です。一覧は最後に記録された状態です。",
-    "status": {
-      "installed": "インストール済み",
-      "partial": "要対応",
-      "installing": "インストール中",
-      "updating": "更新中",
-      "removing": "削除中",
-      "failed": "失敗",
-      "discovered": "検出済み",
-      "updateAvailable": "{version} が利用可能"
-    },
-    "reason": {
-      "required": "自動インストール"
-    },
     "action": {
       "install": "インストール",
       "resume": "セットアップを続行",

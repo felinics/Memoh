@@ -47,8 +47,9 @@ const darkImageUrl = computed(() => imageURL(props.icon?.dark))
 const activeImageUrl = computed(() => settings.resolvedColorMode === 'dark' && darkImageUrl.value
   ? darkImageUrl.value
   : imageUrl.value)
-// Skill SVGs need more visual weight than the fallback glyph without filling the frame.
-const frameClass = computed(() => props.variant === 'detail' ? 'block size-12' : 'block size-7')
+// One glyph size per context, whatever the SVG's own padding: 20px in the
+// 36px list box (same as dependency rows), 32px in the 48px detail box.
+const frameClass = computed(() => props.variant === 'detail' ? 'block size-8' : 'block size-5')
 const imageClass = 'size-full object-contain'
 const fallbackClass = computed(() => props.variant === 'detail'
   ? 'size-8 text-muted-foreground'

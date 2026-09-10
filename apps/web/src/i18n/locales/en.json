@@ -3834,11 +3834,9 @@
   },
   "packages": {
     "title": "Packages",
-    "intro": "Skills, workspace dependencies and connectors installed from the Supermarket, grouped by the Package that brought them.",
     "checkUpdates": "Check for updates",
     "checkUpdatesDone": "Update check finished",
     "checkUpdatesFailed": "Couldn't check for updates",
-    "lastChecked": "Last checked {time}",
     "browse": "Browse Supermarket",
     "emptyTitle": "No Packages installed yet",
     "emptyDescription": "Install Skills, dependencies and connectors as Packages from the Supermarket.",
@@ -3848,19 +3846,6 @@
     "viewBotPackages": "View bot Packages",
     "components": "{count} component | {count} components",
     "workspaceNotRunningDescription": "Installing and updating Packages needs a running workspace. The list shows the last recorded state.",
-    "status": {
-      "installed": "Installed",
-      "partial": "Needs attention",
-      "installing": "Installing",
-      "updating": "Updating",
-      "removing": "Removing",
-      "failed": "Failed",
-      "discovered": "Detected",
-      "updateAvailable": "{version} available"
-    },
-    "reason": {
-      "required": "Auto-installed"
-    },
     "action": {
       "install": "Install",
       "resume": "Continue setup",

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// One Package on the bot: icon, name, version, status, the one primary action
+// One Package on the bot: icon, name, description, the one primary action
 // its state calls for, a menu for the rest, and a disclosure listing its
-// components. Skills are read-only; dependency rows reuse the dependency row
+// components. Version, status and origin stay off the row: the action button
+// and the error line say what needs doing. Skills are read-only; dependency rows reuse the dependency row
 // (update / reinstall / rollback / script); connector rows offer authorization
 // and the enabled switch. Nothing here starts an operation — every choice is
 // emitted and the panel owns confirmation and streaming.
@@ -97,24 +98,6 @@ const dependencies = computed<PackageDependencyItem[]>(() => props.item.dependen
 const connectors = computed<PackageConnectorItem[]>(() => props.item.connectors ?? [])
 const componentCount = computed(() => skills.value.length + dependencies.value.length + connectors.value.length)
 
-const badge = computed<{ variant: 'outline' | 'secondary' | 'destructive' | 'warning' | 'info' | 'success'; key: string; args?: Record<string, string>; spinner?: boolean }>(() => {
-  if (inProgress.value) return { variant: 'secondary', key: `packages.status.${props.item.status}`, spinner: true }
-  switch (props.item.status) {
-    case 'failed':
-      return { variant: 'destructive', key: 'packages.status.failed' }
-    case 'partial':
-      return { variant: 'warning', key: 'packages.status.partial' }
-    case 'discovered':
-      return { variant: 'outline', key: 'packages.status.discovered' }
-    default:
-      break
-  }
-  if (updateAvailable.value) {
-    return { variant: 'info', key: 'packages.status.updateAvailable', args: { version: props.item.available_version || props.item.available_revision?.slice(0, 8) || '' } }
-  }
-  return { variant: 'success', key: 'packages.status.installed' }
-})
-
 const readonly = computed(() => props.workspaceState !== 'running' && props.workspaceState !== undefined)
 
 const primary = computed<{ action: PackageRowAction; labelKey: string; variant: 'default' | 'outline'; disabled: boolean } | null>(() => {
@@ -122,7 +105,9 @@ const primary = computed<{ action: PackageRowAction; labelKey: string; variant: 
     if (!props.ownsStream) return null
     return { action: 'viewProgress', labelKey: 'packages.action.viewProgress', variant: 'outline', disabled: false }
   }
-  if (discovered.value) return { action: 'install', labelKey: 'packages.action.install', variant: 'default', disabled: props.busy }
+  // Discovered Packages are already usable (image-provided or installed by
+  // the agent flow); there is nothing to install.
+  if (discovered.value) return null
   if (props.item.status === 'failed') return { action: 'retry', labelKey: 'common.retry', variant: 'default', disabled: props.busy || readonly.value }
   if (props.item.status === 'partial') return { action: 'resume', labelKey: 'packages.action.resume', variant: 'default', disabled: props.busy || readonly.value }
   if (updateAvailable.value) return { action: 'update', labelKey: 'packages.action.update', variant: 'default', disabled: props.busy || readonly.value }
@@ -181,28 +166,7 @@ function dependencyName(dep: PackageDependencyItem): string {
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <span class="truncate text-control font-medium text-foreground">{{ name }}</span>
-          <Badge
-            v-if="item.version"
-            variant="secondary"
-            size="sm"
-            font="mono"
-          >
-            {{ item.version }}
-          </Badge>
-          <Badge
-            :variant="badge.variant"
-            size="sm"
-          >
-            <Spinner v-if="badge.spinner" />
-            {{ t(badge.key, badge.args ?? {}) }}
-          </Badge>
-          <Badge
-            v-if="item.reason === 'required'"
-            variant="outline"
-            size="sm"
-          >
-            {{ t('packages.reason.required') }}
-          </Badge>
+          <Spinner v-if="inProgress" />
         </div>
         <p
           v-if="description"

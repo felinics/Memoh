@@ -3834,11 +3834,9 @@
   },
   "packages": {
     "title": "扩展包",
-    "intro": "从市场安装的 Skills、工作区依赖与连接器，按带来它们的扩展包分组。",
     "checkUpdates": "检查更新",
     "checkUpdatesDone": "更新检查完成",
     "checkUpdatesFailed": "无法检查更新",
-    "lastChecked": "上次检查 {time}",
     "browse": "浏览市场",
     "emptyTitle": "尚未安装扩展包",
     "emptyDescription": "从市场以扩展包的形式安装 Skills、依赖与连接器。",
@@ -3848,19 +3846,6 @@
     "viewBotPackages": "查看 Bot 扩展包",
     "components": "{count} 个组件",
     "workspaceNotRunningDescription": "安装和更新扩展包需要运行中的工作区。列表显示的是最近记录的状态。",
-    "status": {
-      "installed": "已安装",
-      "partial": "需要处理",
-      "installing": "安装中",
-      "updating": "更新中",
-      "removing": "移除中",
-      "failed": "失败",
-      "discovered": "已检测到",
-      "updateAvailable": "可更新到 {version}"
-    },
-    "reason": {
-      "required": "自动安装"
-    },
     "action": {
       "install": "安装",
       "resume": "继续安装",
