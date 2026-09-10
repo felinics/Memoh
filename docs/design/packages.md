@@ -1,6 +1,6 @@
 # Package：Supermarket 资源统一为扩展包
 
-状态：设计已定稿，待实施。本文是 skills、workspace dependencies、connector 三条线合并为 package 的设计与实施计划。涉及两个仓库：Supermarket（registry 与 API）与 Memoh（Server 与 Web）。
+状态：已实施（Supermarket 侧在 `feat/packages` 分支，Memoh 侧在本分支）。本文是 skills、workspace dependencies、connector 三条线合并为 package 的设计与实施记录。涉及两个仓库：Supermarket（registry 与 API）与 Memoh（Server 与 Web）。
 
 ## 1. 背景与目标
 
@@ -150,7 +150,7 @@ categories:
 
 | 表 | 变化 |
 | --- | --- |
-| `bot_skill_package_installations` | 改名 `bot_package_installations`；新增 `version TEXT`、`status TEXT`（`installed`、`partial`、`installing`、`updating`、`removing`、`failed`）、`reason TEXT`（`user`、`required`）、`available_revision TEXT`、`available_version TEXT`、`last_checked_at TIMESTAMPTZ`、`last_error TEXT` |
+| `bot_skill_package_installations` | 改名 `bot_package_installations`；新增 `version TEXT`、`status TEXT`（`installed`、`partial`、`installing`、`updating`、`removing`、`failed`）、`reason TEXT`（`user`、`required`）、`available_revision TEXT`、`available_version TEXT`、`last_checked_at TIMESTAMPTZ`、`last_error TEXT`、`release BYTEA`（缓存的 release 文档，让列表不依赖 Supermarket 在线） |
 | `bot_package_dependency_refs` | 新增，`(team_id, installation_id, dependency_id)` 唯一，`installation_id` 级联删除 |
 | `bot_package_connector_refs` | 新增，`(team_id, installation_id, connector_type)` 唯一，`connection_id TEXT` 可空，`required BOOLEAN` |
 | `bot_dependency_installations` | 不变 |
@@ -221,9 +221,9 @@ RLS 策略与现有表一致。
 | POST | `/bots/:bot_id/packages/:installation_id/connectors/:type/api-key` | 同上 |
 | GET | `/supermarket/categories` | 代理 registry 的全局分类表 |
 
-保留：`/supermarket/*` 其余代理接口；`/bots/:bot_id/dependencies` 列表、`check-updates`、`preflight`、`:dep_id/script`、`:dep_id/update`、`:dep_id/reinstall`、`:dep_id/rollback`；`/bots/:bot_id/connectors/:connection_id` 的 GET、PATCH、`reauth`；`/connectors/catalog` 用于补全 connector 的名称、图标与授权方式。
+保留：`/supermarket/*` 其余代理接口；`/bots/:bot_id/dependencies` 列表、`check-updates`、`preflight`、`:dep_id/script`、`:dep_id/install`（仅用于已被 package 引用的 dep 的重试与镜像副本覆盖安装，UI 不再提供“安装新 dep”入口）、`:dep_id/update`、`:dep_id/reinstall`、`:dep_id/rollback`；`/bots/:bot_id/connectors/:connection_id` 的 GET、PATCH、`reauth`；`/connectors/catalog` 用于补全 connector 的名称、图标与授权方式。
 
-删除：`POST /bots/:bot_id/supermarket/install-package`、`GET /bots/:bot_id/supermarket/packages`、`DELETE /bots/:bot_id/supermarket/packages/:installation_id`、`GET /workspace-dependencies/catalog`、`POST /bots/:bot_id/dependencies/:dep_id/install`、`DELETE /bots/:bot_id/dependencies/:dep_id`、`POST /bots/:bot_id/connectors/oauth`、`POST /bots/:bot_id/connectors/api-key`、`DELETE /bots/:bot_id/connectors/:connection_id`、`GET /supermarket/registries/:id/categories`。
+删除：`POST /bots/:bot_id/supermarket/install-package`、`GET /bots/:bot_id/supermarket/packages`、`DELETE /bots/:bot_id/supermarket/packages/:installation_id`、`GET /workspace-dependencies/catalog`、`DELETE /bots/:bot_id/dependencies/:dep_id`、`POST /bots/:bot_id/connectors/oauth`、`POST /bots/:bot_id/connectors/api-key`、`DELETE /bots/:bot_id/connectors/:connection_id`、`GET /supermarket/registries/:id/categories`。
 
 `internal/supermarket/protocol.go` 同步新增 3.5 中的字段。SDK 用 `openapi-ts` 重新生成。
 
@@ -244,7 +244,7 @@ RLS 策略与现有表一致。
 ### 5.1 Supermarket
 
 - `pages/supermarket/index.vue`：删除三个 tab 与 `?tab=`，改为单一列表；筛选为 registry、分类、组件类型三组；搜索框统一。卡片显示版本、分类、组件计数徽章。
-- `pages/supermarket/package-detail.vue`：路由改为 `/supermarket/:registryId/:packageId`；新增 Dependencies 与 Connectors 两节，Information 节增加版本、作者、主页、仓库、许可证、分类。connector 的名称、图标与授权方式从 `/connectors/catalog` 补全，connect-it 未配置时显示“此包需要 connector，当前部署未启用”。
+- `pages/supermarket/package-detail.vue`：路由改为 `/supermarket/:registryId/:packageId`；新增 Dependencies 与 Connectors 两节，依赖通过其规范包（`memoh/<dep-id>`）展示名称、图标与描述；Information 节增加版本、作者、主页、仓库、许可证、分类。connector 的名称、图标与授权方式从 `/connectors/catalog` 补全，connect-it 未配置时显示“此包需要 connector，当前部署未启用”。
 - `pages/supermarket/components/install-package-dialog.vue`：选择 bot 与 workspace target 后展示安装预览，包括将安装的 deps、将发布的 skills、需授权的 connectors；提交后进入进度对话框。
 - 删除 `install-dependency-dialog.vue`、`connect-connector-dialog.vue` 的独立入口，授权表单逻辑迁移为子项组件复用。
 
