@@ -154,7 +154,7 @@
         >
           <template #content>
             <p class="text-body text-muted-foreground">
-              {{ $t('bots.agentCreate.directSetupHint') }}
+              {{ $t('bots.agentCreate.authorizeAfterCreate') }}
             </p>
           </template>
         </SettingsRow>

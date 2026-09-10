@@ -2076,6 +2076,9 @@
       "settingsDesc": "时区等"
     },
     "agentCreate": {
+      "prepare": "准备 Agent",
+      "prepareDescription": "检查工作空间并确认安装所需依赖，然后连接账号。",
+      "authorizeAfterCreate": "创建 Bot 后继续为这个 Agent 授权。",
       "typeAriaLabel": "Agent 类型",
       "oauthSettingsHint": "授权在创建后进行，可随时在 Bot 设置中完成。",
       "requiredError": "请填写「{field}」",

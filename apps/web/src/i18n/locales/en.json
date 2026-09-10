@@ -2076,6 +2076,9 @@
       "settingsDesc": "Timezone and more"
     },
     "agentCreate": {
+      "prepare": "Prepare Agent",
+      "prepareDescription": "Check the workspace and install any required dependencies before connecting your account.",
+      "authorizeAfterCreate": "Continue to authorize this Agent after the Bot is created.",
       "typeAriaLabel": "Agent type",
       "oauthSettingsHint": "Authorization happens after creation — finish it anytime in the bot's settings.",
       "requiredError": "Please fill in \"{field}\"",

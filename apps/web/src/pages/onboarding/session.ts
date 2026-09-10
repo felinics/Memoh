@@ -41,7 +41,7 @@ function normalizeBotResult(value: unknown): OnboardingBotResult | null {
   return {
     botId,
     modelConfigured: candidate.modelConfigured === true,
-    ...(agentId && botAgentId && {
+    ...(agentId && (botAgentId || agentId === 'codex' || agentId === 'claude-code') && {
       agent: {
         agentId,
         botAgentId,

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { postBotsByBotIdAgents, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
-import type { BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
+import type { BotagentsBotAgent, BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
 import {
   botCreateProgressPercent,
   collectBotCreateProgressStream,
@@ -119,6 +119,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   const progress = ref<BotCreateProgress | null>(null)
   const lines = ref<BotCreateTerminalLine[]>([])
   const bot = ref<BotsBot | null>(null)
+  const createdAgent = ref<BotagentsBotAgent | null>(null)
   const setupError = ref<string | null>(null)
   const errorCode = ref<string | null>(null)
 
@@ -134,6 +135,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     progress.value = null
     lines.value = []
     bot.value = null
+    createdAgent.value = null
     setupError.value = null
     errorCode.value = null
     lastPayload = null
@@ -153,11 +155,13 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     let settingsApplied = !hasSettings(options.settings)
     let agentApplied = !options.agent
     let createdAgentID = ''
+    const deferAgent = !!options.agent && botAgentRuntimeForProvider(options.agent.provider) !== 'acp'
     lastPayload = payload
     lastOptions = options
 
     status.value = 'creating'
     bot.value = null
+    createdAgent.value = null
     setupError.value = null
     errorCode.value = null
     progress.value = { phase: 'pulling' }
@@ -205,18 +209,21 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         if (options.agent) {
           try {
             const provider = options.agent.provider.trim().toLowerCase()
-            const { data: createdAgent } = await postBotsByBotIdAgents({
+            createdAgent.value = { runtime: botAgentRuntimeForProvider(provider) }
+            const { data: agent } = await postBotsByBotIdAgents({
               path: { bot_id: botId },
               body: {
                 name: options.agent.name.trim(),
                 // codex / claude-code are direct runtimes; everything else is
                 // an ACP profile provider.
                 runtime: botAgentRuntimeForProvider(provider),
+                ...(deferAgent && { enabled: false }),
                 metadata: options.agent.metadata ?? { provider },
               },
               throwOnError: true,
             })
-            createdAgentID = createdAgent.id?.trim() ?? ''
+            createdAgent.value = { ...agent, runtime: agent.runtime ?? botAgentRuntimeForProvider(provider) }
+            createdAgentID = agent.id?.trim() ?? ''
             if (!createdAgentID) throw new Error('Created Agent has no ID')
           } catch (error) {
             setupError.value = resolveApiErrorMessage(error, toMessage(error))
@@ -224,17 +231,17 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
           }
         }
         try {
-          if (hasSettings(options.settings) || createdAgentID) {
+          if (hasSettings(options.settings) || (createdAgentID && !deferAgent)) {
             await putBotsByBotIdSettings({
               path: { bot_id: botId },
               body: {
                 ...settingsBody(options.settings ?? {}),
-                ...(createdAgentID ? { default_bot_agent_id: createdAgentID } : {}),
+                ...(createdAgentID && !deferAgent ? { default_bot_agent_id: createdAgentID } : {}),
               },
               throwOnError: true,
             })
             if (hasSettings(options.settings)) settingsApplied = true
-            if (createdAgentID) agentApplied = true
+            if (createdAgentID && !deferAgent) agentApplied = true
           }
         } catch (error) {
           // The bot exists, but its defaults are wrong — the created Agent is
@@ -243,7 +250,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
           setupError.value = resolveApiErrorMessage(error, toMessage(error))
           lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
         }
-        if (settingsApplied && agentApplied) {
+        if (settingsApplied && (agentApplied || (deferAgent && createdAgentID))) {
           lines.value = finalizeBotCreateTerminalLines(lines.value)
         }
       }
@@ -284,6 +291,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     progress,
     lines,
     bot,
+    createdAgent,
     setupError,
     errorCode,
     percent,

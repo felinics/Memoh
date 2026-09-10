@@ -8,7 +8,7 @@
 // the agent instead of enabling it while the user is away.
 // No dependency is pinned, so the only operation here is an install; the
 // confirm dialog lets the user name a version, blank meaning the latest.
-import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -51,6 +51,7 @@ const store = useDependencyOperationsStore()
 // out of the flow goes through `finish()` so a promise can never be left
 // dangling with a dialog closed underneath it.
 let settle: ((ok: boolean) => void) | null = null
+let generation = 0
 const requirement = ref<EnableFlowRequirement | null>(null)
 const item = ref<DependencyItem | null>(null)
 const name = computed(() => (item.value ? dependencyDisplayName(item.value) : ''))
@@ -88,6 +89,8 @@ async function run(agent: BotagentsBotAgent): Promise<boolean> {
 }
 
 function finish(ok: boolean) {
+  generation += 1
+  checking.value = false
   const resolve = settle
   settle = null
   workspaceOpen.value = false
@@ -97,6 +100,7 @@ function finish(ok: boolean) {
 }
 
 async function preflight() {
+  const currentGeneration = generation
   const declared = requirement.value
   if (!declared) return finish(false)
   checking.value = true
@@ -104,12 +108,14 @@ async function preflight() {
   try {
     // Empty target = the bot's current one; the Server never starts it here.
     const response = await preflightDependencies(props.botId, '', [declared.dependencyId])
+    if (!settle || currentGeneration !== generation) return
     step = resolveEnableFlowStep(declared, response)
   } catch (error) {
+    if (currentGeneration !== generation) return
     toast.error(resolveApiErrorMessage(error, t('bots.dependencies.preflight.failed'), { prefixFallback: true }))
     return finish(false)
   } finally {
-    checking.value = false
+    if (currentGeneration === generation) checking.value = false
   }
   switch (step.kind) {
     case 'satisfied':
@@ -228,7 +234,8 @@ function onProgressOpenChange(value: boolean) {
   finish(displayed.value?.status === 'done')
 }
 
-onBeforeUnmount(hideProgress)
+onDeactivated(() => finish(false))
+onBeforeUnmount(() => finish(false))
 
 defineExpose({ run, checking })
 </script>

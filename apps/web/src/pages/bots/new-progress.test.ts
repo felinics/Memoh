@@ -50,7 +50,7 @@ vi.mock('@felinic/ui', async () => {
     _props: Record<string, unknown>,
     { emit, slots }: { emit: (event: 'click') => void, slots: Slots },
   ) => {
-    return h('button', { onClick: () => emit('click') }, slots.default?.())
+    return h('button', { ..._props, onClick: () => emit('click') }, slots.default?.())
   }, {
     emits: ['click'],
   })
@@ -66,6 +66,18 @@ vi.mock('@felinic/ui', async () => {
     },
   }
 })
+
+vi.mock('./components/created-agent-setup.vue', () => ({
+  default: {
+    emits: ['status'],
+    setup(_props: unknown, { emit }: { emit: (event: string, state: unknown) => void }) {
+      return () => h('button', {
+        'data-authorize': '',
+        onClick: () => emit('status', { authorized: true, busy: false }),
+      }, 'Authorize')
+    },
+  },
+}))
 
 function setupStore() {
   const pinia = createPinia()
@@ -167,6 +179,26 @@ describe('bot create progress route', () => {
     expect(mounted.store.status).toBe('idle')
     expect(mounted.store.lines).toEqual([])
 
+    mounted.app.unmount()
+    mounted.root.remove()
+  })
+
+  it('keeps a direct Agent on the progress page until authorization succeeds', async () => {
+    const mounted = await mountKeptProgress()
+    mounted.store.createdAgent = { id: 'agent-1', runtime: 'codex' }
+    mounted.store.status = 'ready'
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(routerReplace).not.toHaveBeenCalled()
+    expect(mounted.root.querySelector('[data-authorize]')).not.toBeNull()
+    const next = Array.from(mounted.root.querySelectorAll('button')).find(button => button.textContent === 'onboarding.next')!
+    expect(next.disabled).toBe(true)
+    mounted.root.querySelector<HTMLButtonElement>('[data-authorize]')!.click()
+    await nextTick()
+    expect(next.disabled).toBe(false)
+    next.click()
+    await nextTick()
+    expect(routerReplace).toHaveBeenCalledWith({ name: 'bot-detail', params: { botName: 'prog' } })
     mounted.app.unmount()
     mounted.root.remove()
   })

@@ -190,7 +190,7 @@ describe('useBotCreateProgressStore', () => {
     expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
   })
 
-  it('adds the selected Agent after the bot is created', async () => {
+  it('defers enabling and selecting a direct Agent until dependency confirmation', async () => {
     const bot = { id: 'bot-1', name: 'ada' }
     postBotsStream.mockResolvedValue(streamOf([
       { type: 'bot_created', bot },
@@ -209,14 +209,13 @@ describe('useBotCreateProgressStore', () => {
         name: 'Codex',
         // codex is a direct runtime; only non-direct providers create acp rows.
         runtime: 'codex',
+        enabled: false,
         metadata: { provider: 'codex' },
       },
     }))
-    expect(putBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({
-      path: { bot_id: 'bot-1' },
-      body: { default_bot_agent_id: 'agent-1' },
-    }))
-    expect(result.agentApplied).toBe(true)
+    expect(putBotsByBotIdSettings).not.toHaveBeenCalled()
+    expect(result.agentApplied).toBe(false)
+    expect(store.createdAgent).toMatchObject({ id: 'agent-1', runtime: 'codex' })
     expect(result.agentId).toBe('agent-1')
     expect(store.status).toBe('ready')
   })
@@ -232,7 +231,7 @@ describe('useBotCreateProgressStore', () => {
     const store = useBotCreateProgressStore()
     const result = await store.start(
       { name: 'ada', display_name: 'Ada' },
-      { agent: { name: 'Codex', provider: 'codex' } },
+      { agent: { name: 'Custom', provider: 'custom' } },
     )
 
     expect(result.agentApplied).toBe(false)

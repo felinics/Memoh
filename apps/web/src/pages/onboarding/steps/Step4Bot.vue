@@ -34,6 +34,7 @@ import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
 import BotCreateTerminal from '@/pages/bots/components/bot-create-terminal.vue'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
+import CreatedAgentSetup from '@/pages/bots/components/created-agent-setup.vue'
 import AgentTypePill from '@/pages/bots/components/agent-type-pill.vue'
 import AcpSetupPanel, { type AcpSetupSelection } from '@/pages/bots/components/acp-setup-panel.vue'
 import { MEMOH_AGENT_VALUE } from '@/pages/bots/components/agent-type'
@@ -41,6 +42,7 @@ import { useStepTransition } from '../useStepTransition'
 import {
   clearOnboardingBotResult,
   readOnboardingProviderId,
+  readOnboardingBotResult,
   writeOnboardingBotResult,
 } from '../session'
 import { mergeOnboardingModels } from './provider-setup'
@@ -55,6 +57,9 @@ const queryCache = useQueryCache()
 const { visible, exiting, leave } = useStepTransition()
 
 const submitting = ref(false)
+const createdResult = ref(readOnboardingBotResult())
+const authorization = ref({ authorized: false, busy: false })
+const needsAuthorization = computed(() => ['codex', 'claude-code'].includes(createdResult.value?.agent?.agentId ?? ''))
 
 const store = useBotCreateProgressStore()
 const { lines: terminalLines, status: createStatus } = storeToRefs(store)
@@ -72,8 +77,7 @@ const { data: acpProfileData } = useQuery({
   },
 })
 const acpProfiles = computed(() => acpProfileData.value?.items ?? [])
-// codex / claude-code are direct runtimes with no ACP profile: no setup
-// fields here, credentials are configured on the Bot's settings page.
+// Direct runtimes configure credentials after a Bot and Agent exist.
 const selectedDirectRuntime = computed(() => {
   const value = agentType.value
   return value === BOT_AGENT_RUNTIME_CODEX || value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? value : ''
@@ -195,6 +199,10 @@ function buildMetadata(): Record<string, unknown> | undefined {
 }
 
 async function handleSubmit() {
+  if (createdResult.value) {
+    if (!needsAuthorization.value || (authorization.value.authorized && !authorization.value.busy)) leave(nextStep)
+    return
+  }
   if (!canSubmit.value || submitting.value) return
 
   if (selectedAcpProfile.value) {
@@ -295,10 +303,10 @@ async function handleSubmit() {
   writeOnboardingBotResult({
     botId,
     modelConfigured: !!form.chat_model_id && createResult.settingsApplied,
-    ...(stagedAgentId && createResult.agentId && {
+    ...(stagedAgentId && (createResult.agentId || selectedDirectRuntime.value) && {
       agent: {
         agentId: stagedAgentId,
-        botAgentId: createResult.agentId,
+        botAgentId: createResult.agentId ?? '',
       },
     }),
   })
@@ -310,7 +318,8 @@ async function handleSubmit() {
 
   void queryCache.invalidateQueries({ key: getBotsQueryKey() })
 
-  leave(nextStep)
+  createdResult.value = readOnboardingBotResult()
+  if (!needsAuthorization.value) leave(nextStep)
   store.reset()
 }
 
@@ -325,7 +334,16 @@ async function handleSubmit() {
         :visible="visible"
       >
         <div class="min-h-0 flex-1 overflow-y-auto -mx-2 px-2 -my-1 py-1">
+          <CreatedAgentSetup
+            v-if="needsAuthorization && createdResult?.agent"
+            :key="createdResult.botId + createdResult.agent.botAgentId"
+            :bot-id="createdResult.botId"
+            :agent-id="createdResult.agent.botAgentId"
+            :runtime="createdResult.agent.agentId"
+            @status="authorization = $event"
+          />
           <form
+            v-else
             @submit.prevent="handleSubmit"
           >
             <div
@@ -415,7 +433,7 @@ async function handleSubmit() {
                 v-if="selectedDirectRuntime"
                 class="text-sm text-muted-foreground"
               >
-                {{ $t('bots.agentCreate.directSetupHint') }}
+                {{ $t('bots.agentCreate.authorizeAfterCreate') }}
               </p>
               <template v-else-if="!selectedAcpProfile">
                 <div class="mb-2 flex items-center gap-2">
@@ -508,7 +526,7 @@ async function handleSubmit() {
             <button
               type="button"
               class="inline-flex h-[2.625rem] min-w-[180px] items-center justify-center gap-2 rounded-lg bg-primary px-5 font-normal text-primary-foreground shadow-none transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="!canSubmit || submitting"
+              :disabled="createdResult ? needsAuthorization && (!authorization.authorized || authorization.busy) : !canSubmit || submitting"
               @click="handleSubmit"
             >
               <Transition

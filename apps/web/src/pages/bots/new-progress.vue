@@ -27,6 +27,27 @@
     />
 
     <div
+      v-if="needsAuthorization && bot?.id && createdAgent"
+      class="mt-6 space-y-6"
+    >
+      <CreatedAgentSetup
+        :key="bot.id + createdAgent.runtime"
+        :bot-id="bot.id"
+        :agent-id="createdAgent.id ?? ''"
+        :runtime="createdAgent.runtime ?? ''"
+        @status="authorization = $event"
+      />
+      <div class="flex justify-end">
+        <Button
+          :disabled="!authorization.authorized || authorization.busy"
+          @click="goToBot"
+        >
+          {{ $t('onboarding.next') }}
+        </Button>
+      </div>
+    </div>
+
+    <div
       v-if="status === 'error'"
       class="mt-6 flex justify-end gap-3"
     >
@@ -48,7 +69,7 @@
 
 <script setup lang="ts">
 import { Avatar, AvatarImage, AvatarFallback, Button, toast } from '@felinic/ui'
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -56,19 +77,34 @@ import { useQueryCache } from '@pinia/colada'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
+import { readCreatedAgentSession, writeCreatedAgentSession } from './created-agent-session'
+import CreatedAgentSetup from './components/created-agent-setup.vue'
 import BotCreateTerminal from './components/bot-create-terminal.vue'
 
 const router = useRouter()
 const { t } = useI18n()
 const queryCache = useQueryCache()
 const store = useBotCreateProgressStore()
-const { status, lines, display, bot, setupError } = storeToRefs(store)
+const { status, lines, display, bot, setupError, createdAgent } = storeToRefs(store)
+if (store.status === 'idle') {
+  const saved = readCreatedAgentSession()
+  if (saved) {
+    store.bot = { id: saved.botId, name: saved.botName }
+    store.display = { display_name: saved.displayName }
+    store.createdAgent = { id: saved.agentId, runtime: saved.runtime }
+    store.setupError = saved.setupError
+    store.status = 'ready'
+  }
+}
+
+const authorization = ref({ authorized: false, busy: false })
+const needsAuthorization = computed(() => status.value === 'ready' && ['codex', 'claude-code'].includes(createdAgent.value?.runtime ?? ''))
 
 const displayName = computed(() => display.value?.display_name || '')
 const avatarFallback = useAvatarInitials(() => displayName.value)
 
 let navigated = false
-let readyRedirectTimer: ReturnType<typeof window.setTimeout> | null = null
+let readyRedirectTimer: number | null = null
 
 function clearReadyRedirectTimer() {
   if (readyRedirectTimer === null) return
@@ -101,11 +137,13 @@ async function goToBot() {
   }
   // Reset only after navigation has committed, so the still-mounted terminal
   // never flashes empty before the view swaps.
+  writeCreatedAgentSession(null)
   store.reset()
 }
 
 function scheduleReadyRedirect() {
   clearReadyRedirectTimer()
+  if (needsAuthorization.value) return
   // Brief pause so the final "ready" line is visible before redirecting.
   readyRedirectTimer = window.setTimeout(() => {
     readyRedirectTimer = null
@@ -127,8 +165,15 @@ watch(
   status,
   (value) => {
     if (value === 'ready') {
+      const runtime = createdAgent.value?.runtime
+      if (bot.value?.id && (runtime === 'codex' || runtime === 'claude-code')) {
+        writeCreatedAgentSession({ botId: bot.value.id, botName: bot.value.name ?? '',
+          displayName: displayName.value, agentId: createdAgent.value?.id ?? '', runtime,
+          setupError: setupError.value })
+      }
       scheduleReadyRedirect()
     } else {
+      if (value === 'creating') writeCreatedAgentSession(null)
       clearReadyRedirectTimer()
     }
   },
