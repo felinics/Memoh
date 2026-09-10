@@ -47,6 +47,7 @@ WHERE team_id = public.memoh_current_team_id() AND client_type NOT IN (
   'minimax-speech',
   'volcengine-speech',
   'alibabacloud-speech',
+  'alibabacloud-transcription',
   'microsoft-speech',
   'google-speech',
   'google-transcription',
@@ -88,6 +89,7 @@ WHERE team_id = public.memoh_current_team_id() AND client_type NOT IN (
   'minimax-speech',
   'volcengine-speech',
   'alibabacloud-speech',
+  'alibabacloud-transcription',
   'microsoft-speech',
   'google-speech',
   'google-transcription',
@@ -282,6 +284,7 @@ WHERE team_id = public.memoh_current_team_id() AND client_type IN (
   'openrouter-transcription',
   'elevenlabs-transcription',
   'deepgram-transcription',
+  'alibabacloud-transcription',
   'google-transcription'
 )
 ORDER BY created_at DESC;
