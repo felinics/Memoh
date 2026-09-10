@@ -197,7 +197,7 @@ RLS 策略与现有表一致。
 
 检查更新：对每个安装记录取 registry 当前 descriptor，比较 revision，写入 `available_revision` 与 `available_version`，并给出差异摘要：skills 增删改、dependency 引用增删、connector 引用增删。dep 自身的更新沿用 workspacedeps 的 `CheckUpdates`，结果显示在所有引用它的包的子项上。
 
-更新：拉取新 release，按 4.3 的顺序处理新增引用，按 4.4 的规则处理被移除的引用，skills 原子替换，最后写新 revision。dep 定义变化不由 package 更新触发，由 dep 子项的 update 处理。
+更新：`POST /packages/update` 按用户在弹窗里勾选的项目执行一条 SSE 流：先把选中的 dep 逐个更新到最新版本（`workspacedeps.Update`），再在勾选了发布时拉取新 release，按 4.3 的顺序处理新增引用，按 4.4 的规则处理被移除的引用，skills 原子替换，最后写新 revision。discovered 的规范包只能更新自身那一个 dep。一级列表在发布或任一 dep 有新版本时直接显示 Update。
 
 ### 4.6 发现的 dep 与规范包
 
@@ -215,7 +215,7 @@ RLS 策略与现有表一致。
 | GET | `/bots/:bot_id/packages/:installation_id/removal-preview` | 删除预览 |
 | DELETE | `/bots/:bot_id/packages/:installation_id` | 删除，SSE |
 | POST | `/bots/:bot_id/packages/check-updates` | 检查更新 |
-| POST | `/bots/:bot_id/packages/:installation_id/update` | 更新，SSE |
+| POST | `/bots/:bot_id/packages/update` | 按选择更新（发布与/或依赖），SSE |
 | POST | `/bots/:bot_id/packages/:installation_id/resume` | 继续部分安装，SSE |
 | POST | `/bots/:bot_id/packages/:installation_id/connectors/:type/oauth` | 为引用授权，内部调用 connectors 服务并回填 `connection_id` |
 | POST | `/bots/:bot_id/packages/:installation_id/connectors/:type/api-key` | 同上 |
@@ -251,7 +251,7 @@ RLS 策略与现有表一致。
 ### 5.2 Bot 详情页
 
 - `pages/bots/detail.vue`：删除 `connectors`、`dependencies` 两个 tab，新增 `packages` tab；`skills` tab 保留，只管理用户自建、发现的 skill 与发现路径。
-- 新增 `pages/bots/components/bot-packages.vue`：package 行可展开，显示状态、版本、可用更新；行操作为检查更新、更新、继续安装、删除。
+- 新增 `pages/bots/components/bot-packages.vue`：package 行只显示图标、名称、描述，点击进入二级页（`package-detail-panel.vue`）展示 Skills / 依赖 / 连接器；有可用更新时行上直接显示 Update，点击弹出多选对话框（`package-update-dialog.vue`）批量更新；其余操作为检查更新、继续安装、删除。
 - 子项组件：`package-dependency-item.vue` 复用现有 `dependency-row.vue` 的状态与动作决策，去掉 remove；`package-connector-item.vue` 提供授权、重新授权、启停；`package-skill-item.vue` 提供查看。
 - 删除确认框显示删除预览，含“同时移除仅被它使用的自动安装包”勾选。
 - `store/dependency-operations.ts` 泛化为 `store/package-operations.ts`，以安装记录为 key 持有 SSE 流，`step` 事件驱动进度对话框分组显示。
