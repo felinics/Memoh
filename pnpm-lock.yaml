@@ -12,7 +12,7 @@ patchedDependencies:
     hash: ed0eefdb14161c24622f84cfcd1f3470577cc96fd973705c7e09d1c643452b07
     path: patches/dockview-vue@7.0.2.patch
   reka-ui@2.10.1:
-    hash: f5b2b9e163806979729a0cd8ae49726f03297e9a3a03ae1c62a2dcb9e58009d6
+    hash: b58f2bf789485626044d40b71d083765570a7d66b6ec1a3e05e8ae6920c9f840
     path: patches/reka-ui@2.10.1.patch
 
 importers:
@@ -425,7 +425,7 @@ importers:
         version: 0.562.0(vue@3.5.26(typescript@6.0.3))
       reka-ui:
         specifier: ^2.10.1
-        version: 2.10.1(patch_hash=f5b2b9e163806979729a0cd8ae49726f03297e9a3a03ae1c62a2dcb9e58009d6)(vue@3.5.26(typescript@6.0.3))
+        version: 2.10.1(patch_hash=b58f2bf789485626044d40b71d083765570a7d66b6ec1a3e05e8ae6920c9f840)(vue@3.5.26(typescript@6.0.3))
       tailwind-merge:
         specifier: ^3.4.0
         version: 3.4.0
@@ -10204,7 +10204,7 @@ snapshots:
     dependencies:
       regex-utilities: 2.3.0
 
-  reka-ui@2.10.1(patch_hash=f5b2b9e163806979729a0cd8ae49726f03297e9a3a03ae1c62a2dcb9e58009d6)(vue@3.5.26(typescript@6.0.3)):
+  reka-ui@2.10.1(patch_hash=b58f2bf789485626044d40b71d083765570a7d66b6ec1a3e05e8ae6920c9f840)(vue@3.5.26(typescript@6.0.3)):
     dependencies:
       '@floating-ui/dom': 1.7.6
       '@floating-ui/vue': 1.1.9(vue@3.5.26(typescript@6.0.3))
@@ -10980,7 +10980,7 @@ snapshots:
   vue-input-otp@0.3.2(typescript@6.0.3)(vue@3.5.26(typescript@6.0.3)):
     dependencies:
       '@vueuse/core': 12.8.2(typescript@6.0.3)
-      reka-ui: 2.10.1(patch_hash=f5b2b9e163806979729a0cd8ae49726f03297e9a3a03ae1c62a2dcb9e58009d6)(vue@3.5.26(typescript@6.0.3))
+      reka-ui: 2.10.1(patch_hash=b58f2bf789485626044d40b71d083765570a7d66b6ec1a3e05e8ae6920c9f840)(vue@3.5.26(typescript@6.0.3))
       vue: 3.5.26(typescript@6.0.3)
     transitivePeerDependencies:
       - '@vue/composition-api'

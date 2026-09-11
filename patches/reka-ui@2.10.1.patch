@@ -32,11 +32,59 @@ index ecb3d95d837becbb14b3c812504ac58d5da415f1..91b746cbaace196d8fd66b6b5db3ef74
  					}),
  					onBlur: _cache[1] || (_cache[1] = async (event) => {
  						await nextTick();
+diff --git a/dist/Select/SelectItem.cjs b/dist/Select/SelectItem.cjs
+index d324eae78d1af0edc69d6e0ae9346fd3f4ef947b..5ceeac462bb2a6f92a5254f2487a66e0b0941b97 100644
+--- a/dist/Select/SelectItem.cjs
++++ b/dist/Select/SelectItem.cjs
+@@ -69,15 +69,17 @@ var SelectItem_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ (0,
+ 			}
+ 		}
+ 		async function handlePointerMove(event) {
++			const item = event.currentTarget;
+ 			await (0, vue.nextTick)();
+ 			if (event.defaultPrevented) return;
+ 			if (disabled.value) contentContext.onItemLeave?.();
+-			else event.currentTarget?.focus({ preventScroll: true });
++			else item?.focus({ preventScroll: true });
+ 		}
+ 		async function handlePointerLeave(event) {
++			const item = event.currentTarget;
+ 			await (0, vue.nextTick)();
+ 			if (event.defaultPrevented) return;
+-			if (event.currentTarget === require_shared_getActiveElement.getActiveElement()) contentContext.onItemLeave?.();
++			if (item === require_shared_getActiveElement.getActiveElement()) contentContext.onItemLeave?.();
+ 		}
+ 		async function handleKeyDown(event) {
+ 			await (0, vue.nextTick)();
+diff --git a/dist/Select/SelectItem.js b/dist/Select/SelectItem.js
+index fbd2d59db3ffacf6dd48564dd017376145625918..5a23595592a5c8ac81d0e74e96f646c55e1c6011 100644
+--- a/dist/Select/SelectItem.js
++++ b/dist/Select/SelectItem.js
+@@ -68,15 +68,17 @@ var SelectItem_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ def
+ 			}
+ 		}
+ 		async function handlePointerMove(event) {
++			const item = event.currentTarget;
+ 			await nextTick();
+ 			if (event.defaultPrevented) return;
+ 			if (disabled.value) contentContext.onItemLeave?.();
+-			else event.currentTarget?.focus({ preventScroll: true });
++			else item?.focus({ preventScroll: true });
+ 		}
+ 		async function handlePointerLeave(event) {
++			const item = event.currentTarget;
+ 			await nextTick();
+ 			if (event.defaultPrevented) return;
+-			if (event.currentTarget === getActiveElement()) contentContext.onItemLeave?.();
++			if (item === getActiveElement()) contentContext.onItemLeave?.();
+ 		}
+ 		async function handleKeyDown(event) {
+ 			await nextTick();
 diff --git a/src/Menu/MenuItemImpl.vue b/src/Menu/MenuItemImpl.vue
-index 2c29112c5cd98c91f32080fe23586f7de3dce34a..ef22a605cb4b96ca0007c1414c7bbccc1f43ba34 100644
+index 2c29112c5cd98c91f32080fe23586f7de3dce34a..1c8ce44e5aacf988411d3362aa751b23737b50ae 100644
 --- a/src/Menu/MenuItemImpl.vue
 +++ b/src/Menu/MenuItemImpl.vue
-@@ -88,14 +88,15 @@ async function handlePointerLeave(event: PointerEvent) {
+@@ -88,10 +88,11 @@ async function handlePointerLeave(event: PointerEvent) {
        @pointerleave="handlePointerLeave"
        @focus="
          async (event: FocusEvent) => {
@@ -49,7 +97,34 @@ index 2c29112c5cd98c91f32080fe23586f7de3dce34a..ef22a605cb4b96ca0007c1414c7bbccc
          }
        "
        @blur="
-         async (event: FocusEvent) => {
-           await nextTick();
-           if (event.defaultPrevented) return;
-           isFocused = false;
+diff --git a/src/Select/SelectItem.vue b/src/Select/SelectItem.vue
+index c309257e53486cca7b9a45822796b4f5ccc2a775..472e3b6ae5a87f9824d3b91e95a817b7eb8bccd4 100644
+--- a/src/Select/SelectItem.vue
++++ b/src/Select/SelectItem.vue
+@@ -90,6 +90,7 @@ async function handleSelect(ev: SelectEvent<T>) {
+ }
+ 
+ async function handlePointerMove(event: PointerEvent) {
++  const item = event.currentTarget as HTMLElement | null
+   await nextTick()
+   if (event.defaultPrevented)
+     return
+@@ -99,15 +100,16 @@ async function handlePointerMove(event: PointerEvent) {
+   else {
+     // even though safari doesn't support this option, it's acceptable
+     // as it only means it might scroll a few pixels when using the pointer.
+-    (event.currentTarget as HTMLElement | null)?.focus({ preventScroll: true })
++    item?.focus({ preventScroll: true })
+   }
+ }
+ 
+ async function handlePointerLeave(event: PointerEvent) {
++  const item = event.currentTarget as HTMLElement | null
+   await nextTick()
+   if (event.defaultPrevented)
+     return
+-  if (event.currentTarget === getActiveElement())
++  if (item === getActiveElement())
+     contentContext.onItemLeave?.()
+ }
+ 

@@ -16,6 +16,17 @@
     class="[color-scheme:light] dark:[color-scheme:dark]"
     v-bind="$attrs"
   >
+  <!-- URL icon still fetching: hold an empty, correctly-sized box instead of
+       the fallback slot. The fallback would paint at the glyph's default size
+       (it receives no $attrs) and then swap to the real image — a visible
+       flash + size jump on every uncached mount. Unknown non-URL names still
+       get the slot. -->
+  <span
+    v-else-if="isUrl"
+    class="inline-block"
+    v-bind="$attrs"
+    aria-hidden="true"
+  />
   <slot v-else />
 </template>
 
