@@ -1,7 +1,5 @@
 <template>
-  <PageShell
-    variant="tab"
-    :title="$t('bots.hooks.title')"
+  <SectionGroup
     :description="$t('bots.hooks.subtitle')"
   >
     <template #actions>
@@ -192,7 +190,7 @@
         </div>
       </SettingsSection>
     </div>
-  </PageShell>
+  </SectionGroup>
 </template>
 
 <script setup lang="ts">
@@ -219,7 +217,7 @@ import {
   postBotsByBotIdHooksTest,
 } from '@memohai/sdk'
 import type { HandlersHookEventInfo } from '@memohai/sdk'
-import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
+import { SectionGroup, SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const props = defineProps<{

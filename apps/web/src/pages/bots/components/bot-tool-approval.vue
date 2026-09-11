@@ -1,6 +1,5 @@
 <template>
-  <PageShell
-    variant="tab"
+  <SectionGroup
     :title="t('bots.toolApproval.title')"
     :description="t('bots.toolApproval.intro')"
   >
@@ -111,7 +110,7 @@
         </template>
       </SettingsSection>
     </div>
-  </PageShell>
+  </SectionGroup>
 </template>
 
 <script setup lang="ts">
@@ -131,7 +130,7 @@ import {
   Textarea,
   toast,
 } from '@felinic/ui'
-import { FieldStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
+import { FieldStack, InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   cloneToolApprovalConfig,

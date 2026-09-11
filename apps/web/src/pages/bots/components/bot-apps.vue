@@ -1,11 +1,27 @@
 <template>
   <div>
+    <template v-if="route.query.section === 'skills'">
+      <Button
+        variant="ghost"
+        @click="closeSkills"
+      >
+        <ArrowLeft />
+        {{ t('apps.title') }}
+      </Button>
+      <BotSkills :bot-id="botId" />
+    </template>
     <PageShell
-      v-if="!selected"
+      v-if="!selected && route.query.section !== 'skills'"
       variant="tab"
       :title="t('apps.title')"
     >
       <template #actions>
+        <Button
+          variant="outline"
+          @click="openSkills"
+        >
+          {{ t('bots.skills.title') }}
+        </Button>
         <Select
           v-if="targets.length > 1"
           :model-value="displayTargetId"
@@ -158,7 +174,7 @@
     </PageShell>
 
     <DetailPane
-      v-else
+      v-else-if="selected && route.query.section !== 'skills'"
       width="narrow"
       :back-label="t('apps.title')"
       @back="closeDetail"
@@ -294,7 +310,7 @@ import {
   Skeleton,
   toast,
 } from '@felinic/ui'
-import { ArrowRight, Plus, RefreshCw } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Plus, RefreshCw } from 'lucide-vue-next'
 import {
   getBotsByBotIdWorkspaceTargets,
   getConnectorsCatalog,
@@ -312,6 +328,7 @@ import AppConnectorAuthDialog from './app-connector-auth-dialog.vue'
 import AppProgressDialog from './app-progress-dialog.vue'
 import AppRemoveDialog from './app-remove-dialog.vue'
 import AppDetailPanel, { type AppConnectorAction } from './app-detail-panel.vue'
+import BotSkills from './bot-skills.vue'
 import BotAppCard from './bot-app-card.vue'
 import type { AppRowAction } from './app-actions'
 import AppUpdateDialog, { type AppUpdateChoice } from './app-update-dialog.vue'
@@ -369,6 +386,13 @@ const props = defineProps<{ botId: string }>()
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
+function openSkills() {
+  void router.replace({ query: { ...route.query, section: 'skills' } })
+}
+function closeSkills() {
+  const { section: _section, ...query } = route.query
+  void router.replace({ query })
+}
 const queryCache = useQueryCache()
 const capabilitiesStore = useCapabilitiesStore()
 const { run: runMutation } = useDialogMutation()

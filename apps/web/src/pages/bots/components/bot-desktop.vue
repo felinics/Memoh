@@ -1,6 +1,5 @@
 <template>
-  <PageShell
-    variant="tab"
+  <SectionGroup
     :title="$t('bots.desktop.title')"
   >
     <div class="space-y-8">
@@ -18,40 +17,48 @@
             @update:model-value="(val) => handleToggleDisplay(!!val)"
           />
         </SettingsRow>
+        <SettingsRow
+          v-if="info.enabled"
+          :label="$t('bots.desktop.liveTitle')"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            @click="previewOpen = true"
+          >
+            {{ $t('common.open') }}
+          </Button>
+        </SettingsRow>
       </SettingsSection>
-
-      <!-- The live screen is the whole point of the page: when Desktop is on, this
-           is what the 99% came to see. The view speaks for itself — connecting,
-           installing, live, or "can't reach it" all render inside DisplayPane — so
-           there is no separate readiness grid restating it in flags. -->
-      <section
-        v-if="info.enabled"
-        class="space-y-2.5"
-      >
-        <h2 class="px-2 text-[13px] font-medium text-muted-foreground">
-          {{ $t('bots.desktop.liveTitle') }}
-        </h2>
-        <div class="relative aspect-[4/3] w-full overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
-          <DisplayPane
-            v-if="props.botId"
-            :key="props.botId"
-            :bot-id="props.botId"
-            tab-id="settings-desktop"
-            :title="$t('bots.desktop.liveTitle')"
-            active
-            :closable="false"
-            class="size-full"
-          />
-        </div>
-      </section>
+      <Dialog v-model:open="previewOpen">
+        <DialogPanel width="3xl">
+          <DialogHeader>
+            <DialogTitle>{{ $t('bots.desktop.liveTitle') }}</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <div class="relative aspect-[4/3] w-full">
+              <DisplayPane
+                v-if="previewOpen && props.botId"
+                :key="props.botId"
+                :bot-id="props.botId"
+                tab-id="settings-desktop"
+                :title="$t('bots.desktop.liveTitle')"
+                active
+                :closable="false"
+                class="size-full"
+              />
+            </div>
+          </DialogBody>
+        </DialogPanel>
+      </Dialog>
     </div>
-  </PageShell>
+  </SectionGroup>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { onActivated, onDeactivated, ref, computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PageShell, SettingsRow, SettingsSection, Switch, toast } from '@felinic/ui'
+import { Button, Dialog, DialogPanel, DialogHeader, DialogTitle, DialogBody, SectionGroup, SettingsRow, SettingsSection, Switch, toast } from '@felinic/ui'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import {
   getBotsByBotIdContainerDisplay,
@@ -67,6 +74,7 @@ const props = defineProps<{
   botId: string
 }>()
 
+const previewOpen = ref(false)
 const { t } = useI18n()
 const queryCache = useQueryCache()
 
@@ -133,10 +141,11 @@ const info = computed<HandlersDisplayInfoResponse>(() => displayInfo.value ?? {}
 // Silent freshness instead of a manual Refresh button: the live screen streams on
 // its own, so we only quietly re-read status while the tab is actually on screen.
 const POLL_INTERVAL_MS = 10_000
+let active = true
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 function pageVisible() {
-  return typeof document === 'undefined' || document.visibilityState === 'visible'
+  return active && (typeof document === 'undefined' || document.visibilityState === 'visible')
 }
 
 function pollNow() {
@@ -164,6 +173,16 @@ function handleVisibilityChange() {
     stopPoll()
   }
 }
+
+onActivated(() => {
+  active = true
+  startPoll()
+})
+onDeactivated(() => {
+  active = false
+  previewOpen.value = false
+  stopPoll()
+})
 
 onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange)

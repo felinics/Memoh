@@ -1,6 +1,5 @@
 <template>
-  <PageShell
-    variant="tab"
+  <SectionGroup
     :title="$t('bots.settings.networkPageTitle')"
   >
     <template
@@ -546,7 +545,7 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  </PageShell>
+  </SectionGroup>
 </template>
 
 <script setup lang="ts">
@@ -566,7 +565,7 @@ import {
 } from '@felinic/ui'
 import { SquarePen, Eye, EyeOff, RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import { reactive, computed, watch, nextTick, onBeforeUnmount, ref } from 'vue'
-import { ConfirmPopover, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
 import { getBotsByBotIdSettings, putBotsByBotIdSettings } from '@memohai/sdk'

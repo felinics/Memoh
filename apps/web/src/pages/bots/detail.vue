@@ -273,8 +273,8 @@ import {
 } from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
-  BrainCircuit, ShieldAlert, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, ChevronLeft, Workflow, Laptop, Package as App
+  ShieldAlert, Database, Mail, Link, Server, SlidersHorizontal,
+  Bot as BotIcon, ChevronLeft, Laptop, Package as App
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject, type Ref } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
@@ -294,19 +294,13 @@ import type {
 } from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
 
+import BotAdvanced from './components/bot-advanced.vue'
 import BotSettings from './components/bot-settings.vue'
-import BotToolApproval from './components/bot-tool-approval.vue'
-import BotHooks from './components/bot-hooks.vue'
-import BotDesktop from './components/bot-desktop.vue'
-import BotNetwork from './components/bot-network.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
-import BotSkills from './components/bot-skills.vue'
-import BotCompaction from './components/bot-compaction.vue'
 import BotEmail from './components/bot-email.vue'
 import BotOverview from './components/bot-overview.vue'
-import BotSchedule from './components/bot-schedule.vue'
 import BotContainer from './components/bot-container.vue'
 import BotRemoteRuntime from './components/bot-remote-runtime.vue'
 import BotAccess from './components/bot-access.vue'
@@ -414,22 +408,16 @@ const tabList = computed(() => {
   const tabs = [
     { value: 'overview', label: 'bots.tabs.overview', icon: LayoutDashboard, component: BotOverview, params: {} },
     { value: 'general', label: 'bots.tabs.general', icon: Settings, component: BotSettings, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
-    { value: 'desktop', label: 'bots.tabs.desktop', icon: Monitor, component: BotDesktop, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'remote-runtime', label: 'bots.tabs.remoteRuntime', icon: Laptop, component: BotRemoteRuntime, params: { 'bot-id': bot_id } },
     { value: 'container', label: 'bots.tabs.container', icon: Server, component: BotContainer, params: {}, containerWorkspaceOnly: true },
-    { value: 'network', label: 'bots.tabs.network', icon: Globe, component: BotNetwork, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'memory', label: 'bots.tabs.memory', icon: Database, component: BotMemory, params: { 'bot-id': bot_id } },
     { value: 'channels', label: 'bots.tabs.channels', icon: MessageSquare, component: BotChannels, params: { 'bot-id': bot_id } },
+    { value: 'advanced', label: 'bots.tabs.advanced', icon: SlidersHorizontal, component: BotAdvanced, params: { 'bot-id': bot_id, 'workspace-backend': botWorkspaceBackend.value } },
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
-    { value: 'tool-approval', label: 'bots.tabs.toolApproval', icon: Zap, component: BotToolApproval, params: { 'bot-id': bot_id } },
-    { value: 'hooks', label: 'bots.tabs.hooks', icon: Workflow, component: BotHooks, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'agents', label: 'bots.tabs.agents', icon: BotIcon, component: BotAgents, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'apps', label: 'bots.tabs.apps', icon: App, component: BotApps, params: { 'bot-id': bot_id } },
-    { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
-    { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
-    { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
   ] satisfies Array<BotDetailsTabRule & {
     label: string
     icon: unknown
@@ -458,18 +446,21 @@ const searchIndex = computed(() => {
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
     { tab: 'access', key: 'bots.access.title', keywords: ['permissions', 'acl', 'rules', 'allow', 'deny'] },
-    { tab: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
-    { tab: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
+    { tab: 'advanced', section: 'tool-approval', key: 'bots.toolApproval.title', keywords: ['mcp', 'tools', 'review', 'bypass', 'approval'] },
+    { tab: 'advanced', section: 'desktop', key: 'bots.tabs.desktop', keywords: ['desktop', 'display', 'browser', '桌面', 'デスクトップ'] },
+    { tab: 'advanced', section: 'network', key: 'bots.tabs.network', keywords: ['network', 'proxy', 'vpn', '网络', 'ネットワーク'] },
+    { tab: 'advanced', section: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
     { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'external agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
-    { tab: 'compaction', key: 'bots.compaction.title', keywords: ['compress', 'summarize', 'context window'] },
-    { tab: 'schedule', key: 'bots.schedule.title', keywords: ['cron', 'jobs', 'tasks', 'automation'] },
-    { tab: 'skills', key: 'bots.skills.title', keywords: ['prompts', 'instructions', 'system prompt'] },
-  ].map(item => ({
-    ...item,
-    translatedTitle: t(item.key)
-  }))
+    { tab: 'advanced', section: 'compaction', key: 'bots.tabs.compaction', keywords: ['compaction', 'compress', 'summarize', 'context window'] },
+    { tab: 'apps', section: 'skills', key: 'bots.skills.title', keywords: ['prompts', 'instructions', 'system prompt'] },
+  ].filter(item => botWorkspaceBackend.value !== 'remote'
+    || !['desktop', 'network', 'hooks'].includes(item.section ?? ''))
+    .map(item => ({
+      ...item,
+      translatedTitle: t(item.key),
+    }))
 })
 
 const normalizedQuery = computed(() => searchQuery.value.trim().toLowerCase())
@@ -491,7 +482,23 @@ function tabMatches(tab: { value: string, label: string }): boolean {
 }
 
 function selectTab(value: string): void {
+  const match = normalizedQuery.value
+    ? searchIndex.value.find(item => item.tab === value && (
+      item.translatedTitle.toLowerCase().includes(normalizedQuery.value)
+      || item.keywords.some(keyword => keyword.toLowerCase().includes(normalizedQuery.value))
+    ))
+    : undefined
   searchQuery.value = ''
+  if (value === 'advanced' || match?.section || route.query.section) {
+    const query = { ...route.query, tab: value, section: match?.section }
+    if (isMobile.value) {
+      tabPushedFromList.value = true
+      void router.push({ query })
+    } else {
+      void router.replace({ query })
+    }
+    return
+  }
   // Mobile: the tab list and a tab's content are two addressable levels —
   // bare path = list, ?tab=x = content — so the tap is a real push and the
   // system back button pops straight back to the list. The synced-param
@@ -506,7 +513,7 @@ function selectTab(value: string): void {
 }
 
 // Mobile stack state for MasterDetailSidebarLayout, derived from the URL so a
-// refresh / deep link (for example, ?tab=schedule) opens straight on the content and the
+// refresh / deep link (for example, ?tab=advanced) opens straight on the content and the
 // KeepAlive'd page can never inherit a stale stack state from another bot.
 const mobileDetailOpen = computed(() => {
   const tab = route.query.tab
@@ -533,19 +540,14 @@ function closeMobileDetail(): void {
   void router.replace({ query: rest }).catch(() => {})
 }
 
-const groupedTabs = computed(() => {
-  const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['skills', 'apps', 'hooks', 'tool-approval', 'agents', 'mcp', 'memory']
-  const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
-  const securityKeys = ['access', 'email']
-
-  return [
-    { key: 'core', items: tabList.value.filter(t => coreKeys.includes(t.value)) },
-    { key: 'capabilities', items: tabList.value.filter(t => capabilityKeys.includes(t.value)) },
-    { key: 'runtime', items: tabList.value.filter(t => runtimeKeys.includes(t.value)) },
-    { key: 'security', items: tabList.value.filter(t => securityKeys.includes(t.value)) },
-  ].filter(g => g.items.length > 0)
-})
+const groupedTabs = computed(() => [
+  { key: 'core', keys: ['overview', 'general', 'channels'] },
+  { key: 'capabilities', keys: ['memory', 'agents', 'apps', 'mcp', 'container', 'remote-runtime', 'email'] },
+  { key: 'administration', keys: ['advanced', 'access'] },
+].map(group => ({
+  key: group.key,
+  items: group.keys.flatMap(key => tabList.value.filter(tab => tab.value === key)),
+})).filter(group => group.items.length > 0))
 
 // Narrow the grouped nav in place while searching; drop emptied groups.
 const displayGroups = computed(() =>
@@ -600,6 +602,14 @@ watch(bot, (val) => {
 
 const activeTab = useSyncedQueryParam('tab', 'overview')
 watch([tabList, activeTab], ([tabs, tab]) => {
+  if (['tool-approval', 'hooks', 'desktop', 'network', 'compaction'].includes(tab)) {
+    void router.replace({ query: { ...route.query, tab: 'advanced', section: tab } })
+    return
+  }
+  if (tab === 'skills') {
+    void router.replace({ query: { ...route.query, tab: 'apps', section: 'skills' } })
+    return
+  }
   if (tab === 'acp') {
     activeTab.value = 'agents'
     return

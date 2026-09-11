@@ -2316,6 +2316,7 @@
       "reminderAction": "設定"
     },
     "tabs": {
+      "advanced": "詳細設定",
       "overviewSubtitle": "このBotがどこに存在し、どのように設定されているか。",
       "overview": "概要",
       "general": "一般的な",

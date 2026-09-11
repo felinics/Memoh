@@ -2318,6 +2318,7 @@
       "reminderAction": "去设置"
     },
     "tabs": {
+      "advanced": "高级",
       "overviewSubtitle": "这个 bot 此刻活在哪、怎么配的",
       "overview": "概览",
       "general": "通用",

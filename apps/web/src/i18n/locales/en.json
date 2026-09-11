@@ -2318,6 +2318,7 @@
       "reminderAction": "Set up"
     },
     "tabs": {
+      "advanced": "Advanced",
       "overviewSubtitle": "Where this bot lives and how it's set up.",
       "overview": "Overview",
       "general": "General",

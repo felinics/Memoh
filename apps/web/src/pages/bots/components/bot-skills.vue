@@ -850,7 +850,7 @@ function closeApp() {
 // Apps are removed from the Apps tab, where the removal plan
 // (shared dependencies, connections) is shown before anything runs.
 function openAppsTab() {
-  void router.replace({ query: { ...route.query, tab: 'apps' } }).catch(() => {})
+  void router.replace({ query: { ...route.query, tab: 'apps', section: undefined } }).catch(() => {})
 }
 
 function skillKey(skill: SkillItem) {
