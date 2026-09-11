@@ -7,22 +7,20 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, Spinner } from '@felinic/ui'
 import { getBotsByBotIdConnectors, getConnectorsCatalog } from '@memohai/sdk'
-import { connectorPreviewCatalog, connectorPreviewEnabled } from '../fixtures/connectors-preview'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 
 const props = defineProps<{ botId: string, botName: string }>()
 const { t } = useI18n()
 const router = useRouter()
 const open = ref(false)
-const preview = connectorPreviewEnabled
 const catalog = useQuery({
-  key: [preview ? 'preview-connectors-catalog' : 'connectors-catalog'],
-  query: async () => preview ? connectorPreviewCatalog : (await getConnectorsCatalog({ throwOnError: true })).data,
+  key: ['connectors-catalog'],
+  query: async () => (await getConnectorsCatalog({ throwOnError: true })).data,
   enabled: () => open.value,
 })
 const connections = useQuery({
-  key: () => [preview ? 'preview-bot-connectors' : 'bot-connectors', props.botId],
-  query: async () => preview ? [] : (await getBotsByBotIdConnectors({ path: { bot_id: props.botId }, throwOnError: true })).data.items ?? [],
+  key: () => ['bot-connectors', props.botId],
+  query: async () => (await getBotsByBotIdConnectors({ path: { bot_id: props.botId }, throwOnError: true })).data.items ?? [],
   enabled: () => open.value && !!props.botId,
 })
 const rows = computed(() => (catalog.data.value ?? []).filter(item => item.type).map(item => ({

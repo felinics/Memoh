@@ -12,7 +12,6 @@ import { useQuery } from '@pinia/colada'
 import { getBotsByBotIdConnectors, getConnectorsCatalog } from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
 import { preloadProviderIcons } from '@/components/provider-icon/preload'
-import { connectorPreviewCatalog, connectorPreviewEnabled } from '../fixtures/connectors-preview'
 import type { ChatViewTarget } from '@/store/chat-list'
 
 // What a connector tool row needs to identify where the call came from.
@@ -85,7 +84,7 @@ export function provideConnectorLogos(
   // The menu is mounted lazily. Warm image bytes and decoding from the chat
   // pane's existing catalog query, before the user opens the Plus submenu.
   watch(
-    () => connectorPreviewEnabled ? connectorPreviewCatalog : catalogQuery.data.value,
+    () => catalogQuery.data.value,
     catalog => preloadProviderIcons((catalog ?? []).map(item => item.icon_url)),
     { immediate: true },
   )
