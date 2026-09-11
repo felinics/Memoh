@@ -1358,6 +1358,11 @@ func (s *DBService) GetVisibleTurnByMessage(ctx context.Context, sessionID strin
 	return toHistoryTurn(row), nil
 }
 
+// ErrNoVisibleTurn reports that a session holds no visible turn at all. It is
+// a sentinel rather than the driver's own no-rows error so callers can map it
+// onto a user-facing code instead of surfacing the driver's wording.
+var ErrNoVisibleTurn = errors.New("session has no visible turn")
+
 func (s *DBService) GetLatestVisibleTurnBySession(ctx context.Context, sessionID string) (HistoryTurn, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -1365,6 +1370,9 @@ func (s *DBService) GetLatestVisibleTurnBySession(ctx context.Context, sessionID
 	}
 	row, err := s.queries.GetLatestVisibleHistoryTurnBySession(ctx, pgSessionID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return HistoryTurn{}, ErrNoVisibleTurn
+		}
 		return HistoryTurn{}, err
 	}
 	return toHistoryTurn(row), nil

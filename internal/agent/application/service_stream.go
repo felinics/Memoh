@@ -37,7 +37,12 @@ func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 		return apperror.CodeAgentResponseTimeout
 	}
 	switch code := apperror.CodeOf(cause); code {
-	case apperror.CodeAgentResponseTimeout, apperror.CodeAgentResponseInterrupted:
+	case apperror.CodeAgentResponseTimeout,
+		apperror.CodeAgentResponseInterrupted,
+		apperror.CodeAgentProviderOverloaded,
+		apperror.CodeAgentProviderRateLimited,
+		apperror.CodeAgentProviderQuotaExhausted,
+		apperror.CodeAgentProviderAuthFailed:
 		return code
 	default:
 		return ""
@@ -92,6 +97,13 @@ func agentStreamLifecycleError(event native.StreamEvent) error {
 	err := agentStreamEventError(event)
 	if err == nil || apperror.CodeOf(err) != "" {
 		return err
+	}
+	// A provider that names why it refused the request is reported with that
+	// reason: an exhausted balance and a rejected key both need the user to go
+	// change something, and "the model response was interrupted, please try
+	// again" sends them back into a call that cannot succeed.
+	if code := providerFailureCode(event.Error); code != "" {
+		return apperror.Wrap(code, err, nil)
 	}
 	return apperror.Wrap(apperror.CodeAgentResponseInterrupted, err, nil)
 }

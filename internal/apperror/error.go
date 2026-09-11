@@ -103,6 +103,10 @@ const (
 	CodeSessionHistoryInconsistent               Code = "session_runtime.history_inconsistent"
 	CodeAgentResponseTimeout                     Code = "agent.response_timeout"
 	CodeAgentResponseInterrupted                 Code = "agent.response_interrupted"
+	CodeAgentProviderOverloaded                  Code = "agent.provider_overloaded"
+	CodeAgentProviderRateLimited                 Code = "agent.provider_rate_limited"
+	CodeAgentProviderQuotaExhausted              Code = "agent.provider_quota_exhausted"
+	CodeAgentProviderAuthFailed                  Code = "agent.provider_auth_failed"
 	CodeQueueNoActiveRun                         Code = "queue_no_active_run"
 	CodeQueueAdmissionOverloaded                 Code = "queue_admission_overloaded"
 	CodeQueueAdmissionUnavailable                Code = "queue_admission_unavailable"
@@ -542,6 +546,22 @@ var catalog = map[Code]Definition{
 	CodeAgentResponseInterrupted: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model response was interrupted. Please try again.",
+	},
+	CodeAgentProviderOverloaded: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The model provider is overloaded right now. Please try again in a moment.",
+	},
+	CodeAgentProviderRateLimited: {
+		HTTPStatus: http.StatusTooManyRequests,
+		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
+	},
+	CodeAgentProviderQuotaExhausted: {
+		HTTPStatus: http.StatusPaymentRequired,
+		Detail:     "The model provider account has no remaining balance or quota.",
+	},
+	CodeAgentProviderAuthFailed: {
+		HTTPStatus: http.StatusUnauthorized,
+		Detail:     "The model provider rejected the credentials. Check the provider API key.",
 	},
 	CodeQueueSteerUnsupported: {
 		HTTPStatus: http.StatusConflict,

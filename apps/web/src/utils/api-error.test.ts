@@ -199,6 +199,14 @@ describe('resolveApiErrorMessage', () => {
     ['agent.response_interrupted', 'en', 'The model response was interrupted. Please try again.'],
     ['agent.response_interrupted', 'zh', '模型响应意外中断，请重试。'],
     ['agent.response_interrupted', 'ja', 'モデルの応答が中断されました。もう一度お試しください。'],
+    ['agent.provider_overloaded', 'en', 'The model provider is overloaded right now. Please try again in a moment.'],
+    ['agent.provider_overloaded', 'zh', '模型服务当前过载，请稍后重试。'],
+    ['agent.provider_overloaded', 'ja', 'モデルプロバイダーが混雑しています。しばらくしてからお試しください。'],
+    ['agent.provider_rate_limited', 'zh', '已达到模型服务的速率上限，请稍后再发送。'],
+    ['agent.provider_quota_exhausted', 'en', 'The model provider account has no remaining balance or quota.'],
+    ['agent.provider_quota_exhausted', 'zh', '模型服务账户的余额或配额已用尽。'],
+    ['agent.provider_auth_failed', 'en', 'The model provider rejected the credentials. Check the provider API key.'],
+    ['agent.provider_auth_failed', 'zh', '模型服务拒绝了当前凭据，请检查该服务商的 API Key。'],
   ])('localizes structural stream failure %s for %s', (code, language, expected) => {
     locale = language
 

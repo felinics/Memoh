@@ -139,7 +139,11 @@
     },
     "agent": {
       "response_timeout": "モデルから時間内に応答がありませんでした。もう一度お試しください。",
-      "response_interrupted": "モデルの応答が中断されました。もう一度お試しください。"
+      "response_interrupted": "モデルの応答が中断されました。もう一度お試しください。",
+      "provider_overloaded": "モデルプロバイダーが混雑しています。しばらくしてからお試しください。",
+      "provider_rate_limited": "モデルプロバイダーのレート制限に達しました。少し待ってから送信してください。",
+      "provider_quota_exhausted": "モデルプロバイダーのアカウントに残高またはクォータが残っていません。",
+      "provider_auth_failed": "モデルプロバイダーが認証情報を拒否しました。プロバイダーの API キーを確認してください。"
     },
     "queue_request_invalid": "既存の会話で /steer または /queue の後に内容を入力してください。",
     "queue_no_active_run": "現在の応答は終了しています。内容を新しいメッセージとして送信してください。",

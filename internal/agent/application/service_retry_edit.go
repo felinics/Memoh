@@ -264,10 +264,17 @@ func (s *Service) resolveLatestVisibleTurn(ctx context.Context, sessionID, turnI
 	}
 	latest, err := s.messageService.GetLatestVisibleTurnBySession(ctx, sessionID)
 	if err != nil {
+		// A session with no visible turn at all and a session whose latest turn
+		// is a different one are the same answer to the client: the round it
+		// named is not the one the server can replace, so it has to reload.
+		// Both are reported with that code instead of the store's own wording.
+		if errors.Is(err, messagepkg.ErrNoVisibleTurn) {
+			return messagepkg.HistoryTurn{}, apperror.Wrap(apperror.CodeSessionHistoryInconsistent, err, nil)
+		}
 		return messagepkg.HistoryTurn{}, fmt.Errorf("load latest visible turn: %w", err)
 	}
 	if strings.TrimSpace(latest.ID) != turnID {
-		return messagepkg.HistoryTurn{}, errors.New(notLatest)
+		return messagepkg.HistoryTurn{}, apperror.Wrap(apperror.CodeSessionHistoryInconsistent, errors.New(notLatest), nil)
 	}
 	return latest, nil
 }

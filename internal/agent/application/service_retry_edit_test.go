@@ -22,11 +22,15 @@ type forkAnchorMessageService struct {
 type replacementOperationMessageService struct {
 	recordingMessageService
 	latest      messagepkg.HistoryTurn
+	latestErr   error
 	turnByMsg   messagepkg.HistoryTurn
 	turnByMsgID string
 }
 
 func (s *replacementOperationMessageService) GetLatestVisibleTurnBySession(context.Context, string) (messagepkg.HistoryTurn, error) {
+	if s.latestErr != nil {
+		return messagepkg.HistoryTurn{}, s.latestErr
+	}
 	return s.latest, nil
 }
 
@@ -140,6 +144,17 @@ func TestPrepareReplacementOperationUsesPersistedTurnBoundary(t *testing.T) {
 				RequestMessageID: "user-request",
 			},
 		}
+		service := &Service{messageService: messages}
+
+		_, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old")
+		if got := apperror.CodeOf(err); got != apperror.CodeSessionHistoryInconsistent {
+			t.Fatalf("error code = %q, want %q", got, apperror.CodeSessionHistoryInconsistent)
+		}
+	})
+
+	// The store's own no-rows wording used to reach the composer verbatim.
+	t.Run("a session with no visible turn reports the history code", func(t *testing.T) {
+		messages := &replacementOperationMessageService{latestErr: messagepkg.ErrNoVisibleTurn}
 		service := &Service{messageService: messages}
 
 		_, err := service.PrepareRetryLatestTurnOperation(context.Background(), "session-1", "turn-old")

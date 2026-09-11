@@ -142,7 +142,11 @@
     },
     "agent": {
       "response_timeout": "The model did not respond in time. Please try again.",
-      "response_interrupted": "The model response was interrupted. Please try again."
+      "response_interrupted": "The model response was interrupted. Please try again.",
+      "provider_overloaded": "The model provider is overloaded right now. Please try again in a moment.",
+      "provider_rate_limited": "The model provider rate limit was reached. Please wait a moment before sending again.",
+      "provider_quota_exhausted": "The model provider account has no remaining balance or quota.",
+      "provider_auth_failed": "The model provider rejected the credentials. Check the provider API key."
     },
     "queue_request_invalid": "Enter text after /steer or /queue in an existing conversation.",
     "queue_no_active_run": "The current response has ended. Send this as a new message.",

@@ -142,7 +142,11 @@
     },
     "agent": {
       "response_timeout": "模型未能及时响应，请重试。",
-      "response_interrupted": "模型响应意外中断，请重试。"
+      "response_interrupted": "模型响应意外中断，请重试。",
+      "provider_overloaded": "模型服务当前过载，请稍后重试。",
+      "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
+      "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",
+      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。"
     },
     "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
     "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
