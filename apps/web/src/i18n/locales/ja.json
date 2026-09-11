@@ -752,7 +752,6 @@
       "steerDescription": "次の安全なステップで現在の応答に追加",
       "followUpDescription": "現在の応答が終わった後に自動送信",
       "steerPlaceholder": "現在の応答に追加する内容を入力…",
-      "followUpPlaceholder": "次のメッセージを入力…",
       "enqueueSteer": "現在の応答に追加",
       "enqueueFollowUp": "次のメッセージに追加",
       "steerQueued": "現在の応答キューに追加済み",

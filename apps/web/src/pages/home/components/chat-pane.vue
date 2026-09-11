@@ -2785,8 +2785,7 @@ const queueSubmissionGate = new SessionQueueSubmissionGate()
 const composerQueueCommand = computed(() => parseSessionQueueCommand(inputText.value, composerACPAvailableCommands.value))
 const composerPlaceholder = computed(() => {
   if (activeChatReadOnly.value) return t('chat.readonlyHint')
-  if (!streaming.value) return t('chat.inputPlaceholder')
-  return t('chat.queue.followUpPlaceholder')
+  return t('chat.inputPlaceholder')
 })
 watch(inputText, (text) => {
   const prefix = slashPanelSuppressedPrefix.value

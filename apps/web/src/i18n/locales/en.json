@@ -768,7 +768,6 @@
       "steerDescription": "Add to the current response at the next safe step",
       "followUpDescription": "Send automatically after the current response",
       "steerPlaceholder": "Add something to the current response…",
-      "followUpPlaceholder": "Write the next message…",
       "enqueueSteer": "Add to current response",
       "enqueueFollowUp": "Add to up next",
       "steerQueued": "Added to the current response queue",

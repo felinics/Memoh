@@ -768,7 +768,6 @@
       "steerDescription": "在下一个安全步骤加入当前回复",
       "followUpDescription": "当前回复结束后自动发送",
       "steerPlaceholder": "输入要插入当前回复的内容…",
-      "followUpPlaceholder": "输入下一条消息…",
       "enqueueSteer": "插入当前回复",
       "enqueueFollowUp": "添加到接下来",
       "steerQueued": "已加入当前回复队列",
