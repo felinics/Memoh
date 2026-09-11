@@ -454,7 +454,6 @@ const searchIndex = computed(() => {
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
     { tab: 'advanced', section: 'compaction', key: 'bots.tabs.compaction', keywords: ['compaction', 'compress', 'summarize', 'context window'] },
-    { tab: 'apps', section: 'skills', key: 'bots.skills.title', keywords: ['prompts', 'instructions', 'system prompt'] },
   ].filter(item => botWorkspaceBackend.value !== 'remote'
     || !['desktop', 'network', 'hooks'].includes(item.section ?? ''))
     .map(item => ({
@@ -604,10 +603,6 @@ const activeTab = useSyncedQueryParam('tab', 'overview')
 watch([tabList, activeTab], ([tabs, tab]) => {
   if (['tool-approval', 'hooks', 'desktop', 'network', 'compaction'].includes(tab)) {
     void router.replace({ query: { ...route.query, tab: 'advanced', section: tab } })
-    return
-  }
-  if (tab === 'skills') {
-    void router.replace({ query: { ...route.query, tab: 'apps', section: 'skills' } })
     return
   }
   if (tab === 'acp') {
