@@ -44,9 +44,25 @@ export function nativeScrollTo(
   // "smooth scroll in flight" latch would stick. Well past any browser smooth-
   // scroll duration, so a false finish means the flight was already lost —
   // releasing is the right recovery either way.
+  let armedTarget = 0
+  let armedScrollTop = 0
+  const onBackstop = () => {
+    // Revalidate through settle() rather than releasing blindly: the live
+    // destination may have moved during the flight, and these callers disable
+    // bottom-following, so nothing downstream corrects the landing. If neither
+    // the destination nor the position moved since the last arm, no flight is
+    // making progress — finish instead of re-arming forever.
+    if (root.scrollTop === armedScrollTop && resolveTarget() === armedTarget) {
+      finish()
+      return
+    }
+    settle()
+  }
   const armBackstop = () => {
     clearTimeout(backstop)
-    backstop = setTimeout(finish, 2000)
+    armedTarget = target
+    armedScrollTop = root.scrollTop
+    backstop = setTimeout(onBackstop, 2000)
   }
   const stationary = Math.abs(root.scrollTop - target) < 1
   root.addEventListener('scrollend', settle)

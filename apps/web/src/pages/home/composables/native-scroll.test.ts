@@ -92,6 +92,24 @@ describe('live destinations', () => {
     expect(finish).toHaveBeenCalledOnce()
   })
 
+  it('corrects a moved destination when the backstop fires, then releases', () => {
+    vi.useFakeTimers()
+    const root = viewport()
+    let target = 400
+    const finish = vi.fn()
+    nativeScrollTo(root, () => target, finish)
+    // The destination moves mid-flight and scrollend never arrives: the
+    // backstop must retarget rather than release at the original offset.
+    target = 600
+    vi.advanceTimersByTime(2_000)
+    expect(finish).not.toHaveBeenCalled()
+    expect(root.scrollTo).toHaveBeenLastCalledWith({ top: 600, behavior: 'smooth' })
+    // Position frozen (no real scrolling): the next tick detects no progress
+    // and finishes instead of re-arming forever.
+    vi.advanceTimersByTime(2_000)
+    expect(finish).toHaveBeenCalledOnce()
+  })
+
   it.each([620, 180])('settles at a moved destination (%i) before finishing', (next) => {
     const root = viewport()
     let target = 400

@@ -70,25 +70,23 @@
                    line pitch, so a real one-line user bubble is py-3 + 24px =
                    48px tall and ~10 CJK chars + px-4 ≈ 192px wide; each reply
                    bar (12px + 12px gap) occupies one text line's 24px pitch.
-                   Bars use element opacity (not color alpha) so the parent's
-                   animate-pulse compounds with the per-bar fade. -->
+                   The shared Skeleton primitive owns the loading motion and
+                   base tone; only the width stagger is kept from the old
+                   hand-rolled version. -->
               <div
                 v-if="messages.length === 0 && loadingMessages"
-                class="animate-pulse flex flex-col gap-6"
+                class="flex flex-col gap-6"
                 aria-hidden="true"
               >
                 <div class="flex justify-end">
-                  <div
-                    class="h-12 w-48 rounded-2xl bg-foreground"
-                    style="opacity: 0.08"
-                  />
+                  <Skeleton class="h-12 w-48 rounded-2xl" />
                 </div>
                 <div class="flex flex-col gap-3">
-                  <div
-                    v-for="(w, i) in CHAT_SKELETON_BAR_WIDTHS"
-                    :key="i"
-                    class="h-3 rounded bg-foreground"
-                    :style="{ width: w, opacity: 0.15 - i * 0.013 }"
+                  <Skeleton
+                    v-for="w in CHAT_SKELETON_BAR_WIDTHS"
+                    :key="w"
+                    class="h-3 rounded"
+                    :style="{ width: w }"
                   />
                 </div>
               </div>
@@ -1077,7 +1075,7 @@ import {
   SquarePen,
   ShieldCheck,
 } from 'lucide-vue-next'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Spinner, menuChromeClass, toast } from '@felinic/ui'
+import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList, CommandSeparator, Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, InlineLoadingRow, PanePlaceholder, Popover, PopoverContent, PopoverTrigger, ScrollArea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Spinner, menuChromeClass, toast } from '@felinic/ui'
 import { useChatStore, type ExternalAgentSessionInput, type ChatMessage, type ChatWorkspaceTargetSnapshot, type SendMessageResult } from '@/store/chat-list'
 import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
@@ -3632,7 +3630,6 @@ async function handleSend() {
   const sentReasoningEffort = pairSend.pair.reasoningEffort
   const sentWorkspaceTargetId = sendWorkspaceTargetId.value
   const preserveDirectDraftSelection = activeUsesDirectRuntime.value && !sentContext.target.sessionId
-  welcomeSendMotionArmed.value = isWelcome.value
   composerError.value = ''
   inputText.value = ''
   saveInputDraft(sentDraftKey, '')
@@ -3658,6 +3655,10 @@ async function handleSend() {
     return
   }
 
+  // Arm the placement FLIP only after attachment conversion has succeeded and
+  // the send is really going out: arming earlier lets a navigation during the
+  // async read (or a failed conversion) consume/inherit the flag.
+  welcomeSendMotionArmed.value = isWelcome.value
   // Arm the pin only once the store has passed command handling and session
   // setup and is about to start a real turn. Command-only sends therefore do
   // not leave a latent pin behind; startup failures roll the arm back.
