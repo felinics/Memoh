@@ -1,5 +1,7 @@
 -- 0149_alibaba_transcription
--- Restore the previous provider types. Remove Alibaba ASR providers before rollback.
+-- 删除阿里云语音转写 provider，并恢复原有 provider 类型约束。
+
+DELETE FROM public.providers WHERE client_type = 'alibabacloud-transcription';
 
 ALTER TABLE public.providers DROP CONSTRAINT IF EXISTS providers_client_type_check;
 ALTER TABLE public.providers ADD CONSTRAINT providers_client_type_check CHECK (client_type IN (
