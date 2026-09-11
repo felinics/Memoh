@@ -340,6 +340,12 @@ func (s *Service) materialize(ctx context.Context, botID, targetID string, relea
 		record(StepResult{Kind: KindConnector, ID: ref.Type, Status: StepNeedsAuth})
 	}
 
+	// Cleanup is part of materialization so Install/Resume and same-release
+	// update retries all recover retained references before reporting done.
+	if err := s.pruneReferences(ctx, inst, release, sink, &result); err != nil {
+		return result, s.failInstallation(ctx, inst, err)
+	}
+
 	status := StatusInstalled
 	if partial {
 		status = StatusPartial

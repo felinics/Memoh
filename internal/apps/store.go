@@ -26,7 +26,7 @@ const (
 	StatusInstalling Status = "installing"
 	StatusUpdating   Status = "updating"
 	StatusRemoving   Status = "removing"
-	// StatusFailed means the Skills could not be materialized.
+	// StatusFailed means materialization or its reference cleanup failed.
 	StatusFailed Status = "failed"
 )
 
