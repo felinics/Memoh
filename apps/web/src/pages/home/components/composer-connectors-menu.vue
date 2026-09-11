@@ -30,7 +30,7 @@ const rows = computed(() => (catalog.data.value ?? []).filter(item => item.type)
 const loading = computed(() => catalog.isLoading.value || connections.isLoading.value)
 const failed = computed(() => catalog.error.value || connections.error.value)
 function goToSettings() {
-  void router.push({ name: 'bot-detail', params: { botName: props.botName || props.botId }, query: { tab: 'connectors' } })
+  void router.push({ name: 'bot-detail', params: { botName: props.botName || props.botId }, query: { tab: 'apps' } })
 }
 </script>
 
