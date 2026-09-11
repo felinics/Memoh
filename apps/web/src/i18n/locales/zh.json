@@ -95,10 +95,9 @@
     "preview": "预览"
   },
   "computerAccess": {
-    "nativeAlwaysOn": "始终对此 Bot 可用",
     "emptyBots": "还没有 Bot。",
-    "emptyComputers": "还没有已连接的电脑。",
-    "connectCta": "连接电脑",
+    "yourComputer": "你的电脑",
+    "notConnected": "未连接",
     "updateFailed": "更新访问权失败",
     "done": "完成",
     "subtitleRuntime": "哪些 Bot 可以使用它？",
@@ -803,6 +802,7 @@
     "continueOn": {
       "label": "电脑",
       "addComputer": "添加电脑",
+      "addYourComputer": "添加你的电脑",
       "manageAccess": "管理访问权",
       "manageComputers": "管理电脑",
       "noAccess": "尚未授权其他电脑"

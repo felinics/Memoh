@@ -92,10 +92,9 @@
     "saveChanges": "変更を保存"
   },
   "computerAccess": {
-    "nativeAlwaysOn": "この Bot では常に利用できます",
     "emptyBots": "Bot がまだありません。",
-    "emptyComputers": "接続済みのコンピューターがありません。",
-    "connectCta": "コンピューターを接続",
+    "yourComputer": "お使いのコンピューター",
+    "notConnected": "未接続",
     "updateFailed": "アクセス権を更新できませんでした",
     "done": "完了",
     "subtitleRuntime": "どの Bot がこれを使えますか？",
@@ -784,6 +783,7 @@
     "continueOn": {
       "label": "コンピューター",
       "addComputer": "コンピューターを追加",
+      "addYourComputer": "使うコンピューターを追加",
       "manageAccess": "アクセス権を管理",
       "manageComputers": "コンピューターを管理",
       "noAccess": "他のコンピューターは未承認です"

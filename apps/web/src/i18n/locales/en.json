@@ -95,10 +95,9 @@
     "preview": "Preview"
   },
   "computerAccess": {
-    "nativeAlwaysOn": "Always available to this Bot",
     "emptyBots": "No bots yet.",
-    "emptyComputers": "No computers connected.",
-    "connectCta": "Connect computer",
+    "yourComputer": "Your computer",
+    "notConnected": "Not connected",
     "updateFailed": "Couldn’t update access",
     "done": "Done",
     "subtitleRuntime": "Which bots can use it?",
@@ -803,6 +802,7 @@
     "continueOn": {
       "label": "Computers",
       "addComputer": "Add computer",
+      "addYourComputer": "Add your computer",
       "manageAccess": "Manage access",
       "manageComputers": "Manage computers",
       "noAccess": "No other computers authorized"

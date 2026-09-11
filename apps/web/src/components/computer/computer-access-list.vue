@@ -29,7 +29,6 @@
       <SettingsRow
         v-if="subject === 'bot'"
         :label="t('bots.remoteRuntime.nativeWorkspace')"
-        :description="t('computerAccess.nativeAlwaysOn')"
       >
         <template #leading>
           <CloudIcon class="size-4 text-muted-foreground" />
@@ -85,18 +84,23 @@
         </div>
       </SettingsRow>
 
-      <!-- Bot direction with zero account computers: the connect CTA lives in
-           the same frame, one row under the native workspace. -->
+      <!-- Bot direction with zero account computers: a ghost row standing in
+           for the computer the user could connect — it looks like a real row,
+           but the trailing slot is the add action, not a switch. -->
       <SettingsRow
         v-if="subject === 'bot' && rows.length === 0"
-        :label="t('computerAccess.emptyComputers')"
+        :label="t('computerAccess.yourComputer')"
+        :description="t('computerAccess.notConnected')"
       >
+        <template #leading>
+          <ComputerIcon class="size-4 text-muted-foreground" />
+        </template>
         <Button
           variant="outline"
           size="sm"
-          @click="goToRuntimes"
+          @click="emit('addComputer')"
         >
-          {{ t('computerAccess.connectCta') }}
+          {{ t('chat.continueOn.addComputer') }}
         </Button>
       </SettingsRow>
     </SettingsSection>
@@ -115,7 +119,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useQuery } from '@pinia/colada'
 import type { BotsBot } from '@memohai/sdk'
 import { getBotsQuery } from '@memohai/sdk/colada'
@@ -144,6 +147,11 @@ const props = defineProps<{
   bot?: { id: string, name: string } | null
 }>()
 
+const emit = defineEmits<{
+  /** The zero-state ghost row's add action — the host opens the connect wizard. */
+  addComputer: []
+}>()
+
 type AccessRow = {
   key: string
   botId: string
@@ -157,7 +165,6 @@ type AccessRow = {
 )
 
 const { t } = useI18n()
-const router = useRouter()
 
 const subject = computed<'runtime' | 'bot'>(() => (props.runtime ? 'runtime' : 'bot'))
 
@@ -245,9 +252,5 @@ function retry(): void {
   void refetchGrants()
   if (subject.value === 'runtime') void refetchBots()
   else void refetchRuntimes()
-}
-
-function goToRuntimes(): void {
-  void router.push({ name: 'runtimes', query: { connect: '1' } })
 }
 </script>

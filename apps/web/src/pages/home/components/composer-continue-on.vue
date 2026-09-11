@@ -117,10 +117,28 @@
           />
         </DropdownMenuItem>
 
-        <DropdownMenuItem @select="accessDialogOpen = true">
-          <SettingsIcon />
-          <span>{{ t('chat.continueOn.manageComputers') }}</span>
-        </DropdownMenuItem>
+        <!-- Zero-computer accounts skip the management surface entirely: the
+             menu's one action is the connect wizard, opened in place — no
+             detour through the settings page. Until the account query has
+             answered at least once, render NOTHING here: guessing a label
+             shows one wrong frame ("Manage computers" flipping to "Add your
+             computer") to the accounts that have no computers. -->
+        <template v-if="runtimesReady">
+          <DropdownMenuItem
+            v-if="accountRuntimesEmpty"
+            @select="void startConnect()"
+          >
+            <AddIcon />
+            <span>{{ t('chat.continueOn.addYourComputer') }}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            v-else
+            @select="accessDialogOpen = true"
+          >
+            <SettingsIcon />
+            <span>{{ t('chat.continueOn.manageAccess') }}</span>
+          </DropdownMenuItem>
+        </template>
       </template>
     </DropdownMenuContent>
   </DropdownMenu>
@@ -130,10 +148,14 @@
     v-model:open="accessDialogOpen"
     :bot="{ id: botId, name: botName }"
   />
+  <ConnectComputerDialog
+    v-model:open="connectDialogOpen"
+    :credential="createdCredential"
+  />
 </template>
 
 <script setup lang="ts">
-import { SettingsIcon, CloudIcon, ComputerIcon, ExpandIcon } from '@memohai/icon/ui'
+import { AddIcon, SettingsIcon, CloudIcon, ComputerIcon, ExpandIcon } from '@memohai/icon/ui'
 import { computed, inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WorkspaceWorkspaceTarget } from '@memohai/sdk'
@@ -150,7 +172,9 @@ import {
   workspaceTargetStatusLabel,
 } from '@/utils/workspace-target'
 import BotComputerAccessDialog from '@/components/computer/bot-computer-access-dialog.vue'
+import ConnectComputerDialog from '@/components/computer/connect-computer-dialog.vue'
 import { useAccountRuntimes } from '@/components/computer/use-computer-access'
+import { useConnectComputer } from '@/components/computer/use-connect-computer'
 
 // The composer's execution target selector: which authorized
 // computer this session runs on. It sits in the controls row as a peer of the
@@ -177,8 +201,18 @@ const { t } = useI18n()
 const desktopRuntimeBridge = inject(DesktopRuntimeKey, undefined)
 const desktopRuntimeState = ref<DesktopRuntimeState>()
 
-const { refetch: refetchRuntimes } = useAccountRuntimes()
+const { runtimes, error: runtimesError, refetch: refetchRuntimes } = useAccountRuntimes()
 const accessDialogOpen = ref(false)
+
+// "Ready" = the account query has answered (or failed) at least once. On
+// error the safe fallback is the management dialog, which carries its own
+// retry surface.
+const runtimesReady = computed(() => runtimes.value !== undefined || runtimesError.value !== undefined)
+const accountRuntimesEmpty = computed(() => runtimes.value !== undefined && runtimes.value.length === 0)
+
+// The same one-click credential + stepper the Computers page runs, mounted
+// in place — the chat surface never navigates away for this.
+const { connectOpen: connectDialogOpen, connectCredential: createdCredential, startConnect } = useConnectComputer()
 
 // Opening the menu is the user's decision moment — refetch so a computer
 // connected or authorized elsewhere just now shows up immediately.
