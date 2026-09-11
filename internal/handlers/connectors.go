@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -13,42 +11,26 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
-	"github.com/felinics/memoh/internal/apps"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/connectors"
 )
 
-// connectionUnlinker is the slice of *apps.Service the handler uses once a
-// connection is deleted.
-type connectionUnlinker interface {
-	UnlinkConnection(ctx context.Context, botID, connectionID string) error
-}
-
 type ConnectorsHandler struct {
 	service        *connectors.Service
-	apps           connectionUnlinker
 	botService     *bots.Service
 	accountService *accounts.Service
-	logger         *slog.Logger
 }
 
 func NewConnectorsHandler(
-	log *slog.Logger,
 	service *connectors.Service,
-	appService *apps.Service,
 	botService *bots.Service,
 	accountService *accounts.Service,
 ) *ConnectorsHandler {
-	h := &ConnectorsHandler{
+	return &ConnectorsHandler{
 		service:        service,
 		botService:     botService,
 		accountService: accountService,
-		logger:         log.With(slog.String("handler", "connectors")),
 	}
-	if appService != nil {
-		h.apps = appService
-	}
-	return h
 }
 
 func (h *ConnectorsHandler) Register(e *echo.Echo) {
@@ -213,15 +195,6 @@ func (h *ConnectorsHandler) Delete(c echo.Context) error {
 	connectionID := strings.TrimSpace(c.Param("connection_id"))
 	if err := h.service.Delete(ctx, botID, connectionID); err != nil {
 		return connectorHTTPError(err)
-	}
-	// The credential is revoked at this point. A stale App link only delays
-	// the authorization prompt until the App list reconciles, so it does not
-	// turn a completed disconnect into an error.
-	if h.apps != nil {
-		if err := h.apps.UnlinkConnection(ctx, botID, connectionID); err != nil {
-			h.logger.Warn("unlink disconnected connection from Apps",
-				slog.String("bot_id", botID), slog.String("connection_id", connectionID), slog.Any("error", err))
-		}
 	}
 	return c.NoContent(http.StatusNoContent)
 }

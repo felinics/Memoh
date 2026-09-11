@@ -178,3 +178,9 @@ jobs:
             -run '^TestPostgresRuntimeFence' ./internal/agent/runtime/acp
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             ./internal/agent/runtime/session/ledger
+      - name: Verify atomic connector disconnect and tenant isolation
+        env:
+          TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/memoh_runtime_test?sslmode=disable
+        run: >-
+          go test -v -race -tags=integration -count=1 -timeout 90s
+          -run '^TestConnectorDisconnectFinalizationIsAtomicAndScoped$' ./internal/db

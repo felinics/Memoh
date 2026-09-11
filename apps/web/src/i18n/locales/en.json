@@ -352,7 +352,7 @@
     "people": "Members",
     "appearance": "Appearance",
     "keyboard": "Keyboard",
-    "supermarket": "App Store",
+    "supermarket": "Supermarket",
     "about": "About",
     "switchBot": "Switch bot",
     "manageBots": "Manage Bots"
@@ -3566,7 +3566,7 @@
     "colOutputTokens": "Output"
   },
   "supermarket": {
-    "title": "App Store",
+    "title": "Supermarket",
     "searchPlaceholder": "Search Apps...",
     "skillsSection": "Skills",
     "noResults": "No results found",

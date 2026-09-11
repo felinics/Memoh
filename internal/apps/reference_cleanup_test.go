@@ -432,26 +432,3 @@ func TestFailedCleanupPersistsPublicMessageOnly(t *testing.T) {
 		}
 	})
 }
-
-func TestUnlinkConnectionClearsReferencesAndDemotesInstallations(t *testing.T) {
-	f := newCleanupFixture(t)
-	if err := f.service.UnlinkConnection(t.Context(), testBotID, ""); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("empty connection id: %v", err)
-	}
-	if err := f.service.UnlinkConnection(t.Context(), testBotID, "unknown-connection"); err != nil {
-		t.Fatalf("unknown connection must be a no-op: %v", err)
-	}
-	if inst := f.installation(t); inst.Status != StatusInstalled {
-		t.Fatalf("no-op changed status to %s", inst.Status)
-	}
-	if err := f.service.UnlinkConnection(t.Context(), testBotID, "github-1"); err != nil {
-		t.Fatal(err)
-	}
-	refs, err := f.store.ListConnectorRefs(t.Context(), f.inst.ID)
-	if err != nil || len(refs) != 1 || refs[0].ConnectionID != "" {
-		t.Fatalf("refs after unlink = %v, %v", refs, err)
-	}
-	if inst := f.installation(t); inst.Status != StatusPartial || inst.LastError != "" {
-		t.Fatalf("installation after unlink = %+v", inst)
-	}
-}

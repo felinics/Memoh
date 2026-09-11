@@ -201,6 +201,9 @@ func (s *Service) Delete(ctx context.Context, botID, connectionID string) error 
 		return ErrNotConfigured
 	}
 	item, err := s.getBinding(ctx, botID, connectionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -209,6 +212,9 @@ func (s *Service) Delete(ctx context.Context, botID, connectionID string) error 
 			return upstreamError(err)
 		}
 	}
+	// Finalize the binding, App references and App statuses in one SQL
+	// statement. If it fails, the binding survives so retry can reissue the
+	// remote delete (404 is success) and finish local cleanup.
 	return s.queries.DeleteConnector(ctx, dbsqlc.DeleteConnectorParams{
 		BotID:        item.BotID,
 		ConnectionID: item.ConnectionID,

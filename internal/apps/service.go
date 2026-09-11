@@ -470,50 +470,6 @@ func (s *Service) CreateConnectorCredential(ctx context.Context, botID, installa
 	return result, nil
 }
 
-// UnlinkConnection clears every reference of the bot's Apps to a connection
-// the user disconnected. Installations that required it drop back to partial
-// so they ask for authorization again. Connections of other bots are never
-// touched.
-func (s *Service) UnlinkConnection(ctx context.Context, botID, connectionID string) error {
-	connectionID = strings.TrimSpace(connectionID)
-	if connectionID == "" {
-		return ErrInvalidRequest
-	}
-	refs, err := s.store.ListBotConnectorRefs(ctx, botID)
-	if err != nil {
-		return fmt.Errorf("apps: list connector references: %w", err)
-	}
-	linked := false
-	for _, ref := range refs {
-		if ref.ConnectionID == connectionID {
-			linked = true
-			break
-		}
-	}
-	if !linked {
-		return nil
-	}
-	if err := s.store.ClearConnectorRefConnection(ctx, connectionID); err != nil {
-		return fmt.Errorf("apps: unlink connection: %w", err)
-	}
-	for _, ref := range refs {
-		if ref.ConnectionID != connectionID || !ref.Required {
-			continue
-		}
-		inst, err := s.store.GetByID(ctx, botID, ref.InstallationID)
-		if err != nil {
-			return fmt.Errorf("apps: read installation after unlinking: %w", err)
-		}
-		if inst.Status != StatusInstalled {
-			continue
-		}
-		if _, err := s.store.SetStatus(ctx, botID, inst.ID, StatusPartial, ""); err != nil {
-			return fmt.Errorf("apps: record partial installation after unlinking: %w", err)
-		}
-	}
-	return nil
-}
-
 func (s *Service) connectorRef(ctx context.Context, botID, installationID, connectorType string) (Installation, ConnectorRef, error) {
 	inst, err := s.store.GetByID(ctx, botID, installationID)
 	if err != nil {
