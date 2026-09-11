@@ -625,11 +625,13 @@ const canForkAssistantMessage = computed(() =>
   && turnId.value !== '',
 )
 
+// Resubmitting the same text is a valid edit: the server replaces the turn and
+// reruns it either way, so an unchanged draft is the way to re-roll a turn
+// without rewording it. Only an empty draft has nothing to submit.
 const canSubmitEdit = computed(() =>
   props.message.role === 'user'
   && props.canEditLatestUser === true
   && editDraft.value.trim().length > 0
-  && editDraft.value.trim() !== cleanCurrentUserText.value.trim()
   && !editSubmitting.value,
 )
 
