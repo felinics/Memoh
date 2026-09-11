@@ -202,13 +202,14 @@ const { t } = useI18n()
 const desktopRuntimeBridge = inject(DesktopRuntimeKey, undefined)
 const desktopRuntimeState = ref<DesktopRuntimeState>()
 
-const { runtimes, error: runtimesError, refetch: refetchRuntimes } = useAccountRuntimes()
+const { runtimes, isPending: runtimesPending, refetch: refetchRuntimes } = useAccountRuntimes()
 const accessDialogOpen = ref(false)
 
-// "Ready" = the account query has answered (or failed) at least once. On
-// error the safe fallback is the management dialog, which carries its own
-// retry surface.
-const runtimesReady = computed(() => runtimes.value !== undefined || runtimesError.value !== undefined)
+// "Ready" = the account query has answered (or failed) at least once. Colada's
+// error ref starts at null, so it cannot witness "failed" — isPending covers
+// both: it stays true until the first success OR the first error. On error the
+// safe fallback is the management dialog, which carries its own retry surface.
+const runtimesReady = computed(() => !runtimesPending.value)
 const accountRuntimesEmpty = computed(() => runtimes.value !== undefined && runtimes.value.length === 0)
 
 // The same one-click credential + stepper the Computers page runs, mounted
