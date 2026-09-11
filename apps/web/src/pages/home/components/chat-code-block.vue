@@ -10,7 +10,7 @@
     <CodeBlock
       :code="code"
       :lang="language || 'text'"
-      class="overflow-x-auto py-1.5 text-[13px] leading-relaxed"
+      class="overflow-x-auto py-1.5 text-[13px] leading-[1.8]"
     />
     <Button
       variant="ghost"

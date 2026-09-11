@@ -220,15 +220,16 @@
 
             <template v-else>
               <!-- Text block -->
-              <!-- Headings split into two spacing groups, not one flat ramp:
-                 h1–h3 (true section breaks) get more air above and a clear gap
-                 below (so an h3 immediately followed by an h4 isn't cramped);
-                 h4–h6 (sub-labels close to their text) get less. Reads as two
-                 tiers rather than six evenly-spaced rungs. -->
+              <!-- Block rhythm is owned by style.css (.markstream-vue
+                 .node-slot rules): markstream 2.0 wraps every top-level node
+                 in its own .node-slot, so element-level spacing here (p+p,
+                 heading margins) can never match — keep this wrapper free of
+                 spacing utilities. li inter-item tightening and the outer
+                 edge trims are the only exceptions. -->
               <div
                 v-if="node.block.type === 'text' && node.block.content"
                 :lang="contentLang(node.block.content)"
-                class="prose prose-sm dark:prose-invert max-w-none [&_p]:my-0! [&_p+p]:mt-2! [&_ul]:my-1.5! [&_ol]:my-1.5! [&_li]:my-0.5! [&_:is(h1,h2,h3)]:mt-5! [&_:is(h1,h2,h3)]:mb-2! [&_:is(h4,h5,h6)]:mt-3! [&_:is(h4,h5,h6)]:mb-1! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
+                class="prose prose-sm dark:prose-invert max-w-none [&_li]:my-0.5! [&>*:first-child]:mt-0! [&>*:last-child]:mb-0!"
               >
                 <!-- mode="chat" selects the upstream chat profile (32/48/6ms
                      batches, no live-node virtualization cap) instead of the

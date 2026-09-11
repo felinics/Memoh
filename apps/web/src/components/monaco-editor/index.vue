@@ -153,6 +153,14 @@ const {
   },
   fontSize: editorFontSize.value,
   fontFamily: editorFontFamily.value,
+  // Monaco's computed default line box (~1.35×font) packs lines tight, and CJK
+  // glyphs (no descender, full em) read bottom-heavy inside it. A roomier
+  // explicit lineHeight (1.7×, matching our relaxed prose rhythm) spreads the
+  // air evenly above/below and makes consecutive lines distinguishable.
+  lineHeight: Math.round(editorFontSize.value * 1.7),
+  // Mono at 400 reads thin next to the ~420 Latin body; one step up keeps code
+  // legible without approaching bold-token territory (700).
+  fontWeight: '500',
   lineNumbers: 'on',
   renderLineHighlight: 'line',
   tabSize: 2,
@@ -337,7 +345,7 @@ watch(() => props.readonly, (val) => {
 })
 
 watch(editorFontSize, (fontSize) => {
-  getEditorView()?.updateOptions({ fontSize })
+  getEditorView()?.updateOptions({ fontSize, lineHeight: Math.round(fontSize * 1.7) })
 })
 
 watch(editorFontFamily, (fontFamily) => {
