@@ -1,4 +1,4 @@
--- 0149_alibaba_transcription
+-- 0151_alibaba_transcription
 -- Allow Alibaba Cloud Qwen ASR providers.
 
 ALTER TABLE public.providers DROP CONSTRAINT IF EXISTS providers_client_type_check;

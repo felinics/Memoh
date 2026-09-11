@@ -1,4 +1,4 @@
--- 0149_alibaba_transcription
+-- 0151_alibaba_transcription
 -- 删除阿里云语音转写 provider，并恢复原有 provider 类型约束。
 
 DELETE FROM public.providers WHERE client_type = 'alibabacloud-transcription';
