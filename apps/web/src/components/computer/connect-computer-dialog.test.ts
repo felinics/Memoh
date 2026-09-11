@@ -36,7 +36,8 @@ const credential = { id: 'runtime-1', key: 'test-key' }
 let items = ref<UserruntimeRuntime[]>([])
 
 async function flush() {
-  for (let i = 0; i < 12; i++) await nextTick()
+  await vi.advanceTimersByTimeAsync(0)
+  await nextTick()
 }
 
 async function mount(open = true) {
@@ -121,10 +122,10 @@ describe('connect computer polling', () => {
     expect(api.list).toHaveBeenCalledOnce()
   })
 
-  it('does not advance or duplicate grants while authorization is still pending', async () => {
+  it('serializes grants and resumes a new connection after the previous grant finishes', async () => {
     let finishGrant!: (value: { data: object }) => void
     api.grant.mockImplementationOnce(() => new Promise(resolve => { finishGrant = resolve }))
-    await mount()
+    const props = await mount()
     items.value = [{ ...credential, online: true }]
     await vi.advanceTimersByTimeAsync(1000)
     await flush()
@@ -135,8 +136,17 @@ describe('connect computer polling', () => {
     await flush()
     expect(api.grant).toHaveBeenCalledOnce()
     expect(root.textContent).not.toContain('access-list')
+    props.open = false
+    await flush()
+    props.credential = { id: 'runtime-2', key: 'second-key' }
+    items.value = [{ ...props.credential, online: true }]
+    props.open = true
+    await flush()
+    expect(api.grant).toHaveBeenCalledOnce()
     finishGrant({ data: {} })
     await flush()
+    expect(api.grant).toHaveBeenCalledTimes(2)
+    expect(api.grant.mock.lastCall?.[0].path.runtime_id).toBe('runtime-2')
     expect(root.textContent).toContain('access-list')
   })
 

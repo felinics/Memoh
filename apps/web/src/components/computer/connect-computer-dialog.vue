@@ -147,18 +147,23 @@ watch([open, runtimeId, step, () => !!connectedRuntime.value], ([isOpen, id, cur
 }, { immediate: true })
 
 const granting = ref(false)
-watch(connectedRuntime, async (runtime) => {
+// A newly opened connection may become online while the previous grant is
+// still running. Re-check it when that grant releases the shared busy state.
+watch([connectedRuntime, granting, open], async ([runtime]) => {
   if (!open.value || !runtime || step.value !== 'command' || granting.value) return
   adoptedName.value = runtime.name || runtime.hostname || runtimeId.value
   toast.success(t('runtimes.computerOnline', { name: adoptedName.value }))
   const connectedId = runtimeId.value
-  await grantAllBots(connectedId)
-  if (open.value && runtimeId.value === connectedId) step.value = 'access'
+  granting.value = true
+  try {
+    await grantAllBots(connectedId)
+    if (open.value && runtimeId.value === connectedId) step.value = 'access'
+  } finally {
+    granting.value = false
+  }
 })
 
 async function grantAllBots(connectedId: string): Promise<void> {
-  if (granting.value) return
-  granting.value = true
   let failed = 0
   for (const bot of botsData.value?.items ?? []) {
     if (!bot.id) continue
@@ -168,7 +173,6 @@ async function grantAllBots(connectedId: string): Promise<void> {
       failed += 1
     }
   }
-  granting.value = false
   if (failed > 0) {
     toast.error(t('computerAccess.updateFailed'))
   }
