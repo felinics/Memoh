@@ -274,6 +274,13 @@
       "request_invalid": "アプリのリクエストが無効です。",
       "busy": "このアプリの別の操作が進行中です。",
       "operation_failed": "アプリの操作に失敗しました。"
+    },
+    "agent_authorization": {
+      "expired": "認証の有効期限が切れました。アカウントを再接続してください。",
+      "not_ready": "アカウントを接続してから Bot を作成してください。",
+      "limit": "他の認証を終了してから、もう一度お試しください。",
+      "failed": "アカウント認証に失敗しました。もう一度お試しください。",
+      "code_invalid": "認証コードが無効か期限切れです。Claude の完全なコードをコピーするか、再接続してください。"
     }
   },
   "auth": {
@@ -2081,6 +2088,8 @@
       "settingsDesc": "タイムゾーンなど"
     },
     "agentCreate": {
+      "prepare": "Agent を準備",
+      "prepareDescription": "Workspace を確認し、この Agent の実行に必要な依存関係をインストールします。",
       "typeAriaLabel": "エージェントの種類",
       "oauthSettingsHint": "認可は作成後に行います。Bot の設定でいつでも完了できます。",
       "requiredError": "「{field}」を入力してください",
@@ -2101,7 +2110,8 @@
         "creating": "Workspace を作成中",
         "restoring": "Memoryとデータの復元",
         "ready": "Botの準備ができました",
-        "applyingSettings": "ModelとMemory設定の適用"
+        "applyingSettings": "ModelとMemory設定の適用",
+        "installingAgent": "{name} をインストール中"
       }
     },
     "editBot": "Botの編集",
@@ -2377,7 +2387,14 @@
       "openSettings": "Agent の設定を開く",
       "dependencyChecking": "依存関係を確認中…",
       "dependencyRemoteOffline": "この Bot が接続しているコンピューターはオフラインです。オンラインになると依存関係を確認できます。",
-      "dependencyInstalledEnableHint": "{name} をインストールしました。Agent を有効にすると使用できます。"
+      "dependencyInstalledEnableHint": "{name} をインストールしました。Agent を有効にすると使用できます。",
+      "claudeAccount": "Claude アカウント",
+      "claudeAccountDescription": "Claude のサブスクリプションアカウントで Claude Code を認証します。",
+      "claudeAuthorizationHint": "認証ページを開いて Claude にログインしてください。表示された認証コードをコピーし、下に貼り付けて認証を完了してください。",
+      "openAuthorizationPage": "認証ページを開く",
+      "authorizationCode": "認証コード",
+      "authorizationCodePlaceholder": "認証コードをすべて貼り付けてください",
+      "completeAuthorization": "認証を完了"
     },
     "dependencies": {
       "title": "Workspace の依存関係",

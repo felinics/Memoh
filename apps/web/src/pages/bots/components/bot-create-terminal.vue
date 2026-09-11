@@ -19,6 +19,7 @@ const lineLabelKey: Partial<Record<BotCreateTerminalLineKind, string>> = {
   restoring: 'bots.create.line.restoring',
   ready: 'bots.create.line.ready',
   'applying-settings': 'bots.create.line.applyingSettings',
+  'installing-agent': 'bots.create.line.installingAgent',
 }
 
 function labelFor(line: BotCreateTerminalLine): string {

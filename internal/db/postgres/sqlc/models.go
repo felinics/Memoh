@@ -41,6 +41,21 @@ type AcpSessionStateLine struct {
 	ContentBytes int32       `json:"content_bytes"`
 }
 
+type AgentAuthorization struct {
+	ID               pgtype.UUID        `json:"id"`
+	TeamID           pgtype.UUID        `json:"team_id"`
+	OwnerUserID      pgtype.UUID        `json:"owner_user_id"`
+	Runtime          string             `json:"runtime"`
+	AuthKind         string             `json:"auth_kind"`
+	Status           string             `json:"status"`
+	EncryptedPayload []byte             `json:"encrypted_payload"`
+	EncryptionNonce  []byte             `json:"encryption_nonce"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	PollAfter        pgtype.Timestamptz `json:"poll_after"`
+	ClaimedAgentID   pgtype.UUID        `json:"claimed_agent_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentCredential struct {
 	ID                pgtype.UUID        `json:"id"`
 	TeamID            pgtype.UUID        `json:"team_id"`

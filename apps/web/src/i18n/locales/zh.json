@@ -277,6 +277,13 @@
       "request_invalid": "应用请求无效。",
       "busy": "该应用的另一个操作正在进行中。",
       "operation_failed": "应用操作失败。"
+    },
+    "agent_authorization": {
+      "expired": "授权已过期，请重新连接账号。",
+      "not_ready": "请先完成账号连接，再创建 Bot。",
+      "limit": "请关闭其他待完成的授权，然后重试。",
+      "failed": "账号授权失败，请重试。",
+      "code_invalid": "授权码无效或已过期，请复制 Claude 页面上的完整授权码，或重新连接。"
     }
   },
   "auth": {
@@ -2083,7 +2090,7 @@
     },
     "agentCreate": {
       "prepare": "准备 Agent",
-      "prepareDescription": "检查工作空间并确认安装所需依赖，然后连接账号。",
+      "prepareDescription": "检查工作空间并安装运行这个 Agent 所需的依赖。",
       "authorizeAfterCreate": "创建 Bot 后继续为这个 Agent 授权。",
       "typeAriaLabel": "Agent 类型",
       "oauthSettingsHint": "授权在创建后进行，可随时在 Bot 设置中完成。",
@@ -2105,7 +2112,8 @@
         "creating": "正在创建工作区",
         "restoring": "正在恢复记忆与数据",
         "ready": "Bot 已就绪",
-        "applyingSettings": "正在应用模型与记忆设置"
+        "applyingSettings": "正在应用模型与记忆设置",
+        "installingAgent": "正在安装 {name}"
       }
     },
     "editBot": "编辑 Bot",
@@ -2381,7 +2389,14 @@
       "openSettings": "打开 Agent 设置",
       "dependencyChecking": "正在检查依赖…",
       "dependencyRemoteOffline": "该 Bot 连接的电脑已离线，上线后才能检查依赖。",
-      "dependencyInstalledEnableHint": "已安装 {name}，现在可以启用该 Agent。"
+      "dependencyInstalledEnableHint": "已安装 {name}，现在可以启用该 Agent。",
+      "claudeAccount": "Claude 账号",
+      "claudeAccountDescription": "使用 Claude 订阅账号授权 Claude Code。",
+      "claudeAuthorizationHint": "打开授权页面并登录 Claude，复制页面显示的完整授权码，粘贴到下方即可完成授权。",
+      "openAuthorizationPage": "打开授权页面",
+      "authorizationCode": "授权码",
+      "authorizationCodePlaceholder": "粘贴完整授权码",
+      "completeAuthorization": "完成授权"
     },
     "dependencies": {
       "title": "工作区依赖",

@@ -12,6 +12,7 @@ export type BotCreateTerminalLineKind =
   | 'restoring'
   | 'ready'
   | 'applying-settings'
+  | 'installing-agent'
   | 'error'
 
 export type BotCreateTerminalLine = {

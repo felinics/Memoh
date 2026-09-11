@@ -4,7 +4,14 @@ import type { BotCreateStreamEvent } from '@/composables/api/useBotCreateStream'
 
 const postBotsStream = vi.fn()
 const postBotsByBotIdAgents = vi.fn()
+const claimCredential = vi.fn()
 const putBotsByBotIdSettings = vi.fn()
+const installAgent = vi.fn()
+const patchAgent = vi.fn()
+const getAgent = vi.fn()
+const getAgents = vi.fn()
+const getAuthorization = vi.fn()
+vi.mock('./install-created-agent', () => ({ installCreatedAgent: (...args: unknown[]) => installAgent(...args) }))
 
 vi.mock('@/composables/api/useBotCreateStream', async (importActual) => {
   const actual = await importActual<typeof import('@/composables/api/useBotCreateStream')>()
@@ -12,7 +19,12 @@ vi.mock('@/composables/api/useBotCreateStream', async (importActual) => {
 })
 
 vi.mock('@memohai/sdk', () => ({
+  patchBotsByBotIdAgentsById: (...args: unknown[]) => patchAgent(...args),
+  getBotsByBotIdAgentsById: (...args: unknown[]) => getAgent(...args),
+  getBotsByBotIdAgents: (...args: unknown[]) => getAgents(...args),
+  getAgentAuthorizationsById: (...args: unknown[]) => getAuthorization(...args),
   postBotsByBotIdAgents: (...args: unknown[]) => postBotsByBotIdAgents(...args),
+  postBotsByBotIdAgentsByIdCredentialClaim: (...args: unknown[]) => claimCredential(...args),
   putBotsByBotIdSettings: (...args: unknown[]) => putBotsByBotIdSettings(...args),
 }))
 
@@ -29,8 +41,15 @@ function streamOf(events: BotCreateStreamEvent[]) {
 describe('useBotCreateProgressStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    installAgent.mockReset().mockResolvedValue(undefined)
+    patchAgent.mockReset().mockResolvedValue({})
+    getAgent.mockReset().mockResolvedValue({ data: { id: 'agent-1', runtime: 'codex', enabled: false, agent_credential_id: 'credential-1' } })
+    getAgents.mockReset().mockResolvedValue({ data: { items: [] } })
+    getAuthorization.mockReset().mockResolvedValue({ data: { auth_kind: 'openai_codex_oauth' } })
     postBotsStream.mockReset()
     postBotsByBotIdAgents.mockReset()
+    claimCredential.mockReset()
+    claimCredential.mockResolvedValue({ data: { id: 'credential-1' } })
     putBotsByBotIdSettings.mockReset()
     postBotsByBotIdAgents.mockResolvedValue({ data: { id: 'agent-1' } })
     putBotsByBotIdSettings.mockResolvedValue({ data: {} })
@@ -190,7 +209,7 @@ describe('useBotCreateProgressStore', () => {
     expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
   })
 
-  it('defers enabling and selecting a direct Agent until dependency confirmation', async () => {
+  it('automatically installs a direct Agent before enabling it and declaring the Bot ready', async () => {
     const bot = { id: 'bot-1', name: 'ada' }
     postBotsStream.mockResolvedValue(streamOf([
       { type: 'bot_created', bot },
@@ -213,11 +232,36 @@ describe('useBotCreateProgressStore', () => {
         metadata: { provider: 'codex' },
       },
     }))
-    expect(putBotsByBotIdSettings).not.toHaveBeenCalled()
-    expect(result.agentApplied).toBe(false)
+    expect(installAgent).toHaveBeenCalledWith('bot-1', expect.objectContaining({ id: 'agent-1', runtime: 'codex' }))
+    expect(patchAgent).toHaveBeenCalledWith(expect.objectContaining({ body: { enabled: true } }))
+    expect(patchAgent.mock.invocationCallOrder[0]).toBeGreaterThan(installAgent.mock.invocationCallOrder[0]!)
+    expect(putBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({ body: { default_bot_agent_id: 'agent-1' } }))
+    expect(result.agentApplied).toBe(true)
+    expect(store.lines.map(line => line.kind)).toEqual(['command', 'bot-created', 'applying-settings', 'installing-agent', 'ready'])
     expect(store.createdAgent).toMatchObject({ id: 'agent-1', runtime: 'codex' })
     expect(result.agentId).toBe('agent-1')
     expect(store.status).toBe('ready')
+  })
+
+  it.each([false, true])('binds the staged authorization and preserves the created Bot on claim failure: %s', async (failClaim) => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream.mockResolvedValue(streamOf([{ type: 'ready', bot }]))
+    if (failClaim) claimCredential.mockRejectedValue(new Error('claim unavailable'))
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada' }, { agent: { name: 'Codex', provider: 'codex', authorizationId: 'staged-1' } })
+    expect(claimCredential.mock.invocationCallOrder[0]).toBeGreaterThan(postBotsByBotIdAgents.mock.invocationCallOrder[0]!)
+    expect(claimCredential).toHaveBeenCalledWith(expect.objectContaining({
+      path: { bot_id: 'bot-1', id: 'agent-1' }, body: { authorization_id: 'staged-1' },
+    }))
+    expect(store.status).toBe(failClaim ? 'setup-error' : 'ready')
+    expect(store.authorizationId).toBe('staged-1')
+    expect(store.createdAgent?.id).toBe('agent-1')
+    expect(store.createdAgent?.agent_credential_id).toBe(failClaim ? undefined : 'credential-1')
+    expect(store.setupError).toBe(failClaim ? 'claim unavailable' : null)
+    if (failClaim) {
+      expect(installAgent).not.toHaveBeenCalled()
+      expect(putBotsByBotIdSettings).not.toHaveBeenCalled()
+    } else expect(putBotsByBotIdSettings).toHaveBeenCalled()
   })
 
   it('does not report the Agent as applied when selecting it as default fails', async () => {
@@ -239,7 +283,7 @@ describe('useBotCreateProgressStore', () => {
     expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
   })
 
-  it('keeps the bot ready and reports setup failure when Agent creation fails', async () => {
+  it('keeps the created Bot for retry when setup fails when Agent creation fails', async () => {
     const bot = { id: 'bot-1', name: 'ada' }
     postBotsStream.mockResolvedValue(streamOf([
       { type: 'bot_created', bot },
@@ -254,9 +298,48 @@ describe('useBotCreateProgressStore', () => {
     )
 
     expect(result.agentApplied).toBe(false)
-    expect(store.status).toBe('ready')
+    expect(store.status).toBe('setup-error')
     expect(store.setupError).toBe('agent boom')
     expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
+  })
+
+  it.each(['codex', 'claude-code'])('waits for %s installation in the terminal and retries on the same Bot', async (runtime) => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream.mockResolvedValue(streamOf([{ type: 'bot_created', bot }, { type: 'ready', bot }]))
+    let failInstall!: (error: Error) => void
+    const installing = Promise.withResolvers<void>()
+    installAgent.mockImplementationOnce(() => {
+      installing.resolve()
+      return new Promise((_, reject) => { failInstall = reject })
+    })
+    const store = useBotCreateProgressStore()
+    const creation = store.start({ name: 'ada' }, { settings: { memory_provider_id: 'memory-1' }, agent: { name: runtime, provider: runtime, authorizationId: 'stage' } })
+    await installing.promise
+    expect(store.status).toBe('creating')
+    expect(store.lines.at(-1)).toMatchObject({ kind: 'installing-agent', status: 'running', message: runtime === 'codex' ? 'Codex' : 'Claude Code' })
+    expect(store.lines.some(line => line.kind === 'ready')).toBe(false)
+    expect(patchAgent).not.toHaveBeenCalled()
+    failInstall(new Error('download interrupted'))
+    await creation
+    expect(store.status).toBe('setup-error')
+    expect(store.lines.some(line => line.kind === 'installing-agent' && line.status === 'error')).toBe(true)
+    getAgent.mockResolvedValue({ data: { id: 'agent-1', runtime, enabled: false, agent_credential_id: 'credential-1' } })
+    await store.retry()
+    expect(postBotsStream).toHaveBeenCalledTimes(1)
+    expect(postBotsByBotIdAgents).toHaveBeenCalledTimes(1)
+    expect(claimCredential).toHaveBeenCalledTimes(1)
+    expect(store.status).toBe('ready')
+    expect(store.lines.at(-1)?.kind).toBe('ready')
+  })
+
+  it('resumes the saved Agent instead of creating another Bot after a refresh', async () => {
+    const store = useBotCreateProgressStore()
+    await store.restore({ botId: 'bot-1', botName: 'cat', displayName: 'Cat', runtime: 'codex', agentId: 'agent-1', authorizationId: 'stage', setupError: null })
+    expect(store.status).toBe('ready')
+    expect(postBotsStream).not.toHaveBeenCalled()
+    expect(postBotsByBotIdAgents).not.toHaveBeenCalled()
+    expect(installAgent).toHaveBeenCalled()
+    expect(store.createdAgent?.enabled).toBe(true)
   })
 
   it('reset returns the store to idle and drops the retry payload', async () => {

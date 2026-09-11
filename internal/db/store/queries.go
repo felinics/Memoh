@@ -26,6 +26,14 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	CreateAgentAuthorization(context.Context, dbsqlc.CreateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
+	GetAgentAuthorization(context.Context, dbsqlc.GetAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
+	UpdateAgentAuthorization(context.Context, dbsqlc.UpdateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
+	DeleteAgentAuthorization(context.Context, dbsqlc.DeleteAgentAuthorizationParams) error
+	PruneAgentAuthorizations(context.Context) error
+	CountAgentAuthorizations(context.Context, pgtype.UUID) (int64, error)
+	LockAgentAuthorizationOwner(context.Context, string) error
+
 	ClaimBotDependencyOperation(ctx context.Context, arg dbsqlc.ClaimBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
 	FinishBotDependencyOperation(ctx context.Context, arg dbsqlc.FinishBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
 	DeleteBotDependencyOperation(ctx context.Context, arg dbsqlc.DeleteBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)

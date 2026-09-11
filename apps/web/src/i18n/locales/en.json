@@ -277,6 +277,13 @@
       "request_invalid": "The App request is invalid.",
       "busy": "Another operation on this App is in progress.",
       "operation_failed": "The App operation failed."
+    },
+    "agent_authorization": {
+      "expired": "This authorization has expired. Connect your account again.",
+      "not_ready": "Finish connecting your account before creating the Bot.",
+      "limit": "Close other pending authorizations and try again.",
+      "failed": "Account authorization failed. Please try again.",
+      "code_invalid": "The authorization code is invalid or expired. Copy the complete code from Claude or connect again."
     }
   },
   "auth": {
@@ -2083,7 +2090,7 @@
     },
     "agentCreate": {
       "prepare": "Prepare Agent",
-      "prepareDescription": "Check the workspace and install any required dependencies before connecting your account.",
+      "prepareDescription": "Check the workspace and install the dependencies required to run this Agent.",
       "authorizeAfterCreate": "Continue to authorize this Agent after the Bot is created.",
       "typeAriaLabel": "Agent type",
       "oauthSettingsHint": "Authorization happens after creation — finish it anytime in the bot's settings.",
@@ -2105,7 +2112,8 @@
         "creating": "Creating workspace",
         "restoring": "Restoring memory & data",
         "ready": "Bot is ready",
-        "applyingSettings": "Applying model & memory settings"
+        "applyingSettings": "Applying model & memory settings",
+        "installingAgent": "Installing {name}"
       }
     },
     "editBot": "Edit Bot",
@@ -2381,7 +2389,14 @@
       "openSettings": "Open Agent settings",
       "dependencyChecking": "Checking dependency…",
       "dependencyRemoteOffline": "The bot's connected computer is offline. Dependencies can be checked once it is back online.",
-      "dependencyInstalledEnableHint": "{name} installed. Turn the agent on to use it."
+      "dependencyInstalledEnableHint": "{name} installed. Turn the agent on to use it.",
+      "claudeAccount": "Claude account",
+      "claudeAccountDescription": "Authorize Claude Code with your Claude subscription account.",
+      "claudeAuthorizationHint": "Open the authorization page and sign in to Claude. Copy the authorization code shown there, then paste it below to finish connecting.",
+      "openAuthorizationPage": "Open authorization page",
+      "authorizationCode": "Authorization code",
+      "authorizationCodePlaceholder": "Paste the complete authorization code",
+      "completeAuthorization": "Complete authorization"
     },
     "dependencies": {
       "title": "Workspace dependencies",

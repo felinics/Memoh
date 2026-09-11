@@ -116,6 +116,11 @@ const (
 	CodeContextLifecycleAccessDenied           Code = "context_lifecycle.access_denied"
 	CodeContextLifecycleNotFound               Code = "context_lifecycle.not_found"
 	CodeContextLifecycleLoadFailed             Code = "context_lifecycle.load_failed"
+	CodeAgentAuthorizationExpired              Code = "agent_authorization.expired"
+	CodeAgentAuthorizationNotReady             Code = "agent_authorization.not_ready"
+	CodeAgentAuthorizationLimit                Code = "agent_authorization.limit"
+	CodeAgentAuthorizationFailed               Code = "agent_authorization.failed"
+	CodeAgentAuthorizationCodeInvalid          Code = "agent_authorization.code_invalid"
 	CodeAgentCredentialNotFound                Code = "agent_credential.not_found"                //nolint:gosec // Stable public error code.
 	CodeAgentCredentialRequestInvalid          Code = "agent_credential.request_invalid"          //nolint:gosec // Stable public error code.
 	CodeAgentCredentialForbidden               Code = "agent_credential.forbidden"                //nolint:gosec // Stable public error code.
@@ -139,6 +144,11 @@ type Definition struct {
 // clients; the localized copies live under errors.* in
 // apps/web/src/i18n/locales/{en,zh,ja}.json. Keep both sides in sync.
 var catalog = map[Code]Definition{
+	CodeAgentAuthorizationExpired:     {HTTPStatus: http.StatusGone, Detail: "This authorization has expired. Connect your account again."},
+	CodeAgentAuthorizationNotReady:    {HTTPStatus: http.StatusConflict, Detail: "Finish connecting your account before creating the Bot."},
+	CodeAgentAuthorizationLimit:       {HTTPStatus: http.StatusTooManyRequests, Detail: "Close other pending authorizations and try again."},
+	CodeAgentAuthorizationFailed:      {HTTPStatus: http.StatusServiceUnavailable, Detail: "Account authorization failed. Please try again."},
+	CodeAgentAuthorizationCodeInvalid: {HTTPStatus: http.StatusBadRequest, Detail: "The authorization code is invalid or expired. Copy the complete code from Claude or connect again."},
 	CodeAgentCredentialNotFound: {
 		HTTPStatus: http.StatusNotFound,
 		Detail:     "The Agent credential was not found.",

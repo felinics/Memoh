@@ -8,8 +8,8 @@ import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { readOnboardingBotResult, resetOnboardingSession } from '@/pages/onboarding/session'
 import { safeLocalGet, safeLocalRemove, safeLocalSet } from '@/utils/safe-storage'
 
-export const LAST_STEP_INDEX = 4
-export const STEP_COUNT = 5
+export const LAST_STEP_INDEX = 5
+export const STEP_COUNT = 6
 
 const currentStep = ref(0)
 const completing = ref(false)

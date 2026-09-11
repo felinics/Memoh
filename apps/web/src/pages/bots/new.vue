@@ -29,7 +29,7 @@
     <!-- Settings cards, the shape every other surface in the app uses: a muted
          section label over a card whose rows are label-left / control-right,
          divided by the row hairline. Full-width controls are the exception here
-         (the avatar pairing, the ACP panel), and each says so where it sits. -->
+         (the avatar pairing), and each says so where it sits. -->
     <form
       v-else
       class="space-y-8"
@@ -142,41 +142,21 @@
         >
           <AgentTypePill
             v-model="agentType"
-            :profiles="acpProfiles"
+            :profiles="[]"
           />
         </SettingsRow>
 
-        <!-- Direct runtimes need no setup fields at creation, so the row is the
-             sentence explaining where the credentials go instead. -->
-        <SettingsRow
+        <AgentAuthorization
           v-if="selectedDirectRuntime"
-          stack="always"
-        >
-          <template #content>
-            <p class="text-body text-muted-foreground">
-              {{ $t('bots.agentCreate.authorizeAfterCreate') }}
-            </p>
-          </template>
-        </SettingsRow>
-
-        <!-- The ACP panel is a form of its own (setup mode, credentials), so it
-             takes the full row rather than the control column. -->
-        <SettingsRow
-          v-else-if="selectedAcpProfile"
-          stack="always"
-        >
-          <template #content>
-            <AcpSetupPanel
-              ref="acpSetupPanelRef"
-              v-model:error-message="acpError"
-              :profile="selectedAcpProfile"
-              :oauth-hint="$t('bots.agentCreate.oauthSettingsHint')"
-            />
-          </template>
-        </SettingsRow>
+          :key="selectedDirectRuntime"
+          ref="accountPanel"
+          :runtime="selectedDirectRuntime"
+          :storage-key="authorizationKey"
+          @status="account = $event"
+        />
 
         <SettingsRow
-          v-else
+          v-if="agentType === MEMOH_AGENT_VALUE"
           :label="$t('bots.settings.chatModel')"
           :description="$t('bots.steps.modelDesc')"
           stack="sm"
@@ -353,12 +333,12 @@ import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
-import type { BotsCreateBotRequest, AcpprofilePublicProfile } from '@memohai/sdk'
+import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } from '@memohai/sdk'
+import type { BotsCreateBotRequest } from '@memohai/sdk'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
 import { emptyTimezoneValue } from '@/utils/timezones'
-import { acpAgentDisplayName, normalizeACPAgentID, withACPMetadata, type ACPForm } from '@/utils/acp'
+import { acpAgentDisplayName } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
 import TimezoneSelect from '@/components/timezone-select/index.vue'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
@@ -367,7 +347,8 @@ import { BOT_PERMISSION_ORDER } from '@/utils/bot-permissions'
 import type { BotsUserGrant } from '@memohai/sdk'
 import ModelSelect from './components/model-select.vue'
 import AgentTypePill from './components/agent-type-pill.vue'
-import AcpSetupPanel from './components/acp-setup-panel.vue'
+import AgentAuthorization from './components/agent-authorization.vue'
+import { readAgentAuthorizationDraft } from '@/composables/useAgentAuthorization'
 import { MEMOH_AGENT_VALUE } from './components/agent-type'
 import MemoryProviderSelect from './components/memory-provider-select.vue'
 import BotUserAccess from './components/bot-user-access.vue'
@@ -522,33 +503,14 @@ watch(memoryProviders, (list) => {
   }
 }, { immediate: true })
 
-const { data: acpProfileData } = useQuery({
-  key: ['acp-profiles'],
-  query: async () => {
-    const { data } = await getAcpProfiles({ throwOnError: true })
-    return data
-  },
-})
+const authorizationKey = 'memoh:new-bot:agent-authorization'
+const agentType = ref(readAgentAuthorizationDraft(authorizationKey)?.runtime ?? MEMOH_AGENT_VALUE)
+const account = ref({ ready: false, busy: false, id: '', auth: '' })
+const accountPanel = ref<InstanceType<typeof AgentAuthorization> | null>(null)
 
-const acpProfiles = computed(() => acpProfileData.value?.items ?? [])
-
-const agentType = ref(MEMOH_AGENT_VALUE)
-const acpError = ref('')
-const acpSetupPanelRef = ref<InstanceType<typeof AcpSetupPanel> | null>(null)
-
-// codex / claude-code are direct runtimes with no ACP profile: they need no
-// setup fields at creation (credentials and login are configured on the Bot's
-// settings page afterwards).
 const selectedDirectRuntime = computed(() => {
   const value = agentType.value
   return value === BOT_AGENT_RUNTIME_CODEX || value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? value : ''
-})
-
-// Null for the built-in agent; the panel + metadata only exist when a hosted
-// agent is picked.
-const selectedAcpProfile = computed<AcpprofilePublicProfile | null>(() => {
-  if (agentType.value === MEMOH_AGENT_VALUE || selectedDirectRuntime.value) return null
-  return acpProfiles.value.find(profile => normalizeACPAgentID(profile.id) === agentType.value) ?? null
 })
 
 // ACL description
@@ -559,6 +521,7 @@ const aclDescription = computed(() => {
 
 // Validation
 const canSubmit = computed(() => {
+  if (selectedDirectRuntime.value && (!account.value.ready || account.value.busy)) return false
   if (!form.display_name.trim()) return false
   if (!form.name.trim() || nameStatus.value !== 'available') return false
   if (!form.acl_preset) return false
@@ -578,25 +541,6 @@ function handleImported(botId: string) {
   }
 }
 
-// A hosted agent travels as bot metadata (same shape the onboarding bot step
-// builds); the built-in Memoh agent carries none.
-function buildAcpMetadata(): Record<string, unknown> | undefined {
-  if (selectedDirectRuntime.value) return undefined
-  const panel = acpSetupPanelRef.value
-  if (!selectedAcpProfile.value || !panel) return undefined
-  const selection = panel.selection()
-  const acpForm: ACPForm = {
-    agents: {
-      [selection.agentId]: {
-        enabled: true,
-        setup_mode: selection.setupMode,
-        managed: selection.setupMode === 'api_key' ? selection.managed : {},
-      },
-    },
-  }
-  return withACPMetadata({}, acpForm, acpProfiles.value)
-}
-
 function buildCreatePayload(): BotsCreateBotRequest {
   const tz = form.timezone === emptyTimezoneValue ? undefined : form.timezone || undefined
 
@@ -607,7 +551,6 @@ function buildCreatePayload(): BotsCreateBotRequest {
     timezone: tz,
     is_active: true,
     acl_preset: form.acl_preset,
-    metadata: buildAcpMetadata(),
     wait_for_ready: true,
   }
 }
@@ -638,33 +581,22 @@ function createStartOptions() {
           agent: {
             name: acpAgentDisplayName(selectedDirectRuntime.value, selectedDirectRuntime.value),
             provider: selectedDirectRuntime.value,
-            metadata: directBotAgentMetadata(selectedDirectRuntime.value),
+            metadata: { ...directBotAgentMetadata(selectedDirectRuntime.value), auth: account.value.auth },
+            authorizationId: account.value.id,
           },
         }
-      : selectedAcpProfile.value && {
-          agent: {
-            name: selectedAcpProfile.value.display_name?.trim() || normalizeACPAgentID(selectedAcpProfile.value.id),
-            provider: normalizeACPAgentID(selectedAcpProfile.value.id),
-          },
-        }),
+      : {}),
   }
 }
 
 async function handleSubmit() {
   if (!canSubmit.value || isCreateFlowBlocked.value) return
 
-  // Submit-time validation, not on-blur: the first empty required field is
-  // named inline inside the panel and nothing nags while typing.
-  const missing = selectedAcpProfile.value ? acpSetupPanelRef.value?.missingRequiredField() : null
-  if (missing) {
-    acpError.value = t('bots.agentCreate.requiredError', { field: missing.label || missing.id || '' })
-    return
-  }
-
   submitLoading.value = true
 
   const payload = buildCreatePayload()
   const options = createStartOptions()
+  accountPanel.value?.handoff()
 
   // Hand the live workspace stream off to the dedicated progress route.
   void store.start(payload, options)

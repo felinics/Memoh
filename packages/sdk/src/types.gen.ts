@@ -383,6 +383,26 @@ export type AdaptersUsageResponse = {
     total_text_bytes?: number;
 };
 
+export type AgentcredentialAuthorization = {
+    auth_kind: string;
+    authorization_url?: string;
+    expires_at: string;
+    id: string;
+    interval_seconds?: number;
+    runtime: string;
+    status: 'pending' | 'ready' | 'claimed';
+    user_code?: string;
+    verification_url?: string;
+};
+
+export type AgentcredentialAuthorizationRequest = {
+    auth_kind: string;
+    runtime: 'codex' | 'claude-code';
+    secret?: {
+        [key: string]: string;
+    };
+};
+
 export type AgentcredentialPublicCredential = {
     account_metadata?: {
         [key: string]: unknown;
@@ -1718,6 +1738,14 @@ export type GithubComFelinicsMemohInternalMcpConnection = {
     tools_cache?: Array<McpToolDescriptor>;
     type?: string;
     updated_at?: string;
+};
+
+export type HandlersAgentAuthorizationClaimRequest = {
+    authorization_id: string;
+};
+
+export type HandlersAgentAuthorizationExchangeRequest = {
+    code: string;
 };
 
 export type HandlersAppConnectorCredentialRequest = {
@@ -4227,6 +4255,207 @@ export type GetAcpProfilesResponses = {
 
 export type GetAcpProfilesResponse = GetAcpProfilesResponses[keyof GetAcpProfilesResponses];
 
+export type PostAgentAuthorizationsData = {
+    /**
+     * Authorization request
+     */
+    body: AgentcredentialAuthorizationRequest;
+    path?: never;
+    query?: never;
+    url: '/agent-authorizations';
+};
+
+export type PostAgentAuthorizationsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Too Many Requests
+     */
+    429: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostAgentAuthorizationsError = PostAgentAuthorizationsErrors[keyof PostAgentAuthorizationsErrors];
+
+export type PostAgentAuthorizationsResponses = {
+    /**
+     * Created
+     */
+    201: AgentcredentialAuthorization;
+};
+
+export type PostAgentAuthorizationsResponse = PostAgentAuthorizationsResponses[keyof PostAgentAuthorizationsResponses];
+
+export type DeleteAgentAuthorizationsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Authorization ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/agent-authorizations/{id}';
+};
+
+export type DeleteAgentAuthorizationsByIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type DeleteAgentAuthorizationsByIdError = DeleteAgentAuthorizationsByIdErrors[keyof DeleteAgentAuthorizationsByIdErrors];
+
+export type DeleteAgentAuthorizationsByIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type GetAgentAuthorizationsByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Authorization ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/agent-authorizations/{id}';
+};
+
+export type GetAgentAuthorizationsByIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Gone
+     */
+    410: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetAgentAuthorizationsByIdError = GetAgentAuthorizationsByIdErrors[keyof GetAgentAuthorizationsByIdErrors];
+
+export type GetAgentAuthorizationsByIdResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialAuthorization;
+};
+
+export type GetAgentAuthorizationsByIdResponse = GetAgentAuthorizationsByIdResponses[keyof GetAgentAuthorizationsByIdResponses];
+
+export type PostAgentAuthorizationsByIdExchangeData = {
+    /**
+     * Authorization code
+     */
+    body: HandlersAgentAuthorizationExchangeRequest;
+    path: {
+        /**
+         * Authorization ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/agent-authorizations/{id}/exchange';
+};
+
+export type PostAgentAuthorizationsByIdExchangeErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Gone
+     */
+    410: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostAgentAuthorizationsByIdExchangeError = PostAgentAuthorizationsByIdExchangeErrors[keyof PostAgentAuthorizationsByIdExchangeErrors];
+
+export type PostAgentAuthorizationsByIdExchangeResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialAuthorization;
+};
+
+export type PostAgentAuthorizationsByIdExchangeResponse = PostAgentAuthorizationsByIdExchangeResponses[keyof PostAgentAuthorizationsByIdExchangeResponses];
+
+export type PostAgentAuthorizationsByIdPollData = {
+    body?: never;
+    path: {
+        /**
+         * Authorization ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/agent-authorizations/{id}/poll';
+};
+
+export type PostAgentAuthorizationsByIdPollErrors = {
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Gone
+     */
+    410: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostAgentAuthorizationsByIdPollError = PostAgentAuthorizationsByIdPollErrors[keyof PostAgentAuthorizationsByIdPollErrors];
+
+export type PostAgentAuthorizationsByIdPollResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialAuthorization;
+};
+
+export type PostAgentAuthorizationsByIdPollResponse = PostAgentAuthorizationsByIdPollResponses[keyof PostAgentAuthorizationsByIdPollResponses];
+
 export type PostAuthLoginData = {
     /**
      * Login request
@@ -5674,6 +5903,63 @@ export type PutBotsByBotIdAgentsByIdCredentialResponses = {
 };
 
 export type PutBotsByBotIdAgentsByIdCredentialResponse = PutBotsByBotIdAgentsByIdCredentialResponses[keyof PutBotsByBotIdAgentsByIdCredentialResponses];
+
+export type PostBotsByBotIdAgentsByIdCredentialClaimData = {
+    /**
+     * Authorization reference
+     */
+    body: HandlersAgentAuthorizationClaimRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/credential/claim';
+};
+
+export type PostBotsByBotIdAgentsByIdCredentialClaimErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Gone
+     */
+    410: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAgentsByIdCredentialClaimError = PostBotsByBotIdAgentsByIdCredentialClaimErrors[keyof PostBotsByBotIdAgentsByIdCredentialClaimErrors];
+
+export type PostBotsByBotIdAgentsByIdCredentialClaimResponses = {
+    /**
+     * OK
+     */
+    200: AgentcredentialPublicCredential;
+};
+
+export type PostBotsByBotIdAgentsByIdCredentialClaimResponse = PostBotsByBotIdAgentsByIdCredentialClaimResponses[keyof PostBotsByBotIdAgentsByIdCredentialClaimResponses];
 
 export type GetBotsByBotIdAgentsByIdModelsData = {
     body?: never;

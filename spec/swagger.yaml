@@ -620,6 +620,54 @@ definitions:
       total_text_bytes:
         type: integer
     type: object
+  agentcredential.Authorization:
+    properties:
+      auth_kind:
+        type: string
+      authorization_url:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      interval_seconds:
+        type: integer
+      runtime:
+        type: string
+      status:
+        enum:
+        - pending
+        - ready
+        - claimed
+        type: string
+      user_code:
+        type: string
+      verification_url:
+        type: string
+    required:
+    - auth_kind
+    - expires_at
+    - id
+    - runtime
+    - status
+    type: object
+  agentcredential.AuthorizationRequest:
+    properties:
+      auth_kind:
+        type: string
+      runtime:
+        enum:
+        - codex
+        - claude-code
+        type: string
+      secret:
+        additionalProperties:
+          type: string
+        type: object
+    required:
+    - auth_kind
+    - runtime
+    type: object
   agentcredential.PublicCredential:
     properties:
       account_metadata:
@@ -3058,6 +3106,20 @@ definitions:
         type: string
       updated_at:
         type: string
+    type: object
+  handlers.AgentAuthorizationClaimRequest:
+    properties:
+      authorization_id:
+        type: string
+    required:
+    - authorization_id
+    type: object
+  handlers.AgentAuthorizationExchangeRequest:
+    properties:
+      code:
+        type: string
+    required:
+    - code
     type: object
   handlers.AppConnectorCredentialRequest:
     properties:
@@ -7226,6 +7288,176 @@ paths:
       summary: List ACP profiles
       tags:
       - acp
+  /agent-authorizations:
+    post:
+      consumes:
+      - application/json
+      description: Starts Codex device authorization or Claude browser authorization,
+        or encrypts a supplied API key or Claude OAuth token. No Bot or workspace
+        is created. Ready means the credential has been staged; API keys and manually
+        supplied tokens are not probed against the provider.
+      parameters:
+      - description: Authorization request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/agentcredential.AuthorizationRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/agentcredential.Authorization'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Authorize an Agent account before creating a Bot
+      tags:
+      - agent-authorizations
+  /agent-authorizations/{id}:
+    delete:
+      parameters:
+      - description: Authorization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Discard a temporary authorization without disconnecting an already-created
+        Agent
+      tags:
+      - agent-authorizations
+    get:
+      parameters:
+      - description: Authorization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.Authorization'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Read an authorization session owned by the current user
+      tags:
+      - agent-authorizations
+  /agent-authorizations/{id}/exchange:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Authorization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Authorization code
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AgentAuthorizationExchangeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.Authorization'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Complete Claude browser authorization with the returned authorization
+        code
+      tags:
+      - agent-authorizations
+  /agent-authorizations/{id}/poll:
+    post:
+      parameters:
+      - description: Authorization ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.Authorization'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Poll a pending Agent device authorization
+      tags:
+      - agent-authorizations
   /auth/login:
     post:
       description: Validate user credentials and issue a JWT
@@ -8286,6 +8518,65 @@ paths:
       summary: Attach a credential to a Bot Agent, replacing any previous one
       tags:
       - agent-credentials
+  /bots/{bot_id}/agents/{id}/credential/claim:
+    post:
+      consumes:
+      - application/json
+      description: Requires Bot management access and ownership of the authorization.
+        Retrying for the same Agent is safe; an authorization cannot be bound to another
+        Agent. Credentials are attached atomically and removed from the temporary
+        session.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Authorization reference
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AgentAuthorizationClaimRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agentcredential.PublicCredential'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Bind a completed temporary authorization to a Bot Agent
+      tags:
+      - agent-authorizations
   /bots/{bot_id}/agents/{id}/models:
     get:
       parameters:

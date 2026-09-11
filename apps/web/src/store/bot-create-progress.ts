@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { postBotsByBotIdAgents, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
+import { getAgentAuthorizationsById, getBotsByBotIdAgents, getBotsByBotIdAgentsById, patchBotsByBotIdAgentsById, postBotsByBotIdAgents, postBotsByBotIdAgentsByIdCredentialClaim, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
 import type { BotagentsBotAgent, BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
 import {
   botCreateProgressPercent,
@@ -15,14 +15,13 @@ import {
   type BotCreateTerminalLine,
 } from '@/composables/api/botCreateTerminal'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
-import { botAgentRuntimeForProvider } from '@/utils/bot-agent'
+import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
+import { acpAgentDisplayName } from '@/utils/acp'
+import { writeCreatedAgentSession, type CreatedAgentSession } from '@/pages/bots/created-agent-session'
+import { installCreatedAgent } from './install-created-agent'
 
-// status reflects the bot-create lifecycle:
-//   idle     - nothing in flight (also the guard for the progress route)
-//   creating - the SSE stream is running
-//   ready    - a bot exists (possibly with a non-fatal setupError warning)
-//   error    - a hard failure where no bot was created
-export type BotCreateStatus = 'idle' | 'creating' | 'ready' | 'error'
+// A setup failure keeps the created Bot and retries only its remaining setup.
+export type BotCreateStatus = 'idle' | 'creating' | 'ready' | 'setup-error' | 'error'
 
 export type BotCreateDisplay = {
   display_name: string
@@ -37,6 +36,7 @@ export type BotCreateSettings = {
 }
 
 export type BotCreateAgent = {
+  authorizationId?: string
   name: string
   provider: string
   metadata?: Record<string, unknown>
@@ -52,6 +52,7 @@ export type BotCreateGrant = {
 }
 
 export type StartBotCreateOptions = {
+  onboarding?: boolean
   display?: BotCreateDisplay
   settings?: BotCreateSettings
   agent?: BotCreateAgent
@@ -120,8 +121,10 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   const lines = ref<BotCreateTerminalLine[]>([])
   const bot = ref<BotsBot | null>(null)
   const createdAgent = ref<BotagentsBotAgent | null>(null)
+  const authorizationId = ref('')
   const setupError = ref<string | null>(null)
   const errorCode = ref<string | null>(null)
+  const modelConfigured = ref(false)
 
   let lastPayload: BotsCreateBotRequest | null = null
   let lastOptions: StartBotCreateOptions = {}
@@ -136,10 +139,13 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     lines.value = []
     bot.value = null
     createdAgent.value = null
+    authorizationId.value = ''
     setupError.value = null
     errorCode.value = null
     lastPayload = null
+    writeCreatedAgentSession(null, lastOptions.onboarding)
     lastOptions = {}
+    modelConfigured.value = false
   }
 
   function ensureErrorLine(message: string) {
@@ -147,142 +153,185 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     lines.value = appendBotCreateTerminalLine(lines.value, { type: 'error', message })
   }
 
+  function saveSession() {
+    const runtime = lastOptions.agent && botAgentRuntimeForProvider(lastOptions.agent.provider)
+    if (!bot.value?.id || (runtime !== 'codex' && runtime !== 'claude-code')) return
+    writeCreatedAgentSession({
+      botId: bot.value.id, botName: bot.value.name ?? '', displayName: display.value?.display_name ?? '',
+      agentId: createdAgent.value?.id ?? '', runtime, authorizationId: authorizationId.value,
+      settings: lastOptions.settings, setupError: setupError.value,
+    }, lastOptions.onboarding)
+  }
+
+  async function applySetup(recovering = false): Promise<BotCreateStartResult> {
+    const options = lastOptions
+    const botId = bot.value?.id
+    let settingsApplied = !hasSettings(options.settings)
+    let agentApplied = !options.agent
+    const directAgent = !!options.agent && botAgentRuntimeForProvider(options.agent.provider) !== 'acp'
+    if (!botId) return { settingsApplied: false, agentApplied: false }
+    try {
+      if (hasSettings(options.settings) || options.agent) {
+        lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'applying-settings', status: 'running' })
+      }
+      if (options.agent) {
+        const provider = options.agent.provider.trim().toLowerCase()
+        const runtime = botAgentRuntimeForProvider(provider)
+        let metadata = options.agent.metadata ?? { provider }
+        // Reconcile lost responses and refreshes before creating or claiming again.
+        if (recovering) {
+          if (createdAgent.value?.id) {
+            const { data } = await getBotsByBotIdAgentsById({ path: { bot_id: botId, id: createdAgent.value.id }, throwOnError: true })
+            createdAgent.value = data
+          } else {
+            const { data } = await getBotsByBotIdAgents({ path: { bot_id: botId }, throwOnError: true })
+            createdAgent.value = data.items?.find(agent => agent.runtime === runtime) ?? null
+          }
+          if (authorizationId.value && !createdAgent.value?.agent_credential_id) {
+            const { data } = await getAgentAuthorizationsById({ path: { id: authorizationId.value }, throwOnError: true })
+            metadata = { ...metadata, auth: data.auth_kind === 'openai_codex_oauth' ? 'chatgpt' : data.auth_kind === 'claude_code_oauth' ? 'oauth_token' : 'api_key' }
+          }
+        }
+        if (!createdAgent.value?.id) {
+          const { data } = await postBotsByBotIdAgents({
+            path: { bot_id: botId },
+            body: { name: options.agent.name.trim(), runtime, ...(directAgent && { enabled: false }), metadata },
+            throwOnError: true,
+          })
+          createdAgent.value = { ...data, runtime: data.runtime ?? runtime }
+          saveSession()
+        }
+        const agentId = createdAgent.value.id?.trim()
+        if (!agentId) throw new Error('Created Agent has no ID')
+        if (authorizationId.value && !createdAgent.value.agent_credential_id) {
+          if (recovering && createdAgent.value.metadata?.auth !== metadata.auth) {
+            await patchBotsByBotIdAgentsById({ path: { bot_id: botId, id: agentId }, body: { metadata }, throwOnError: true })
+          }
+          const { data } = await postBotsByBotIdAgentsByIdCredentialClaim({
+            path: { bot_id: botId, id: agentId }, body: { authorization_id: authorizationId.value }, throwOnError: true,
+          })
+          createdAgent.value.agent_credential_id = data.id
+        }
+      }
+      if (hasSettings(options.settings) || (createdAgent.value?.id && !directAgent)) {
+        await putBotsByBotIdSettings({
+          path: { bot_id: botId },
+          body: { ...settingsBody(options.settings ?? {}), ...(!directAgent && createdAgent.value?.id ? { default_bot_agent_id: createdAgent.value.id } : {}) },
+          throwOnError: true,
+        })
+        settingsApplied = true
+        if (!directAgent) agentApplied = true
+      }
+      modelConfigured.value = !!options.settings?.chat_model_id && settingsApplied
+      lines.value = finalizeBotCreateTerminalLines(lines.value)
+      if (directAgent && createdAgent.value?.id) {
+        const agent = createdAgent.value
+        const agentId = agent.id!
+        lines.value = pushBotCreateTerminalLine(lines.value, {
+          kind: 'installing-agent', status: 'running', message: acpAgentDisplayName(agent.runtime ?? '', agent.name ?? ''),
+        })
+        await installCreatedAgent(botId, agent)
+        if (!agent.enabled) {
+          await patchBotsByBotIdAgentsById({ path: { bot_id: botId, id: agentId }, body: { enabled: true }, throwOnError: true })
+          agent.enabled = true
+        }
+        await putBotsByBotIdSettings({ path: { bot_id: botId }, body: { default_bot_agent_id: agentId }, throwOnError: true })
+        agentApplied = true
+        lines.value = finalizeBotCreateTerminalLines(lines.value)
+      }
+      if (!setupError.value) lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'ready', status: 'done' })
+      status.value = 'ready'
+    } catch (error) {
+      setupError.value = resolveApiErrorMessage(error, toMessage(error))
+      errorCode.value = parseMemohError(error)?.code ?? null
+      lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
+      ensureErrorLine(setupError.value)
+      status.value = directAgent ? 'setup-error' : 'ready'
+    }
+    saveSession()
+    return { settingsApplied, agentApplied, agentId: createdAgent.value?.id }
+  }
+
   async function start(
     payload: BotsCreateBotRequest,
     options: StartBotCreateOptions = {},
   ): Promise<BotCreateStartResult> {
     if (status.value === 'creating') return { settingsApplied: false, agentApplied: false }
-    let settingsApplied = !hasSettings(options.settings)
-    let agentApplied = !options.agent
-    let createdAgentID = ''
-    const deferAgent = !!options.agent && botAgentRuntimeForProvider(options.agent.provider) !== 'acp'
     lastPayload = payload
     lastOptions = options
-
+    writeCreatedAgentSession(null, options.onboarding)
     status.value = 'creating'
     bot.value = null
     createdAgent.value = null
+    authorizationId.value = options.agent?.authorizationId ?? ''
     setupError.value = null
     errorCode.value = null
+    modelConfigured.value = false
     progress.value = { phase: 'pulling' }
-    display.value = options.display ?? {
-      display_name: payload.display_name ?? payload.name ?? '',
-      avatar_url: payload.avatar_url,
-    }
-    lines.value = pushBotCreateTerminalLine([], {
-      kind: 'command',
-      status: 'info',
-      message: display.value.display_name,
-    })
-
+    display.value = options.display ?? { display_name: payload.display_name ?? payload.name ?? '', avatar_url: payload.avatar_url }
+    lines.value = pushBotCreateTerminalLine([], { kind: 'command', status: 'info', message: display.value.display_name })
     try {
       const { stream } = await postBotsStream({ body: payload, throwOnError: true })
       const result = await collectBotCreateProgressStream(stream, {
         onState: (state) => {
           progress.value = state.progress ?? progress.value
+          if (state.bot) { bot.value = state.bot; saveSession() }
         },
         onEvent: (event) => {
-          // The final "ready" line is emitted after settings are applied so the
-          // log reads naturally: creating, applying settings, ready.
-          if (event.type === 'ready') return
-          lines.value = appendBotCreateTerminalLine(lines.value, event)
+          // Installation and Agent activation must finish before the ready line.
+          if (event.type !== 'ready') lines.value = appendBotCreateTerminalLine(lines.value, event)
         },
       })
-
-      const createdBot = result.bot ?? null
-      bot.value = createdBot
+      bot.value = result.bot ?? null
       setupError.value = result.setupError ?? null
       errorCode.value = result.errorCode ?? null
-
-      if (!createdBot) {
+      if (!bot.value) {
         ensureErrorLine(result.setupError ?? toMessage(undefined))
         status.value = 'error'
         return { settingsApplied: false, agentApplied: false }
       }
-
-      const botId = createdBot.id
-      if (botId) {
-        await applyGrants(botId, options.grants, (message) => { setupError.value = message })
+      if (result.setupError && options.agent) {
+        status.value = 'setup-error'
+        saveSession()
+        return { settingsApplied: false, agentApplied: false }
       }
-      if (botId && (hasSettings(options.settings) || options.agent)) {
-        lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'applying-settings', status: 'running' })
-        if (options.agent) {
-          try {
-            const provider = options.agent.provider.trim().toLowerCase()
-            createdAgent.value = { runtime: botAgentRuntimeForProvider(provider) }
-            const { data: agent } = await postBotsByBotIdAgents({
-              path: { bot_id: botId },
-              body: {
-                name: options.agent.name.trim(),
-                // codex / claude-code are direct runtimes; everything else is
-                // an ACP profile provider.
-                runtime: botAgentRuntimeForProvider(provider),
-                ...(deferAgent && { enabled: false }),
-                metadata: options.agent.metadata ?? { provider },
-              },
-              throwOnError: true,
-            })
-            createdAgent.value = { ...agent, runtime: agent.runtime ?? botAgentRuntimeForProvider(provider) }
-            createdAgentID = agent.id?.trim() ?? ''
-            if (!createdAgentID) throw new Error('Created Agent has no ID')
-          } catch (error) {
-            setupError.value = resolveApiErrorMessage(error, toMessage(error))
-            lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
-          }
-        }
-        try {
-          if (hasSettings(options.settings) || (createdAgentID && !deferAgent)) {
-            await putBotsByBotIdSettings({
-              path: { bot_id: botId },
-              body: {
-                ...settingsBody(options.settings ?? {}),
-                ...(createdAgentID && !deferAgent ? { default_bot_agent_id: createdAgentID } : {}),
-              },
-              throwOnError: true,
-            })
-            if (hasSettings(options.settings)) settingsApplied = true
-            if (createdAgentID && !deferAgent) agentApplied = true
-          }
-        } catch (error) {
-          // The bot exists, but its defaults are wrong — the created Agent is
-          // not the default, or settings were dropped. Surface the failure
-          // instead of showing a clean success over a half-configured bot.
-          setupError.value = resolveApiErrorMessage(error, toMessage(error))
-          lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
-        }
-        if (settingsApplied && (agentApplied || (deferAgent && createdAgentID))) {
-          lines.value = finalizeBotCreateTerminalLines(lines.value)
-        }
-      }
-
-      if (!result.setupError && !setupError.value) {
-        lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'ready', status: 'done' })
-      }
-      status.value = 'ready'
-      return { settingsApplied, agentApplied, agentId: createdAgentID || undefined }
+      if (bot.value.id) await applyGrants(bot.value.id, options.grants, message => { setupError.value = message })
+      return await applySetup()
     } catch (error) {
-      const parsed = parseMemohError(error)
       const message = resolveApiErrorMessage(error, toMessage(error))
       setupError.value = message
-      errorCode.value = parsed?.code
-        ?? (apiErrorStatus(error) === 409 ? 'bot.name_taken' : null)
-      // If a bot was already created, a later failure (settings, terminal or
-      // cache bookkeeping) is non-fatal: the bot exists, so never downgrade it
-      // to a hard error — otherwise a successful create is reported as failed.
-      if (bot.value) {
-        status.value = 'ready'
-        return { settingsApplied, agentApplied, agentId: createdAgentID || undefined }
-      }
+      errorCode.value = parseMemohError(error)?.code ?? (apiErrorStatus(error) === 409 ? 'bot.name_taken' : null)
       progress.value = { phase: 'error', error: message }
       ensureErrorLine(message)
-      status.value = 'error'
+      status.value = bot.value ? options.agent ? 'setup-error' : 'ready' : 'error'
+      saveSession()
       return { settingsApplied: false, agentApplied: false }
     }
   }
 
   async function retry() {
-    if (!lastPayload) return
-    await start(lastPayload, lastOptions)
+    if (status.value === 'creating') return
+    if (bot.value?.id) {
+      status.value = 'creating'
+      setupError.value = null
+      errorCode.value = null
+      return await applySetup(true)
+    }
+    if (lastPayload) return await start(lastPayload, lastOptions)
+  }
+
+  function restore(saved: CreatedAgentSession, onboarding = false) {
+    if (status.value !== 'idle') return
+    bot.value = { id: saved.botId, name: saved.botName }
+    display.value = { display_name: saved.displayName }
+    createdAgent.value = saved.agentId ? { id: saved.agentId, runtime: saved.runtime } : null
+    authorizationId.value = saved.authorizationId ?? ''
+    lastOptions = { onboarding, settings: saved.settings, agent: {
+      name: acpAgentDisplayName(saved.runtime, saved.runtime), provider: saved.runtime,
+      metadata: directBotAgentMetadata(saved.runtime), authorizationId: saved.authorizationId,
+    } }
+    lines.value = pushBotCreateTerminalLine([], { kind: 'bot-created', status: 'done' })
+    return retry()
   }
 
   return {
@@ -292,8 +341,11 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     lines,
     bot,
     createdAgent,
+    authorizationId,
     setupError,
     errorCode,
+    modelConfigured,
+    restore,
     percent,
     isActive,
     start,

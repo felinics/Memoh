@@ -31,23 +31,14 @@
         :description="config.auth === 'api_key' ? $t('bots.agent.apiKeyDescription') : $t('bots.agent.oauthTokenDescription')"
         stack="sm"
       >
-        <div class="flex w-full flex-col gap-2 sm:w-96 sm:flex-row">
-          <PasswordInput
-            v-model="credentialSecret"
-            autocomplete="new-password"
-            class="min-w-0 flex-1"
-            :placeholder="$t('bots.settings.agentCredentialSecretPlaceholder')"
-            @keydown.enter.prevent="saveCredential"
-          />
-          <Button
-            type="button"
-            size="sm"
-            :loading="savingCredential"
-            :disabled="!credentialSecret.trim()"
-            @click="saveCredential"
-          >
-            {{ credentialConnected ? $t('bots.settings.agentCredentialReplace') : $t('bots.settings.agentCredentialSave') }}
-          </Button>
+        <AgentCredentialInput
+          v-model="credentialSecret"
+          :loading="savingCredential"
+          :connected="credentialConnected"
+          :placeholder="config.auth === 'oauth_token' ? $t('bots.agent.oauthToken') : undefined"
+          class="sm:w-96"
+          @save="saveCredential"
+        >
           <ConfirmPopover
             v-if="credentialConnected"
             :title="$t('bots.settings.agentCredentialDisconnectConfirm')"
@@ -67,7 +58,7 @@
               </Button>
             </template>
           </ConfirmPopover>
-        </div>
+        </AgentCredentialInput>
       </SettingsRow>
 
       <SettingsRow
@@ -204,7 +195,7 @@ import {
   putBotsByBotIdAgentsByIdCredential,
   type BotagentsBotAgent,
 } from '@memohai/sdk'
-import PasswordInput from '@/components/password-input/index.vue'
+import AgentCredentialInput from './agent-credential-input.vue'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   BOT_AGENT_RUNTIME_CODEX,

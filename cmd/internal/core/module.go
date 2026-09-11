@@ -91,6 +91,7 @@ func ServerModule() fx.Option {
 			provideMemoryProviderRegistry,
 			models.NewService,
 			agentcredential.NewService,
+			agentcredential.NewAuthorizationService,
 			provideACPRunner,
 			provideACPSessionPool,
 			provideCodexDriver,

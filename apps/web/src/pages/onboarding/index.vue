@@ -8,6 +8,7 @@ import Step2Appearance from './steps/Step2Appearance.vue'
 import Step3Provider from './steps/Step3Provider.vue'
 import Step4Bot from './steps/Step4Bot.vue'
 import Step5Complete from './steps/Step5Complete.vue'
+import BotCreateProgress from '@/pages/bots/new-progress.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -20,6 +21,7 @@ const stepComponents = [
   { component: Step2Appearance, props: {} },
   { component: Step3Provider, props: {} },
   { component: Step4Bot, props: {} },
+  { component: BotCreateProgress, props: { onboarding: true } },
   { component: Step5Complete, props: {} },
 ]
 
@@ -60,7 +62,7 @@ watch(() => route.query.step, (val) => {
     <div class="flex-1 flex items-center justify-center">
       <div
         class="w-full"
-        :class="currentStep === LAST_STEP_INDEX ? 'max-w-3xl' : 'max-w-lg'"
+        :class="currentStep === LAST_STEP_INDEX ? 'max-w-3xl' : currentStep === 4 ? 'max-w-2xl' : 'max-w-lg'"
       >
         <component
           :is="stepComponents[currentStep].component"
