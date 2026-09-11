@@ -99,14 +99,7 @@ export function operationKey(botId: string, depId: string): string {
 }
 
 function optimisticStatus(action: DependencyOperationAction): DependencyStatus {
-  switch (action) {
-    case 'remove':
-      return 'removing'
-    case 'update':
-      return 'updating'
-    default:
-      return 'installing'
-  }
+  return action === 'update' ? 'updating' : 'installing'
 }
 
 export const useDependencyOperationsStore = defineStore('dependency-operations', () => {
@@ -196,15 +189,13 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
     void router.push({
       name: 'bot-detail',
       params: { botName: botId },
-      query: { tab: 'dependencies' },
+      query: { tab: 'apps' },
     }).catch(() => {})
   }
 
   function doneMessage(operation: DependencyOperation): string {
     const args = { name: dependencyDisplayName(operation.item, unref(i18n.global.locale)) }
     switch (operation.action) {
-      case 'remove':
-        return t('bots.dependencies.background.removed', args)
       case 'update':
         return t('bots.dependencies.background.updated', args)
       case 'reinstall':
@@ -222,7 +213,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
         description: operation.error,
         duration: ACTIONABLE_TOAST_MS,
         action: {
-          label: t('supermarket.viewBotDependencies'),
+          label: t('apps.viewBotApps'),
           onClick: () => viewDependencies(operation.botId),
         },
       })
@@ -237,7 +228,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
       toast.success(doneMessage(operation), {
         duration: ACTIONABLE_TOAST_MS,
         action: {
-          label: t('supermarket.viewBotDependencies'),
+          label: t('apps.viewBotApps'),
           onClick: () => viewDependencies(operation.botId),
         },
       })

@@ -196,9 +196,9 @@
     },
     "registry": {
       "unavailable": "The Supermarket is unavailable. Please try again later.",
-      "package_not_found": "This package is no longer available.",
-      "package_invalid": "This package is invalid and cannot be installed.",
-      "package_install_failed": "The package could not be installed. Please try again."
+      "app_not_found": "This app is no longer available.",
+      "app_invalid": "This app is invalid and cannot be installed.",
+      "app_install_failed": "The app could not be installed. Please try again."
     },
     "workspace": {
       "unreachable": "The workspace could not be reached.",
@@ -271,6 +271,12 @@
     "external_runtime": {
       "auth_required": "Codex is not connected yet. Open Agent settings to connect ChatGPT or configure an API key.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again."
+    },
+    "app": {
+      "not_found": "This App installation was not found.",
+      "request_invalid": "The App request is invalid.",
+      "busy": "Another operation on this App is in progress.",
+      "operation_failed": "The App operation failed."
     }
   },
   "auth": {
@@ -336,7 +342,7 @@
     "people": "Members",
     "appearance": "Appearance",
     "keyboard": "Keyboard",
-    "supermarket": "Supermarket",
+    "supermarket": "App Store",
     "about": "About",
     "switchBot": "Switch bot",
     "manageBots": "Manage Bots"
@@ -1400,9 +1406,9 @@
       "prepare": {
         "title": "Preparing desktop",
         "checking": "Checking desktop runtime",
-        "toolkit": "Workspace toolkit is not installed; trying system packages",
+        "toolkit": "Workspace toolkit is not installed; trying system apps",
         "system": "Checking workspace operating system",
-        "installing": "Installing desktop and VNC packages",
+        "installing": "Installing desktop and VNC apps",
         "browser": "Installing Chrome and CJK fonts",
         "starting": "Starting VNC display",
         "desktop": "Starting desktop session",
@@ -2316,18 +2322,17 @@
       "channels": "Platforms",
       "remoteRuntime": "Computers",
       "container": "Workspace",
-      "dependencies": "Dependencies",
       "mcp": "MCP",
       "compaction": "Compaction",
       "schedule": "Schedule",
       "history": "History",
-      "connectors": "Connectors",
       "skills": "Skills",
       "email": "Email",
       "files": "Files",
       "access": "Access",
       "terminal": "Terminal",
-      "settings": "Settings"
+      "settings": "Settings",
+      "apps": "Apps"
     },
     "agent": {
       "add": "Add Agent",
@@ -2398,7 +2403,8 @@
         "removing": "Removing",
         "updateAvailable": "{version} available",
         "unsupported": "Unsupported",
-        "unsupportedTooltip": "This dependency isn't available on the workspace platform."
+        "unsupportedTooltip": "This dependency isn't available on the workspace platform.",
+        "retired": "Retired"
       },
       "action": {
         "install": "Install",
@@ -2437,7 +2443,8 @@
         "remoteWarningDescription": "The script downloads and writes files on that computer.",
         "installConfirm": "Install",
         "updateConfirm": "Update",
-        "installAndEnable": "Install and enable"
+        "installAndEnable": "Install and enable",
+        "versionInvalid": "Enter a release identifier such as 1.2.3 or latest."
       },
       "progress": {
         "installing": "Installing {name}",
@@ -2450,7 +2457,10 @@
         "failedHint": "Recorded as failed; retry from the dependency list. The full log can be copied.",
         "runInBackground": "Run in background",
         "version": "Version",
-        "entrypoint": "Entrypoint"
+        "entrypoint": "Entrypoint",
+        "log": "Operation log",
+        "unknownTitle": "Result not confirmed",
+        "unknownHint": "The operation result is not yet confirmed. Refresh dependencies to check its status."
       },
       "script": {
         "title": "Script that will run in the workspace",
@@ -3347,15 +3357,11 @@
       "discoverySaveFailed": "Failed to save skill paths",
       "addSkill": "New Skill",
       "libraryTitle": "Skill library",
-      "packageBadge": "Package",
-      "openPackage": "Open Package",
+      "appBadge": "App",
+      "openApp": "Open App",
       "backToLibrary": "Back",
       "viewSkill": "View Skill",
-      "uninstallPackage": "Uninstall Package",
-      "uninstallPackageConfirm": "Uninstall this Package?",
-      "uninstallPackageSuccess": "Package uninstalled",
-      "uninstallPackageFailed": "Failed to uninstall Package",
-      "packageSkillsUnavailable": "Package Skills are unavailable",
+      "appSkillsUnavailable": "App Skills are unavailable",
       "close": "Close",
       "emptyTitle": "No Active Skills",
       "emptyDescription": "Create a managed skill or scan external paths to get started.",
@@ -3389,7 +3395,8 @@
       "saveSuccess": "Skill saved",
       "saveFailed": "Failed to save skill",
       "loadFailed": "Failed to load skills",
-      "intro": "Configure custom abilities for this bot. Managed skills take precedence."
+      "intro": "Configure custom abilities for this bot. Managed skills take precedence.",
+      "manageApp": "Manage App"
     },
     "compaction": {
       "title": "Compaction Logs",
@@ -3607,24 +3614,16 @@
     "colOutputTokens": "Output"
   },
   "supermarket": {
-    "title": "Supermarket",
-    "searchPlaceholder": "Search Skills...",
-    "searchPlaceholderWithConnectors": "Search Skills and Connectors...",
+    "title": "App Store",
+    "searchPlaceholder": "Search Apps...",
     "skillsSection": "Skills",
-    "packagesSection": "Packages",
-    "connectorsSection": "Connectors",
-    "dependenciesSection": "Dependencies",
     "noResults": "No results found",
-    "noPackageResults": "No packages found",
-    "noConnectorResults": "No connectors found",
-    "noDependencyResults": "No dependencies found",
+    "noAppResults": "No apps found",
     "install": "Install",
     "installToBot": "Install to Bot",
     "selectBot": "Select a bot",
     "selectBotPlaceholder": "Choose a bot to install to...",
     "selectWorkspaceTarget": "Workspace",
-    "dependencyInstallTitle": "Install {name}",
-    "viewBotDependencies": "View bot dependencies",
     "envVariables": "Environment Variables",
     "envDescription": "Configure the required environment variables",
     "installSuccess": "Installed successfully",
@@ -3638,7 +3637,7 @@
     "homepage": "Homepage",
     "files": "Files",
     "viewDetails": "View details",
-    "packageInstallTitle": "Install Package",
+    "appInstallTitle": "Install App",
     "loadError": "Failed to load from Supermarket",
     "submit": "Submit",
     "information": "Information",
@@ -3646,7 +3645,7 @@
     "registry": "Registry",
     "allRegistries": "All",
     "registryFilter": "Filter by registry",
-    "package": "Package",
+    "app": "App",
     "previousPage": "Previous page",
     "nextPage": "Next page",
     "developer": "Developer",
@@ -3656,10 +3655,22 @@
     "website": "Website",
     "instructions": "Instructions",
     "backToSupermarket": "Back to Supermarket",
-    "includedSkills": "Included Skills",
-    "packageNotFound": "Package not found",
+    "appNotFound": "App not found",
     "noDescription": "No description",
-    "unnamedSkill": "Unnamed skill"
+    "unnamedSkill": "Unnamed skill",
+    "dependenciesHint": "Installed into the bot's workspace and shared with other Apps that need them.",
+    "dependencyPending": "Loading…",
+    "connectorsHint": "Each connector needs your authorization after the App is installed.",
+    "connectorsUnavailableHint": "Connect-It is not configured on this server; these connectors will stay unauthorized.",
+    "connectorAuthHint": "Authorize after installing.",
+    "license": "License",
+    "repository": "Repository",
+    "revision": "Revision",
+    "installPreview": "Installing will",
+    "installPreviewDependency": "install into the workspace if missing",
+    "installPreviewConnector": "need your authorization",
+    "installPreviewConnectorOptional": "can be authorized later (optional)",
+    "viewAll": "View all"
   },
   "connectors": {
     "title": "Connectors",
@@ -3820,5 +3831,116 @@
     "expiresIn": "Expires in {time}",
     "codeExpired": "Code expired",
     "copyFailed": "Failed to copy the code"
+  },
+  "apps": {
+    "title": "Apps",
+    "checkUpdates": "Check for updates",
+    "checkUpdatesDone": "Update check finished",
+    "checkUpdatesFailed": "Couldn't check for updates",
+    "browse": "Browse Supermarket",
+    "emptyTitle": "No Apps installed yet",
+    "emptyDescription": "Install Skills, dependencies and connectors as Apps from the Supermarket.",
+    "emptyAction": "Open Supermarket",
+    "loadFailed": "Couldn't load Apps",
+    "busy": "Another App operation is still running in this workspace.",
+    "viewBotApps": "View bot Apps",
+    "components": "{count} component | {count} components",
+    "workspaceNotRunningDescription": "Installing and updating Apps needs a running workspace. The list shows the last recorded state.",
+    "action": {
+      "install": "Install",
+      "resume": "Continue setup",
+      "update": "Update",
+      "remove": "Uninstall",
+      "viewProgress": "View progress",
+      "open": "View in Supermarket"
+    },
+    "section": {
+      "skills": "{count} Skill | {count} Skills",
+      "dependencies": "{count} dependency | {count} dependencies",
+      "connectors": "{count} connector | {count} connectors"
+    },
+    "dependency": {
+      "shared": "Shared",
+      "unknown": "Not in catalog"
+    },
+    "connector": {
+      "needsAuth": "Authorization required",
+      "optional": "Optional",
+      "shared": "Shared across workspaces",
+      "authorize": "Authorize",
+      "authDescription": "Connect the service {name} uses.",
+      "unavailableTitle": "Connector unavailable",
+      "unavailableDescription": "This connector type is not offered by the configured Connect-It deployment."
+    },
+    "remove": {
+      "title": "Uninstall {name}?",
+      "description": "Removes the App's Skills. Dependencies and connections are released only when no other App references them.",
+      "willRemove": "Will be removed",
+      "willKeep": "Kept",
+      "willDisconnect": "Will be disconnected",
+      "alsoRemoveRequired": "Also remove auto-installed Apps that only this one uses",
+      "reason": {
+        "shared": "used by another App",
+        "image": "shipped with the workspace image",
+        "absent": "not installed"
+      }
+    },
+    "progress": {
+      "installing": "Installing {name}",
+      "updating": "Updating {name}",
+      "resuming": "Continuing setup of {name}",
+      "removing": "Uninstalling {name}",
+      "doneTitle": "Done",
+      "partialTitle": "Installed with items needing attention",
+      "partialHint": "Some components failed or still need authorization. Continue the setup from the Apps tab once they are resolved.",
+      "failedTitle": "Operation failed",
+      "failedHint": "Recorded as failed; retry from the Apps tab. The full log can be copied.",
+      "unknownTitle": "Result not confirmed",
+      "unknownHint": "The operation result is not yet confirmed. Refresh Apps to check its status.",
+      "preparing": "Preparing…",
+      "noLog": "No script output.",
+      "log": "Operation log",
+      "runInBackground": "Run in background",
+      "reconnecting": "Connection to the server was lost; checking the result…"
+    },
+    "steps": {
+      "skills": "Skills",
+      "dependency": "Dependency {name}",
+      "connector": "Connector {name}"
+    },
+    "stepStatus": {
+      "running": "Running",
+      "installed": "Installed",
+      "linked": "Linked",
+      "needs_auth": "Needs authorization",
+      "failed": "Failed",
+      "skipped": "Skipped",
+      "removed": "Removed",
+      "kept": "Kept",
+      "disconnected": "Disconnected",
+      "updated": "Updated"
+    },
+    "background": {
+      "installed": "{name} installed",
+      "partial": "{name} installed, some items need attention",
+      "updated": "{name} updated",
+      "removed": "{name} uninstalled",
+      "failed": "{name}: operation failed"
+    },
+    "enableFlow": {
+      "installDescription": "Installs the {name} App into the workspace, then enables the agent."
+    },
+    "sections": {
+      "skills": "Skills",
+      "dependencies": "Dependencies",
+      "connectors": "Connectors"
+    },
+    "update": {
+      "title": "Update {name}",
+      "description": "Choose what to update. Dependencies move to their latest version; the App release replaces its Skills.",
+      "release": "App release",
+      "confirm": "Update {count} item | Update {count} items",
+      "none": "Nothing to update."
+    }
   }
 }

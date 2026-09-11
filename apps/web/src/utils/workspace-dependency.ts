@@ -36,7 +36,7 @@ export interface DependencyPrimaryAction {
   disabled: boolean
 }
 
-export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'viewScript' | 'remove'
+export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'viewScript'
 
 export interface DependencyMenuAction {
   kind: DependencyMenuActionKind
@@ -303,15 +303,9 @@ export function dependencyMenuActions(
       separatorBefore: false,
     })
   }
+  // Removal is not offered per dependency: the App that references the
+  // dependency removes it, so shared copies are never pulled out from under
+  // another App.
   if (scripted) items.push({ ...viewScript, separatorBefore: items.length > 0 })
-  if (dependencyAllows(item, 'remove')) {
-    items.push({
-      kind: 'remove',
-      labelKey: `${ACTION_KEY}.remove`,
-      destructive: true,
-      disabled: readonly,
-      separatorBefore: false,
-    })
-  }
   return items
 }

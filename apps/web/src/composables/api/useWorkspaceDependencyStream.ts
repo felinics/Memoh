@@ -1,5 +1,4 @@
 import {
-  deleteBotsByBotIdDependenciesByDepId,
   postBotsByBotIdDependenciesByDepIdInstall,
   postBotsByBotIdDependenciesByDepIdReinstall,
   postBotsByBotIdDependenciesByDepIdUpdate,
@@ -31,7 +30,7 @@ export interface WorkspaceDependencyStreamRequestOptions {
   definitionRevision?: string
   /**
    * Version to install / update / reinstall to. Empty means the latest the
-   * catalog script resolves (or the manifest pin). Ignored by remove.
+   * catalog script resolves (or the manifest pin).
    */
   version?: string
   /**
@@ -95,7 +94,7 @@ export async function* streamDependencyOperation(
 ): AsyncGenerator<WorkspaceDependencyStreamEvent, void, unknown> {
   let streamError: unknown
 
-  // One options object for the four generated SSE functions: their *Data
+  // One options object for the three generated SSE functions: their *Data
   // shapes are identical (path bot_id/dep_id, optional workspace_target_id),
   // and the generated functions keep each route's URL single-sourced.
   const request = {
@@ -129,13 +128,11 @@ export async function* streamDependencyOperation(
     } : undefined,
   }
 
-  const result = action === 'remove'
-    ? await deleteBotsByBotIdDependenciesByDepId(versioned)
-    : action === 'update'
-      ? await postBotsByBotIdDependenciesByDepIdUpdate(versioned)
-      : action === 'reinstall'
-        ? await postBotsByBotIdDependenciesByDepIdReinstall(versioned)
-        : await postBotsByBotIdDependenciesByDepIdInstall(versioned)
+  const result = action === 'update'
+    ? await postBotsByBotIdDependenciesByDepIdUpdate(versioned)
+    : action === 'reinstall'
+      ? await postBotsByBotIdDependenciesByDepIdReinstall(versioned)
+      : await postBotsByBotIdDependenciesByDepIdInstall(versioned)
 
   for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
     if (!isWorkspaceDependencyStreamEvent(event)) {

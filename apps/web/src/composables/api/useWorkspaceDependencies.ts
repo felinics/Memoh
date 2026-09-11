@@ -2,7 +2,6 @@ import type { Ref } from 'vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getBotsByBotIdDependencies,
-  getWorkspaceDependenciesCatalog,
   getBotsByBotIdDependenciesByDepIdScript,
   postBotsByBotIdDependenciesByDepIdRollback,
   postBotsByBotIdDependenciesCheckUpdates,
@@ -37,8 +36,12 @@ export type ScriptResponse = HandlersWorkspaceDependencyScriptResponse
 export type ScriptEnv = HandlersWorkspaceDependencyScriptEnv
 export type ScriptAction = NonNullable<ScriptResponse['action']>
 export type DependencyOperationResponse = HandlersWorkspaceDependencyOperationResponse
-/** The operations that stream a log. Rollback is synchronous. */
-export type DependencyOperationAction = 'install' | 'update' | 'reinstall' | 'remove'
+/**
+ * The dependency operations that stream a log. Install here means a retry or
+ * an overlay for a dependency an App already references; removal belongs
+ * to the App. Rollback is synchronous.
+ */
+export type DependencyOperationAction = 'install' | 'update' | 'reinstall'
 
 export const BOT_DEPENDENCIES_QUERY_KEY = 'bot-dependencies'
 
@@ -153,10 +156,4 @@ export function invalidateBotDependencies(
   botId: string,
 ): Promise<unknown> {
   return queryCache.invalidateQueries({ key: [BOT_DEPENDENCIES_QUERY_KEY, botId] })
-}
-
-/** Explicit retry of the remote catalog, independently of software update checks. */
-export async function refreshDependencyCatalog() {
-  const { data } = await getWorkspaceDependenciesCatalog({ query: { refresh: true }, throwOnError: true })
-  return data
 }

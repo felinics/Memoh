@@ -109,11 +109,11 @@ describe('useDependencyOperationsStore', () => {
     expect(toastSuccess).toHaveBeenCalledTimes(1)
     const [message, options] = toastSuccess.mock.calls[0] as [string, { action?: { label: string; onClick: () => void } }]
     expect(message).toBe('bots.dependencies.background.installed:Codex')
-    expect(options.action?.label).toBe('supermarket.viewBotDependencies')
+    expect(options.action?.label).toBe('apps.viewBotApps')
     const navigated = new Promise<void>(resolve => router.afterEach(() => resolve()))
     options.action?.onClick()
     await navigated
-    expect(router.currentRoute.value.fullPath).toBe('/settings/bots/bot-1?tab=dependencies')
+    expect(router.currentRoute.value.fullPath).toBe('/settings/bots/bot-1?tab=apps')
   })
 
   it('leaves the verdict to an open dialog and forgets the record when it closes', async () => {
@@ -121,7 +121,7 @@ describe('useDependencyOperationsStore', () => {
     streamDependencyOperation.mockReturnValue(stream.generator)
     const store = useDependencyOperationsStore()
 
-    const result = store.start({ botId: 'bot-1', targetId: 't-2', item: node, action: 'remove' })
+    const result = store.start({ botId: 'bot-1', targetId: 't-2', item: node, action: 'reinstall' })
     expect(result.kind).toBe('started')
     const key = operationKey('bot-1', 'node')
     store.view(key, 'panel')

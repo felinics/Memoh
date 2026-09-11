@@ -8,7 +8,10 @@ const sseOperations = new Set([
   'post /bots/{bot_id}/dependencies/{dep_id}/install',
   'post /bots/{bot_id}/dependencies/{dep_id}/update',
   'post /bots/{bot_id}/dependencies/{dep_id}/reinstall',
-  'delete /bots/{bot_id}/dependencies/{dep_id}',
+  'post /bots/{bot_id}/apps',
+  'post /bots/{bot_id}/apps/update',
+  'post /bots/{bot_id}/apps/{installation_id}/resume',
+  'delete /bots/{bot_id}/apps/{installation_id}',
 ])
 
 export default defineConfig({

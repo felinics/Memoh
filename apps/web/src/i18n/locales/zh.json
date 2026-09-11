@@ -196,9 +196,9 @@
     },
     "registry": {
       "unavailable": "暂时无法连接 Supermarket，请稍后重试。",
-      "package_not_found": "该技能包已不存在。",
-      "package_invalid": "该技能包无效，无法安装。",
-      "package_install_failed": "技能包安装失败，请重试。"
+      "app_not_found": "该应用已不存在。",
+      "app_invalid": "该应用无效，无法安装。",
+      "app_install_failed": "应用安装失败，请重试。"
     },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
@@ -271,6 +271,12 @@
     "external_runtime": {
       "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。"
+    },
+    "app": {
+      "not_found": "未找到该应用安装记录。",
+      "request_invalid": "应用请求无效。",
+      "busy": "该应用的另一个操作正在进行中。",
+      "operation_failed": "应用操作失败。"
     }
   },
   "auth": {
@@ -2316,18 +2322,17 @@
       "channels": "平台",
       "remoteRuntime": "电脑",
       "container": "工作区",
-      "dependencies": "依赖",
       "mcp": "MCP",
       "compaction": "上下文压缩",
       "schedule": "定时任务",
       "history": "对话历史",
-      "connectors": "连接器",
       "skills": "技能",
       "email": "邮件",
       "files": "文件",
       "access": "访问控制",
       "terminal": "终端",
-      "settings": "设置"
+      "settings": "设置",
+      "apps": "应用"
     },
     "agent": {
       "add": "添加 Agent",
@@ -2398,7 +2403,8 @@
         "removing": "卸载中",
         "updateAvailable": "有更新 {version}",
         "unsupported": "不支持",
-        "unsupportedTooltip": "当前工作区平台不支持该依赖。"
+        "unsupportedTooltip": "当前工作区平台不支持该依赖。",
+        "retired": "已下架"
       },
       "action": {
         "install": "安装",
@@ -2437,7 +2443,8 @@
         "remoteWarningDescription": "脚本会在这台电脑上下载并写入文件。",
         "installConfirm": "安装",
         "updateConfirm": "更新",
-        "installAndEnable": "安装并启用"
+        "installAndEnable": "安装并启用",
+        "versionInvalid": "请输入 1.2.3 或 latest 这样的版本标识。"
       },
       "progress": {
         "installing": "正在安装 {name}",
@@ -2450,7 +2457,10 @@
         "failedHint": "状态已记为失败，可在依赖列表中重试。完整日志可复制。",
         "runInBackground": "后台运行",
         "version": "版本",
-        "entrypoint": "入口"
+        "entrypoint": "入口",
+        "log": "操作日志",
+        "unknownTitle": "结果未确认",
+        "unknownHint": "操作结果尚未确认，请刷新依赖列表查看状态。"
       },
       "script": {
         "title": "将在工作区执行的脚本",
@@ -3347,15 +3357,11 @@
       "discoverySaveFailed": "保存技能路径失败",
       "addSkill": "新建技能",
       "libraryTitle": "技能库",
-      "packageBadge": "Package",
-      "openPackage": "打开 Package",
+      "appBadge": "应用",
+      "openApp": "打开应用",
       "backToLibrary": "返回",
       "viewSkill": "查看 Skill",
-      "uninstallPackage": "卸载 Package",
-      "uninstallPackageConfirm": "确定卸载这个 Package 吗？",
-      "uninstallPackageSuccess": "Package 已卸载",
-      "uninstallPackageFailed": "卸载 Package 失败",
-      "packageSkillsUnavailable": "Package 中的 Skill 当前不可用",
+      "appSkillsUnavailable": "应用中的 Skill 当前不可用",
       "close": "关闭",
       "emptyTitle": "技能库为空",
       "emptyDescription": "请创建新的托管技能，或配置外部扫描路径以引入现有技能。",
@@ -3389,7 +3395,8 @@
       "saveSuccess": "技能已保存",
       "saveFailed": "保存技能失败",
       "loadFailed": "加载技能失败",
-      "intro": "管理此机器人的专属技能。本地托管副本具有最高优先级。"
+      "intro": "管理此机器人的专属技能。本地托管副本具有最高优先级。",
+      "manageApp": "管理应用"
     },
     "compaction": {
       "title": "压缩记录",
@@ -3608,23 +3615,15 @@
   },
   "supermarket": {
     "title": "市场",
-    "searchPlaceholder": "搜索 Skills...",
-    "searchPlaceholderWithConnectors": "搜索 Skills 和连接器...",
+    "searchPlaceholder": "搜索应用...",
     "skillsSection": "Skills",
-    "packagesSection": "Packages",
-    "connectorsSection": "连接器",
-    "dependenciesSection": "依赖",
     "noResults": "未找到结果",
-    "noPackageResults": "未找到 Package",
-    "noConnectorResults": "未找到连接器",
-    "noDependencyResults": "未找到依赖",
+    "noAppResults": "未找到应用",
     "install": "安装",
     "installToBot": "安装到 Bot",
     "selectBot": "选择 Bot",
     "selectBotPlaceholder": "选择要安装到的 Bot...",
     "selectWorkspaceTarget": "工作区",
-    "dependencyInstallTitle": "安装 {name}",
-    "viewBotDependencies": "查看 Bot 依赖",
     "envVariables": "环境变量",
     "envDescription": "配置所需的环境变量",
     "installSuccess": "安装成功",
@@ -3638,7 +3637,7 @@
     "homepage": "主页",
     "files": "文件",
     "viewDetails": "查看详情",
-    "packageInstallTitle": "安装 Package",
+    "appInstallTitle": "安装应用",
     "loadError": "从市场加载失败",
     "submit": "提交",
     "information": "信息",
@@ -3646,7 +3645,7 @@
     "registry": "Registry",
     "allRegistries": "全部",
     "registryFilter": "按 Registry 筛选",
-    "package": "Package",
+    "app": "应用",
     "previousPage": "上一页",
     "nextPage": "下一页",
     "developer": "开发者",
@@ -3656,10 +3655,22 @@
     "website": "网站",
     "instructions": "说明",
     "backToSupermarket": "返回市场",
-    "includedSkills": "包含的 Skills",
-    "packageNotFound": "未找到 Package",
+    "appNotFound": "未找到应用",
     "noDescription": "暂无描述",
-    "unnamedSkill": "未命名 Skill"
+    "unnamedSkill": "未命名 Skill",
+    "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他应用共享。",
+    "dependencyPending": "加载中…",
+    "connectorsHint": "安装应用后，每个连接器都需要你授权。",
+    "connectorsUnavailableHint": "服务器未配置 Connect-It，这些连接器将保持未授权状态。",
+    "connectorAuthHint": "安装后授权。",
+    "license": "许可证",
+    "repository": "仓库",
+    "revision": "版本修订",
+    "installPreview": "安装将会",
+    "installPreviewDependency": "缺失时安装到工作区",
+    "installPreviewConnector": "需要你授权",
+    "installPreviewConnectorOptional": "可稍后授权（可选）",
+    "viewAll": "查看全部"
   },
   "connectors": {
     "title": "连接器",
@@ -3820,5 +3831,116 @@
     "expiresIn": "{time} 后过期",
     "codeExpired": "验证码已过期",
     "copyFailed": "复制验证码失败"
+  },
+  "apps": {
+    "title": "应用",
+    "checkUpdates": "检查更新",
+    "checkUpdatesDone": "更新检查完成",
+    "checkUpdatesFailed": "无法检查更新",
+    "browse": "浏览市场",
+    "emptyTitle": "尚未安装应用",
+    "emptyDescription": "为 Bot 安装应用，增加新的能力。",
+    "emptyAction": "打开市场",
+    "loadFailed": "无法加载应用",
+    "busy": "此工作区还有另一个应用操作在进行中。",
+    "viewBotApps": "查看 Bot 应用",
+    "components": "{count} 个组件",
+    "workspaceNotRunningDescription": "安装和更新应用需要运行中的工作区。列表显示的是最近记录的状态。",
+    "action": {
+      "install": "安装",
+      "resume": "继续安装",
+      "update": "更新",
+      "remove": "卸载",
+      "viewProgress": "查看进度",
+      "open": "在市场中查看"
+    },
+    "section": {
+      "skills": "{count} 个 Skill",
+      "dependencies": "{count} 个依赖",
+      "connectors": "{count} 个连接器"
+    },
+    "dependency": {
+      "shared": "共享",
+      "unknown": "目录中不存在"
+    },
+    "connector": {
+      "needsAuth": "需要授权",
+      "optional": "可选",
+      "shared": "所有工作区共享",
+      "authorize": "去授权",
+      "authDescription": "连接 {name} 使用的服务。",
+      "unavailableTitle": "连接器不可用",
+      "unavailableDescription": "当前配置的 Connect-It 未提供此类型的连接器。"
+    },
+    "remove": {
+      "title": "卸载 {name}？",
+      "description": "移除该应用的 Skills。依赖与连接只有在没有其他应用引用时才会一并释放。",
+      "willRemove": "将被移除",
+      "willKeep": "保留",
+      "willDisconnect": "将断开连接",
+      "alsoRemoveRequired": "同时移除仅被它使用的自动安装应用",
+      "reason": {
+        "shared": "被其他应用使用",
+        "image": "随工作区镜像自带",
+        "absent": "未安装"
+      }
+    },
+    "progress": {
+      "installing": "正在安装 {name}",
+      "updating": "正在更新 {name}",
+      "resuming": "正在继续安装 {name}",
+      "removing": "正在卸载 {name}",
+      "doneTitle": "完成",
+      "partialTitle": "已安装，部分项目需要处理",
+      "partialHint": "部分组件失败或仍需授权。处理完成后可在应用页继续安装。",
+      "failedTitle": "操作失败",
+      "failedHint": "已记录为失败，可在应用页重试。完整日志可复制。",
+      "unknownTitle": "结果未确认",
+      "unknownHint": "操作结果尚未确认，请刷新应用列表查看状态。",
+      "preparing": "准备中…",
+      "noLog": "没有脚本输出。",
+      "log": "操作日志",
+      "runInBackground": "后台运行",
+      "reconnecting": "与服务器的连接中断，正在确认结果…"
+    },
+    "steps": {
+      "skills": "Skills",
+      "dependency": "依赖 {name}",
+      "connector": "连接器 {name}"
+    },
+    "stepStatus": {
+      "running": "进行中",
+      "installed": "已安装",
+      "linked": "已关联",
+      "needs_auth": "需要授权",
+      "failed": "失败",
+      "skipped": "已跳过",
+      "removed": "已移除",
+      "kept": "已保留",
+      "disconnected": "已断开",
+      "updated": "已更新"
+    },
+    "background": {
+      "installed": "{name} 已安装",
+      "partial": "{name} 已安装，部分项目需要处理",
+      "updated": "{name} 已更新",
+      "removed": "{name} 已卸载",
+      "failed": "{name}：操作失败"
+    },
+    "enableFlow": {
+      "installDescription": "将 {name} 应用安装到工作区，然后启用该 Agent。"
+    },
+    "sections": {
+      "skills": "Skills",
+      "dependencies": "依赖",
+      "connectors": "连接器"
+    },
+    "update": {
+      "title": "更新 {name}",
+      "description": "选择要更新的项目。依赖会更新到最新版本，应用发布会替换其 Skills。",
+      "release": "应用发布",
+      "confirm": "更新 {count} 项",
+      "none": "没有可更新的项目。"
+    }
   }
 }

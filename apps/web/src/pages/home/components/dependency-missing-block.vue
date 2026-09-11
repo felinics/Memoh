@@ -116,7 +116,7 @@ function openDependencies() {
   void router.push({
     name: 'bot-detail',
     params: { botName },
-    query: { tab: 'dependencies', dependency_id: args.value.dep_id, session_id: props.sessionId || undefined },
+    query: { tab: 'apps', dependency_id: args.value.dep_id, session_id: props.sessionId || undefined },
   }).catch(() => {})
 }
 </script>

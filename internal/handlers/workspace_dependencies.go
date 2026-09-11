@@ -119,47 +119,6 @@ type WorkspaceDependencyItem struct {
 	Actions []string `json:"actions" enums:"install,update,reinstall,remove,rollback,check_update"`
 }
 
-// WorkspaceDependencyCatalogPlatform is one (os, arch set, libc) tuple a
-// catalog dependency can be installed on.
-type WorkspaceDependencyCatalogPlatform struct {
-	OS   string   `json:"os"`
-	Arch []string `json:"arch"`
-	// Libc is empty when the libc flavour does not matter for the OS.
-	Libc string `json:"libc,omitempty"`
-}
-
-// WorkspaceDependencyCatalogItem is one catalog dependency as declared by its
-// manifest, independent of any bot or workspace.
-type WorkspaceDependencyCatalogItem struct {
-	RegistryID         string                                    `json:"registry_id,omitempty"`
-	DefinitionRevision string                                    `json:"definition_revision,omitempty"`
-	IconURL            string                                    `json:"icon_url,omitempty"`
-	Translations       map[string]WorkspaceDependencyTranslation `json:"translations,omitempty"`
-	Retired            bool                                      `json:"retired,omitempty"`
-	ID                 string                                    `json:"id"`
-	Name               string                                    `json:"name"`
-	Description        string                                    `json:"description,omitempty"`
-	Icon               string                                    `json:"icon,omitempty"`
-	// Category is agent, runtime, or tool.
-	Category string `json:"category" enums:"agent,runtime,tool"`
-	// Provides lists the commands the dependency makes available.
-	Provides  []string                             `json:"provides"`
-	Platforms []WorkspaceDependencyCatalogPlatform `json:"platforms"`
-	// Installable is set when the catalog has an install script for the
-	// dependency, i.e. it can be installed into a workspace (as a managed
-	// overlay when the image already ships it).
-	Installable bool `json:"installable"`
-	// HasImageBaseline is set when the workspace image ships a copy of the
-	// dependency; removing a managed overlay returns to that copy.
-	HasImageBaseline bool `json:"has_image_baseline"`
-	// VersionPin is the version every install produces when the manifest
-	// locks one; omitted when installs follow the latest release.
-	VersionPin string `json:"version_pin,omitempty"`
-	// ActionsSupported lists the actions the catalog gives the dependency,
-	// before any workspace state is considered.
-	ActionsSupported []string `json:"actions_supported" enums:"install,update,reinstall,remove,rollback,check_update"`
-}
-
 type WorkspaceDependencyTranslation struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -171,13 +130,6 @@ func dependencyTranslations(dep catalog.Dependency) map[string]WorkspaceDependen
 		result[language] = WorkspaceDependencyTranslation{Name: text.Name, Description: text.Description}
 	}
 	return result
-}
-
-// WorkspaceDependencyCatalogResponse is the whole dependency catalog.
-type WorkspaceDependencyCatalogResponse struct {
-	CatalogStale     bool                             `json:"catalog_stale"`
-	CatalogFetchedAt *time.Time                       `json:"catalog_fetched_at,omitempty"`
-	Items            []WorkspaceDependencyCatalogItem `json:"items"`
 }
 
 // WorkspaceDependencyListResponse is the reconciled dependency view of one
@@ -314,35 +266,6 @@ type workspaceDependencyErrorEvent struct {
 	RequestID string            `json:"request_id,omitempty"`
 }
 
-// ListWorkspaceDependencyCatalog godoc
-// @Summary List the workspace dependency catalog
-// @Description Every dependency the catalog declares, as its manifest describes it: what it provides, where it installs, whether it can be installed and whether the workspace image ships a baseline copy. Reads no workspace and needs no bot; the Supermarket shows it before a bot is chosen.
-// @Tags containerd
-// @Produce json
-// @Success 200 {object} WorkspaceDependencyCatalogResponse
-// @Failure 401 {object} ErrorResponse
-// @Failure 503 {object} apperror.Problem
-// @Param refresh query bool false "Refresh the remote catalog"
-// @Router /workspace-dependencies/catalog [get].
-func (h *ContainerdHandler) ListWorkspaceDependencyCatalog(c echo.Context) error {
-	if h.workspaceDeps == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "workspace dependency service not configured")
-	}
-	result, err := h.workspaceDeps.Catalog(c.Request().Context(), c.QueryParam("refresh") == "true")
-	if err != nil {
-		return workspaceDependencyError(err)
-	}
-	deps := result.Items
-	resp := WorkspaceDependencyCatalogResponse{Items: make([]WorkspaceDependencyCatalogItem, 0, len(deps)), CatalogStale: result.Stale}
-	if !result.FetchedAt.IsZero() {
-		resp.CatalogFetchedAt = &result.FetchedAt
-	}
-	for _, dep := range deps {
-		resp.Items = append(resp.Items, workspaceDependencyCatalogItem(dep))
-	}
-	return c.JSON(http.StatusOK, resp)
-}
-
 // ListWorkspaceDependencies godoc
 // @Summary List workspace dependencies
 // @Description Every catalog dependency (image-provided runtimes, managed agent CLIs and tools) reconciled with its installation record and, when the workspace is running, with what is actually installed.
@@ -467,8 +390,8 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 }
 
 // InstallWorkspaceDependency godoc
-// @Summary Install a workspace dependency
-// @Description Runs the catalog install script and streams its output. The optional body names the version to install; without one the script installs the latest version (or the manifest pin). For a dependency the image already ships this installs a managed overlay that takes precedence over the image copy. A stopped native workspace is started first. Events: started, log, done, error.
+// @Summary Install or reinstall a referenced workspace dependency
+// @Description Runs the catalog install script for a dependency an App references and streams its output: a retry after a failed App step, or a managed overlay laid over the copy the workspace image ships. New dependencies reach a bot by installing the App that references them. Events: started, log, done, error.
 // @Tags containerd
 // @Accept json
 // @Produce text/event-stream
@@ -527,28 +450,6 @@ func (h *ContainerdHandler) UpdateWorkspaceDependency(c echo.Context) error {
 // @Router /bots/{bot_id}/dependencies/{dep_id}/reinstall [post].
 func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 	return h.streamWorkspaceDependencyOperation(c, catalog.ActionReinstall, workspaceDependencyService.Reinstall)
-}
-
-// RemoveWorkspaceDependency godoc
-// @Summary Remove a workspace dependency
-// @Description Runs the catalog remove script, deletes the generated shims, drops the installation record, and streams the output. For a dependency the image ships this removes the managed overlay only; the image copy becomes the one in effect again.
-// @Tags containerd
-// @Produce text/event-stream
-// @Param bot_id path string true "Bot ID"
-// @Param dep_id path string true "Dependency ID"
-// @Param workspace_target_id query string false "Workspace target ID (defaults to the bot's current target)"
-// @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
-// @Param payload body WorkspaceDependencyInstallRequest false "Prepared definition revision (optional)"
-// @Router /bots/{bot_id}/dependencies/{dep_id} [delete].
-func (h *ContainerdHandler) RemoveWorkspaceDependency(c echo.Context) error {
-	return h.streamWorkspaceDependencyOperation(c, catalog.ActionRemove, func(svc workspaceDependencyService, ctx context.Context, botID, targetID, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
-		return svc.Remove(ctx, botID, targetID, depID, sink)
-	})
 }
 
 // RollbackWorkspaceDependency godoc
@@ -1071,34 +972,6 @@ func (h *ContainerdHandler) GetWorkspaceDependencyIcon(c echo.Context) error {
 		return c.NoContent(http.StatusNotModified)
 	}
 	return c.Blob(http.StatusOK, "image/svg+xml", content)
-}
-
-func workspaceDependencyCatalogItem(dep catalog.Dependency) WorkspaceDependencyCatalogItem {
-	item := WorkspaceDependencyCatalogItem{
-		ID:         dep.ID,
-		RegistryID: dep.RegistryID, DefinitionRevision: dep.Revision, IconURL: dependencyIconURL(dep), Translations: dependencyTranslations(dep), Retired: dep.Retired,
-		Name:             dep.Name,
-		Description:      dep.Description,
-		Icon:             dep.Icon,
-		Category:         string(dep.Category),
-		Provides:         append([]string{}, dep.Provides...),
-		Platforms:        make([]WorkspaceDependencyCatalogPlatform, 0, len(dep.Platforms)),
-		Installable:      !dep.Retired && workspacedeps.ActionSupported(dep, catalog.ActionInstall),
-		HasImageBaseline: dep.HasImageBaseline(),
-		VersionPin:       dep.Version.Pin,
-		ActionsSupported: make([]string, 0, len(workspacedeps.UserActions)),
-	}
-	for _, platform := range dep.Platforms {
-		item.Platforms = append(item.Platforms, WorkspaceDependencyCatalogPlatform{
-			OS:   platform.OS,
-			Arch: append([]string{}, platform.Arch...),
-			Libc: platform.Libc,
-		})
-	}
-	for _, action := range workspacedeps.SupportedActions(dep) {
-		item.ActionsSupported = append(item.ActionsSupported, string(action))
-	}
-	return item
 }
 
 func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) WorkspaceDependencyItem {

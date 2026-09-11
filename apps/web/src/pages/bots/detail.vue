@@ -203,8 +203,8 @@
                         <!-- NavItem's root is already a flex row, so the count
                              pushes itself to the trailing edge without a slot. -->
                         <BadgeCount
-                          v-if="tab.value === 'dependencies' && dependencyAttentionCount > 0"
-                          :count="dependencyAttentionCount"
+                          v-if="tab.value === 'apps' && appAttentionCount > 0"
+                          :count="appAttentionCount"
                           variant="destructive"
                           class="ml-auto"
                         />
@@ -274,7 +274,7 @@ import {
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, Settings, MessageSquare,
   BrainCircuit, ShieldAlert, Database, Mail, Link, Clock, Server, FileBox, Zap,
-  Monitor, Globe, Bot as BotIcon, ChevronLeft, Workflow, Laptop, Plug, Package
+  Monitor, Globe, Bot as BotIcon, ChevronLeft, Workflow, Laptop, Package as App
 } from 'lucide-vue-next'
 import { computed, ref, watch, onMounted, toValue, nextTick, inject, type Ref } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
@@ -301,7 +301,6 @@ import BotDesktop from './components/bot-desktop.vue'
 import BotNetwork from './components/bot-network.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
-import BotConnectors from './components/bot-connectors.vue'
 import BotMemory from './components/bot-memory.vue'
 import BotSkills from './components/bot-skills.vue'
 import BotCompaction from './components/bot-compaction.vue'
@@ -312,7 +311,7 @@ import BotContainer from './components/bot-container.vue'
 import BotRemoteRuntime from './components/bot-remote-runtime.vue'
 import BotAccess from './components/bot-access.vue'
 import BotAgents from './components/bot-agents.vue'
-import BotDependencies from './components/bot-dependencies.vue'
+import BotApps from './components/bot-apps.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
@@ -325,8 +324,7 @@ import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
-import { useBotDependenciesQuery } from '@/composables/api/useWorkspaceDependencies'
-import { dependencyNeedsAttention } from '@/utils/workspace-dependency'
+import { appNeedsAttention, useBotAppsQuery } from '@/composables/api/useApps'
 type BotCheck = BotsBotCheck
 type BotContainerInfo = HandlersGetContainerResponse
 type BotContainerSnapshot = HandlersListSnapshotsResponse extends { snapshots?: (infer T)[] } ? T : never
@@ -403,13 +401,13 @@ const canManageBot = computed(() => {
 
 const capabilitiesStore = useCapabilitiesStore()
 
-// Sidebar count for the Dependencies tab: rows that need a hand (missing,
-// failed, version to align, update available). Same query key as the tab
-// itself (bot + the Server-resolved primary target), so opening the tab reuses
-// this fetch; chat-only members never see the tab, so they never fetch.
-const dependencyBadgeBotId = computed(() => (canManageBot.value ? botId.value : '')) as Ref<string>
-const { data: dependencyList } = useBotDependenciesQuery(dependencyBadgeBotId, ref(''))
-const dependencyAttentionCount = computed(() => (dependencyList.value?.items ?? []).filter(dependencyNeedsAttention).length)
+// Sidebar count for the Apps tab: Apps that need a hand (partial,
+// failed, update available). Same query key as the tab itself (bot + the
+// Server-resolved primary target), so opening the tab reuses this fetch;
+// chat-only members never see the tab, so they never fetch.
+const appBadgeBotId = computed(() => (canManageBot.value ? botId.value : '')) as Ref<string>
+const { data: appList } = useBotAppsQuery(appBadgeBotId, ref(''))
+const appAttentionCount = computed(() => (appList.value?.items ?? []).filter(appNeedsAttention).length)
 
 const tabList = computed(() => {
   const bot_id = toValue(botId)
@@ -427,11 +425,8 @@ const tabList = computed(() => {
     { value: 'hooks', label: 'bots.tabs.hooks', icon: Workflow, component: BotHooks, params: { 'bot-id': bot_id }, containerWorkspaceOnly: true },
     { value: 'agents', label: 'bots.tabs.agents', icon: BotIcon, component: BotAgents, params: { 'bot-id': bot_id } },
     { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
-    ...(capabilitiesStore.loaded && capabilitiesStore.connectors
-      ? [{ value: 'connectors', label: 'bots.tabs.connectors', icon: Plug, component: BotConnectors, params: { 'bot-id': bot_id } }]
-      : []),
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
-    { value: 'dependencies', label: 'bots.tabs.dependencies', icon: Package, component: BotDependencies, params: { 'bot-id': bot_id } },
+    { value: 'apps', label: 'bots.tabs.apps', icon: App, component: BotApps, params: { 'bot-id': bot_id } },
     { value: 'compaction', label: 'bots.tabs.compaction', icon: FileBox, component: BotCompaction, params: { 'bot-id': bot_id } },
     { value: 'schedule', label: 'bots.tabs.schedule', icon: Clock, component: BotSchedule, params: { 'bot-id': bot_id } },
     { value: 'skills', label: 'bots.tabs.skills', icon: BrainCircuit, component: BotSkills, params: { 'bot-id': bot_id } },
@@ -458,7 +453,7 @@ const searchIndex = computed(() => {
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },
     { tab: 'container', key: 'bots.container.dataTitle', keywords: ['docker', 'image', 'gpu', 'volume'] },
     { tab: 'container', key: 'bots.container.metricsTitle', keywords: ['cpu', 'ram', 'storage'] },
-    { tab: 'dependencies', key: 'bots.tabs.dependencies', keywords: ['codex', 'claude code', 'node', 'python', 'uv', 'install', 'version', '依赖', '安装', '版本', '依存', 'インストール'] },
+    { tab: 'apps', key: 'bots.tabs.apps', keywords: ['codex', 'claude code', 'node', 'python', 'uv', 'install', 'version', 'connector', 'oauth', 'dependency', 'supermarket', '依赖', '安装', '版本', '连接器', '扩展包', '依存', 'インストール', 'コネクター', 'パッケージ'] },
     { tab: 'remote-runtime', key: 'bots.remoteRuntime.title', keywords: ['files', 'commands', 'computer', 'server', '文件', '命令', '电脑', '服务器', 'ファイル', 'コマンド'] },
     { tab: 'memory', key: 'bots.memory.title', keywords: ['vector', 'database', 'pgvector', 'embed'] },
     { tab: 'channels', key: 'bots.channels.configured', keywords: ['telegram', 'discord', 'wechat', 'slack'] },
@@ -467,9 +462,6 @@ const searchIndex = computed(() => {
     { tab: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
     { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'external agent', 'acp'] },
     { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
-    ...(capabilitiesStore.loaded && capabilitiesStore.connectors
-      ? [{ tab: 'connectors', key: 'bots.tabs.connectors', keywords: ['providers', 'apps', 'oauth', 'api', '连接器', 'コネクター'] }]
-      : []),
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
     { tab: 'compaction', key: 'bots.compaction.title', keywords: ['compress', 'summarize', 'context window'] },
     { tab: 'schedule', key: 'bots.schedule.title', keywords: ['cron', 'jobs', 'tasks', 'automation'] },
@@ -543,7 +535,7 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => {
   const coreKeys = ['overview', 'general', 'channels']
-  const capabilityKeys = ['skills', 'hooks', 'tool-approval', 'agents', 'connectors', 'mcp', 'dependencies', 'memory']
+  const capabilityKeys = ['skills', 'apps', 'hooks', 'tool-approval', 'agents', 'mcp', 'memory']
   const runtimeKeys = ['desktop', 'remote-runtime', 'container', 'network', 'schedule', 'compaction']
   const securityKeys = ['access', 'email']
 

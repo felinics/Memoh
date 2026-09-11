@@ -1,3 +1,5 @@
+import { assertSecureRuntimeUrl, runtimeConnectUrl } from './server-url'
+export { assertSecureRuntimeUrl, runtimeConnectUrl } from './server-url'
 import { arch, hostname, platform } from 'node:os'
 import { realpath } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
@@ -44,35 +46,6 @@ export interface RuntimeSessionOptions {
 }
 
 export type RuntimeSessionStatus = 'connecting' | 'connected' | 'disconnected' | 'stopped'
-
-export function runtimeConnectUrl(serverUrl: string): URL {
-  const url = new URL(serverUrl)
-  if (url.protocol === 'http:') {
-    url.protocol = 'ws:'
-  } else if (url.protocol === 'https:') {
-    url.protocol = 'wss:'
-  }
-  const basePath = url.pathname.replace(/\/+$/, '')
-  url.pathname = `${basePath}/runtimes/connect`
-  url.search = ''
-  url.hash = ''
-  return url
-}
-
-export function assertSecureRuntimeUrl(url: URL, insecureLocalhost = false): void {
-  if (url.username || url.password) {
-    throw new Error('runtime connection URL must not contain credentials')
-  }
-  if (url.protocol === 'wss:') {
-    return
-  }
-  const hostname = url.hostname.replace(/^\[|\]$/g, '')
-  const local = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1'
-  if (url.protocol === 'ws:' && insecureLocalhost && local) {
-    return
-  }
-  throw new Error('runtime connections require wss://; use --insecure-localhost only for localhost development')
-}
 
 export function createHandshakeMetadata(
   workspaceBase: string,

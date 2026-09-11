@@ -339,9 +339,9 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/mcp-stdio", h.CreateMCPStdio)
 	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
 	root.POST("/tools", h.HandleMCPTools)
-	// Workspace dependency routes.
-	// The catalog is bot independent and needs only a signed-in user.
-	e.GET("/workspace-dependencies/catalog", h.ListWorkspaceDependencyCatalog)
+	// Workspace dependency routes. Dependencies are installed and removed
+	// through Apps (/bots/:bot_id/packages); these routes inspect and
+	// maintain the copies an App references.
 	e.GET("/workspace-dependencies/icons/:digest", h.GetWorkspaceDependencyIcon)
 	deps := e.Group("/bots/:bot_id/dependencies")
 	deps.GET("", h.ListWorkspaceDependencies)
@@ -352,7 +352,6 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	deps.POST("/:dep_id/update", h.UpdateWorkspaceDependency)
 	deps.POST("/:dep_id/reinstall", h.ReinstallWorkspaceDependency)
 	deps.POST("/:dep_id/rollback", h.RollbackWorkspaceDependency)
-	deps.DELETE("/:dep_id", h.RemoveWorkspaceDependency)
 }
 
 // CreateContainer godoc

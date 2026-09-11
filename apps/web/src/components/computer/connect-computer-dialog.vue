@@ -128,28 +128,51 @@ const adoptedName = ref('')
 const connectedRuntime = computed(() => (
   (runtimes.value ?? []).find(runtime => runtime.id === runtimeId.value && runtime.online)
 ))
-watch(connectedRuntime, async (runtime) => {
-  if (!runtime || step.value !== 'command') return
-  adoptedName.value = runtime.name || runtime.hostname || runtimeId.value
-  toast.success(t('runtimes.computerOnline', { name: adoptedName.value }))
-  await grantAllBots()
-  step.value = 'access'
-})
+// Own connection refresh here rather than relying on polling in the caller.
+// Refetch resolves with Colada's error state on failure, so the next tick can
+// recover without overlapping requests or depending on browser focus events.
+watch([open, runtimeId, step, () => !!connectedRuntime.value], ([isOpen, id, currentStep, online], _previous, onCleanup) => {
+  if (!isOpen || !id || currentStep !== 'command' || online) return
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => {
+    stopped = true
+    clearTimeout(timer)
+  })
+  async function poll(): Promise<void> {
+    await refetchRuntimes()
+    if (!stopped) timer = setTimeout(() => { void poll() }, 1000)
+  }
+  void poll()
+}, { immediate: true })
 
 const granting = ref(false)
-async function grantAllBots(): Promise<void> {
-  if (granting.value) return
+// A newly opened connection may become online while the previous grant is
+// still running. Re-check it when that grant releases the shared busy state.
+watch([connectedRuntime, granting, open], async ([runtime]) => {
+  if (!open.value || !runtime || step.value !== 'command' || granting.value) return
+  adoptedName.value = runtime.name || runtime.hostname || runtimeId.value
+  toast.success(t('runtimes.computerOnline', { name: adoptedName.value }))
+  const connectedId = runtimeId.value
   granting.value = true
+  try {
+    await grantAllBots(connectedId)
+    if (open.value && runtimeId.value === connectedId) step.value = 'access'
+  } finally {
+    granting.value = false
+  }
+})
+
+async function grantAllBots(connectedId: string): Promise<void> {
   let failed = 0
   for (const bot of botsData.value?.items ?? []) {
     if (!bot.id) continue
     try {
-      await grantAccess({ botId: bot.id, runtimeId: runtimeId.value })
+      await grantAccess({ botId: bot.id, runtimeId: connectedId })
     } catch {
       failed += 1
     }
   }
-  granting.value = false
   if (failed > 0) {
     toast.error(t('computerAccess.updateFailed'))
   }

@@ -139,8 +139,26 @@ type Queries interface {
 	DeleteBotByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotChannelConfig(ctx context.Context, arg dbsqlc.DeleteBotChannelConfigParams) error
 	DeleteBotEmailBinding(ctx context.Context, id pgtype.UUID) error
-	DeleteBotSkillPackageInstallation(ctx context.Context, arg dbsqlc.DeleteBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
 	DeleteBotDependencyInstallation(ctx context.Context, arg dbsqlc.DeleteBotDependencyInstallationParams) (int64, error)
+	GetBotAppInstallation(ctx context.Context, arg dbsqlc.GetBotAppInstallationParams) (dbsqlc.BotAppInstallation, error)
+	GetBotAppInstallationByID(ctx context.Context, arg dbsqlc.GetBotAppInstallationByIDParams) (dbsqlc.BotAppInstallation, error)
+	ListBotAppInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotAppInstallation, error)
+	ListBotAppInstallationsForTarget(ctx context.Context, arg dbsqlc.ListBotAppInstallationsForTargetParams) ([]dbsqlc.BotAppInstallation, error)
+	UpsertBotAppInstallation(ctx context.Context, arg dbsqlc.UpsertBotAppInstallationParams) (dbsqlc.BotAppInstallation, error)
+	UpdateBotAppInstallationStatus(ctx context.Context, arg dbsqlc.UpdateBotAppInstallationStatusParams) (dbsqlc.BotAppInstallation, error)
+	UpdateBotAppInstallationRelease(ctx context.Context, arg dbsqlc.UpdateBotAppInstallationReleaseParams) (dbsqlc.BotAppInstallation, error)
+	UpdateBotAppInstallationCheck(ctx context.Context, arg dbsqlc.UpdateBotAppInstallationCheckParams) (dbsqlc.BotAppInstallation, error)
+	DeleteBotAppInstallation(ctx context.Context, arg dbsqlc.DeleteBotAppInstallationParams) (dbsqlc.BotAppInstallation, error)
+	ListAppDependencyRefs(ctx context.Context, installationID pgtype.UUID) ([]dbsqlc.BotAppDependencyRef, error)
+	ListAppDependencyRefsForTarget(ctx context.Context, arg dbsqlc.ListAppDependencyRefsForTargetParams) ([]dbsqlc.ListAppDependencyRefsForTargetRow, error)
+	UpsertAppDependencyRef(ctx context.Context, arg dbsqlc.UpsertAppDependencyRefParams) (dbsqlc.BotAppDependencyRef, error)
+	DeleteAppDependencyRef(ctx context.Context, arg dbsqlc.DeleteAppDependencyRefParams) (int64, error)
+	ListAppConnectorRefs(ctx context.Context, installationID pgtype.UUID) ([]dbsqlc.BotAppConnectorRef, error)
+	ListAppConnectorRefsForBot(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListAppConnectorRefsForBotRow, error)
+	UpsertAppConnectorRef(ctx context.Context, arg dbsqlc.UpsertAppConnectorRefParams) (dbsqlc.BotAppConnectorRef, error)
+	SetAppConnectorRefConnection(ctx context.Context, arg dbsqlc.SetAppConnectorRefConnectionParams) (dbsqlc.BotAppConnectorRef, error)
+	ClearAppConnectorRefConnection(ctx context.Context, connectionID string) (int64, error)
+	DeleteAppConnectorRef(ctx context.Context, arg dbsqlc.DeleteAppConnectorRefParams) (int64, error)
 	DeleteChatRoute(ctx context.Context, id pgtype.UUID) error
 	DeleteCompactionLogsByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteContainerByBotID(ctx context.Context, botID pgtype.UUID) error
@@ -198,8 +216,6 @@ type Queries interface {
 	GetBotEmailBindingByBotAndProvider(ctx context.Context, arg dbsqlc.GetBotEmailBindingByBotAndProviderParams) (dbsqlc.BotEmailBinding, error)
 	GetBotEmailBindingByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotEmailBinding, error)
 	GetBotOverlayConfig(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotOverlayConfigRow, error)
-	GetBotSkillPackageInstallation(ctx context.Context, arg dbsqlc.GetBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
-	GetBotSkillPackageInstallationByID(ctx context.Context, arg dbsqlc.GetBotSkillPackageInstallationByIDParams) (dbsqlc.BotSkillPackageInstallation, error)
 	GetBotDependencyInstallation(ctx context.Context, arg dbsqlc.GetBotDependencyInstallationParams) (dbsqlc.BotDependencyInstallation, error)
 	GetWorkspaceDependencyDefinition(ctx context.Context, arg dbsqlc.GetWorkspaceDependencyDefinitionParams) (dbsqlc.GetWorkspaceDependencyDefinitionRow, error)
 	FindWorkspaceDependencyIcon(ctx context.Context, arg dbsqlc.FindWorkspaceDependencyIconParams) (dbsqlc.FindWorkspaceDependencyIconRow, error)
@@ -321,7 +337,6 @@ type Queries interface {
 	ListEnabledModelsByProviderClientType(ctx context.Context, clientType string) ([]dbsqlc.Model, error)
 	ListEnabledModelsByType(ctx context.Context, type_ string) ([]dbsqlc.Model, error)
 	ListEnabledSchedules(ctx context.Context) ([]dbsqlc.Schedule, error)
-	ListBotSkillPackageInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotSkillPackageInstallation, error)
 	ListBotDependencyInstallations(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotDependencyInstallation, error)
 	ListBotDependencyInstallationsForTarget(ctx context.Context, arg dbsqlc.ListBotDependencyInstallationsForTargetParams) ([]dbsqlc.BotDependencyInstallation, error)
 	ListBotDependencyInstallationsByStatus(ctx context.Context, status string) ([]dbsqlc.BotDependencyInstallation, error)
@@ -504,7 +519,6 @@ type Queries interface {
 	UpsertContainer(ctx context.Context, arg dbsqlc.UpsertContainerParams) error
 	UpsertEmailOAuthToken(ctx context.Context, arg dbsqlc.UpsertEmailOAuthTokenParams) (dbsqlc.EmailOauthToken, error)
 	UpsertMCPConnectionByName(ctx context.Context, arg dbsqlc.UpsertMCPConnectionByNameParams) (dbsqlc.McpConnection, error)
-	UpsertBotSkillPackageInstallation(ctx context.Context, arg dbsqlc.UpsertBotSkillPackageInstallationParams) (dbsqlc.BotSkillPackageInstallation, error)
 	UpsertBotDependencyInstallationIntent(ctx context.Context, arg dbsqlc.UpsertBotDependencyInstallationIntentParams) (dbsqlc.BotDependencyInstallation, error)
 	UpdateBotDependencyInstallationStatus(ctx context.Context, arg dbsqlc.UpdateBotDependencyInstallationStatusParams) (dbsqlc.BotDependencyInstallation, error)
 	UpdateBotDependencyInstallationObserved(ctx context.Context, arg dbsqlc.UpdateBotDependencyInstallationObservedParams) (dbsqlc.BotDependencyInstallation, error)

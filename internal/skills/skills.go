@@ -409,7 +409,7 @@ func IsValidName(name string) bool {
 
 const maxPortableResourceIDBytes = 128
 
-// IsValidRegistryComponent validates one Registry, Package, or Skill path component.
+// IsValidRegistryComponent validates one Registry, App, or Skill path component.
 func IsValidRegistryComponent(value string) bool {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > maxPortableResourceIDBytes ||
 		strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") || strings.Contains(value, "..") ||

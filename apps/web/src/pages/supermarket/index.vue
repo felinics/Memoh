@@ -13,358 +13,192 @@
       </Button>
     </template>
 
-    <div class="space-y-6">
-      <!-- Search -->
-      <div class="relative">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-        <Input
-          v-model="searchInput"
-          :placeholder="$t(capabilitiesStore.connectors
-            ? 'supermarket.searchPlaceholderWithConnectors'
-            : 'supermarket.searchPlaceholder')"
-          class="pl-9"
-          @keydown.enter="applySearch"
+    <div class="space-y-8">
+      <div class="space-y-4">
+        <div class="relative">
+          <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <Input
+            v-model="searchInput"
+            :placeholder="$t('supermarket.searchPlaceholder')"
+            class="pl-9"
+            @keydown.enter="applySearch"
+          />
+        </div>
+
+        <SegmentedControl
+          v-if="registryFilterItems.length > 1"
+          :model-value="selectedRegistry"
+          :items="registryFilterItems"
+          :aria-label="$t('supermarket.registryFilter')"
+          class="w-full sm:w-fit"
+          @update:model-value="onRegistryFilterChange"
         />
       </div>
 
-      <InlineLoadingRow
-        v-if="!capabilitiesStore.loaded"
-        class="justify-center py-8"
-      >
-        {{ $t('common.loading') }}
-      </InlineLoadingRow>
-
-      <Tabs
-        v-else
-        v-model="activeTab"
-        class="w-full"
-      >
-        <TabsList>
-          <TabsTrigger
-            v-if="capabilitiesStore.connectors"
-            value="connectors"
-          >
-            {{ $t('supermarket.connectorsSection') }}
-          </TabsTrigger>
-          <TabsTrigger value="skills">
-            {{ $t('supermarket.skillsSection') }}
-          </TabsTrigger>
-          <TabsTrigger value="dependencies">
-            {{ $t('supermarket.dependenciesSection') }}
-          </TabsTrigger>
-        </TabsList>
-
-        <!-- Skills Tab -->
-        <TabsContent
-          value="skills"
-          class="space-y-4"
+      <!-- Searching flattens the catalog into one paginated list; browsing
+           groups it by category, a preview per category with "View all"
+           leading to the category page when there is more. -->
+      <template v-if="searching">
+        <InlineLoadingRow
+          v-if="searchLoading"
+          class="justify-center py-8"
         >
-          <SegmentedControl
-            v-if="registryFilterItems.length > 1"
-            :model-value="selectedRegistry"
-            :items="registryFilterItems"
-            :aria-label="$t('supermarket.registryFilter')"
-            class="w-full sm:w-fit"
-            @update:model-value="onRegistryFilterChange"
+          {{ $t('common.loading') }}
+        </InlineLoadingRow>
+
+        <div
+          v-else-if="!searchResults.length"
+          class="py-8 text-center text-xs text-muted-foreground"
+        >
+          {{ $t('supermarket.noAppResults') }}
+        </div>
+
+        <div
+          v-else
+          class="grid grid-cols-1 gap-4 sm:grid-cols-2"
+        >
+          <AppCard
+            v-for="pkg in searchResults"
+            :key="`${pkg.registry_id}/${pkg.app_id}`"
+            :pkg="pkg"
+            :bot-id="defaultBotId"
           />
+        </div>
 
-          <InlineLoadingRow
-            v-if="packagesLoading"
-            class="justify-center py-8"
+        <div
+          v-if="showPagination"
+          class="flex justify-end gap-2"
+        >
+          <Button
+            variant="outline"
+            size="icon-sm"
+            :disabled="page === 1 || searchLoading"
+            :aria-label="$t('supermarket.previousPage')"
+            @click="page--"
           >
-            {{ $t('common.loading') }}
-          </InlineLoadingRow>
+            <ChevronLeft class="size-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            :disabled="!hasNextPage || searchLoading"
+            :aria-label="$t('supermarket.nextPage')"
+            @click="page++"
+          >
+            <ChevronRight class="size-4" />
+          </Button>
+        </div>
+      </template>
 
-          <div
-            v-else-if="!packages.length"
-            class="py-8 text-center text-xs text-muted-foreground"
-          >
-            {{ $t('supermarket.noPackageResults') }}
-          </div>
+      <template v-else>
+        <InlineLoadingRow
+          v-if="sectionsLoading && !sections.length"
+          class="justify-center py-8"
+        >
+          {{ $t('common.loading') }}
+        </InlineLoadingRow>
 
-          <div
-            v-else
-            class="grid grid-cols-1 gap-4 sm:grid-cols-2"
-          >
-            <PackageCard
-              v-for="pkg in packages"
-              :key="`${pkg.registry_id}/${pkg.package_id}`"
-              :pkg="pkg"
-            />
-          </div>
+        <div
+          v-else-if="!sections.length"
+          class="py-8 text-center text-xs text-muted-foreground"
+        >
+          {{ $t('supermarket.noAppResults') }}
+        </div>
 
-          <div
-            v-if="showPagination"
-            class="flex justify-end gap-2"
-          >
+        <section
+          v-for="section in sections"
+          :key="section.category.id"
+          class="space-y-3"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-base font-semibold">
+              {{ sectionTitle(section) }}
+            </h2>
             <Button
-              variant="outline"
-              size="icon-sm"
-              :disabled="page === 1 || packagesLoading"
-              :aria-label="$t('supermarket.previousPage')"
-              @click="page--"
+              v-if="section.total > SECTION_PREVIEW_LIMIT"
+              variant="ghost"
+              size="sm"
+              @click="openCategory(section.category.id)"
             >
-              <ChevronLeft class="size-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              :disabled="!hasNextPage || packagesLoading"
-              :aria-label="$t('supermarket.nextPage')"
-              @click="page++"
-            >
+              {{ $t('supermarket.viewAll') }}
               <ChevronRight class="size-4" />
             </Button>
           </div>
-        </TabsContent>
-
-        <TabsContent
-          v-if="capabilitiesStore.connectors"
-          value="connectors"
-        >
-          <InlineLoadingRow
-            v-if="connectorsQuery.isLoading.value"
-            class="justify-center py-8"
-          >
-            {{ $t('common.loading') }}
-          </InlineLoadingRow>
-
-          <div
-            v-else-if="searchQuery && !filteredConnectors.length"
-            class="py-8 text-center text-xs text-muted-foreground"
-          >
-            {{ $t('supermarket.noConnectorResults') }}
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <AppCard
+              v-for="pkg in section.apps"
+              :key="`${pkg.registry_id}/${pkg.app_id}`"
+              :pkg="pkg"
+              :bot-id="defaultBotId"
+            />
           </div>
-
-          <Empty
-            v-else-if="!filteredConnectors.length"
-            class="py-12"
-          >
-            <EmptyHeader>
-              <EmptyTitle>{{ $t('connectors.catalogEmptyTitle') }}</EmptyTitle>
-              <EmptyDescription>{{ $t('connectors.catalogEmptyDescription') }}</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-
-          <div
-            v-else
-            class="grid grid-cols-1 gap-4 sm:grid-cols-2"
-          >
-            <MarketItemCard
-              v-for="connector in filteredConnectors"
-              :key="connector.type"
-              :name="connector.name || connector.type"
-              :description="connector.description"
-              :homepage="connector.homepage_url"
-              @open="openConnectorConnect(connector)"
-            >
-              <template #leading>
-                <ProviderIcon
-                  :icon="connector.icon_url || ''"
-                  size="20"
-                  class="size-5 object-contain"
-                >
-                  <Plug class="size-4 text-muted-foreground" />
-                </ProviderIcon>
-              </template>
-              <template #actions>
-                <Button
-                  size="sm"
-                  :disabled="connector.status !== 'ready'"
-                  @click="openConnectorConnect(connector)"
-                >
-                  {{ connector.status === 'ready'
-                    ? $t('connectors.connect')
-                    : $t('connectors.unavailable') }}
-                </Button>
-              </template>
-            </MarketItemCard>
-          </div>
-        </TabsContent>
-        <!-- Dependencies Tab: the workspace dependency catalog. A card per
-             installable entry; installing streams into a bot's workspace. -->
-        <TabsContent value="dependencies">
-          <CalloutBanner
-            v-if="dependenciesQuery.error.value || dependenciesQuery.data.value?.catalog_stale"
-            class="mb-4"
-            :title="dependenciesQuery.data.value ? t('bots.dependencies.catalogStaleTitle') : t('common.loadFailed')"
-            :description="dependenciesQuery.error.value
-              ? resolveApiErrorMessage(dependenciesQuery.error.value, t('common.loadFailed'))
-              : t('bots.dependencies.catalogStaleDescription')"
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              :loading="dependenciesQuery.isLoading.value"
-              @click="retryDependencies"
-            >
-              {{ t('common.retry') }}
-            </Button>
-          </CalloutBanner>
-          <InlineLoadingRow
-            v-if="dependenciesQuery.isLoading.value"
-            class="justify-center py-8"
-          >
-            {{ $t('common.loading') }}
-          </InlineLoadingRow>
-
-          <div
-            v-else-if="!filteredDependencies.length && !dependenciesQuery.error.value"
-            class="py-8 text-center text-xs text-muted-foreground"
-          >
-            {{ $t('supermarket.noDependencyResults') }}
-          </div>
-
-          <div
-            v-else-if="filteredDependencies.length"
-            class="grid grid-cols-1 gap-4 sm:grid-cols-2"
-          >
-            <MarketItemCard
-              v-for="dependency in filteredDependencies"
-              :key="dependency.id"
-              :name="dependencyName(dependency)"
-              :description="dependencyDescription(dependency)"
-              @open="openDependencyInstall(dependency)"
-            >
-              <template #leading>
-                <img
-                  v-if="dependencyIconUrl(dependency)"
-                  :src="dependencyIconUrl(dependency)"
-                  class="size-5 object-contain"
-                  alt=""
-                >
-                <Package
-                  v-else
-                  class="size-5"
-                />
-              </template>
-              <template
-                v-if="dependency.actions_supported?.includes('install')"
-                #actions
-              >
-                <Button
-                  size="sm"
-                  @click="openDependencyInstall(dependency)"
-                >
-                  {{ $t('supermarket.installToBot') }}
-                </Button>
-              </template>
-            </MarketItemCard>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      <ConnectConnectorDialog
-        v-model:open="connectorDialogOpen"
-        :connector="selectedConnector"
-        :default-bot-id="defaultBotId"
-        @connected="openBotConnectors"
-      />
-
-      <InstallDependencyDialog
-        v-model:open="dependencyDialogOpen"
-        :item="selectedDependency"
-        :default-bot-id="defaultBotId"
-        @installed="openBotDependencies"
-      />
+        </section>
+      </template>
     </div>
   </PageShell>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useQuery } from '@pinia/colada'
-import { ChevronLeft, ChevronRight, Github, Package, Plug, Search } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Github, Search } from 'lucide-vue-next'
 import {
   Button,
-  CalloutBanner,
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
   InlineLoadingRow,
   Input,
   PageShell,
   SegmentedControl,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   toast,
   type SegmentedItem,
 } from '@felinic/ui'
 import {
-  getConnectorsCatalog,
+  getSupermarketApps,
   getSupermarketRegistries,
-  getSupermarketPackages,
-  getWorkspaceDependenciesCatalog,
-  type ConnectitConnector,
-  type HandlersSupermarketSkillPackageSummary,
+  type HandlersSupermarketAppCategory,
   type HandlersSupermarketRegistry,
-  type HandlersWorkspaceDependencyCatalogItem,
+  type HandlersSupermarketAppSummary,
 } from '@memohai/sdk'
+import { categoryDisplayName, useAppCategoriesQuery } from '@/composables/api/useApps'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import PackageCard from './components/package-card.vue'
-import ConnectConnectorDialog from './components/connect-connector-dialog.vue'
-import InstallDependencyDialog from './components/install-dependency-dialog.vue'
-import MarketItemCard from './components/market-item-card.vue'
-import ProviderIcon from '@/components/provider-icon/index.vue'
-import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
-import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
-import { useCapabilitiesStore } from '@/store/capabilities'
+import { browsableCategories, SECTION_PREVIEW_LIMIT } from './category-sections'
+import AppCard from './components/app-card.vue'
 
-const { t } = useI18n()
+interface CategorySection {
+  category: HandlersSupermarketAppCategory
+  apps: HandlersSupermarketAppSummary[]
+  total: number
+}
+
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const capabilitiesStore = useCapabilitiesStore()
-const tabParam = useSyncedQueryParam('tab', '')
 const pageSize = 50
-const allRegistriesValue = 'all'
-// Settings pages are KeepAlive-cached and share the `tab` query key, so a
-// foreign value (e.g. bot detail's ?tab=memory) can land in the synced param
-// while this page is deactivated. Render anything outside this page's own
-// tabs as the capability-dependent default; writes go back through the synced param.
-const activeTab = computed({
-  get: () => {
-    const valid = capabilitiesStore.connectors
-      ? ['connectors', 'skills', 'dependencies']
-      : ['skills', 'dependencies']
-    const fallback = capabilitiesStore.connectors ? 'connectors' : 'skills'
-    return valid.includes(tabParam.value) ? tabParam.value : fallback
-  },
-  set: (value: string) => {
-    tabParam.value = value
-  },
-})
+const allValue = 'all'
 
 const searchInput = ref('')
 const searchQuery = ref('')
 const page = ref(1)
 const total = ref(0)
-const selectedRegistry = ref(allRegistriesValue)
-const packages = ref<HandlersSupermarketSkillPackageSummary[]>([])
+const selectedRegistry = ref(allValue)
 const registries = ref<HandlersSupermarketRegistry[]>([])
-const packagesLoading = ref(false)
+const searchResults = ref<HandlersSupermarketAppSummary[]>([])
+const searchLoading = ref(false)
+const sections = ref<CategorySection[]>([])
+const sectionsLoading = ref(false)
 
-const connectorDialogOpen = ref(false)
-const selectedConnector = ref<ConnectitConnector | null>(null)
+const categoriesQuery = useAppCategoriesQuery()
+const categories = computed(() => categoriesQuery.data.value ?? [])
 
-const dependencyDialogOpen = ref(false)
-const selectedDependency = ref<HandlersWorkspaceDependencyCatalogItem | null>(null)
-const { dependencyName, dependencyDescription, dependencyIconUrl } = useWorkspaceDependencyText()
-
+const searching = computed(() => !!searchQuery.value)
+const registryParam = computed(() => (selectedRegistry.value === allValue ? undefined : selectedRegistry.value))
 const hasNextPage = computed(() => page.value * pageSize < total.value)
 const showPagination = computed(() => page.value > 1 || hasNextPage.value)
 const registryFilterItems = computed<SegmentedItem[]>(() => [
-  { value: allRegistriesValue, label: t('supermarket.allRegistries') },
+  { value: allValue, label: t('supermarket.allRegistries') },
   ...registries.value
     .filter((registry): registry is HandlersSupermarketRegistry & { id: string } => !!registry.id)
-    .map(registry => ({
-      value: registry.id,
-      label: registry.name || registry.id,
-    })),
+    .map(registry => ({ value: registry.id, label: registry.name || registry.id })),
 ])
 
 const defaultBotId = computed(() => {
@@ -372,82 +206,28 @@ const defaultBotId = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 
-const connectorsQuery = useQuery({
-  key: () => ['connectors-catalog'],
-  query: async () => {
-    const { data } = await getConnectorsCatalog({ throwOnError: true })
-    return data
-  },
-  enabled: () => capabilitiesStore.connectors,
-})
-
-const filteredConnectors = computed(() => {
-  const query = searchQuery.value.toLowerCase()
-  const connectors = connectorsQuery.data.value ?? []
-  if (!query) return connectors
-  return connectors.filter(connector =>
-    [connector.name, connector.type, connector.description, ...(connector.categories ?? [])]
-      .some(value => value?.toLowerCase().includes(query)),
-  )
-})
-
-watch(connectorsQuery.error, error => {
-  if (error) toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
-})
-
-let forceDependenciesRefresh = false
-const dependenciesQuery = useQuery({
-  key: () => ['workspace-dependencies-catalog'],
-  query: async () => {
-    const refresh = forceDependenciesRefresh
-    forceDependenciesRefresh = false
-    const { data } = await getWorkspaceDependenciesCatalog({ query: { refresh: refresh || undefined }, throwOnError: true })
-    return data
-  },
-})
-
-async function retryDependencies() {
-  forceDependenciesRefresh = true
-  await dependenciesQuery.refetch()
+function sectionTitle(section: CategorySection): string {
+  return categoryDisplayName(section.category, section.category.name, locale.value)
 }
 
-// Only entries the catalog can install are for sale here; the search matches
-// the localized name and description plus the commands an entry provides.
-const filteredDependencies = computed(() => {
-  const query = searchQuery.value.toLowerCase()
-  const installable = (dependenciesQuery.data.value?.items ?? []).filter(dependency => dependency.installable && dependency.id)
-  if (!query) return installable
-  return installable.filter(dependency =>
-    [dependency.id, dependencyName(dependency), dependencyDescription(dependency), ...(dependency.provides ?? [])]
-      .some(value => value?.toLowerCase().includes(query)),
-  )
-})
-
-watch(dependenciesQuery.error, error => {
-  if (error) toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
-})
-
-watch(
-  () => [capabilitiesStore.loaded, capabilitiesStore.connectors] as const,
-  ([loaded, connectors]) => {
-    // Normalize the URL param only while this page owns the current route —
-    // firing while KeepAlive-deactivated would rewrite another page's ?tab.
-    if (loaded && !connectors && route.name === 'supermarket' && tabParam.value === 'connectors') {
-      tabParam.value = 'skills'
-    }
-  },
-  { immediate: true },
-)
-
-onMounted(() => {
-  void capabilitiesStore.load()
-})
+function openCategory(categoryId: string) {
+  router.push({
+    name: 'supermarket-category',
+    params: { categoryId },
+    query: {
+      ...(registryParam.value ? { registry: registryParam.value } : {}),
+      ...(defaultBotId.value ? { botId: defaultBotId.value } : {}),
+    },
+  })
+}
 
 function applySearch() {
   const nextQuery = searchInput.value.trim()
   if (searchQuery.value === nextQuery) {
-    page.value = 1
-    void refreshAll()
+    if (nextQuery) {
+      page.value = 1
+      void loadSearch()
+    }
     return
   }
   searchQuery.value = nextQuery
@@ -463,39 +243,6 @@ function onRegistryFilterChange(value: string | number) {
   const next = String(value)
   if (selectedRegistry.value === next) return
   selectedRegistry.value = next
-  if (page.value !== 1) {
-    page.value = 1
-    return
-  }
-  void loadPackages()
-}
-
-function openConnectorConnect(connector: ConnectitConnector) {
-  if (connector.status !== 'ready') return
-  selectedConnector.value = connector
-  connectorDialogOpen.value = true
-}
-
-function openBotConnectors(botId: string) {
-  void router.push({
-    name: 'bot-detail',
-    params: { botName: botId },
-    query: { tab: 'connectors' },
-  })
-}
-
-function openDependencyInstall(dependency: HandlersWorkspaceDependencyCatalogItem) {
-  if (!dependency.actions_supported?.includes('install')) return
-  selectedDependency.value = dependency
-  dependencyDialogOpen.value = true
-}
-
-function openBotDependencies(botId: string) {
-  void router.push({
-    name: 'bot-detail',
-    params: { botName: botId },
-    query: { tab: 'dependencies' },
-  })
 }
 
 async function loadRegistries() {
@@ -507,46 +254,89 @@ async function loadRegistries() {
   }
 }
 
-async function loadPackages() {
-  packagesLoading.value = true
+// Requests overlap when the query or registry changes quickly; only the
+// newest one may write its result.
+let searchSequence = 0
+async function loadSearch() {
+  const sequence = ++searchSequence
+  searchLoading.value = true
   try {
-    const { data } = await getSupermarketPackages({
+    const { data } = await getSupermarketApps({
       query: {
-        q: searchQuery.value || undefined,
-        registry: selectedRegistry.value === allRegistriesValue
-          ? undefined
-          : selectedRegistry.value,
+        q: searchQuery.value,
+        registry: registryParam.value,
         page: page.value,
         limit: pageSize,
         sort: 'relevance',
       },
       throwOnError: true,
     })
-    packages.value = data.data ?? []
+    if (sequence !== searchSequence) return
+    searchResults.value = data.data ?? []
     total.value = data.total ?? 0
   } catch (error) {
-    packages.value = []
+    if (sequence !== searchSequence) return
+    searchResults.value = []
     total.value = 0
     toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
   } finally {
-    packagesLoading.value = false
+    if (sequence === searchSequence) searchLoading.value = false
   }
 }
 
-function refreshAll() {
-  void loadPackages()
-}
-
-watch(searchQuery, () => {
-  if (page.value !== 1) {
-    page.value = 1
+let sectionsSequence = 0
+async function loadSections() {
+  const sequence = ++sectionsSequence
+  const visible = browsableCategories(categories.value, registryParam.value ?? '')
+  if (!visible.length) {
+    sections.value = []
+    sectionsLoading.value = false
     return
   }
-  refreshAll()
+  sectionsLoading.value = true
+  try {
+    const loaded = await Promise.all(visible.map(async (category): Promise<CategorySection> => {
+      const { data } = await getSupermarketApps({
+        query: {
+          registry: registryParam.value,
+          category: category.id,
+          page: 1,
+          limit: SECTION_PREVIEW_LIMIT,
+          sort: 'relevance',
+        },
+        throwOnError: true,
+      })
+      return { category, apps: data.data ?? [], total: data.total ?? 0 }
+    }))
+    if (sequence !== sectionsSequence) return
+    sections.value = loaded.filter(section => section.apps.length > 0)
+  } catch (error) {
+    if (sequence !== sectionsSequence) return
+    sections.value = []
+    toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
+  } finally {
+    if (sequence === sectionsSequence) sectionsLoading.value = false
+  }
+}
+
+watch([searchQuery, selectedRegistry], () => {
+  if (searching.value) {
+    if (page.value !== 1) {
+      page.value = 1
+      return
+    }
+    void loadSearch()
+  }
+})
+watch(page, () => {
+  if (searching.value) void loadSearch()
+})
+watch([categories, selectedRegistry], () => {
+  void loadSections()
+}, { immediate: true })
+watch(categoriesQuery.error, (error) => {
+  if (error) toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
 })
 
-watch(page, loadPackages)
-
 void loadRegistries()
-refreshAll()
 </script>

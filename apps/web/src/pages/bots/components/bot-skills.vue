@@ -6,7 +6,7 @@
   >
     <template #actions>
       <Button
-        v-if="!selectedPackage"
+        v-if="!selectedApp"
         variant="outline"
         size="sm"
         @click="isDiscoveryDialogOpen = true"
@@ -22,46 +22,36 @@
         </Badge>
       </Button>
       <Button
-        v-if="!selectedPackage"
+        v-if="!selectedApp"
         size="sm"
         @click="handleCreate"
       >
         <Plus class="size-4" />
         {{ $t('bots.skills.addSkill') }}
       </Button>
-      <ConfirmPopover
-        v-if="selectedPackage"
-        :message="$t('bots.skills.uninstallPackageConfirm')"
-        :cancel-text="$t('common.cancel')"
-        :confirm-text="$t('common.confirm')"
-        :loading="isUninstallingPackage"
-        @confirm="handleUninstallPackage"
+      <Button
+        v-if="selectedApp"
+        variant="outline"
+        size="sm"
+        @click="openAppsTab"
       >
-        <template #trigger>
-          <Button
-            variant="destructive"
-            size="sm"
-            :disabled="isUninstallingPackage"
-          >
-            <Trash2 class="size-4" />
-            {{ $t('bots.skills.uninstallPackage') }}
-          </Button>
-        </template>
-      </ConfirmPopover>
+        <Box class="size-4" />
+        {{ $t('bots.skills.manageApp') }}
+      </Button>
     </template>
 
     <Button
-      v-if="selectedPackage"
+      v-if="selectedApp"
       variant="ghost"
       size="sm"
       class="mb-2 w-fit"
-      @click="closePackage"
+      @click="closeApp"
     >
       <ArrowLeft class="size-4" />
       {{ $t('bots.skills.backToLibrary') }}
     </Button>
 
-    <SettingsSection :title="selectedPackage?.packageId || $t('bots.skills.libraryTitle')">
+    <SettingsSection :title="selectedApp?.appId || $t('bots.skills.libraryTitle')">
       <!-- Loading borrows the skill-row height to hold the list's space steady
            (no CLS) until skills load — same card-row family as the row list it
            stands in for. -->
@@ -74,7 +64,7 @@
       </InlineLoadingRow>
 
       <Empty
-        v-else-if="packageLoadFailed"
+        v-else-if="appLoadFailed"
         class="py-12"
       >
         <EmptyHeader>
@@ -83,7 +73,7 @@
       </Empty>
 
       <Empty
-        v-else-if="!skills.length && !skillPackages.length"
+        v-else-if="!skills.length && !apps.length"
         class="py-12"
       >
         <EmptyHeader>
@@ -112,17 +102,17 @@
       </Empty>
 
       <template v-else>
-        <template v-if="selectedPackage">
+        <template v-if="selectedApp">
           <Empty
-            v-if="!selectedPackage.skills.length"
+            v-if="!selectedApp.skills.length"
             class="py-12"
           >
             <EmptyHeader>
-              <EmptyTitle>{{ $t('bots.skills.packageSkillsUnavailable') }}</EmptyTitle>
+              <EmptyTitle>{{ $t('bots.skills.appSkillsUnavailable') }}</EmptyTitle>
             </EmptyHeader>
           </Empty>
           <SettingsRow
-            v-for="skill in selectedPackage.skills"
+            v-for="skill in selectedApp.skills"
             :key="skillKey(skill)"
             align="start"
           >
@@ -162,30 +152,30 @@
 
         <template v-else>
           <SettingsRow
-            v-for="pkg in skillPackages"
+            v-for="pkg in apps"
             :key="pkg.key"
             align="start"
-            :class="packageRowClass"
+            :class="appRowClass"
             role="button"
             tabindex="0"
-            @click="openPackage(pkg.key)"
-            @keydown.enter.prevent="openPackage(pkg.key)"
-            @keydown.space.prevent="openPackage(pkg.key)"
+            @click="openApp(pkg.key)"
+            @keydown.enter.prevent="openApp(pkg.key)"
+            @keydown.space.prevent="openApp(pkg.key)"
           >
             <template #content>
               <div class="flex min-w-0 items-center gap-2">
                 <Box class="size-4 shrink-0 text-muted-foreground" />
                 <h3
                   class="truncate font-mono text-sm font-medium text-foreground"
-                  :title="pkg.packageId"
+                  :title="pkg.appId"
                 >
-                  {{ pkg.packageId }}
+                  {{ pkg.appId }}
                 </h3>
                 <Badge
                   variant="outline"
                   size="sm"
                 >
-                  {{ $t('bots.skills.packageBadge') }}
+                  {{ $t('bots.skills.appBadge') }}
                 </Badge>
               </div>
               <p class="mt-2 truncate font-mono text-xs text-muted-foreground">
@@ -484,17 +474,17 @@ import MonacoEditor from '@/components/monaco-editor/index.vue'
 import {
   getBotsById,
   getBotsByBotIdContainerSkills,
-  getBotsByBotIdSupermarketPackages,
+  getBotsByBotIdApps,
   getBotsByBotIdWorkspaceTargets,
   postBotsByBotIdContainerSkills,
   postBotsByBotIdContainerSkillsActions,
   deleteBotsByBotIdContainerSkills,
-  deleteBotsByBotIdSupermarketPackagesByInstallationId,
   putBotsById,
   type HandlersSkillItem,
-  type SkillpackagesInstallation,
+  type HandlersAppItem,
 } from '@memohai/sdk'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
+import { useRoute, useRouter } from 'vue-router'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 
 type SkillItem = HandlersSkillItem & {
@@ -505,22 +495,22 @@ type SkillItem = HandlersSkillItem & {
   state?: string
   shadowed_by?: string
   registry_id?: string
-  package_id?: string
+  app_id?: string
   skill_id?: string
 }
 
-type SkillPackage = {
+type App = {
   key: string
   installationId: string
   registryId: string
-  packageId: string
+  appId: string
   workspaceTargetId: string
   revision: string
   skills: SkillItem[]
 }
 
-// The whole SettingsRow is the Package navigation target, so this page owns its interaction state.
-const packageRowClass = 'cursor-pointer transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset' /* ui-allow-style */
+// The whole SettingsRow is the App navigation target, so this page owns its interaction state.
+const appRowClass = 'cursor-pointer transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset' /* ui-allow-style */
 
 const props = defineProps<{
   botId: string
@@ -528,6 +518,8 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
+const route = useRoute()
+const router = useRouter()
 
 const MANAGED_SKILL_PATH = '/data/skills'
 const DEFAULT_DISCOVERY_ROOTS = ['/data/.agents/skills', '/root/.agents/skills']
@@ -538,14 +530,13 @@ const SKILL_DISCOVERY_ROOTS_METADATA_KEY = 'skill_discovery_roots'
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isDeleting = ref(false)
-const isUninstallingPackage = ref(false)
 const deletingPath = ref('')
 const isActioning = ref(false)
 const actionTargetPath = ref('')
 const actionName = ref('')
 const skills = ref<SkillItem[]>([])
-const installedPackages = ref<SkillpackagesInstallation[]>([])
-const packageLoadFailed = ref(false)
+const installedApps = ref<HandlersAppItem[]>([])
+const appLoadFailed = ref(false)
 const isSavingDiscoveryRoots = ref(false)
 const isDiscoveryDialogOpen = ref(false)
 const discoveryRootsDraft = ref(DEFAULT_DISCOVERY_ROOTS.join('\n'))
@@ -556,9 +547,9 @@ const isEditing = ref(false)
 const isViewing = ref(false)
 const draftRaw = ref('')
 const editingSourcePath = ref('')
-const selectedPackageKey = ref('')
+const selectedAppKey = ref('')
 let skillsLoadSequence = 0
-let packagesLoadSequence = 0
+let appsLoadSequence = 0
 let libraryLoadSequence = 0
 
 const SKILL_TEMPLATE = `---
@@ -573,41 +564,43 @@ const canSave = computed(() => {
   return !isViewing.value && draftRaw.value.trim().length > 0
 })
 
-const skillPackages = computed<SkillPackage[]>(() => {
-  const skillsByPackage = new Map<string, SkillItem[]>()
+const apps = computed<App[]>(() => {
+  const skillsByApp = new Map<string, SkillItem[]>()
   for (const skill of skills.value) {
-    if (!skill.registry_id || !skill.package_id) continue
-    const key = `${skill.registry_id}/${skill.package_id}`
-    const members = skillsByPackage.get(key) || []
+    if (!skill.registry_id || !skill.app_id) continue
+    const key = `${skill.registry_id}/${skill.app_id}`
+    const members = skillsByApp.get(key) || []
     members.push(skill)
-    skillsByPackage.set(key, members)
+    skillsByApp.set(key, members)
   }
-  return installedPackages.value
+  return installedApps.value
+    .filter(item => item.installation_id && item.registry_id && item.app_id && (item.skills?.length || skillsByApp.has(`${item.registry_id}/${item.app_id}`)))
     .map(item => {
-      const identity = `${item.registry_id}/${item.package_id}`
-      const workspaceTargetId = item.workspace_target_id
+      const identity = `${item.registry_id}/${item.app_id}`
       return {
-        key: `${workspaceTargetId}:${identity}`,
-        installationId: item.id,
-        registryId: item.registry_id,
-        packageId: item.package_id,
-        workspaceTargetId,
-        revision: item.revision,
-        skills: skillsByPackage.get(identity) || [],
+        key: `${installedAppsTargetId.value}:${identity}`,
+        installationId: item.installation_id ?? '',
+        registryId: item.registry_id ?? '',
+        appId: item.app_id ?? '',
+        workspaceTargetId: installedAppsTargetId.value,
+        revision: item.revision ?? '',
+        skills: skillsByApp.get(identity) || [],
       }
     })
-    .sort((left, right) => left.packageId.localeCompare(right.packageId))
+    .sort((left, right) => left.appId.localeCompare(right.appId))
 })
-const installedPackageIdentities = computed(() => new Set(
-  installedPackages.value
-    .map(item => `${item.registry_id}/${item.package_id}`),
+const installedAppsTargetId = ref('')
+const installedAppIdentities = computed(() => new Set(
+  installedApps.value
+    .filter(item => item.installation_id)
+    .map(item => `${item.registry_id}/${item.app_id}`),
 ))
 const standaloneSkills = computed(() => skills.value.filter((skill) => {
-  if (!skill.registry_id || !skill.package_id) return true
-  if (packageLoadFailed.value) return false
-  return !installedPackageIdentities.value.has(`${skill.registry_id}/${skill.package_id}`)
+  if (!skill.registry_id || !skill.app_id) return true
+  if (appLoadFailed.value) return false
+  return !installedAppIdentities.value.has(`${skill.registry_id}/${skill.app_id}`)
 }))
-const selectedPackage = computed(() => skillPackages.value.find(pkg => pkg.key === selectedPackageKey.value) || null)
+const selectedApp = computed(() => apps.value.find(pkg => pkg.key === selectedAppKey.value) || null)
 
 const { data: bot, refetch: refetchBot } = useQuery({
   key: () => ['bot', props.botId],
@@ -651,23 +644,24 @@ async function fetchSkills(workspaceTargetId = '') {
   }
 }
 
-async function fetchInstalledPackages(workspaceTargetId = '') {
+async function fetchInstalledApps(workspaceTargetId = '') {
   if (!props.botId) return
   const botID = props.botId
-  const sequence = ++packagesLoadSequence
+  const sequence = ++appsLoadSequence
   try {
-    const { data } = await getBotsByBotIdSupermarketPackages({
+    const { data } = await getBotsByBotIdApps({
       path: { bot_id: botID },
       query: workspaceTargetId ? { workspace_target_id: workspaceTargetId } : undefined,
       throwOnError: true,
     })
-    if (props.botId !== botID || sequence !== packagesLoadSequence) return
-    installedPackages.value = data || []
-    packageLoadFailed.value = false
+    if (props.botId !== botID || sequence !== appsLoadSequence) return
+    installedApps.value = data.items || []
+    installedAppsTargetId.value = data.workspace_target_id || workspaceTargetId
+    appLoadFailed.value = false
   } catch (error) {
-    if (props.botId !== botID || sequence !== packagesLoadSequence) return
-    installedPackages.value = []
-    packageLoadFailed.value = true
+    if (props.botId !== botID || sequence !== appsLoadSequence) return
+    installedApps.value = []
+    appLoadFailed.value = true
     toast.error(resolveApiErrorMessage(error, t('bots.skills.loadFailed')))
   }
 }
@@ -686,13 +680,13 @@ async function fetchSkillLibrary() {
     const workspaceTargetId = data.targets?.find(target => target.primary)?.target_id || 'native'
     await Promise.all([
       fetchSkills(workspaceTargetId),
-      fetchInstalledPackages(workspaceTargetId),
+      fetchInstalledApps(workspaceTargetId),
     ])
   } catch (error) {
     if (props.botId !== botID || sequence !== libraryLoadSequence) return
     skills.value = []
-    installedPackages.value = []
-    packageLoadFailed.value = true
+    installedApps.value = []
+    appLoadFailed.value = true
     toast.error(resolveApiErrorMessage(error, t('bots.skills.loadFailed')))
   } finally {
     if (props.botId === botID && sequence === libraryLoadSequence) isLoading.value = false
@@ -845,31 +839,18 @@ function handleView(skill: SkillItem) {
   isDialogOpen.value = true
 }
 
-function openPackage(key: string) {
-  selectedPackageKey.value = key
+function openApp(key: string) {
+  selectedAppKey.value = key
 }
 
-function closePackage() {
-  selectedPackageKey.value = ''
+function closeApp() {
+  selectedAppKey.value = ''
 }
 
-async function handleUninstallPackage() {
-  const pkg = selectedPackage.value
-  if (!pkg) return
-  isUninstallingPackage.value = true
-  try {
-    await deleteBotsByBotIdSupermarketPackagesByInstallationId({
-      path: { bot_id: props.botId, installation_id: pkg.installationId },
-      throwOnError: true,
-    })
-    toast.success(t('bots.skills.uninstallPackageSuccess'))
-    closePackage()
-    await fetchSkillLibrary()
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('bots.skills.uninstallPackageFailed')))
-  } finally {
-    isUninstallingPackage.value = false
-  }
+// Apps are removed from the Apps tab, where the removal plan
+// (shared dependencies, connections) is shown before anything runs.
+function openAppsTab() {
+  void router.replace({ query: { ...route.query, tab: 'apps' } }).catch(() => {})
 }
 
 function skillKey(skill: SkillItem) {
@@ -1011,7 +992,7 @@ async function handleSaveDiscoveryRoots() {
 
 async function handleDelete(skill: SkillItem) {
   // Deleting by source_path keeps registry skills (nested under their registry
-  // and package) distinct from a flat managed skill that shares the short name.
+  // and app) distinct from a flat managed skill that shares the short name.
   const sourcePath = skill.source_path
   if (!sourcePath) return
   isDeleting.value = true
@@ -1037,10 +1018,10 @@ async function handleDelete(skill: SkillItem) {
 watch(() => props.botId, () => {
   if (!props.botId) return
   isDiscoveryDialogOpen.value = false
-  selectedPackageKey.value = ''
+  selectedAppKey.value = ''
   skills.value = []
-  installedPackages.value = []
-  packageLoadFailed.value = false
+  installedApps.value = []
+  appLoadFailed.value = false
   syncDiscoveryRoots(DEFAULT_DISCOVERY_ROOTS)
   void fetchSkillLibrary()
 }, { immediate: true })
