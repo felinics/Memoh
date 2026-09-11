@@ -41,6 +41,7 @@ import 'dockview-vue/dist/styles/dockview.css'
 import '@/styles/dockview-theme.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
+import { normalizeFileManagerPath } from './file-manager-path'
 import { DesktopShellKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelFile from './dockview/panel-file.vue'
@@ -179,21 +180,6 @@ function onReady(event: DockviewReadyEvent) {
   // workspace by opening New Session into its ephemeral slot.
   store.registerApi(event.api)
   applyLayout()
-}
-
-const FILE_MANAGER_ROOT = '/data'
-
-function normalizeFileManagerPath(path: string): string {
-  const trimmedPath = path.trim()
-  if (!trimmedPath) return FILE_MANAGER_ROOT
-  if (trimmedPath === FILE_MANAGER_ROOT || trimmedPath.startsWith(`${FILE_MANAGER_ROOT}/`)) {
-    return trimmedPath
-  }
-  if (trimmedPath === '/') return FILE_MANAGER_ROOT
-  if (trimmedPath.startsWith('/')) {
-    return `${FILE_MANAGER_ROOT}${trimmedPath}`
-  }
-  return `${FILE_MANAGER_ROOT}/${trimmedPath}`
 }
 
 // dockview-vue renders panel/tab/header-action components by mounting fresh

@@ -33,7 +33,10 @@ vi.mock('dockview-vue', () => ({
     setup(_, { emit }) {
       const openFile = inject(openInFileManagerKey)!
       onMounted(() => emit('ready', { api: dock }))
-      return () => h('button', { onClick: () => openFile('/data/a.md') }, 'Open file')
+      return () => [
+        h('button', { class: 'open-workspace-file', onClick: () => openFile('/data/a.md') }, 'Open file'),
+        h('button', { class: 'open-outside-file', onClick: () => openFile('/home/user/project/package.json') }, 'Open outside file'),
+      ]
     },
   }),
 }))
@@ -88,6 +91,7 @@ describe('chat workspace initialization', () => {
     workspaceStore.openSessionChat.mockClear()
     workspaceStore.openDraftChat.mockClear()
     workspaceStore.releaseApi.mockClear()
+    workspaceStore.openFilePinned.mockClear()
     dock.layout.mockClear()
     api.value = null
     root?.remove()
@@ -113,8 +117,13 @@ describe('chat workspace initialization', () => {
     expect(workspaceStore.openSessionChat).not.toHaveBeenCalled()
     expect(workspaceStore.openDraftChat).not.toHaveBeenCalled()
 
-    root.querySelector('button')!.click()
+    root.querySelector<HTMLButtonElement>('.open-workspace-file')!.click()
     expect(workspaceStore.openFilePinned).toHaveBeenCalledWith('/data/a.md')
+
+    // An absolute path outside the workspace mount must reach the store as-is;
+    // the workspace root used to be prefixed onto it.
+    root.querySelector<HTMLButtonElement>('.open-outside-file')!.click()
+    expect(workspaceStore.openFilePinned).toHaveBeenCalledWith('/home/user/project/package.json')
 
     app.unmount()
   })
