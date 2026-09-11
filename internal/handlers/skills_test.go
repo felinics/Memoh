@@ -80,7 +80,7 @@ func TestListSkillsMapsMissingWorkspaceTargetToNotFound(t *testing.T) {
 
 func TestListSkillsAPIReportsEffectiveShadowedAndSourceMetadata(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	env.writeSkillFile(t, path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md"), managedSkillRaw("alpha", "Managed Alpha"))
+	env.writeSkillFile(t, path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha", "SKILL.md"), managedSkillRaw("alpha", "Managed Alpha"))
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "alpha", "SKILL.md"), managedSkillRaw("alpha", "Compat Alpha"))
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "beta", "SKILL.md"), managedSkillRaw("beta", "Compat Beta"))
 
@@ -100,7 +100,7 @@ func TestListSkillsAPIReportsEffectiveShadowedAndSourceMetadata(t *testing.T) {
 		t.Fatalf("expected 3 skills, got %d", len(resp.Skills))
 	}
 
-	alphaManaged := mustFindSkillByPath(t, resp.Skills, path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md"))
+	alphaManaged := mustFindSkillByPath(t, resp.Skills, path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha", "SKILL.md"))
 	if !alphaManaged.Managed {
 		t.Fatalf("managed alpha should be managed: %+v", alphaManaged)
 	}
@@ -139,7 +139,7 @@ func TestListSkillsAPIReportsEffectiveShadowedAndSourceMetadata(t *testing.T) {
 func TestSkillsActionsAPIAdoptDisableEnableAndDeleteManaged(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	externalPath := path.Join("/data/.agents/skills", "alpha", "SKILL.md")
-	managedPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
+	managedPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha", "SKILL.md")
 	env.writeSkillFile(t, externalPath, managedSkillRaw("alpha", "Compat Alpha"))
 
 	rec, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", SkillsActionRequest{
@@ -233,7 +233,7 @@ func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "alpha", "SKILL.md"), managedSkillRaw("alpha", "Compat Alpha"))
 
 	_, err := env.callJSON(t, http.MethodDelete, "/bots/:bot_id/container/skills", SkillsDeleteRequest{
-		SourcePaths: []string{path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")},
+		SourcePaths: []string{path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha", "SKILL.md")},
 	}, env.handler.DeleteSkills)
 	if err == nil {
 		t.Fatal("expected deleting a skill that was never adopted to fail")
@@ -247,7 +247,7 @@ func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	}
 }
 
-func TestDeleteSkillsAPIRejectsRegistryPackageSkill(t *testing.T) {
+func TestDeleteSkillsAPIRejectsRegistryAppSkill(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	registrySkillDir := path.Join(skillset.ManagedDir(), "openai-api-curated", "docs", "xlsx")
 	registryPath := path.Join(registrySkillDir, "SKILL.md")
@@ -257,16 +257,16 @@ func TestDeleteSkillsAPIRejectsRegistryPackageSkill(t *testing.T) {
 	}, env.handler.DeleteSkills)
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("DeleteSkills(Package member) error = %v, want 400", err)
+		t.Fatalf("DeleteSkills(App member) error = %v, want 400", err)
 	}
 	if _, err := os.Stat(env.localPath(registryPath)); err != nil {
-		t.Fatalf("Package Skill should remain: %v", err)
+		t.Fatalf("App Skill should remain: %v", err)
 	}
 }
 
 func TestDeleteSkillsAPIPreservesArtifactWhenDeleteFails(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	skillDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "meeting")
+	skillDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "meeting")
 	sourcePath := path.Join(skillDir, "SKILL.md")
 	env.writeSkillFile(t, sourcePath, managedSkillRaw("meeting", "Meeting notes"))
 	env.bridge.deleteErrors[skillDir] = errors.New("injected delete failure")
@@ -325,7 +325,7 @@ func TestUpsertSkillsAPIRejectsTraversalName(t *testing.T) {
 
 func TestUpsertSkillsAPIRenamesManagedSkillAndRejectsDirectRegistryEdit(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	oldPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
+	oldPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha", "SKILL.md")
 	env.writeSkillFile(t, oldPath, managedSkillRaw("alpha", "Managed Alpha"))
 
 	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills", SkillsUpsertRequest{
@@ -336,10 +336,10 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndRejectsDirectRegistryEdit(t *testi
 		t.Fatalf("UpsertSkills(rename) error = %v cause = %v", err, apperror.CauseOf(err))
 	}
 
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha"))); !os.IsNotExist(err) {
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha"))); !os.IsNotExist(err) {
 		t.Fatalf("old managed skill directory should be removed after rename, stat err = %v", err)
 	}
-	newRaw, err := os.ReadFile(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "beta", "SKILL.md")))
+	newRaw, err := os.ReadFile(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "beta", "SKILL.md")))
 	if err != nil {
 		t.Fatalf("read renamed skill: %v", err)
 	}
@@ -366,15 +366,15 @@ func TestUpsertSkillsAPIRenamesManagedSkillAndRejectsDirectRegistryEdit(t *testi
 	if string(got) != original {
 		t.Fatalf("registry skill changed despite immutable ownership:\n%s", got)
 	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "xlsx"))); !os.IsNotExist(err) {
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "xlsx"))); !os.IsNotExist(err) {
 		t.Fatalf("registry edit should not create a user Skill, stat err = %v", err)
 	}
 }
 
 func TestUpsertSkillsAPIRenameRejectsExistingDestination(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	alphaPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
-	betaPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "beta", "SKILL.md")
+	alphaPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha", "SKILL.md")
+	betaPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "beta", "SKILL.md")
 	alphaRaw := managedSkillRaw("alpha", "Managed Alpha")
 	betaRaw := managedSkillRaw("beta", "Managed Beta")
 	env.writeSkillFile(t, alphaPath, alphaRaw)
@@ -397,9 +397,9 @@ func TestUpsertSkillsAPIRenameRejectsExistingDestination(t *testing.T) {
 
 func TestUpsertSkillsAPIRenameRollsBackWhenWriteFails(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	alphaDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha")
+	alphaDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha")
 	alphaPath := path.Join(alphaDir, "SKILL.md")
-	betaDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "beta")
+	betaDir := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "beta")
 	betaPath := path.Join(betaDir, "SKILL.md")
 	alphaRaw := managedSkillRaw("alpha", "Managed Alpha")
 	env.writeSkillFile(t, alphaPath, alphaRaw)
@@ -449,11 +449,11 @@ func TestBuiltinSkillsAreReadOnlyAndNotDeletable(t *testing.T) {
 	if string(got) != original {
 		t.Fatalf("builtin skill changed despite rejection:\n%s", got)
 	}
-	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "skill-creator"))); !os.IsNotExist(err) {
+	if _, err := os.Stat(env.localPath(path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "skill-creator"))); !os.IsNotExist(err) {
 		t.Fatalf("builtin edit should not create a managed override, stat err = %v", err)
 	}
 
-	flatPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "editable", "SKILL.md")
+	flatPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "editable", "SKILL.md")
 	env.writeSkillFile(t, flatPath, managedSkillRaw("editable", "Editable"))
 	items := env.listSkills(t)
 	item := mustFindSkillByPath(t, items, builtinPath)
@@ -468,7 +468,7 @@ func TestBuiltinSkillsAreReadOnlyAndNotDeletable(t *testing.T) {
 
 func TestLoadSkillsUsesEffectiveSetAndPromptReflectsOverrideFallback(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	managedPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserSkillPackage, "alpha", "SKILL.md")
+	managedPath := path.Join(skillset.ManagedDir(), skillset.UserSkillNamespace, skillset.UserApp, "alpha", "SKILL.md")
 	compatPath := path.Join("/data/.agents/skills", "alpha", "SKILL.md")
 	env.writeSkillFile(t, managedPath, managedSkillRaw("alpha", "Managed Alpha"))
 	env.writeSkillFile(t, compatPath, managedSkillRaw("alpha", "Compat Alpha"))
@@ -550,31 +550,31 @@ func TestListSkillsAPIUsesConfiguredDiscoveryRoots(t *testing.T) {
 
 func TestListSkillsAPIIncludesInstalledRegistrySkillDirectories(t *testing.T) {
 	env := newSkillsTestEnv(t)
-	packageRoot, err := skillset.SkillDirForIDs("memoh", "github", "review")
+	appRoot, err := skillset.SkillDirForIDs("memoh", "github", "review")
 	if err != nil {
-		t.Fatalf("Registry Package Skill root: %v", err)
+		t.Fatalf("Registry App Skill root: %v", err)
 	}
 	disabledRoot, err := skillset.SkillDirForIDs("memoh", "disabled", "hidden")
 	if err != nil {
-		t.Fatalf("disabled Registry Package Skill root: %v", err)
+		t.Fatalf("disabled Registry App Skill root: %v", err)
 	}
 	remoteRoot, err := skillset.SkillDirForIDs("memoh", "remote", "hidden")
 	if err != nil {
-		t.Fatalf("remote Registry Package Skill root: %v", err)
+		t.Fatalf("remote Registry App Skill root: %v", err)
 	}
-	packagePath := path.Join(packageRoot, "SKILL.md")
+	appPath := path.Join(appRoot, "SKILL.md")
 	disabledPath := path.Join(disabledRoot, "SKILL.md")
 	remotePath := path.Join(remoteRoot, "SKILL.md")
-	env.writeSkillFile(t, packagePath, managedSkillRaw("review", "Package Review"))
-	env.writeSkillFile(t, disabledPath, managedSkillRaw("hidden", "Hidden Package"))
-	env.writeSkillFile(t, remotePath, managedSkillRaw("hidden", "Remote Package"))
+	env.writeSkillFile(t, appPath, managedSkillRaw("review", "App Review"))
+	env.writeSkillFile(t, disabledPath, managedSkillRaw("hidden", "Hidden App"))
+	env.writeSkillFile(t, remotePath, managedSkillRaw("hidden", "Remote App"))
 	skills := env.listSkills(t)
 	if len(skills) != 3 {
 		t.Fatalf("expected 3 installed Registry Skills, got %d: %+v", len(skills), skills)
 	}
-	got := mustFindSkillByPath(t, skills, packagePath)
-	if got.SourceRoot != packageRoot {
-		t.Fatalf("source_root = %q, want %q", got.SourceRoot, packageRoot)
+	got := mustFindSkillByPath(t, skills, appPath)
+	if got.SourceRoot != appRoot {
+		t.Fatalf("source_root = %q, want %q", got.SourceRoot, appRoot)
 	}
 	if got.SourceKind != skillset.SourceKindRegistry {
 		t.Fatalf("source_kind = %q, want %q", got.SourceKind, skillset.SourceKindRegistry)
@@ -582,11 +582,11 @@ func TestListSkillsAPIIncludesInstalledRegistrySkillDirectories(t *testing.T) {
 	if got.State != skillset.StateEffective {
 		t.Fatalf("state = %q, want effective", got.State)
 	}
-	if got.RegistryID != "memoh" || got.PackageID != "github" || got.SkillID != "review" {
-		t.Fatalf("Registry Package identity = %q/%q/%q", got.RegistryID, got.PackageID, got.SkillID)
+	if got.RegistryID != "memoh" || got.AppID != "github" || got.SkillID != "review" {
+		t.Fatalf("Registry App identity = %q/%q/%q", got.RegistryID, got.AppID, got.SkillID)
 	}
 	if got.Editable || got.Deletable {
-		t.Fatalf("Registry Package Skill permissions = editable:%v deletable:%v", got.Editable, got.Deletable)
+		t.Fatalf("Registry App Skill permissions = editable:%v deletable:%v", got.Editable, got.Deletable)
 	}
 	mustFindSkillByPath(t, skills, disabledPath)
 	mustFindSkillByPath(t, skills, remotePath)

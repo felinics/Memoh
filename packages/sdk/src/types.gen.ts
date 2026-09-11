@@ -1720,6 +1720,162 @@ export type GithubComFelinicsMemohInternalMcpConnection = {
     updated_at?: string;
 };
 
+export type HandlersAppConnectorCredentialRequest = {
+    auth_method: string;
+    fields?: {
+        [key: string]: string;
+    };
+};
+
+export type HandlersAppConnectorItem = {
+    connection_id?: string;
+    connector?: ConnectorsConnector;
+    required?: boolean;
+    /**
+     * Status is linked once a connection is bound, otherwise needs_auth.
+     */
+    status?: 'linked' | 'needs_auth';
+    type?: string;
+};
+
+export type HandlersAppConnectorOAuthRequest = {
+    auth_method: string;
+};
+
+export type HandlersAppDependencyItem = {
+    dependency?: HandlersWorkspaceDependencyItem;
+    id?: string;
+    /**
+     * Shared is set when another installed App references the same
+     * dependency on this workspace target.
+     */
+    shared?: boolean;
+};
+
+export type HandlersAppInstallRequest = {
+    app_id: string;
+    registry_id: string;
+    revision: string;
+    workspace_target_id?: string;
+};
+
+export type HandlersAppItem = {
+    app_id?: string;
+    author?: HandlersSupermarketAuthor;
+    /**
+     * AvailableRevision and AvailableVersion name the registry's newer
+     * release after a check found one.
+     */
+    available_revision?: string;
+    available_version?: string;
+    category?: string;
+    category_name?: string;
+    connectors?: Array<HandlersAppConnectorItem>;
+    dependencies?: Array<HandlersAppDependencyItem>;
+    description?: string;
+    homepage?: string;
+    icon?: HandlersSupermarketSkillIcon;
+    /**
+     * InstallationID is empty for a discovered App: a dependency the
+     * workspace carries that no installed App references, shown through
+     * its canonical App.
+     */
+    installation_id?: string;
+    installed_at?: string;
+    last_checked_at?: string;
+    last_error?: string;
+    license?: string;
+    name?: string;
+    reason?: 'user' | 'required';
+    registry_id?: string;
+    repository?: string;
+    revision?: string;
+    skills?: Array<HandlersAppSkillItem>;
+    /**
+     * Status is discovered for Apps without an installation record.
+     */
+    status?: 'installed' | 'partial' | 'installing' | 'updating' | 'removing' | 'failed' | 'discovered';
+    tags?: Array<string>;
+    translations?: {
+        [key: string]: HandlersSupermarketAppTranslation;
+    };
+    updated_at?: string;
+    version?: string;
+};
+
+export type HandlersAppListResponse = {
+    dependency_catalog_stale?: boolean;
+    items?: Array<HandlersAppItem>;
+    workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
+    workspace_target_id?: string;
+};
+
+export type HandlersAppRemovalPreviewApp = {
+    app_id?: string;
+    installation_id?: string;
+    registry_id?: string;
+    version?: string;
+};
+
+export type HandlersAppRemovalPreviewConnector = {
+    action?: 'disconnect' | 'keep' | 'none';
+    connection_id?: string;
+    reason?: 'shared';
+    type?: string;
+};
+
+export type HandlersAppRemovalPreviewDependency = {
+    action?: 'remove' | 'keep';
+    id?: string;
+    reason?: 'shared' | 'image' | 'absent';
+};
+
+export type HandlersAppRemovalPreviewResponse = {
+    connectors?: Array<HandlersAppRemovalPreviewConnector>;
+    dependencies?: Array<HandlersAppRemovalPreviewDependency>;
+    installation_id?: string;
+    required_apps?: Array<HandlersAppRemovalPreviewApp>;
+};
+
+export type HandlersAppSkillItem = {
+    description?: string;
+    icon?: HandlersSupermarketSkillIcon;
+    install_id?: string;
+    name?: string;
+    skill_id?: string;
+};
+
+export type HandlersAppStreamEvent = {
+    args?: {
+        [key: string]: string;
+    };
+    code?: string;
+    data?: string;
+    detail?: string;
+    id?: string;
+    kind?: 'app' | 'dependency' | 'skills' | 'connector';
+    message?: string;
+    request_id?: string;
+    status?: string;
+    stream?: 'stdout' | 'stderr';
+    type?: 'started' | 'step' | 'log' | 'step_done' | 'done' | 'error';
+    version?: string;
+};
+
+export type HandlersAppUpdateRequest = {
+    app_id: string;
+    /**
+     * Dependencies are updated to their latest version.
+     */
+    dependencies?: Array<string>;
+    registry_id: string;
+    /**
+     * Release moves the installation to the registry's current release.
+     */
+    release?: boolean;
+    workspace_target_id?: string;
+};
+
 export type HandlersBatchDeleteRequest = {
     ids?: Array<string>;
 };
@@ -2160,162 +2316,6 @@ export type HandlersModelTokenUsage = {
     provider_name?: string;
 };
 
-export type HandlersPackageConnectorCredentialRequest = {
-    auth_method: string;
-    fields?: {
-        [key: string]: string;
-    };
-};
-
-export type HandlersPackageConnectorItem = {
-    connection_id?: string;
-    connector?: ConnectorsConnector;
-    required?: boolean;
-    /**
-     * Status is linked once a connection is bound, otherwise needs_auth.
-     */
-    status?: 'linked' | 'needs_auth';
-    type?: string;
-};
-
-export type HandlersPackageConnectorOAuthRequest = {
-    auth_method: string;
-};
-
-export type HandlersPackageDependencyItem = {
-    dependency?: HandlersWorkspaceDependencyItem;
-    id?: string;
-    /**
-     * Shared is set when another installed Package references the same
-     * dependency on this workspace target.
-     */
-    shared?: boolean;
-};
-
-export type HandlersPackageInstallRequest = {
-    package_id: string;
-    registry_id: string;
-    revision: string;
-    workspace_target_id?: string;
-};
-
-export type HandlersPackageItem = {
-    author?: HandlersSupermarketAuthor;
-    /**
-     * AvailableRevision and AvailableVersion name the registry's newer
-     * release after a check found one.
-     */
-    available_revision?: string;
-    available_version?: string;
-    category?: string;
-    category_name?: string;
-    connectors?: Array<HandlersPackageConnectorItem>;
-    dependencies?: Array<HandlersPackageDependencyItem>;
-    description?: string;
-    homepage?: string;
-    icon?: HandlersSupermarketSkillIcon;
-    /**
-     * InstallationID is empty for a discovered Package: a dependency the
-     * workspace carries that no installed Package references, shown through
-     * its canonical Package.
-     */
-    installation_id?: string;
-    installed_at?: string;
-    last_checked_at?: string;
-    last_error?: string;
-    license?: string;
-    name?: string;
-    package_id?: string;
-    reason?: 'user' | 'required';
-    registry_id?: string;
-    repository?: string;
-    revision?: string;
-    skills?: Array<HandlersPackageSkillItem>;
-    /**
-     * Status is discovered for Packages without an installation record.
-     */
-    status?: 'installed' | 'partial' | 'installing' | 'updating' | 'removing' | 'failed' | 'discovered';
-    tags?: Array<string>;
-    translations?: {
-        [key: string]: HandlersSupermarketPackageTranslation;
-    };
-    updated_at?: string;
-    version?: string;
-};
-
-export type HandlersPackageListResponse = {
-    dependency_catalog_stale?: boolean;
-    items?: Array<HandlersPackageItem>;
-    workspace_state?: 'running' | 'not_running' | 'missing' | 'remote_offline';
-    workspace_target_id?: string;
-};
-
-export type HandlersPackageRemovalPreviewConnector = {
-    action?: 'disconnect' | 'keep' | 'none';
-    connection_id?: string;
-    reason?: 'shared';
-    type?: string;
-};
-
-export type HandlersPackageRemovalPreviewDependency = {
-    action?: 'remove' | 'keep';
-    id?: string;
-    reason?: 'shared' | 'image' | 'absent';
-};
-
-export type HandlersPackageRemovalPreviewPackage = {
-    installation_id?: string;
-    package_id?: string;
-    registry_id?: string;
-    version?: string;
-};
-
-export type HandlersPackageRemovalPreviewResponse = {
-    connectors?: Array<HandlersPackageRemovalPreviewConnector>;
-    dependencies?: Array<HandlersPackageRemovalPreviewDependency>;
-    installation_id?: string;
-    required_packages?: Array<HandlersPackageRemovalPreviewPackage>;
-};
-
-export type HandlersPackageSkillItem = {
-    description?: string;
-    icon?: HandlersSupermarketSkillIcon;
-    install_id?: string;
-    name?: string;
-    skill_id?: string;
-};
-
-export type HandlersPackageStreamEvent = {
-    args?: {
-        [key: string]: string;
-    };
-    code?: string;
-    data?: string;
-    detail?: string;
-    id?: string;
-    kind?: 'package' | 'dependency' | 'skills' | 'connector';
-    message?: string;
-    request_id?: string;
-    status?: string;
-    stream?: 'stdout' | 'stderr';
-    type?: 'started' | 'step' | 'log' | 'step_done' | 'done' | 'error';
-    version?: string;
-};
-
-export type HandlersPackageUpdateRequest = {
-    /**
-     * Dependencies are updated to their latest version.
-     */
-    dependencies?: Array<string>;
-    package_id: string;
-    registry_id: string;
-    /**
-     * Release moves the installation to the registry's current release.
-     */
-    release?: boolean;
-    workspace_target_id?: string;
-};
-
 export type HandlersPingResponse = {
     commit_hash?: string;
     connectors?: boolean;
@@ -2364,6 +2364,7 @@ export type HandlersSessionInfoResponse = {
 };
 
 export type HandlersSkillItem = {
+    app_id?: string;
     content?: string;
     deletable?: boolean;
     description?: string;
@@ -2373,7 +2374,6 @@ export type HandlersSkillItem = {
         [key: string]: unknown;
     };
     name?: string;
-    package_id?: string;
     raw?: string;
     registry_id?: string;
     shadowed_by?: string;
@@ -2392,7 +2392,7 @@ export type HandlersSkillsActionRequest = {
 export type HandlersSkillsDeleteRequest = {
     /**
      * SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
-     * cannot address registry skills, which are nested by registry and package.
+     * cannot address registry skills, which are nested by registry and app.
      */
     source_paths?: Array<string>;
 };
@@ -2428,12 +2428,110 @@ export type HandlersSnapshotInfo = {
     version?: number;
 };
 
+export type HandlersSupermarketAppCategory = {
+    app_count: number;
+    id: string;
+    name: string;
+    names: {
+        [key: string]: string;
+    };
+    order: number;
+    registries: Array<HandlersSupermarketAppCategoryRegistry>;
+};
+
+export type HandlersSupermarketAppCategoryListResponse = {
+    data: Array<HandlersSupermarketAppCategory>;
+};
+
+export type HandlersSupermarketAppCategoryRegistry = {
+    count: number;
+    id: string;
+};
+
+export type HandlersSupermarketAppConnector = {
+    required: boolean;
+    type: string;
+};
+
+export type HandlersSupermarketAppDescriptor = {
+    app_id: string;
+    author?: HandlersSupermarketAuthor;
+    categories: Array<HandlersSupermarketAppSkillCategory>;
+    category: string;
+    category_name: string;
+    connector_count: number;
+    connectors: Array<HandlersSupermarketAppConnector>;
+    dependencies: Array<string>;
+    dependency_count: number;
+    description: string;
+    homepage?: string;
+    icon?: HandlersSupermarketSkillIcon;
+    license?: string;
+    name: string;
+    registry_id: string;
+    repository?: string;
+    revision: string;
+    schema_version: string;
+    skill_count: number;
+    skills: Array<HandlersSupermarketCatalogSkill>;
+    tags: Array<string>;
+    translations?: {
+        [key: string]: HandlersSupermarketAppTranslation;
+    };
+    version?: string;
+};
+
+export type HandlersSupermarketAppListResponse = {
+    data: Array<HandlersSupermarketAppSummary>;
+    limit: number;
+    page: number;
+    total: number;
+};
+
+export type HandlersSupermarketAppSkillCategory = {
+    id: string;
+    name: string;
+    skill_count: number;
+};
+
+export type HandlersSupermarketAppSummary = {
+    app_id: string;
+    author?: HandlersSupermarketAuthor;
+    categories: Array<HandlersSupermarketAppSkillCategory>;
+    category: string;
+    category_name: string;
+    connector_count: number;
+    connectors: Array<HandlersSupermarketAppConnector>;
+    dependencies: Array<string>;
+    dependency_count: number;
+    description: string;
+    homepage?: string;
+    icon?: HandlersSupermarketSkillIcon;
+    license?: string;
+    name: string;
+    registry_id: string;
+    repository?: string;
+    schema_version: string;
+    skill_count: number;
+    tags: Array<string>;
+    translations?: {
+        [key: string]: HandlersSupermarketAppTranslation;
+    };
+    version?: string;
+};
+
+export type HandlersSupermarketAppTranslation = {
+    description?: string;
+    name?: string;
+};
+
 export type HandlersSupermarketAuthor = {
     email: string;
     name: string;
 };
 
 export type HandlersSupermarketCatalogSkill = {
+    app_id: string;
     artifact: HandlersSupermarketSkillArtifact;
     author: HandlersSupermarketAuthor;
     category: string;
@@ -2444,7 +2542,6 @@ export type HandlersSupermarketCatalogSkill = {
     icon?: HandlersSupermarketSkillIcon;
     install_id: string;
     name: string;
-    package_id: string;
     registry_id: string;
     schema_version: string;
     skill_id: string;
@@ -2460,48 +2557,18 @@ export type HandlersSupermarketCatalogSkillListResponse = {
     total: number;
 };
 
-export type HandlersSupermarketPackageCategory = {
-    id: string;
-    name: string;
-    names: {
-        [key: string]: string;
-    };
-    order: number;
-    package_count: number;
-    registries: Array<HandlersSupermarketPackageCategoryRegistry>;
-};
-
-export type HandlersSupermarketPackageCategoryListResponse = {
-    data: Array<HandlersSupermarketPackageCategory>;
-};
-
-export type HandlersSupermarketPackageCategoryRegistry = {
-    count: number;
-    id: string;
-};
-
-export type HandlersSupermarketPackageConnector = {
-    required: boolean;
-    type: string;
-};
-
-export type HandlersSupermarketPackageTranslation = {
-    description?: string;
-    name?: string;
-};
-
 export type HandlersSupermarketRegistry = {
     adapter: string;
+    app_count: number;
     category_count: number;
     enabled: boolean;
     id: string;
     name: string;
-    package_count: number;
     priority: number;
     published_at?: string;
     revision?: string;
     skill_count: number;
-    skipped_package_count: number;
+    skipped_app_count: number;
 };
 
 export type HandlersSupermarketRegistryListResponse = {
@@ -2530,73 +2597,6 @@ export type HandlersSupermarketSkillIconAsset = {
     content_type: string;
     digest: string;
     size: number;
-};
-
-export type HandlersSupermarketSkillPackageCategory = {
-    id: string;
-    name: string;
-    skill_count: number;
-};
-
-export type HandlersSupermarketSkillPackageDescriptor = {
-    author?: HandlersSupermarketAuthor;
-    categories: Array<HandlersSupermarketSkillPackageCategory>;
-    category: string;
-    category_name: string;
-    connector_count: number;
-    connectors: Array<HandlersSupermarketPackageConnector>;
-    dependencies: Array<string>;
-    dependency_count: number;
-    description: string;
-    homepage?: string;
-    icon?: HandlersSupermarketSkillIcon;
-    license?: string;
-    name: string;
-    package_id: string;
-    registry_id: string;
-    repository?: string;
-    revision: string;
-    schema_version: string;
-    skill_count: number;
-    skills: Array<HandlersSupermarketCatalogSkill>;
-    tags: Array<string>;
-    translations?: {
-        [key: string]: HandlersSupermarketPackageTranslation;
-    };
-    version?: string;
-};
-
-export type HandlersSupermarketSkillPackageListResponse = {
-    data: Array<HandlersSupermarketSkillPackageSummary>;
-    limit: number;
-    page: number;
-    total: number;
-};
-
-export type HandlersSupermarketSkillPackageSummary = {
-    author?: HandlersSupermarketAuthor;
-    categories: Array<HandlersSupermarketSkillPackageCategory>;
-    category: string;
-    category_name: string;
-    connector_count: number;
-    connectors: Array<HandlersSupermarketPackageConnector>;
-    dependencies: Array<string>;
-    dependency_count: number;
-    description: string;
-    homepage?: string;
-    icon?: HandlersSupermarketSkillIcon;
-    license?: string;
-    name: string;
-    package_id: string;
-    registry_id: string;
-    repository?: string;
-    schema_version: string;
-    skill_count: number;
-    tags: Array<string>;
-    translations?: {
-        [key: string]: HandlersSupermarketPackageTranslation;
-    };
-    version?: string;
 };
 
 export type HandlersSupermarketSkillSource = {
@@ -5716,6 +5716,473 @@ export type GetBotsByBotIdAgentsByIdModelsResponses = {
 };
 
 export type GetBotsByBotIdAgentsByIdModelsResponse = GetBotsByBotIdAgentsByIdModelsResponses[keyof GetBotsByBotIdAgentsByIdModelsResponses];
+
+export type GetBotsByBotIdAppsData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+        /**
+         * Refresh workspace discovery
+         */
+        refresh?: boolean;
+    };
+    url: '/bots/{bot_id}/apps';
+};
+
+export type GetBotsByBotIdAppsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAppsError = GetBotsByBotIdAppsErrors[keyof GetBotsByBotIdAppsErrors];
+
+export type GetBotsByBotIdAppsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAppListResponse;
+};
+
+export type GetBotsByBotIdAppsResponse = GetBotsByBotIdAppsResponses[keyof GetBotsByBotIdAppsResponses];
+
+export type PostBotsByBotIdAppsData = {
+    /**
+     * App release to install
+     */
+    body: HandlersAppInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps';
+};
+
+export type PostBotsByBotIdAppsErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsError = PostBotsByBotIdAppsErrors[keyof PostBotsByBotIdAppsErrors];
+
+export type PostBotsByBotIdAppsResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersAppStreamEvent;
+};
+
+export type PostBotsByBotIdAppsResponse = PostBotsByBotIdAppsResponses[keyof PostBotsByBotIdAppsResponses];
+
+export type PostBotsByBotIdAppsCheckUpdatesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID (defaults to the bot's current target)
+         */
+        workspace_target_id?: string;
+    };
+    url: '/bots/{bot_id}/apps/check-updates';
+};
+
+export type PostBotsByBotIdAppsCheckUpdatesErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsCheckUpdatesError = PostBotsByBotIdAppsCheckUpdatesErrors[keyof PostBotsByBotIdAppsCheckUpdatesErrors];
+
+export type PostBotsByBotIdAppsCheckUpdatesResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAppListResponse;
+};
+
+export type PostBotsByBotIdAppsCheckUpdatesResponse = PostBotsByBotIdAppsCheckUpdatesResponses[keyof PostBotsByBotIdAppsCheckUpdatesResponses];
+
+export type PostBotsByBotIdAppsUpdateData = {
+    /**
+     * What to update
+     */
+    body: HandlersAppUpdateRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/update';
+};
+
+export type PostBotsByBotIdAppsUpdateErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsUpdateError = PostBotsByBotIdAppsUpdateErrors[keyof PostBotsByBotIdAppsUpdateErrors];
+
+export type PostBotsByBotIdAppsUpdateResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersAppStreamEvent;
+};
+
+export type PostBotsByBotIdAppsUpdateResponse = PostBotsByBotIdAppsUpdateResponses[keyof PostBotsByBotIdAppsUpdateResponses];
+
+export type DeleteBotsByBotIdAppsByInstallationIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * App installation ID
+         */
+        installation_id: string;
+    };
+    query?: {
+        /**
+         * Also remove auto-installed Apps that lose their last reference
+         */
+        remove_unreferenced_required?: boolean;
+    };
+    url: '/bots/{bot_id}/apps/{installation_id}';
+};
+
+export type DeleteBotsByBotIdAppsByInstallationIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdAppsByInstallationIdError = DeleteBotsByBotIdAppsByInstallationIdErrors[keyof DeleteBotsByBotIdAppsByInstallationIdErrors];
+
+export type DeleteBotsByBotIdAppsByInstallationIdResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersAppStreamEvent;
+};
+
+export type DeleteBotsByBotIdAppsByInstallationIdResponse = DeleteBotsByBotIdAppsByInstallationIdResponses[keyof DeleteBotsByBotIdAppsByInstallationIdResponses];
+
+export type GetBotsByBotIdAppsByInstallationIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * App installation ID
+         */
+        installation_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/{installation_id}';
+};
+
+export type GetBotsByBotIdAppsByInstallationIdErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAppsByInstallationIdError = GetBotsByBotIdAppsByInstallationIdErrors[keyof GetBotsByBotIdAppsByInstallationIdErrors];
+
+export type GetBotsByBotIdAppsByInstallationIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAppItem;
+};
+
+export type GetBotsByBotIdAppsByInstallationIdResponse = GetBotsByBotIdAppsByInstallationIdResponses[keyof GetBotsByBotIdAppsByInstallationIdResponses];
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyData = {
+    /**
+     * Credential request
+     */
+    body: HandlersAppConnectorCredentialRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * App installation ID
+         */
+        installation_id: string;
+        /**
+         * Connector type
+         */
+        connector_type: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/{installation_id}/connectors/{connector_type}/api-key';
+};
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyError = PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyErrors[keyof PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyErrors];
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyResponses = {
+    /**
+     * Created
+     */
+    201: ConnectorsConnector;
+};
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyResponse = PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyResponses[keyof PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyResponses];
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthData = {
+    /**
+     * OAuth request
+     */
+    body: HandlersAppConnectorOAuthRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * App installation ID
+         */
+        installation_id: string;
+        /**
+         * Connector type
+         */
+        connector_type: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/{installation_id}/connectors/{connector_type}/oauth';
+};
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthError = PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthErrors[keyof PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthErrors];
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthResponses = {
+    /**
+     * Created
+     */
+    201: ConnectitOAuthAuthorization;
+};
+
+export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthResponse = PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthResponses[keyof PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthResponses];
+
+export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * App installation ID
+         */
+        installation_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/{installation_id}/removal-preview';
+};
+
+export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewError = GetBotsByBotIdAppsByInstallationIdRemovalPreviewErrors[keyof GetBotsByBotIdAppsByInstallationIdRemovalPreviewErrors];
+
+export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAppRemovalPreviewResponse;
+};
+
+export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponse = GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses[keyof GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses];
+
+export type PostBotsByBotIdAppsByInstallationIdResumeData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * App installation ID
+         */
+        installation_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/{installation_id}/resume';
+};
+
+export type PostBotsByBotIdAppsByInstallationIdResumeErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsByInstallationIdResumeError = PostBotsByBotIdAppsByInstallationIdResumeErrors[keyof PostBotsByBotIdAppsByInstallationIdResumeErrors];
+
+export type PostBotsByBotIdAppsByInstallationIdResumeResponses = {
+    /**
+     * SSE stream of operation events
+     */
+    200: HandlersAppStreamEvent;
+};
+
+export type PostBotsByBotIdAppsByInstallationIdResumeResponse = PostBotsByBotIdAppsByInstallationIdResumeResponses[keyof PostBotsByBotIdAppsByInstallationIdResumeResponses];
 
 export type PostBotsByBotIdBackupExportData = {
     /**
@@ -9726,473 +10193,6 @@ export type GetBotsByBotIdMessagesLocateResponses = {
 };
 
 export type GetBotsByBotIdMessagesLocateResponse = GetBotsByBotIdMessagesLocateResponses[keyof GetBotsByBotIdMessagesLocateResponses];
-
-export type GetBotsByBotIdPackagesData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Workspace target ID (defaults to the bot's current target)
-         */
-        workspace_target_id?: string;
-        /**
-         * Refresh workspace discovery
-         */
-        refresh?: boolean;
-    };
-    url: '/bots/{bot_id}/packages';
-};
-
-export type GetBotsByBotIdPackagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ApperrorProblem;
-};
-
-export type GetBotsByBotIdPackagesError = GetBotsByBotIdPackagesErrors[keyof GetBotsByBotIdPackagesErrors];
-
-export type GetBotsByBotIdPackagesResponses = {
-    /**
-     * OK
-     */
-    200: HandlersPackageListResponse;
-};
-
-export type GetBotsByBotIdPackagesResponse = GetBotsByBotIdPackagesResponses[keyof GetBotsByBotIdPackagesResponses];
-
-export type PostBotsByBotIdPackagesData = {
-    /**
-     * Package release to install
-     */
-    body: HandlersPackageInstallRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages';
-};
-
-export type PostBotsByBotIdPackagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-};
-
-export type PostBotsByBotIdPackagesError = PostBotsByBotIdPackagesErrors[keyof PostBotsByBotIdPackagesErrors];
-
-export type PostBotsByBotIdPackagesResponses = {
-    /**
-     * SSE stream of operation events
-     */
-    200: HandlersPackageStreamEvent;
-};
-
-export type PostBotsByBotIdPackagesResponse = PostBotsByBotIdPackagesResponses[keyof PostBotsByBotIdPackagesResponses];
-
-export type PostBotsByBotIdPackagesCheckUpdatesData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: {
-        /**
-         * Workspace target ID (defaults to the bot's current target)
-         */
-        workspace_target_id?: string;
-    };
-    url: '/bots/{bot_id}/packages/check-updates';
-};
-
-export type PostBotsByBotIdPackagesCheckUpdatesErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-};
-
-export type PostBotsByBotIdPackagesCheckUpdatesError = PostBotsByBotIdPackagesCheckUpdatesErrors[keyof PostBotsByBotIdPackagesCheckUpdatesErrors];
-
-export type PostBotsByBotIdPackagesCheckUpdatesResponses = {
-    /**
-     * OK
-     */
-    200: HandlersPackageListResponse;
-};
-
-export type PostBotsByBotIdPackagesCheckUpdatesResponse = PostBotsByBotIdPackagesCheckUpdatesResponses[keyof PostBotsByBotIdPackagesCheckUpdatesResponses];
-
-export type PostBotsByBotIdPackagesUpdateData = {
-    /**
-     * What to update
-     */
-    body: HandlersPackageUpdateRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages/update';
-};
-
-export type PostBotsByBotIdPackagesUpdateErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-};
-
-export type PostBotsByBotIdPackagesUpdateError = PostBotsByBotIdPackagesUpdateErrors[keyof PostBotsByBotIdPackagesUpdateErrors];
-
-export type PostBotsByBotIdPackagesUpdateResponses = {
-    /**
-     * SSE stream of operation events
-     */
-    200: HandlersPackageStreamEvent;
-};
-
-export type PostBotsByBotIdPackagesUpdateResponse = PostBotsByBotIdPackagesUpdateResponses[keyof PostBotsByBotIdPackagesUpdateResponses];
-
-export type DeleteBotsByBotIdPackagesByInstallationIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Package installation ID
-         */
-        installation_id: string;
-    };
-    query?: {
-        /**
-         * Also remove auto-installed Packages that lose their last reference
-         */
-        remove_unreferenced_required?: boolean;
-    };
-    url: '/bots/{bot_id}/packages/{installation_id}';
-};
-
-export type DeleteBotsByBotIdPackagesByInstallationIdErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-};
-
-export type DeleteBotsByBotIdPackagesByInstallationIdError = DeleteBotsByBotIdPackagesByInstallationIdErrors[keyof DeleteBotsByBotIdPackagesByInstallationIdErrors];
-
-export type DeleteBotsByBotIdPackagesByInstallationIdResponses = {
-    /**
-     * SSE stream of operation events
-     */
-    200: HandlersPackageStreamEvent;
-};
-
-export type DeleteBotsByBotIdPackagesByInstallationIdResponse = DeleteBotsByBotIdPackagesByInstallationIdResponses[keyof DeleteBotsByBotIdPackagesByInstallationIdResponses];
-
-export type GetBotsByBotIdPackagesByInstallationIdData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Package installation ID
-         */
-        installation_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages/{installation_id}';
-};
-
-export type GetBotsByBotIdPackagesByInstallationIdErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-};
-
-export type GetBotsByBotIdPackagesByInstallationIdError = GetBotsByBotIdPackagesByInstallationIdErrors[keyof GetBotsByBotIdPackagesByInstallationIdErrors];
-
-export type GetBotsByBotIdPackagesByInstallationIdResponses = {
-    /**
-     * OK
-     */
-    200: HandlersPackageItem;
-};
-
-export type GetBotsByBotIdPackagesByInstallationIdResponse = GetBotsByBotIdPackagesByInstallationIdResponses[keyof GetBotsByBotIdPackagesByInstallationIdResponses];
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyData = {
-    /**
-     * Credential request
-     */
-    body: HandlersPackageConnectorCredentialRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Package installation ID
-         */
-        installation_id: string;
-        /**
-         * Connector type
-         */
-        connector_type: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages/{installation_id}/connectors/{connector_type}/api-key';
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ApperrorProblem;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyError = PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyErrors[keyof PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyErrors];
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyResponses = {
-    /**
-     * Created
-     */
-    201: ConnectorsConnector;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyResponse = PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyResponses[keyof PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeApiKeyResponses];
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthData = {
-    /**
-     * OAuth request
-     */
-    body: HandlersPackageConnectorOAuthRequest;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Package installation ID
-         */
-        installation_id: string;
-        /**
-         * Connector type
-         */
-        connector_type: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages/{installation_id}/connectors/{connector_type}/oauth';
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Bad Gateway
-     */
-    502: ApperrorProblem;
-    /**
-     * Service Unavailable
-     */
-    503: ApperrorProblem;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthError = PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthErrors[keyof PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthErrors];
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthResponses = {
-    /**
-     * Created
-     */
-    201: ConnectitOAuthAuthorization;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthResponse = PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthResponses[keyof PostBotsByBotIdPackagesByInstallationIdConnectorsByConnectorTypeOauthResponses];
-
-export type GetBotsByBotIdPackagesByInstallationIdRemovalPreviewData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Package installation ID
-         */
-        installation_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages/{installation_id}/removal-preview';
-};
-
-export type GetBotsByBotIdPackagesByInstallationIdRemovalPreviewErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-};
-
-export type GetBotsByBotIdPackagesByInstallationIdRemovalPreviewError = GetBotsByBotIdPackagesByInstallationIdRemovalPreviewErrors[keyof GetBotsByBotIdPackagesByInstallationIdRemovalPreviewErrors];
-
-export type GetBotsByBotIdPackagesByInstallationIdRemovalPreviewResponses = {
-    /**
-     * OK
-     */
-    200: HandlersPackageRemovalPreviewResponse;
-};
-
-export type GetBotsByBotIdPackagesByInstallationIdRemovalPreviewResponse = GetBotsByBotIdPackagesByInstallationIdRemovalPreviewResponses[keyof GetBotsByBotIdPackagesByInstallationIdRemovalPreviewResponses];
-
-export type PostBotsByBotIdPackagesByInstallationIdResumeData = {
-    body?: never;
-    path: {
-        /**
-         * Bot ID
-         */
-        bot_id: string;
-        /**
-         * Package installation ID
-         */
-        installation_id: string;
-    };
-    query?: never;
-    url: '/bots/{bot_id}/packages/{installation_id}/resume';
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdResumeErrors = {
-    /**
-     * Forbidden
-     */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdResumeError = PostBotsByBotIdPackagesByInstallationIdResumeErrors[keyof PostBotsByBotIdPackagesByInstallationIdResumeErrors];
-
-export type PostBotsByBotIdPackagesByInstallationIdResumeResponses = {
-    /**
-     * SSE stream of operation events
-     */
-    200: HandlersPackageStreamEvent;
-};
-
-export type PostBotsByBotIdPackagesByInstallationIdResumeResponse = PostBotsByBotIdPackagesByInstallationIdResumeResponses[keyof PostBotsByBotIdPackagesByInstallationIdResumeResponses];
 
 export type PostBotsByBotIdQuickActionsExecuteData = {
     /**
@@ -15991,6 +15991,68 @@ export type GetSpeechProvidersByIdModelsResponses = {
 
 export type GetSpeechProvidersByIdModelsResponse = GetSpeechProvidersByIdModelsResponses[keyof GetSpeechProvidersByIdModelsResponses];
 
+export type GetSupermarketAppsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search query
+         */
+        q?: string;
+        /**
+         * Registry ID
+         */
+        registry?: string;
+        /**
+         * Category ID
+         */
+        category?: string;
+        /**
+         * Exact tag
+         */
+        tag?: string;
+        /**
+         * Component filter
+         */
+        component?: 'skills' | 'dependencies' | 'connectors';
+        /**
+         * Page number
+         */
+        page?: number;
+        /**
+         * Items per page
+         */
+        limit?: number;
+        /**
+         * Sort order
+         */
+        sort?: string;
+    };
+    url: '/supermarket/apps';
+};
+
+export type GetSupermarketAppsErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetSupermarketAppsError = GetSupermarketAppsErrors[keyof GetSupermarketAppsErrors];
+
+export type GetSupermarketAppsResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSupermarketAppListResponse;
+};
+
+export type GetSupermarketAppsResponse = GetSupermarketAppsResponses[keyof GetSupermarketAppsResponses];
+
 export type GetSupermarketArtifactsIconByDigestData = {
     body?: never;
     path: {
@@ -16060,72 +16122,10 @@ export type GetSupermarketCategoriesResponses = {
     /**
      * OK
      */
-    200: HandlersSupermarketPackageCategoryListResponse;
+    200: HandlersSupermarketAppCategoryListResponse;
 };
 
 export type GetSupermarketCategoriesResponse = GetSupermarketCategoriesResponses[keyof GetSupermarketCategoriesResponses];
-
-export type GetSupermarketPackagesData = {
-    body?: never;
-    path?: never;
-    query?: {
-        /**
-         * Search query
-         */
-        q?: string;
-        /**
-         * Registry ID
-         */
-        registry?: string;
-        /**
-         * Category ID
-         */
-        category?: string;
-        /**
-         * Exact tag
-         */
-        tag?: string;
-        /**
-         * Component filter
-         */
-        component?: 'skills' | 'dependencies' | 'connectors';
-        /**
-         * Page number
-         */
-        page?: number;
-        /**
-         * Items per page
-         */
-        limit?: number;
-        /**
-         * Sort order
-         */
-        sort?: string;
-    };
-    url: '/supermarket/packages';
-};
-
-export type GetSupermarketPackagesErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Bad Gateway
-     */
-    502: HandlersErrorResponse;
-};
-
-export type GetSupermarketPackagesError = GetSupermarketPackagesErrors[keyof GetSupermarketPackagesErrors];
-
-export type GetSupermarketPackagesResponses = {
-    /**
-     * OK
-     */
-    200: HandlersSupermarketSkillPackageListResponse;
-};
-
-export type GetSupermarketPackagesResponse = GetSupermarketPackagesResponses[keyof GetSupermarketPackagesResponses];
 
 export type GetSupermarketRegistriesData = {
     body?: never;
@@ -16152,7 +16152,7 @@ export type GetSupermarketRegistriesResponses = {
 
 export type GetSupermarketRegistriesResponse = GetSupermarketRegistriesResponses[keyof GetSupermarketRegistriesResponses];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesData = {
+export type GetSupermarketRegistriesByRegistryIdAppsData = {
     body?: never;
     path: {
         /**
@@ -16186,10 +16186,10 @@ export type GetSupermarketRegistriesByRegistryIdPackagesData = {
          */
         sort?: string;
     };
-    url: '/supermarket/registries/{registry_id}/packages';
+    url: '/supermarket/registries/{registry_id}/apps';
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesErrors = {
+export type GetSupermarketRegistriesByRegistryIdAppsErrors = {
     /**
      * Bad Request
      */
@@ -16204,18 +16204,18 @@ export type GetSupermarketRegistriesByRegistryIdPackagesErrors = {
     502: HandlersErrorResponse;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesError = GetSupermarketRegistriesByRegistryIdPackagesErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesErrors];
+export type GetSupermarketRegistriesByRegistryIdAppsError = GetSupermarketRegistriesByRegistryIdAppsErrors[keyof GetSupermarketRegistriesByRegistryIdAppsErrors];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesResponses = {
+export type GetSupermarketRegistriesByRegistryIdAppsResponses = {
     /**
      * OK
      */
-    200: HandlersSupermarketSkillPackageListResponse;
+    200: HandlersSupermarketAppListResponse;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesResponse = GetSupermarketRegistriesByRegistryIdPackagesResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesResponses];
+export type GetSupermarketRegistriesByRegistryIdAppsResponse = GetSupermarketRegistriesByRegistryIdAppsResponses[keyof GetSupermarketRegistriesByRegistryIdAppsResponses];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdData = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdData = {
     body?: never;
     path: {
         /**
@@ -16223,15 +16223,15 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdData = {
          */
         registry_id: string;
         /**
-         * Package ID
+         * App ID
          */
-        package_id: string;
+        app_id: string;
     };
     query?: never;
-    url: '/supermarket/registries/{registry_id}/packages/{package_id}';
+    url: '/supermarket/registries/{registry_id}/apps/{app_id}';
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors = {
     /**
      * Bad Request
      */
@@ -16246,18 +16246,18 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors = {
     502: HandlersErrorResponse;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdErrors];
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdError = GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdResponses = {
     /**
      * OK
      */
-    200: HandlersSupermarketSkillPackageDescriptor;
+    200: HandlersSupermarketAppDescriptor;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdResponses];
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdResponse = GetSupermarketRegistriesByRegistryIdAppsByAppIdResponses[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdResponses];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionData = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionData = {
     body?: never;
     path: {
         /**
@@ -16265,19 +16265,19 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRev
          */
         registry_id: string;
         /**
-         * Package ID
+         * App ID
          */
-        package_id: string;
+        app_id: string;
         /**
-         * Package revision
+         * App revision
          */
         revision: string;
     };
     query?: never;
-    url: '/supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}';
+    url: '/supermarket/registries/{registry_id}/apps/{app_id}/releases/{revision}';
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErrors = {
     /**
      * Bad Request
      */
@@ -16292,18 +16292,18 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRev
     502: HandlersErrorResponse;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionErrors];
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionError = GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErrors];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionResponses = {
     /**
      * OK
      */
-    200: HandlersSupermarketSkillPackageDescriptor;
+    200: HandlersSupermarketAppDescriptor;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdReleasesByRevisionResponses];
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionResponse = GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionResponses[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionResponses];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdData = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdData = {
     body?: never;
     path: {
         /**
@@ -16311,19 +16311,19 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkill
          */
         registry_id: string;
         /**
-         * Package ID
+         * App ID
          */
-        package_id: string;
+        app_id: string;
         /**
          * Skill ID
          */
         skill_id: string;
     };
     query?: never;
-    url: '/supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}';
+    url: '/supermarket/registries/{registry_id}/apps/{app_id}/skills/{skill_id}';
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdErrors = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors = {
     /**
      * Bad Request
      */
@@ -16338,16 +16338,16 @@ export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkill
     502: HandlersErrorResponse;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdError = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdErrors[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdErrors];
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdError = GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors];
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses = {
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdResponses = {
     /**
      * OK
      */
     200: HandlersSupermarketCatalogSkill;
 };
 
-export type GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponse = GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses[keyof GetSupermarketRegistriesByRegistryIdPackagesByPackageIdSkillsBySkillIdResponses];
+export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdResponse = GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdResponses[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdResponses];
 
 export type GetSupermarketSkillsData = {
     body?: never;
@@ -16362,9 +16362,9 @@ export type GetSupermarketSkillsData = {
          */
         registry?: string;
         /**
-         * Package ID
+         * App ID
          */
-        package?: string;
+        app?: string;
         /**
          * Category ID
          */

@@ -172,6 +172,45 @@ type BotAgent struct {
 	AgentCredentialID pgtype.UUID        `json:"agent_credential_id"`
 }
 
+type BotAppConnectorRef struct {
+	ID             pgtype.UUID        `json:"id"`
+	TeamID         pgtype.UUID        `json:"team_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ConnectorType  string             `json:"connector_type"`
+	ConnectionID   string             `json:"connection_id"`
+	Required       bool               `json:"required"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotAppDependencyRef struct {
+	ID             pgtype.UUID        `json:"id"`
+	TeamID         pgtype.UUID        `json:"team_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	DependencyID   string             `json:"dependency_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type BotAppInstallation struct {
+	ID                pgtype.UUID        `json:"id"`
+	TeamID            pgtype.UUID        `json:"team_id"`
+	BotID             pgtype.UUID        `json:"bot_id"`
+	WorkspaceTargetID string             `json:"workspace_target_id"`
+	RegistryID        string             `json:"registry_id"`
+	AppID             string             `json:"app_id"`
+	Revision          string             `json:"revision"`
+	Version           string             `json:"version"`
+	Status            string             `json:"status"`
+	Reason            string             `json:"reason"`
+	AvailableRevision string             `json:"available_revision"`
+	AvailableVersion  string             `json:"available_version"`
+	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
+	LastError         string             `json:"last_error"`
+	Release           []byte             `json:"release"`
+	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotChannelAdmin struct {
 	ID                pgtype.UUID        `json:"id"`
 	BotID             pgtype.UUID        `json:"bot_id"`
@@ -317,45 +356,6 @@ type BotHistoryMessageCompact struct {
 	StartedAt       pgtype.Timestamptz `json:"started_at"`
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 	TeamID          pgtype.UUID        `json:"team_id"`
-}
-
-type BotPackageConnectorRef struct {
-	ID             pgtype.UUID        `json:"id"`
-	TeamID         pgtype.UUID        `json:"team_id"`
-	InstallationID pgtype.UUID        `json:"installation_id"`
-	ConnectorType  string             `json:"connector_type"`
-	ConnectionID   string             `json:"connection_id"`
-	Required       bool               `json:"required"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-}
-
-type BotPackageDependencyRef struct {
-	ID             pgtype.UUID        `json:"id"`
-	TeamID         pgtype.UUID        `json:"team_id"`
-	InstallationID pgtype.UUID        `json:"installation_id"`
-	DependencyID   string             `json:"dependency_id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
-type BotPackageInstallation struct {
-	ID                pgtype.UUID        `json:"id"`
-	TeamID            pgtype.UUID        `json:"team_id"`
-	BotID             pgtype.UUID        `json:"bot_id"`
-	WorkspaceTargetID string             `json:"workspace_target_id"`
-	RegistryID        string             `json:"registry_id"`
-	PackageID         string             `json:"package_id"`
-	Revision          string             `json:"revision"`
-	Version           string             `json:"version"`
-	Status            string             `json:"status"`
-	Reason            string             `json:"reason"`
-	AvailableRevision string             `json:"available_revision"`
-	AvailableVersion  string             `json:"available_version"`
-	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
-	LastError         string             `json:"last_error"`
-	Release           []byte             `json:"release"`
-	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotRemoteRuntimeBinding struct {

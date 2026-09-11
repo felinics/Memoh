@@ -340,8 +340,8 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	root.POST("/mcp-stdio/:connection_id", h.HandleMCPStdio)
 	root.POST("/tools", h.HandleMCPTools)
 	// Workspace dependency routes. Dependencies are installed and removed
-	// through Packages (/bots/:bot_id/packages); these routes inspect and
-	// maintain the copies a Package references.
+	// through Apps (/bots/:bot_id/packages); these routes inspect and
+	// maintain the copies an App references.
 	e.GET("/workspace-dependencies/icons/:digest", h.GetWorkspaceDependencyIcon)
 	deps := e.Group("/bots/:bot_id/dependencies")
 	deps.GET("", h.ListWorkspaceDependencies)

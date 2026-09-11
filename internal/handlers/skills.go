@@ -32,7 +32,7 @@ type SkillItem struct {
 	State       string         `json:"state,omitempty"`
 	ShadowedBy  string         `json:"shadowed_by,omitempty"`
 	RegistryID  string         `json:"registry_id,omitempty"`
-	PackageID   string         `json:"package_id,omitempty"`
+	AppID       string         `json:"app_id,omitempty"`
 	SkillID     string         `json:"skill_id,omitempty"`
 }
 
@@ -54,7 +54,7 @@ type SkillsUpsertRequest struct {
 
 type SkillsDeleteRequest struct {
 	// SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
-	// cannot address registry skills, which are nested by registry and package.
+	// cannot address registry skills, which are nested by registry and app.
 	SourcePaths []string `json:"source_paths"`
 }
 
@@ -163,7 +163,7 @@ func (h *ContainerdHandler) upsertSkills(
 		return workspaceUnavailableError(err)
 	}
 	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills cannot be edited directly")
+		return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills cannot be edited directly")
 	}
 
 	for i, raw := range rawSkills {
@@ -177,7 +177,7 @@ func (h *ContainerdHandler) upsertSkills(
 				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
 			}
 			if errors.Is(planErr, skillset.ErrRegistrySkillReadOnly) {
-				return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills cannot be edited directly")
+				return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills cannot be edited directly")
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
 		}
@@ -285,7 +285,7 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
 			}
 			if errors.Is(dirErr, skillset.ErrRegistrySkillReadOnly) {
-				return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills cannot be deleted directly")
+				return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills cannot be deleted directly")
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "only Memoh-managed skills can be deleted")
 		}
@@ -332,7 +332,7 @@ func (h *ContainerdHandler) pinCurrentWorkspaceTarget(
 	return bridge.WithWorkspaceTarget(ctx, targetID), targetID, nil
 }
 
-// pruneEmptySkillNamespaceDirs drops the package and namespace directories left
+// pruneEmptySkillNamespaceDirs drops the app and namespace directories left
 // behind by the last deleted Skill. Best effort: a concurrent install may refill
 // them, and a stale empty directory is harmless to discovery.
 func pruneEmptySkillNamespaceDirs(ctx context.Context, client *bridge.Client, skillDir string) {
@@ -378,7 +378,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 
 func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, req SkillsActionRequest) error {
 	if _, _, _, ok := skillset.RegistrySkillIDs(req.TargetPath); ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "Registry Package Skills are read-only")
+		return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills are read-only")
 	}
 	ctx, _, err := h.pinCurrentWorkspaceTarget(ctx, botID)
 	if err != nil {
@@ -498,8 +498,8 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 	items := make([]SkillItem, len(entries))
 	for i, entry := range entries {
 		_, builtin := skillset.BuiltinSkillName(entry.SourcePath)
-		registryID, packageID, skillID, packageMember := skillset.RegistrySkillIDs(entry.SourcePath)
-		registryOwned := entry.SourceKind == skillset.SourceKindRegistry || packageMember
+		registryID, appID, skillID, appMember := skillset.RegistrySkillIDs(entry.SourcePath)
+		registryOwned := entry.SourceKind == skillset.SourceKindRegistry || appMember
 		items[i] = SkillItem{
 			Name:        entry.Name,
 			Description: entry.Description,
@@ -511,11 +511,11 @@ func skillItemsFromEntries(entries []skillset.Entry) []SkillItem {
 			SourceKind:  entry.SourceKind,
 			Managed:     entry.Managed,
 			Editable:    !builtin && !registryOwned,
-			Deletable:   entry.Managed && !builtin && !packageMember,
+			Deletable:   entry.Managed && !builtin && !appMember,
 			State:       entry.State,
 			ShadowedBy:  entry.ShadowedBy,
 			RegistryID:  registryID,
-			PackageID:   packageID,
+			AppID:       appID,
 			SkillID:     skillID,
 		}
 	}

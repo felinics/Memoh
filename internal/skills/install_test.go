@@ -23,9 +23,9 @@ func TestShellQuoteEscapesApostrophes(t *testing.T) {
 	}
 }
 
-func TestPackagePublicationCommitCanRetryCleanup(t *testing.T) {
-	client := &packagePublicationTestClient{deleteErrors: []error{errors.New("temporary failure"), nil}}
-	publication := &PackagePublication{
+func TestAppPublicationCommitCanRetryCleanup(t *testing.T) {
+	client := &appPublicationTestClient{deleteErrors: []error{errors.New("temporary failure"), nil}}
+	publication := &AppPublication{
 		client: client, backupDir: "/backup", stagingDir: "/staging", targetExists: true,
 	}
 	canceled, cancel := context.WithCancel(context.Background())
@@ -44,13 +44,13 @@ func TestPackagePublicationCommitCanRetryCleanup(t *testing.T) {
 	}
 }
 
-type packagePublicationTestClient struct {
+type appPublicationTestClient struct {
 	deleteErrors []error
 	calls        int
 	sawDeadline  bool
 }
 
-func (c *packagePublicationTestClient) DeleteFile(ctx context.Context, _ string, _ bool) error {
+func (c *appPublicationTestClient) DeleteFile(ctx context.Context, _ string, _ bool) error {
 	c.calls++
 	_, c.sawDeadline = ctx.Deadline()
 	if len(c.deleteErrors) == 0 {
@@ -61,32 +61,32 @@ func (c *packagePublicationTestClient) DeleteFile(ctx context.Context, _ string,
 	return err
 }
 
-func (*packagePublicationTestClient) Rename(context.Context, string, string) error {
+func (*appPublicationTestClient) Rename(context.Context, string, string) error {
 	return nil
 }
 
-func TestReconcilePackageRestoresRecordedRevision(t *testing.T) {
+func TestReconcileAppRestoresRecordedRevision(t *testing.T) {
 	t.Parallel()
 
-	const registryID, packageID = "openai", "docs"
+	const registryID, appID = "openai", "docs"
 	recordedRevision := strings.Repeat("a", 64)
 	interruptedRevision := strings.Repeat("b", 64)
-	paths, err := packageOperationPaths(registryID, packageID)
+	paths, err := appOperationPaths(registryID, appID)
 	if err != nil {
-		t.Fatalf("packageOperationPaths() error = %v", err)
+		t.Fatalf("appOperationPaths() error = %v", err)
 	}
-	client := newPackageInstallTestClient(t)
-	seedPackageInstallTestData(t, client, paths.target, interruptedRevision, "new")
-	seedPackageInstallTestData(t, client, paths.backup, recordedRevision, "old")
+	client := newAppInstallTestClient(t)
+	seedAppInstallTestData(t, client, paths.target, interruptedRevision, "new")
+	seedAppInstallTestData(t, client, paths.backup, recordedRevision, "old")
 
-	consistent, err := ReconcilePackage(context.Background(), client, registryID, packageID, recordedRevision)
+	consistent, err := ReconcileApp(context.Background(), client, registryID, appID, recordedRevision)
 	if err != nil {
-		t.Fatalf("ReconcilePackage() error = %v", err)
+		t.Fatalf("ReconcileApp() error = %v", err)
 	}
 	if !consistent {
-		t.Fatal("ReconcilePackage() did not recover the recorded revision")
+		t.Fatal("ReconcileApp() did not recover the recorded revision")
 	}
-	if got := readPackageInstallTestFile(t, client, path.Join(paths.target, "skill", "SKILL.md")); got != "old" {
+	if got := readAppInstallTestFile(t, client, path.Join(paths.target, "skill", "SKILL.md")); got != "old" {
 		t.Fatalf("recovered Skill = %q, want old", got)
 	}
 	if _, err := client.Stat(context.Background(), paths.staging); !errors.Is(err, bridge.ErrNotFound) {
@@ -94,55 +94,55 @@ func TestReconcilePackageRestoresRecordedRevision(t *testing.T) {
 	}
 }
 
-func TestReconcilePackageRemovesUnrecordedPublication(t *testing.T) {
+func TestReconcileAppRemovesUnrecordedPublication(t *testing.T) {
 	t.Parallel()
 
-	const registryID, packageID = "openai", "docs"
-	paths, err := packageOperationPaths(registryID, packageID)
+	const registryID, appID = "openai", "docs"
+	paths, err := appOperationPaths(registryID, appID)
 	if err != nil {
-		t.Fatalf("packageOperationPaths() error = %v", err)
+		t.Fatalf("appOperationPaths() error = %v", err)
 	}
-	client := newPackageInstallTestClient(t)
-	seedPackageInstallTestData(t, client, paths.target, strings.Repeat("b", 64), "unrecorded")
+	client := newAppInstallTestClient(t)
+	seedAppInstallTestData(t, client, paths.target, strings.Repeat("b", 64), "unrecorded")
 
-	consistent, err := ReconcilePackage(context.Background(), client, registryID, packageID, "")
+	consistent, err := ReconcileApp(context.Background(), client, registryID, appID, "")
 	if err != nil {
-		t.Fatalf("ReconcilePackage() error = %v", err)
+		t.Fatalf("ReconcileApp() error = %v", err)
 	}
 	if consistent {
-		t.Fatal("ReconcilePackage() reported an unrecorded publication as consistent")
+		t.Fatal("ReconcileApp() reported an unrecorded publication as consistent")
 	}
 	if _, err := client.Stat(context.Background(), paths.target); !errors.Is(err, bridge.ErrNotFound) {
 		t.Fatalf("target Stat() error = %v, want not found", err)
 	}
 }
 
-func TestPackagePublicationRollbackRestoresPreviousRevision(t *testing.T) {
+func TestAppPublicationRollbackRestoresPreviousRevision(t *testing.T) {
 	t.Parallel()
 
-	const registryID, packageID = "openai", "docs"
+	const registryID, appID = "openai", "docs"
 	oldRevision := strings.Repeat("a", 64)
 	newRevision := strings.Repeat("b", 64)
-	paths, err := packageOperationPaths(registryID, packageID)
+	paths, err := appOperationPaths(registryID, appID)
 	if err != nil {
-		t.Fatalf("packageOperationPaths() error = %v", err)
+		t.Fatalf("appOperationPaths() error = %v", err)
 	}
-	client := newPackageInstallTestClient(t)
-	seedPackageInstallTestData(t, client, paths.target, oldRevision, "old")
-	publication, err := PublishPackage(
-		context.Background(), client, "linux", registryID, packageID, newRevision,
-		[]PackageArchive{{SkillID: "skill", Archive: Archive{files: []archiveFile{{path: "SKILL.md", content: []byte("new")}}}}},
+	client := newAppInstallTestClient(t)
+	seedAppInstallTestData(t, client, paths.target, oldRevision, "old")
+	publication, err := PublishApp(
+		context.Background(), client, "linux", registryID, appID, newRevision,
+		[]AppArchive{{SkillID: "skill", Archive: Archive{files: []archiveFile{{path: "SKILL.md", content: []byte("new")}}}}},
 	)
 	if err != nil {
-		t.Fatalf("PublishPackage() error = %v", err)
+		t.Fatalf("PublishApp() error = %v", err)
 	}
-	if got := readPackageInstallTestFile(t, client, path.Join(paths.target, "skill", "SKILL.md")); got != "new" {
+	if got := readAppInstallTestFile(t, client, path.Join(paths.target, "skill", "SKILL.md")); got != "new" {
 		t.Fatalf("published Skill = %q, want new", got)
 	}
 	if err := publication.Rollback(context.Background()); err != nil {
 		t.Fatalf("Rollback() error = %v", err)
 	}
-	if got := readPackageInstallTestFile(t, client, path.Join(paths.target, "skill", "SKILL.md")); got != "old" {
+	if got := readAppInstallTestFile(t, client, path.Join(paths.target, "skill", "SKILL.md")); got != "old" {
 		t.Fatalf("rolled back Skill = %q, want old", got)
 	}
 	if _, err := client.Stat(context.Background(), paths.staging); !errors.Is(err, bridge.ErrNotFound) {
@@ -150,7 +150,7 @@ func TestPackagePublicationRollbackRestoresPreviousRevision(t *testing.T) {
 	}
 }
 
-func newPackageInstallTestClient(t *testing.T) *bridge.Client {
+func newAppInstallTestClient(t *testing.T) *bridge.Client {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -182,21 +182,21 @@ func newPackageInstallTestClient(t *testing.T) *bridge.Client {
 	return bridge.NewClientFromConn(connection)
 }
 
-func seedPackageInstallTestData(t *testing.T, client *bridge.Client, packageDir, revision, content string) {
+func seedAppInstallTestData(t *testing.T, client *bridge.Client, appDir, revision, content string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := client.Mkdir(ctx, path.Join(packageDir, "skill")); err != nil {
+	if err := client.Mkdir(ctx, path.Join(appDir, "skill")); err != nil {
 		t.Fatalf("Mkdir() error = %v", err)
 	}
-	if err := client.WriteFile(ctx, path.Join(packageDir, packageRevisionMarker), []byte(revision+"\n")); err != nil {
+	if err := client.WriteFile(ctx, path.Join(appDir, appRevisionMarker), []byte(revision+"\n")); err != nil {
 		t.Fatalf("write revision marker: %v", err)
 	}
-	if err := client.WriteFile(ctx, path.Join(packageDir, "skill", "SKILL.md"), []byte(content)); err != nil {
+	if err := client.WriteFile(ctx, path.Join(appDir, "skill", "SKILL.md"), []byte(content)); err != nil {
 		t.Fatalf("write Skill: %v", err)
 	}
 }
 
-func readPackageInstallTestFile(t *testing.T, client *bridge.Client, filePath string) string {
+func readAppInstallTestFile(t *testing.T, client *bridge.Client, filePath string) string {
 	t.Helper()
 	response, err := client.ReadFile(context.Background(), filePath, 0, 0)
 	if err != nil {

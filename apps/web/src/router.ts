@@ -233,11 +233,11 @@ const routes = [
             },
           },
           {
-            name: 'supermarket-package-detail',
-            path: ':registryId/:packageId',
-            component: () => import('@/pages/supermarket/package-detail.vue'),
+            name: 'supermarket-app-detail',
+            path: ':registryId/:appId',
+            component: () => import('@/pages/supermarket/app-detail.vue'),
             meta: {
-              breadcrumb: (route: RouteLocationNormalized) => route.params.packageId,
+              breadcrumb: (route: RouteLocationNormalized) => route.params.appId,
             },
           },
         ],

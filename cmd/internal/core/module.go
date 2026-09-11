@@ -9,6 +9,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/apps"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/bots"
@@ -22,7 +23,6 @@ import (
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthclients"
-	"github.com/felinics/memoh/internal/packages"
 	"github.com/felinics/memoh/internal/policy"
 	"github.com/felinics/memoh/internal/providertemplates"
 	"github.com/felinics/memoh/internal/schedule"
@@ -105,7 +105,7 @@ func ServerModule() fx.Option {
 			mcp.NewConnectionService,
 			connectors.NewService,
 			connectors.NewSource,
-			providePackageService,
+			provideAppService,
 			mcp.NewToolSessionContextStore,
 			provideAudioRegistry,
 			audiopkg.NewService,
@@ -154,11 +154,11 @@ func ServerModule() fx.Option {
 	)
 }
 
-func providePackageService(log *slog.Logger, cfg config.Config, queries dbstore.Queries, manager *workspace.Manager, workspaceDeps *workspacedeps.Service, connectorService *connectors.Service) *packages.Service {
+func provideAppService(log *slog.Logger, cfg config.Config, queries dbstore.Queries, manager *workspace.Manager, workspaceDeps *workspacedeps.Service, connectorService *connectors.Service) *apps.Service {
 	upstream := supermarket.NewClient(cfg.Supermarket.GetBaseURL(), nil)
-	publisher := packages.NewSupermarketPublisher(supermarket.NewInstaller(upstream, manager, log))
-	return packages.NewService(packages.Options{
-		Store:        packages.NewPostgresStore(queries),
+	publisher := apps.NewSupermarketPublisher(supermarket.NewInstaller(upstream, manager, log))
+	return apps.NewService(apps.Options{
+		Store:        apps.NewPostgresStore(queries),
 		Registry:     publisher,
 		Skills:       publisher,
 		Dependencies: workspaceDeps,

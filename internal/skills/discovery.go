@@ -39,7 +39,7 @@ func orderedDiscoveryRoots(ctx context.Context, client fileClient, rawCompatRoot
 	return roots
 }
 
-// discoverManagedSkillRoots walks the canonical namespace/package/Skill layout.
+// discoverManagedSkillRoots walks the canonical namespace/app/Skill layout.
 func discoverManagedSkillRoots(ctx context.Context, client fileClient) (userRoots, registryRoots []Root) {
 	if client == nil {
 		return nil, nil
@@ -65,30 +65,30 @@ func discoverManagedSkillRoots(ctx context.Context, client fileClient) (userRoot
 		if err != nil {
 			continue
 		}
-		packages, err := client.ListDirAll(ctx, namespacePath, false)
+		apps, err := client.ListDirAll(ctx, namespacePath, false)
 		if err != nil {
 			continue
 		}
-		slices.SortFunc(packages, func(a, b *pb.FileEntry) int {
+		slices.SortFunc(apps, func(a, b *pb.FileEntry) int {
 			return strings.Compare(a.GetPath(), b.GetPath())
 		})
-		for _, packageEntry := range packages {
-			if !packageEntry.GetIsDir() {
+		for _, appEntry := range apps {
+			if !appEntry.GetIsDir() {
 				continue
 			}
-			packageID := path.Base(packageEntry.GetPath())
-			if !IsValidName(packageID) {
+			appID := path.Base(appEntry.GetPath())
+			if !IsValidName(appID) {
 				continue
 			}
-			packagePath, err := SkillPackageDirForIDs(namespaceID, packageID)
+			appPath, err := AppDirForIDs(namespaceID, appID)
 			if err != nil {
 				continue
 			}
 			if namespaceID == UserSkillNamespace {
-				userRoots = append(userRoots, Root{Path: packagePath, Kind: SourceKindManaged, Managed: true})
+				userRoots = append(userRoots, Root{Path: appPath, Kind: SourceKindManaged, Managed: true})
 				continue
 			}
-			skills, err := client.ListDirAll(ctx, packagePath, false)
+			skills, err := client.ListDirAll(ctx, appPath, false)
 			if err != nil {
 				continue
 			}
@@ -103,7 +103,7 @@ func discoverManagedSkillRoots(ctx context.Context, client fileClient) (userRoot
 				if !IsValidName(skillID) {
 					continue
 				}
-				skillPath, err := SkillDirForIDs(namespaceID, packageID, skillID)
+				skillPath, err := SkillDirForIDs(namespaceID, appID, skillID)
 				if err != nil {
 					continue
 				}

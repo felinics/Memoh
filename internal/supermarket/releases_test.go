@@ -11,12 +11,12 @@ import (
 	"testing"
 )
 
-func TestFetchPackageReleaseHydratesArtifactURLs(t *testing.T) {
-	release := SkillPackageRelease{
-		SchemaVersion: "1", RegistryID: "openai", PackageID: "docs",
+func TestFetchAppReleaseHydratesArtifactURLs(t *testing.T) {
+	release := AppRelease{
+		SchemaVersion: "2", RegistryID: "openai", AppID: "docs",
 		Name: "Docs", Description: "Docs", Tags: []string{},
-		Skills: []SkillPackageReleaseSkill{{
-			SchemaVersion: "1", RegistryID: "openai", PackageID: "docs", SkillID: "write-docs",
+		Skills: []AppReleaseSkill{{
+			SchemaVersion: "2", RegistryID: "openai", AppID: "docs", SkillID: "write-docs",
 			InstallID: "openai+docs+write-docs", Name: "Write docs", Description: "Write docs",
 			Author: Author{Name: "OpenAI", Email: "support@example.com"}, Tags: []string{}, Files: []string{"SKILL.md"},
 			Artifact: SkillArtifact{
@@ -31,12 +31,12 @@ func TestFetchPackageReleaseHydratesArtifactURLs(t *testing.T) {
 		return protocolTestResponse(req, http.StatusOK, payload), nil
 	})})
 
-	pkg, err := client.FetchPackageRelease(context.Background(), "openai", "docs", revision)
+	pkg, err := client.FetchAppRelease(context.Background(), "openai", "docs", revision)
 	if err != nil {
-		t.Fatalf("FetchPackageRelease() error = %v", err)
+		t.Fatalf("FetchAppRelease() error = %v", err)
 	}
 	if pkg.Revision != revision || len(pkg.Skills) != 1 || pkg.SkillCount != 1 {
-		t.Fatalf("Package = %+v", pkg)
+		t.Fatalf("App = %+v", pkg)
 	}
 	wantURL := "/api/artifacts/skill/" + release.Skills[0].Artifact.Digest
 	if pkg.Skills[0].Artifact.DownloadURL != wantURL {

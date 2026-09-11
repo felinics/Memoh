@@ -18,17 +18,17 @@ type SupermarketRegistryListResponse = supermarketclient.RegistryListResponse
 
 type SupermarketRegistry = supermarketclient.Registry
 
-type SupermarketPackageCategoryListResponse = supermarketclient.PackageCategoryListResponse
+type SupermarketAppCategoryListResponse = supermarketclient.AppCategoryListResponse
 
-type SupermarketPackageCategoryRegistry = supermarketclient.PackageCategoryRegistry
+type SupermarketAppCategoryRegistry = supermarketclient.AppCategoryRegistry
 
-type SupermarketPackageCategory = supermarketclient.PackageCategory
+type SupermarketAppCategory = supermarketclient.AppCategory
 
-type SupermarketPackageMetadata = supermarketclient.PackageMetadata
+type SupermarketAppMetadata = supermarketclient.AppMetadata
 
-type SupermarketPackageTranslation = supermarketclient.PackageTranslation
+type SupermarketAppTranslation = supermarketclient.AppTranslation
 
-type SupermarketPackageConnector = supermarketclient.PackageConnectorReference
+type SupermarketAppConnector = supermarketclient.AppConnectorReference
 
 type SupermarketSkillSource = supermarketclient.SkillSource
 
@@ -42,17 +42,17 @@ type SupermarketCatalogSkill = supermarketclient.CatalogSkill
 
 type SupermarketCatalogSkillListResponse = supermarketclient.CatalogSkillListResponse
 
-type SupermarketSkillPackageCategory = supermarketclient.SkillPackageCategory
+type SupermarketAppSkillCategory = supermarketclient.AppSkillCategory
 
-type SupermarketSkillPackageSummary = supermarketclient.SkillPackageSummary
+type SupermarketAppSummary = supermarketclient.AppSummary
 
-type SupermarketSkillPackageDescriptor = supermarketclient.SkillPackageDescriptor
+type SupermarketAppDescriptor = supermarketclient.AppDescriptor
 
-type supermarketSkillPackageReleaseSkill = supermarketclient.SkillPackageReleaseSkill
+type supermarketAppReleaseSkill = supermarketclient.AppReleaseSkill
 
-type SupermarketSkillPackageRelease = supermarketclient.SkillPackageRelease
+type SupermarketAppRelease = supermarketclient.AppRelease
 
-type SupermarketSkillPackageListResponse = supermarketclient.SkillPackageListResponse
+type SupermarketAppListResponse = supermarketclient.AppListResponse
 
 type InstallRegistrySkillResponse = supermarketclient.InstallSkillResponse
 
@@ -67,10 +67,10 @@ func (h *SupermarketHandler) ListRegistries(c echo.Context) error {
 }
 
 // ListCategories godoc
-// @Summary List Package categories with localized names
+// @Summary List App categories with localized names
 // @Tags supermarket
 // @Param registry query string false "Registry ID"
-// @Success 200 {object} SupermarketPackageCategoryListResponse
+// @Success 200 {object} SupermarketAppCategoryListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
@@ -84,7 +84,7 @@ func (h *SupermarketHandler) ListCategories(c echo.Context) error {
 // @Tags supermarket
 // @Param q query string false "Search query"
 // @Param registry query string false "Registry ID"
-// @Param package query string false "Package ID"
+// @Param app query string false "App ID"
 // @Param category query string false "Category ID"
 // @Param tag query string false "Exact tag"
 // @Param page query int false "Page number"
@@ -98,8 +98,8 @@ func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 	return h.proxy(c, "/api/skills")
 }
 
-// ListPackages godoc
-// @Summary List Skill Packages across supermarket Registries
+// ListApps godoc
+// @Summary List Skill Apps across supermarket Registries
 // @Tags supermarket
 // @Param q query string false "Search query"
 // @Param registry query string false "Registry ID"
@@ -109,16 +109,16 @@ func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 // @Param page query int false "Page number"
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
-// @Success 200 {object} SupermarketSkillPackageListResponse
+// @Success 200 {object} SupermarketAppListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/packages [get].
-func (h *SupermarketHandler) ListPackages(c echo.Context) error {
-	return h.proxy(c, "/api/packages")
+// @Router /supermarket/apps [get].
+func (h *SupermarketHandler) ListApps(c echo.Context) error {
+	return h.proxy(c, "/api/apps")
 }
 
-// ListRegistryPackages godoc
-// @Summary List Skill Packages in one Registry
+// ListRegistryApps godoc
+// @Summary List Skill Apps in one Registry
 // @Tags supermarket
 // @Param registry_id path string true "Registry ID"
 // @Param q query string false "Search query"
@@ -127,58 +127,58 @@ func (h *SupermarketHandler) ListPackages(c echo.Context) error {
 // @Param page query int false "Page number"
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
-// @Success 200 {object} SupermarketSkillPackageListResponse
+// @Success 200 {object} SupermarketAppListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/registries/{registry_id}/packages [get].
-func (h *SupermarketHandler) ListRegistryPackages(c echo.Context) error {
+// @Router /supermarket/registries/{registry_id}/apps [get].
+func (h *SupermarketHandler) ListRegistryApps(c echo.Context) error {
 	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
 	if err != nil {
 		return err
 	}
-	return h.proxy(c, "/api/registries/"+url.PathEscape(registryID)+"/packages")
+	return h.proxy(c, "/api/registries/"+url.PathEscape(registryID)+"/apps")
 }
 
-// GetRegistryPackage godoc
-// @Summary Get a namespaced Skill Package
+// GetRegistryApp godoc
+// @Summary Get a namespaced Skill App
 // @Tags supermarket
 // @Param registry_id path string true "Registry ID"
-// @Param package_id path string true "Package ID"
-// @Success 200 {object} SupermarketSkillPackageDescriptor
+// @Param app_id path string true "App ID"
+// @Success 200 {object} SupermarketAppDescriptor
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/registries/{registry_id}/packages/{package_id} [get].
-func (h *SupermarketHandler) GetRegistryPackage(c echo.Context) error {
+// @Router /supermarket/registries/{registry_id}/apps/{app_id} [get].
+func (h *SupermarketHandler) GetRegistryApp(c echo.Context) error {
 	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
 	if err != nil {
 		return err
 	}
-	packageID, err := requireRegistryComponent(c.Param("package_id"), "package_id")
+	appID, err := requireRegistryComponent(c.Param("app_id"), "app_id")
 	if err != nil {
 		return err
 	}
-	return h.proxy(c, registryPackageUpstreamPath(registryID, packageID))
+	return h.proxy(c, registryAppUpstreamPath(registryID, appID))
 }
 
-// GetRegistryPackageRelease godoc
-// @Summary Get an immutable Skill Package release
+// GetRegistryAppRelease godoc
+// @Summary Get an immutable Skill App release
 // @Tags supermarket
 // @Param registry_id path string true "Registry ID"
-// @Param package_id path string true "Package ID"
-// @Param revision path string true "Package revision"
-// @Success 200 {object} SupermarketSkillPackageDescriptor
+// @Param app_id path string true "App ID"
+// @Param revision path string true "App revision"
+// @Success 200 {object} SupermarketAppDescriptor
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision} [get].
-func (h *SupermarketHandler) GetRegistryPackageRelease(c echo.Context) error {
+// @Router /supermarket/registries/{registry_id}/apps/{app_id}/releases/{revision} [get].
+func (h *SupermarketHandler) GetRegistryAppRelease(c echo.Context) error {
 	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
 	if err != nil {
 		return err
 	}
-	packageID, err := requireRegistryComponent(c.Param("package_id"), "package_id")
+	appID, err := requireRegistryComponent(c.Param("app_id"), "app_id")
 	if err != nil {
 		return err
 	}
@@ -186,25 +186,25 @@ func (h *SupermarketHandler) GetRegistryPackageRelease(c echo.Context) error {
 	if !isCanonicalDigest(revision) {
 		return echo.NewHTTPError(http.StatusBadRequest, "revision is invalid")
 	}
-	pkg, err := h.upstream.FetchPackageRelease(c.Request().Context(), registryID, packageID, revision)
+	pkg, err := h.upstream.FetchAppRelease(c.Request().Context(), registryID, appID, revision)
 	if err != nil {
 		if supermarketclient.ErrorKindOf(err) == supermarketclient.ErrorNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Skill Package release not found")
+			return echo.NewHTTPError(http.StatusNotFound, "Skill App release not found")
 		}
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
-	pkg.Categories = packageCategories(pkg.Skills)
+	pkg.Categories = appCategories(pkg.Skills)
 	return c.JSON(http.StatusOK, pkg)
 }
 
-func packageCategories(skills []supermarketclient.CatalogSkill) []supermarketclient.SkillPackageCategory {
-	result := make([]supermarketclient.SkillPackageCategory, 0)
+func appCategories(skills []supermarketclient.CatalogSkill) []supermarketclient.AppSkillCategory {
+	result := make([]supermarketclient.AppSkillCategory, 0)
 	indexes := make(map[string]int)
 	for _, skill := range skills {
 		index, ok := indexes[skill.Category]
 		if !ok {
 			indexes[skill.Category] = len(result)
-			result = append(result, supermarketclient.SkillPackageCategory{ID: skill.Category, Name: skill.CategoryName})
+			result = append(result, supermarketclient.AppSkillCategory{ID: skill.Category, Name: skill.CategoryName})
 			index = len(result) - 1
 		}
 		result[index].SkillCount++
@@ -216,21 +216,21 @@ func packageCategories(skills []supermarketclient.CatalogSkill) []supermarketcli
 // @Summary Get a namespaced Registry Skill
 // @Tags supermarket
 // @Param registry_id path string true "Registry ID"
-// @Param package_id path string true "Package ID"
+// @Param app_id path string true "App ID"
 // @Param skill_id path string true "Skill ID"
 // @Success 200 {object} SupermarketCatalogSkill
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 502 {object} ErrorResponse
-// @Router /supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id} [get].
+// @Router /supermarket/registries/{registry_id}/apps/{app_id}/skills/{skill_id} [get].
 func (h *SupermarketHandler) GetRegistrySkill(c echo.Context) error {
-	registryID, packageID, skillID, err := registrySkillIdentity(
-		c.Param("registry_id"), c.Param("package_id"), c.Param("skill_id"),
+	registryID, appID, skillID, err := registrySkillIdentity(
+		c.Param("registry_id"), c.Param("app_id"), c.Param("skill_id"),
 	)
 	if err != nil {
 		return err
 	}
-	return h.proxy(c, registrySkillUpstreamPath(registryID, packageID, skillID))
+	return h.proxy(c, registrySkillUpstreamPath(registryID, appID, skillID))
 }
 
 // GetRegistrySkillIcon proxies an immutable Skill icon from Supermarket.
@@ -332,12 +332,12 @@ func requireRegistryID(value, field string) (string, error) {
 	return value, nil
 }
 
-func registrySkillIdentity(registryValue, packageValue, skillValue string) (string, string, string, error) {
+func registrySkillIdentity(registryValue, appValue, skillValue string) (string, string, string, error) {
 	registryID, err := requireRegistryID(registryValue, "registry_id")
 	if err != nil {
 		return "", "", "", err
 	}
-	packageID, err := requireRegistryComponent(packageValue, "package_id")
+	appID, err := requireRegistryComponent(appValue, "app_id")
 	if err != nil {
 		return "", "", "", err
 	}
@@ -345,13 +345,13 @@ func registrySkillIdentity(registryValue, packageValue, skillValue string) (stri
 	if err != nil {
 		return "", "", "", err
 	}
-	return registryID, packageID, skillID, nil
+	return registryID, appID, skillID, nil
 }
 
-func registrySkillUpstreamPath(registryID, packageID, skillID string) string {
-	return "/api/registries/" + url.PathEscape(registryID) + "/packages/" + url.PathEscape(packageID) + "/skills/" + url.PathEscape(skillID)
+func registrySkillUpstreamPath(registryID, appID, skillID string) string {
+	return "/api/registries/" + url.PathEscape(registryID) + "/apps/" + url.PathEscape(appID) + "/skills/" + url.PathEscape(skillID)
 }
 
-func registryPackageUpstreamPath(registryID, packageID string) string {
-	return "/api/registries/" + url.PathEscape(registryID) + "/packages/" + url.PathEscape(packageID)
+func registryAppUpstreamPath(registryID, appID string) string {
+	return "/api/registries/" + url.PathEscape(registryID) + "/apps/" + url.PathEscape(appID)
 }

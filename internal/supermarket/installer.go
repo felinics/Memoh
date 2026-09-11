@@ -12,9 +12,9 @@ import (
 	"github.com/felinics/memoh/internal/workspace"
 )
 
-const maxConcurrentPackagePreparations = 2
+const maxConcurrentAppPreparations = 2
 
-var packagePreparationTokens = make(chan struct{}, maxConcurrentPackagePreparations)
+var appPreparationTokens = make(chan struct{}, maxConcurrentAppPreparations)
 
 type resourceLock struct {
 	token chan struct{}
@@ -31,8 +31,8 @@ type WorkspaceResolver interface {
 	ResolveWorkspaceTarget(ctx context.Context, botID, targetID string) (workspace.ResolvedWorkspaceTarget, error)
 }
 
-// Installer materializes the Skills of a Package release into a workspace.
-// It owns no installation records: the packages service records what it
+// Installer materializes the Skills of an App release into a workspace.
+// It owns no installation records: the apps service records what it
 // installed and commits or rolls back the workspace change accordingly.
 type Installer struct {
 	client     *Client
@@ -72,8 +72,8 @@ func (i *Installer) acquirePreparation(ctx context.Context) (func(), error) {
 		return nil, errors.New("supermarket installer is not configured")
 	}
 	select {
-	case packagePreparationTokens <- struct{}{}:
-		return func() { <-packagePreparationTokens }, nil
+	case appPreparationTokens <- struct{}{}:
+		return func() { <-appPreparationTokens }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -158,8 +158,8 @@ func uniqueSortedStrings(values []string) []string {
 	return result
 }
 
-// PackageInstallationLockKey names the resource one Package installation on
+// AppInstallationLockKey names the resource one App installation on
 // one workspace target occupies.
-func PackageInstallationLockKey(botID, targetID, registryID, packageID string) string {
-	return strings.Join([]string{"package", botID, targetID, registryID, packageID}, "\x00")
+func AppInstallationLockKey(botID, targetID, registryID, appID string) string {
+	return strings.Join([]string{"app", botID, targetID, registryID, appID}, "\x00")
 }

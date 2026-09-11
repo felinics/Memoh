@@ -58,14 +58,14 @@ const (
 	CodeSkillBuiltinReadOnly                     Code = "skill.builtin_read_only"
 	CodeSkillNameTaken                           Code = "skill.name_taken"
 	CodeSkillSaveFailed                          Code = "skill.save_failed"
-	CodePackageNotFound                          Code = "package.not_found"
-	CodePackageRequestInvalid                    Code = "package.request_invalid"
-	CodePackageBusy                              Code = "package.busy"
-	CodePackageOperationFailed                   Code = "package.operation_failed"
+	CodeAppNotFound                              Code = "app.not_found"
+	CodeAppRequestInvalid                        Code = "app.request_invalid"
+	CodeAppBusy                                  Code = "app.busy"
+	CodeAppOperationFailed                       Code = "app.operation_failed"
 	CodeRegistryUnavailable                      Code = "registry.unavailable"
-	CodeRegistryPackageNotFound                  Code = "registry.package_not_found"
-	CodeRegistryPackageInvalid                   Code = "registry.package_invalid"
-	CodeRegistryPackageInstallFailed             Code = "registry.package_install_failed"
+	CodeRegistryAppNotFound                      Code = "registry.app_not_found"
+	CodeRegistryAppInvalid                       Code = "registry.app_invalid"
+	CodeRegistryAppInstallFailed                 Code = "registry.app_install_failed"
 	CodeProfileRequestInvalid                    Code = "profile.request_invalid"
 	CodeProfileTitleModelInvalid                 Code = "profile.title_model_invalid"
 	CodeProfileUpdateFailed                      Code = "profile.update_failed"
@@ -361,37 +361,37 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Skill could not be saved.",
 	},
-	CodePackageNotFound: {
+	CodeAppNotFound: {
 		HTTPStatus: http.StatusNotFound,
-		Detail:     "This Package installation was not found.",
+		Detail:     "This App installation was not found.",
 	},
-	CodePackageRequestInvalid: {
+	CodeAppRequestInvalid: {
 		HTTPStatus: http.StatusBadRequest,
-		Detail:     "The Package request is invalid.",
+		Detail:     "The App request is invalid.",
 	},
-	CodePackageBusy: {
+	CodeAppBusy: {
 		HTTPStatus: http.StatusConflict,
-		Detail:     "Another operation on this Package is in progress.",
+		Detail:     "Another operation on this App is in progress.",
 	},
-	CodePackageOperationFailed: {
+	CodeAppOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
-		Detail:     "The Package operation failed.",
+		Detail:     "The App operation failed.",
 	},
 	CodeRegistryUnavailable: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The Supermarket is unavailable.",
 	},
-	CodeRegistryPackageNotFound: {
+	CodeRegistryAppNotFound: {
 		HTTPStatus: http.StatusNotFound,
-		Detail:     "The Skill package was not found.",
+		Detail:     "The App was not found.",
 	},
-	CodeRegistryPackageInvalid: {
+	CodeRegistryAppInvalid: {
 		HTTPStatus: http.StatusBadGateway,
-		Detail:     "The Skill package is invalid.",
+		Detail:     "The App is invalid.",
 	},
-	CodeRegistryPackageInstallFailed: {
+	CodeRegistryAppInstallFailed: {
 		HTTPStatus: http.StatusInternalServerError,
-		Detail:     "The Skill package could not be installed.",
+		Detail:     "The App could not be installed.",
 	},
 	CodeProfileTitleModelInvalid: {
 		HTTPStatus: http.StatusBadRequest,

@@ -213,7 +213,7 @@ describe('dependencyMenuActions', () => {
     ])
   })
 
-  it('never offers removal per dependency: the Package that references it removes it', () => {
+  it('never offers removal per dependency: the App that references it removes it', () => {
     const overlay = imageCopy({ source: 'managed', overlay: true, actions: ['update', 'reinstall', 'remove'] })
     expect(dependencyMenuActions(overlay, 'running').map(action => String(action.kind))).not.toContain('remove')
     expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').map(action => String(action.kind))).not.toContain('remove')

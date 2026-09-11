@@ -2,8 +2,8 @@
 // Preflight runs before a direct agent can be enabled. Mounted once by
 // bot-agents.vue; `run(agent)` resolves true only when its declared dependency
 // is installed, and only then does the caller write `enabled: true`.
-// A missing dependency is installed through its canonical Package (the
-// Package with the dependency's own ID), so the bot's Packages tab shows it
+// A missing dependency is installed through its canonical App (the
+// App with the dependency's own ID), so the bot's Apps tab shows it
 // afterwards like anything else installed from the Supermarket. Cancellation,
 // an unavailable workspace or platform, and failed or backgrounded
 // installation all leave the agent disabled.
@@ -22,7 +22,7 @@ import {
   toast,
 } from '@felinic/ui'
 import {
-  getSupermarketRegistriesByRegistryIdPackagesByPackageId,
+  getSupermarketRegistriesByRegistryIdAppsByAppId,
   postBotsByBotIdContainerStart,
   type BotagentsBotAgent,
 } from '@memohai/sdk'
@@ -30,12 +30,12 @@ import {
   preflightDependencies,
   type DependencyItem,
 } from '@/composables/api/useWorkspaceDependencies'
-import { packageDisplayName } from '@/composables/api/usePackages'
-import { usePackageOperationsStore, type PackageOperation } from '@/store/package-operations'
+import { appDisplayName } from '@/composables/api/useApps'
+import { useAppOperationsStore, type AppOperation } from '@/store/app-operations'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { dependencyDisplayName } from '@/utils/workspace-dependency'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
-import PackageProgressDialog from './package-progress-dialog.vue'
+import AppProgressDialog from './app-progress-dialog.vue'
 import {
   agentDependencyRequirement,
   dependencyItemFromPreflight,
@@ -50,7 +50,7 @@ const props = defineProps<{ botId: string }>()
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const store = usePackageOperationsStore()
+const store = useAppOperationsStore()
 
 let settle: ((ok: boolean) => void) | null = null
 const requirement = ref<EnableFlowRequirement | null>(null)
@@ -69,7 +69,7 @@ const installing = ref(false)
 
 const VIEWER_ID = 'dependency-enable-flow'
 const progressOpen = ref(false)
-const displayed = shallowRef<PackageOperation | null>(null)
+const displayed = shallowRef<AppOperation | null>(null)
 
 const workspaceRows = computed<DependencyKvRow[]>(() => [
   { label: t('bots.dependencies.confirm.dependency'), value: item.value?.id, mono: true },
@@ -169,16 +169,16 @@ function onConfirmOpenChange(value: boolean) {
   if (!value && !installing.value) finish(false)
 }
 
-// The canonical Package of the dependency carries it; installing that
-// Package's current release installs the dependency.
+// The canonical App of the dependency carries it; installing that
+// App's current release installs the dependency.
 async function onConfirmed() {
   const current = item.value
   const depId = current?.id
   if (!current || !depId) return finish(false)
   installing.value = true
   try {
-    const { data } = await getSupermarketRegistriesByRegistryIdPackagesByPackageId({
-      path: { registry_id: DEPENDENCY_REGISTRY, package_id: depId },
+    const { data } = await getSupermarketRegistriesByRegistryIdAppsByAppId({
+      path: { registry_id: DEPENDENCY_REGISTRY, app_id: depId },
       throwOnError: true,
     })
     if (!data.revision) throw new Error('missing revision')
@@ -186,10 +186,10 @@ async function onConfirmed() {
       botId: props.botId,
       targetId: '',
       registryId: DEPENDENCY_REGISTRY,
-      packageId: depId,
-      name: packageDisplayName(data, locale.value),
+      appId: depId,
+      name: appDisplayName(data, locale.value),
       action: 'install',
-      install: { registryId: DEPENDENCY_REGISTRY, packageId: depId, revision: data.revision },
+      install: { registryId: DEPENDENCY_REGISTRY, appId: depId, revision: data.revision },
       onBackgroundDone,
     })
     confirmOpen.value = false
@@ -199,7 +199,7 @@ async function onConfirmed() {
         showProgress(result.operation)
         return
       case 'busy':
-        toast.error(t('packages.busy'))
+        toast.error(t('apps.busy'))
         return finish(false)
       default:
         return finish(false)
@@ -212,11 +212,11 @@ async function onConfirmed() {
   }
 }
 
-function onBackgroundDone(operation: PackageOperation) {
+function onBackgroundDone(operation: AppOperation) {
   toast.success(t('bots.agent.dependencyInstalledEnableHint', { name: operation.name }))
 }
 
-function showProgress(operation: PackageOperation) {
+function showProgress(operation: AppOperation) {
   displayed.value = operation
   progressOpen.value = true
   store.view(operation.key, VIEWER_ID)
@@ -305,7 +305,7 @@ defineExpose({ run, checking })
           {{ t('bots.dependencies.confirm.installTitle', { name }) }}
         </DialogTitle>
         <DialogDescription class="break-words">
-          {{ t('packages.enableFlow.installDescription', { name }) }}
+          {{ t('apps.enableFlow.installDescription', { name }) }}
         </DialogDescription>
       </DialogHeader>
       <DialogBody class="min-w-0">
@@ -329,7 +329,7 @@ defineExpose({ run, checking })
     </DialogPanel>
   </Dialog>
 
-  <PackageProgressDialog
+  <AppProgressDialog
     :open="progressOpen"
     :name="displayed?.name ?? name"
     :action="displayed?.action ?? 'install'"

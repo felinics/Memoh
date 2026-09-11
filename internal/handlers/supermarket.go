@@ -12,7 +12,7 @@ import (
 )
 
 // SupermarketHandler proxies the read-only Supermarket catalog. Installing
-// Packages into bots is the PackagesHandler's job.
+// Apps into bots is the AppsHandler's job.
 type SupermarketHandler struct {
 	upstream *supermarketclient.Client
 	logger   *slog.Logger
@@ -28,13 +28,13 @@ func NewSupermarketHandler(log *slog.Logger, cfg config.Config) *SupermarketHand
 func (h *SupermarketHandler) Register(e *echo.Echo) {
 	g := e.Group("/supermarket")
 	g.GET("/skills", h.ListSkills)
-	g.GET("/packages", h.ListPackages)
+	g.GET("/apps", h.ListApps)
 	g.GET("/categories", h.ListCategories)
 	g.GET("/registries", h.ListRegistries)
-	g.GET("/registries/:registry_id/packages", h.ListRegistryPackages)
-	g.GET("/registries/:registry_id/packages/:package_id", h.GetRegistryPackage)
-	g.GET("/registries/:registry_id/packages/:package_id/releases/:revision", h.GetRegistryPackageRelease)
-	g.GET("/registries/:registry_id/packages/:package_id/skills/:skill_id", h.GetRegistrySkill)
+	g.GET("/registries/:registry_id/apps", h.ListRegistryApps)
+	g.GET("/registries/:registry_id/apps/:app_id", h.GetRegistryApp)
+	g.GET("/registries/:registry_id/apps/:app_id/releases/:revision", h.GetRegistryAppRelease)
+	g.GET("/registries/:registry_id/apps/:app_id/skills/:skill_id", h.GetRegistrySkill)
 	g.GET("/artifacts/icon/:digest", h.GetRegistrySkillIcon)
 }
 

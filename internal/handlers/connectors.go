@@ -36,7 +36,7 @@ func NewConnectorsHandler(
 func (h *ConnectorsHandler) Register(e *echo.Echo) {
 	e.GET("/connectors/catalog", h.ListCatalog)
 
-	// Connections are created and removed through Packages
+	// Connections are created and removed through Apps
 	// (/bots/:bot_id/packages); here they are only listed, toggled and
 	// reauthorized.
 	group := e.Group("/bots/:bot_id/connectors")

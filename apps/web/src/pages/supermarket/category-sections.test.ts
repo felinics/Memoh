@@ -1,28 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import type { HandlersSupermarketPackageCategory } from '@memohai/sdk'
-import { browsableCategories, categoryPackageCount } from './category-sections'
+import type { HandlersSupermarketAppCategory } from '@memohai/sdk'
+import { browsableCategories, categoryAppCount } from './category-sections'
 
-function category(id: string, order: number, registries: Array<{ id: string; count: number }>): HandlersSupermarketPackageCategory {
+function category(id: string, order: number, registries: Array<{ id: string; count: number }>): HandlersSupermarketAppCategory {
   return {
     id,
     name: id,
     names: { en: id },
     order,
-    package_count: registries.reduce((sum, entry) => sum + entry.count, 0),
+    app_count: registries.reduce((sum, entry) => sum + entry.count, 0),
     registries,
   }
 }
 
-describe('categoryPackageCount', () => {
+describe('categoryAppCount', () => {
   const documents = category('documents', 50, [{ id: 'memoh', count: 3 }, { id: 'openai', count: 2 }])
 
   it('counts every registry by default', () => {
-    expect(categoryPackageCount(documents)).toBe(5)
+    expect(categoryAppCount(documents)).toBe(5)
   })
 
   it('narrows to one registry', () => {
-    expect(categoryPackageCount(documents, 'openai')).toBe(2)
-    expect(categoryPackageCount(documents, 'missing')).toBe(0)
+    expect(categoryAppCount(documents, 'openai')).toBe(2)
+    expect(categoryAppCount(documents, 'missing')).toBe(0)
   })
 })
 

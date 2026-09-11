@@ -48,7 +48,7 @@ const props = withDefaults(defineProps<{
   busy?: boolean
   /** This client holds the row's stream, so it can show the log. */
   ownsStream?: boolean
-  /** Another installed Package references the same dependency. */
+  /** Another installed App references the same dependency. */
   shared?: boolean
 }>(), {
   workspaceState: undefined,
@@ -172,7 +172,7 @@ const dimClass = computed(() => (unsupported.value ? 'opacity-40' : ''))
             variant="outline"
             size="sm"
           >
-            {{ t('packages.dependency.shared') }}
+            {{ t('apps.dependency.shared') }}
           </Badge>
         </div>
 

@@ -189,7 +189,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
     void router.push({
       name: 'bot-detail',
       params: { botName: botId },
-      query: { tab: 'packages' },
+      query: { tab: 'apps' },
     }).catch(() => {})
   }
 
@@ -213,7 +213,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
         description: operation.error,
         duration: ACTIONABLE_TOAST_MS,
         action: {
-          label: t('packages.viewBotPackages'),
+          label: t('apps.viewBotApps'),
           onClick: () => viewDependencies(operation.botId),
         },
       })
@@ -228,7 +228,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
       toast.success(doneMessage(operation), {
         duration: ACTIONABLE_TOAST_MS,
         action: {
-          label: t('packages.viewBotPackages'),
+          label: t('apps.viewBotApps'),
           onClick: () => viewDependencies(operation.botId),
         },
       })

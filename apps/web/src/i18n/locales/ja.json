@@ -193,9 +193,9 @@
     },
     "registry": {
       "unavailable": "Supermarket に接続できません。しばらくしてからもう一度お試しください。",
-      "package_not_found": "このパッケージは現在利用できません。",
-      "package_invalid": "このパッケージは無効なため、インストールできません。",
-      "package_install_failed": "パッケージをインストールできませんでした。もう一度お試しください。"
+      "app_not_found": "このアプリは現在利用できません。",
+      "app_invalid": "このアプリは無効なため、インストールできません。",
+      "app_install_failed": "アプリをインストールできませんでした。もう一度お試しください。"
     },
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
@@ -269,11 +269,11 @@
       "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。"
     },
-    "package": {
-      "not_found": "このパッケージのインストールは見つかりませんでした。",
-      "request_invalid": "パッケージのリクエストが無効です。",
-      "busy": "このパッケージの別の操作が進行中です。",
-      "operation_failed": "パッケージの操作に失敗しました。"
+    "app": {
+      "not_found": "このアプリのインストールは見つかりませんでした。",
+      "request_invalid": "アプリのリクエストが無効です。",
+      "busy": "このアプリの別の操作が進行中です。",
+      "operation_failed": "アプリの操作に失敗しました。"
     }
   },
   "auth": {
@@ -1375,9 +1375,9 @@
       "prepare": {
         "title": "デスクトップを準備中",
         "checking": "デスクトップランタイムを確認中",
-        "toolkit": "ワークスペースツールキットがインストールされていません。システムパッケージを試します",
+        "toolkit": "ワークスペースツールキットがインストールされていません。システムアプリを試します",
         "system": "Workspaceのオペレーティング システムを確認しています",
-        "installing": "デスクトップとVNCパッケージをインストール中",
+        "installing": "デスクトップとVNCアプリをインストール中",
         "browser": "ChromeとCJKフォントをインストール中",
         "starting": "VNC画面を起動中",
         "desktop": "デスクトップセッションを開始中",
@@ -2328,7 +2328,7 @@
       "access": "アクセス",
       "terminal": "Terminal",
       "settings": "設定",
-      "packages": "パッケージ"
+      "apps": "アプリ"
     },
     "agent": {
       "add": "Agent を追加",
@@ -3355,11 +3355,11 @@
       "discoverySaveFailed": "Skillパスの保存に失敗しました",
       "addSkill": "新しいSkill",
       "libraryTitle": "Skill ライブラリ",
-      "packageBadge": "Package",
-      "openPackage": "Package を開く",
+      "appBadge": "App",
+      "openApp": "App を開く",
       "backToLibrary": "戻る",
       "viewSkill": "Skill を表示",
-      "packageSkillsUnavailable": "Package の Skill は現在利用できません",
+      "appSkillsUnavailable": "App の Skill は現在利用できません",
       "close": "閉じる",
       "emptyTitle": "アクティブSkillなし",
       "emptyDescription": "マネージド Skillを作成するか、外部パスをスキャンして開始します。",
@@ -3393,7 +3393,7 @@
       "saveFailed": "Skillの保存に失敗しました",
       "loadFailed": "Skillのロードに失敗しました",
       "intro": "このBotのカスタム能力を構成します。マネージド Skillが優先されます。",
-      "managePackage": "パッケージを管理"
+      "manageApp": "アプリを管理"
     },
     "compaction": {
       "advanced": "詳細設定",
@@ -3607,10 +3607,10 @@
   },
   "supermarket": {
     "title": "マーケットプレイス",
-    "searchPlaceholder": "パッケージを検索...",
+    "searchPlaceholder": "アプリを検索...",
     "skillsSection": "スキル",
     "noResults": "結果が見つかりませんでした",
-    "noPackageResults": "Package が見つかりません",
+    "noAppResults": "App が見つかりません",
     "install": "インストール",
     "installToBot": "Botにインストールする",
     "selectBot": "Botを選択してください",
@@ -3629,7 +3629,7 @@
     "homepage": "ホームページ",
     "files": "ファイル",
     "viewDetails": "詳細を見る",
-    "packageInstallTitle": "Package をインストール",
+    "appInstallTitle": "App をインストール",
     "loadError": "スーパーマーケットからの読み込みに失敗しました",
     "submit": "送信",
     "information": "情報",
@@ -3637,7 +3637,7 @@
     "registry": "Registry",
     "allRegistries": "すべて",
     "registryFilter": "Registry で絞り込む",
-    "package": "Package",
+    "app": "App",
     "previousPage": "前のページ",
     "nextPage": "次のページ",
     "developer": "開発者",
@@ -3647,12 +3647,12 @@
     "website": "Webサイト",
     "instructions": "説明書",
     "backToSupermarket": "スーパーマーケットに戻る",
-    "packageNotFound": "Package が見つかりません",
+    "appNotFound": "App が見つかりません",
     "noDescription": "説明なし",
     "unnamedSkill": "名前のないスキル",
-    "dependenciesHint": "Bot のワークスペースにインストールされ、必要とする他のパッケージと共有されます。",
+    "dependenciesHint": "Bot のワークスペースにインストールされ、必要とする他のアプリと共有されます。",
     "dependencyPending": "読み込み中…",
-    "connectorsHint": "パッケージをインストールした後、各コネクターの認証が必要です。",
+    "connectorsHint": "アプリをインストールした後、各コネクターの認証が必要です。",
     "connectorsUnavailableHint": "このサーバーでは Connect-It が設定されていないため、これらのコネクターは未認証のままになります。",
     "connectorAuthHint": "インストール後に認証します。",
     "license": "ライセンス",
@@ -3824,25 +3824,25 @@
     "codeExpired": "コードは期限切れです",
     "copyFailed": "コードをコピーできませんでした"
   },
-  "packages": {
-    "title": "パッケージ",
+  "apps": {
+    "title": "アプリ",
     "checkUpdates": "更新を確認",
     "checkUpdatesDone": "更新の確認が完了しました",
     "checkUpdatesFailed": "更新を確認できませんでした",
     "browse": "マーケットプレイスを見る",
-    "emptyTitle": "パッケージはまだインストールされていません",
-    "emptyDescription": "スキル、依存関係、コネクターはマーケットプレイスからパッケージとしてインストールします。",
+    "emptyTitle": "アプリはまだインストールされていません",
+    "emptyDescription": "スキル、依存関係、コネクターはマーケットプレイスからアプリとしてインストールします。",
     "emptyAction": "マーケットプレイスを開く",
-    "loadFailed": "パッケージを読み込めませんでした",
-    "busy": "このワークスペースでは別のパッケージ操作が実行中です。",
-    "viewBotPackages": "Bot のパッケージを表示",
+    "loadFailed": "アプリを読み込めませんでした",
+    "busy": "このワークスペースでは別のアプリ操作が実行中です。",
+    "viewBotApps": "Bot のアプリを表示",
     "components": "{count} 個のコンポーネント",
-    "workspaceNotRunningDescription": "パッケージのインストールと更新には実行中のワークスペースが必要です。一覧は最後に記録された状態です。",
+    "workspaceNotRunningDescription": "アプリのインストールと更新には実行中のワークスペースが必要です。一覧は最後に記録された状態です。",
     "action": {
       "install": "インストール",
       "resume": "セットアップを続行",
       "update": "更新",
-      "remove": "削除",
+      "remove": "アンインストール",
       "viewProgress": "進捗を表示",
       "open": "マーケットプレイスで表示"
     },
@@ -3866,13 +3866,13 @@
     },
     "remove": {
       "title": "{name} を削除しますか？",
-      "description": "パッケージのスキルを削除します。依存関係と接続は、他のパッケージが参照していない場合にのみ解放されます。",
+      "description": "アプリのスキルを削除します。依存関係と接続は、他のアプリが参照していない場合にのみ解放されます。",
       "willRemove": "削除されます",
       "willKeep": "保持",
       "willDisconnect": "切断されます",
-      "alsoRemoveRequired": "このパッケージだけが使用している自動インストール済みパッケージも削除する",
+      "alsoRemoveRequired": "このアプリだけが使用している自動インストール済みアプリも削除する",
       "reason": {
-        "shared": "他のパッケージが使用中",
+        "shared": "他のアプリが使用中",
         "image": "ワークスペースイメージに同梱",
         "absent": "未インストール"
       }
@@ -3884,11 +3884,11 @@
       "removing": "{name} を削除中",
       "doneTitle": "完了",
       "partialTitle": "インストール済み（要対応の項目あり）",
-      "partialHint": "一部のコンポーネントが失敗したか、まだ認証が必要です。解決後にパッケージタブからセットアップを続行してください。",
+      "partialHint": "一部のコンポーネントが失敗したか、まだ認証が必要です。解決後にアプリタブからセットアップを続行してください。",
       "failedTitle": "操作に失敗しました",
-      "failedHint": "失敗として記録されました。パッケージタブから再試行できます。ログ全体をコピーできます。",
+      "failedHint": "失敗として記録されました。アプリタブから再試行できます。ログ全体をコピーできます。",
       "unknownTitle": "結果は未確認です",
-      "unknownHint": "操作結果はまだ確認されていません。パッケージ一覧を更新して状態を確認してください。",
+      "unknownHint": "操作結果はまだ確認されていません。アプリ一覧を更新して状態を確認してください。",
       "preparing": "準備中…",
       "noLog": "スクリプトの出力はありません。",
       "log": "操作ログ",
@@ -3920,7 +3920,7 @@
       "failed": "{name}: 操作に失敗しました"
     },
     "enableFlow": {
-      "installDescription": "{name} パッケージをワークスペースにインストールしてからエージェントを有効にします。"
+      "installDescription": "{name} アプリをワークスペースにインストールしてからエージェントを有効にします。"
     },
     "sections": {
       "skills": "スキル",
@@ -3929,8 +3929,8 @@
     },
     "update": {
       "title": "{name} を更新",
-      "description": "更新する項目を選択してください。依存関係は最新バージョンに更新され、パッケージのリリースはスキルを置き換えます。",
-      "release": "パッケージのリリース",
+      "description": "更新する項目を選択してください。依存関係は最新バージョンに更新され、アプリのリリースはスキルを置き換えます。",
+      "release": "アプリのリリース",
       "confirm": "{count} 件を更新",
       "none": "更新できる項目はありません。"
     }

@@ -11,34 +11,34 @@ import (
 const (
 	// UserSkillNamespace is reserved for Skills authored from the Memoh UI.
 	UserSkillNamespace = "user"
-	// UserSkillPackage groups a workspace user's personal Skills.
-	UserSkillPackage = "personal"
+	// UserApp groups a workspace user's personal Skills.
+	UserApp = "personal"
 )
 
 // SkillDirForIDs returns the canonical workspace directory for one Skill:
-// /data/skills/<namespace_id>/<package_id>/<skill_id>.
-func SkillDirForIDs(namespaceID, packageID, skillID string) (string, error) {
+// /data/skills/<namespace_id>/<app_id>/<skill_id>.
+func SkillDirForIDs(namespaceID, appID, skillID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
-	packageID = strings.TrimSpace(packageID)
+	appID = strings.TrimSpace(appID)
 	skillID = strings.TrimSpace(skillID)
-	if !validSkillPathIDs(namespaceID, packageID, skillID) {
+	if !validSkillPathIDs(namespaceID, appID, skillID) {
 		return "", bridge.ErrBadRequest
 	}
-	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, packageID, skillID))
+	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, appID, skillID))
 	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
 		return "", bridge.ErrBadRequest
 	}
 	return dirPath, nil
 }
 
-// SkillPackageDirForIDs is the discovery root for a Skill package.
-func SkillPackageDirForIDs(namespaceID, packageID string) (string, error) {
+// AppDirForIDs is the discovery root for a Skill app.
+func AppDirForIDs(namespaceID, appID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
-	packageID = strings.TrimSpace(packageID)
-	if !validSkillPackageIDs(namespaceID, packageID) {
+	appID = strings.TrimSpace(appID)
+	if !validAppIDs(namespaceID, appID) {
 		return "", bridge.ErrBadRequest
 	}
-	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, packageID))
+	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, appID))
 	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
 		return "", bridge.ErrBadRequest
 	}
@@ -46,18 +46,18 @@ func SkillPackageDirForIDs(namespaceID, packageID string) (string, error) {
 }
 
 // RegistrySkillIDs returns the Registry identity encoded by one canonical
-// /data/skills/<registry>/<package>/<skill>/SKILL.md path.
-func RegistrySkillIDs(skillMDPath string) (registryID, packageID, skillID string, ok bool) {
-	registryID, packageID, skillID, ok = skillPathIDs(skillMDPath)
+// /data/skills/<registry>/<app>/<skill>/SKILL.md path.
+func RegistrySkillIDs(skillMDPath string) (registryID, appID, skillID string, ok bool) {
+	registryID, appID, skillID, ok = skillPathIDs(skillMDPath)
 	if !ok || registryID == UserSkillNamespace {
 		return "", "", "", false
 	}
-	return registryID, packageID, skillID, true
+	return registryID, appID, skillID, true
 }
 
 // RegistrySkillDirIDs returns the Registry identity encoded by one canonical
-// /data/skills/<registry>/<package>/<skill> directory.
-func RegistrySkillDirIDs(skillDir string) (registryID, packageID, skillID string, ok bool) {
+// /data/skills/<registry>/<app>/<skill> directory.
+func RegistrySkillDirIDs(skillDir string) (registryID, appID, skillID string, ok bool) {
 	skillDir = path.Clean(strings.TrimSpace(skillDir))
 	return RegistrySkillIDs(path.Join(skillDir, "SKILL.md"))
 }
@@ -75,7 +75,7 @@ func skillNamespaceDirForID(namespaceID string) (string, error) {
 }
 
 func userSkillDirForName(name string) (string, error) {
-	return SkillDirForIDs(UserSkillNamespace, UserSkillPackage, name)
+	return SkillDirForIDs(UserSkillNamespace, UserApp, name)
 }
 
 // UpsertPlan is the filesystem plan for creating or updating one Skill.
@@ -128,7 +128,7 @@ func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 }
 
 // DeletableSkillDirForSourcePath resolves the directory to remove for a
-// user-managed Skill. Registry Package Skills are immutable as individual items.
+// user-managed Skill. Registry App Skills are immutable as individual items.
 func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
 	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
 	if !path.IsAbs(sourcePath) || path.Base(sourcePath) != "SKILL.md" {
@@ -146,26 +146,26 @@ func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
 	return "", bridge.ErrBadRequest
 }
 
-// PrunableSkillNamespaceDirs returns empty package and namespace directories
+// PrunableSkillNamespaceDirs returns empty app and namespace directories
 // after one namespaced Skill is deleted. It never removes ManagedDirPath.
 func PrunableSkillNamespaceDirs(skillDir string) []string {
 	skillDir = path.Clean(strings.TrimSpace(skillDir))
-	packageDir := path.Dir(skillDir)
-	namespaceDir := path.Dir(packageDir)
+	appDir := path.Dir(skillDir)
+	namespaceDir := path.Dir(appDir)
 	if path.Dir(namespaceDir) != ManagedDirPath {
 		return nil
 	}
-	if !validSkillPathIDs(path.Base(namespaceDir), path.Base(packageDir), path.Base(skillDir)) {
+	if !validSkillPathIDs(path.Base(namespaceDir), path.Base(appDir), path.Base(skillDir)) {
 		return nil
 	}
-	return []string{packageDir, namespaceDir}
+	return []string{appDir, namespaceDir}
 }
 
 // UserSkillName reports the name for
 // /data/skills/user/personal/<skill>/SKILL.md.
 func UserSkillName(skillMDPath string) (string, bool) {
-	namespaceID, packageID, skillID, ok := skillPathIDs(skillMDPath)
-	if !ok || namespaceID != UserSkillNamespace || packageID != UserSkillPackage {
+	namespaceID, appID, skillID, ok := skillPathIDs(skillMDPath)
+	if !ok || namespaceID != UserSkillNamespace || appID != UserApp {
 		return "", false
 	}
 	return skillID, true
@@ -190,42 +190,42 @@ func BuiltinSkillName(skillMDPath string) (string, bool) {
 }
 
 // IsNamespacedSkillPath reports whether path follows the canonical managed
-// namespace/package/Skill layout below ManagedDirPath.
+// namespace/app/Skill layout below ManagedDirPath.
 func IsNamespacedSkillPath(skillMDPath string) bool {
 	_, _, _, ok := skillPathIDs(skillMDPath)
 	return ok
 }
 
-func skillPathIDs(skillMDPath string) (namespaceID, packageID, skillID string, ok bool) {
+func skillPathIDs(skillMDPath string) (namespaceID, appID, skillID string, ok bool) {
 	skillMDPath = path.Clean(strings.TrimSpace(skillMDPath))
 	if path.Base(skillMDPath) != "SKILL.md" {
 		return "", "", "", false
 	}
 	skillDir := path.Dir(skillMDPath)
-	packageDir := path.Dir(skillDir)
-	namespaceDir := path.Dir(packageDir)
+	appDir := path.Dir(skillDir)
+	namespaceDir := path.Dir(appDir)
 	if path.Dir(namespaceDir) != ManagedDirPath {
 		return "", "", "", false
 	}
-	namespaceID, packageID, skillID = path.Base(namespaceDir), path.Base(packageDir), path.Base(skillDir)
-	if !validSkillPathIDs(namespaceID, packageID, skillID) {
+	namespaceID, appID, skillID = path.Base(namespaceDir), path.Base(appDir), path.Base(skillDir)
+	if !validSkillPathIDs(namespaceID, appID, skillID) {
 		return "", "", "", false
 	}
-	return namespaceID, packageID, skillID, true
+	return namespaceID, appID, skillID, true
 }
 
-func validSkillPackageIDs(namespaceID, packageID string) bool {
+func validAppIDs(namespaceID, appID string) bool {
 	if namespaceID == UserSkillNamespace {
-		return packageID == UserSkillPackage
+		return appID == UserApp
 	}
-	return IsValidRegistryID(namespaceID) && IsValidRegistryComponent(packageID)
+	return IsValidRegistryID(namespaceID) && IsValidRegistryComponent(appID)
 }
 
-func validSkillPathIDs(namespaceID, packageID, skillID string) bool {
+func validSkillPathIDs(namespaceID, appID, skillID string) bool {
 	if namespaceID == UserSkillNamespace {
-		return packageID == UserSkillPackage && IsValidName(skillID)
+		return appID == UserApp && IsValidName(skillID)
 	}
-	return IsValidRegistryID(namespaceID) && IsValidRegistryComponent(packageID) && IsValidRegistryComponent(skillID)
+	return IsValidRegistryID(namespaceID) && IsValidRegistryComponent(appID) && IsValidRegistryComponent(skillID)
 }
 
 var (

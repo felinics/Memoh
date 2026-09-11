@@ -50,16 +50,16 @@
           v-else-if="!searchResults.length"
           class="py-8 text-center text-xs text-muted-foreground"
         >
-          {{ $t('supermarket.noPackageResults') }}
+          {{ $t('supermarket.noAppResults') }}
         </div>
 
         <div
           v-else
           class="grid grid-cols-1 gap-4 sm:grid-cols-2"
         >
-          <PackageCard
+          <AppCard
             v-for="pkg in searchResults"
-            :key="`${pkg.registry_id}/${pkg.package_id}`"
+            :key="`${pkg.registry_id}/${pkg.app_id}`"
             :pkg="pkg"
             :bot-id="defaultBotId"
           />
@@ -102,7 +102,7 @@
           v-else-if="!sections.length"
           class="py-8 text-center text-xs text-muted-foreground"
         >
-          {{ $t('supermarket.noPackageResults') }}
+          {{ $t('supermarket.noAppResults') }}
         </div>
 
         <section
@@ -125,9 +125,9 @@
             </Button>
           </div>
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <PackageCard
-              v-for="pkg in section.packages"
-              :key="`${pkg.registry_id}/${pkg.package_id}`"
+            <AppCard
+              v-for="pkg in section.apps"
+              :key="`${pkg.registry_id}/${pkg.app_id}`"
               :pkg="pkg"
               :bot-id="defaultBotId"
             />
@@ -153,20 +153,20 @@ import {
   type SegmentedItem,
 } from '@felinic/ui'
 import {
-  getSupermarketPackages,
+  getSupermarketApps,
   getSupermarketRegistries,
-  type HandlersSupermarketPackageCategory,
+  type HandlersSupermarketAppCategory,
   type HandlersSupermarketRegistry,
-  type HandlersSupermarketSkillPackageSummary,
+  type HandlersSupermarketAppSummary,
 } from '@memohai/sdk'
-import { categoryDisplayName, usePackageCategoriesQuery } from '@/composables/api/usePackages'
+import { categoryDisplayName, useAppCategoriesQuery } from '@/composables/api/useApps'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { browsableCategories, SECTION_PREVIEW_LIMIT } from './category-sections'
-import PackageCard from './components/package-card.vue'
+import AppCard from './components/app-card.vue'
 
 interface CategorySection {
-  category: HandlersSupermarketPackageCategory
-  packages: HandlersSupermarketSkillPackageSummary[]
+  category: HandlersSupermarketAppCategory
+  apps: HandlersSupermarketAppSummary[]
   total: number
 }
 
@@ -182,12 +182,12 @@ const page = ref(1)
 const total = ref(0)
 const selectedRegistry = ref(allValue)
 const registries = ref<HandlersSupermarketRegistry[]>([])
-const searchResults = ref<HandlersSupermarketSkillPackageSummary[]>([])
+const searchResults = ref<HandlersSupermarketAppSummary[]>([])
 const searchLoading = ref(false)
 const sections = ref<CategorySection[]>([])
 const sectionsLoading = ref(false)
 
-const categoriesQuery = usePackageCategoriesQuery()
+const categoriesQuery = useAppCategoriesQuery()
 const categories = computed(() => categoriesQuery.data.value ?? [])
 
 const searching = computed(() => !!searchQuery.value)
@@ -261,7 +261,7 @@ async function loadSearch() {
   const sequence = ++searchSequence
   searchLoading.value = true
   try {
-    const { data } = await getSupermarketPackages({
+    const { data } = await getSupermarketApps({
       query: {
         q: searchQuery.value,
         registry: registryParam.value,
@@ -296,7 +296,7 @@ async function loadSections() {
   sectionsLoading.value = true
   try {
     const loaded = await Promise.all(visible.map(async (category): Promise<CategorySection> => {
-      const { data } = await getSupermarketPackages({
+      const { data } = await getSupermarketApps({
         query: {
           registry: registryParam.value,
           category: category.id,
@@ -306,10 +306,10 @@ async function loadSections() {
         },
         throwOnError: true,
       })
-      return { category, packages: data.data ?? [], total: data.total ?? 0 }
+      return { category, apps: data.data ?? [], total: data.total ?? 0 }
     }))
     if (sequence !== sectionsSequence) return
-    sections.value = loaded.filter(section => section.packages.length > 0)
+    sections.value = loaded.filter(section => section.apps.length > 0)
   } catch (error) {
     if (sequence !== sectionsSequence) return
     sections.value = []

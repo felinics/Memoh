@@ -196,9 +196,9 @@
     },
     "registry": {
       "unavailable": "暂时无法连接 Supermarket，请稍后重试。",
-      "package_not_found": "该技能包已不存在。",
-      "package_invalid": "该技能包无效，无法安装。",
-      "package_install_failed": "技能包安装失败，请重试。"
+      "app_not_found": "该应用已不存在。",
+      "app_invalid": "该应用无效，无法安装。",
+      "app_install_failed": "应用安装失败，请重试。"
     },
     "workspace": {
       "unreachable": "暂时无法连接工作区，请稍后重试。",
@@ -272,11 +272,11 @@
       "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。"
     },
-    "package": {
-      "not_found": "未找到该扩展包安装记录。",
-      "request_invalid": "扩展包请求无效。",
-      "busy": "该扩展包的另一个操作正在进行中。",
-      "operation_failed": "扩展包操作失败。"
+    "app": {
+      "not_found": "未找到该应用安装记录。",
+      "request_invalid": "应用请求无效。",
+      "busy": "该应用的另一个操作正在进行中。",
+      "operation_failed": "应用操作失败。"
     }
   },
   "auth": {
@@ -2329,7 +2329,7 @@
       "access": "访问控制",
       "terminal": "终端",
       "settings": "设置",
-      "packages": "扩展包"
+      "apps": "应用"
     },
     "agent": {
       "add": "添加 Agent",
@@ -3354,11 +3354,11 @@
       "discoverySaveFailed": "保存技能路径失败",
       "addSkill": "新建技能",
       "libraryTitle": "技能库",
-      "packageBadge": "Package",
-      "openPackage": "打开 Package",
+      "appBadge": "应用",
+      "openApp": "打开应用",
       "backToLibrary": "返回",
       "viewSkill": "查看 Skill",
-      "packageSkillsUnavailable": "Package 中的 Skill 当前不可用",
+      "appSkillsUnavailable": "应用中的 Skill 当前不可用",
       "close": "关闭",
       "emptyTitle": "技能库为空",
       "emptyDescription": "请创建新的托管技能，或配置外部扫描路径以引入现有技能。",
@@ -3393,7 +3393,7 @@
       "saveFailed": "保存技能失败",
       "loadFailed": "加载技能失败",
       "intro": "管理此机器人的专属技能。本地托管副本具有最高优先级。",
-      "managePackage": "管理扩展包"
+      "manageApp": "管理应用"
     },
     "compaction": {
       "title": "压缩记录",
@@ -3612,10 +3612,10 @@
   },
   "supermarket": {
     "title": "市场",
-    "searchPlaceholder": "搜索扩展包...",
+    "searchPlaceholder": "搜索应用...",
     "skillsSection": "Skills",
     "noResults": "未找到结果",
-    "noPackageResults": "未找到 Package",
+    "noAppResults": "未找到应用",
     "install": "安装",
     "installToBot": "安装到 Bot",
     "selectBot": "选择 Bot",
@@ -3634,7 +3634,7 @@
     "homepage": "主页",
     "files": "文件",
     "viewDetails": "查看详情",
-    "packageInstallTitle": "安装 Package",
+    "appInstallTitle": "安装应用",
     "loadError": "从市场加载失败",
     "submit": "提交",
     "information": "信息",
@@ -3642,7 +3642,7 @@
     "registry": "Registry",
     "allRegistries": "全部",
     "registryFilter": "按 Registry 筛选",
-    "package": "Package",
+    "app": "应用",
     "previousPage": "上一页",
     "nextPage": "下一页",
     "developer": "开发者",
@@ -3652,12 +3652,12 @@
     "website": "网站",
     "instructions": "说明",
     "backToSupermarket": "返回市场",
-    "packageNotFound": "未找到 Package",
+    "appNotFound": "未找到应用",
     "noDescription": "暂无描述",
     "unnamedSkill": "未命名 Skill",
-    "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他扩展包共享。",
+    "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他应用共享。",
     "dependencyPending": "加载中…",
-    "connectorsHint": "安装扩展包后，每个连接器都需要你授权。",
+    "connectorsHint": "安装应用后，每个连接器都需要你授权。",
     "connectorsUnavailableHint": "服务器未配置 Connect-It，这些连接器将保持未授权状态。",
     "connectorAuthHint": "安装后授权。",
     "license": "许可证",
@@ -3829,25 +3829,25 @@
     "codeExpired": "验证码已过期",
     "copyFailed": "复制验证码失败"
   },
-  "packages": {
-    "title": "扩展包",
+  "apps": {
+    "title": "应用",
     "checkUpdates": "检查更新",
     "checkUpdatesDone": "更新检查完成",
     "checkUpdatesFailed": "无法检查更新",
     "browse": "浏览市场",
-    "emptyTitle": "尚未安装扩展包",
-    "emptyDescription": "从市场以扩展包的形式安装 Skills、依赖与连接器。",
+    "emptyTitle": "尚未安装应用",
+    "emptyDescription": "为 Bot 安装应用，增加新的能力。",
     "emptyAction": "打开市场",
-    "loadFailed": "无法加载扩展包",
-    "busy": "此工作区还有另一个扩展包操作在进行中。",
-    "viewBotPackages": "查看 Bot 扩展包",
+    "loadFailed": "无法加载应用",
+    "busy": "此工作区还有另一个应用操作在进行中。",
+    "viewBotApps": "查看 Bot 应用",
     "components": "{count} 个组件",
-    "workspaceNotRunningDescription": "安装和更新扩展包需要运行中的工作区。列表显示的是最近记录的状态。",
+    "workspaceNotRunningDescription": "安装和更新应用需要运行中的工作区。列表显示的是最近记录的状态。",
     "action": {
       "install": "安装",
       "resume": "继续安装",
       "update": "更新",
-      "remove": "移除",
+      "remove": "卸载",
       "viewProgress": "查看进度",
       "open": "在市场中查看"
     },
@@ -3870,14 +3870,14 @@
       "unavailableDescription": "当前配置的 Connect-It 未提供此类型的连接器。"
     },
     "remove": {
-      "title": "移除 {name}？",
-      "description": "移除该扩展包的 Skills。依赖与连接只有在没有其他扩展包引用时才会一并释放。",
+      "title": "卸载 {name}？",
+      "description": "移除该应用的 Skills。依赖与连接只有在没有其他应用引用时才会一并释放。",
       "willRemove": "将被移除",
       "willKeep": "保留",
       "willDisconnect": "将断开连接",
-      "alsoRemoveRequired": "同时移除仅被它使用的自动安装包",
+      "alsoRemoveRequired": "同时移除仅被它使用的自动安装应用",
       "reason": {
-        "shared": "被其他扩展包使用",
+        "shared": "被其他应用使用",
         "image": "随工作区镜像自带",
         "absent": "未安装"
       }
@@ -3886,14 +3886,14 @@
       "installing": "正在安装 {name}",
       "updating": "正在更新 {name}",
       "resuming": "正在继续安装 {name}",
-      "removing": "正在移除 {name}",
+      "removing": "正在卸载 {name}",
       "doneTitle": "完成",
       "partialTitle": "已安装，部分项目需要处理",
-      "partialHint": "部分组件失败或仍需授权。处理完成后可在扩展包页继续安装。",
+      "partialHint": "部分组件失败或仍需授权。处理完成后可在应用页继续安装。",
       "failedTitle": "操作失败",
-      "failedHint": "已记录为失败，可在扩展包页重试。完整日志可复制。",
+      "failedHint": "已记录为失败，可在应用页重试。完整日志可复制。",
       "unknownTitle": "结果未确认",
-      "unknownHint": "操作结果尚未确认，请刷新扩展包列表查看状态。",
+      "unknownHint": "操作结果尚未确认，请刷新应用列表查看状态。",
       "preparing": "准备中…",
       "noLog": "没有脚本输出。",
       "log": "操作日志",
@@ -3921,11 +3921,11 @@
       "installed": "{name} 已安装",
       "partial": "{name} 已安装，部分项目需要处理",
       "updated": "{name} 已更新",
-      "removed": "{name} 已移除",
+      "removed": "{name} 已卸载",
       "failed": "{name}：操作失败"
     },
     "enableFlow": {
-      "installDescription": "将 {name} 扩展包安装到工作区，然后启用该 Agent。"
+      "installDescription": "将 {name} 应用安装到工作区，然后启用该 Agent。"
     },
     "sections": {
       "skills": "Skills",
@@ -3934,8 +3934,8 @@
     },
     "update": {
       "title": "更新 {name}",
-      "description": "选择要更新的项目。依赖会更新到最新版本，扩展包发布会替换其 Skills。",
-      "release": "扩展包发布",
+      "description": "选择要更新的项目。依赖会更新到最新版本，应用发布会替换其 Skills。",
+      "release": "应用发布",
       "confirm": "更新 {count} 项",
       "none": "没有可更新的项目。"
     }

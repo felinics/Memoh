@@ -38,8 +38,8 @@ export type ScriptAction = NonNullable<ScriptResponse['action']>
 export type DependencyOperationResponse = HandlersWorkspaceDependencyOperationResponse
 /**
  * The dependency operations that stream a log. Install here means a retry or
- * an overlay for a dependency a Package already references; removal belongs
- * to the Package. Rollback is synchronous.
+ * an overlay for a dependency an App already references; removal belongs
+ * to the App. Rollback is synchronous.
  */
 export type DependencyOperationAction = 'install' | 'update' | 'reinstall'
 

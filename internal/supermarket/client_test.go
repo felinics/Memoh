@@ -21,12 +21,12 @@ func TestClientPinsRequestsToConfiguredOrigin(t *testing.T) {
 			Header:     make(http.Header),
 		}, nil
 	})})
-	resp, err := client.Get(context.Background(), "/api/packages?q=docs", "application/json")
+	resp, err := client.Get(context.Background(), "/api/apps?q=docs", "application/json")
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
 	_ = resp.Body.Close()
-	if requested != "https://supermarket.example/api/packages?q=docs" {
+	if requested != "https://supermarket.example/api/apps?q=docs" {
 		t.Fatalf("requested URL = %q", requested)
 	}
 	artifactResp, err := client.GetArtifact(context.Background(), "https://attacker.example/artifact", "application/gzip")
@@ -51,7 +51,7 @@ func TestClientPreservesConfiguredBasePath(t *testing.T) {
 			}, nil
 		}),
 	})
-	apiResp, err := client.Get(context.Background(), "/api/packages?q=docs", "application/json")
+	apiResp, err := client.Get(context.Background(), "/api/apps?q=docs", "application/json")
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestClientPreservesConfiguredBasePath(t *testing.T) {
 	}
 	_ = artifactResp.Body.Close()
 	want := []string{
-		"https://gateway.example/memoh/supermarket/api/packages?q=docs",
+		"https://gateway.example/memoh/supermarket/api/apps?q=docs",
 		"https://gateway.example/memoh/supermarket/api/artifacts/skill/digest",
 	}
 	if len(requested) != len(want) || requested[0] != want[0] || requested[1] != want[1] {
@@ -99,7 +99,7 @@ func TestClientForwardsHeadersAndRejectsCrossOriginRedirect(t *testing.T) {
 func TestClientRejectsInvalidBaseURL(t *testing.T) {
 	for _, rawURL := range []string{"file:///tmp/supermarket", "https://supermarket.example?tenant=memoh"} {
 		client := NewClient(rawURL, nil)
-		resp, err := client.Get(context.Background(), "/api/packages", "application/json")
+		resp, err := client.Get(context.Background(), "/api/apps", "application/json")
 		if resp != nil {
 			_ = resp.Body.Close()
 		}

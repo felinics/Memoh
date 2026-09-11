@@ -9,8 +9,9 @@ installation scripts. Adding a CLI or correcting its recipe is a registry releas
 not a Memoh release. Adding an Agent runtime driver still requires Memoh code.
 
 The first release supports the official registry only and includes Codex, Claude
-Code, Node.js, Python, and uv. Skill Packages remain a separate resource and retain
-their existing installer and `postinstall` behavior.
+Code, Node.js, Python, and uv. Apps compose Skills, workspace dependencies and
+connectors as one installable unit. Dependencies retain their independent definitions
+and releases; Apps orchestrate their installation. See [Apps](apps.md).
 
 ## Definition protocol
 

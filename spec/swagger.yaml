@@ -3059,6 +3059,310 @@ definitions:
       updated_at:
         type: string
     type: object
+  handlers.AppConnectorCredentialRequest:
+    properties:
+      auth_method:
+        type: string
+      fields:
+        additionalProperties:
+          type: string
+        type: object
+    required:
+    - auth_method
+    type: object
+  handlers.AppConnectorItem:
+    properties:
+      connection_id:
+        type: string
+      connector:
+        $ref: '#/definitions/connectors.Connector'
+      required:
+        type: boolean
+      status:
+        description: Status is linked once a connection is bound, otherwise needs_auth.
+        enum:
+        - linked
+        - needs_auth
+        type: string
+      type:
+        type: string
+    type: object
+  handlers.AppConnectorOAuthRequest:
+    properties:
+      auth_method:
+        type: string
+    required:
+    - auth_method
+    type: object
+  handlers.AppDependencyItem:
+    properties:
+      dependency:
+        $ref: '#/definitions/handlers.WorkspaceDependencyItem'
+      id:
+        type: string
+      shared:
+        description: |-
+          Shared is set when another installed App references the same
+          dependency on this workspace target.
+        type: boolean
+    type: object
+  handlers.AppInstallRequest:
+    properties:
+      app_id:
+        type: string
+      registry_id:
+        type: string
+      revision:
+        type: string
+      workspace_target_id:
+        type: string
+    required:
+    - app_id
+    - registry_id
+    - revision
+    type: object
+  handlers.AppItem:
+    properties:
+      app_id:
+        type: string
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      available_revision:
+        description: |-
+          AvailableRevision and AvailableVersion name the registry's newer
+          release after a check found one.
+        type: string
+      available_version:
+        type: string
+      category:
+        type: string
+      category_name:
+        type: string
+      connectors:
+        items:
+          $ref: '#/definitions/handlers.AppConnectorItem'
+        type: array
+      dependencies:
+        items:
+          $ref: '#/definitions/handlers.AppDependencyItem'
+        type: array
+      description:
+        type: string
+      homepage:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      installation_id:
+        description: |-
+          InstallationID is empty for a discovered App: a dependency the
+          workspace carries that no installed App references, shown through
+          its canonical App.
+        type: string
+      installed_at:
+        type: string
+      last_checked_at:
+        type: string
+      last_error:
+        type: string
+      license:
+        type: string
+      name:
+        type: string
+      reason:
+        enum:
+        - user
+        - required
+        type: string
+      registry_id:
+        type: string
+      repository:
+        type: string
+      revision:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/handlers.AppSkillItem'
+        type: array
+      status:
+        description: Status is discovered for Apps without an installation record.
+        enum:
+        - installed
+        - partial
+        - installing
+        - updating
+        - removing
+        - failed
+        - discovered
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      translations:
+        additionalProperties:
+          $ref: '#/definitions/handlers.SupermarketAppTranslation'
+        type: object
+      updated_at:
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.AppListResponse:
+    properties:
+      dependency_catalog_stale:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/handlers.AppItem'
+        type: array
+      workspace_state:
+        enum:
+        - running
+        - not_running
+        - missing
+        - remote_offline
+        type: string
+      workspace_target_id:
+        type: string
+    type: object
+  handlers.AppRemovalPreviewApp:
+    properties:
+      app_id:
+        type: string
+      installation_id:
+        type: string
+      registry_id:
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.AppRemovalPreviewConnector:
+    properties:
+      action:
+        enum:
+        - disconnect
+        - keep
+        - none
+        type: string
+      connection_id:
+        type: string
+      reason:
+        enum:
+        - shared
+        type: string
+      type:
+        type: string
+    type: object
+  handlers.AppRemovalPreviewDependency:
+    properties:
+      action:
+        enum:
+        - remove
+        - keep
+        type: string
+      id:
+        type: string
+      reason:
+        enum:
+        - shared
+        - image
+        - absent
+        type: string
+    type: object
+  handlers.AppRemovalPreviewResponse:
+    properties:
+      connectors:
+        items:
+          $ref: '#/definitions/handlers.AppRemovalPreviewConnector'
+        type: array
+      dependencies:
+        items:
+          $ref: '#/definitions/handlers.AppRemovalPreviewDependency'
+        type: array
+      installation_id:
+        type: string
+      required_apps:
+        items:
+          $ref: '#/definitions/handlers.AppRemovalPreviewApp'
+        type: array
+    type: object
+  handlers.AppSkillItem:
+    properties:
+      description:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      install_id:
+        type: string
+      name:
+        type: string
+      skill_id:
+        type: string
+    type: object
+  handlers.AppStreamEvent:
+    properties:
+      args:
+        additionalProperties:
+          type: string
+        type: object
+      code:
+        type: string
+      data:
+        type: string
+      detail:
+        type: string
+      id:
+        type: string
+      kind:
+        enum:
+        - app
+        - dependency
+        - skills
+        - connector
+        type: string
+      message:
+        type: string
+      request_id:
+        type: string
+      status:
+        type: string
+      stream:
+        enum:
+        - stdout
+        - stderr
+        type: string
+      type:
+        enum:
+        - started
+        - step
+        - log
+        - step_done
+        - done
+        - error
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.AppUpdateRequest:
+    properties:
+      app_id:
+        type: string
+      dependencies:
+        description: Dependencies are updated to their latest version.
+        items:
+          type: string
+        type: array
+      registry_id:
+        type: string
+      release:
+        description: Release moves the installation to the registry's current release.
+        type: boolean
+      workspace_target_id:
+        type: string
+    required:
+    - app_id
+    - registry_id
+    type: object
   handlers.BatchDeleteRequest:
     properties:
       ids:
@@ -3756,310 +4060,6 @@ definitions:
       provider_name:
         type: string
     type: object
-  handlers.PackageConnectorCredentialRequest:
-    properties:
-      auth_method:
-        type: string
-      fields:
-        additionalProperties:
-          type: string
-        type: object
-    required:
-    - auth_method
-    type: object
-  handlers.PackageConnectorItem:
-    properties:
-      connection_id:
-        type: string
-      connector:
-        $ref: '#/definitions/connectors.Connector'
-      required:
-        type: boolean
-      status:
-        description: Status is linked once a connection is bound, otherwise needs_auth.
-        enum:
-        - linked
-        - needs_auth
-        type: string
-      type:
-        type: string
-    type: object
-  handlers.PackageConnectorOAuthRequest:
-    properties:
-      auth_method:
-        type: string
-    required:
-    - auth_method
-    type: object
-  handlers.PackageDependencyItem:
-    properties:
-      dependency:
-        $ref: '#/definitions/handlers.WorkspaceDependencyItem'
-      id:
-        type: string
-      shared:
-        description: |-
-          Shared is set when another installed Package references the same
-          dependency on this workspace target.
-        type: boolean
-    type: object
-  handlers.PackageInstallRequest:
-    properties:
-      package_id:
-        type: string
-      registry_id:
-        type: string
-      revision:
-        type: string
-      workspace_target_id:
-        type: string
-    required:
-    - package_id
-    - registry_id
-    - revision
-    type: object
-  handlers.PackageItem:
-    properties:
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      available_revision:
-        description: |-
-          AvailableRevision and AvailableVersion name the registry's newer
-          release after a check found one.
-        type: string
-      available_version:
-        type: string
-      category:
-        type: string
-      category_name:
-        type: string
-      connectors:
-        items:
-          $ref: '#/definitions/handlers.PackageConnectorItem'
-        type: array
-      dependencies:
-        items:
-          $ref: '#/definitions/handlers.PackageDependencyItem'
-        type: array
-      description:
-        type: string
-      homepage:
-        type: string
-      icon:
-        $ref: '#/definitions/handlers.SupermarketSkillIcon'
-      installation_id:
-        description: |-
-          InstallationID is empty for a discovered Package: a dependency the
-          workspace carries that no installed Package references, shown through
-          its canonical Package.
-        type: string
-      installed_at:
-        type: string
-      last_checked_at:
-        type: string
-      last_error:
-        type: string
-      license:
-        type: string
-      name:
-        type: string
-      package_id:
-        type: string
-      reason:
-        enum:
-        - user
-        - required
-        type: string
-      registry_id:
-        type: string
-      repository:
-        type: string
-      revision:
-        type: string
-      skills:
-        items:
-          $ref: '#/definitions/handlers.PackageSkillItem'
-        type: array
-      status:
-        description: Status is discovered for Packages without an installation record.
-        enum:
-        - installed
-        - partial
-        - installing
-        - updating
-        - removing
-        - failed
-        - discovered
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      translations:
-        additionalProperties:
-          $ref: '#/definitions/handlers.SupermarketPackageTranslation'
-        type: object
-      updated_at:
-        type: string
-      version:
-        type: string
-    type: object
-  handlers.PackageListResponse:
-    properties:
-      dependency_catalog_stale:
-        type: boolean
-      items:
-        items:
-          $ref: '#/definitions/handlers.PackageItem'
-        type: array
-      workspace_state:
-        enum:
-        - running
-        - not_running
-        - missing
-        - remote_offline
-        type: string
-      workspace_target_id:
-        type: string
-    type: object
-  handlers.PackageRemovalPreviewConnector:
-    properties:
-      action:
-        enum:
-        - disconnect
-        - keep
-        - none
-        type: string
-      connection_id:
-        type: string
-      reason:
-        enum:
-        - shared
-        type: string
-      type:
-        type: string
-    type: object
-  handlers.PackageRemovalPreviewDependency:
-    properties:
-      action:
-        enum:
-        - remove
-        - keep
-        type: string
-      id:
-        type: string
-      reason:
-        enum:
-        - shared
-        - image
-        - absent
-        type: string
-    type: object
-  handlers.PackageRemovalPreviewPackage:
-    properties:
-      installation_id:
-        type: string
-      package_id:
-        type: string
-      registry_id:
-        type: string
-      version:
-        type: string
-    type: object
-  handlers.PackageRemovalPreviewResponse:
-    properties:
-      connectors:
-        items:
-          $ref: '#/definitions/handlers.PackageRemovalPreviewConnector'
-        type: array
-      dependencies:
-        items:
-          $ref: '#/definitions/handlers.PackageRemovalPreviewDependency'
-        type: array
-      installation_id:
-        type: string
-      required_packages:
-        items:
-          $ref: '#/definitions/handlers.PackageRemovalPreviewPackage'
-        type: array
-    type: object
-  handlers.PackageSkillItem:
-    properties:
-      description:
-        type: string
-      icon:
-        $ref: '#/definitions/handlers.SupermarketSkillIcon'
-      install_id:
-        type: string
-      name:
-        type: string
-      skill_id:
-        type: string
-    type: object
-  handlers.PackageStreamEvent:
-    properties:
-      args:
-        additionalProperties:
-          type: string
-        type: object
-      code:
-        type: string
-      data:
-        type: string
-      detail:
-        type: string
-      id:
-        type: string
-      kind:
-        enum:
-        - package
-        - dependency
-        - skills
-        - connector
-        type: string
-      message:
-        type: string
-      request_id:
-        type: string
-      status:
-        type: string
-      stream:
-        enum:
-        - stdout
-        - stderr
-        type: string
-      type:
-        enum:
-        - started
-        - step
-        - log
-        - step_done
-        - done
-        - error
-        type: string
-      version:
-        type: string
-    type: object
-  handlers.PackageUpdateRequest:
-    properties:
-      dependencies:
-        description: Dependencies are updated to their latest version.
-        items:
-          type: string
-        type: array
-      package_id:
-        type: string
-      registry_id:
-        type: string
-      release:
-        description: Release moves the installation to the registry's current release.
-        type: boolean
-      workspace_target_id:
-        type: string
-    required:
-    - package_id
-    - registry_id
-    type: object
   handlers.PingResponse:
     properties:
       commit_hash:
@@ -4138,6 +4138,8 @@ definitions:
     type: object
   handlers.SkillItem:
     properties:
+      app_id:
+        type: string
       content:
         type: string
       deletable:
@@ -4152,8 +4154,6 @@ definitions:
         additionalProperties: {}
         type: object
       name:
-        type: string
-      package_id:
         type: string
       raw:
         type: string
@@ -4184,7 +4184,7 @@ definitions:
       source_paths:
         description: |-
           SourcePaths are SKILL.md paths reported in the skill list. Deleting by name
-          cannot address registry skills, which are nested by registry and package.
+          cannot address registry skills, which are nested by registry and app.
         items:
           type: string
         type: array
@@ -4238,6 +4238,247 @@ definitions:
       version:
         type: integer
     type: object
+  handlers.SupermarketAppCategory:
+    properties:
+      app_count:
+        type: integer
+      id:
+        type: string
+      name:
+        type: string
+      names:
+        additionalProperties:
+          type: string
+        type: object
+      order:
+        type: integer
+      registries:
+        items:
+          $ref: '#/definitions/handlers.SupermarketAppCategoryRegistry'
+        type: array
+    required:
+    - app_count
+    - id
+    - name
+    - names
+    - order
+    - registries
+    type: object
+  handlers.SupermarketAppCategoryListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketAppCategory'
+        type: array
+    required:
+    - data
+    type: object
+  handlers.SupermarketAppCategoryRegistry:
+    properties:
+      count:
+        type: integer
+      id:
+        type: string
+    required:
+    - count
+    - id
+    type: object
+  handlers.SupermarketAppConnector:
+    properties:
+      required:
+        type: boolean
+      type:
+        type: string
+    required:
+    - required
+    - type
+    type: object
+  handlers.SupermarketAppDescriptor:
+    properties:
+      app_id:
+        type: string
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketAppSkillCategory'
+        type: array
+      category:
+        type: string
+      category_name:
+        type: string
+      connector_count:
+        type: integer
+      connectors:
+        items:
+          $ref: '#/definitions/handlers.SupermarketAppConnector'
+        type: array
+      dependencies:
+        items:
+          type: string
+        type: array
+      dependency_count:
+        type: integer
+      description:
+        type: string
+      homepage:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      license:
+        type: string
+      name:
+        type: string
+      registry_id:
+        type: string
+      repository:
+        type: string
+      revision:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      skills:
+        items:
+          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
+        type: array
+      tags:
+        items:
+          type: string
+        type: array
+      translations:
+        additionalProperties:
+          $ref: '#/definitions/handlers.SupermarketAppTranslation'
+        type: object
+      version:
+        type: string
+    required:
+    - app_id
+    - categories
+    - category
+    - category_name
+    - connector_count
+    - connectors
+    - dependencies
+    - dependency_count
+    - description
+    - name
+    - registry_id
+    - revision
+    - schema_version
+    - skill_count
+    - skills
+    - tags
+    type: object
+  handlers.SupermarketAppListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.SupermarketAppSummary'
+        type: array
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+    required:
+    - data
+    - limit
+    - page
+    - total
+    type: object
+  handlers.SupermarketAppSkillCategory:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      skill_count:
+        type: integer
+    required:
+    - id
+    - name
+    - skill_count
+    type: object
+  handlers.SupermarketAppSummary:
+    properties:
+      app_id:
+        type: string
+      author:
+        $ref: '#/definitions/handlers.SupermarketAuthor'
+      categories:
+        items:
+          $ref: '#/definitions/handlers.SupermarketAppSkillCategory'
+        type: array
+      category:
+        type: string
+      category_name:
+        type: string
+      connector_count:
+        type: integer
+      connectors:
+        items:
+          $ref: '#/definitions/handlers.SupermarketAppConnector'
+        type: array
+      dependencies:
+        items:
+          type: string
+        type: array
+      dependency_count:
+        type: integer
+      description:
+        type: string
+      homepage:
+        type: string
+      icon:
+        $ref: '#/definitions/handlers.SupermarketSkillIcon'
+      license:
+        type: string
+      name:
+        type: string
+      registry_id:
+        type: string
+      repository:
+        type: string
+      schema_version:
+        type: string
+      skill_count:
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+      translations:
+        additionalProperties:
+          $ref: '#/definitions/handlers.SupermarketAppTranslation'
+        type: object
+      version:
+        type: string
+    required:
+    - app_id
+    - categories
+    - category
+    - category_name
+    - connector_count
+    - connectors
+    - dependencies
+    - dependency_count
+    - description
+    - name
+    - registry_id
+    - schema_version
+    - skill_count
+    - tags
+    type: object
+  handlers.SupermarketAppTranslation:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
   handlers.SupermarketAuthor:
     properties:
       email:
@@ -4250,6 +4491,8 @@ definitions:
     type: object
   handlers.SupermarketCatalogSkill:
     properties:
+      app_id:
+        type: string
       artifact:
         $ref: '#/definitions/handlers.SupermarketSkillArtifact'
       author:
@@ -4272,8 +4515,6 @@ definitions:
         type: string
       name:
         type: string
-      package_id:
-        type: string
       registry_id:
         type: string
       schema_version:
@@ -4289,6 +4530,7 @@ definitions:
           type: string
         type: array
     required:
+    - app_id
     - artifact
     - author
     - category
@@ -4297,7 +4539,6 @@ definitions:
     - files
     - install_id
     - name
-    - package_id
     - registry_id
     - schema_version
     - skill_id
@@ -4322,72 +4563,12 @@ definitions:
     - page
     - total
     type: object
-  handlers.SupermarketPackageCategory:
-    properties:
-      id:
-        type: string
-      name:
-        type: string
-      names:
-        additionalProperties:
-          type: string
-        type: object
-      order:
-        type: integer
-      package_count:
-        type: integer
-      registries:
-        items:
-          $ref: '#/definitions/handlers.SupermarketPackageCategoryRegistry'
-        type: array
-    required:
-    - id
-    - name
-    - names
-    - order
-    - package_count
-    - registries
-    type: object
-  handlers.SupermarketPackageCategoryListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/handlers.SupermarketPackageCategory'
-        type: array
-    required:
-    - data
-    type: object
-  handlers.SupermarketPackageCategoryRegistry:
-    properties:
-      count:
-        type: integer
-      id:
-        type: string
-    required:
-    - count
-    - id
-    type: object
-  handlers.SupermarketPackageConnector:
-    properties:
-      required:
-        type: boolean
-      type:
-        type: string
-    required:
-    - required
-    - type
-    type: object
-  handlers.SupermarketPackageTranslation:
-    properties:
-      description:
-        type: string
-      name:
-        type: string
-    type: object
   handlers.SupermarketRegistry:
     properties:
       adapter:
         type: string
+      app_count:
+        type: integer
       category_count:
         type: integer
       enabled:
@@ -4396,8 +4577,6 @@ definitions:
         type: string
       name:
         type: string
-      package_count:
-        type: integer
       priority:
         type: integer
       published_at:
@@ -4406,18 +4585,18 @@ definitions:
         type: string
       skill_count:
         type: integer
-      skipped_package_count:
+      skipped_app_count:
         type: integer
     required:
     - adapter
+    - app_count
     - category_count
     - enabled
     - id
     - name
-    - package_count
     - priority
     - skill_count
-    - skipped_package_count
+    - skipped_app_count
     type: object
   handlers.SupermarketRegistryListResponse:
     properties:
@@ -4479,185 +4658,6 @@ definitions:
     - content_type
     - digest
     - size
-    type: object
-  handlers.SupermarketSkillPackageCategory:
-    properties:
-      id:
-        type: string
-      name:
-        type: string
-      skill_count:
-        type: integer
-    required:
-    - id
-    - name
-    - skill_count
-    type: object
-  handlers.SupermarketSkillPackageDescriptor:
-    properties:
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      categories:
-        items:
-          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
-        type: array
-      category:
-        type: string
-      category_name:
-        type: string
-      connector_count:
-        type: integer
-      connectors:
-        items:
-          $ref: '#/definitions/handlers.SupermarketPackageConnector'
-        type: array
-      dependencies:
-        items:
-          type: string
-        type: array
-      dependency_count:
-        type: integer
-      description:
-        type: string
-      homepage:
-        type: string
-      icon:
-        $ref: '#/definitions/handlers.SupermarketSkillIcon'
-      license:
-        type: string
-      name:
-        type: string
-      package_id:
-        type: string
-      registry_id:
-        type: string
-      repository:
-        type: string
-      revision:
-        type: string
-      schema_version:
-        type: string
-      skill_count:
-        type: integer
-      skills:
-        items:
-          $ref: '#/definitions/handlers.SupermarketCatalogSkill'
-        type: array
-      tags:
-        items:
-          type: string
-        type: array
-      translations:
-        additionalProperties:
-          $ref: '#/definitions/handlers.SupermarketPackageTranslation'
-        type: object
-      version:
-        type: string
-    required:
-    - categories
-    - category
-    - category_name
-    - connector_count
-    - connectors
-    - dependencies
-    - dependency_count
-    - description
-    - name
-    - package_id
-    - registry_id
-    - revision
-    - schema_version
-    - skill_count
-    - skills
-    - tags
-    type: object
-  handlers.SupermarketSkillPackageListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/handlers.SupermarketSkillPackageSummary'
-        type: array
-      limit:
-        type: integer
-      page:
-        type: integer
-      total:
-        type: integer
-    required:
-    - data
-    - limit
-    - page
-    - total
-    type: object
-  handlers.SupermarketSkillPackageSummary:
-    properties:
-      author:
-        $ref: '#/definitions/handlers.SupermarketAuthor'
-      categories:
-        items:
-          $ref: '#/definitions/handlers.SupermarketSkillPackageCategory'
-        type: array
-      category:
-        type: string
-      category_name:
-        type: string
-      connector_count:
-        type: integer
-      connectors:
-        items:
-          $ref: '#/definitions/handlers.SupermarketPackageConnector'
-        type: array
-      dependencies:
-        items:
-          type: string
-        type: array
-      dependency_count:
-        type: integer
-      description:
-        type: string
-      homepage:
-        type: string
-      icon:
-        $ref: '#/definitions/handlers.SupermarketSkillIcon'
-      license:
-        type: string
-      name:
-        type: string
-      package_id:
-        type: string
-      registry_id:
-        type: string
-      repository:
-        type: string
-      schema_version:
-        type: string
-      skill_count:
-        type: integer
-      tags:
-        items:
-          type: string
-        type: array
-      translations:
-        additionalProperties:
-          $ref: '#/definitions/handlers.SupermarketPackageTranslation'
-        type: object
-      version:
-        type: string
-    required:
-    - categories
-    - category
-    - category_name
-    - connector_count
-    - connectors
-    - dependencies
-    - dependency_count
-    - description
-    - name
-    - package_id
-    - registry_id
-    - schema_version
-    - skill_count
-    - tags
     type: object
   handlers.SupermarketSkillSource:
     properties:
@@ -8319,6 +8319,439 @@ paths:
       summary: List models available to a bot Agent
       tags:
       - bot-agents
+  /bots/{bot_id}/apps:
+    get:
+      description: Every App installed on the workspace target with its Skills, dependency
+        references and connector references, plus the canonical Apps of dependencies
+        the workspace carries that no App references.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      - description: Refresh workspace discovery
+        in: query
+        name: refresh
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AppListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List the Apps installed for a bot
+      tags:
+      - apps
+    post:
+      consumes:
+      - application/json
+      description: 'Installs missing dependencies, publishes the Skills and links
+        connectors, streaming progress. A dependency failure or an unauthorized required
+        connector leaves the installation partial. Events: started, step, log, step_done,
+        done, error.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App release to install
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppInstallRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.AppStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Install an App release into a bot workspace
+      tags:
+      - apps
+  /bots/{bot_id}/apps/{installation_id}:
+    delete:
+      description: 'Removes the Skills, the dependencies no other App references and
+        the connections no other App references, streaming progress. Events: started,
+        step, log, step_done, done, error.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      - description: Also remove auto-installed Apps that lose their last reference
+        in: query
+        name: remove_unreferenced_required
+        type: boolean
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.AppStreamEvent'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Remove an App from a bot workspace
+      tags:
+      - apps
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AppItem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get one installed App
+      tags:
+      - apps
+  /bots/{bot_id}/apps/{installation_id}/connectors/{connector_type}/api-key:
+    post:
+      consumes:
+      - application/json
+      description: Sends the credential fields to Connect-It and links the resulting
+        connection to the App installation.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      - description: Connector type
+        in: path
+        name: connector_type
+        required: true
+        type: string
+      - description: Credential request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppConnectorCredentialRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/connectors.Connector'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Connect an API-key connector an App references
+      tags:
+      - apps
+  /bots/{bot_id}/apps/{installation_id}/connectors/{connector_type}/oauth:
+    post:
+      consumes:
+      - application/json
+      description: Starts OAuth for the connector type and links the resulting Connect-It
+        connection to the App installation.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      - description: Connector type
+        in: path
+        name: connector_type
+        required: true
+        type: string
+      - description: OAuth request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppConnectorOAuthRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/connectit.OAuthAuthorization'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Authorize a connector an App references
+      tags:
+      - apps
+  /bots/{bot_id}/apps/{installation_id}/removal-preview:
+    get:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AppRemovalPreviewResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Preview what removing an App would do
+      tags:
+      - apps
+  /bots/{bot_id}/apps/{installation_id}/resume:
+    post:
+      description: 'Installs dependencies that are still missing, reconciles the Skills
+        and links connectors that were authorized since. Events: started, step, log,
+        step_done, done, error.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App installation ID
+        in: path
+        name: installation_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.AppStreamEvent'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Continue a partial App installation
+      tags:
+      - apps
+  /bots/{bot_id}/apps/check-updates:
+    post:
+      description: Compares every installed App with the registry's current release,
+        runs the dependency update checks, and returns the refreshed list.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workspace target ID (defaults to the bot's current target)
+        in: query
+        name: workspace_target_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AppListResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Check installed Apps for newer releases
+      tags:
+      - apps
+  /bots/{bot_id}/apps/update:
+    post:
+      consumes:
+      - application/json
+      description: 'Updates the selected dependencies to their latest version and,
+        when release is set, moves the installation to the registry''s current release,
+        streaming progress. A discovered App may update its own dependency. Events:
+        started, step, log, step_done, done, error.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: What to update
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppUpdateRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of operation events
+          schema:
+            $ref: '#/definitions/handlers.AppStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Update parts of an App on a bot workspace
+      tags:
+      - apps
   /bots/{bot_id}/backup/export:
     post:
       consumes:
@@ -9952,11 +10385,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Runs the catalog install script for a dependency a Package references
-        and streams its output: a retry after a failed Package step, or a managed
-        overlay laid over the copy the workspace image ships. New dependencies reach
-        a bot by installing the Package that references them. Events: started, log,
-        done, error.'
+      description: 'Runs the catalog install script for a dependency an App references
+        and streams its output: a retry after a failed App step, or a managed overlay
+        laid over the copy the workspace image ships. New dependencies reach a bot
+        by installing the App that references them. Events: started, log, done, error.'
       parameters:
       - description: Bot ID
         in: path
@@ -11715,439 +12147,6 @@ paths:
       summary: Locate a bot history message
       tags:
       - messages
-  /bots/{bot_id}/packages:
-    get:
-      description: Every Package installed on the workspace target with its Skills,
-        dependency references and connector references, plus the canonical Packages
-        of dependencies the workspace carries that no Package references.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Workspace target ID (defaults to the bot's current target)
-        in: query
-        name: workspace_target_id
-        type: string
-      - description: Refresh workspace discovery
-        in: query
-        name: refresh
-        type: boolean
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.PackageListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: List the Packages installed for a bot
-      tags:
-      - packages
-    post:
-      consumes:
-      - application/json
-      description: 'Installs missing dependencies, publishes the Skills and links
-        connectors, streaming progress. A dependency failure or an unauthorized required
-        connector leaves the installation partial. Events: started, step, log, step_done,
-        done, error.'
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package release to install
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.PackageInstallRequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream of operation events
-          schema:
-            $ref: '#/definitions/handlers.PackageStreamEvent'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Install a Package release into a bot workspace
-      tags:
-      - packages
-  /bots/{bot_id}/packages/{installation_id}:
-    delete:
-      description: 'Removes the Skills, the dependencies no other Package references
-        and the connections no other Package references, streaming progress. Events:
-        started, step, log, step_done, done, error.'
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package installation ID
-        in: path
-        name: installation_id
-        required: true
-        type: string
-      - description: Also remove auto-installed Packages that lose their last reference
-        in: query
-        name: remove_unreferenced_required
-        type: boolean
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream of operation events
-          schema:
-            $ref: '#/definitions/handlers.PackageStreamEvent'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Remove a Package from a bot workspace
-      tags:
-      - packages
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package installation ID
-        in: path
-        name: installation_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.PackageItem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Get one installed Package
-      tags:
-      - packages
-  /bots/{bot_id}/packages/{installation_id}/connectors/{connector_type}/api-key:
-    post:
-      consumes:
-      - application/json
-      description: Sends the credential fields to Connect-It and links the resulting
-        connection to the Package installation.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package installation ID
-        in: path
-        name: installation_id
-        required: true
-        type: string
-      - description: Connector type
-        in: path
-        name: connector_type
-        required: true
-        type: string
-      - description: Credential request
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.PackageConnectorCredentialRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/connectors.Connector'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Connect an API-key connector a Package references
-      tags:
-      - packages
-  /bots/{bot_id}/packages/{installation_id}/connectors/{connector_type}/oauth:
-    post:
-      consumes:
-      - application/json
-      description: Starts OAuth for the connector type and links the resulting Connect-It
-        connection to the Package installation.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package installation ID
-        in: path
-        name: installation_id
-        required: true
-        type: string
-      - description: Connector type
-        in: path
-        name: connector_type
-        required: true
-        type: string
-      - description: OAuth request
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.PackageConnectorOAuthRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/connectit.OAuthAuthorization'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Authorize a connector a Package references
-      tags:
-      - packages
-  /bots/{bot_id}/packages/{installation_id}/removal-preview:
-    get:
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package installation ID
-        in: path
-        name: installation_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.PackageRemovalPreviewResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Preview what removing a Package would do
-      tags:
-      - packages
-  /bots/{bot_id}/packages/{installation_id}/resume:
-    post:
-      description: 'Installs dependencies that are still missing, reconciles the Skills
-        and links connectors that were authorized since. Events: started, step, log,
-        step_done, done, error.'
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Package installation ID
-        in: path
-        name: installation_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream of operation events
-          schema:
-            $ref: '#/definitions/handlers.PackageStreamEvent'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Continue a partial Package installation
-      tags:
-      - packages
-  /bots/{bot_id}/packages/check-updates:
-    post:
-      description: Compares every installed Package with the registry's current release,
-        runs the dependency update checks, and returns the refreshed list.
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: Workspace target ID (defaults to the bot's current target)
-        in: query
-        name: workspace_target_id
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.PackageListResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Check installed Packages for newer releases
-      tags:
-      - packages
-  /bots/{bot_id}/packages/update:
-    post:
-      consumes:
-      - application/json
-      description: 'Updates the selected dependencies to their latest version and,
-        when release is set, moves the installation to the registry''s current release,
-        streaming progress. A discovered Package may update its own dependency. Events:
-        started, step, log, step_done, done, error.'
-      parameters:
-      - description: Bot ID
-        in: path
-        name: bot_id
-        required: true
-        type: string
-      - description: What to update
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.PackageUpdateRequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: SSE stream of operation events
-          schema:
-            $ref: '#/definitions/handlers.PackageStreamEvent'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-      summary: Update parts of a Package on a bot workspace
-      tags:
-      - packages
   /bots/{bot_id}/quick-actions/execute:
     post:
       consumes:
@@ -17126,62 +17125,7 @@ paths:
       summary: List speech provider metadata
       tags:
       - speech-providers
-  /supermarket/artifacts/icon/{digest}:
-    get:
-      parameters:
-      - description: SHA-256 digest
-        in: path
-        name: digest
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: file
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a mirrored Skill icon
-      tags:
-      - supermarket
-  /supermarket/categories:
-    get:
-      parameters:
-      - description: Registry ID
-        in: query
-        name: registry
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.SupermarketPackageCategoryListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "502":
-          description: Bad Gateway
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List Package categories with localized names
-      tags:
-      - supermarket
-  /supermarket/packages:
+  /supermarket/apps:
     get:
       parameters:
       - description: Search query
@@ -17224,7 +17168,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+            $ref: '#/definitions/handlers.SupermarketAppListResponse'
         "400":
           description: Bad Request
           schema:
@@ -17233,7 +17177,62 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List Skill Packages across supermarket Registries
+      summary: List Skill Apps across supermarket Registries
+      tags:
+      - supermarket
+  /supermarket/artifacts/icon/{digest}:
+    get:
+      parameters:
+      - description: SHA-256 digest
+        in: path
+        name: digest
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get a mirrored Skill icon
+      tags:
+      - supermarket
+  /supermarket/categories:
+    get:
+      parameters:
+      - description: Registry ID
+        in: query
+        name: registry
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SupermarketAppCategoryListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List App categories with localized names
       tags:
       - supermarket
   /supermarket/registries:
@@ -17250,7 +17249,7 @@ paths:
       summary: List Skill Registries from supermarket
       tags:
       - supermarket
-  /supermarket/registries/{registry_id}/packages:
+  /supermarket/registries/{registry_id}/apps:
     get:
       parameters:
       - description: Registry ID
@@ -17286,7 +17285,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillPackageListResponse'
+            $ref: '#/definitions/handlers.SupermarketAppListResponse'
         "400":
           description: Bad Request
           schema:
@@ -17299,10 +17298,10 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List Skill Packages in one Registry
+      summary: List Skill Apps in one Registry
       tags:
       - supermarket
-  /supermarket/registries/{registry_id}/packages/{package_id}:
+  /supermarket/registries/{registry_id}/apps/{app_id}:
     get:
       parameters:
       - description: Registry ID
@@ -17310,16 +17309,16 @@ paths:
         name: registry_id
         required: true
         type: string
-      - description: Package ID
+      - description: App ID
         in: path
-        name: package_id
+        name: app_id
         required: true
         type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+            $ref: '#/definitions/handlers.SupermarketAppDescriptor'
         "400":
           description: Bad Request
           schema:
@@ -17332,10 +17331,10 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a namespaced Skill Package
+      summary: Get a namespaced Skill App
       tags:
       - supermarket
-  /supermarket/registries/{registry_id}/packages/{package_id}/releases/{revision}:
+  /supermarket/registries/{registry_id}/apps/{app_id}/releases/{revision}:
     get:
       parameters:
       - description: Registry ID
@@ -17343,12 +17342,12 @@ paths:
         name: registry_id
         required: true
         type: string
-      - description: Package ID
+      - description: App ID
         in: path
-        name: package_id
+        name: app_id
         required: true
         type: string
-      - description: Package revision
+      - description: App revision
         in: path
         name: revision
         required: true
@@ -17357,7 +17356,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SupermarketSkillPackageDescriptor'
+            $ref: '#/definitions/handlers.SupermarketAppDescriptor'
         "400":
           description: Bad Request
           schema:
@@ -17370,10 +17369,10 @@ paths:
           description: Bad Gateway
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get an immutable Skill Package release
+      summary: Get an immutable Skill App release
       tags:
       - supermarket
-  /supermarket/registries/{registry_id}/packages/{package_id}/skills/{skill_id}:
+  /supermarket/registries/{registry_id}/apps/{app_id}/skills/{skill_id}:
     get:
       parameters:
       - description: Registry ID
@@ -17381,9 +17380,9 @@ paths:
         name: registry_id
         required: true
         type: string
-      - description: Package ID
+      - description: App ID
         in: path
-        name: package_id
+        name: app_id
         required: true
         type: string
       - description: Skill ID
@@ -17422,9 +17421,9 @@ paths:
         in: query
         name: registry
         type: string
-      - description: Package ID
+      - description: App ID
         in: query
-        name: package
+        name: app
         type: string
       - description: Category ID
         in: query

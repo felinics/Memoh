@@ -391,7 +391,7 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 
 // InstallWorkspaceDependency godoc
 // @Summary Install or reinstall a referenced workspace dependency
-// @Description Runs the catalog install script for a dependency a Package references and streams its output: a retry after a failed Package step, or a managed overlay laid over the copy the workspace image ships. New dependencies reach a bot by installing the Package that references them. Events: started, log, done, error.
+// @Description Runs the catalog install script for a dependency an App references and streams its output: a retry after a failed App step, or a managed overlay laid over the copy the workspace image ships. New dependencies reach a bot by installing the App that references them. Events: started, log, done, error.
 // @Tags containerd
 // @Accept json
 // @Produce text/event-stream

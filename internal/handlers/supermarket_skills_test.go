@@ -48,7 +48,7 @@ func TestSupermarketSkillRoutesUseRegistryCatalogOnly(t *testing.T) {
 	}
 }
 
-func TestSupermarketPackageRoutesUsePackageCatalog(t *testing.T) {
+func TestSupermarketAppRoutesUseAppCatalog(t *testing.T) {
 	var upstreamRequestURI string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamRequestURI = r.URL.RequestURI()
@@ -67,9 +67,9 @@ func TestSupermarketPackageRoutesUsePackageCatalog(t *testing.T) {
 		path string
 		want string
 	}{
-		{"/supermarket/packages?registry=memoh&limit=50", "/api/packages?registry=memoh&limit=50"},
-		{"/supermarket/registries/memoh/packages?q=web", "/api/registries/memoh/packages?q=web"},
-		{"/supermarket/registries/memoh/packages/web-tools", "/api/registries/memoh/packages/web-tools"},
+		{"/supermarket/apps?registry=memoh&limit=50", "/api/apps?registry=memoh&limit=50"},
+		{"/supermarket/registries/memoh/apps?q=web", "/api/registries/memoh/apps?q=web"},
+		{"/supermarket/registries/memoh/apps/web-tools", "/api/registries/memoh/apps/web-tools"},
 	}
 	for _, test := range tests {
 		req := httptest.NewRequest(http.MethodGet, test.path, nil)
@@ -84,13 +84,13 @@ func TestSupermarketPackageRoutesUsePackageCatalog(t *testing.T) {
 	}
 }
 
-func TestGetRegistryPackageReleaseReturnsPinnedDescriptor(t *testing.T) {
-	pkg := validRegistryPackageDescriptor()
-	release := registryPackageReleaseBytes(t, pkg)
+func TestGetRegistryAppReleaseReturnsPinnedDescriptor(t *testing.T) {
+	pkg := validRegistryAppDescriptor()
+	release := registryAppReleaseBytes(t, pkg)
 	digest := sha256.Sum256(release)
 	revision := hex.EncodeToString(digest[:])
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		want := "/api/registries/registry/packages/package/releases/" + revision
+		want := "/api/registries/registry/apps/app/releases/" + revision
 		if r.URL.Path != want {
 			t.Fatalf("upstream path = %q, want %q", r.URL.Path, want)
 		}
@@ -105,13 +105,13 @@ func TestGetRegistryPackageReleaseReturnsPinnedDescriptor(t *testing.T) {
 	}
 	e := echo.New()
 	handler.Register(e)
-	req := httptest.NewRequest(http.MethodGet, "/supermarket/registries/registry/packages/package/releases/"+revision, nil)
+	req := httptest.NewRequest(http.MethodGet, "/supermarket/registries/registry/apps/app/releases/"+revision, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("release status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var got SupermarketSkillPackageDescriptor
+	var got SupermarketAppDescriptor
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestProxySkillIconOverridesUpstreamSecurityHeaders(t *testing.T) {
 
 func validRegistrySkillDescriptor() SupermarketCatalogSkill {
 	return SupermarketCatalogSkill{
-		RegistryID: "registry", PackageID: "package", SkillID: "skill", InstallID: "registry+package+skill",
+		RegistryID: "registry", AppID: "app", SkillID: "skill", InstallID: "registry+app+skill",
 		Artifact: SupermarketSkillArtifact{
 			Format: "memoh_skill_v1",
 			Digest: strings.Repeat("a", 64), Size: 1,
@@ -205,37 +205,37 @@ func validRegistrySkillDescriptor() SupermarketCatalogSkill {
 	}
 }
 
-func validRegistryPackageDescriptor() SupermarketSkillPackageDescriptor {
+func validRegistryAppDescriptor() SupermarketAppDescriptor {
 	first := validRegistrySkillDescriptor()
 	second := validRegistrySkillDescriptor()
 	second.SkillID = "second"
-	second.InstallID = "registry+package+second"
-	return SupermarketSkillPackageDescriptor{
-		SkillPackageSummary: SupermarketSkillPackageSummary{
-			SchemaVersion: "1", RegistryID: "registry", PackageID: "package", Name: "Package",
-			Description: "Demo", Tags: []string{}, Categories: []SupermarketSkillPackageCategory{}, SkillCount: 2,
+	second.InstallID = "registry+app+second"
+	return SupermarketAppDescriptor{
+		AppSummary: SupermarketAppSummary{
+			SchemaVersion: "1", RegistryID: "registry", AppID: "app", Name: "App",
+			Description: "Demo", Tags: []string{}, Categories: []SupermarketAppSkillCategory{}, SkillCount: 2,
 		},
 		Revision: strings.Repeat("b", 64),
 		Skills:   []SupermarketCatalogSkill{first, second},
 	}
 }
 
-func registryPackageReleaseBytes(t *testing.T, pkg SupermarketSkillPackageDescriptor) []byte {
+func registryAppReleaseBytes(t *testing.T, pkg SupermarketAppDescriptor) []byte {
 	t.Helper()
-	members := make([]supermarketSkillPackageReleaseSkill, 0, len(pkg.Skills))
+	members := make([]supermarketAppReleaseSkill, 0, len(pkg.Skills))
 	for _, skill := range pkg.Skills {
-		members = append(members, supermarketSkillPackageReleaseSkill{
-			SchemaVersion: skill.SchemaVersion, RegistryID: skill.RegistryID, PackageID: skill.PackageID,
+		members = append(members, supermarketAppReleaseSkill{
+			SchemaVersion: skill.SchemaVersion, RegistryID: skill.RegistryID, AppID: skill.AppID,
 			SkillID: skill.SkillID, InstallID: skill.InstallID, Name: skill.Name,
 			Description: skill.Description, Author: skill.Author, Homepage: skill.Homepage,
 			Tags: skill.Tags, Category: skill.Category, CategoryName: skill.CategoryName,
 			SourceCategory: skill.SourceCategory, Files: skill.Files, Icon: skill.Icon, Artifact: skill.Artifact,
 		})
 	}
-	payload, err := json.Marshal(SupermarketSkillPackageRelease{
+	payload, err := json.Marshal(SupermarketAppRelease{
 		SchemaVersion: pkg.SchemaVersion,
 		RegistryID:    pkg.RegistryID,
-		PackageID:     pkg.PackageID,
+		AppID:         pkg.AppID,
 		Name:          pkg.Name,
 		Description:   pkg.Description,
 		Tags:          pkg.Tags,
@@ -243,7 +243,7 @@ func registryPackageReleaseBytes(t *testing.T, pkg SupermarketSkillPackageDescri
 		Skills:        members,
 	})
 	if err != nil {
-		t.Fatalf("marshal immutable Package release: %v", err)
+		t.Fatalf("marshal immutable App release: %v", err)
 	}
 	return payload
 }

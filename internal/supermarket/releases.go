@@ -13,7 +13,7 @@ import (
 	"net/url"
 )
 
-const maxPackageMetadataBytes = 8 * 1024 * 1024
+const maxAppMetadataBytes = 8 * 1024 * 1024
 
 type ErrorKind string
 
@@ -57,41 +57,41 @@ func ErrorKindOf(err error) ErrorKind {
 	return ""
 }
 
-// FetchPackageRelease downloads one immutable, digest-verified Package release.
-func (c *Client) FetchPackageRelease(
+// FetchAppRelease downloads one immutable, digest-verified App release.
+func (c *Client) FetchAppRelease(
 	ctx context.Context,
-	registryID, packageID, revision string,
-) (SkillPackageDescriptor, error) {
+	registryID, appID, revision string,
+) (AppDescriptor, error) {
 	requestPath := "/api/registries/" + url.PathEscape(registryID) +
-		"/packages/" + url.PathEscape(packageID) + "/releases/" + url.PathEscape(revision)
-	var release SkillPackageRelease
-	if err := c.getImmutableJSON(ctx, requestPath, revision, maxPackageMetadataBytes, &release); err != nil {
-		return SkillPackageDescriptor{}, err
+		"/apps/" + url.PathEscape(appID) + "/releases/" + url.PathEscape(revision)
+	var release AppRelease
+	if err := c.getImmutableJSON(ctx, requestPath, revision, maxAppMetadataBytes, &release); err != nil {
+		return AppDescriptor{}, err
 	}
 	skills := make([]CatalogSkill, 0, len(release.Skills))
 	for _, member := range release.Skills {
 		member.Artifact.DownloadURL = "/api/artifacts/skill/" + member.Artifact.Digest
 		skills = append(skills, CatalogSkill{
-			SchemaVersion: member.SchemaVersion, RegistryID: member.RegistryID, PackageID: member.PackageID,
+			SchemaVersion: member.SchemaVersion, RegistryID: member.RegistryID, AppID: member.AppID,
 			SkillID: member.SkillID, InstallID: member.InstallID, Name: member.Name,
 			Description: member.Description, Author: member.Author, Homepage: member.Homepage,
 			Tags: member.Tags, Category: member.Category, CategoryName: member.CategoryName,
 			SourceCategory: member.SourceCategory, Files: member.Files, Icon: member.Icon, Artifact: member.Artifact,
 		})
 	}
-	metadata := release.PackageMetadata
+	metadata := release.AppMetadata
 	if metadata.Dependencies == nil {
 		metadata.Dependencies = []string{}
 	}
 	if metadata.Connectors == nil {
-		metadata.Connectors = []PackageConnectorReference{}
+		metadata.Connectors = []AppConnectorReference{}
 	}
-	return SkillPackageDescriptor{
-		SkillPackageSummary: SkillPackageSummary{
+	return AppDescriptor{
+		AppSummary: AppSummary{
 			SchemaVersion: release.SchemaVersion,
-			RegistryID:    release.RegistryID, PackageID: release.PackageID,
+			RegistryID:    release.RegistryID, AppID: release.AppID,
 			Name: release.Name, Description: release.Description, Tags: release.Tags,
-			PackageMetadata: metadata,
+			AppMetadata:     metadata,
 			SkillCount:      len(release.Skills),
 			DependencyCount: len(metadata.Dependencies),
 			ConnectorCount:  len(metadata.Connectors),
@@ -102,17 +102,17 @@ func (c *Client) FetchPackageRelease(
 	}, nil
 }
 
-// FetchCurrentPackage reads the mutable Package descriptor the registry
+// FetchCurrentApp reads the mutable App descriptor the registry
 // publishes for its newest release. Its revision names the immutable release
-// FetchPackageRelease can then verify.
-func (c *Client) FetchCurrentPackage(ctx context.Context, registryID, packageID string) (SkillPackageDescriptor, error) {
-	requestPath := "/api/registries/" + url.PathEscape(registryID) + "/packages/" + url.PathEscape(packageID)
-	var descriptor SkillPackageDescriptor
-	if err := c.getJSON(ctx, requestPath, maxPackageMetadataBytes, &descriptor); err != nil {
-		return SkillPackageDescriptor{}, err
+// FetchAppRelease can then verify.
+func (c *Client) FetchCurrentApp(ctx context.Context, registryID, appID string) (AppDescriptor, error) {
+	requestPath := "/api/registries/" + url.PathEscape(registryID) + "/apps/" + url.PathEscape(appID)
+	var descriptor AppDescriptor
+	if err := c.getJSON(ctx, requestPath, maxAppMetadataBytes, &descriptor); err != nil {
+		return AppDescriptor{}, err
 	}
 	if !isCanonicalSHA256(descriptor.Revision) {
-		return SkillPackageDescriptor{}, invalidResponse("decode Package descriptor", errors.New("revision is invalid"))
+		return AppDescriptor{}, invalidResponse("decode App descriptor", errors.New("revision is invalid"))
 	}
 	for index := range descriptor.Skills {
 		descriptor.Skills[index].Artifact.DownloadURL = "/api/artifacts/skill/" + descriptor.Skills[index].Artifact.Digest
@@ -121,7 +121,7 @@ func (c *Client) FetchCurrentPackage(ctx context.Context, registryID, packageID 
 		descriptor.Dependencies = []string{}
 	}
 	if descriptor.Connectors == nil {
-		descriptor.Connectors = []PackageConnectorReference{}
+		descriptor.Connectors = []AppConnectorReference{}
 	}
 	if descriptor.Tags == nil {
 		descriptor.Tags = []string{}
@@ -207,11 +207,11 @@ func decodeJSONPayload(payload []byte, target any, op string) error {
 }
 
 func (c *Client) getJSON(ctx context.Context, requestPath string, limit int64, target any) error {
-	payload, err := c.fetchJSONPayload(ctx, requestPath, limit, "fetch Package descriptor")
+	payload, err := c.fetchJSONPayload(ctx, requestPath, limit, "fetch App descriptor")
 	if err != nil {
 		return err
 	}
-	return decodeJSONPayload(payload, target, "decode Package descriptor")
+	return decodeJSONPayload(payload, target, "decode App descriptor")
 }
 
 func (c *Client) getImmutableJSON(

@@ -303,9 +303,9 @@ export function dependencyMenuActions(
       separatorBefore: false,
     })
   }
-  // Removal is not offered per dependency: the Package that references the
+  // Removal is not offered per dependency: the App that references the
   // dependency removes it, so shared copies are never pulled out from under
-  // another Package.
+  // another App.
   if (scripted) items.push({ ...viewScript, separatorBefore: items.length > 0 })
   return items
 }

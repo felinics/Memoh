@@ -175,11 +175,11 @@ Memoh/
 │   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
 │   ├── settings/               #   Bot settings management
-│   ├── skillpackages/          #   Installed Supermarket Package state
+│   ├── apps/          #   Installed Supermarket App state
 │   ├── skills/                 #   Skill registry and activation
 │   ├── slash/                  #   Slash-command classification and metadata (channel + web surfaces)
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
-│   ├── supermarket/            #   Supermarket protocol client and Package installer
+│   ├── supermarket/            #   Supermarket protocol client and App installer
 │   ├── team/                   #   Singleton team identity (DefaultTeamID)
 │   ├── textutil/               #   UTF-8 safe text utilities
 │   ├── timezone/               #   Timezone utilities
@@ -398,7 +398,7 @@ The codebase has grown beyond the original agent/channel/container core. When wo
 
 - **External coding-agent runtimes (`internal/agent/runtime/external/`, `codex/`, `claudecode/`)** — the neutral `external.Driver` port plus the direct Codex and Claude Code runtimes (pinned protocol assets, device-code/OAuth login, native thread resume/fork, Memoh tool gateway mounts via `toolmount/`). **ACP (`internal/agent/runtime/acp/`)** is the generic channel for custom user-supplied ACP agents (single generic profile with a managed launch command), folded into the same driver port. Stable user-facing runtime errors live in `internal/agent/decision/feedback/`.
 - **Workspace dependencies (`internal/workspacedeps/`)** — launcher resolution is read-only and must discover existing CLIs without a warm Supermarket cache. Chat and device-code login do not authorize installation: a Manage-authorized action confirms a frozen recipe revision. Direct Codex and Claude Code execution currently requires a native workspace; remote dependency management does not imply remote runtime support. Keep the Server/image upgrade boundary documented in `docs/workspace-dependencies-upgrade.md`.
-- **Skill Packages (`internal/skillpackages/`, `internal/supermarket/`)** — Supermarket Package discovery and installation state. Installed Packages expand into immutable Registry Skills in the selected workspace target.
+- **Apps (`internal/apps/`, `internal/supermarket/`)** — Supermarket App discovery and installation state. Installed Apps expand into immutable Registry Skills in the selected workspace target.
 - **User input / `ask_user` (`internal/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.
 - **Bot backup / import / export (`internal/botbackup/`)** — archive-based bot portability with preview and merge/replace/skip strategies.
 - **Workspace resource limits (`internal/workspace/resource_limits.go`)** — per-bot CPU/memory/storage quotas and runtime metrics.
@@ -441,8 +441,8 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `mcp_connections` — MCP connection configurations per bot
 - `mcp_oauth_tokens` — MCP OAuth tokens
 
-**Skill Packages**
-- `bot_skill_package_installations` — Installed Registry Package revision per bot and workspace target
+**Apps**
+- `bot_app_installations` — Installed Registry App revision per bot and workspace target
 
 **Containers**
 - `containers` — Bot container instances
