@@ -206,9 +206,12 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	if err != nil {
 		return OperationResult{}, err
 	}
+	failRemoval := func(cause error) error {
+		return s.failInstallation(ctx, inst, fail("App removal failed", cause))
+	}
 	plan, err := s.plan(ctx, inst, true)
 	if err != nil {
-		return OperationResult{}, err
+		return OperationResult{}, failRemoval(err)
 	}
 	if inst, err = s.store.SetStatus(ctx, botID, inst.ID, StatusRemoving, ""); err != nil {
 		return OperationResult{}, fmt.Errorf("apps: record removal: %w", err)
@@ -223,7 +226,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	sink.Send(Event{Type: EventStep, Kind: KindSkills, ID: inst.AppID})
 	tx, err := s.skills.RemoveSkills(ctx, botID, inst.WorkspaceTargetID, inst.RegistryID, inst.AppID, inst.Revision)
 	if err != nil {
-		return result, s.failInstallation(ctx, inst, fail("remove Skills", err))
+		return result, failRemoval(fail("remove Skills", err))
 	}
 	record(StepResult{Kind: KindSkills, ID: inst.AppID, Status: StepRemoved})
 
@@ -233,7 +236,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			if _, err := s.dependencies.Remove(ctx, botID, inst.WorkspaceTargetID, dep.ID, logSink(sink, KindDependency, dep.ID)); err != nil {
 				cause := fail("remove dependency "+dep.ID, err)
 				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepFailed, Error: publicMessage(cause)})
-				return result, s.failInstallation(ctx, inst, errors.Join(cause, tx.Rollback(ctx)))
+				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 			} else {
 				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepRemoved})
 			}
@@ -241,7 +244,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepKept, Error: dep.Reason})
 		}
 		if err := s.store.RemoveDependencyRef(ctx, inst.ID, dep.ID); err != nil {
-			return result, errors.Join(s.failInstallation(ctx, inst, fail("drop dependency reference "+dep.ID, err)), tx.Rollback(ctx))
+			return result, errors.Join(failRemoval(fail("drop dependency reference "+dep.ID, err)), tx.Rollback(ctx))
 		}
 	}
 
@@ -250,13 +253,13 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 		if conn.Action == RemovalActionDisconnect && s.connectors == nil {
 			cause := fail("disconnect "+conn.Type, connectors.ErrNotConfigured)
 			record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Error: publicMessage(cause)})
-			return result, s.failInstallation(ctx, inst, errors.Join(cause, tx.Rollback(ctx)))
+			return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 		}
 		if conn.Action == RemovalActionDisconnect {
 			if err := s.connectors.Delete(ctx, botID, conn.ConnectionID); err != nil && !isNotFound(err) && !errors.Is(err, errConnectorGone) {
 				cause := fail("disconnect "+conn.Type, err)
 				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Error: publicMessage(cause)})
-				return result, s.failInstallation(ctx, inst, errors.Join(cause, tx.Rollback(ctx)))
+				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 			} else {
 				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepDisconnected})
 			}
@@ -264,7 +267,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepKept, Error: conn.Reason})
 		}
 		if err := s.store.RemoveConnectorRef(ctx, inst.ID, conn.Type); err != nil {
-			return result, errors.Join(s.failInstallation(ctx, inst, fail("drop connector reference "+conn.Type, err)), tx.Rollback(ctx))
+			return result, errors.Join(failRemoval(fail("drop connector reference "+conn.Type, err)), tx.Rollback(ctx))
 		}
 	}
 
@@ -278,18 +281,18 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			nested, err := s.Remove(ctx, botID, required.ID, RemoveOptions{}, childSink)
 			result.Steps = append(result.Steps, nested.Steps...)
 			if err != nil {
-				return result, s.failInstallation(ctx, inst, errors.Join(fail("remove required App "+required.AppID, err), tx.Rollback(ctx)))
+				return result, failRemoval(errors.Join(fail("remove required App "+required.AppID, err), tx.Rollback(ctx)))
 			}
 		}
 	}
 	// Keep the record until workspace cleanup is confirmed. If the final DB
 	// delete fails, the record remains retryable even though Skills are gone.
 	if err := tx.Commit(ctx); err != nil {
-		return result, s.failInstallation(ctx, inst, fail("finish removing Skills", err))
+		return result, failRemoval(fail("finish removing Skills", err))
 	}
 	removed, err := s.store.Delete(ctx, botID, inst.ID)
 	if err != nil {
-		return result, s.failInstallation(ctx, inst, fail("delete installation", err))
+		return result, failRemoval(fail("delete installation", err))
 	}
 	result.Installation = removed
 	sink.Send(Event{Type: EventDone, Kind: KindApp, ID: inst.AppID, Status: "removed"})

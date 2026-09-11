@@ -76,6 +76,9 @@ func TestRemoveRetainsFailedCleanupUntilRetry(t *testing.T) {
 			rec := &recorder{}
 			_, err := f.service.Remove(t.Context(), testBotID, f.inst.ID, RemoveOptions{}, rec)
 			assertCleanupFailed(t, f, rec, err)
+			if !strings.HasPrefix(f.installation(t).LastError, "App removal failed:") {
+				t.Fatal("removal failure must identify the failed operation")
+			}
 			if !errors.Is(err, errCleanupProbe) {
 				t.Fatalf("lost error cause: %v", err)
 			}

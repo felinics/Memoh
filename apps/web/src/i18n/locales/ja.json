@@ -3793,6 +3793,7 @@
     "components": "{count} 個のコンポーネント",
     "workspaceNotRunningDescription": "アプリのインストールと更新には実行中のワークスペースが必要です。一覧は最後に記録された状態です。",
     "action": {
+      "restore": "インストールを復元",
       "install": "インストール",
       "resume": "セットアップを続行",
       "update": "更新",
@@ -3832,6 +3833,7 @@
       }
     },
     "progress": {
+      "recoveryHint": "失敗したアンインストールを続けるには「アンインストール」を選択してください。「インストールを復元」はアプリを再設定し、削除済みのコンポーネントを再インストールする場合があります。",
       "installing": "{name} をインストール中",
       "updating": "{name} を更新中",
       "resuming": "{name} のセットアップを続行中",

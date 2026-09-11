@@ -3799,6 +3799,7 @@
     "components": "{count} 个组件",
     "workspaceNotRunningDescription": "安装和更新应用需要运行中的工作区。列表显示的是最近记录的状态。",
     "action": {
+      "restore": "恢复安装",
       "install": "安装",
       "resume": "继续安装",
       "update": "更新",
@@ -3838,6 +3839,7 @@
       }
     },
     "progress": {
+      "recoveryHint": "若要继续失败的卸载，请选择“卸载”。“恢复安装”会重新配置应用，并可能重新安装已移除的组件。",
       "installing": "正在安装 {name}",
       "updating": "正在更新 {name}",
       "resuming": "正在继续安装 {name}",

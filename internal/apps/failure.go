@@ -71,6 +71,10 @@ func publicCause(err error) string {
 	if err == nil {
 		return ""
 	}
+	var nested *failure
+	if errors.As(err, &nested) {
+		return nested.Public()
+	}
 	if public, ok := apperror.PublicFrom(err, ""); ok {
 		return public.Detail
 	}

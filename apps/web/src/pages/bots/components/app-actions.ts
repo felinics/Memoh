@@ -24,7 +24,9 @@ export function appPrimaryAction(
     if (!options.ownsStream) return null
     return { action: 'viewProgress', labelKey: 'apps.action.viewProgress', variant: 'outline', disabled: false }
   }
-  if (item.status === 'failed') return { action: 'retry', labelKey: 'common.retry', variant: 'default', disabled: options.busy || options.readonly }
+  // The persisted failed status does not identify the operation. Never
+  // label materialization as a generic retry: it may undo a failed removal.
+  if (item.status === 'failed') return { action: 'resume', labelKey: 'apps.action.restore', variant: 'default', disabled: options.busy || options.readonly }
   if (item.status === 'partial') return { action: 'resume', labelKey: 'apps.action.resume', variant: 'default', disabled: options.busy || options.readonly }
   if (appHasUpdates(item)) return { action: 'update', labelKey: 'apps.action.update', variant: 'default', disabled: options.busy || options.readonly }
   return null

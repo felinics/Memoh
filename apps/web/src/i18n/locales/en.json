@@ -3799,6 +3799,7 @@
     "components": "{count} component | {count} components",
     "workspaceNotRunningDescription": "Installing and updating Apps needs a running workspace. The list shows the last recorded state.",
     "action": {
+      "restore": "Restore installation",
       "install": "Install",
       "resume": "Continue setup",
       "update": "Update",
@@ -3838,6 +3839,7 @@
       }
     },
     "progress": {
+      "recoveryHint": "To continue a failed uninstall, choose Uninstall. Restore installation sets up the App again and may reinstall removed components.",
       "installing": "Installing {name}",
       "updating": "Updating {name}",
       "resuming": "Continuing setup of {name}",

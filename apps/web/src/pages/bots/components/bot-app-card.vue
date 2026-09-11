@@ -119,6 +119,15 @@ const failedText = computed(() => (
         >
           {{ t(primary.labelKey) }}
         </Button>
+        <Button
+          v-if="item.status === 'failed' && canRemove"
+          size="sm"
+          variant="destructive"
+          :disabled="busy || readonly"
+          @click="emit('action', 'remove')"
+        >
+          {{ t('apps.action.remove') }}
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <Button
@@ -134,7 +143,7 @@ const failedText = computed(() => (
               <ExternalLink />
               {{ t('apps.action.open') }}
             </DropdownMenuItem>
-            <template v-if="canRemove">
+            <template v-if="canRemove && item.status !== 'failed'">
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
