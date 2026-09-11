@@ -785,8 +785,7 @@
       "addComputer": "コンピューターを追加",
       "addYourComputer": "使うコンピューターを追加",
       "manageAccess": "アクセス権を管理",
-      "manageComputers": "コンピューターを管理",
-      "noAccess": "他のコンピューターは未承認です"
+      "manageComputers": "コンピューターを管理"
     },
     "computerLoading": "コンピューターを読み込み中",
     "computerLoadFailed": "コンピューターを読み込めませんでした",

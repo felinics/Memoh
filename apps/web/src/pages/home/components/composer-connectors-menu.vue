@@ -8,8 +8,14 @@ import { useRouter } from 'vue-router'
 import { DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, Spinner } from '@felinic/ui'
 import { getBotsByBotIdConnectors, getConnectorsCatalog } from '@memohai/sdk'
 import ProviderIcon from '@/components/provider-icon/index.vue'
+import { useCapabilitiesStore } from '@/store/capabilities'
 
 const props = defineProps<{ botId: string, botName: string }>()
+// Connectors only exist when the server has ConnectIt configured; everywhere
+// else consuming them gates on this capability (useConnectorLogos, bot-apps),
+// and the endpoints answer ErrNotConfigured without it.
+const capabilities = useCapabilitiesStore()
+void capabilities.load()
 const { t } = useI18n()
 const router = useRouter()
 const open = ref(false)
@@ -35,7 +41,10 @@ function goToSettings() {
 </script>
 
 <template>
-  <DropdownMenuSub v-model:open="open">
+  <DropdownMenuSub
+    v-if="capabilities.connectors"
+    v-model:open="open"
+  >
     <DropdownMenuSubTrigger :disabled="!botId">
       <ConnectorIcon />
       <span>{{ t('connectors.title') }}</span>

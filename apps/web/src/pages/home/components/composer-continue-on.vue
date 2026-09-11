@@ -147,6 +147,7 @@
     v-if="accessDialogOpen"
     v-model:open="accessDialogOpen"
     :bot="{ id: botId, name: botName }"
+    @add-computer="onAccessAddComputer"
   />
   <ConnectComputerDialog
     v-model:open="connectDialogOpen"
@@ -213,6 +214,13 @@ const accountRuntimesEmpty = computed(() => runtimes.value !== undefined && runt
 // The same one-click credential + stepper the Computers page runs, mounted
 // in place — the chat surface never navigates away for this.
 const { connectOpen: connectDialogOpen, connectCredential: createdCredential, startConnect } = useConnectComputer()
+
+// Ghost row inside the ACL dialog: close that dialog and run the same wizard
+// here, where the dialog's v-if can't take the wizard down with it.
+function onAccessAddComputer(): void {
+  accessDialogOpen.value = false
+  void startConnect()
+}
 
 // Opening the menu is the user's decision moment — refetch so a computer
 // connected or authorized elsewhere just now shows up immediately.

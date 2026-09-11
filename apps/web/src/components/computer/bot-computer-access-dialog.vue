@@ -39,11 +39,6 @@
       </DialogFooter>
     </DialogPanel>
   </Dialog>
-
-  <ConnectComputerDialog
-    v-model:open="connectOpen"
-    :credential="connectCredential"
-  />
 </template>
 
 <script setup lang="ts">
@@ -62,8 +57,6 @@ import {
   DialogTitle,
 } from '@felinic/ui'
 import ComputerAccessList from './computer-access-list.vue'
-import ConnectComputerDialog from './connect-computer-dialog.vue'
-import { useConnectComputer } from './use-connect-computer'
 
 // The standalone Computer ACL dialog (gear on the Computers page, composer
 // empty states). Exactly one subject prop is set: runtime shows bots, bot
@@ -75,15 +68,17 @@ const props = defineProps<{
 
 const open = defineModel<boolean>('open', { default: false })
 
+// The zero-state ghost row's add action is re-emitted, not run here: hosts
+// v-if this dialog away the moment it closes, so a wizard mounted inside it
+// would be destroyed before its credential round-trip resolves. The host owns
+// the wizard on a surface that outlives this dialog.
+const emit = defineEmits<{ addComputer: [] }>()
+
 const { t } = useI18n()
 const router = useRouter()
-const { connectOpen, connectCredential, startConnect } = useConnectComputer()
 
-// The zero-state ghost row adds in place: this dialog steps aside while the
-// wizard runs on the same surface, no route change.
 function onAddComputer(): void {
-  open.value = false
-  void startConnect()
+  emit('addComputer')
 }
 
 function goToManage(): void {

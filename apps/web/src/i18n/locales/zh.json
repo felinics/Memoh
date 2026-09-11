@@ -804,8 +804,7 @@
       "addComputer": "添加电脑",
       "addYourComputer": "添加你的电脑",
       "manageAccess": "管理访问权",
-      "manageComputers": "管理电脑",
-      "noAccess": "尚未授权其他电脑"
+      "manageComputers": "管理电脑"
     },
     "computerLoading": "正在加载电脑",
     "computerLoadFailed": "无法加载电脑",
