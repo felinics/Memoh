@@ -3675,15 +3675,15 @@
     "unnamedSkill": "Unnamed skill",
     "dependenciesHint": "Installed into the bot's workspace and shared with other Apps that need them.",
     "dependencyPending": "Loading…",
-    "connectorsHint": "Each connector needs your authorization after the App is installed.",
+    "connectorsHint": "Authorize connectors during installation.",
     "connectorsUnavailableHint": "Connect-It is not configured on this server; these connectors will stay unauthorized.",
-    "connectorAuthHint": "Authorize after installing.",
+    "connectorAuthHint": "Authorize during installation.",
     "license": "License",
     "repository": "Repository",
     "revision": "Revision",
     "installPreview": "Installing will",
     "installPreviewDependency": "install into the workspace if missing",
-    "installPreviewConnector": "need your authorization",
+    "installPreviewConnector": "authorize during installation",
     "installPreviewConnectorOptional": "can be authorized later (optional)",
     "viewAll": "View all"
   },
@@ -3916,7 +3916,11 @@
       "noLog": "No script output.",
       "log": "Operation log",
       "runInBackground": "Run in background",
-      "reconnecting": "Connection to the server was lost; checking the result…"
+      "reconnecting": "Connection to the server was lost; checking the result…",
+      "preparingAuthorization": "Preparing authorization…",
+      "awaitingAuthorization": "Complete authorization in the opened window.",
+      "authorize": "Connect {name} to finish installation.",
+      "authorizationLoadFailed": "Could not load authorization. Try again."
     },
     "steps": {
       "skills": "Skills",

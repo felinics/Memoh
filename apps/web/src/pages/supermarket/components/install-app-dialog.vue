@@ -101,6 +101,9 @@
 
   <AppProgressDialog
     :open="progressOpen"
+    :operation="active"
+    :oauth-popup="oauthPopup"
+    :has-skills="!!pkg?.skills.length"
     :name="active?.name ?? ''"
     :action="active?.action ?? 'install'"
     :steps="active?.steps ?? []"
@@ -116,7 +119,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery } from '@pinia/colada'
@@ -139,12 +142,14 @@ import {
 } from '@felinic/ui'
 import {
   getBotsByBotIdWorkspaceTargets,
+  getConnectorsCatalog,
   type HandlersSupermarketAppDescriptor,
   type WorkspaceWorkspaceTarget,
 } from '@memohai/sdk'
 import BotSelect from '@/components/bot-select/index.vue'
 import AppProgressDialog from '@/pages/bots/components/app-progress-dialog.vue'
 import { useAppOperation } from '@/pages/bots/composables/useAppOperation'
+import { prepareConnectorOAuthPopup } from '@/composables/useConnectorOAuth'
 import { appDisplayName } from '@/composables/api/useApps'
 import { workspaceTargetAvailable, workspaceTargetName } from '@/utils/workspace-target'
 
@@ -197,9 +202,26 @@ watch(selectedBotId, () => {
 
 const { active, progressOpen, start, retry, setProgressOpen } = useAppOperation(selectedBotId, 'supermarket-install')
 
+const oauthPopup = shallowRef<Window | null>(null)
+const catalogQuery = useQuery({
+  key: () => ['connectors-catalog'],
+  query: async () => (await getConnectorsCatalog({ throwOnError: true })).data,
+  enabled: () => props.open && !!props.pkg?.connectors.length,
+})
+function closePopup() {
+  oauthPopup.value?.close()
+  oauthPopup.value = null
+}
+watch(progressOpen, open => { if (!open) closePopup() })
+onBeforeUnmount(closePopup)
+
 function handleInstall() {
   const pkg = props.pkg
   if (!selectedBotId.value || !pkg?.registry_id || !pkg.app_id || !pkg.revision) return
+  closePopup()
+  const firstConnector = pkg.connectors[0]
+  const method = catalogQuery.data.value?.find(item => item.type === firstConnector?.type)?.auth_methods?.[0]
+  if (method?.type === 'oauth2') oauthPopup.value = prepareConnectorOAuthPopup(t('common.loading'))
   const started = start({
     targetId: selectedTargetId.value,
     registryId: pkg.registry_id,
@@ -214,6 +236,7 @@ function handleInstall() {
     },
   })
   if (started) emit('update:open', false)
+  else closePopup()
 }
 
 function openBotApps() {

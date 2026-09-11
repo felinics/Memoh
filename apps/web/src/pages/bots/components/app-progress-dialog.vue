@@ -3,13 +3,14 @@
 // Server walks through (dependencies, Skills, connectors) above the raw script
 // log. Closing while running means "run in background"; the store keeps the
 // stream and the verdict lands as a toast.
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, toRef, watch } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { getConnectorsCatalog } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import {
   Alert,
   AlertDescription,
   AlertTitle,
-  Badge,
   Button,
   Dialog,
   DialogBody,
@@ -18,6 +19,7 @@ import {
   DialogHeader,
   DialogPanel,
   DialogTitle,
+  InlineLoadingRow,
   Spinner,
   TextButton,
   toast,
@@ -25,11 +27,16 @@ import {
 } from '@felinic/ui'
 import { AlertTriangle, Check, CircleDashed, Link2, KeyRound } from 'lucide-vue-next'
 import type { AppOperationAction } from '@/composables/api/useAppStream'
-import type { AppOperationStep } from '@/store/app-operations'
+import AppConnectorAuthForm from './app-connector-auth-form.vue'
+import { useAppInstallAuthorization } from '../composables/useAppInstallAuthorization'
+import type { AppOperation, AppOperationStep } from '@/store/app-operations'
 import type { DependencyLogLine, DependencyProgressStatus } from '@/utils/workspace-dependency'
 
 const props = withDefaults(defineProps<{
   open: boolean
+  operation?: AppOperation | null
+  oauthPopup?: Window | null
+  hasSkills?: boolean
   name: string
   action?: AppOperationAction
   steps: AppOperationStep[]
@@ -42,6 +49,9 @@ const props = withDefaults(defineProps<{
   doneLabel?: string
 }>(), {
   action: 'install',
+  operation: null,
+  oauthPopup: null,
+  hasSkills: true,
   result: '',
   error: '',
   canRetry: true,
@@ -59,7 +69,42 @@ const { copyText } = useClipboard()
 
 const running = computed(() => props.status === 'running')
 
+const operation = computed(() => props.operation ?? null)
+const authorization = useAppInstallAuthorization(operation, toRef(props, 'open'))
+const { installation, loading: authorizationLoading, error: authorizationError, current: connector, needsSetup } = authorization
+const authForm = ref<InstanceType<typeof AppConnectorAuthForm> | null>(null)
+const authPhase = ref<'idle' | 'submitting' | 'awaiting-oauth'>('idle')
+const catalogQuery = useQuery({
+  key: () => ['connectors-catalog'],
+  query: async () => (await getConnectorsCatalog({ throwOnError: true })).data,
+  enabled: () => props.open && !!props.operation && props.steps.some(step => step.kind === 'connector'),
+})
+const catalog = computed(() => catalogQuery.data.value?.find(item => item.type === connector.value?.type))
+const visibleSteps = computed(() => props.steps.filter(step => step.kind !== 'skills' || props.hasSkills))
+const catalogLoading = computed(() => !catalog.value && catalogQuery.asyncStatus.value === 'loading')
+const setupLoading = computed(() => authorizationLoading.value || catalogLoading.value)
+const showAuthForm = computed(() => props.open && needsSetup.value && !setupLoading.value
+  && !authorizationError.value && !!connector.value && !!catalog.value)
+watch(showAuthForm, shown => { if (!shown) authPhase.value = 'idle' })
+watch([() => props.status, needsSetup, authorizationLoading, () => props.open], () => {
+  if (!props.open || props.status === 'error' || props.status === 'unknown'
+    || (props.status === 'done' && !needsSetup.value && !authorizationLoading.value)) props.oauthPopup?.close()
+})
+function updateOpen(open: boolean) {
+  if (!open && authPhase.value === 'submitting') return
+  if (!open) authForm.value?.cancel()
+  emit('update:open', open)
+}
+async function retryAuthorization() {
+  await Promise.all([authorization.refresh(), catalogQuery.refetch()])
+}
+
 const subtitle = computed(() => {
+  if (needsSetup.value) {
+    if (setupLoading.value) return t('apps.progress.preparingAuthorization')
+    if (authPhase.value === 'awaiting-oauth') return t('apps.progress.awaitingAuthorization')
+    return t('apps.progress.authorize', { name: catalog.value?.name || connector.value?.type || props.name })
+  }
   if (props.status === 'done') {
     return props.result === 'partial' ? t('apps.progress.partialTitle') : t('apps.progress.doneTitle')
   }
@@ -83,7 +128,7 @@ function stepLabel(step: AppOperationStep): string {
     case 'skills':
       return t('apps.steps.skills')
     case 'connector':
-      return t('apps.steps.connector', { name: step.id })
+      return catalogQuery.data.value?.find(item => item.type === step.id)?.name || step.id
     case 'dependency':
       return t('apps.steps.dependency', { name: step.id })
     default:
@@ -97,25 +142,8 @@ function stepStatusLabel(step: AppOperationStep): string {
   return text === key ? step.status : text
 }
 
-function stepVariant(step: AppOperationStep): 'secondary' | 'success' | 'warning' | 'destructive' | 'outline' {
-  switch (step.status) {
-    case 'running':
-      return 'secondary'
-    case 'failed':
-      return 'destructive'
-    case 'needs_auth':
-      return 'warning'
-    case 'installed':
-    case 'linked':
-    case 'removed':
-    case 'disconnected':
-      return 'success'
-    default:
-      return 'outline'
-  }
-}
-
 function stepIcon(step: AppOperationStep) {
+  if (step.kind === 'connector' && step.id === connector.value?.type && authPhase.value !== 'idle') return Spinner
   switch (step.status) {
     case 'running':
       return Spinner
@@ -164,10 +192,10 @@ function finish() {
 <template>
   <Dialog
     :open="open"
-    @update:open="(value) => emit('update:open', value)"
+    @update:open="updateOpen"
   >
     <DialogPanel
-      width="2xl"
+      width="lg"
       footer
     >
       <DialogHeader class="min-w-0">
@@ -186,11 +214,11 @@ function finish() {
 
       <DialogBody class="min-w-0 space-y-4">
         <ul
-          v-if="steps.length"
+          v-if="visibleSteps.length"
           class="space-y-1.5"
         >
           <li
-            v-for="step in steps"
+            v-for="step in visibleSteps"
             :key="`${step.kind}/${step.id}`"
             class="flex min-w-0 items-center gap-2 text-body"
           >
@@ -203,28 +231,20 @@ function finish() {
               v-if="step.version && step.kind !== 'skills'"
               class="font-mono text-caption text-muted-foreground"
             >{{ step.version }}</span>
-            <Badge
-              :variant="stepVariant(step)"
-              size="sm"
-            >
+            <span :class="['installed', 'linked', 'needs_auth'].includes(step.status) ? 'sr-only' : 'text-caption text-muted-foreground'">
               {{ stepStatusLabel(step) }}
-            </Badge>
+            </span>
           </li>
         </ul>
 
         <div
+          v-if="lines.length"
           ref="scroller"
           role="region"
           :aria-label="t('apps.progress.log')"
           tabindex="0"
           class="max-h-60 min-w-0 overflow-auto rounded-lg border border-border bg-muted-soft p-3 font-mono text-caption leading-relaxed text-foreground"
         >
-          <p
-            v-if="lines.length === 0"
-            class="text-muted-foreground"
-          >
-            {{ running ? t('apps.progress.preparing') : t('apps.progress.noLog') }}
-          </p>
           <div
             v-for="(line, index) in lines"
             :key="line.id ?? index"
@@ -234,6 +254,30 @@ function finish() {
             {{ line.data }}
           </div>
         </div>
+
+        <InlineLoadingRow v-if="needsSetup && setupLoading">
+          {{ t('apps.progress.preparingAuthorization') }}
+        </InlineLoadingRow>
+        <AppConnectorAuthForm
+          v-else-if="showAuthForm && operation && installation"
+          :key="`${installation.installation_id}/${connector?.type}`"
+          ref="authForm"
+          :bot-id="operation.botId"
+          :installation-id="installation.installation_id!"
+          :connector="connector ?? null"
+          :catalog="catalog"
+          :oauth-popup="oauthPopup?.closed ? null : oauthPopup"
+          auto-start
+          @phase="authPhase = $event"
+          @authorized="authorization.authorized"
+        />
+        <Alert
+          v-else-if="needsSetup"
+          variant="destructive"
+        >
+          <AlertTitle>{{ t('apps.progress.authorizationLoadFailed') }}</AlertTitle>
+          <AlertDescription>{{ authorizationError || t('apps.connector.unavailableDescription') }}</AlertDescription>
+        </Alert>
 
         <Alert
           v-if="status === 'error' || status === 'unknown'"
@@ -247,7 +291,7 @@ function finish() {
         </Alert>
 
         <Alert
-          v-else-if="status === 'done' && result === 'partial'"
+          v-else-if="status === 'done' && result === 'partial' && !needsSetup"
           variant="default"
           class="min-w-0"
         >
@@ -258,14 +302,42 @@ function finish() {
 
       <DialogFooter class="min-w-0 items-center gap-2 sm:justify-between">
         <TextButton
-          :disabled="lines.length === 0"
+          v-if="lines.length"
           @click="copyLog"
         >
           {{ t('common.copy') }}
         </TextButton>
-        <div class="flex items-center gap-2">
+        <div class="ml-auto flex items-center gap-2">
+          <template v-if="needsSetup">
+            <Button
+              variant="outline"
+              :disabled="authPhase === 'submitting'"
+              @click="updateOpen(false)"
+            >
+              {{ t('bots.dependencies.close') }}
+            </Button>
+            <Button
+              v-if="showAuthForm && authPhase === 'awaiting-oauth'"
+              @click="authForm?.cancel()"
+            >
+              {{ t('common.cancel') }}
+            </Button>
+            <Button
+              v-else-if="showAuthForm"
+              :loading="authPhase === 'submitting'"
+              @click="authForm?.connect()"
+            >
+              {{ t('connectors.connect') }}
+            </Button>
+            <Button
+              v-else-if="!setupLoading"
+              @click="retryAuthorization"
+            >
+              {{ t('common.retry') }}
+            </Button>
+          </template>
           <Button
-            v-if="running"
+            v-else-if="running"
             variant="outline"
             @click="emit('update:open', false)"
           >

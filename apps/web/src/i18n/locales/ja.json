@@ -3669,15 +3669,15 @@
     "unnamedSkill": "名前のないスキル",
     "dependenciesHint": "Bot のワークスペースにインストールされ、必要とする他のアプリと共有されます。",
     "dependencyPending": "読み込み中…",
-    "connectorsHint": "アプリをインストールした後、各コネクターの認証が必要です。",
+    "connectorsHint": "インストール中にコネクターを認証できます。",
     "connectorsUnavailableHint": "このサーバーでは Connect-It が設定されていないため、これらのコネクターは未認証のままになります。",
-    "connectorAuthHint": "インストール後に認証します。",
+    "connectorAuthHint": "インストール中に認証します。",
     "license": "ライセンス",
     "repository": "リポジトリ",
     "revision": "リビジョン",
     "installPreview": "インストールすると",
     "installPreviewDependency": "未インストールならワークスペースにインストールします",
-    "installPreviewConnector": "認証が必要です",
+    "installPreviewConnector": "インストール中に認証",
     "installPreviewConnectorOptional": "後で認証できます（任意）",
     "viewAll": "すべて表示"
   },
@@ -3910,7 +3910,11 @@
       "noLog": "スクリプトの出力はありません。",
       "log": "操作ログ",
       "runInBackground": "バックグラウンドで実行",
-      "reconnecting": "サーバーとの接続が切れました。結果を確認しています…"
+      "reconnecting": "サーバーとの接続が切れました。結果を確認しています…",
+      "preparingAuthorization": "認証を準備しています…",
+      "awaitingAuthorization": "開いたウィンドウで認証を完了してください。",
+      "authorize": "{name} に接続してインストールを完了します。",
+      "authorizationLoadFailed": "認証情報を読み込めませんでした。もう一度お試しください。"
     },
     "steps": {
       "skills": "スキル",

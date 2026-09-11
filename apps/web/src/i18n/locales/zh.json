@@ -3675,15 +3675,15 @@
     "unnamedSkill": "未命名 Skill",
     "dependenciesHint": "安装到 Bot 的工作区，并与需要它们的其他应用共享。",
     "dependencyPending": "加载中…",
-    "connectorsHint": "安装应用后，每个连接器都需要你授权。",
+    "connectorsHint": "安装时即可完成连接器授权。",
     "connectorsUnavailableHint": "服务器未配置 Connect-It，这些连接器将保持未授权状态。",
-    "connectorAuthHint": "安装后授权。",
+    "connectorAuthHint": "安装时授权。",
     "license": "许可证",
     "repository": "仓库",
     "revision": "版本修订",
     "installPreview": "安装将会",
     "installPreviewDependency": "缺失时安装到工作区",
-    "installPreviewConnector": "需要你授权",
+    "installPreviewConnector": "安装时授权",
     "installPreviewConnectorOptional": "可稍后授权（可选）",
     "viewAll": "查看全部"
   },
@@ -3916,7 +3916,11 @@
       "noLog": "没有脚本输出。",
       "log": "操作日志",
       "runInBackground": "后台运行",
-      "reconnecting": "与服务器的连接中断，正在确认结果…"
+      "reconnecting": "与服务器的连接中断，正在确认结果…",
+      "preparingAuthorization": "正在准备授权…",
+      "awaitingAuthorization": "请在打开的窗口中完成授权。",
+      "authorize": "连接 {name} 以完成安装。",
+      "authorizationLoadFailed": "无法加载授权信息，请重试。"
     },
     "steps": {
       "skills": "Skills",
