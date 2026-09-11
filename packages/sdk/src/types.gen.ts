@@ -6781,6 +6781,62 @@ export type GetBotsByBotIdConnectorsResponses = {
 
 export type GetBotsByBotIdConnectorsResponse = GetBotsByBotIdConnectorsResponses[keyof GetBotsByBotIdConnectorsResponses];
 
+export type DeleteBotsByBotIdConnectorsByConnectionIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Connect-It connection ID
+         */
+        connection_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/connectors/{connection_id}';
+};
+
+export type DeleteBotsByBotIdConnectorsByConnectionIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type DeleteBotsByBotIdConnectorsByConnectionIdError = DeleteBotsByBotIdConnectorsByConnectionIdErrors[keyof DeleteBotsByBotIdConnectorsByConnectionIdErrors];
+
+export type DeleteBotsByBotIdConnectorsByConnectionIdResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
 export type GetBotsByBotIdConnectorsByConnectionIdData = {
     body?: never;
     path: {

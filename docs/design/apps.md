@@ -31,7 +31,7 @@
 | 哪些 registry 可含 deps 与 connector | 第一期仅 `memoh` registry；远程 registry 的 app 只有 skills |
 | dep 的 revision 是否被 app 锁定 | 不锁定，安装与更新时总是解析 dep 当前定义，与现有 workspacedeps 行为一致 |
 | 工作区目标粒度 | app 安装记录与 dep 引用按 `(bot, workspace_target)`；connector 引用挂在安装记录上，但 connection 是 bot 级共享 |
-| 子项删除 | skills、deps、connector 不能在 app 之外单独删除；dep 子项保留 update、reinstall、rollback、查看脚本，connector 子项保留授权、重新授权、启停 |
+| 子项删除 | skills、deps、connector 不能在 app 之外单独删除；dep 子项保留 update、reinstall、rollback、查看脚本，connector 子项保留授权、重新授权、启停、断开（断开会吊销 Bot 级连接并让引用它的 app 重新要求授权） |
 | 自动带装的包 | 不自动回收，删除确认框提供“同时移除仅被它使用的自动安装包”勾选，默认不勾 |
 
 ## 3. Registry 侧（Supermarket 仓库）
@@ -254,7 +254,7 @@ RLS 策略与现有表一致。
 
 - `pages/bots/detail.vue`：删除 `connectors`、`dependencies` 两个 tab，新增 `apps` tab；`skills` tab 保留，只管理用户自建、发现的 skill 与发现路径。
 - 新增 `pages/bots/components/bot-apps.vue`：app 以两列卡片网格显示（复用市场页的 `market-item-card.vue`，只有图标、名称、描述），点击进入二级页（`app-detail-panel.vue`，版式同市场详情页：返回/操作行、大图标与标题、描述）展示 Skills / 依赖 / 连接器；有可用更新时行上直接显示 Update，点击弹出多选对话框（`app-update-dialog.vue`）批量更新；其余操作为检查更新、继续安装、删除。
-- 子项组件：`app-dependency-item.vue` 复用现有 `dependency-row.vue` 的状态与动作决策，去掉 remove；`app-connector-item.vue` 提供授权、重新授权、启停；`app-skill-item.vue` 提供查看。
+- 子项组件：`app-dependency-item.vue` 复用现有 `dependency-row.vue` 的状态与动作决策，去掉 remove；`app-connector-item.vue` 提供授权、重新授权、启停、断开；`app-skill-item.vue` 提供查看。
 - 删除确认框显示删除预览，含“同时移除仅被它使用的自动安装包”勾选。
 - `store/dependency-operations.ts` 泛化为 `store/app-operations.ts`，以安装记录为 key 持有 SSE 流，`step` 事件驱动进度对话框分组显示。
 - `pages/home/components/dependency-missing-block.vue` 跳转目标改为 apps tab 并定位到规范包。

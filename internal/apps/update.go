@@ -132,8 +132,9 @@ func uniqueDependencyIDs(ids []string) []string {
 }
 
 // Update moves an installation to the registry's current release. Skills
-// are replaced atomically, new references are linked or installed, and
-// references the new release dropped are released the way Remove would.
+// are replaced atomically, new references are linked or installed, dropped
+// dependencies are removed the way Remove would, and dropped connector
+// references are unlinked while the bot-level connection stays authorized.
 // Dependency definitions keep their own update cycle; an App update never
 // reinstalls a dependency that is already present.
 func (s *Service) Update(ctx context.Context, botID, installationID string, sink EventSink) (OperationResult, error) {
@@ -161,14 +162,16 @@ func (s *Service) updateRelease(ctx context.Context, botID string, inst Installa
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if current.Revision == inst.Revision && inst.Status == StatusInstalled {
+	if current.Revision == inst.Revision && (inst.Status == StatusInstalled || inst.Status == StatusPartial) {
 		release, err := s.releaseFor(ctx, inst)
 		if err != nil {
 			return OperationResult{}, err
 		}
 		result := OperationResult{Installation: inst}
-		// Retained references are durable cleanup work, including rows left
-		// by an older Server. Matching revisions alone do not prove completion.
+		// A partial installation waits for authorization, not for a release,
+		// so it is not republished either. Retained references are durable
+		// cleanup work, including rows left by an older Server; matching
+		// revisions alone do not prove completion.
 		if err := s.pruneReferences(ctx, inst, release, sink, &result); err != nil {
 			return result, s.failInstallation(ctx, inst, err)
 		}

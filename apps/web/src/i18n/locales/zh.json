@@ -3644,7 +3644,7 @@
     "reauthorize": "重新授权",
     "disconnect": "断开连接",
     "disconnectTitle": "断开这个连接器？",
-    "disconnectDescription": "这会从 Bot 中移除 {name}，并删除已保存的连接。",
+    "disconnectDescription": "这会删除已保存的 {name} 连接，使用它的应用需要重新授权。",
     "disconnected": "已断开连接器",
     "disconnectFailed": "断开连接器失败",
     "loadFailed": "加载连接器失败",
@@ -3873,6 +3873,7 @@
       "skipped": "已跳过",
       "removed": "已移除",
       "kept": "已保留",
+      "unlinked": "已解除关联",
       "disconnected": "已断开",
       "updated": "已更新"
     },

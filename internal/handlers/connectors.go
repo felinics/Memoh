@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -11,38 +13,55 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/apps"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/connectors"
 )
 
+// connectionUnlinker is the slice of *apps.Service the handler uses once a
+// connection is deleted.
+type connectionUnlinker interface {
+	UnlinkConnection(ctx context.Context, botID, connectionID string) error
+}
+
 type ConnectorsHandler struct {
 	service        *connectors.Service
+	apps           connectionUnlinker
 	botService     *bots.Service
 	accountService *accounts.Service
+	logger         *slog.Logger
 }
 
 func NewConnectorsHandler(
+	log *slog.Logger,
 	service *connectors.Service,
+	appService *apps.Service,
 	botService *bots.Service,
 	accountService *accounts.Service,
 ) *ConnectorsHandler {
-	return &ConnectorsHandler{
+	h := &ConnectorsHandler{
 		service:        service,
 		botService:     botService,
 		accountService: accountService,
+		logger:         log.With(slog.String("handler", "connectors")),
 	}
+	if appService != nil {
+		h.apps = appService
+	}
+	return h
 }
 
 func (h *ConnectorsHandler) Register(e *echo.Echo) {
 	e.GET("/connectors/catalog", h.ListCatalog)
 
-	// Connections are created and removed through Apps
-	// (/bots/:bot_id/packages); here they are only listed, toggled and
-	// reauthorized.
+	// Connections are created through Apps (/bots/:bot_id/apps); here they
+	// are listed, toggled, reauthorized and disconnected. App updates only
+	// unlink a connection, so disconnecting is the user's explicit action.
 	group := e.Group("/bots/:bot_id/connectors")
 	group.GET("", h.List)
 	group.GET("/:connection_id", h.Get)
 	group.PATCH("/:connection_id", h.SetEnabled)
+	group.DELETE("/:connection_id", h.Delete)
 	group.POST("/:connection_id/reauth", h.Reauthorize)
 }
 
@@ -166,6 +185,43 @@ func (h *ConnectorsHandler) SetEnabled(c echo.Context) error {
 		c.Request().Context(), botID, strings.TrimSpace(c.Param("connection_id")), *request.Enabled,
 	); err != nil {
 		return connectorHTTPError(err)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// Delete godoc
+// @Summary Disconnect a connector
+// @Description Delete the Connect-It credential, remove its bot binding and unlink it from every App that referenced it; those Apps ask for authorization again.
+// @Tags connectors
+// @Param bot_id path string true "Bot ID"
+// @Param connection_id path string true "Connect-It connection ID"
+// @Success 204
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
+// @Router /bots/{bot_id}/connectors/{connection_id} [delete].
+func (h *ConnectorsHandler) Delete(c echo.Context) error {
+	botID, err := h.authorize(c)
+	if err != nil {
+		return err
+	}
+	ctx := c.Request().Context()
+	connectionID := strings.TrimSpace(c.Param("connection_id"))
+	if err := h.service.Delete(ctx, botID, connectionID); err != nil {
+		return connectorHTTPError(err)
+	}
+	// The credential is revoked at this point. A stale App link only delays
+	// the authorization prompt until the App list reconciles, so it does not
+	// turn a completed disconnect into an error.
+	if h.apps != nil {
+		if err := h.apps.UnlinkConnection(ctx, botID, connectionID); err != nil {
+			h.logger.Warn("unlink disconnected connection from Apps",
+				slog.String("bot_id", botID), slog.String("connection_id", connectionID), slog.Any("error", err))
+		}
 	}
 	return c.NoContent(http.StatusNoContent)
 }

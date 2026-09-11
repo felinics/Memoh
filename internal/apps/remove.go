@@ -216,7 +216,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	sink.Send(Event{Type: EventStep, Kind: KindSkills, ID: inst.AppID})
 	tx, err := s.skills.RemoveSkills(ctx, botID, inst.WorkspaceTargetID, inst.RegistryID, inst.AppID, inst.Revision)
 	if err != nil {
-		return result, s.failInstallation(ctx, inst, err)
+		return result, s.failInstallation(ctx, inst, fail("remove Skills", err))
 	}
 	record(StepResult{Kind: KindSkills, ID: inst.AppID, Status: StepRemoved})
 
@@ -232,7 +232,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepKept, Error: dep.Reason})
 		}
 		if err := s.store.RemoveDependencyRef(ctx, inst.ID, dep.ID); err != nil {
-			return result, errors.Join(s.failInstallation(ctx, inst, fmt.Errorf("apps: drop dependency reference %s: %w", dep.ID, err)), tx.Rollback(ctx))
+			return result, errors.Join(s.failInstallation(ctx, inst, fail("drop dependency reference "+dep.ID, err)), tx.Rollback(ctx))
 		}
 	}
 
@@ -248,13 +248,13 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepKept, Error: conn.Reason})
 		}
 		if err := s.store.RemoveConnectorRef(ctx, inst.ID, conn.Type); err != nil {
-			return result, errors.Join(s.failInstallation(ctx, inst, fmt.Errorf("apps: drop connector reference %s: %w", conn.Type, err)), tx.Rollback(ctx))
+			return result, errors.Join(s.failInstallation(ctx, inst, fail("drop connector reference "+conn.Type, err)), tx.Rollback(ctx))
 		}
 	}
 
 	removed, err := s.store.Delete(ctx, botID, inst.ID)
 	if err != nil {
-		return result, errors.Join(s.failInstallation(ctx, inst, fmt.Errorf("apps: delete installation: %w", err)), tx.Rollback(ctx))
+		return result, errors.Join(s.failInstallation(ctx, inst, fail("delete installation", err)), tx.Rollback(ctx))
 	}
 	if err := tx.Commit(ctx); err != nil {
 		s.logger.Warn("cleanup removed App Skills failed", slog.String("app_id", inst.AppID), slog.Any("error", err))

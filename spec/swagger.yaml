@@ -9298,6 +9298,54 @@ paths:
       tags:
       - connectors
   /bots/{bot_id}/connectors/{connection_id}:
+    delete:
+      description: Delete the Connect-It credential, remove its bot binding and unlink
+        it from every App that referenced it; those Apps ask for authorization again.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Connect-It connection ID
+        in: path
+        name: connection_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Disconnect a connector
+      tags:
+      - connectors
     get:
       description: Get one Connect-It connection bound to a bot.
       parameters:

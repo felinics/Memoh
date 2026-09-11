@@ -223,6 +223,17 @@
       @authorized="onConnectorAuthorized"
     />
 
+    <ConfirmDeleteDialog
+      :open="!!disconnectTarget"
+      :title="t('connectors.disconnectTitle')"
+      :description="t('connectors.disconnectDescription', { name: disconnectTarget?.name ?? '' })"
+      :confirm-label="t('connectors.disconnect')"
+      :cancel-label="t('common.cancel')"
+      :loading="connectorPending.has(disconnectTarget?.connector.connection_id ?? '')"
+      @update:open="(value) => { if (!value) disconnectTarget = null }"
+      @confirm="disconnectConnector"
+    />
+
     <DependencyConfirmDialog
       :open="confirm.open"
       :mode="confirm.mode"
@@ -276,6 +287,7 @@ import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Button,
   CalloutBanner,
+  ConfirmDeleteDialog,
   DetailPane,
   Empty,
   EmptyContent,
@@ -296,6 +308,7 @@ import {
 } from '@felinic/ui'
 import { ArrowRight, Plus, RefreshCw } from 'lucide-vue-next'
 import {
+  deleteBotsByBotIdConnectorsByConnectionId,
   getBotsByBotIdWorkspaceTargets,
   getConnectorsCatalog,
   patchBotsByBotIdConnectorsByConnectionId,
@@ -612,6 +625,7 @@ function onRemoveConfirmed(options: { removeUnreferencedRequired: boolean }) {
 
 const authTarget = ref<{ installationId: string; appName: string; connector: AppConnectorItem } | null>(null)
 const connectorPending = ref(new Set<string>())
+const disconnectTarget = ref<{ connector: AppConnectorItem; name: string } | null>(null)
 
 function onSelectedConnector(connector: AppConnectorItem, action: AppConnectorAction) {
   if (selected.value) void onConnector(selected.value, connector, action)
@@ -623,7 +637,38 @@ async function onConnector(item: AppItem, connector: AppConnectorItem, action: A
     authTarget.value = { installationId: item.installation_id, appName: appDisplayName(item, locale.value), connector }
     return
   }
+  if (action === 'disconnect') {
+    const name = connectorCatalog.value.get(connector.type ?? '')?.name || connector.type || t('connectors.unknown')
+    disconnectTarget.value = { connector, name }
+    return
+  }
   await reauthorize(connector)
+}
+
+/**
+ * Deletes the bot-level connection after confirmation. App updates only
+ * unlink connections, so this is the one place a stored credential is
+ * revoked outside of uninstalling an App.
+ */
+async function disconnectConnector() {
+  const target = disconnectTarget.value
+  const connectionId = target?.connector.connection_id
+  if (!target || !connectionId) return
+  if (connectorPending.value.has(connectionId)) return
+  connectorPending.value.add(connectionId)
+  try {
+    await deleteBotsByBotIdConnectorsByConnectionId({
+      path: { bot_id: props.botId, connection_id: connectionId },
+      throwOnError: true,
+    })
+    disconnectTarget.value = null
+    await onConnectorAuthorized()
+    toast.success(t('connectors.disconnected'))
+  } catch (err) {
+    toast.error(resolveApiErrorMessage(err, t('connectors.disconnectFailed')))
+  } finally {
+    connectorPending.value.delete(connectionId)
+  }
 }
 
 async function onConnectorAuthorized() {

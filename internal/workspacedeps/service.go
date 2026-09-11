@@ -274,6 +274,13 @@ func (s *Service) Refresh(ctx context.Context, botID, targetID string) (ListResu
 	return s.list(ctx, botID, targetID, true)
 }
 
+// EnsureRunning starts a stopped native workspace the way a mutating
+// operation would, so a caller can act on live discovery facts. Remote
+// targets are never started; an offline one returns ErrRemoteOffline.
+func (s *Service) EnsureRunning(ctx context.Context, botID, targetID string) error {
+	return s.ensureWorkspace(ctx, botID, normalizeTargetID(targetID))
+}
+
 func (s *Service) list(ctx context.Context, botID, targetID string, force bool) (ListResult, error) {
 	ctx, catalogResult, err := s.prepareCatalog(ctx, force, false)
 	if err != nil {

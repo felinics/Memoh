@@ -44,7 +44,7 @@ import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependency
 import DependencyRow from './dependency-row.vue'
 import { appPrimaryAction, type AppRowAction } from './app-actions'
 
-export type AppConnectorAction = 'authorize' | 'reauthorize'
+export type AppConnectorAction = 'authorize' | 'reauthorize' | 'disconnect'
 
 const props = withDefaults(defineProps<{
   item: AppItem
@@ -321,7 +321,7 @@ function dependencyName(dep: AppDependencyItem): string {
             class="flex items-center gap-2"
           >
             <Button
-              v-if="!connector.connection_id"
+              v-if="!connector.connection_id || !connector.connector"
               size="sm"
               variant="outline"
               :disabled="!connectorsEnabled || busy"
@@ -337,6 +337,15 @@ function dependencyName(dep: AppDependencyItem): string {
               @click="emit('connector', connector, 'reauthorize')"
             >
               {{ t('connectors.reauthorize') }}
+            </Button>
+            <Button
+              v-if="connector.connection_id && connector.connector"
+              size="sm"
+              variant="ghost"
+              :disabled="!connectorsEnabled || connectorPending.has(connector.connection_id)"
+              @click="emit('connector', connector, 'disconnect')"
+            >
+              {{ t('connectors.disconnect') }}
             </Button>
             <Switch
               v-if="connector.connector"

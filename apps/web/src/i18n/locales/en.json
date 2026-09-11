@@ -3644,7 +3644,7 @@
     "reauthorize": "Reauthorize",
     "disconnect": "Disconnect",
     "disconnectTitle": "Disconnect connector?",
-    "disconnectDescription": "This will remove {name} from the Bot and delete its stored connection.",
+    "disconnectDescription": "This deletes the stored {name} connection. Apps that use it will ask for authorization again.",
     "disconnected": "Connector disconnected",
     "disconnectFailed": "Failed to disconnect connector",
     "loadFailed": "Failed to load connectors",
@@ -3873,6 +3873,7 @@
       "skipped": "Skipped",
       "removed": "Removed",
       "kept": "Kept",
+      "unlinked": "Unlinked",
       "disconnected": "Disconnected",
       "updated": "Updated"
     },

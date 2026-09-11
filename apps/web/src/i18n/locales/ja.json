@@ -3638,7 +3638,7 @@
     "reauthorize": "再認証",
     "disconnect": "切断",
     "disconnectTitle": "コネクターを切断しますか？",
-    "disconnectDescription": "Bot から {name} を削除し、保存された接続も削除します。",
+    "disconnectDescription": "保存された {name} の接続を削除します。これを使用するアプリは再認証が必要になります。",
     "disconnected": "コネクターを切断しました",
     "disconnectFailed": "コネクターを切断できませんでした",
     "loadFailed": "コネクターを読み込めませんでした",
@@ -3867,6 +3867,7 @@
       "skipped": "スキップ",
       "removed": "削除済み",
       "kept": "保持",
+      "unlinked": "関連付け解除",
       "disconnected": "切断済み",
       "updated": "更新済み"
     },

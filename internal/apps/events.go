@@ -29,6 +29,9 @@ const (
 	StepRemoved      = "removed"
 	StepKept         = "kept"
 	StepDisconnected = "disconnected"
+	// StepUnlinked means an App reference to a connection was dropped while
+	// the bot-level connection stays authorized.
+	StepUnlinked = "unlinked"
 )
 
 // Event is one progress frame of an App operation. Type selects which

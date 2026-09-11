@@ -393,6 +393,8 @@ func (f *fakeDeps) Update(_ context.Context, _, _, depID, _ string, sink workspa
 	return workspacedeps.OperationResult{DependencyID: depID, Version: "2.0.0"}, nil
 }
 
+func (*fakeDeps) EnsureRunning(context.Context, string, string) error { return nil }
+
 func (f *fakeDeps) Remove(_ context.Context, _, _, depID string, _ workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
 	f.removed = append(f.removed, depID)
 	delete(f.present, depID)
