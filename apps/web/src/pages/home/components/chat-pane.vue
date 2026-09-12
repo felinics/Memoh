@@ -74,7 +74,7 @@
                    base tone; only the width stagger is kept from the old
                    hand-rolled version. -->
               <div
-                v-if="messages.length === 0 && loadingMessages"
+                v-if="skeletonVisible"
                 class="flex flex-col gap-6"
                 aria-hidden="true"
               >
@@ -1212,6 +1212,18 @@ provideConnectorLogos(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
+// Delayed skeleton reveal: local/fast loads finish within a few frames, and
+// flashing the placeholder for a frame or two reads as a glitch. Mount it
+// only when loading actually outlives the delay.
+const skeletonVisible = ref(false)
+watch(() => messages.value.length === 0 && loadingMessages.value, (pending, _prev, onCleanup) => {
+  if (!pending) {
+    skeletonVisible.value = false
+    return
+  }
+  const timer = setTimeout(() => { skeletonVisible.value = true }, CHAT_SKELETON_REVEAL_DELAY_MS)
+  onCleanup(() => clearTimeout(timer))
+}, { immediate: true })
 const loadingOlder = computed(() => paneView.value.transcript.loadingOlder.value)
 const hasMoreOlder = computed(() => paneView.value.transcript.hasMoreOlder.value)
 const streaming = computed(() => chatStore.isChatViewStreaming(paneTarget.value))
@@ -1312,6 +1324,8 @@ const WELCOME_GREETING_KEYS = [
 // so they scale with Memoh's layout; heights/pitches above are derived from
 // Memoh's own chat metrics, not copied.
 const CHAT_SKELETON_BAR_WIDTHS = ['85%', '65%', '90%', '55%', '75%', '60%', '80%', '50%', '70%', '40%'] as const
+// Loading shorter than this never shows the placeholder at all.
+const CHAT_SKELETON_REVEAL_DELAY_MS = 200
 function pickWelcomeGreetingIndex() {
   return Math.floor(Math.random() * WELCOME_GREETING_KEYS.length)
 }
