@@ -287,22 +287,22 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return deactivated
   }
 
-  // Staleness only needs flagging while the view is hidden: a visible view
-  // receives its updates live, and a refresh clears the flag on commit.
+  // The flag is only consulted at activation, so marking a visible view is
+  // inert — but it must still be marked: coverage can end while it is
+  // visible (e.g. the bot's activity stream stops on a bot switch), after
+  // which it hides and would otherwise revisit with an untrusted cache.
   function markSessionStale(botId: string, sessionId: string) {
     const view = views.get(chatSessionViewKey(botId, sessionId))
-    if (view && view.visiblePanelIds.size === 0) view.staleWhileHidden = true
+    if (view) view.staleWhileHidden = true
   }
 
   // The activity stream is the only staleness signal; any gap in it (buffer
-  // drop, reconnect, bot switch) makes every hidden view of that bot
-  // unknowable, so they all become conservative.
+  // drop, reconnect, bot switch) makes every view of that bot unknowable,
+  // so they all become conservative.
   function markAllSessionsStale(botId: string) {
     const prefix = `session:${normalize(botId)}:`
     for (const view of views.values()) {
-      if (view.key.startsWith(prefix) && view.visiblePanelIds.size === 0) {
-        view.staleWhileHidden = true
-      }
+      if (view.key.startsWith(prefix)) view.staleWhileHidden = true
     }
   }
 

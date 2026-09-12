@@ -275,13 +275,16 @@ describe('stale-while-hidden marks', () => {
     expect(view.staleWhileHidden).toBe(false)
   })
 
-  it('does not mark a view that is still visible', () => {
+  it('marks a visible view too: coverage can end before it hides (bot switch)', () => {
     const { registry } = makeRegistry()
     const view = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-1', viewId: 'chat:1' })
     registry.bindPanel('chat:1', { botId: 'bot-1', sessionId: 'session-1', viewId: 'chat:1' }, true)
 
-    registry.markSessionStale('bot-1', 'session-1')
-    expect(view.staleWhileHidden).toBe(false)
+    // The mark is inert while the view stays visible, but it must follow the
+    // view into hiding — otherwise a bot switch would let a stale cache
+    // through the optimistic path on revisit.
+    registry.markAllSessionsStale('bot-1')
+    expect(view.staleWhileHidden).toBe(true)
   })
 
   it('marks every hidden view of the interrupted bot and leaves other bots alone', () => {
