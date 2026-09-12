@@ -180,3 +180,13 @@ func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath s
 	}
 	return nil, storage.ErrContainerFileNotSupported
 }
+
+func (p *Provider) OpenWorkspaceFile(ctx context.Context, botID, containerPath string) (io.ReadCloser, error) {
+	if opener, ok := p.primary.(storage.WorkspaceFileOpener); ok {
+		return opener.OpenWorkspaceFile(ctx, botID, containerPath)
+	}
+	if opener, ok := p.secondary.(storage.WorkspaceFileOpener); ok {
+		return opener.OpenWorkspaceFile(ctx, botID, containerPath)
+	}
+	return nil, storage.ErrContainerFileNotSupported
+}

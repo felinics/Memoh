@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+
+	"github.com/felinics/memoh/internal/markdownmedia"
 )
 
 // Manager manages the lifecycle of all email receiving connections.
@@ -168,6 +170,7 @@ func (m *Manager) SendEmail(ctx context.Context, botID string, providerID string
 
 	fromAddr, _ := config["username"].(string)
 
+	msg, partial := prepareMarkdownBody(msg)
 	outboxID, err := m.outbox.Create(ctx, providerID, botID, msg, fromAddr)
 	if err != nil {
 		return "", fmt.Errorf("record outbox: %w", err)
@@ -180,5 +183,8 @@ func (m *Manager) SendEmail(ctx context.Context, botID string, providerID string
 	}
 
 	_ = m.outbox.MarkSent(ctx, outboxID, messageID)
+	if partial {
+		return messageID, markdownmedia.ErrPartialDelivery
+	}
 	return messageID, nil
 }

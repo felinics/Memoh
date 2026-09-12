@@ -26,9 +26,10 @@ Object.defineProperty(globalThis, 'localStorage', {
 async function renderChatMarkdown(content: string): Promise<HTMLElement> {
   const { default: MarkdownRender } = await import('markstream-vue')
   const { registerSharedMarkdownComponents } = await import('@/components/markdown')
+  const { default: MdImage } = await import('./md-image.vue')
   const { default: ChatCodeBlock } = await import('@/pages/home/components/chat-code-block.vue')
   const { createI18n } = await import('vue-i18n')
-  registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
+  registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock, image: MdImage })
   const host = document.createElement('div')
   document.body.appendChild(host)
   const app = createApp({
@@ -64,5 +65,20 @@ describe('registerSharedMarkdownComponents', () => {
     const host = await renderChatMarkdown('中文 mixed with Latin')
     expect(host.querySelector('.chat-cjk')?.textContent).toContain('中文')
     expect(host.querySelector('.chat-latin')?.textContent).toContain('Latin')
+  })
+})
+
+
+describe('chat Markdown media', () => {
+  it('shows a failed image as a status instead of leaking its workspace path', async () => {
+    const host = await renderChatMarkdown('![image](memoh-media-error:media.reference_unavailable)')
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('errors.media.reference_unavailable')
+    expect(host.querySelector('img')).toBeNull()
+  })
+
+  it('keeps a pending workspace file unclickable', async () => {
+    const host = await renderChatMarkdown('[report](/data/report.pdf)')
+    expect(host.querySelector('a[href="/data/report.pdf"]')).toBeNull()
+    expect(host.textContent).toContain('chat.mediaPreparing')
   })
 })

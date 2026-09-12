@@ -337,6 +337,7 @@
 <script lang="ts">
 import { setCustomComponents } from 'markstream-vue'
 import ChatCodeBlock from './chat-code-block.vue'
+import MdImage from '@/components/markdown/md-image.vue'
 import { registerSharedMarkdownComponents } from '@/components/markdown'
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 
@@ -346,7 +347,7 @@ import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 // shell/bash blocks render identically — and register the shared design-system
 // node components (library Checkbox task markers, link-language footnotes).
 // Runs once at module load.
-registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock })
+registerSharedMarkdownComponents('chat-msg', { code_block: ChatCodeBlock, shell: ChatCodeBlock, image: MdImage })
 // Mermaid is registered globally so the appearance preference wins over the
 // markstream default (which only follows the host renderer's isDark flag). One
 // registration covers chat + file preview + any future MarkdownRender call site.

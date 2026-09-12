@@ -111,6 +111,7 @@
     "finish": "完成"
   },
   "errors": {
+    "media": { "reference_unavailable": "文件未能分享，请让 Agent 重新生成或再次分享。" },
     "queue": {
       "steer_unsupported": "当前运行不支持插入消息，请等它结束后再发送。"
     },
@@ -659,6 +660,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "mediaPreparing": "正在准备媒体",
     "selectSession": "选择会话",
     "welcome": {
       "folder": "要在 {name} 里做点什么？",

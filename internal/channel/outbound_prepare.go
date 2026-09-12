@@ -470,7 +470,7 @@ func applyPreparedAsset(ctx context.Context, store OutboundAttachmentStore, asse
 	}
 	*item = AttachmentFromBundle(bundle.WithAssetAccess(botID, asset, store.AccessPath(ctx, asset)))
 	item.SourcePlatform = ""
-	if item.Type == AttachmentFile || item.Type == "" {
+	if item.Metadata["send_as_file"] != true && (item.Type == AttachmentFile || item.Type == "") {
 		item.Type = preparedAttachmentTypeFromMime(item.Mime)
 	}
 }

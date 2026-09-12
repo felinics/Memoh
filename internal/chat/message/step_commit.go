@@ -39,6 +39,12 @@ func (s *DBService) persistAgentStep(ctx context.Context, step AgentStep, replac
 	if err != nil {
 		return nil, err
 	}
+	if !step.Interrupted {
+		step.Messages = append([]PersistInput(nil), step.Messages...)
+		for i := range step.Messages {
+			step.Messages[i] = s.prepareMarkdownMedia(ctx, step.Messages[i])
+		}
+	}
 	var persisted []Message
 	err = runtimefence.InTransaction(ctx, s.queries, botID, sessionID, func(queries dbstore.Queries) error {
 		var txErr error

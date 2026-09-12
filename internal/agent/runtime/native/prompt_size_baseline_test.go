@@ -8,15 +8,11 @@ import (
 )
 
 const (
-	staticPromptTokenHeadroom           = 4
-	staticPromptChatBaselineTokens      = 1212
-	staticPromptDiscussBaselineTokens   = 1278
-	staticPromptScheduleBaselineTokens  = 1220
-	staticPromptSubagentBaselineTokens  = 599
-	staticPromptChatPreRound6Tokens     = 1224
-	staticPromptDiscussPreRound6Tokens  = 1297
-	staticPromptSchedulePreRound6Tokens = 1226
-	staticPromptSubagentPreRound6Tokens = 617
+	staticPromptTokenHeadroom          = 4
+	staticPromptChatBaselineTokens     = 1298
+	staticPromptDiscussBaselineTokens  = 1340
+	staticPromptScheduleBaselineTokens = 1281
+	staticPromptSubagentBaselineTokens = 660
 )
 
 var staticPromptTokenBaselines = map[string]int{
@@ -24,13 +20,6 @@ var staticPromptTokenBaselines = map[string]int{
 	sessionmode.Discuss:  staticPromptDiscussBaselineTokens,
 	sessionmode.Schedule: staticPromptScheduleBaselineTokens,
 	sessionmode.Subagent: staticPromptSubagentBaselineTokens,
-}
-
-var staticPromptPreRound6Tokens = map[string]int{
-	sessionmode.Chat:     staticPromptChatPreRound6Tokens,
-	sessionmode.Discuss:  staticPromptDiscussPreRound6Tokens,
-	sessionmode.Schedule: staticPromptSchedulePreRound6Tokens,
-	sessionmode.Subagent: staticPromptSubagentPreRound6Tokens,
 }
 
 func TestStaticPromptSizeBaselines(t *testing.T) {
@@ -50,19 +39,9 @@ func TestStaticPromptSizeBaselines(t *testing.T) {
 			if !ok {
 				t.Fatalf("missing static prompt baseline for mode %q", mode)
 			}
-			preRound6, ok := staticPromptPreRound6Tokens[mode]
-			if !ok {
-				t.Fatalf("missing pre-Round-6 static prompt size for mode %q", mode)
-			}
+			// The media-sharing contract adds guidance across modes. Compare
+			// against the current budget, not a historical optimization target.
 			t.Logf("static prompt tokens = %d, bytes = %d", got, len(prompt))
-			if baseline >= preRound6 || baseline+staticPromptTokenHeadroom >= preRound6 {
-				t.Fatalf(
-					"static prompt baseline/headroom = %d/%d, pre-Round-6 = %d",
-					baseline,
-					staticPromptTokenHeadroom,
-					preRound6,
-				)
-			}
 			if got > baseline+staticPromptTokenHeadroom {
 				t.Fatalf(
 					"static prompt tokens = %d, baseline = %d, headroom = %d",

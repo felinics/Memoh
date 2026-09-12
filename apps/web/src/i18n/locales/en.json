@@ -111,6 +111,7 @@
     "finish": "Done"
   },
   "errors": {
+    "media": { "reference_unavailable": "This file could not be shared. Ask the agent to recreate or share it again." },
     "queue": {
       "steer_unsupported": "This run cannot accept steer input. Wait for it to finish and send a new message."
     },
@@ -659,6 +660,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "mediaPreparing": "Preparing media",
     "selectSession": "Select a session",
     "welcome": {
       "folder": "What can I do in {name}?",

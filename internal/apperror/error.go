@@ -28,6 +28,7 @@ const (
 	CodeSettingsReasoningUnavailable             Code = "settings.reasoning_options_unavailable"
 	CodeContextBudgetUnsatisfied                 Code = "context.budget_unsatisfied"
 	CodeContextProtectedOverflow                 Code = "context.protected_overflow"
+	CodeMediaReferenceUnavailable                Code = "media.reference_unavailable"
 	CodeWorkspaceUnreachable                     Code = "workspace.unreachable"
 	CodeWorkspaceTemplateBootstrapFailed         Code = "workspace.template_bootstrap_failed"
 	CodeWorkspaceDisplayPrepareFailed            Code = "workspace.display_prepare_failed"
@@ -245,6 +246,7 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusUnprocessableEntity,
 		Detail:     "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window.",
 	},
+	CodeMediaReferenceUnavailable: {HTTPStatus: http.StatusUnprocessableEntity, Detail: "This file could not be shared. Ask the agent to recreate or share it again."},
 	CodeWorkspaceUnreachable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The workspace could not be reached.",

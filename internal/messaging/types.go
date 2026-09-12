@@ -143,6 +143,8 @@ func (m Message) IsEmpty() bool {
 }
 
 type SendRequest struct {
+	// ExcludedTarget is checked after platform target resolution, before publication.
+	ExcludedTarget    string  `json:"excluded_target,omitempty"`
 	Target            string  `json:"target,omitempty"`
 	ChannelIdentityID string  `json:"channel_identity_id,omitempty"`
 	Message           Message `json:"message"`

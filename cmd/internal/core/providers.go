@@ -71,6 +71,7 @@ import (
 	"github.com/felinics/memoh/internal/handlers"
 	hookspkg "github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/logger"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/mcp"
 	mcpfederation "github.com/felinics/memoh/internal/mcp/sources/federation"
 	"github.com/felinics/memoh/internal/media"
@@ -425,8 +426,12 @@ func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event
 	return service
 }
 
-func provideMessageService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *message.DBService {
-	return message.NewService(log, queries, hub)
+func provideMessageService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub, mediaService *media.Service) *message.DBService {
+	svc := message.NewService(log, queries, hub)
+	svc.SetMarkdownMediaResolver(func(ctx context.Context, botID, text string) []markdownmedia.Binding {
+		return markdownmedia.Resolve(ctx, mediaService, botID, text)
+	})
+	return svc
 }
 
 func provideScheduleTriggerer(service *application.Service) schedule.Triggerer {

@@ -9,17 +9,19 @@ import (
 	"strings"
 
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/media"
 )
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
-	BotID              string
-	ChatID             string
-	CanOmitTarget      bool
-	AllowLocalShortcut bool
-	CurrentPlatform    string
-	ReplyTarget        string
+	BotID                     string
+	ChatID                    string
+	CanOmitTarget             bool
+	AllowLocalShortcut        bool
+	RejectCurrentConversation bool
+	CurrentPlatform           string
+	ReplyTarget               string
 }
 
 // AssetMeta holds resolved metadata for a media asset.
@@ -37,6 +39,7 @@ type Executor struct {
 
 // SendResult is the success payload returned after sending a message.
 type SendResult struct {
+	Partial   bool
 	BotID     string
 	Platform  string
 	Target    string
@@ -132,10 +135,18 @@ func (e *Executor) sendWithMode(
 		e.promoteDataPathAttachmentsToAssets(ctx, plan.botID, plan.channelType, &plan.message)
 	}
 
+	excludedTarget := ""
+	if session.RejectCurrentConversation && strings.EqualFold(session.CurrentPlatform, plan.channelType.String()) {
+		excludedTarget = session.ReplyTarget
+	}
 	if err := e.Sender.Send(ctx, plan.botID, plan.channelType, SendRequest{
-		Target:  plan.target,
-		Message: plan.message,
+		ExcludedTarget: excludedTarget,
+		Target:         plan.target,
+		Message:        plan.message,
 	}); err != nil {
+		if errors.Is(err, markdownmedia.ErrPartialDelivery) {
+			return &SendResult{BotID: plan.botID, Platform: plan.channelType.String(), Target: plan.target, Partial: true}, nil
+		}
 		if e.Logger != nil {
 			e.Logger.Warn("outbound send failed",
 				slog.String("mode", mode.name),
@@ -191,6 +202,9 @@ func (e *Executor) prepareSendPlan(
 	}
 
 	sameConv := IsSameConversation(session, channelType.String(), target)
+	if session.RejectCurrentConversation && sameConv {
+		return nil, errors.New("send to the current conversation is not allowed in chat mode; reply directly using Markdown for images and files")
+	}
 	allowSameConversationShortcut := mode.allowLocalShortcut && session.AllowLocalShortcut && sameConv
 	msg, err := e.buildOutboundMessage(ctx, botID, session, channelType, target, args, allowSameConversationShortcut)
 	if err != nil {
@@ -516,6 +530,7 @@ func (e *Executor) React(ctx context.Context, session SessionContext, args map[s
 	emoji := firstStringArg(args, "emoji")
 	remove, _, _ := boolArg(args, "remove")
 	sameConv := IsSameConversation(session, channelType.String(), target)
+
 	if session.AllowLocalShortcut && sameConv {
 		action := "added"
 		if remove {

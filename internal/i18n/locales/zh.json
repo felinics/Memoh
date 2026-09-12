@@ -1,4 +1,5 @@
 {
+  "media.reference_unavailable": "文件未能分享，请让 Agent 重新生成或再次分享。",
   "chrome": {
     "close": "✕ 关闭",
     "prev": "◀ 上一页",

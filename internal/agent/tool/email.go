@@ -11,6 +11,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/email"
+	"github.com/felinics/memoh/internal/markdownmedia"
 )
 
 type EmailProvider struct {
@@ -142,6 +143,9 @@ func (p *EmailProvider) execSendEmail(ctx context.Context, session SessionContex
 	messageID, err := p.manager.SendEmail(ctx, botID, binding.EmailProviderID, email.OutboundEmail{
 		To: toList, Subject: subject, Body: body, HTML: isHTML,
 	})
+	if errors.Is(err, markdownmedia.ErrPartialDelivery) {
+		return map[string]any{"message_id": messageID, "status": "partial", "note": "The email body was sent. This email transport does not support media attachments; do not resend the whole email."}, nil
+	}
 	if err != nil {
 		return nil, err
 	}

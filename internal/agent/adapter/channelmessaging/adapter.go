@@ -31,6 +31,7 @@ func New(runtime runtime, resolver resolver, assets channel.OutboundAttachmentSt
 func (a *Adapter) Send(ctx context.Context, botID string, platform messaging.Platform, req messaging.SendRequest) error {
 	return a.runtime.Send(ctx, botID, channel.ChannelType(platform), channel.SendRequest{
 		Target:            req.Target,
+		ExcludedTarget:    req.ExcludedTarget,
 		ChannelIdentityID: req.ChannelIdentityID,
 		Message:           toChannelMessage(req.Message),
 	})

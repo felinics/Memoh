@@ -2502,3 +2502,17 @@ func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
 		})
 	}
 }
+
+func TestManagerRejectsCurrentConversationAfterAliasResolution(t *testing.T) {
+	typ := ChannelType("target-resolving-guard")
+	adapter := &targetResolvingAdapter{channelType: typ}
+	registry := NewRegistry()
+	if err := registry.Register(adapter); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(nil, registry, &fakeConfigStore{effectiveConfig: ChannelConfig{BotID: "bot-1", ChannelType: typ}}, nil)
+	err := manager.Send(context.Background(), "bot-1", typ, SendRequest{Target: "alias", ExcludedTarget: "channel-target", Message: Message{Text: "must not publish"}})
+	if err == nil || len(adapter.sent) != 0 {
+		t.Fatalf("err=%v sent=%v", err, adapter.sent)
+	}
+}

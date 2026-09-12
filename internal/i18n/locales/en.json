@@ -1,4 +1,5 @@
 {
+  "media.reference_unavailable": "This file could not be shared. Ask the agent to recreate or share it again.",
   "chrome": {
     "close": "✕ Close",
     "prev": "◀ Prev",

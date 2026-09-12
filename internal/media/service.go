@@ -374,3 +374,22 @@ func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (contentHash string
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), written, tmp, nil
 }
+
+// IngestWorkspaceFile archives a regular workspace file through descriptor-anchored
+// reads. Unsafe or unsupported symlinks fail closed; no unrestricted read fallback.
+func (s *Service) IngestWorkspaceFile(ctx context.Context, botID, containerPath string) (Asset, error) {
+	if s.provider == nil {
+		return Asset{}, ErrProviderUnavailable
+	}
+	opener, ok := s.provider.(storage.WorkspaceFileOpener)
+	if !ok {
+		return Asset{}, storage.ErrContainerFileNotSupported
+	}
+	file, err := opener.OpenWorkspaceFile(ctx, botID, containerPath)
+	if err != nil {
+		return Asset{}, err
+	}
+	defer func() { _ = file.Close() }()
+	ext := path.Ext(containerPath)
+	return s.Ingest(ctx, IngestInput{BotID: botID, Mime: mimeFromExtension(ext), Reader: file, OriginalExt: ext})
+}

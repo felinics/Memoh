@@ -19,6 +19,7 @@ import (
 	dbpkg "github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/markdownmedia"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/runtimekind"
@@ -26,9 +27,10 @@ import (
 
 // DBService persists and reads bot history messages.
 type DBService struct {
-	queries   dbstore.Queries
-	logger    *slog.Logger
-	publisher event.Publisher
+	resolveMarkdownMedia markdownmedia.Resolver
+	queries              dbstore.Queries
+	logger               *slog.Logger
+	publisher            event.Publisher
 }
 
 type historyTurnWriter interface {
@@ -90,6 +92,7 @@ func NewService(log *slog.Logger, queries dbstore.Queries, publishers ...event.P
 
 // Persist writes a single message to bot_history_messages.
 func (s *DBService) Persist(ctx context.Context, input PersistInput) (Message, error) {
+	input = s.prepareMarkdownMedia(ctx, input)
 	const maxTurnSequenceRetries = 3
 	var lastErr error
 	for attempt := 0; attempt < maxTurnSequenceRetries; attempt++ {
@@ -167,6 +170,11 @@ func isTurnSequenceUniqueViolation(err error) bool {
 // -> assistant(final) round with one PostgreSQL statement. Unsupported stores
 // or non-matching inputs return handled=false so callers can use Persist.
 func (s *DBService) PersistToolTailRound(ctx context.Context, inputs []PersistInput) ([]Message, bool, error) {
+	for _, input := range inputs {
+		if input.Role == "assistant" && len(markdownmedia.Parse(markdownSource(input))) > 0 {
+			return nil, false, nil
+		}
+	}
 	if s == nil || s.queries == nil || !isToolTailRoundShape(inputs) {
 		return nil, false, nil
 	}
@@ -295,6 +303,11 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 		if strings.TrimSpace(input.BotID) != botID || strings.TrimSpace(input.SessionID) != sessionID {
 			return nil, true, errors.New("atomic round spans multiple sessions")
 		}
+	}
+
+	inputs = append([]PersistInput(nil), inputs...)
+	for i := range inputs {
+		inputs[i] = s.prepareMarkdownMedia(ctx, inputs[i])
 	}
 
 	const maxTurnSequenceRetries = 3

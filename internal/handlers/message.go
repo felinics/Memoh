@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -835,6 +836,10 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+	if name := c.QueryParam("download"); name != "" {
+		c.Response().Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	}
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("Content-Type", contentType)
 	c.Response().Header().Set("Cache-Control", "private, max-age=86400")
 	c.Response().WriteHeader(http.StatusOK)

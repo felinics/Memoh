@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, useAttrs } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { markdownAssetUrl } from './media-url'
 import { LinkNode, type LinkNodeProps } from 'markstream-vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { tryParseLocalhostHref } from '@/utils/localhost-link'
@@ -18,6 +20,15 @@ const props = defineProps<{
 }>()
 
 const attrs = useAttrs()
+const { t } = useI18n()
+const failed = computed(() => props.node.href.startsWith('memoh-media-error:'))
+const assetUrl = computed(() => markdownAssetUrl(props.node.href))
+const pending = computed(() => !assetUrl.value && /^\/data\//.test(props.node.href) && !/[#?]|:\d/.test(props.node.href))
+const displayNode = computed(() => {
+  const url = assetUrl.value
+  const href = url ? `${url}${url.includes('?') ? '&' : '?'}download=${encodeURIComponent(props.node.text || 'download')}` : props.node.href
+  return { ...props.node, href }
+})
 const tabs = useWorkspaceTabsStore()
 
 const localAddress = computed(() => tryParseLocalhostHref(props.node?.href))
@@ -38,8 +49,19 @@ function onClickCapture(event: MouseEvent) {
 </script>
 
 <template>
-  <span @click.capture="onClickCapture"><LinkNode
-    :node="node"
+  <span
+    v-if="failed"
+    role="status"
+  >{{ node.text }} — {{ t('errors.media.reference_unavailable') }}</span>
+  <span
+    v-else-if="pending"
+    role="status"
+  >{{ node.text }} — {{ t('chat.mediaPreparing') }}</span>
+  <span
+    v-else
+    @click.capture="onClickCapture"
+  ><LinkNode
+    :node="displayNode"
     :index-key="indexKey"
     v-bind="attrs"
   /></span>

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/felinics/memoh/internal/markdownmedia"
 )
 
 // ConfigLister lists channel configs for periodic refresh. Used by connection lifecycle.
@@ -264,12 +266,22 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	if err != nil {
 		return err
 	}
+	if req.ExcludedTarget != "" {
+		excluded, err := m.resolveOutboundTarget(ctx, channelType, config, req.ExcludedTarget)
+		if err != nil {
+			return err
+		}
+		if excluded == target {
+			return errors.New("send to the current conversation is not allowed in chat mode; reply directly")
+		}
+	}
 	if req.Message.IsEmpty() {
 		return errors.New("message is required")
 	}
 	if m.logger != nil {
 		m.logger.Info("send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))
 	}
+	req.Message = resolveMarkdownMessage(ctx, m.attachmentStore, config, req.Message)
 	policy := m.resolveOutboundPolicy(channelType)
 	caps, hasCaps := m.registry.GetOutboundCapabilities(channelType, config, target)
 	outbound, err := buildOutboundMessagesWithCaps(OutboundMessage{
@@ -284,6 +296,11 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 			m.logger.Error("send outbound failed", slog.String("channel", channelType.String()), slog.String("bot_id", botID), slog.Any("error", err))
 		}
 		return err
+	}
+	for _, binding := range markdownmedia.Bindings(req.Message.Metadata) {
+		if binding.ErrorCode != "" || (hasCaps && !caps.Attachments) {
+			return markdownmedia.ErrPartialDelivery
+		}
 	}
 	return nil
 }
