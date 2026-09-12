@@ -1944,3 +1944,90 @@ func TestUIMessageStreamConverterRuntimeNoticeCarriesMetadataArgs(t *testing.T) 
 		t.Fatalf("args must be omitted from the wire shape when empty: %s", data)
 	}
 }
+
+func TestConvertModelMessagesToUIAssistantMessagesIncludesDiff(t *testing.T) {
+	t.Parallel()
+
+	diff := "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n"
+	messages := ConvertModelMessagesToUIAssistantMessages([]turn.ModelMessage{{
+		Role: "assistant",
+		Content: mustUIRawJSON(t, []map[string]any{{
+			"type":       "tool-call",
+			"toolCallId": "call-1",
+			"toolName":   "edit",
+			"input":      map[string]any{"path": "f"},
+			"providerMetadata": map[string]any{
+				"diff": diff,
+			},
+		}}),
+	}})
+
+	if len(messages) != 1 || messages[0].Diff != diff {
+		t.Fatalf("messages = %#v, want diff %q", messages, diff)
+	}
+}
+
+func TestConvertMessagesToUITurnsAppliesToolRowDiffMetadata(t *testing.T) {
+	t.Parallel()
+
+	diff := "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n"
+	turns := convertTestMessagesToUITurns([]messagepkg.Message{
+		{
+			ID:        "assistant-1",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "assistant",
+			Content: mustUIMessageJSON(t, turn.ModelMessage{
+				Role: "assistant",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-call", "toolCallId": "call-1", "toolName": "edit", "input": map[string]any{"path": "f"}},
+				}),
+			}),
+		},
+		{
+			ID:        "tool-1",
+			BotID:     "bot-1",
+			SessionID: "session-1",
+			Role:      "tool",
+			Content: mustUIMessageJSON(t, turn.ModelMessage{
+				Role: "tool",
+				Content: mustUIRawJSON(t, []map[string]any{
+					{"type": "tool-result", "toolCallId": "call-1", "toolName": "edit", "result": map[string]any{"ok": true}},
+				}),
+			}),
+			Metadata: map[string]any{"diff": diff},
+		},
+	})
+
+	if len(turns) != 1 || len(turns[0].Messages) != 1 {
+		t.Fatalf("turns = %#v, want one tool block", turns)
+	}
+	block := turns[0].Messages[0]
+	if block.Diff != diff {
+		t.Fatalf("tool block diff = %q, want %q", block.Diff, diff)
+	}
+}
+
+func TestUIMessageStreamConverterAppliesDiffMetadataOnToolEnd(t *testing.T) {
+	t.Parallel()
+
+	diff := "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n"
+	converter := NewUIMessageStreamConverter()
+	converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_start",
+		ToolName:   "edit",
+		ToolCallID: "call-1",
+		Input:      map[string]any{"path": "f"},
+	})
+	update := converter.HandleEvent(UIMessageStreamEvent{
+		Type:       "tool_call_end",
+		ToolName:   "edit",
+		ToolCallID: "call-1",
+		Output:     map[string]any{"ok": true},
+		Metadata:   map[string]any{"diff": diff},
+	})
+
+	if len(update) != 1 || update[0].Diff != diff {
+		t.Fatalf("update = %#v, want diff %q", update, diff)
+	}
+}

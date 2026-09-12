@@ -222,13 +222,15 @@ func (s *Service) continueCommittedToolApprovalResponse(
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
 	runID := runIDForChatRequest(committed.runID)
 	var toolResult sdk.ToolResultPart
+	var toolUIMetadata map[string]any
 	switch target.Status {
 	case toolapproval.StatusApproved:
-		result, err := s.executeApprovedTool(ctx, target, committed.input, runID)
+		result, uiMetadata, err := s.executeApprovedTool(ctx, target, committed.input, runID)
 		if err != nil {
 			return err
 		}
 		toolResult = result
+		toolUIMetadata = uiMetadata
 	case toolapproval.StatusRejected:
 		toolResult = sdk.ToolResultPart{
 			ToolCallID: target.ToolCallID,
@@ -239,7 +241,7 @@ func (s *Service) continueCommittedToolApprovalResponse(
 	default:
 		return fmt.Errorf("committed tool approval has unexpected status %q", target.Status)
 	}
-	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, runID, committed.runHandle, lifecycle, eventCh)
+	return s.storeToolResultAndContinue(ctx, target, committed.input, toolResult, toolUIMetadata, runID, committed.runHandle, lifecycle, eventCh)
 }
 
 func (s *Service) toolOutputLimit() contextlimit.ToolOutputLimit {
@@ -365,7 +367,7 @@ func emitApprovalAck(ctx context.Context, eventCh chan<- WSStreamEvent) error {
 	return nil
 }
 
-func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput, runID string) (sdk.ToolResultPart, error) {
+func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Request, input ToolApprovalResponseInput, runID string) (sdk.ToolResultPart, map[string]any, error) {
 	ctx = workspace.WithWorkspaceTarget(ctx, req.WorkspaceTargetID)
 	req = withLocalWebReplyTarget(req)
 	resolved, err := s.ResolveRunConfig(ctx,
@@ -378,14 +380,15 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 		input.ChatToken,
 	)
 	if err != nil {
-		return sdk.ToolResultPart{}, err
+		return sdk.ToolResultPart{}, nil, err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
-	return s.agent.ExecuteTool(ctx, resolved.RunConfig, sdk.ToolCall{
+	part, uiMetadata, err := s.agent.ExecuteToolWithUIMetadata(ctx, resolved.RunConfig, sdk.ToolCall{
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
 		Input:      req.ToolInput,
 	})
+	return part, uiMetadata, err
 }
 
 func (s *Service) storeToolResultAndContinue(
@@ -393,6 +396,7 @@ func (s *Service) storeToolResultAndContinue(
 	approval toolapproval.Request,
 	input ToolApprovalResponseInput,
 	result sdk.ToolResultPart,
+	uiMetadata map[string]any,
 	runID string,
 	runHandle sessionruntime.RunHandle,
 	lifecycle *continuationLifecycleResult,
@@ -405,6 +409,12 @@ func (s *Service) storeToolResultAndContinue(
 		return err
 	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
+	storeOpts := storeRoundOptions{AllowPendingToolCalls: true}
+	// UI-only payloads stripped from the tool output (e.g. the edit diff) ride
+	// the tool row's metadata — the model history reads only the content.
+	if len(uiMetadata) > 0 {
+		storeOpts.MessageMetadataByIndex = map[int]map[string]any{0: uiMetadata}
+	}
 	storeReq := ChatRequest{
 		RunID:                   runID,
 		BotID:                   input.BotID,
@@ -418,7 +428,7 @@ func (s *Service) storeToolResultAndContinue(
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 	}
 	storeReq.WorkspaceTarget = target
-	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeRoundOptions{AllowPendingToolCalls: true}); err != nil {
+	if err := s.storeRoundWithOptions(ctx, storeReq, modelMessages, "", storeOpts); err != nil {
 		return err
 	}
 	return s.continueToolApprovalSession(ctx, approval, input, runID, runHandle, lifecycle, eventCh)

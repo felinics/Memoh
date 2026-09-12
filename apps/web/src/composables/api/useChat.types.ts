@@ -194,6 +194,9 @@ export interface UIToolMessage {
   execution_location?: UIExecutionLocation
   user_input?: UIUserInput
   background_task?: UIBackgroundTask
+  // UI-only unified diff attached to the tool call at execution time (edit
+  // tool). Never part of the model-facing tool result.
+  diff?: string
 }
 
 export interface UIExecutionLocation {

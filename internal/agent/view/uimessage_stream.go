@@ -279,6 +279,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			state.Message.Input = event.Input
 		}
 		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyDiffMetadata(&state.Message, event.Metadata)
 		applyToolResultToUIMessage(&state.Message, event.Output)
 		if state.Message.ToolCallID != "" && !isBackgroundToolStillRunning(state.Message) {
 			delete(c.tools, state.Message.ToolCallID)
@@ -451,5 +452,14 @@ func applyExecutionLocationMetadata(message *UIMessage, metadata map[string]any)
 	}
 	if location := extractExecutionLocationMetadata(metadata); location != nil {
 		message.ExecutionLocation = location
+	}
+}
+
+func applyDiffMetadata(message *UIMessage, metadata map[string]any) {
+	if message == nil {
+		return
+	}
+	if diff := extractDiffMetadata(metadata); diff != "" {
+		message.Diff = diff
 	}
 }

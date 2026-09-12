@@ -48,11 +48,12 @@
       >-{{ display.diffRemove }}</span>
       <span
         v-if="approvalLabel"
-        class="font-mono shrink-0 text-xs text-warning-foreground"
+        class="shrink-0 text-xs"
+        :class="block.approval?.status === 'pending' ? 'text-warning-foreground' : 'text-muted-foreground'"
       >{{ approvalLabel }}</span>
       <span
         v-if="userInputLabel"
-        class="font-mono shrink-0 text-xs text-warning-foreground"
+        class="shrink-0 text-xs text-muted-foreground"
       >{{ userInputLabel }}</span>
       <ExpandChevron
         :open="open"
@@ -104,11 +105,12 @@
       >-{{ display.diffRemove }}</span>
       <span
         v-if="approvalLabel"
-        class="font-mono shrink-0 text-xs text-warning-foreground"
+        class="shrink-0 text-xs"
+        :class="block.approval?.status === 'pending' ? 'text-warning-foreground' : 'text-muted-foreground'"
       >{{ approvalLabel }}</span>
       <span
         v-if="userInputLabel"
-        class="font-mono shrink-0 text-xs text-warning-foreground"
+        class="shrink-0 text-xs text-muted-foreground"
       >{{ userInputLabel }}</span>
     </div>
 
@@ -119,10 +121,16 @@
       <!-- inGroup: a card nested inside the group's own muted capsule needs a
            visibly different fill (bg-card, not bg-muted) so it reads as one
            layer up — a genuinely different surface, not a padding drift of
-           the capsule shape below, so it stays hand-written. -->
+           the capsule shape below, so it stays hand-written.
+           edit (always) and write (when it carries a server diff) use that
+           card and drop the padding so their diff rows meet the card edges:
+           one rounded surface, same radius and borderless fill as every
+           other detail surface, no colored block nested inside a second
+           card. -->
       <div
-        v-if="inGroup"
-        class="mt-1.5 rounded-sm bg-card px-2.5 py-2 font-[400]"
+        v-if="inGroup || flushDiffCard"
+        class="mt-1.5 rounded-sm bg-card font-[400]"
+        :class="flushDiffCard ? 'overflow-hidden' : 'px-2.5 py-2'"
       >
         <component
           :is="detailComponent"
@@ -221,6 +229,14 @@ const showPendingLabel = computed(() => title.value.pending)
 const showActionLabel = computed(() => title.value.showAction)
 const renderedActionLabel = computed(() => title.value.action)
 
+// edit always renders its diff flush with the card edges; write joins it
+// only when the server attached a diff (older write records keep the padded
+// content block).
+const flushDiffCard = computed(() => {
+  if (props.block.toolName === 'edit') return true
+  return props.block.toolName === 'write' && Boolean(props.block.diff)
+})
+
 // 工具标题是执行过程摘要。Agent 在虚拟机中试错、检查并修复命令是正常的
 // 长任务行为；非零退出码（包括 -1）或工具 isError 不等于用户任务失败。
 // 标题保持中性色，不附加退出码或错误染色；诊断留在展开详情中，真正的
@@ -273,13 +289,16 @@ const actionClass = computed(() => {
 // composer-panel.vue), never here — this row keeps only the read-only status
 // label so history still shows which call needed one and how it ended. The
 // old inline Allow/Reject also carried raw color classes that bypassed the
-// Button variants, so nothing of it is worth keeping.
+// Button variants, so nothing of it is worth keeping. An approved call is
+// the common case and reads as noise next to the title, so its label is
+// hidden; only pending/declined/canceled stay visible.
 const approvalLabel = computed(() => {
   const approval = props.block.approval
-  if (!approval?.approval_id) return ''
-  const id = approval.short_id ? `#${approval.short_id}` : ''
-  if (approval.status === 'pending') return `${id} ${t('chat.tools.pendingApproval', 'pending approval')}`.trim()
-  return `${id} ${approval.status}`.trim()
+  if (!approval?.approval_id || approval.status === 'approved') return ''
+  if (approval.status === 'pending') return t('chat.tools.pendingApproval', 'Awaiting approval')
+  if (approval.status === 'rejected') return t('chat.tools.approvalDeclined', 'Declined')
+  if (approval.status === 'canceled') return t('chat.tools.approvalCanceled', 'Canceled')
+  return approval.status
 })
 
 const userInputLabel = computed(() => {

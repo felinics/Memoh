@@ -230,11 +230,22 @@ func (a *Agent) Generate(ctx context.Context, cfg RunConfig) (*GenerateResult, e
 }
 
 func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, error) {
+	part, _, err := a.ExecuteToolWithUIMetadata(ctx, cfg, call)
+	return part, err
+}
+
+// ExecuteToolWithUIMetadata runs one tool outside a stream (deferred approval,
+// hook tests) and returns the UI-only payloads stripped from its output
+// alongside the model-facing result, so callers can persist them on
+// harness-side channels (row metadata) instead of leaking them to the model.
+func (a *Agent) ExecuteToolWithUIMetadata(ctx context.Context, cfg RunConfig, call sdk.ToolCall) (sdk.ToolResultPart, map[string]any, error) {
 	sdkTools, _, _, _, err := a.assembleTools(ctx, cfg, nil, false)
 	if err != nil {
-		return sdk.ToolResultPart{}, fmt.Errorf("assemble tools: %w", err)
+		return sdk.ToolResultPart{}, nil, fmt.Errorf("assemble tools: %w", err)
 	}
 	sdkTools, _ = decorateReadMediaTools(cfg.Model, sdkTools)
+	uiMetadata := newToolExecutionMetadataRegistry(nil)
+	sdkTools = uiMetadata.wrapToolUIOutput(sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, a.Limits().ToolOutputLimit())
 	for i := range sdkTools {
 		tool := sdkTools[i]
@@ -242,7 +253,7 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 			continue
 		}
 		if tool.Execute == nil {
-			return sdk.ToolResultPart{}, fmt.Errorf("tool %q has no execute handler", call.ToolName)
+			return sdk.ToolResultPart{}, nil, fmt.Errorf("tool %q has no execute handler", call.ToolName)
 		}
 		execCtx := &sdk.ToolExecContext{
 			Context:    ctx,
@@ -257,15 +268,15 @@ func (a *Agent) ExecuteTool(ctx context.Context, cfg RunConfig, call sdk.ToolCal
 				ToolName:   call.ToolName,
 				Result:     limitedErr.Error(),
 				IsError:    true,
-			}, nil
+			}, nil, nil
 		}
 		return sdk.ToolResultPart{
 			ToolCallID: call.ToolCallID,
 			ToolName:   call.ToolName,
 			Result:     publicReadMediaToolResult(output),
-		}, nil
+		}, uiMetadata.metadata(call.ToolCallID), nil
 	}
-	return sdk.ToolResultPart{}, fmt.Errorf("tool %q not found", call.ToolName)
+	return sdk.ToolResultPart{}, nil, fmt.Errorf("tool %q not found", call.ToolName)
 }
 
 // sendEvent sends an event to the stream channel. It returns false if the
@@ -362,10 +373,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if readMediaState != nil {
 		readMediaState.ledger = cfg.ContextMutations
 	}
-	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
-	approvalTools := append([]sdk.Tool(nil), sdkTools...)
-	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
-	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	toolExecutionMetadata := newToolExecutionMetadataRegistry(func(call sdk.ToolCall, metadata map[string]any) {
 		eventGate.emitAgentEvent(StreamEvent{
 			Type:       EventToolCallMetadata,
@@ -375,6 +382,13 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			Metadata:   metadata,
 		})
 	})
+	// Innermost wrapper: strips UI-only payloads from raw tool outputs before
+	// limits, hooks, or the SDK ever see them.
+	sdkTools = toolExecutionMetadata.wrapToolUIOutput(sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
+	approvalTools := append([]sdk.Tool(nil), sdkTools...)
+	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
+	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
 
 	// Loop detection setup
@@ -1082,11 +1096,14 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	if readMediaState != nil {
 		readMediaState.ledger = cfg.ContextMutations
 	}
+	toolExecutionMetadata := newToolExecutionMetadataRegistry(nil)
+	// Innermost wrapper: strips UI-only payloads from raw tool outputs before
+	// limits, hooks, or the SDK ever see them.
+	sdkTools = toolExecutionMetadata.wrapToolUIOutput(sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
 	approvalTools := append([]sdk.Tool(nil), sdkTools...)
 	sdkTools = a.wrapToolsWithHooks(ctx, cfg, sdkTools)
 	sdkTools = tools.WrapToolOutputLimits(sdkTools, limit)
-	toolExecutionMetadata := newToolExecutionMetadataRegistry(nil)
 	cfg.ToolApprovalHandler = toolExecutionMetadata.wrap(cfg.ToolApprovalHandler)
 
 	var toolLoopGuard *ToolLoopGuard
