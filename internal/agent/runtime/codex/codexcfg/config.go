@@ -28,10 +28,12 @@ type Config struct {
 	// Per-turn model and reasoning overrides win over these values.
 	Model           string
 	ReasoningEffort string
+	PermissionMode  string
 }
 
 func ParseAgentConfig(metadata map[string]any) (Config, error) {
 	cfg := Config{
+		PermissionMode:  strings.TrimSpace(metadataString(metadata, "permission_mode")),
 		Auth:            AuthMode(strings.TrimSpace(metadataString(metadata, "auth"))),
 		BaseURL:         strings.TrimSpace(metadataString(metadata, "base_url")),
 		Model:           strings.TrimSpace(metadataString(metadata, "model")),
@@ -48,4 +50,14 @@ func ParseAgentConfig(metadata map[string]any) (Config, error) {
 func metadataString(meta map[string]any, key string) string {
 	value, _ := meta[key].(string)
 	return value
+}
+
+// ValidPermissionMode also accepts an unset value, which means the default.
+func ValidPermissionMode(mode string) bool {
+	switch mode {
+	case "", "strict", "policy", "yolo":
+		return true
+	default:
+		return false
+	}
 }

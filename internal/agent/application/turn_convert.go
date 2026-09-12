@@ -34,6 +34,7 @@ func chatRequestFromCommand(cmd turn.StartTurnCommand) ChatRequest {
 		ForwardFromConversationID: cmd.ForwardFromConversationID,
 		ForwardSender:             cmd.ForwardSender,
 		ForwardDate:               cmd.ForwardDate,
+		AgentCommand:              cmd.AgentCommand,
 		Query:                     cmd.Query,
 		ModelQuery:                cmd.ModelQuery,
 		UserMessageKind:           cmd.UserMessageKind,

@@ -16,7 +16,7 @@ import {
 } from '@/composables/api/botCreateTerminal'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
-import { acpAgentDisplayName } from '@/utils/acp'
+import { externalAgentDisplayName } from '@/utils/external-agent'
 import { writeCreatedAgentSession, type CreatedAgentSession } from '@/pages/bots/created-agent-session'
 import { installCreatedAgent } from './install-created-agent'
 
@@ -228,7 +228,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         const agent = createdAgent.value
         const agentId = agent.id!
         lines.value = pushBotCreateTerminalLine(lines.value, {
-          kind: 'installing-agent', status: 'running', message: acpAgentDisplayName(agent.runtime ?? '', agent.name ?? ''),
+          kind: 'installing-agent', status: 'running', message: externalAgentDisplayName(agent.runtime ?? '', agent.name ?? ''),
         })
         await installCreatedAgent(botId, agent)
         if (!agent.enabled) {
@@ -327,7 +327,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     createdAgent.value = saved.agentId ? { id: saved.agentId, runtime: saved.runtime } : null
     authorizationId.value = saved.authorizationId ?? ''
     lastOptions = { onboarding, settings: saved.settings, agent: {
-      name: acpAgentDisplayName(saved.runtime, saved.runtime), provider: saved.runtime,
+      name: externalAgentDisplayName(saved.runtime, saved.runtime), provider: saved.runtime,
       metadata: directBotAgentMetadata(saved.runtime), authorizationId: saved.authorizationId,
     } }
     lines.value = pushBotCreateTerminalLine([], { kind: 'bot-created', status: 'done' })

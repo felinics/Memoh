@@ -1,6 +1,6 @@
+import { externalAgentDisplayName, normalizeAgentID } from '@/utils/external-agent'
 import type { SegmentedItem } from '@felinic/ui'
 import type { AcpprofilePublicProfile } from '@memohai/sdk'
-import { acpAgentDisplayName, normalizeACPAgentID } from '@/utils/acp'
 import {
   BOT_AGENT_RUNTIME_CLAUDE_CODE,
   BOT_AGENT_RUNTIME_CODEX,
@@ -17,16 +17,16 @@ export const MEMOH_AGENT_VALUE = 'memoh'
 // publishes.
 export function agentTypeItems(profiles: AcpprofilePublicProfile[]): SegmentedItem<string>[] {
   const direct = [
-    { value: BOT_AGENT_RUNTIME_CODEX, label: acpAgentDisplayName(BOT_AGENT_RUNTIME_CODEX, 'Codex') },
-    { value: BOT_AGENT_RUNTIME_CLAUDE_CODE, label: acpAgentDisplayName(BOT_AGENT_RUNTIME_CLAUDE_CODE, 'Claude Code') },
+    { value: BOT_AGENT_RUNTIME_CODEX, label: externalAgentDisplayName(BOT_AGENT_RUNTIME_CODEX, 'Codex') },
+    { value: BOT_AGENT_RUNTIME_CLAUDE_CODE, label: externalAgentDisplayName(BOT_AGENT_RUNTIME_CLAUDE_CODE, 'Claude Code') },
   ]
   const agents = profiles.flatMap((profile) => {
-    const agentId = normalizeACPAgentID(profile.id)
+    const agentId = normalizeAgentID(profile.id)
     // Skip entries that fail normalization or would collide with the reserved
     // built-in segment value or a direct runtime name.
     if (!agentId || agentId === MEMOH_AGENT_VALUE) return []
     if (agentId === BOT_AGENT_RUNTIME_CODEX || agentId === BOT_AGENT_RUNTIME_CLAUDE_CODE) return []
-    return [{ value: agentId, label: profile.display_name || acpAgentDisplayName(agentId, agentId) }]
+    return [{ value: agentId, label: profile.display_name || externalAgentDisplayName(agentId, agentId) }]
   })
   return [{ value: MEMOH_AGENT_VALUE, label: 'Memoh' }, ...direct, ...agents]
 }

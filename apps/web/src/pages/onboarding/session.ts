@@ -1,4 +1,4 @@
-import { normalizeACPAgentID } from '@/utils/acp'
+import { normalizeAgentID } from '@/utils/external-agent'
 import { safeSessionGet, safeSessionRemove, safeSessionSet } from '@/utils/safe-storage'
 import { ONBOARDING_KEYS } from './constants'
 
@@ -36,7 +36,7 @@ function normalizeBotResult(value: unknown): OnboardingBotResult | null {
 
   const legacy = candidate as Partial<OnboardingBotResult> & { acp?: OnboardingAgentResult }
   const selectedAgent = candidate.agent ?? legacy.acp
-  const agentId = normalizeACPAgentID(selectedAgent?.agentId)
+  const agentId = normalizeAgentID(selectedAgent?.agentId)
   const botAgentId = normalizeProviderId(selectedAgent?.botAgentId)
 
   return {

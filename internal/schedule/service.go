@@ -400,7 +400,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		OwnerUserID:     ownerUserID,
 		SessionID:       sessionID,
 		ModelID:         sched.ModelID,
-		ACPModelID:      sched.ACPModelID,
+		RuntimeModelID:  sched.ACPModelID,
 		ReasoningEffort: sched.ReasoningEffort,
 	}, token)
 	if triggerErr != nil {

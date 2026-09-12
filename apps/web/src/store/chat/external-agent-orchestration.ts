@@ -182,6 +182,10 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
 
   function stageDefaultExternalAgentSession(input: ExternalAgentSessionInput, target?: ChatViewTarget) {
     const draft = targetDraft(target)
+    const pending = pendingExternalAgentStateFor(draft)?.input
+    if (pending && sameExternalAgentSessionInput(pending, input)) {
+      input = { ...input, permissionMode: pending.permissionMode, planMode: pending.planMode }
+    }
     deps.invalidateDraftCommand(draft)
     activateDraftStage(draft)
     stageFocusedDefaultExternalAgentSession(input)
@@ -255,6 +259,19 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
     }
   }
 
+  function setPendingRuntimeMode(modeId: string, target: ChatViewTarget, modeKind: 'permission' | 'plan' = 'permission') {
+    if (target.sessionId) return
+    const draft = targetDraft(target)
+    const state = pendingExternalAgentStateFor(draft)
+    if (!state) return
+    deps.invalidateDraftCommand(draft)
+    const input = modeKind === 'plan'
+      ? { ...state.input, planMode: modeId === 'plan' }
+      : { ...state.input, permissionMode: modeId }
+    if (isLiveDraft(liveDraft, draft)) pendingExternalAgentSessionInput.value = input
+    rememberDraftStage(draft, { botId: draft.botId, input, runtimeId: state.runtimeId })
+  }
+
   function pendingExternalAgentMatchesInput(input: ExternalAgentSessionInput, target?: ChatViewTarget) {
     if (!target) return focusedPendingExternalAgentMatchesInput(input)
     const state = pendingExternalAgentStateFor(target)
@@ -282,6 +299,7 @@ export function createExternalAgentOrchestration(deps: ExternalAgentOrchestratio
     ensurePendingACPRuntime,
     setPendingACPModel,
     setPendingACPMode,
+    setPendingRuntimeMode,
     setPendingACPReasoning,
     pendingExternalAgentMatchesInput,
     sameDraftExternalAgentStage: isLiveDraft,

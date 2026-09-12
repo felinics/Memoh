@@ -508,10 +508,10 @@
     }
   },
   "slash": {
-      "error": {
-        "unknownSlash": "未知 slash 命令。",
-        "unsupportedWebCommand": "这个 slash 命令不能在 Web Chat 中使用。",
-        "invalidSkillSlashSyntax": "无效的 skill slash 语法。请使用 /<skill-name> [prompt]。",
+    "error": {
+      "unknownSlash": "未知 slash 命令。",
+      "unsupportedWebCommand": "这个 slash 命令不能在 Web Chat 中使用。",
+      "invalidSkillSlashSyntax": "无效的 skill slash 语法。请使用 /<skill-name> [prompt]。",
       "requestedSkillNotFound": "找不到请求的 skill。",
       "requestedSkillAmbiguous": "请求的 skill 存在歧义。",
       "requestedSkillDisabled": "请求的 skill 已被禁用。",
@@ -562,5 +562,24 @@
     "compact": "压缩对话上下文",
     "queue": "加入队列",
     "steer": "引导当前回复"
+  },
+  "errors": {
+    "runtime_control": {
+      "goal_requires_default_mode": "请先退出计划模式，再创建或继续目标。",
+      "unsupported": "当前运行时不支持此操作。",
+      "command_unavailable": "此命令已不可用，请刷新后重试。",
+      "mode_unavailable": "此权限模式已不可用，请刷新后重新选择。",
+      "thread_unavailable": "请先开始对话，再执行此操作。",
+      "failed": "操作未能完成，请重试。",
+      "forbidden": "你没有访问此会话的权限。",
+      "request_invalid": "请求无效，请刷新后重试。",
+      "cancelled": "操作已中止。"
+    },
+    "session_runtime": {
+      "session_busy": "这个会话还在处理上一条消息，请稍后再试。"
+    },
+    "external_runtime": {
+      "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。"
+    }
   }
 }

@@ -22,7 +22,7 @@
     :aria-label="label"
   >
     <component
-      :is="acpAgentIcon(agentId, true)"
+      :is="externalAgentIcon(agentId, true)"
       class="size-4"
       aria-hidden="true"
     />
@@ -35,8 +35,8 @@
 </template>
 
 <script setup lang="ts">
+import { externalAgentIcon } from '@/utils/external-agent'
 import { Clock } from 'lucide-vue-next'
-import { acpAgentIcon } from '@/utils/acp'
 
 export type SessionKind = 'chat' | 'acp' | 'schedule'
 

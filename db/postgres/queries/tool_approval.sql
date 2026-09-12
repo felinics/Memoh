@@ -93,6 +93,14 @@ WHERE team_id = public.memoh_current_team_id()
   AND status = 'pending'
 ORDER BY created_at ASC, short_id ASC;
 
+-- name: ListToolApprovalsByRun :many
+-- Finalization must also reconcile terminal decisions whose live event was lost.
+SELECT *
+FROM tool_approval_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+ORDER BY created_at ASC, short_id ASC;
+
 -- name: ClaimToolApprovalRequestForRuntime :one
 UPDATE tool_approval_requests
 SET runtime_fencing_token = sqlc.arg(runtime_fencing_token)

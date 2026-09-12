@@ -88,6 +88,30 @@
           @keydown.enter.prevent="commitConfig"
         />
       </SettingsRow>
+      <SettingsRow
+        v-if="defaultModes?.supported"
+        :label="$t('bots.agent.defaultPermissionMode')"
+        :description="$t('bots.agent.defaultPermissionModeDescription')"
+        stack="sm"
+      >
+        <Select
+          :model-value="config.permission_mode || defaultModes.current_mode_id"
+          @update:model-value="setDefaultPermission"
+        >
+          <SelectTrigger class="w-full sm:w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="mode in defaultModes.available_modes"
+              :key="mode.id"
+              :value="mode.id!"
+            >
+              <span :class="mode.warning ? 'text-warning-foreground' : ''">{{ mode.name }}</span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingsRow>
     </SettingsSection>
 
     <SettingsSection
@@ -168,7 +192,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { useQueryCache } from '@pinia/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Button,
   ConfirmPopover,
@@ -188,6 +212,7 @@ import {
 import { KeyRound } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdAgentsByIdCredential,
+  getBotsByBotIdAgentsByIdRuntimeControls,
   patchBotsByBotIdAgentsById,
   postBotsByBotIdAgentsByIdCodexLoginDeviceAuthorize,
   postBotsByBotIdAgentsByIdCodexLoginDeviceCancel,
@@ -206,6 +231,7 @@ interface DirectAgentConfig {
   auth: string
   base_url: string
   model: string
+  permission_mode: string
   reasoning_effort: string
 }
 
@@ -220,13 +246,31 @@ const props = defineProps<{
   agent: BotagentsBotAgent
 }>()
 const emit = defineEmits<{ authorized: [] }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 const queryCache = useQueryCache()
 
 const runtime = computed(() => normalizeBotAgentRuntime(props.agent.runtime))
 const isCodex = computed(() => runtime.value === BOT_AGENT_RUNTIME_CODEX)
-const config = reactive<DirectAgentConfig>({ auth: '', base_url: '', model: '', reasoning_effort: '' })
+const config = reactive<DirectAgentConfig>({ auth: '', base_url: '', model: '', reasoning_effort: '', permission_mode: '' })
+const defaultControls = useQuery({
+  key: () => ['bot-agent-runtime-controls', props.botId, props.agent.id ?? '', locale.value, props.agent.metadata?.permission_mode ?? ''],
+  enabled: () => !!props.agent.id,
+  query: async ({ signal }) => {
+    const { data } = await getBotsByBotIdAgentsByIdRuntimeControls({
+      path: { bot_id: props.botId, id: props.agent.id! },
+      headers: { 'Accept-Language': locale.value }, signal, throwOnError: true,
+    })
+    return data
+  },
+})
+const defaultModes = computed(() => defaultControls.data.value?.modes)
+async function setDefaultPermission(value: unknown) {
+  if (typeof value !== 'string') return
+  const previous = config.permission_mode
+  config.permission_mode = value
+  if (!await commitConfig()) config.permission_mode = previous
+}
 const credentialSecret = ref('')
 const savingCredential = ref(false)
 const credentialConnected = computed(() => !!props.agent.agent_credential_id)
@@ -237,6 +281,7 @@ function readConfig() {
   config.base_url = String(source.base_url ?? '')
   config.model = String(source.model ?? '')
   config.reasoning_effort = String(source.reasoning_effort ?? '')
+  config.permission_mode = String(source.permission_mode ?? '')
 }
 
 watch([() => props.agent.metadata, runtime], readConfig, { immediate: true })
@@ -274,6 +319,7 @@ async function commitConfig(): Promise<boolean> {
     provider: runtime.value,
     auth: config.auth,
   }
+  if (config.permission_mode) metadata.permission_mode = config.permission_mode
   if (config.base_url.trim()) metadata.base_url = config.base_url.trim()
   else delete metadata.base_url
   if (config.model.trim()) metadata.model = config.model.trim()

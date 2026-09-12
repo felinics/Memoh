@@ -1,6 +1,6 @@
+import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH } from '@/utils/external-agent'
 import type { Ref } from 'vue'
 import { getBotsByBotIdSettings } from '@memohai/sdk'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
 import type { ExternalAgentSessionInput } from './types'
 
 interface ExternalAgentSettings {
@@ -84,9 +84,9 @@ export function createExternalAgentDefaults(deps: {
         botAgentId: settings.default_bot_agent_id?.trim() || undefined,
         agentId,
         projectPath: settings.chat_acp_project_path?.trim()
-          || ACP_DEFAULT_PROJECT_PATH,
+          || EXTERNAL_AGENT_DEFAULT_PROJECT_PATH,
         projectMode: settings.chat_acp_project_mode?.trim()
-          || ACP_DEFAULT_PROJECT_MODE,
+          || EXTERNAL_AGENT_DEFAULT_PROJECT_MODE,
       }
       deps.rememberDefault(bid, input)
       return input

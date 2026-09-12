@@ -378,8 +378,8 @@ func TestWorkspaceInfoAddsACPToolsEndpointForProviderContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ACPToolsHTTPURL != ACPToolsProxyHTTPURL {
-		t.Fatalf("ACPToolsHTTPURL = %q", info.ACPToolsHTTPURL)
+	if info.ToolsHTTPURL != ToolsProxyHTTPURL {
+		t.Fatalf("ToolsHTTPURL = %q", info.ToolsHTTPURL)
 	}
 }
 

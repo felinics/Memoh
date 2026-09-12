@@ -319,7 +319,7 @@ export const useChatStore = defineStore('chat', () => {
     pendingACPRuntimeStatus, pendingACPRuntimeEnsuring, pendingExternalAgentStateFor,
     pendingExternalAgentMatchesInput,
     stageExternalAgentSession, stageDefaultExternalAgentSession, resetToEmptyComposer,
-    ensurePendingACPRuntime, setPendingACPModel, setPendingACPMode, setPendingACPReasoning,
+    ensurePendingACPRuntime, setPendingACPModel, setPendingACPMode, setPendingRuntimeMode, setPendingACPReasoning,
     saveLiveDraftExternalAgentStage, activateDraftExternalAgentStage, discardEvictedDraft,
   } = externalAgents.orchestration
   const {
@@ -615,7 +615,7 @@ export const useChatStore = defineStore('chat', () => {
     forkedSessionRequested, guiToolUseRequested, deletedSession,
     stageExternalAgentSession, stageDefaultExternalAgentSession, cacheDefaultExternalAgentSession,
     resetToEmptyComposer, ensurePendingACPRuntime,
-    setPendingACPModel, setPendingACPMode, setPendingACPReasoning, clearPendingExternalAgentSession,
+    setPendingACPModel, setPendingACPMode, setPendingRuntimeMode, setPendingACPReasoning, clearPendingExternalAgentSession,
     createExternalAgentSession, updateCurrentSessionAgent, updateCurrentSessionToMemoh,
     acpRuntimeKey, ensureACPRuntime, setACPRuntimeMode, setACPRuntimeModel, setACPRuntimeReasoning,
     removeSession, renameSession, forkTurn,

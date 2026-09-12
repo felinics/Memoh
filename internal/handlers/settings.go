@@ -105,7 +105,7 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 		if reasoningErr := settingsReasoningHTTPError(err); reasoningErr != nil {
 			return reasoningErr
 		}
-		if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
+		if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
 			return feedbackErr
 		}
 		if errors.Is(err, settings.ErrInvalidModelRef) {

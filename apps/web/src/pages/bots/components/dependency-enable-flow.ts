@@ -1,10 +1,10 @@
+import { externalAgentDisplayName } from '@/utils/external-agent'
 import type { BotagentsBotAgent } from '@memohai/sdk'
 import type {
   DependencyItem,
   PreflightItem,
   PreflightResponse,
 } from '@/composables/api/useWorkspaceDependencies'
-import { acpAgentDisplayName } from '@/utils/acp'
 
 // Pure decision table of the "enable an agent" preflight. The
 // flow component owns the dialogs; this module only maps the agent's declared
@@ -47,7 +47,7 @@ export function dependencyItemFromPreflight(
   const state = preflight?.state
   return {
     id: requirement.dependencyId,
-    name: preflight?.name?.trim() || acpAgentDisplayName(requirement.dependencyId, requirement.dependencyId),
+    name: preflight?.name?.trim() || externalAgentDisplayName(requirement.dependencyId, requirement.dependencyId),
     category: 'agent',
     source: 'managed',
     installed_version: preflight?.installed_version?.trim() || undefined,

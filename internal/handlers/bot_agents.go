@@ -39,6 +39,7 @@ func (h *BotAgentsHandler) Register(e *echo.Echo) {
 	group.GET("", h.List)
 	group.GET("/:id", h.Get)
 	group.GET("/:id/models", h.ListModels)
+	group.GET("/:id/runtime-controls", h.RuntimeControls)
 	group.PATCH("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
 }
@@ -67,7 +68,7 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 		// Stable runtime feedback (agent_dependency_missing and friends) keeps
 		// its own status and args; wrapping it as runtime-unavailable would
 		// lose both and hide the install task from the web.
-		if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
+		if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
 			return feedbackErr
 		}
 		if apperror.CodeOf(err) != "" {
@@ -288,4 +289,37 @@ func dependencyFor(requirements map[string]external.DependencyRequirement, runti
 		return nil
 	}
 	return &botagents.DependencyRequirement{DependencyID: requirement.DependencyID}
+}
+
+// RuntimeControls godoc
+// @Summary Get bot Agent default runtime controls
+// @Tags bot-agents
+// @Param bot_id path string true "Bot ID"
+// @Param id path string true "Agent ID"
+// @Success 200 {object} external.Controls
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Router /bots/{bot_id}/agents/{id}/runtime-controls [get].
+func (h *BotAgentsHandler) RuntimeControls(c echo.Context) error {
+	botID, err := h.authorize(c, bots.PermissionWorkspaceExec)
+	if err != nil {
+		return err
+	}
+	agent, err := h.service.Get(c.Request().Context(), botID, strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		return h.publicError("runtime controls", err)
+	}
+	var driver external.Driver
+	for _, candidate := range h.runtimes {
+		if candidate != nil && candidate.RuntimeType() == agent.Runtime {
+			driver = candidate
+			break
+		}
+	}
+	controls, err := external.ReadControls(c.Request().Context(), driver, external.PromptInput{BotID: botID, BotAgentID: agent.ID, Language: c.Request().Header.Get("Accept-Language"), RuntimeMetadata: agent.Metadata})
+	if err != nil {
+		return runtimeControlError(err)
+	}
+	return c.JSON(http.StatusOK, controls)
 }

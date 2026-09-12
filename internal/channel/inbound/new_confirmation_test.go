@@ -575,7 +575,7 @@ func TestSendACPFeedbackErrorUsesI18nKey(t *testing.T) {
 		ReplyTarget: "target-1",
 	}
 
-	err := p.sendACPFeedbackError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, agentfeedback.New(
+	err := p.sendExternalAgentFeedbackError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, agentfeedback.New(
 		agentfeedback.CodeNoWorkspaceExec,
 		"missing_workspace_exec",
 		403,
@@ -584,7 +584,7 @@ func TestSendACPFeedbackErrorUsesI18nKey(t *testing.T) {
 		nil,
 	))
 	if err != nil {
-		t.Fatalf("sendACPFeedbackError() error = %v", err)
+		t.Fatalf("sendExternalAgentFeedbackError() error = %v", err)
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent replies = %d, want 1", len(sender.sent))

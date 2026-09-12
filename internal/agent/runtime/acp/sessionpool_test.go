@@ -1506,7 +1506,7 @@ func TestProfileSupportsBackend(t *testing.T) {
 
 func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 	runner := &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp"},
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ToolsHTTPURL: "http://127.0.0.1:18732/mcp"},
 		startErr: errors.New("started"),
 	}
 	pool := newSessionPool(
@@ -1546,7 +1546,7 @@ func TestSessionPoolUsesSessionMetadataAsRuntimeTruth(t *testing.T) {
 
 func TestSessionPoolBakesOnlyStableRuntimeIdentity(t *testing.T) {
 	runner := &recordingRunner{
-		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp"},
+		info:     bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendContainer, DefaultWorkDir: "/data", ToolsHTTPURL: "http://127.0.0.1:18732/mcp"},
 		startErr: errors.New("started"),
 	}
 	pool := newSessionPool(
@@ -1597,8 +1597,8 @@ func TestSessionPoolUsesWorkspaceACPToolsEndpointForContainer(t *testing.T) {
 	pool.SetToolGateway(mcp.NewToolGatewayService(nil, nil))
 
 	got, err := pool.resolveToolHTTPURL("", bridge.WorkspaceInfo{
-		Backend:         bridge.WorkspaceBackendContainer,
-		ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp",
+		Backend:      bridge.WorkspaceBackendContainer,
+		ToolsHTTPURL: "http://127.0.0.1:18732/mcp",
 	})
 	if err != nil {
 		t.Fatal(err)

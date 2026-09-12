@@ -21,7 +21,7 @@ fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
-codex app-server generate-json-schema --out "${tmp}" >/dev/null
+codex app-server generate-json-schema --experimental --out "${tmp}" >/dev/null
 
 files=(
   codex_app_server_protocol.v2.schemas.json

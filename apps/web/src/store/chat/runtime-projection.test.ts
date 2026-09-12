@@ -7,6 +7,7 @@ import type {
 import {
   createEmptyRuntimeProjection,
   isRuntimeRunActive,
+  isRuntimeRunStreaming,
   reduceRuntimeProjection,
 } from './runtime-projection'
 
@@ -498,4 +499,17 @@ describe('idle settled run projection', () => {
 
     expect(state.transcript.turns.map(turn => turn.role)).toEqual(['user', 'assistant'])
   })
+})
+
+
+it('配置切换从 admitting 到完成都不显示生成状态或空助手消息', () => {
+  for (const status of ['admitting', 'running', 'finishing', 'completed'] as const) {
+    const run = runView({ configuration_only: true, status, request_user_turn: undefined })
+    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(run))
+    expect(isRuntimeRunStreaming(state.currentRunView)).toBe(false)
+    expect(state.transcript.streaming).toBe(false)
+    expect(state.transcript.turns).toEqual([])
+  }
+  expect(isRuntimeRunStreaming(runView())).toBe(true)
+  expect(isRuntimeRunActive('running')).toBe(true)
 })

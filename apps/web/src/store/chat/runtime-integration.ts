@@ -300,6 +300,12 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     const view = deps.chatViews.getSession(botId, sessionId)
     const previousRun = change.previous.currentRunView
     const currentRun = change.current.currentRunView
+    // Configuration saves have no chat output or history to reload. Applying
+    // an empty transcript here would also disturb the previous settled reply.
+    if (currentRun?.configuration_only || (!currentRun && previousRun?.configuration_only)) {
+      deps.decisions.observeRun(sessionId, currentRun)
+      return
+    }
     const currentInvocationId = currentRun
       // The frame's own echo is authoritative; the run_id registry lookup only
       // covers frames from before the echo existed (pre-ledger runs).

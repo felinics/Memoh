@@ -1,3 +1,4 @@
+import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH } from '@/utils/external-agent'
 import { computed, ref, type Ref } from 'vue'
 import type { AcpagentRuntimeStatus } from '@memohai/sdk'
 import {
@@ -8,7 +9,6 @@ import {
   setACPRuntimeModeByID as requestSetACPRuntimeModeByID,
   setACPRuntimeReasoningByID as requestSetACPRuntimeReasoningByID,
 } from '@/composables/api/useChat'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH } from '@/utils/acp'
 import { botAgentRuntimeForProvider, normalizeBotAgentRuntime, type BotAgentRuntime } from '@/utils/bot-agent'
 import { isApiErrorCode } from '@/utils/api-error'
 import type { ACPRuntimeStatusRegistry } from './acp-runtime-registry'
@@ -46,15 +46,15 @@ export function normalizedExternalAgentInput(input: ExternalAgentSessionInput): 
     runtime: normalizeBotAgentRuntime(input.runtime) || botAgentRuntimeForProvider(input.agentId),
     botAgentId: input.botAgentId?.trim() || undefined,
     agentId: input.agentId.trim(),
-    projectPath: input.projectPath?.trim() || ACP_DEFAULT_PROJECT_PATH,
-    projectMode: input.projectMode?.trim() || ACP_DEFAULT_PROJECT_MODE,
+    projectPath: input.projectPath?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_PATH,
+    projectMode: input.projectMode?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_MODE,
   }
 }
 
 export function externalAgentDraftMetadata(input: ExternalAgentSessionInput): Record<string, unknown> {
   const agentId = input.agentId.trim()
-  const projectMode = input.projectMode?.trim() || ACP_DEFAULT_PROJECT_MODE
-  const projectPath = input.projectPath?.trim() || ACP_DEFAULT_PROJECT_PATH
+  const projectMode = input.projectMode?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_MODE
+  const projectPath = input.projectPath?.trim() || EXTERNAL_AGENT_DEFAULT_PROJECT_PATH
   return {
     acp_agent_id: agentId,
     project_path: projectPath,

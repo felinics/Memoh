@@ -72,6 +72,7 @@ type StartTurnCommand struct {
 	ExternalMessageID string
 	EventID           string
 
+	AgentCommand    string
 	Query           string
 	ModelQuery      string
 	UserMessageKind string

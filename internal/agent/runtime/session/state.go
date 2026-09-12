@@ -60,6 +60,15 @@ func pendingDecisionEvent(event native.StreamEvent) bool {
 	return status == "" || strings.EqualFold(status, "pending")
 }
 
+func terminalDecisionEvent(event native.StreamEvent) bool {
+	switch event.Type {
+	case native.EventToolApprovalRequest, native.EventUserInputRequest:
+		return !pendingDecisionEvent(event)
+	default:
+		return false
+	}
+}
+
 // decisionEventID identifies the decision an approval or user-input event
 // belongs to, pairing its pending event with the later terminal status.
 func decisionEventID(event native.StreamEvent) string {

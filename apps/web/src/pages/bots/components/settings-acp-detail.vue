@@ -34,6 +34,7 @@
 </template>
 
 <script setup lang="ts">
+import { isACPAgent } from '@/utils/external-agent'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -47,7 +48,6 @@ import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
 import {
   ensureACPAgentForm,
   findMissingRequiredManagedField,
-  isACPAgent,
   type ACPAgentForm,
   type ACPForm,
 } from '@/utils/acp'

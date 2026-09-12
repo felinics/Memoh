@@ -2,7 +2,6 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -43,14 +42,18 @@ type appServer struct {
 	// loadedThreads tracks thread ids this process has started or resumed;
 	// resuming an already-loaded thread is a no-op server-side but tracking
 	// avoids redundant calls.
-	loadedThreads map[string]bool
+	loadedThreads  map[string]bool
+	threadSettings map[string]protocol.Settings
 	// toollessThreads marks threads whose start-time config carried no Memoh
 	// tool gateway; the driver re-emits a notice for them every turn.
 	toollessThreads map[string]bool
 	// toolLookup reports whether a tool name is served by the Memoh gateway
 	// for this bot; the MCP consent path uses it turn-independently.
-	toolLookup func(context.Context, string) bool
-	authReady  bool
+	toolLookup   func(context.Context, string) bool
+	authReady    bool
+	threadStatus map[string]protocol.ThreadStatus
+	threadUsage  map[string]protocol.ThreadTokenUsage
+	rateLimits   *protocol.RateLimitSnapshot
 	// toolMounts holds each thread's live gateway route (see tools.go).
 	toolMounts map[string]*toolmount.Mount
 	// logins tracks in-flight device-code logins by login id; outcomes arrive
@@ -67,7 +70,7 @@ type loginOutcome struct {
 
 // ErrAuthRequired identifies a configured Codex runtime that still needs the
 // user to complete account authorization in the Bot's workspace.
-var ErrAuthRequired = errors.New("codex runtime authentication is required")
+var ErrAuthRequired = external.ErrAuthRequired
 
 // handshakeTimeout bounds initialize plus auth setup on a fresh process.
 const handshakeTimeout = 60 * time.Second
@@ -97,8 +100,10 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 
 	handshakeCtx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
+	experimental := true
 	var initResp protocol.InitializeResponse
 	err = srv.conn.Call(handshakeCtx, "initialize", protocol.InitializeParams{
+		Capabilities: &protocol.InitializeCapabilities{ExperimentalAPI: &experimental},
 		ClientInfo: protocol.ClientInfo{
 			Name:    "memoh",
 			Version: version.ShortCommitHash(),
@@ -299,6 +304,7 @@ func (s *appServer) HandleNotification(_ context.Context, note *protocol.Inbound
 	if !known {
 		return
 	}
+	s.cacheControlNotification(decoded)
 	threadID := notificationThreadID(decoded)
 	if threadID == "" {
 		s.handleGlobalNotification(note.Method, decoded)
@@ -404,6 +410,10 @@ func notificationThreadID(decoded any) string {
 	case *protocol.ThreadStartedNotification:
 		return params.Thread.ID
 	case *protocol.ThreadStatusChangedNotification:
+		return params.ThreadID
+	case *protocol.ThreadGoalUpdatedNotification:
+		return params.ThreadID
+	case *protocol.ThreadGoalClearedNotification:
 		return params.ThreadID
 	case *protocol.ThreadTokenUsageUpdatedNotification:
 		return params.ThreadID

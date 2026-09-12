@@ -1,8 +1,7 @@
+import { normalizeAgentID } from '@/utils/external-agent'
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
 
 export const ACP_NO_PROJECT_MODE = 'none'
-export const ACP_DEFAULT_PROJECT_MODE = 'project'
-export const ACP_DEFAULT_PROJECT_PATH = '/data'
 export const ACP_NO_PROJECT_ROOT = '/data/.memoh/acp-work/no-project'
 
 export interface ACPAgentForm {
@@ -27,7 +26,7 @@ export function readACPConfig(metadata: Record<string, unknown> | undefined, pro
   const acp = isRecord(metadata?.acp) ? metadata.acp : {}
   const agents = isRecord(acp.agents) ? acp.agents : {}
   for (const profile of profiles) {
-    const id = normalizeACPAgentID(profile.id)
+    const id = normalizeAgentID(profile.id)
     if (!id) continue
     const defaults = emptyACPAgentForm(profile)
     const raw = agents[id]
@@ -49,7 +48,7 @@ export function readACPConfig(metadata: Record<string, unknown> | undefined, pro
 export function normalizeACPForm(source: ACPForm, profiles: AcpprofilePublicProfile[]): ACPForm {
   const out: ACPForm = { agents: {} }
   for (const profile of profiles) {
-    const id = normalizeACPAgentID(profile.id)
+    const id = normalizeAgentID(profile.id)
     if (!id) continue
     const agent = source.agents[id] ?? emptyACPAgentForm(profile)
     out.agents[id] = {
@@ -99,7 +98,7 @@ export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile
   }
   if (mode === 'self') return null
   for (const field of profile.managed_fields ?? []) {
-    const id = normalizeACPAgentID(field.id)
+    const id = normalizeAgentID(field.id)
     if (!id || !field.required) continue
     if (!String(managed[id] ?? '').trim()) return field
   }
@@ -109,11 +108,11 @@ export function findMissingRequiredManagedField(profile: AcpprofilePublicProfile
 function profileSupportsSetupMode(profile: AcpprofilePublicProfile, mode: string): boolean {
   const modes = profile.setup_modes?.filter(Boolean)
   if (!modes || modes.length === 0) return true
-  return modes.some(supported => normalizeACPAgentID(supported) === mode)
+  return modes.some(supported => normalizeAgentID(supported) === mode)
 }
 
 export function readACPAgentConfig(metadata: Record<string, unknown> | undefined, rawAgentID: string | undefined): ACPAgentConfig {
-  const agentID = normalizeACPAgentID(rawAgentID)
+  const agentID = normalizeAgentID(rawAgentID)
   const acp = isRecord(metadata?.acp) ? metadata.acp : {}
   const agents = isRecord(acp.agents) ? acp.agents : {}
   const raw = agentID ? agents[agentID] : undefined
@@ -127,7 +126,7 @@ export function readACPAgentConfig(metadata: Record<string, unknown> | undefined
 }
 
 export function isACPAgentEnabled(metadata: Record<string, unknown> | undefined, rawAgentID: unknown): boolean {
-  const agentID = normalizeACPAgentID(rawAgentID)
+  const agentID = normalizeAgentID(rawAgentID)
   if (!agentID || !metadata) return false
   const acp = isRecord(metadata.acp) ? metadata.acp : {}
   const agents = isRecord(acp.agents) ? acp.agents : {}
@@ -150,7 +149,7 @@ export function emptyACPAgentForm(profile: AcpprofilePublicProfile): ACPAgentFor
 }
 
 export function ensureACPAgentForm(form: ACPForm, profile: AcpprofilePublicProfile): ACPAgentForm {
-  const id = normalizeACPAgentID(profile.id)
+  const id = normalizeAgentID(profile.id)
   if (!id) return emptyACPAgentForm(profile)
   if (!form.agents[id]) {
     form.agents[id] = emptyACPAgentForm(profile)
@@ -161,7 +160,7 @@ export function ensureACPAgentForm(form: ACPForm, profile: AcpprofilePublicProfi
 export function fieldsFromProfile(profile: AcpprofilePublicProfile, source: Record<string, unknown>): Record<string, string> {
   const values: Record<string, string> = {}
   for (const field of profile.managed_fields ?? []) {
-    const id = normalizeACPAgentID(field.id)
+    const id = normalizeAgentID(field.id)
     if (!id) continue
     const value = source[id]
     values[id] = typeof value === 'string' ? value : ''
@@ -177,21 +176,18 @@ export function defaultSetupMode(profile: AcpprofilePublicProfile): string {
   return normalizeSetupMode(modes[0] ?? 'api_key')
 }
 
-export function normalizeACPAgentID(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : ''
-}
 
 function legacyEnabled(acp: Record<string, unknown>, id: string): boolean {
-  if (Array.isArray(acp.enabled_agents) && acp.enabled_agents.some((item) => normalizeACPAgentID(item) === id)) return true
+  if (Array.isArray(acp.enabled_agents) && acp.enabled_agents.some((item) => normalizeAgentID(item) === id)) return true
   if (id === 'codex' && typeof acp.codex_enabled === 'boolean') return acp.codex_enabled
   return false
 }
 
 function normalizeSetupMode(mode: string, managed: Record<string, unknown> = {}): string {
-  const value = normalizeACPAgentID(mode)
+  const value = normalizeAgentID(mode)
   if (value === 'oauth' || value === 'self') return value
   if (value === 'managed') {
-    const legacyAuthType = normalizeACPAgentID(managed.auth_type)
+    const legacyAuthType = normalizeAgentID(managed.auth_type)
     return legacyAuthType === 'provider_oauth' || legacyAuthType === 'oauth' ? 'oauth' : 'api_key'
   }
   if (value === 'api_key') return value
@@ -199,16 +195,16 @@ function normalizeSetupMode(mode: string, managed: Record<string, unknown> = {})
 }
 
 function serializeACPAgents(metadata: Record<string, unknown> | undefined, acpForm: ACPForm, profiles: AcpprofilePublicProfile[]): Record<string, unknown> {
-  const profileByID = new Map(profiles.map(profile => [normalizeACPAgentID(profile.id), profile]))
+  const profileByID = new Map(profiles.map(profile => [normalizeAgentID(profile.id), profile]))
   const out: Record<string, unknown> = {}
   for (const [rawAgentID, agent] of Object.entries(acpForm.agents)) {
-    const agentID = normalizeACPAgentID(rawAgentID)
+    const agentID = normalizeAgentID(rawAgentID)
     const profile = profileByID.get(agentID)
     const managed: Record<string, unknown> = { ...agent.managed }
     if (profile) {
       const existingManaged = existingManagedFields(metadata, agentID)
       for (const field of profile.managed_fields ?? []) {
-        const fieldID = normalizeACPAgentID(field.id)
+        const fieldID = normalizeAgentID(field.id)
         if (!fieldID || !isSensitiveManagedField(field)) continue
         const value = managed[fieldID]
         const existing = existingManaged[fieldID]

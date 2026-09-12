@@ -282,6 +282,7 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 		turnRequestMessageID = strings.TrimSpace(req.PersistedUserMessageID)
 	}
 	persistInputs := make([]messagepkg.PersistInput, 0, len(messages))
+	originalQueryAvailable := !req.UserMessagePersisted && !req.ReusePersistedUserMessage
 	for i, msg := range messages {
 		msg = normalizeUserMessageContent(msg)
 
@@ -333,9 +334,10 @@ func (s *Service) buildPersistInputs(ctx context.Context, req ChatRequest, messa
 				strings.TrimSpace(req.Query) == "" &&
 				ownText == "" &&
 				i == 0
-			isOriginalQuery := (ownText != "" && ownText == strings.TrimSpace(req.Query)) || isOriginalSkillActivation
+			isOriginalQuery := originalQueryAvailable && ((ownText != "" && ownText == strings.TrimSpace(req.Query)) || isOriginalSkillActivation)
 
 			if isOriginalQuery {
+				originalQueryAvailable = false
 				externalMessageID = req.ExternalMessageID
 				sourceReplyToMessageID = req.SourceReplyToMessageID
 				messageEventID = req.EventID

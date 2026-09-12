@@ -223,6 +223,7 @@ type PromptInput struct {
 	ProjectPath              string
 	ModelID                  string
 	ReasoningEffort          string
+	PermissionMode           string
 	Prompt                   string
 	Images                   []client.PromptImage
 	AttachmentReferences     []string
@@ -1124,6 +1125,12 @@ func (p *SessionPool) rememberedACPPair(ctx context.Context, sessionID string) (
 // holds the runtime operation lock. Model must be applied first because the
 // authoritative response can replace the available reasoning options.
 func applyPromptConfig(ctx context.Context, sess *client.Session, input PromptInput) error {
+	if input.PermissionMode != "" && sess.ModeState().CurrentModeID != input.PermissionMode {
+		if _, err := sess.SetMode(ctx, input.PermissionMode); err != nil {
+			return err
+		}
+	}
+
 	desiredModel := strings.TrimSpace(input.ModelID)
 	if desiredModel != "" && strings.TrimSpace(sess.ModelState().CurrentModelID) != desiredModel {
 		if _, err := sess.SetModel(ctx, desiredModel); err != nil {
@@ -2526,7 +2533,7 @@ func (p *SessionPool) resolveToolHTTPURL(inputURL string, workspaceInfo bridge.W
 	}
 	backend := strings.TrimSpace(workspaceInfo.Backend)
 	if backend == "" || backend == bridge.WorkspaceBackendContainer {
-		return strings.TrimSpace(workspaceInfo.ACPToolsHTTPURL), nil
+		return strings.TrimSpace(workspaceInfo.ToolsHTTPURL), nil
 	}
 	return strings.TrimSpace(inputURL), nil
 }

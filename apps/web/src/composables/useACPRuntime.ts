@@ -2,8 +2,8 @@ import { computed, ref, shallowRef, toValue, watch, type MaybeRefOrGetter } from
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/store/chat-list'
 import type { ChatViewTarget } from '@/store/chat/types'
-import { acpRuntimeMatchesConfiguration } from '@/utils/acp-slash-commands'
-import type { AcpagentRuntimeStatus, AcpclientAvailableCommandInfo, AcpclientModeInfo, AcpclientModelInfo, AcpclientReasoningEffortInfo } from '@memohai/sdk'
+import { acpRuntimeMatchesConfiguration } from '@/utils/acp-runtime-matching'
+import type { AcpagentRuntimeStatus, AcpclientAvailableCommandInfo, AcpclientModeInfo, AcpclientModelInfo, AcpclientReasoningEffortInfo, ExternalControls } from '@memohai/sdk'
 
 interface UseACPRuntimeOptions {
   target: MaybeRefOrGetter<ChatViewTarget>
@@ -73,6 +73,17 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   const availableCommands = computed<AcpclientAvailableCommandInfo[]>(() => runtime.value?.available_commands ?? [])
   const reasoningEfforts = computed<AcpclientReasoningEffortInfo[]>(() => runtime.value?.reasoning?.available_efforts ?? [])
   const currentReasoningEffort = computed(() => runtime.value?.reasoning?.current_effort ?? '')
+
+  const controls = computed<ExternalControls>(() => ({
+    session_id: runtime.value?.session_id,
+    commands: availableCommands.value.map(command => ({ ...command, kind: 'turn' as const })),
+    modes: {
+      available_modes: modes.value,
+      current_mode_id: currentModeId.value,
+      supported: runtime.value?.modes?.supported ?? false,
+    },
+    capabilities: { permission_modes: runtime.value?.modes?.supported ?? false, compact: false, plan_mode: false },
+  }))
 
   function requestScope() {
     const value = target.value
@@ -207,6 +218,7 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
   }, { immediate: true })
 
   return {
+    controls,
     runtime,
     modes,
     currentModeId,

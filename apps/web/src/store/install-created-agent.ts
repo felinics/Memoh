@@ -3,7 +3,7 @@ import { getSupermarketRegistriesByRegistryIdAppsByAppId, postBotsByBotIdContain
 import i18n from '@/i18n'
 import { preflightDependencies } from '@/composables/api/useWorkspaceDependencies'
 import { agentDependencyRequirement, resolveEnableFlowStep } from '@/pages/bots/components/dependency-enable-flow'
-import { acpAgentDisplayName } from '@/utils/acp'
+import { externalAgentDisplayName } from '@/utils/external-agent'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useAppOperationsStore } from './app-operations'
 
@@ -34,7 +34,7 @@ export async function installCreatedAgent(botId: string, agent: BotagentsBotAgen
   const operations = useAppOperationsStore()
   const result = operations.start({
     botId, targetId: '', registryId: 'memoh', appId: requirement.dependencyId,
-    name: acpAgentDisplayName(agent.runtime ?? '', agent.name ?? ''), action: 'install',
+    name: externalAgentDisplayName(agent.runtime ?? '', agent.name ?? ''), action: 'install',
     install: { registryId: 'memoh', appId: requirement.dependencyId, revision: data.revision },
   })
   if (result.kind === 'busy') throw new Error(t('apps.busy'))

@@ -116,6 +116,30 @@ func TestRunFlowPolicyBypass(t *testing.T) {
 	}
 }
 
+func TestRuntimeApprovalNeverUsesMemohPolicy(t *testing.T) {
+	for _, interactive := range []bool{true, false} {
+		svc := &fakeFlowService{
+			evaluation: Evaluation{Decision: DecisionBypass},
+			evalErr:    errors.New("runtime approvals must not evaluate Memoh policy"),
+			decided:    Request{Status: StatusRejected, DecidedByUser: true},
+		}
+		flow := flowInputFor(svc)
+		flow.Interactive = interactive
+		emitted := 0
+		flow.Emit = func(Request) bool { emitted++; return true }
+		result, err := RunRuntimeFlow(context.Background(), svc, flow)
+		if err != nil || result.Approved || svc.createCalls != 1 {
+			t.Fatalf("interactive=%v: result=%+v, err=%v, created=%d", interactive, result, err, svc.createCalls)
+		}
+		if interactive && (emitted != 2 || svc.waitCalls != 1) {
+			t.Fatalf("runtime approval was not delivered: emitted=%d waits=%d", emitted, svc.waitCalls)
+		}
+		if !interactive && len(svc.rejectCalls) != 1 {
+			t.Fatal("non-interactive runtime approval must be rejected")
+		}
+	}
+}
+
 func TestRunFlowPolicyDenyDoesNotCreatePendingRequest(t *testing.T) {
 	t.Parallel()
 

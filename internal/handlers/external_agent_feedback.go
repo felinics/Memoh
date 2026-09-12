@@ -10,15 +10,15 @@ import (
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 )
 
-func acpFeedbackHTTPError(err error) error {
-	feedback := acpFeedbackError(err)
+func externalAgentFeedbackHTTPError(err error) error {
+	feedback := externalAgentFeedbackError(err)
 	if feedback == nil {
 		return nil
 	}
 	return echo.NewHTTPError(feedback.HTTPStatus, feedback)
 }
 
-func acpFeedbackError(err error) *agentfeedback.Error {
+func externalAgentFeedbackError(err error) *agentfeedback.Error {
 	var feedback *agentfeedback.Error
 	if errors.As(err, &feedback) {
 		return feedback

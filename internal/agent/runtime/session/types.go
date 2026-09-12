@@ -252,7 +252,9 @@ func (s Snapshot) cursor() Cursor {
 }
 
 type CurrentRunView struct {
-	RunID string `json:"run_id" validate:"required" format:"uuid"`
+	// ConfigurationOnly holds the session lock but does not generate a reply.
+	ConfigurationOnly bool   `json:"configuration_only,omitempty"`
+	RunID             string `json:"run_id" validate:"required" format:"uuid"`
 	// TurnID is the durable turn this run writes into, allocated at admission.
 	// It is part of the observable view because SR-OBS-003 requires every
 	// subscriber to agree on the run's turn, and a subscriber that only learns

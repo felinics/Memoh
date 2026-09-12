@@ -16,6 +16,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
@@ -33,6 +34,7 @@ type SessionHandler struct {
 	runtimeResets   sessionResetService
 	workdirs        sessionWorkdirService
 	agentRuntimes   sessionAgentRuntimeService
+	runtimeControls turn.RuntimeControlService
 	botAgents       *botagents.Service
 	botService      *bots.Service
 	accountService  *accounts.Service
@@ -128,6 +130,9 @@ func (h *SessionHandler) SetBotAgents(service *botagents.Service) {
 // external-runtime fork preparation and active-run shutdown.
 func (h *SessionHandler) SetAgentRuntimeService(service sessionAgentRuntimeService) {
 	h.agentRuntimes = service
+	if controls, ok := service.(turn.RuntimeControlService); ok {
+		h.runtimeControls = controls
+	}
 }
 
 func (h *SessionHandler) SetProjectionCache(cache sessionProjectionCache) {
@@ -141,6 +146,11 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g.GET("", h.ListSessions)
 	g.GET("/model-preference-seed", h.ModelPreferenceSeed)
 	g.GET("/:session_id", h.GetSession)
+	g.GET("/:session_id/runtime-controls", h.GetRuntimeControls)
+	g.PATCH("/:session_id/runtime-controls/mode", h.SetRuntimeMode)
+	g.GET("/:session_id/runtime-controls/goal", h.GetRuntimeGoal)
+	g.POST("/:session_id/runtime-controls/goal", h.ControlRuntimeGoal)
+	g.POST("/:session_id/runtime-controls/commands", h.ExecuteRuntimeCommand)
 	g.POST("/:session_id/fork", h.ForkSession)
 	g.PATCH("/:session_id", h.UpdateSession)
 	g.DELETE("/:session_id", h.DeleteSession)
@@ -269,7 +279,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if err := rejectSystemACPRuntime(targetMode, targetRuntimeType); err != nil {
+	if err := rejectSystemExternalRuntime(targetMode, targetRuntimeType); err != nil {
 		return err
 	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID, requiredPermissionForSessionRuntime(targetMode, targetRuntimeType))
@@ -659,15 +669,11 @@ const (
 	sessionListMaxLimit     = 200
 )
 
-// parseSessionTypesParam resolves the types filter. The second return says
-// whether the default user-facing listing applies: no explicit types and no
-// parent filter. That default filters by stored visibility rather than by a
-// type list, so schedule-created sessions marked user-visible surface too.
-// rejectSystemACPRuntime keeps system-managed session modes out of the HTTP
-// session API's ACP surface. The thread domain itself allows
-// schedule+acp_agent — the schedule trigger path creates those sessions —
-// but interactive session creation stays limited to chat and discuss.
-func rejectSystemACPRuntime(mode, runtimeType string) error {
+// rejectSystemExternalRuntime keeps system-managed session modes out of the HTTP
+// session API's external-agent surface. The schedule trigger path can create
+// external-agent sessions in schedule mode; interactive session creation
+// stays limited to chat and discuss.
+func rejectSystemExternalRuntime(mode, runtimeType string) error {
 	// Agent runtimes (ACP and direct): the capability table also allows
 	// schedule mode, but those sessions are created by the schedule service —
 	// this user-facing endpoint stays limited to chat and discuss.
@@ -677,6 +683,10 @@ func rejectSystemACPRuntime(mode, runtimeType string) error {
 	return nil
 }
 
+// parseSessionTypesParam resolves the types filter. The second return says
+// whether the default user-facing listing applies: no explicit types and no
+// parent filter. That default filters by stored visibility rather than by a
+// type list, so schedule-created sessions marked user-visible surface too.
 func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -921,7 +931,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		if err := rejectSystemACPRuntime(targetMode, targetRuntime); err != nil {
+		if err := rejectSystemExternalRuntime(targetMode, targetRuntime); err != nil {
 			return err
 		}
 		if !bots.HasPermission(perms, requiredPermissionForSessionRuntime(targetMode, targetRuntime)) {

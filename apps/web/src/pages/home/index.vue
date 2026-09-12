@@ -13,6 +13,7 @@
 </template>
 
 <script setup lang="ts">
+import { normalizeAgentID } from '@/utils/external-agent'
 import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
@@ -21,7 +22,7 @@ import { getBotsByBotIdAgents, getBotsById } from '@memohai/sdk'
 import { PanePlaceholder } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { ACP_NO_PROJECT_MODE, createACPNoProjectPath, normalizeACPAgentID } from '@/utils/acp'
+import { ACP_NO_PROJECT_MODE, createACPNoProjectPath } from '@/utils/acp'
 import { botAgentProvider } from '@/utils/bot-agent'
 import ChatWorkspace from './components/chat-workspace.vue'
 
@@ -97,7 +98,7 @@ async function maybeStartExternalAgentSession() {
     return
   }
   agentStartConsumed = true
-  const agentId = normalizeACPAgentID(raw)
+  const agentId = normalizeAgentID(raw)
   try {
     const botId = currentBotId.value?.trim() ?? ''
     if (agentId && botId) {

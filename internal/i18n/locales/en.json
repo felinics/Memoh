@@ -508,10 +508,10 @@
     }
   },
   "slash": {
-      "error": {
-        "unknownSlash": "Unknown slash command.",
-        "unsupportedWebCommand": "That slash command is not available in Web chat.",
-        "invalidSkillSlashSyntax": "Invalid skill slash syntax. Use /<skill-name> [prompt].",
+    "error": {
+      "unknownSlash": "Unknown slash command.",
+      "unsupportedWebCommand": "That slash command is not available in Web chat.",
+      "invalidSkillSlashSyntax": "Invalid skill slash syntax. Use /<skill-name> [prompt].",
       "requestedSkillNotFound": "Requested skill was not found.",
       "requestedSkillAmbiguous": "Requested skill is ambiguous.",
       "requestedSkillDisabled": "Requested skill is disabled.",
@@ -562,5 +562,24 @@
     "compact": "Compact conversation context",
     "queue": "Queue input",
     "steer": "Steer the current response"
+  },
+  "errors": {
+    "runtime_control": {
+      "goal_requires_default_mode": "Exit Plan mode before creating or resuming a goal.",
+      "unsupported": "This runtime does not support this control.",
+      "command_unavailable": "This runtime command is no longer available. Refresh and try again.",
+      "mode_unavailable": "This permission mode is unavailable. Refresh and choose a supported mode.",
+      "thread_unavailable": "Start a conversation before using this operation.",
+      "failed": "The runtime control could not be completed. Try again.",
+      "forbidden": "You do not have access to this conversation.",
+      "request_invalid": "The runtime control request is invalid.",
+      "cancelled": "Operation cancelled."
+    },
+    "session_runtime": {
+      "session_busy": "This conversation is still working on your previous message. Please try again in a moment."
+    },
+    "external_runtime": {
+      "auth_required": "Codex is not connected yet. Open Agent settings to connect ChatGPT or configure an API key."
+    }
   }
 }

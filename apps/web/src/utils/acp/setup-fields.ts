@@ -1,6 +1,5 @@
+import { isACPAgent, normalizeAgentID } from '@/utils/external-agent'
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
-import { isACPAgent } from './agent-icon'
-import { normalizeACPAgentID } from './metadata'
 
 export type AcpSetupModeLabelTranslate = (key: string) => string
 
@@ -32,7 +31,7 @@ export function acpManagedFieldLabel(
   t: AcpSetupModeLabelTranslate,
 ): string {
   if (isACPAgent(profile.id)) {
-    const id = normalizeACPAgentID(field.id)
+    const id = normalizeAgentID(field.id)
     if (id === 'command') return t('bots.settings.acpCommand')
     if (id === 'arguments') return t('bots.settings.acpArguments')
   }
@@ -47,7 +46,7 @@ export function acpManagedFieldHelp(
   // placeholder (`my-agent-acp`, `--stdio`) shows the shape. A sentence under
   // each only restated that, on both the create panel and the settings page.
   if (isACPAgent(profile.id)) {
-    const id = normalizeACPAgentID(field.id)
+    const id = normalizeAgentID(field.id)
     if (id === 'command' || id === 'arguments') return ''
   }
   return field.help || ''
@@ -61,7 +60,7 @@ export function acpManagedPlaceholder(
 }
 
 export function acpManagedFieldName(profile: AcpprofilePublicProfile, field: AcpprofileManagedField): string {
-  return `acp-${normalizeACPAgentID(profile.id) || 'agent'}-${normalizeACPAgentID(field.id) || 'field'}`
+  return `acp-${normalizeAgentID(profile.id) || 'agent'}-${normalizeAgentID(field.id) || 'field'}`
 }
 
 export function acpManagedFieldAutocomplete(field: AcpprofileManagedField): string {
@@ -76,7 +75,7 @@ export function filterCreateVisibleManagedFields(
 ): AcpprofileManagedField[] {
   if (setupMode !== 'api_key') return []
   return (profile.managed_fields ?? []).filter((field) => {
-    const id = normalizeACPAgentID(field.id)
+    const id = normalizeAgentID(field.id)
     return !(!id || id === 'provider_id' || id === 'oauth_token')
   })
 }
@@ -88,7 +87,7 @@ export function filterSettingsVisibleManagedFields(
   _setupMode: string,
 ): AcpprofileManagedField[] {
   return (profile.managed_fields ?? []).filter((field) => {
-    const id = normalizeACPAgentID(field.id)
+    const id = normalizeAgentID(field.id)
     return id !== 'provider_id'
   })
 }

@@ -32,8 +32,8 @@ describe('slash command result helpers', () => {
 
   it('routes an opaque ACP mode id through permission', () => {
     const modeId = ' review:deep '
-    expect(resolveCommandResultSelection({ id: modeId, title: modeId, kind: 'acp_mode' })).toEqual({
-      kind: 'acp_permission',
+    expect(resolveCommandResultSelection({ id: modeId, title: modeId, kind: 'runtime_mode' })).toEqual({
+      kind: 'runtime_permission',
       modeId,
     })
   })

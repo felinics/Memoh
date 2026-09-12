@@ -284,6 +284,24 @@
       "limit": "他の認証を終了してから、もう一度お試しください。",
       "failed": "アカウント認証に失敗しました。もう一度お試しください。",
       "code_invalid": "認証コードが無効か期限切れです。Claude の完全なコードをコピーするか、再接続してください。"
+    },
+    "workdir": {
+      "git_busy": "Agent がこの作業ディレクトリを使用中です。実行が終わってからブランチを切り替えてください。",
+      "git_branch_unavailable": "このローカルブランチは利用できません。更新して既存のブランチを選択してください。",
+      "git_switch_failed": "Git ブランチを切り替えられませんでした。未コミットの変更や、別の Worktree で使用中のブランチでないか確認してください。",
+      "git_unavailable": "Git 作業ディレクトリを読み取れません。ワークスペースを確認して再試行してください。"
+    },
+    "runtime_control": {
+      "goal_requires_default_mode": "目標を作成・再開するには、先にプランモードを終了してください。",
+      "steer_failed": "追加の指示を送信できませんでした。このターンが終了してから再送信してください。",
+      "unsupported": "このランタイムはこの操作に対応していません。",
+      "command_unavailable": "このコマンドは利用できません。更新して再試行してください。",
+      "mode_unavailable": "この権限モードは利用できません。更新して選び直してください。",
+      "thread_unavailable": "会話を開始してから、この操作を実行してください。",
+      "failed": "操作を完了できませんでした。再試行してください。",
+      "forbidden": "この会話へのアクセス権がありません。",
+      "request_invalid": "リクエストが無効です。更新して再試行してください。",
+      "cancelled": "操作は中止されました。"
     }
   },
   "auth": {
@@ -1420,7 +1438,49 @@
         "rtt": "RTT"
       }
     },
-    "modelDefaultNamed": "デフォルト（{model}）"
+    "modelDefaultNamed": "デフォルト（{model}）",
+    "codexProject": {
+      "chooseBranch": "ブランチを切り替え",
+      "noBranches": "ローカルブランチはまだありません",
+      "detachedHead": "Detached HEAD",
+      "expand": "ワークスペースを表示",
+      "collapse": "ワークスペースを折りたたむ",
+      "choose": "プロジェクトを選択",
+      "clear": "プロジェクトを使わない",
+      "none": "プロジェクト未選択",
+      "workspace": "Memoh ワークスペース",
+      "empty": "サイドバーにフォルダを追加してから、プロジェクトを選択してください。"
+    },
+    "planMode": {
+      "commandLabel": "プランモード",
+      "label": "プラン",
+      "enable": "プランモードをオンにする",
+      "disable": "プランモードをオフにする",
+      "placeholder": "プランを作成するタスクを説明してください…",
+      "changeFailed": "プランモードを切り替えられませんでした。もう一度お試しください。"
+    },
+    "sessionPermissionMode": "セッションの権限モード",
+    "permissionMode": "権限モード",
+    "goal": {
+      "label": "目標",
+      "description": "継続して取り組む目標を設定",
+      "placeholder": "目標と、その完了条件を入力してください",
+      "cancelDraft": "目標の入力をキャンセル",
+      "sentAsGoal": "目標として送信済み",
+      "pause": "目標を一時停止",
+      "resume": "目標を再開",
+      "clear": "目標を削除",
+      "elapsed": "{seconds} 秒",
+      "textOnly": "添付ファイルやスキルを含めず、テキストで目標を設定してください。",
+      "status": {
+        "active": "目標に取り組み中",
+        "paused": "目標は一時停止中",
+        "blocked": "目標は進行できません",
+        "usageLimited": "利用上限に到達",
+        "budgetLimited": "Token 予算に到達",
+        "complete": "目標を達成"
+      }
+    }
   },
   "models": {
     "title": "モデル",
@@ -2397,7 +2457,9 @@
       "openAuthorizationPage": "認証ページを開く",
       "authorizationCode": "認証コード",
       "authorizationCodePlaceholder": "認証コードをすべて貼り付けてください",
-      "completeAuthorization": "認証を完了"
+      "completeAuthorization": "認証を完了",
+      "defaultPermissionMode": "デフォルトの権限モード",
+      "defaultPermissionModeDescription": "新しいセッションで使用するモードです。セッション内の選択が優先されます。"
     },
     "dependencies": {
       "title": "Workspace の依存関係",

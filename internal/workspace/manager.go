@@ -38,7 +38,7 @@ const (
 	ContainerPrefix             = "workspace-"
 	LegacyContainerPrefix       = "mcp-"
 	DisplayRFBSocketName        = "display.rfb.sock"
-	ACPToolsProxyHTTPURL        = bridge.ACPToolsProxyHTTPURL
+	ToolsProxyHTTPURL           = bridge.ToolsProxyHTTPURL
 
 	// WorkspaceInitPath and WorkspaceBridgePath are the container start
 	// parameters used by buildWorkspaceContainerSpec: the image's init and the
@@ -421,7 +421,7 @@ func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge
 	if provider, ok := m.service.(bridge.WorkspaceInfoProvider); ok {
 		info, err := provider.WorkspaceInfo(ctx, botID)
 		if err == nil {
-			return withACPToolsEndpoint(info), nil
+			return withToolsEndpoint(info), nil
 		}
 		if !errors.Is(err, ctr.ErrNotSupported) && !ctr.IsNotFound(err) {
 			return bridge.WorkspaceInfo{}, err
@@ -431,7 +431,7 @@ func (m *Manager) nativeWorkspaceInfo(ctx context.Context, botID string) (bridge
 		Backend:        bridge.WorkspaceBackendContainer,
 		DefaultWorkDir: config.DefaultDataMount,
 	}
-	return withACPToolsEndpoint(info), nil
+	return withToolsEndpoint(info), nil
 }
 
 func (m *Manager) nativeToolApprovalConfig(ctx context.Context, botID string) (settings.ToolApprovalConfig, error) {
@@ -496,14 +496,14 @@ func (m *Manager) ListWorkspaceTargets(ctx context.Context, botID string) ([]Wor
 	return targets, nil
 }
 
-func withACPToolsEndpoint(info bridge.WorkspaceInfo) bridge.WorkspaceInfo {
+func withToolsEndpoint(info bridge.WorkspaceInfo) bridge.WorkspaceInfo {
 	if strings.TrimSpace(info.Backend) != bridge.WorkspaceBackendContainer {
 		return info
 	}
-	if strings.TrimSpace(info.ACPToolsHTTPURL) != "" {
+	if strings.TrimSpace(info.ToolsHTTPURL) != "" {
 		return info
 	}
-	info.ACPToolsHTTPURL = ACPToolsProxyHTTPURL
+	info.ToolsHTTPURL = ToolsProxyHTTPURL
 	return info
 }
 

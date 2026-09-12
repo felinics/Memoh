@@ -22,6 +22,14 @@ func (m *Manager) liveQueueBackend() (LiveQueueBackend, error) {
 // EnableSteer advertises an actual execution consumer, not just an allocated
 // channel. Other instances therefore reject queues aimed at old/unsupported owners.
 func (m *Manager) EnableSteer(ctx context.Context, handle RunHandle) error {
+	return m.setSteerEnabled(ctx, handle, true)
+}
+
+func (m *Manager) DisableSteer(ctx context.Context, handle RunHandle) error {
+	return m.setSteerEnabled(ctx, handle, false)
+}
+
+func (m *Manager) setSteerEnabled(ctx context.Context, handle RunHandle, enabled bool) error {
 	if m.SteerWake(handle) == nil {
 		return ErrRunOwnershipLost
 	}
@@ -31,10 +39,10 @@ func (m *Manager) EnableSteer(ctx context.Context, handle RunHandle) error {
 			(run.Status != RunStatusRunning && run.Status != RunStatusWaitingDecision) {
 			return snapshot, false, ErrRunOwnershipLost
 		}
-		if run.SteerSupported {
+		if run.SteerSupported == enabled {
 			return snapshot, false, nil
 		}
-		run.SteerSupported = true
+		run.SteerSupported = enabled
 		run.UpdatedAt = now
 		snapshot.Seq++
 		snapshot.UpdatedAt = now

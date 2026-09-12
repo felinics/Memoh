@@ -1149,7 +1149,7 @@ func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {
 		t.Setenv("MEMOH_ACP_MCP_HTTP_BASE_URL", "https://memoh.example")
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/acp-runtime", nil)
 		req.Header.Set("X-Forwarded-Host", "evil.example")
-		got := buildACPMCPToolsURLFromRequest(req, botID)
+		got := buildExternalAgentToolsURLFromRequest(req, botID)
 		want := "https://memoh.example/bots/" + botID + "/tools"
 		if got != want {
 			t.Fatalf("tools URL = %q, want %q", got, want)
@@ -1160,7 +1160,7 @@ func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:18080/acp-runtime", nil)
 		req.Header.Set("X-Forwarded-Host", "evil.example")
 		req.Header.Set("X-Forwarded-Proto", "https")
-		got := buildACPMCPToolsURLFromRequest(req, botID)
+		got := buildExternalAgentToolsURLFromRequest(req, botID)
 		want := "http://127.0.0.1:18080/bots/" + botID + "/tools"
 		if got != want {
 			t.Fatalf("tools URL = %q, want %q", got, want)
@@ -1170,7 +1170,7 @@ func TestBuildACPMCPToolsURLUsesOnlyExplicitOrLoopbackBaseURL(t *testing.T) {
 	t.Run("non-loopback request host", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "https://memoh.example/acp-runtime", nil)
 		req.Header.Set("X-Forwarded-Host", "evil.example")
-		if got := buildACPMCPToolsURLFromRequest(req, botID); got != "" {
+		if got := buildExternalAgentToolsURLFromRequest(req, botID); got != "" {
 			t.Fatalf("tools URL = %q, want empty", got)
 		}
 	})

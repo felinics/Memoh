@@ -3,7 +3,8 @@
     data-slot="input-group"
     role="group"
     :aria-label="label || undefined"
-    class="chat-composer-edge rounded-2xl bg-surface-composer p-3"
+    class="chat-composer-edge rounded-2xl bg-surface-composer"
+    :class="compact ? 'px-3 py-1' : 'p-3'"
   >
     <slot />
   </div>
@@ -21,5 +22,7 @@
 defineProps<{
   // Accessible region name; omit when the content already names itself.
   label?: string
+  // Single-line status bars keep the shell with less vertical padding.
+  compact?: boolean
 }>()
 </script>

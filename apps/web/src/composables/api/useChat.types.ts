@@ -338,6 +338,7 @@ export interface UIUserTurn {
 }
 
 export interface UIAssistantTurn {
+  runtime_forkable?: boolean
   turn_id: string
   turn_position?: number
   role: 'assistant'
@@ -427,6 +428,7 @@ export interface RuntimeRunOperation {
 }
 
 export interface RuntimeCurrentRunView {
+  configuration_only?: boolean
   run_id: string
   turn_id: string
   // The originating send's client-issued id, echoed so live frames can be

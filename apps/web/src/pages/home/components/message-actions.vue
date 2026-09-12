@@ -102,7 +102,33 @@
           </TooltipContent>
         </Tooltip>
 
-        <DropdownMenu>
+        <template v-if="inlineActions">
+          <Tooltip v-if="onFork">
+            <TooltipTrigger as-child>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                :class="actionIconClass"
+                :aria-label="t('chat.actions.createFork')"
+                @click="onFork"
+              >
+                <ForkSplitIcon class="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {{ t('chat.actions.createFork') }}
+            </TooltipContent>
+          </Tooltip>
+          <span
+            v-if="timeLabel"
+            class="ml-1.5 min-w-0 truncate text-xs text-muted-foreground"
+            :title="fullTime"
+          >
+            {{ timeLabel }}
+          </span>
+        </template>
+        <DropdownMenu v-else>
           <DropdownMenuTrigger as-child>
             <Button
               type="button"
@@ -114,8 +140,6 @@
               <DotsIcon class="size-[18px]" />
             </Button>
           </DropdownMenuTrigger>
-          <!-- Opens UPWARD: the action bar sits right above the composer, so a
-               downward menu would land on top of the input. -->
           <DropdownMenuContent
             side="top"
             align="start"
@@ -125,7 +149,7 @@
               class="text-label font-normal text-muted-foreground"
               :title="fullTime"
             >
-              {{ menuTime }}
+              {{ timeLabel }}
             </DropdownMenuLabel>
             <DropdownMenuItem
               v-if="onFork"
@@ -148,8 +172,8 @@ import { PencilLine, RotateCcw } from 'lucide-vue-next'
 import { useClipboard } from '@felinic/ui'
 import CopyConnectedIcon from './copy-connected-icon.vue'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
-import DotsIcon from './dots-icon.vue'
 import ForkSplitIcon from './fork-split-icon.vue'
+import DotsIcon from './dots-icon.vue'
 import {
   Button,
   Tooltip,
@@ -166,7 +190,8 @@ import {
 const props = defineProps<{
   copyText: string
   role: 'user' | 'assistant'
-  menuTime?: string
+  timeLabel?: string
+  inlineActions?: boolean
   fullTime?: string
   persistent?: boolean
   streaming?: boolean

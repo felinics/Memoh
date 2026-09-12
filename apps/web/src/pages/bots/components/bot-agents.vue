@@ -205,6 +205,7 @@
 </template>
 
 <script setup lang="ts">
+import { externalAgentDisplayName, normalizeAgentID } from '@/utils/external-agent'
 import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQuery, useQueryCache } from '@pinia/colada'
@@ -252,11 +253,9 @@ import { externalAgentModelsQueryKey } from '@/composables/useAgentModelCatalog'
 import { useViewSwap } from '@/composables/useViewSwap'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
-  acpAgentDisplayName,
   emptyACPAgentForm,
   ensureACPAgentForm,
   findMissingRequiredManagedField,
-  normalizeACPAgentID,
   normalizeACPForm,
   readACPConfig,
   withACPMetadata,
@@ -330,7 +329,7 @@ const botMetadata = computed(() => bot.value?.metadata as Record<string, unknown
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedID.value) ?? null)
 const selectedProfile = computed(() => {
   const provider = botAgentProvider(selectedAgent.value)
-  return profiles.value.find(profile => normalizeACPAgentID(profile.id) === provider) ?? null
+  return profiles.value.find(profile => normalizeAgentID(profile.id) === provider) ?? null
 })
 const selectedDirectRuntime = computed(() => {
   const runtime = normalizeBotAgentRuntime(selectedAgent.value?.runtime)
@@ -394,13 +393,13 @@ watch(agents, (list) => {
 
 function profileFor(agent: BotagentsBotAgent): AcpprofilePublicProfile | null {
   const provider = botAgentProvider(agent)
-  return profiles.value.find(profile => normalizeACPAgentID(profile.id) === provider) ?? null
+  return profiles.value.find(profile => normalizeAgentID(profile.id) === provider) ?? null
 }
 
 function providerLabel(agent: BotagentsBotAgent): string {
   const profile = profileFor(agent)
   const provider = botAgentProvider(agent)
-  return profile?.display_name?.trim() || acpAgentDisplayName(provider, provider)
+  return profile?.display_name?.trim() || externalAgentDisplayName(provider, provider)
 }
 
 function agentForm(profile: AcpprofilePublicProfile): ACPAgentForm {
@@ -565,7 +564,7 @@ function applyMetadataToForm(metadata: Record<string, unknown> | undefined, list
     if (!next.agents[key]) delete form.agents[key]
   }
   for (const profile of list) {
-    const id = normalizeACPAgentID(profile.id)
+    const id = normalizeAgentID(profile.id)
     if (!id) continue
     form.agents[id] = next.agents[id] ?? emptyACPAgentForm(profile)
   }

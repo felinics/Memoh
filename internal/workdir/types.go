@@ -25,14 +25,18 @@ const (
 )
 
 var (
-	ErrWorkdirNotFound  = errors.New("workdir not found")
-	ErrWorkdirArchived  = errors.New("workdir is archived")
-	ErrNameRequired     = errors.New("workdir name is required")
-	ErrPathRequired     = errors.New("workdir path is required")
-	ErrInvalidPath      = errors.New("invalid workdir path")
-	ErrPathNotFound     = errors.New("workdir path does not exist")
-	ErrPathNotDirectory = errors.New("workdir path is not a directory")
-	ErrDuplicatePath    = errors.New("a workdir for this directory already exists")
+	ErrWorkdirNotFound      = errors.New("workdir not found")
+	ErrWorkdirArchived      = errors.New("workdir is archived")
+	ErrNameRequired         = errors.New("workdir name is required")
+	ErrPathRequired         = errors.New("workdir path is required")
+	ErrInvalidPath          = errors.New("invalid workdir path")
+	ErrPathNotFound         = errors.New("workdir path does not exist")
+	ErrPathNotDirectory     = errors.New("workdir path is not a directory")
+	ErrDuplicatePath        = errors.New("a workdir for this directory already exists")
+	ErrGitBusy              = errors.New("an agent is using this Git working directory")
+	ErrGitBranchUnavailable = errors.New("local Git branch is unavailable")
+	ErrGitSwitchFailed      = errors.New("git branch switch failed")
+	ErrGitUnavailable       = errors.New("git working directory is unavailable")
 )
 
 // Workdir is the API shape of a workdir. WorkspaceTargetID is the derived
@@ -79,4 +83,15 @@ type Resolved struct {
 	TargetID  string
 	Kind      string
 	WorkDir   string
+}
+
+// GitBranchResponse contains a branch only when the directory has an attached Git HEAD.
+type GitBranchResponse struct {
+	Branch   string   `json:"branch,omitempty"`
+	Branches []string `json:"branches"`
+	Busy     bool     `json:"busy"`
+}
+
+type SwitchGitBranchRequest struct {
+	Branch string `json:"branch" validate:"required"`
 }

@@ -21,6 +21,7 @@ var (
 	uiMessageCollapsedNewlinesRe = regexp.MustCompile(`\n{3,}`)
 	uiTaskNotificationRe         = regexp.MustCompile(`(?s)<task-notification>\s*(.*?)\s*</task-notification>`)
 	uiMetadataParseKeys          = [][]byte{
+		[]byte(`"agent_turn_id"`),
 		[]byte(`"forward"`),
 		[]byte(`"model_requested_skills"`),
 		[]byte(`"platform"`),
@@ -162,6 +163,7 @@ func ConvertModelMessagesToUIAssistantMessages(messages []turn.ModelMessage) []U
 // ConvertMessagesToUITurns converts persisted message rows into frontend-friendly turns.
 func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 	result := make([]UITurn, 0, len(messages))
+	runtimeForkable := make(map[string]bool)
 	var pending *uiPendingAssistantTurn
 	var backgroundToolRefs map[string]uiBackgroundToolRef
 
@@ -304,6 +306,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 		case "assistant":
 			ensurePersistedMetadata(&raw)
+			if anchor, _ := raw.Metadata["agent_turn_id"].(string); strings.TrimSpace(anchor) != "" {
+				runtimeForkable[rawTurnID] = true
+			}
 			modelMessage := decodePersistedModelMessage(raw)
 			toolCalls := extractPersistedToolCalls(&modelMessage)
 			text := extractPersistedMessageText(raw, &modelMessage)
@@ -375,6 +380,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 	}
 
 	flushPending()
+	for i := range result {
+		if result[i].Role == "assistant" {
+			result[i].RuntimeForkable = runtimeForkable[result[i].TurnID]
+		}
+	}
 	return result
 }
 

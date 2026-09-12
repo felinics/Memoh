@@ -287,6 +287,24 @@
       "limit": "Close other pending authorizations and try again.",
       "failed": "Account authorization failed. Please try again.",
       "code_invalid": "The authorization code is invalid or expired. Copy the complete code from Claude or connect again."
+    },
+    "workdir": {
+      "git_busy": "An agent is using this working directory. Wait for it to finish before switching branches.",
+      "git_branch_unavailable": "This local branch is unavailable. Refresh and select an existing branch.",
+      "git_switch_failed": "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree.",
+      "git_unavailable": "The Git working directory could not be read. Check the workspace and try again."
+    },
+    "runtime_control": {
+      "goal_requires_default_mode": "Exit Plan mode before creating or resuming a goal.",
+      "steer_failed": "The additional instruction could not be delivered. Send it again after this turn finishes.",
+      "unsupported": "This runtime does not support this control.",
+      "command_unavailable": "This runtime command is no longer available. Refresh and try again.",
+      "mode_unavailable": "This permission mode is unavailable. Refresh and choose a supported mode.",
+      "thread_unavailable": "Start a conversation before using this operation.",
+      "failed": "The runtime control could not be completed. Try again.",
+      "forbidden": "You do not have access to this conversation.",
+      "request_invalid": "The runtime control request is invalid.",
+      "cancelled": "Operation cancelled."
     }
   },
   "auth": {
@@ -1451,7 +1469,49 @@
         "rtt": "RTT"
       }
     },
-    "modelDefaultNamed": "Default ({model})"
+    "modelDefaultNamed": "Default ({model})",
+    "codexProject": {
+      "chooseBranch": "Switch branch",
+      "noBranches": "No local branches yet",
+      "detachedHead": "Detached HEAD",
+      "expand": "Show workspace",
+      "collapse": "Hide workspace",
+      "choose": "Choose project",
+      "clear": "Don't work in a project",
+      "none": "No project",
+      "workspace": "Memoh workspace",
+      "empty": "Add a folder in the sidebar to choose a project."
+    },
+    "planMode": {
+      "commandLabel": "Plan mode",
+      "label": "Plan",
+      "enable": "Turn plan mode on",
+      "disable": "Turn plan mode off",
+      "placeholder": "Describe your task to generate a plan…",
+      "changeFailed": "Could not change plan mode. Please try again."
+    },
+    "sessionPermissionMode": "Session permission mode",
+    "permissionMode": "Permission mode",
+    "goal": {
+      "label": "Goal",
+      "description": "Set a goal to keep pursuing",
+      "placeholder": "Describe your goal and what completing it means",
+      "cancelDraft": "Cancel goal input",
+      "sentAsGoal": "Sent as goal",
+      "pause": "Pause goal",
+      "resume": "Resume goal",
+      "clear": "Clear goal",
+      "elapsed": "{seconds}s",
+      "textOnly": "Send the goal as text without attachments or skills.",
+      "status": {
+        "active": "Pursuing goal",
+        "paused": "Goal paused",
+        "blocked": "Goal blocked",
+        "usageLimited": "Usage limit reached",
+        "budgetLimited": "Token budget reached",
+        "complete": "Goal completed"
+      }
+    }
   },
   "models": {
     "title": "Models",
@@ -2399,7 +2459,9 @@
       "openAuthorizationPage": "Open authorization page",
       "authorizationCode": "Authorization code",
       "authorizationCodePlaceholder": "Paste the complete authorization code",
-      "completeAuthorization": "Complete authorization"
+      "completeAuthorization": "Complete authorization",
+      "defaultPermissionMode": "Default permission mode",
+      "defaultPermissionModeDescription": "New sessions use this mode. A session selection overrides the default."
     },
     "dependencies": {
       "title": "Workspace dependencies",

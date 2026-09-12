@@ -105,6 +105,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		RuntimeOwnerAccountID:     input.RuntimeOwnerAccountID,
 		ForceFreshRuntime:         input.ForceFreshRuntime,
 		RequiredCommand:           input.Command,
+		PermissionMode:            driverMetadataString(input.RuntimeMetadata, "permission_mode"),
 		Sink:                      sink,
 	})
 	out := DriverPromptResult(result, agentID)

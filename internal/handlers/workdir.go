@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/workdir"
@@ -18,6 +19,8 @@ import (
 
 // botWorkdirService is the slice of *workdir.Service the handler needs.
 type botWorkdirService interface {
+	GitBranch(ctx context.Context, botID, workdirID string) (workdir.GitBranchResponse, error)
+	SwitchGitBranch(ctx context.Context, botID, workdirID, branch string) (workdir.GitBranchResponse, error)
 	Create(ctx context.Context, botID, userID string, req workdir.CreateRequest) (workdir.Workdir, error)
 	List(ctx context.Context, botID string, includeArchived bool) ([]workdir.Workdir, error)
 	Rename(ctx context.Context, botID, workdirID, name string) (workdir.Workdir, error)
@@ -53,6 +56,8 @@ func (h *WorkdirHandler) Register(e *echo.Echo) {
 	g := e.Group("/bots/:bot_id/workdirs")
 	g.POST("", h.Create)
 	g.GET("", h.List)
+	g.GET("/:workdir_id/git-branch", h.GitBranch)
+	g.POST("/:workdir_id/git-branch", h.SwitchGitBranch)
 	g.PATCH("/:workdir_id", h.Rename)
 	g.DELETE("/:workdir_id", h.Archive)
 }
@@ -215,4 +220,66 @@ func workdirHTTPError(log *slog.Logger, err error) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
 	}
+}
+
+// GitBranch godoc
+// @Summary Read a workdir's current Git branch
+// @Tags workdirs
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Param workdir_id path string true "Workdir ID"
+// @Success 200 {object} workdir.GitBranchResponse
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Router /bots/{bot_id}/workdirs/{workdir_id}/git-branch [get].
+func (h *WorkdirHandler) GitBranch(c echo.Context) error {
+	botID, _, err := h.requirePermission(c, bots.PermissionWorkspaceRead)
+	if err != nil {
+		return err
+	}
+	result, err := h.service.GitBranch(c.Request().Context(), botID, strings.TrimSpace(c.Param("workdir_id")))
+	if err != nil {
+		return apperror.Wrap(apperror.CodeWorkdirGitUnavailable, err, nil)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// SwitchGitBranch godoc
+// @Summary Switch a workdir to an existing local Git branch
+// @Tags workdirs
+// @Accept json
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Param workdir_id path string true "Workdir ID"
+// @Param request body workdir.SwitchGitBranchRequest true "Local branch"
+// @Success 200 {object} workdir.GitBranchResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
+// @Router /bots/{bot_id}/workdirs/{workdir_id}/git-branch [post].
+func (h *WorkdirHandler) SwitchGitBranch(c echo.Context) error {
+	botID, _, err := h.requirePermission(c, bots.PermissionWorkspaceExec)
+	if err != nil {
+		return err
+	}
+	var req workdir.SwitchGitBranchRequest
+	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Branch) == "" {
+		return apperror.New(apperror.CodeWorkdirGitBranchUnavailable, nil)
+	}
+	result, err := h.service.SwitchGitBranch(c.Request().Context(), botID, strings.TrimSpace(c.Param("workdir_id")), req.Branch)
+	if err != nil {
+		code := apperror.CodeWorkdirGitUnavailable
+		switch {
+		case errors.Is(err, workdir.ErrGitBusy):
+			code = apperror.CodeWorkdirGitBusy
+		case errors.Is(err, workdir.ErrGitBranchUnavailable):
+			code = apperror.CodeWorkdirGitBranchUnavailable
+		case errors.Is(err, workdir.ErrGitSwitchFailed):
+			code = apperror.CodeWorkdirGitSwitchFailed
+		}
+		return apperror.Wrap(code, err, nil)
+	}
+	return c.JSON(http.StatusOK, result)
 }

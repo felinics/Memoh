@@ -85,15 +85,12 @@ vi.mock('./model-select.vue', async () => {
 
 vi.mock('@/utils/acp', async () => {
   return {
-    ACP_DEFAULT_PROJECT_MODE: 'project',
-    ACP_DEFAULT_PROJECT_PATH: '/data',
     findMissingRequiredManagedField: (_profile: unknown, managed: Record<string, unknown>, setupMode: string) =>
       setupMode === 'self' || String(managed.api_key ?? '').trim() ? null : { id: 'api_key' },
     isACPAgentEnabled: (metadata: Record<string, unknown> | undefined, provider: string) => {
       const acp = metadata?.acp as { agents?: Record<string, { enabled?: boolean }> } | undefined
       return acp?.agents?.[provider]?.enabled === true
     },
-    normalizeACPAgentID: (value: unknown) => String(value ?? '').trim().toLowerCase(),
     readACPAgentConfig: (metadata: Record<string, unknown> | undefined, provider: string) => {
       const acp = metadata?.acp as { agents?: Record<string, { setup_mode?: string, managed?: Record<string, unknown> }> } | undefined
       const config = acp?.agents?.[provider] ?? {}

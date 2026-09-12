@@ -47,6 +47,10 @@ func (f *fakeUserInputService) CreatePending(context.Context, userinput.CreatePe
 	return userinput.Request{}, errors.New("unexpected CreatePending")
 }
 
+func (f *fakeUserInputService) Get(context.Context, string) (userinput.Request, error) {
+	return f.target, nil
+}
+
 func (f *fakeUserInputService) ResolveTarget(context.Context, userinput.ResolveInput) (userinput.Request, error) {
 	return f.target, nil
 }

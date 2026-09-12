@@ -27,7 +27,7 @@ import { useOnboarding } from '@/composables/useOnboarding'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { defaultAclPreset } from '@/constants/acl-presets'
 import { randomCatName } from '@/constants/bot-name-presets'
-import { acpAgentDisplayName } from '@/utils/acp'
+import { externalAgentDisplayName } from '@/utils/external-agent'
 import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, directBotAgentMetadata } from '@/utils/bot-agent'
 import { useBotCreateProgressStore } from '@/store/bot-create-progress'
 import AvatarEditDialog from '@/pages/bots/components/avatar-edit-dialog.vue'
@@ -209,7 +209,7 @@ async function handleSubmit() {
     ...(selectedDirectRuntime.value
       ? {
           agent: {
-            name: acpAgentDisplayName(selectedDirectRuntime.value, selectedDirectRuntime.value),
+            name: externalAgentDisplayName(selectedDirectRuntime.value, selectedDirectRuntime.value),
             provider: selectedDirectRuntime.value,
             metadata: { ...directBotAgentMetadata(selectedDirectRuntime.value), auth: account.value.auth },
             authorizationId: account.value.id,

@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providers"
@@ -144,7 +145,8 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 	if botID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
 	}
-	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.PermissionChat); err != nil {
+	_, err = AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.PermissionChat)
+	if err != nil {
 		return err
 	}
 	sessionID := strings.TrimSpace(c.Param("session_id"))
@@ -152,6 +154,20 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
 	}
 
+	sess, err := sessionpkg.NewService(h.logger, h.queries, nil).Get(c.Request().Context(), sessionID)
+	if err != nil || sess.BotID != botID {
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+	}
+	perms, err := (&SessionHandler{botService: h.botService, accountService: h.accountService}).resolveCurrentUserPermissions(c, userID, botID)
+	if err != nil {
+		return err
+	}
+	if !canAccessSession(sess, userID, perms) {
+		return apperror.New(apperror.CodeRuntimeControlForbidden, nil)
+	}
+	if sessionpkg.UsesDecisionWaiter(sess) {
+		return apperror.New(apperror.CodeRuntimeControlUnsupported, nil)
+	}
 	cfg, err := h.buildTriggerConfig(c.Request().Context(), botID, sessionID)
 	if err != nil {
 		if apperror.CodeOf(err) != "" {

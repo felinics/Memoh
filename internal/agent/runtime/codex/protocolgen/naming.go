@@ -23,6 +23,11 @@ var initialisms = map[string]string{
 // exportedName converts a JSON identifier (camelCase, kebab-case, snake_case,
 // or slash-separated) into an exported Go identifier.
 func exportedName(name string) string {
+	// Codex 0.154 exposes both "openai/form" and "openaiForm" as distinct
+	// elicitation modes. Preserve the existing slash form's Go name.
+	if name == "openaiForm" {
+		return "OpenaiFormCamelCase"
+	}
 	var b strings.Builder
 	for _, word := range splitWords(name) {
 		lower := strings.ToLower(word)

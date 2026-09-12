@@ -1,6 +1,6 @@
 {
-  "codexVersion": "0.151.0",
-  "command": "codex app-server generate-json-schema --out <dir>",
+  "codexVersion": "0.154.0",
+  "command": "codex app-server generate-json-schema --experimental --out <dir>",
   "files": [
     "codex_app_server_protocol.v2.schemas.json",
     "ServerRequest.json",

@@ -120,7 +120,7 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 	}
 	cfg, err := ParseAgentConfig(agent.Metadata)
 	if err != nil {
-		return Config{}, agentcredential.ResolvedCredential{}, err
+		return Config{}, agentcredential.ResolvedCredential{}, apperror.Wrap(apperror.CodeExternalRuntimeAuthRequired, err, nil)
 	}
 	credential, err := d.credentials.ResolveForBotAgent(ctx, botID, botAgentID)
 	if errors.Is(err, agentcredential.ErrNotFound) && !credentialRequired {
@@ -234,12 +234,27 @@ func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (ex
 // Prompt implements external.Driver: it runs one turn on the bot's
 // app-server, streaming events through the sink.
 func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
+	if input.Command == "goal" && !goalExecutionAllowed(input) {
+		return external.PromptResult{}, apperror.New(apperror.CodeRuntimeControlGoalRequiresDefaultMode, nil)
+	}
 	cfg, credential, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
 	if err != nil {
 		if apperror.CodeOf(err) != "" {
 			return external.PromptResult{}, err
 		}
 		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+	}
+
+	if input.Command != "" {
+		commands, _ := d.Commands(ctx, input)
+		command, ok := external.FindCommand(commands, input.Command)
+		if !ok || command.Kind != external.CommandTurn {
+			return external.PromptResult{}, external.ErrCommandUnavailable
+		}
+	}
+	preset, err := permissions(cfg, input)
+	if err != nil {
+		return external.PromptResult{}, err
 	}
 
 	srv, releaseServer, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
@@ -254,6 +269,10 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
 
+	continueGoal, err := srv.prepareGoal(ctx, input)
+	if err != nil {
+		return external.PromptResult{}, err
+	}
 	threadID, isNewThread, err := d.ensureThread(ctx, srv, cfg, input)
 	if err != nil {
 		return external.PromptResult{}, err
@@ -262,14 +281,22 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	turn := newTurnState(ctx, input, threadID, d.approval, d.approval.RegisterWaiter, d.userInput, srv.toolLookup, d.logger)
 	defer turn.close()
+	if continueGoal {
+		turn.followsGoal = true
+		turn.goalStarting = true
+	}
 	srv.registerTurn(threadID, turn)
 	defer srv.unregisterTurn(threadID, turn)
+	defer d.pauseGoalOnExit(ctx, srv, turn)
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, turn.emit)
 	defer unregisterToolEvents()
 
 	turnParams := protocol.TurnStartParams{
-		ThreadID: threadID,
-		Input:    buildTurnInput(input),
+		ThreadID:          threadID,
+		Input:             buildTurnInput(input),
+		ApprovalPolicy:    &preset.approval,
+		ApprovalsReviewer: &preset.reviewer,
+		SandboxPolicy:     &preset.policy,
 	}
 	if model := firstNonEmpty(input.ModelID, cfg.Model); model != "" {
 		turnParams.Model = &model
@@ -277,10 +304,13 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if effort := firstNonEmpty(input.ReasoningEffort, cfg.ReasoningEffort); effort != "" {
 		turnParams.Effort = &effort
 	}
+	if err := applyCollaborationMode(&turnParams, input, srv.settingsForThread(threadID)); err != nil {
+		return external.PromptResult{}, err
+	}
 
 	var turnResp protocol.TurnStartResponse
-	if err := srv.conn.Call(ctx, protocol.MethodTurnStart, turnParams, &turnResp); err != nil {
-		if ctx.Err() != nil {
+	if err := startRuntimeTurn(ctx, srv, input, turnParams, &turnResp); err != nil {
+		if ctx.Err() != nil || input.Command == "goal" {
 			// The server may have accepted the turn even though the response
 			// never reached us; interrupt by the id from turn/started so no
 			// orphan keeps running unsupervised. When even that id has not
@@ -300,11 +330,28 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return d.turnResultAfterError(turn, isNewThread, threadID, err)
 	}
 	turn.setTurnID(turnResp.Turn.ID)
+	if continueGoal {
+		if err := srv.activateGoal(ctx, threadID); err != nil {
+			d.interruptTurn(srv, threadID, turn.currentTurnID())
+			return d.turnResultAfterError(turn, isNewThread, threadID, err)
+		}
+	}
+	settings := srv.settingsForThread(threadID)
+	if turnParams.Model != nil {
+		settings.Model = *turnParams.Model
+	}
+	if turnParams.Effort != nil {
+		settings.ReasoningEffort = turnParams.Effort
+	}
+	srv.rememberThreadSettings(threadID, settings.Model, settings.ReasoningEffort)
+	stopSteering := startSteering(ctx, srv.conn, turn)
+	defer stopSteering()
 
 	select {
 	case <-turn.done:
 	case <-ctx.Done():
-		d.interruptTurn(srv, threadID, firstNonEmpty(turnResp.Turn.ID, turn.currentTurnID()))
+		d.pauseGoalOnExit(ctx, srv, turn)
+		d.interruptTurn(srv, threadID, firstNonEmpty(turn.currentTurnID(), turnResp.Turn.ID))
 		select {
 		case <-turn.done:
 		case <-time.After(interruptSettleTimeout):
@@ -319,10 +366,12 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		case <-srv.proc.Done():
 		}
 	case <-srv.proc.Done():
+		stopSteering()
 		result, _ := turn.result(newThreadMetadata(isNewThread, threadID))
 		return result, fmt.Errorf("codex app-server exited mid-turn: %s", srv.proc.StderrTail())
 	}
 
+	stopSteering()
 	result, resultErr := turn.result(newThreadMetadata(isNewThread, threadID))
 	if cfg.Auth == AuthChatGPT {
 		d.persistChatGPTCredential(ctx, srv.client, input, credential)
@@ -365,7 +414,10 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	if cwd == "" {
 		cwd = defaultProjectPath
 	}
-	approvalPolicy := protocol.AskForApproval{Unit: protocol.AskForApprovalUnitOnRequest}
+	preset, err := permissions(cfg, input)
+	if err != nil {
+		return "", false, err
+	}
 
 	if threadID == "" {
 		toolsConfig, bindTools, err := d.prepareThreadTools(srv, input)
@@ -373,9 +425,11 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 			return "", false, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 		}
 		params := protocol.ThreadStartParams{
-			Cwd:            &cwd,
-			ApprovalPolicy: &approvalPolicy,
-			Config:         toolsConfig,
+			Cwd:               &cwd,
+			ApprovalPolicy:    &preset.approval,
+			ApprovalsReviewer: &preset.reviewer,
+			Sandbox:           &preset.sandbox,
+			Config:            toolsConfig,
 		}
 		if cfg.Model != "" {
 			params.Model = &cfg.Model
@@ -392,6 +446,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 		}
 		bindTools(threadID)
 		srv.markThreadLoaded(threadID)
+		srv.rememberThreadSettings(threadID, resp.Model, resp.ReasoningEffort)
 		srv.setThreadToolless(threadID, toolsConfig == nil)
 		return threadID, true, nil
 	}
@@ -404,21 +459,24 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 		return "", false, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
 	params := protocol.ThreadResumeParams{
-		ThreadID:       threadID,
-		Cwd:            &cwd,
-		ApprovalPolicy: &approvalPolicy,
-		Config:         toolsConfig,
+		ThreadID:          threadID,
+		Cwd:               &cwd,
+		ApprovalPolicy:    &preset.approval,
+		ApprovalsReviewer: &preset.reviewer,
+		Sandbox:           &preset.sandbox,
+		Config:            toolsConfig,
 	}
 	var resp protocol.ThreadResumeResponse
 	err = srv.conn.Call(ctx, protocol.MethodThreadResume, params, &resp)
 	if err == nil {
 		bindTools(threadID)
 		srv.markThreadLoaded(threadID)
+		srv.rememberThreadSettings(threadID, resp.Model, resp.ReasoningEffort)
 		srv.setThreadToolless(threadID, toolsConfig == nil)
 		return threadID, false, nil
 	}
 	bindTools("")
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || input.Command == "compact" {
 		return "", false, fmt.Errorf("codex thread/resume: %w", err)
 	}
 	// The stored thread no longer exists on the codex side (wiped state,
@@ -432,9 +490,11 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 		return "", false, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err2, map[string]string{"runtime": RuntimeType})
 	}
 	startParams := protocol.ThreadStartParams{
-		Cwd:            &cwd,
-		ApprovalPolicy: &approvalPolicy,
-		Config:         freshConfig,
+		Cwd:               &cwd,
+		ApprovalPolicy:    &preset.approval,
+		ApprovalsReviewer: &preset.reviewer,
+		Sandbox:           &preset.sandbox,
+		Config:            freshConfig,
 	}
 	if cfg.Model != "" {
 		startParams.Model = &cfg.Model
@@ -450,6 +510,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	}
 	bindFresh(startResp.Thread.ID)
 	srv.markThreadLoaded(startResp.Thread.ID)
+	srv.rememberThreadSettings(startResp.Thread.ID, startResp.Model, startResp.ReasoningEffort)
 	srv.setThreadToolless(startResp.Thread.ID, freshConfig == nil)
 	return startResp.Thread.ID, true, nil
 }
@@ -666,28 +727,41 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runti
 		return nil, wrapServerError(err)
 	}
 	defer releaseServer()
+	toolsConfig, bindTools, err := d.prepareThreadTools(srv, external.PromptInput{BotID: botID, BotAgentID: botAgentID})
+	if err != nil {
+		return nil, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+	}
 	cwd := strings.TrimSpace(metadataString(runtimeMetadata, "project_path"))
 	if cwd == "" {
 		cwd = defaultProjectPath
 	}
 	approvalPolicy := protocol.AskForApproval{Unit: protocol.AskForApprovalUnitOnRequest}
+	deferGoal := true
 	params := protocol.ThreadForkParams{
-		ThreadID:       threadID,
-		Cwd:            &cwd,
-		ApprovalPolicy: &approvalPolicy,
+		DeferGoalContinuation: &deferGoal,
+		ThreadID:              threadID,
+		Cwd:                   &cwd,
+		ApprovalPolicy:        &approvalPolicy,
+		Config:                toolsConfig,
 	}
 	if trimmed := strings.TrimSpace(lastTurnID); trimmed != "" {
 		params.LastTurnID = &trimmed
 	}
 	var resp protocol.ThreadForkResponse
 	if err := srv.conn.Call(ctx, protocol.MethodThreadFork, params, &resp); err != nil {
+		bindTools("")
 		return nil, fmt.Errorf("codex thread/fork: %w", err)
 	}
 	if resp.Thread.ID == "" {
+		bindTools("")
 		return nil, errors.New("codex thread/fork returned no thread id")
 	}
-	// Deliberately not marked loaded: the forked session's first prompt goes
-	// through thread/resume, which applies the per-thread tool-gateway config.
+	// Fork loads the thread immediately, so its tool config must be supplied
+	// above; resuming an already loaded thread would ignore new overrides.
+	bindTools(resp.Thread.ID)
+	srv.markThreadLoaded(resp.Thread.ID)
+	srv.rememberThreadSettings(resp.Thread.ID, resp.Model, resp.ReasoningEffort)
+	srv.setThreadToolless(resp.Thread.ID, toolsConfig == nil)
 	return map[string]any{metadataThreadIDKey: resp.Thread.ID}, nil
 }
 

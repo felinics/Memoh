@@ -18,7 +18,7 @@ import (
 const feedbackStatusPrefix = "memoh-acp-feedback:"
 
 // feedbackFromError extracts a transportable feedback error. The sentinel
-// table mirrors acpFeedbackFromError in internal/channel/inbound: session
+// table mirrors externalAgentFeedbackFromError in internal/channel/inbound: session
 // sentinels compared via errors.Is cannot survive serialization, so they
 // are converted to feedback errors before crossing the wire.
 func feedbackFromError(err error) *agentfeedback.Error {

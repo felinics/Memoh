@@ -482,6 +482,17 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// (via @mention or reply) to avoid all bots responding to the same command.
 	cmdText := rawTextForCommand(msg, text)
 	slashDecision := p.classifyChannelSlash(cmdText, msg, identity)
+	runtimeInvocation := slashDecision.Invocation
+	var runtimeHandled bool
+	slashDecision, runtimeHandled, err = p.runtimeSlash(ctx, cfg, msg, sender, identity, slashDecision)
+	if runtimeHandled || err != nil {
+		return err
+	}
+	if slashDecision.AgentCommand != "" && runtimeInvocation != nil {
+		text = runtimeInvocation.CommandText
+		msg.Message.Text = text
+	}
+
 	invocation := slashDecision.Invocation
 	slashDirected := slashDecision.Directed
 	isNewCommand := invocationHasResource(invocation, "new")
@@ -747,7 +758,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.Warn("resolve default session spec failed", slog.Any("error", specErr))
 				}
-				return p.sendACPFeedbackError(ctx, sender, msg, identity, specErr)
+				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
 			}
 			defaultSpec = spec
 			defaultSpecShouldCreate = shouldCreate
@@ -800,7 +811,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.Warn("resolve default session spec failed", slog.Any("error", specErr))
 				}
-				return p.sendACPFeedbackError(ctx, sender, msg, identity, specErr)
+				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
 			}
 		}
 		if shouldCreate {
@@ -812,7 +823,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.Warn("auto-create session failed", slog.Any("error", createErr))
 				}
-				return p.sendACPFeedbackError(ctx, sender, msg, identity, createErr)
+				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, createErr)
 			}
 			sessionID = sess.ID
 			sessionType = sess.Type
@@ -821,22 +832,22 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	acpRuntimeSession := SessionResult{Type: sessionType, Runtime: sessionRuntime}
-	if sessionUsesACPRuntime(acpRuntimeSession) {
+	runtimeSession := SessionResult{Type: sessionType, Runtime: sessionRuntime}
+	if sessionUsesExternalRuntime(runtimeSession) {
 		ownerPrincipal := strings.TrimSpace(sessionRuntimeOwner)
 		var err error
 		if ownerPrincipal == "" {
 			err = sessionpkg.ErrACPRuntimeOwnerMissing
 		} else {
-			err = p.requireWorkspaceExecForACPPrincipal(ctx, identity.BotID, ownerPrincipal)
+			err = p.requireWorkspaceExecForPrincipal(ctx, identity.BotID, ownerPrincipal)
 		}
-		if err == nil && sessionRequiresACPRuntimeActor(acpRuntimeSession) && (shouldTrigger || isDirectedAtBot(msg)) {
-			err = p.requireACPRuntimeActor(ctx, identity, ownerPrincipal)
+		if err == nil && sessionRequiresExternalRuntimeActor(runtimeSession) && (shouldTrigger || isDirectedAtBot(msg)) {
+			err = p.requireExternalRuntimeActor(ctx, identity, ownerPrincipal)
 		}
 		if err != nil {
 			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 			if shouldTrigger || isDirectedAtBot(msg) {
-				return p.sendACPFeedbackError(ctx, sender, msg, identity, err)
+				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, err)
 			}
 			return nil
 		}
@@ -863,9 +874,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	// Discuss mode: dispatch to the discuss driver and return.
 	// The discuss driver autonomously decides whether to call the LLM.
-	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil {
+	if sessionType == sessionpkg.TypeDiscuss && p.discussDriver != nil && latestRC != nil && slashDecision.AgentCommand == "" {
 		chatToken := p.issueChatToken(identity, resolved.RouteID, msg)
-		sessionToken := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
+		sessionToken := p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken)
 		p.discussDriver.NotifyRC(ctx, sessionID, latestRC, discuss.DiscussSessionConfig{
 			TeamID:            cfg.TeamID,
 			BotID:             identity.BotID,
@@ -952,7 +963,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	token := p.issueSessionBearerToken(ctx, identity, acpRuntimeSession, sessionRuntimeOwner, chatToken)
+	token := p.issueSessionBearerToken(ctx, identity, runtimeSession, sessionRuntimeOwner, chatToken)
 
 	var desc channel.Descriptor
 	if p.registry != nil {
@@ -1070,6 +1081,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	cmd := turn.StartTurnCommand{
+		AgentCommand:              slashDecision.AgentCommand,
 		SchemaVersion:             1,
 		TeamID:                    cfg.TeamID,
 		Mode:                      turn.ModeChat,
@@ -1291,7 +1303,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.Any("error", streamErr),
 			)
 		}
-		if feedback := acpFeedbackFromError(streamErr); feedback != nil {
+		if feedback := externalAgentFeedbackFromError(streamErr); feedback != nil {
 			_ = stream.Push(ctx, channel.StreamEvent{
 				Type:  channel.StreamEventError,
 				Error: strings.TrimSpace(feedback.Message),
@@ -1301,7 +1313,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 				}
 			}
-			_ = p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
+			_ = p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
 			return streamErr
 		}
 		_ = stream.Push(ctx, channel.StreamEvent{
@@ -4028,7 +4040,7 @@ func (p *ChannelInboundProcessor) issueChannelBearerToken(ctx context.Context, i
 }
 
 func (p *ChannelInboundProcessor) issueSessionBearerToken(ctx context.Context, identity InboundIdentity, sess SessionResult, runtimeOwnerAccountID, fallbackChatToken string) string {
-	if sessionUsesACPRuntime(sess) {
+	if sessionUsesExternalRuntime(sess) {
 		return p.issueRuntimeBearerToken(ctx, identity, runtimeOwnerAccountID, fallbackChatToken)
 	}
 	return p.issueChannelBearerToken(ctx, identity, fallbackChatToken)
@@ -4106,7 +4118,7 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 		mode = sessionpkg.TypeChat
 		agentID = firstNewSessionAgentArg(args)
 		if agentID != "" && isGroupConversation(msg) {
-			return NewSessionSpec{}, groupChatACPUnsupportedFeedback()
+			return NewSessionSpec{}, groupChatExternalAgentUnsupportedFeedback()
 		}
 	case "discuss":
 		if isLocalChannelType(msg.Channel) {
@@ -4247,8 +4259,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	parsed := invocation.Parsed
 	spec, err := resolveNewSessionSpecParsed(parsed, msg, p.acpProfiles)
 	if err != nil {
-		if feedback := acpFeedbackFromError(err); feedback != nil {
-			return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
+		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
+			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -4257,23 +4269,23 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	spec, err = p.applyDefaultChatRuntimeToNewSessionSpec(ctx, identity, msg, spec)
 	if err != nil {
-		if feedback := acpFeedbackFromError(err); feedback != nil {
-			return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
+		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
+			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
 		}
 		return err
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent {
 		if err := p.validateACPNewSessionSpec(ctx, identity, spec); err != nil {
-			if feedback := acpFeedbackFromError(err); feedback != nil {
-				return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
+			if feedback := externalAgentFeedbackFromError(err); feedback != nil {
+				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
 			}
 			return err
 		}
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		if err := p.requireWorkspaceExecForACP(ctx, identity); err != nil {
-			if feedback := acpFeedbackFromError(err); feedback != nil {
-				return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
+		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
+			if feedback := externalAgentFeedbackFromError(err); feedback != nil {
+				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
 			}
 			return err
 		}
@@ -4326,7 +4338,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 
 	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
-		spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, spec.RuntimeOwnerAccountID)
+		spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, spec.RuntimeOwnerAccountID)
 	}
 	if strings.TrimSpace(spec.CreatedByUserID) == "" {
 		spec.CreatedByUserID = strings.TrimSpace(identity.UserID)
@@ -4338,8 +4350,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		if p.logger != nil {
 			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
 		}
-		if feedback := acpFeedbackFromError(err); feedback != nil {
-			return p.sendACPFeedbackError(ctx, sender, msg, identity, feedback)
+		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
+			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -4509,7 +4521,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	if p.permissionChecker == nil {
 		return NewSessionSpec{}, p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
 	}
-	if err := p.requireWorkspaceExecForACP(ctx, identity); err != nil {
+	if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
 		return NewSessionSpec{}, err
 	}
 	projectPath := strings.TrimSpace(defaults.ProjectPath)
@@ -4523,7 +4535,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 		spec.Runtime = defaultRuntime
 		spec.Type = sessionpkg.TypeChat
 		spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
-		spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, "")
+		spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
 		spec.Metadata = map[string]any{
 			"project_path": projectPath,
 		}
@@ -4549,7 +4561,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 	spec.Runtime = sessionpkg.RuntimeACPAgent
 	spec.Type = sessionpkg.TypeACPAgent
 	spec.BotAgentID = strings.TrimSpace(defaults.BotAgentID)
-	spec.RuntimeOwnerAccountID = acpRuntimeOwnerPrincipal(identity, "")
+	spec.RuntimeOwnerAccountID = externalRuntimeOwnerPrincipal(identity, "")
 	spec.Metadata = sessionpkg.ApplyACPMetadataDefaults(map[string]any{
 		"acp_agent_id":     agentID,
 		"project_path":     projectPath,
@@ -4706,11 +4718,11 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	return nil
 }
 
-func (p *ChannelInboundProcessor) requireWorkspaceExecForACP(ctx context.Context, identity InboundIdentity) error {
-	return p.requireWorkspaceExecForACPPrincipal(ctx, identity.BotID, acpRuntimeOwnerPrincipal(identity, ""))
+func (p *ChannelInboundProcessor) requireWorkspaceExecForExternalAgent(ctx context.Context, identity InboundIdentity) error {
+	return p.requireWorkspaceExecForPrincipal(ctx, identity.BotID, externalRuntimeOwnerPrincipal(identity, ""))
 }
 
-func (p *ChannelInboundProcessor) requireWorkspaceExecForACPPrincipal(ctx context.Context, botID, accountUserID string) error {
+func (p *ChannelInboundProcessor) requireWorkspaceExecForPrincipal(ctx context.Context, botID, accountUserID string) error {
 	if p.permissionChecker == nil {
 		return p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
 	}
@@ -4728,7 +4740,7 @@ func (p *ChannelInboundProcessor) requireWorkspaceExecForACPPrincipal(ctx contex
 	return nil
 }
 
-func (p *ChannelInboundProcessor) requireACPRuntimeActor(_ context.Context, identity InboundIdentity, runtimeOwnerAccountID string) error {
+func (p *ChannelInboundProcessor) requireExternalRuntimeActor(_ context.Context, identity InboundIdentity, runtimeOwnerAccountID string) error {
 	actorUserID := strings.TrimSpace(identity.UserID)
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
@@ -4743,11 +4755,10 @@ func (p *ChannelInboundProcessor) requireACPRuntimeActor(_ context.Context, iden
 	return p.missingWorkspaceExecFeedback("runtime_owner_mismatch", "This ACP runtime belongs to another user.")
 }
 
-// sessionUsesACPRuntime reports a session that runs on an agent runtime with
+// sessionUsesExternalRuntime reports a session that runs on an agent runtime with
 // workspace access — ACP or a direct external agent — and therefore needs the
-// runtime-owner workspace-exec gate before a turn starts. The name predates
-// the direct runtimes; every caller wants "agent runtime", not "ACP".
-func sessionUsesACPRuntime(sess SessionResult) bool {
+// runtime-owner workspace-exec gate before a turn starts.
+func sessionUsesExternalRuntime(sess SessionResult) bool {
 	return runtimekind.RequiresWorkspaceExec(sess.Runtime) ||
 		strings.TrimSpace(sess.Type) == sessionpkg.TypeACPAgent
 }
@@ -4764,14 +4775,14 @@ func newSessionSpecSupportsRequestedSkills(spec NewSessionSpec) bool {
 	return sessionpkg.SupportsSkillActivation("", typ, spec.Runtime)
 }
 
-func sessionRequiresACPRuntimeActor(sess SessionResult) bool {
-	if !sessionUsesACPRuntime(sess) {
+func sessionRequiresExternalRuntimeActor(sess SessionResult) bool {
+	if !sessionUsesExternalRuntime(sess) {
 		return false
 	}
 	return strings.TrimSpace(sess.Type) != sessionpkg.TypeDiscuss
 }
 
-func acpRuntimeOwnerPrincipal(identity InboundIdentity, explicitOwner string) string {
+func externalRuntimeOwnerPrincipal(identity InboundIdentity, explicitOwner string) string {
 	if owner := strings.TrimSpace(explicitOwner); owner != "" {
 		return owner
 	}
@@ -4782,7 +4793,7 @@ func isGroupConversation(msg channel.InboundMessage) bool {
 	return !isLocalChannelType(msg.Channel) && !channel.IsPrivateConversationType(msg.Conversation.Type)
 }
 
-func groupChatACPUnsupportedFeedback() *agentfeedback.Error {
+func groupChatExternalAgentUnsupportedFeedback() *agentfeedback.Error {
 	return agentfeedback.New(
 		agentfeedback.CodeGroupChatUnsupported,
 		"group_chat_acp_unsupported",
@@ -4804,8 +4815,8 @@ func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message str
 	)
 }
 
-func (p *ChannelInboundProcessor) sendACPFeedbackError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	feedback := acpFeedbackFromError(err)
+func (p *ChannelInboundProcessor) sendExternalAgentFeedbackError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
+	feedback := externalAgentFeedbackFromError(err)
 	if feedback == nil {
 		return err
 	}
@@ -4825,7 +4836,7 @@ func (p *ChannelInboundProcessor) sendACPFeedbackError(ctx context.Context, send
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-func acpFeedbackFromError(err error) *agentfeedback.Error {
+func externalAgentFeedbackFromError(err error) *agentfeedback.Error {
 	var feedback *agentfeedback.Error
 	if errors.As(err, &feedback) {
 		return feedback

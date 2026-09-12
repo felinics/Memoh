@@ -1,6 +1,6 @@
+import { externalAgentDisplayName, externalAgentIcon, normalizeAgentID } from '@/utils/external-agent'
 import type { Component } from 'vue'
 import type { AcpprofilePublicProfile, BotagentsBotAgent } from '@memohai/sdk'
-import { acpAgentDisplayName, acpAgentIcon, normalizeACPAgentID } from '@/utils/acp'
 
 export const BOT_AGENT_RUNTIME_ACP = 'acp'
 export const BOT_AGENT_RUNTIME_CODEX = 'codex'
@@ -30,7 +30,7 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 }
 
 export function normalizeBotAgentRuntime(value: unknown): BotAgentRuntime | '' {
-  const runtime = normalizeACPAgentID(value)
+  const runtime = normalizeAgentID(value)
   switch (runtime) {
     case BOT_AGENT_RUNTIME_ACP:
     case BOT_AGENT_RUNTIME_CODEX:
@@ -42,7 +42,7 @@ export function normalizeBotAgentRuntime(value: unknown): BotAgentRuntime | '' {
 }
 
 export function botAgentRuntimeForProvider(provider: unknown): BotAgentRuntime {
-  const normalized = normalizeACPAgentID(provider)
+  const normalized = normalizeAgentID(provider)
   if (normalized === BOT_AGENT_RUNTIME_CODEX) return BOT_AGENT_RUNTIME_CODEX
   if (normalized === BOT_AGENT_RUNTIME_CLAUDE_CODE) return BOT_AGENT_RUNTIME_CLAUDE_CODE
   return BOT_AGENT_RUNTIME_ACP
@@ -52,13 +52,13 @@ export function botAgentRuntimeOptions(profiles: AcpprofilePublicProfile[]): Bot
   const direct = directRuntimeProviders.map(provider => ({
     value: provider,
     runtime: provider,
-    label: acpAgentDisplayName(provider, provider),
-    keywords: [provider, acpAgentDisplayName(provider, provider)],
+    label: externalAgentDisplayName(provider, provider),
+    keywords: [provider, externalAgentDisplayName(provider, provider)],
   }))
   const acp = profiles.flatMap((profile) => {
-    const provider = normalizeACPAgentID(profile.id)
+    const provider = normalizeAgentID(profile.id)
     if (!provider || botAgentRuntimeForProvider(provider) !== BOT_AGENT_RUNTIME_ACP) return []
-    const label = profile.display_name?.trim() || acpAgentDisplayName(provider, provider)
+    const label = profile.display_name?.trim() || externalAgentDisplayName(provider, provider)
     return [{
       value: provider,
       runtime: BOT_AGENT_RUNTIME_ACP,
@@ -83,7 +83,7 @@ export function isDirectBotAgentConfigured(
 ): boolean | null {
   const runtime = normalizeBotAgentRuntime(agent?.runtime)
   const config = objectValue(agent?.metadata)
-  const auth = normalizeACPAgentID(config?.auth)
+  const auth = normalizeAgentID(config?.auth)
   if (runtime === BOT_AGENT_RUNTIME_CODEX) {
     return (auth === 'chatgpt' || auth === 'api_key') && !!agent?.agent_credential_id
   }
@@ -96,14 +96,14 @@ export function isDirectBotAgentConfigured(
 }
 
 export function botAgentProvider(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadata'> | null | undefined): string {
-  const provider = normalizeACPAgentID(agent?.metadata?.provider)
+  const provider = normalizeAgentID(agent?.metadata?.provider)
   if (provider) return provider
   const runtime = normalizeBotAgentRuntime(agent?.runtime)
   return runtime === BOT_AGENT_RUNTIME_CODEX || runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE ? runtime : ''
 }
 
 export function botAgentIcon(agent: Pick<BotagentsBotAgent, 'runtime' | 'metadata'> | null | undefined, color = false): Component {
-  return acpAgentIcon(botAgentProvider(agent), color)
+  return externalAgentIcon(botAgentProvider(agent), color)
 }
 
 export function sessionAgentProvider(
@@ -113,14 +113,14 @@ export function sessionAgentProvider(
 ): string {
   const runtime = normalizeBotAgentRuntime(runtimeType)
   if (runtime === BOT_AGENT_RUNTIME_CODEX || runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE) return runtime
-  return normalizeACPAgentID(runtimeMetadata?.acp_agent_id ?? metadata?.acp_agent_id)
+  return normalizeAgentID(runtimeMetadata?.acp_agent_id ?? metadata?.acp_agent_id)
 }
 
 export function botAgentName(agent: Pick<BotagentsBotAgent, 'name' | 'runtime' | 'metadata'> | null | undefined): string {
   const name = agent?.name?.trim()
   if (name) return name
   const provider = botAgentProvider(agent)
-  return acpAgentDisplayName(provider, provider)
+  return externalAgentDisplayName(provider, provider)
 }
 
 export function suggestBotAgentName(
@@ -128,7 +128,7 @@ export function suggestBotAgentName(
   agents: Array<Pick<BotagentsBotAgent, 'name'>>,
   fallback = '',
 ): string {
-  const base = fallback.trim() || acpAgentDisplayName(provider, provider) || provider
+  const base = fallback.trim() || externalAgentDisplayName(provider, provider) || provider
   const names = new Set(
     agents
       .map(agent => agent.name?.trim().toLocaleLowerCase())

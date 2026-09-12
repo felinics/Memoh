@@ -3,10 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
-	"net/url"
-	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -129,7 +126,7 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 		AgentID:               agentID,
 		ProjectPath:           projectPath,
 		RuntimeOwnerAccountID: channelIdentityID,
-		ToolHTTPURL:           buildACPMCPToolsURL(c, bot.ID),
+		ToolHTTPURL:           buildExternalAgentToolsURL(c, bot.ID),
 	})
 	if err != nil {
 		if errors.Is(err, acpagent.ErrTooManyRuntimes) {
@@ -354,7 +351,7 @@ func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 		AgentID:               sessionMetadataString(acpMeta, "acp_agent_id"),
 		ProjectPath:           sessionMetadataString(acpMeta, "project_path"),
 		RuntimeOwnerAccountID: sessionMetadataString(acpMeta, "runtime_owner_account_id"),
-		ToolHTTPURL:           buildACPMCPToolsURL(c, botID),
+		ToolHTTPURL:           buildExternalAgentToolsURL(c, botID),
 	})
 	if err != nil {
 		return runtimePoolError(err)
@@ -403,7 +400,7 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 		AgentID:               sessionMetadataString(acpMeta, "acp_agent_id"),
 		ProjectPath:           sessionMetadataString(acpMeta, "project_path"),
 		RuntimeOwnerAccountID: sessionMetadataString(acpMeta, "runtime_owner_account_id"),
-		ToolHTTPURL:           buildACPMCPToolsURL(c, botID),
+		ToolHTTPURL:           buildExternalAgentToolsURL(c, botID),
 	}, modelID)
 	if err != nil {
 		return runtimePoolError(err)
@@ -452,7 +449,7 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 		AgentID:               sessionMetadataString(acpMeta, "acp_agent_id"),
 		ProjectPath:           sessionMetadataString(acpMeta, "project_path"),
 		RuntimeOwnerAccountID: sessionMetadataString(acpMeta, "runtime_owner_account_id"),
-		ToolHTTPURL:           buildACPMCPToolsURL(c, botID),
+		ToolHTTPURL:           buildExternalAgentToolsURL(c, botID),
 	}, effort)
 	if err != nil {
 		return runtimePoolError(err)
@@ -501,7 +498,7 @@ func (h *ACPRuntimeHandler) SetMode(c echo.Context) error {
 		AgentID:               sessionMetadataString(acpMeta, "acp_agent_id"),
 		ProjectPath:           sessionMetadataString(acpMeta, "project_path"),
 		RuntimeOwnerAccountID: sessionMetadataString(acpMeta, "runtime_owner_account_id"),
-		ToolHTTPURL:           buildACPMCPToolsURL(c, bot.ID),
+		ToolHTTPURL:           buildExternalAgentToolsURL(c, bot.ID),
 	}, modeID)
 	if err != nil {
 		return runtimePoolError(err)
@@ -526,7 +523,7 @@ func runtimePoolError(err error) error {
 	if err == nil || apperror.CodeOf(err) != "" {
 		return err
 	}
-	if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
+	if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
 		return acpRuntimeHTTPError(feedbackErr)
 	}
 	switch {
@@ -696,64 +693,4 @@ func acpRuntimeHTTPError(err error) error {
 		}
 	}
 	return apperror.Wrap(apperror.CodeACPOperationFailed, err, nil)
-}
-
-func buildACPMCPToolsURL(c echo.Context, botID string) string {
-	if c == nil {
-		return ""
-	}
-	return buildACPMCPToolsURLFromRequest(c.Request(), botID)
-}
-
-func buildACPMCPToolsURLFromRequest(req *http.Request, botID string) string {
-	if raw := strings.TrimSpace(os.Getenv("MEMOH_ACP_MCP_HTTP_URL")); raw != "" {
-		if strings.Contains(raw, "{bot_id}") {
-			return strings.ReplaceAll(raw, "{bot_id}", url.PathEscape(strings.TrimSpace(botID)))
-		}
-		return raw
-	}
-	base := strings.TrimSpace(os.Getenv("MEMOH_ACP_MCP_HTTP_BASE_URL"))
-	if base == "" {
-		base = localRequestBaseURL(req)
-	}
-	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	if base == "" {
-		return ""
-	}
-	return base + "/bots/" + url.PathEscape(strings.TrimSpace(botID)) + "/tools"
-}
-
-func localRequestBaseURL(req *http.Request) string {
-	if req == nil {
-		return ""
-	}
-	proto := "http"
-	if req.TLS != nil {
-		proto = "https"
-	}
-	host := strings.TrimSpace(req.Host)
-	if host == "" {
-		return ""
-	}
-	if !isLoopbackRequestHost(host) {
-		return ""
-	}
-	return proto + "://" + host
-}
-
-func isLoopbackRequestHost(host string) bool {
-	host = strings.TrimSpace(host)
-	if host == "" || strings.Contains(host, "/") {
-		return false
-	}
-	name := host
-	if splitHost, _, err := net.SplitHostPort(host); err == nil {
-		name = splitHost
-	}
-	name = strings.Trim(strings.TrimSpace(name), "[]")
-	if strings.EqualFold(name, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(name)
-	return ip != nil && ip.IsLoopback()
 }

@@ -184,6 +184,13 @@
             :text="userBubbleText"
           />
         </div>
+        <p
+          v-if="isGoalMessage"
+          class="flex items-center gap-1.5 text-caption text-muted-foreground"
+        >
+          <Target class="size-3.5" />
+          {{ $t('chat.goal.sentAsGoal') }}
+        </p>
         <MessageActions
           v-if="!isEditingUserMessage"
           class="-mt-1"
@@ -277,7 +284,7 @@
                 class="flex items-start gap-2 rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
               >
                 <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
-                <span class="min-w-0 whitespace-pre-wrap break-words">{{ node.block.content }}</span>
+                <span class="min-w-0 whitespace-pre-wrap break-words">{{ errorBlockContent(node.block) }}</span>
               </div>
 
               <!-- Attachment block. An assistant turn posts images as reply
@@ -321,7 +328,8 @@
           class="mt-2"
           role="assistant"
           :copy-text="assistantPlainText"
-          :menu-time="calendarTimestamp"
+          :inline-actions="inlineActions"
+          :time-label="calendarTimestamp"
           :full-time="fullTimestamp"
           align="start"
           :persistent="isLastMessage"
@@ -379,7 +387,7 @@ if (typeof document !== 'undefined') {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
-import { CircleAlert, Sparkles, TriangleAlert } from 'lucide-vue-next'
+import { CircleAlert, Sparkles, Target, TriangleAlert } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
@@ -444,6 +452,8 @@ const props = defineProps<{
   canRetryLatestAssistant?: boolean
   canEditLatestUser?: boolean
   canForkAssistant?: boolean
+  inlineActions?: boolean
+  goalSupported?: boolean
   isScrolling: boolean
   isLastMessage?: boolean
 }>()
@@ -558,9 +568,12 @@ const skillActivationNames = computed(() => {
 
 const skillActivationPrompt = computed(() => skillActivation.value?.prompt?.trim() ?? '')
 
+const isGoalMessage = computed(() => props.goalSupported && props.message.role === 'user'
+  && /^\/goal\s+(?!resume$)/.test(cleanUserText(props.message.text)))
 const userBubbleText = computed(() => {
   if (props.message.role !== 'user') return ''
   const text = cleanUserText(props.message.text)
+  if (isGoalMessage.value) return text.replace(/^\/goal\s+/, '')
   if (!isSkillActivationMessage.value) return text
   if (skillActivationPrompt.value) return skillActivationPrompt.value
   if (text.startsWith('/') || text.startsWith('The user activated the following skill for this turn without an additional prompt:')) {
@@ -804,7 +817,7 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
   return true
 }
 
-function errorBlockContent(block: ErrorBlock): string {
+function errorBlockContent(block: Pick<ErrorBlock, 'code' | 'content'>): string {
   const code = block.code?.trim()
   const key = code ? `errors.${code}` : ''
   return key && te(key) ? t(key) : block.content
@@ -904,7 +917,7 @@ const relativeTimestamp = computed(() =>
 const fullTimestamp = computed(() =>
   formatDateTime(props.message.timestamp, { locale: locale.value }),
 )
-// Precise, calendar-anchored time shown inside the assistant "more" menu —
+// Precise, calendar-anchored time for the assistant action bar or menu —
 // "Today 10:11 PM" rather than the decaying "3 hours ago".
 const calendarTimestamp = computed(() =>
   formatCalendarTime(props.message.timestamp, { locale: locale.value }),

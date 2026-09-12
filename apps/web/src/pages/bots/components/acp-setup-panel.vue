@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { normalizeAgentID } from '@/utils/external-agent'
 // Creation-time setup panel for one hosted ACP agent: setup-mode chooser +
 // managed fields (api_key mode) / deferral hints (oauth, self). Shared by the
 // new-bot page and onboarding — it owns only the *pre-create* slice, so the
@@ -14,7 +15,6 @@ import { useAcpSetupModeItems } from '@/composables/useAcpSetupModeItems'
 import {
   defaultSetupMode,
   findMissingRequiredManagedField,
-  normalizeACPAgentID,
 } from '@/utils/acp'
 import { filterCreateVisibleManagedFields } from '@/utils/acp/setup-fields'
 import AcpManagedFields from './acp-managed-fields.vue'
@@ -50,7 +50,7 @@ const selfModeHint = computed(() => t('bots.settings.acpSelfModeHint'))
 watch(() => props.profile, (profile) => {
   for (const key of Object.keys(managed)) delete managed[key]
   for (const field of profile.managed_fields ?? []) {
-    const id = normalizeACPAgentID(field.id)
+    const id = normalizeAgentID(field.id)
     if (id) managed[id] = ''
   }
   const modes = setupModes()
@@ -72,13 +72,13 @@ function selection(): AcpSetupSelection {
   const managedSnapshot: Record<string, string> = {}
   if (setupMode.value === 'api_key') {
     for (const field of visibleManagedFields.value) {
-      const id = normalizeACPAgentID(field.id)
+      const id = normalizeAgentID(field.id)
       const value = (managed[id ?? ''] ?? '').trim()
       if (value) managedSnapshot[id] = value
     }
   }
   return {
-    agentId: normalizeACPAgentID(props.profile.id),
+    agentId: normalizeAgentID(props.profile.id),
     setupMode: setupMode.value,
     managed: managedSnapshot,
   }

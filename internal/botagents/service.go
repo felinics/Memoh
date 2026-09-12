@@ -468,6 +468,14 @@ func normalizeDescriptor(runtime string, metadata map[string]any) (string, map[s
 		normalized[MetadataProviderKey] = provider
 		return runtime, normalized, nil
 	case RuntimeCodex, RuntimeClaudeCode:
+		if runtime == RuntimeCodex {
+			if value, exists := metadata["permission_mode"]; exists {
+				mode, ok := value.(string)
+				if !ok || !codexcfg.ValidPermissionMode(mode) {
+					return "", nil, ErrInvalidMetadata
+				}
+			}
+		}
 		normalized := make(map[string]any, len(metadata)+1)
 		for key, value := range metadata {
 			if isCredentialField(key) {

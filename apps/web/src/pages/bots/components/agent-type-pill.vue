@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import { externalAgentIcon } from '@/utils/external-agent'
 // Agent-kind chooser for bot creation: built-in Memoh, direct external
 // runtimes, and generic ACP profiles.
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { SegmentedControl } from '@felinic/ui'
 import type { AcpprofilePublicProfile } from '@memohai/sdk'
-import { acpAgentIcon } from '@/utils/acp'
 import { MEMOH_AGENT_VALUE, agentTypeItems } from './agent-type'
 
 const props = defineProps<{
@@ -36,7 +36,7 @@ const items = computed(() => agentTypeItems(props.profiles))
           class="size-4 shrink-0"
         >
         <component
-          :is="acpAgentIcon(item.value, true)"
+          :is="externalAgentIcon(item.value, true)"
           v-else
           class="size-4 shrink-0"
         />

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { normalizeAgentID } from '@/utils/external-agent'
 /* eslint-disable vue/no-mutating-props -- Parents pass a reactive managed map; field edits mutate in place like settings-acp-detail. */
 // Shared managed-field stack for ACP setup (create + settings). Parents own
 // setup_mode; this component only renders the schema-driven fields.
@@ -10,7 +11,6 @@ import {
   Textarea,
 } from '@felinic/ui'
 import type { AcpprofileManagedField, AcpprofilePublicProfile } from '@memohai/sdk'
-import { normalizeACPAgentID } from '@/utils/acp'
 import {
   acpInputType,
   acpManagedFieldAutocomplete,
@@ -40,7 +40,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 function setManagedField(fieldID: string | undefined, value: string) {
-  const id = normalizeACPAgentID(fieldID)
+  const id = normalizeAgentID(fieldID)
   if (!id) return
   props.managed[id] = value
   emit('fieldChange')

@@ -2,7 +2,7 @@
 // protocol from the vendored JSON Schema snapshot under schema/.
 //
 // The snapshot is produced by the pinned codex CLI (`codex app-server
-// generate-json-schema`, non-experimental). Generic JSON-Schema code
+// generate-json-schema --experimental`). Generic JSON-Schema code
 // generators cannot represent the serde union encodings this protocol uses,
 // so this package implements a small purpose-built generator that handles
 // exactly the schema shapes present in the snapshot and fails loudly on

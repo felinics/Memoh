@@ -58,6 +58,14 @@ func (b *TranscriptRecorder) Add(ev event.StreamEvent) {
 	}
 }
 
+// AddUser inserts a confirmed mid-turn input between the surrounding output.
+func (b *TranscriptRecorder) AddUser(text string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.flushAssistant()
+	b.output = append(b.output, sdk.UserMessage(text))
+}
+
 // Messages finalizes and returns the transcript. fallbackText is used when
 // the runtime never streamed a text delta (some agents only return final
 // text). Safe to call more than once; finalization is idempotent on the

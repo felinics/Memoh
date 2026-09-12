@@ -147,7 +147,9 @@ export function createChatBootstrap(deps: ChatBootstrapDeps) {
             deps.sessionId.value = null
             deps.explicitSessionSelection.value = false
             deps.draftIntent.value = false
-            deps.clearHistoryView()
+            // Cold startup must apply the same default as New Chat, without
+            // relying on a mounted/focused composer's settings watcher.
+            await deps.stageDefaultExternalAgentFromSettings(deps.currentSelectSessionRequest())
           } else if (restoredExplicitSession) {
             deps.draftIntent.value = false
           } else if (!visibleSessions.length) {

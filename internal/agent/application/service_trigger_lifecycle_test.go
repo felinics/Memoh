@@ -346,7 +346,7 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 			SessionID:       lifecycleTestSessionID,
 			Command:         "run scheduled task",
 			OwnerUserID:     "user-1",
-			ACPModelID:      "test-model",
+			RuntimeModelID:  "test-model",
 			ReasoningEffort: "medium",
 		},
 		"",

@@ -35,7 +35,7 @@
           :aria-label="agentLabel"
         >
           <component
-            :is="acpAgentIcon(agentProvider, true)"
+            :is="externalAgentIcon(agentProvider, true)"
             class="size-4"
             aria-hidden="true"
           />
@@ -169,6 +169,7 @@
 </template>
 
 <script setup lang="ts">
+import { externalAgentDisplayName, externalAgentIcon } from '@/utils/external-agent'
 import { computed, ref } from 'vue'
 import { Clock, LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -185,7 +186,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@felinic/ui'
-import { acpAgentDisplayName, acpAgentIcon } from '@/utils/acp'
 import { sessionAgentProvider } from '@/utils/bot-agent'
 import { splitScriptRuns } from '@/utils/script-runs'
 import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
@@ -271,7 +271,7 @@ const agentProvider = computed(() => sessionAgentProvider(
 ))
 const isAgentSession = computed(() => isAgentRuntimeType(normalizedRuntimeType(props.session)))
 const isScheduleSession = computed(() => normalizedSessionMode(props.session) === 'schedule')
-const agentLabel = computed(() => acpAgentDisplayName(agentProvider.value, t('chat.sessionTypeACPAgent')))
+const agentLabel = computed(() => externalAgentDisplayName(agentProvider.value, t('chat.sessionTypeACPAgent')))
 
 // The old two-line subLabel is folded into the native tooltip: channel handle
 // for IM sessions, agent name for ACP sessions.

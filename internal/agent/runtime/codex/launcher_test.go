@@ -75,7 +75,7 @@ func TestResolveLauncherWithoutResolverUsesToolkitPath(t *testing.T) {
 	if launcher.Path != defaultLauncherPath || launcher.Source != external.LauncherSourceToolkit {
 		t.Fatalf("launcher = %+v, want toolkit default", launcher)
 	}
-	if got := appServerCommand(launcher.Path); got != "/opt/memoh/toolkit/bin/codex app-server" {
+	if got := appServerCommand(launcher.Path); got != "/opt/memoh/toolkit/bin/codex app-server -c features.goals=true" {
 		t.Fatalf("appServerCommand = %q", got)
 	}
 }
@@ -94,19 +94,19 @@ func TestResolveLauncherManagedPathReachesCommandLine(t *testing.T) {
 	if len(resolver.calls) != 1 || resolver.calls[0] != (resolveCall{botID: "bot-1", depID: "codex"}) {
 		t.Fatalf("resolver calls = %+v", resolver.calls)
 	}
-	if got, want := appServerCommand(launcher.Path), "/data/.memoh/deps/codex/versions/0.151.0/bin/codex app-server"; got != want {
+	if got, want := appServerCommand(launcher.Path), "/data/.memoh/deps/codex/versions/0.151.0/bin/codex app-server -c features.goals=true"; got != want {
 		t.Fatalf("appServerCommand = %q, want %q", got, want)
 	}
 }
 
 func TestAppServerCommandQuotesUnsafePaths(t *testing.T) {
 	cases := map[string]string{
-		"/data/my deps/codex":             "'/data/my deps/codex' app-server",
-		"/data/it's/codex":                `'/data/it'\''s/codex' app-server`,
-		"/data/$HOME/codex":               "'/data/$HOME/codex' app-server",
-		"/opt/memoh/toolkit/bin/codex":    "/opt/memoh/toolkit/bin/codex app-server",
-		"  /opt/memoh/toolkit/bin/codex ": "/opt/memoh/toolkit/bin/codex app-server",
-		"":                                "/opt/memoh/toolkit/bin/codex app-server",
+		"/data/my deps/codex":             "'/data/my deps/codex' app-server -c features.goals=true",
+		"/data/it's/codex":                `'/data/it'\''s/codex' app-server -c features.goals=true`,
+		"/data/$HOME/codex":               "'/data/$HOME/codex' app-server -c features.goals=true",
+		"/opt/memoh/toolkit/bin/codex":    "/opt/memoh/toolkit/bin/codex app-server -c features.goals=true",
+		"  /opt/memoh/toolkit/bin/codex ": "/opt/memoh/toolkit/bin/codex app-server -c features.goals=true",
+		"":                                "/opt/memoh/toolkit/bin/codex app-server -c features.goals=true",
 	}
 	for path, want := range cases {
 		if got := appServerCommand(path); got != want {

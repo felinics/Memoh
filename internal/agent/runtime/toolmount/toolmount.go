@@ -37,7 +37,7 @@ type Gateway struct {
 func ResolveBaseURL(info bridge.WorkspaceInfo, inputURL string) string {
 	backend := strings.TrimSpace(info.Backend)
 	if backend == "" || backend == bridge.WorkspaceBackendContainer {
-		return strings.TrimSpace(info.ACPToolsHTTPURL)
+		return strings.TrimSpace(info.ToolsHTTPURL)
 	}
 	return strings.TrimSpace(inputURL)
 }

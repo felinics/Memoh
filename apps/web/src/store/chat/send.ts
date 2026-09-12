@@ -413,7 +413,8 @@ export function createChatSend(deps: ChatSendDeps) {
           && wasDraft
           && !currentSessionId
         if (
-          stillCurrent
+          options.restoreDraftOnFailure !== false
+          && stillCurrent
           && deferredDraftStillCurrent
           && (!isCommandError || commandErrorRestoredDraft)
         ) {

@@ -405,9 +405,9 @@ func TestStartMemohToolsBridgeRetriesClosingWorkspaceClient(t *testing.T) {
 	fresh := newTestBridgeClient(t, root)
 	workspace := &rotatingTestWorkspace{
 		info: bridge.WorkspaceInfo{
-			Backend:         bridge.WorkspaceBackendContainer,
-			DefaultWorkDir:  "/data",
-			ACPToolsHTTPURL: "http://127.0.0.1:18732/mcp",
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+			ToolsHTTPURL:   "http://127.0.0.1:18732/mcp",
 		},
 		clients: []*bridge.Client{fresh},
 	}
@@ -833,9 +833,9 @@ func TestRunnerStartGenericACPSessionInjectsHTTPToolServer(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:         bridge.WorkspaceBackendContainer,
-			DefaultWorkDir:  root,
-			ACPToolsHTTPURL: "http://memoh.test/bots/bot-1/tools",
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: root,
+			ToolsHTTPURL:   "http://memoh.test/bots/bot-1/tools",
 		},
 	})
 
@@ -913,9 +913,9 @@ func TestRunnerStartSessionInjectsHTTPToolServerForForcedProfile(t *testing.T) {
 	runner := NewRunner(nil, testWorkspace{
 		client: client,
 		info: bridge.WorkspaceInfo{
-			Backend:         bridge.WorkspaceBackendContainer,
-			DefaultWorkDir:  root,
-			ACPToolsHTTPURL: "http://memoh.test/bots/bot-custom/tools",
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: root,
+			ToolsHTTPURL:   "http://memoh.test/bots/bot-custom/tools",
 		},
 	})
 

@@ -206,3 +206,20 @@ func storedMemoryTestMessage(t *testing.T, id, sessionID, role, text string) mes
 	}
 	return messagepkg.Message{ID: id, SessionID: sessionID, Role: role, Content: content}
 }
+
+func TestRepeatedSteerTextDoesNotReuseOriginalTurnIdentity(t *testing.T) {
+	service := &Service{settingsService: settings.NewService(slog.New(slog.DiscardHandler), &storeRoundSettingsQueries{}, nil, nil), logger: slog.New(slog.DiscardHandler)}
+	req := ChatRequest{BotID: storeRoundBotID, ThreadID: "session-1", TurnID: "original-turn", Query: "same", ExternalMessageID: "original-external"}
+	inputs, err := service.buildPersistInputs(t.Context(), req, []ModelMessage{
+		{Role: "user", Content: newTextContent("same")},
+		{Role: "assistant", Content: newTextContent("before")},
+		{Role: "user", Content: newTextContent("same")},
+		{Role: "assistant", Content: newTextContent("after")},
+	}, "", storeRoundOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inputs[0].TurnID != "original-turn" || inputs[2].TurnID != "" || inputs[2].ExternalMessageID != "" {
+		t.Fatalf("steer reused original identity: %+v", inputs)
+	}
+}

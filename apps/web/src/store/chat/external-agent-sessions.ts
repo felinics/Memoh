@@ -57,8 +57,12 @@ function agentSessionRuntimeType(input: ExternalAgentSessionInput): string {
   return runtime === 'acp' ? 'acp_agent' : runtime
 }
 
-function externalAgentSessionMetadata(input: ExternalAgentSessionInput): Record<string, unknown> {
-  return agentSessionRuntimeType(input) === 'acp_agent' ? externalAgentDraftMetadata(input) : {}
+export function externalAgentSessionMetadata(input: ExternalAgentSessionInput): Record<string, unknown> {
+  return {
+    ...(agentSessionRuntimeType(input) === 'acp_agent' ? externalAgentDraftMetadata(input) : {}),
+    ...(input.permissionMode ? { permission_mode: input.permissionMode } : {}),
+    ...(input.planMode !== undefined ? { collaboration_mode: input.planMode ? 'plan' : 'default' } : {}),
+  }
 }
 
 export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
@@ -137,7 +141,7 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
         runtimeId,
         generation,
       )
-      const error = new Error('Chat scope changed during ACP Session creation')
+      const error = new Error('Chat scope changed during external-agent session creation')
       error.name = 'AbortError'
       throw error
     }

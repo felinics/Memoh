@@ -350,6 +350,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	emit(native.StreamEvent{Type: native.EventStart})
 
 	result, err := driver.Prompt(idleCtx, external.PromptInput{
+		Steering:                  s.runtimeSteering(req),
 		BotID:                     req.BotID,
 		BotAgentID:                sess.BotAgentID,
 		ChatID:                    req.ChatID,
@@ -371,6 +372,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		ReplyTarget:               req.ReplyTarget,
 		ConversationType:          req.ConversationType,
 		Command:                   req.AgentCommand,
+		CommandArgs:               strings.TrimSpace(strings.TrimPrefix(firstNonEmpty(req.RawQuery, req.Query), "/"+req.AgentCommand)),
 		ForceFreshRuntime:         req.ForceFreshRuntime,
 		RuntimeMetadata:           runtimeMeta,
 		RuntimeOwnerAccountID:     runtimeOwnerAccountID,
@@ -582,7 +584,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		RawQuery:        payload.Command,
 		UserID:          payload.OwnerUserID,
 		Token:           token,
-		Model:           payload.ACPModelID,
+		Model:           payload.RuntimeModelID,
 		ReasoningEffort: payload.ReasoningEffort,
 		SessionType:     sessionmode.Schedule,
 	}
@@ -637,7 +639,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		ContextURI:                contextURI,
 		ContextBudgetMaxTokens:    s.runtimeContextBudgetDefault(ctx, botID),
 		ContextToolExchangePolicy: defaultToolExchangePolicy(),
-		ModelID:                   strings.TrimSpace(payload.ACPModelID),
+		ModelID:                   strings.TrimSpace(payload.RuntimeModelID),
 		ReasoningEffort:           strings.TrimSpace(payload.ReasoningEffort),
 		SessionMode:               sessionmode.Schedule,
 		RuntimeMetadata:           runtimeMeta,
@@ -863,6 +865,12 @@ func (s *Service) persistRuntimeRound(
 		output = []ModelMessage{{Role: "assistant", Content: newTextContent("")}}
 	}
 	output = repairToolCallClosures(output, syntheticToolClosureError)
+	if len(result.SteerInputIDs) > 0 && output[len(output)-1].Role != "assistant" {
+		// A stop may arrive after the final steer input, before its reply.
+		// Keep the terminal metadata and fork anchor after that input, even
+		// when earlier portions of this runtime turn already had output.
+		output = append(output, ModelMessage{Role: "assistant", Content: newTextContent("")})
+	}
 	hasAssistant := false
 	for _, msg := range output {
 		if msg.Role == "assistant" {
@@ -916,6 +924,14 @@ func (s *Service) persistRuntimeRound(
 		}
 		metadataByIndex[lastAssistantIndex+metadataOffset] = outcome
 	}
+	agentTurnID := strings.TrimSpace(result.AgentTurnID)
+	if (len(result.SteerInputIDs) > 0 || result.FinalTurnAnchorOnly) && lastAssistantIndex >= 0 {
+		// Codex forks at whole runtime turns. Steer splits and Goal continuation
+		// collect multiple assistant rows under one publication; only the tail
+		// has a runtime anchor matching the complete visible history.
+		metadataByIndex[lastAssistantIndex+metadataOffset]["agent_turn_id"] = agentTurnID
+		agentTurnID = "" // Do not bulk-assign this anchor to earlier assistant rows.
+	}
 	var publication *messagepkg.AgentPublication
 	if promptErr == nil && turnCompleted && lastAssistantIndex >= 0 && result.Checkpoint != external.CheckpointNone {
 		publication = &messagepkg.AgentPublication{
@@ -935,7 +951,7 @@ func (s *Service) persistRuntimeRound(
 		AgentPublication:                  publication,
 		// The runtime's turn id lands on the run row in the round transaction;
 		// it anchors turn-level operations such as codex thread/fork.
-		AgentTurnID:      strings.TrimSpace(result.AgentTurnID),
+		AgentTurnID:      agentTurnID,
 		ContextLifecycle: contextLifecycle,
 	})
 	if err == nil && lastPersistedAssistantMessageID(persisted) == "" {
@@ -943,6 +959,9 @@ func (s *Service) persistRuntimeRound(
 		// sentinel so callers route into database reconciliation instead of
 		// the definite-rollback compensation.
 		err = errors.Join(db.ErrCommitOutcomeUnknown, errors.New("external assistant output was not persisted"))
+	}
+	if err == nil {
+		s.publishRuntimeSteerHistory(ctx, req, result.SteerInputIDs, persisted)
 	}
 	if err == nil && promptErr == nil && (req.UserMessagePersisted || req.ReusePersistedUserMessage) && !req.SkipMemoryExtraction {
 		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
@@ -988,6 +1007,7 @@ func isRuntimeConfigurationError(err error) bool {
 	}
 	switch apperror.CodeOf(err) {
 	case apperror.CodeExternalRuntimeAuthRequired, apperror.CodeExternalRuntimeUnavailable,
+		apperror.CodeRuntimeControlGoalRequiresDefaultMode,
 		apperror.CodeSessionHistoryInconsistent,
 		apperror.CodeACPModelSelectionUnsupported, apperror.CodeACPModelIDRequired,
 		apperror.CodeACPModelUnavailable, apperror.CodeACPReasoningUnsupported,
@@ -1004,7 +1024,7 @@ func runtimeFailureEvent(cause error) native.StreamEvent {
 	if strings.TrimSpace(code) == "" {
 		code = "runtime_prompt_failed"
 	}
-	return native.StreamEvent{Type: native.EventError, Error: code}
+	return native.StreamEvent{Type: native.EventError, Code: code, Error: code}
 }
 
 func runtimeTerminalStreamEvent(eventType native.StreamEventType, result external.PromptResult) native.StreamEvent {

@@ -47,6 +47,10 @@ type turnState struct {
 
 	mu            sync.Mutex
 	turnID        string
+	followsGoal   bool
+	goalStarting  bool
+	goalActive    bool
+	steers        map[string]*pendingSteer
 	events        []event.StreamEvent
 	finalText     string
 	usage         *sdk.Usage
@@ -71,22 +75,24 @@ type turnState struct {
 func newTurnState(parent context.Context, input external.PromptInput, threadID string, approvalSvc approval.FlowService, waiter func(string) func(), userInput UserInputService, toolLookup func(context.Context, string) bool, logger *slog.Logger) *turnState {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	t := &turnState{
-		input:      input,
-		approval:   approvalSvc,
-		waiter:     waiter,
-		userInput:  userInput,
-		toolLookup: toolLookup,
-		logger:     logger,
-		threadID:   threadID,
-		ctx:        ctx,
-		cancel:     cancel,
-		done:       make(chan struct{}),
-		toolNames:  map[string]string{},
-		inflight:   map[string]context.CancelFunc{},
-		pumpDone:   make(chan struct{}),
+		input:        input,
+		approval:     approvalSvc,
+		waiter:       waiter,
+		userInput:    userInput,
+		toolLookup:   toolLookup,
+		logger:       logger,
+		threadID:     threadID,
+		followsGoal:  input.Command == "goal",
+		goalStarting: input.Command == "goal",
+		ctx:          ctx,
+		cancel:       cancel,
+		done:         make(chan struct{}),
+		toolNames:    map[string]string{},
+		inflight:     map[string]context.CancelFunc{},
+		pumpDone:     make(chan struct{}),
 	}
 	t.queueCond = sync.NewCond(&t.mu)
-	go t.pump()
+	go t.pump(ctx)
 	return t
 }
 
@@ -126,7 +132,7 @@ func (t *turnState) emit(ev event.StreamEvent) {
 }
 
 // pump delivers queued events to the sink on its own goroutine.
-func (t *turnState) pump() {
+func (t *turnState) pump(ctx context.Context) {
 	defer close(t.pumpDone)
 	for {
 		t.mu.Lock()
@@ -141,6 +147,10 @@ func (t *turnState) pump() {
 		t.queue = nil
 		t.mu.Unlock()
 		for _, ev := range batch {
+			if ev.Type == steerInputEvent {
+				t.deliverSteerInput(ctx, ev.ToolCallID)
+				continue
+			}
 			t.input.Sink.EmitStreamEvent(ev)
 		}
 	}
@@ -186,8 +196,12 @@ func (t *turnState) acceptsTurn(turnID string) bool {
 // It runs on the connection read loop and must stay non-blocking.
 func (t *turnState) handleNotification(decoded any) {
 	switch params := decoded.(type) {
+	case *protocol.ThreadGoalUpdatedNotification:
+		t.updateGoal(&params.Goal)
+	case *protocol.ThreadGoalClearedNotification:
+		t.updateGoal(nil)
 	case *protocol.TurnStartedNotification:
-		t.setTurnID(params.Turn.ID)
+		t.startContinuation(params.Turn.ID)
 	case *protocol.AgentMessageDeltaNotification:
 		if !t.acceptsTurn(params.TurnID) {
 			return
@@ -256,8 +270,11 @@ func (t *turnState) handleNotification(decoded any) {
 		t.mu.Lock()
 		turn := params.Turn
 		t.turn = &turn
+		finish := !t.followsGoal || (!t.goalStarting && !t.goalActive) || turn.Status != protocol.TurnStatusCompleted
 		t.mu.Unlock()
-		t.finish()
+		if finish {
+			t.finish()
+		}
 	case *protocol.ErrorNotification:
 		if !t.acceptsTurn(params.TurnID) {
 			return
@@ -285,6 +302,11 @@ func (t *turnState) handleNotification(decoded any) {
 }
 
 func (t *turnState) handleItemStarted(item *protocol.ThreadItem) {
+	if item.UserMessage != nil && item.UserMessage.ClientID != nil {
+		t.recordSteerInput(*item.UserMessage.ClientID)
+		return
+	}
+
 	switch {
 	case item.CommandExecution != nil:
 		cmd := item.CommandExecution
@@ -322,7 +344,26 @@ func (t *turnState) handleItemStarted(item *protocol.ThreadItem) {
 }
 
 func (t *turnState) handleItemCompleted(item *protocol.ThreadItem) {
+	if item.UserMessage != nil && item.UserMessage.ClientID != nil {
+		t.recordSteerInput(*item.UserMessage.ClientID)
+		return
+	}
+
 	switch {
+	case item.Plan != nil:
+		// The completed plan is authoritative; partial plan deltas may differ.
+		// Deliver it through the ordinary assistant transcript so it survives reload.
+		text := item.Plan.Text
+		if text == "" {
+			return
+		}
+		t.mu.Lock()
+		if t.finalText != "" {
+			text = "\n\n" + text
+		}
+		t.finalText += text
+		t.mu.Unlock()
+		t.emit(event.StreamEvent{Type: event.TextDelta, Delta: text})
 	case item.AgentMessage != nil:
 		t.mu.Lock()
 		if text := item.AgentMessage.Text; text != "" {
@@ -560,7 +601,7 @@ func (t *turnState) decide(ctx context.Context, callID, toolName string, input m
 	if t.approval == nil {
 		return approval.FlowResult{Status: approval.StatusRejected, DecisionReason: "approval service unavailable"}
 	}
-	result, err := approval.RunFlow(ctx, t.approval, approval.FlowRequest{
+	result, err := approval.RunRuntimeFlow(ctx, t.approval, approval.FlowRequest{
 		Input: approval.CreatePendingInput{
 			BotID:                        t.input.BotID,
 			SessionID:                    t.input.ThreadID,
@@ -610,9 +651,20 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	recorder := external.NewTranscriptRecorder(t.input.ToolOutputLimit)
+	var steerIDs []string
+	for _, ev := range t.events {
+		if ev.Type == steerInputEvent {
+			recorder.AddUser(ev.Delta)
+			steerIDs = append(steerIDs, ev.ToolCallID)
+		} else {
+			recorder.Add(ev)
+		}
+	}
 	out := external.PromptResult{
-		Output: external.TranscriptFromEvents(t.events, t.finalText),
-		Text:   t.finalText,
+		Output:        recorder.Messages(t.finalText),
+		SteerInputIDs: steerIDs,
+		Text:          t.finalText,
 	}
 	if t.usage != nil {
 		usage := *t.usage
@@ -644,6 +696,7 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 	}
 	out.StopReason = string(status)
 	out.AgentTurnID = t.turnID
+	out.FinalTurnAnchorOnly = t.followsGoal
 	switch status {
 	case protocol.TurnStatusCompleted:
 		out.TurnCompleted = true

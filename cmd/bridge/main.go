@@ -39,7 +39,7 @@ func runBridge() int {
 
 	reverseHTTP := bridgesvc.NewReverseHTTPBroker()
 	startDisplaySupervisor(ctx)
-	startACPToolsProxy(ctx, reverseHTTP)
+	startToolsProxy(ctx, reverseHTTP)
 
 	network := "unix"
 	address := os.Getenv("BRIDGE_SOCKET_PATH")

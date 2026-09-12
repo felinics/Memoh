@@ -30,7 +30,7 @@ export function matchesChatPaneSendContext(
 // it lives here rather than inline in the pane: the two call sites must agree,
 // and this is the only piece of that decision worth testing on its own.
 //
-// Only a native composer can be model-less in a way that blocks sending. An ACP
+// Only a native composer can be model-less in a way that blocks sending. An external
 // agent supplies its own default model, so an empty selection there is normal.
 export function composerHasNoModel(
   activeUsesExternalAgentComposer: boolean,
@@ -65,7 +65,7 @@ const ACP_STALE_CONFIG_CODES = new Set([
   // Feedback-family code (underscore form): the runtime dropped or replaced
   // the command set between admission and prompt; refresh the registry so the
   // picker stops offering the stale command.
-  'acp_agent_command_stale',
+  'runtime_agent_command_stale',
 ])
 
 export function shouldRefreshACPComposerConfig(

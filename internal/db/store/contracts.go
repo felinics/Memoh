@@ -115,6 +115,14 @@ type BotWorkdirStore interface {
 	ArchiveWorkdir(ctx context.Context, botID, workdirID string) error
 }
 
+// WorkdirActivityStore coordinates directory mutations with durable run admission.
+// The callback holds the same bot lock used by admission and ownership claims;
+// running agents remain concurrent, but no new run can cross the idle check.
+type WorkdirActivityStore interface {
+	ActiveWorkdirs(context.Context, string) ([]BotWorkdirRecord, error)
+	WithWorkdirMutation(context.Context, string, func([]BotWorkdirRecord) error) error
+}
+
 type AccountRecord struct {
 	ID                  string
 	Username            string

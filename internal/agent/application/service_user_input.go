@@ -19,6 +19,7 @@ import (
 // on, kept as an interface so the respond/resume routing can be tested with
 // fakes.
 type userInputService interface {
+	Get(ctx context.Context, requestID string) (userinput.Request, error)
 	CreatePending(ctx context.Context, input userinput.CreatePendingInput) (userinput.Request, error)
 	ResolveTarget(ctx context.Context, input userinput.ResolveInput) (userinput.Request, error)
 	AdvanceText(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)

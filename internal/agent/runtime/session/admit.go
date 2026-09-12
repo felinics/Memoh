@@ -82,6 +82,8 @@ type AdmitInput struct {
 // cannot be separated safely: live state reserved without an executor is a run
 // holding a session's only slot with nothing driving it to a terminal state.
 type Execution struct {
+	// ConfigurationOnly keeps the execution lock without presenting an assistant turn.
+	ConfigurationOnly bool
 	// Admission persists the run's user turn and any replacement operation, and
 	// returns the view subscribers should see when the run leaves admitting. It
 	// runs after ownership is established, so its writes can be fenced with
@@ -324,17 +326,18 @@ func (m *Manager) claimAndStart(ctx context.Context, in AdmitInput, admission Ad
 	}
 
 	handle, cursor, err := m.startRun(ctx, runStart{
-		botID:           in.BotID,
-		sessionID:       in.SessionID,
-		runID:           admission.RunID,
-		turnID:          admission.TurnID,
-		invocationID:    in.InvocationID,
-		fencingToken:    token,
-		builder:         in.Execution.Admission,
-		ownershipCancel: in.Execution.OwnershipCancel,
-		abortCh:         in.Execution.AbortCh,
-		cancel:          in.Execution.Cancel,
-		injectCh:        in.Execution.InjectCh,
+		botID:             in.BotID,
+		sessionID:         in.SessionID,
+		runID:             admission.RunID,
+		turnID:            admission.TurnID,
+		invocationID:      in.InvocationID,
+		fencingToken:      token,
+		builder:           in.Execution.Admission,
+		configurationOnly: in.Execution.ConfigurationOnly,
+		ownershipCancel:   in.Execution.OwnershipCancel,
+		abortCh:           in.Execution.AbortCh,
+		cancel:            in.Execution.Cancel,
+		injectCh:          in.Execution.InjectCh,
 	})
 	switch {
 	case err != nil:

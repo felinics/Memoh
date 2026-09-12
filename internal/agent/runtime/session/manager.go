@@ -233,6 +233,18 @@ func (c *runControl) decisionWaitActive() bool {
 	return len(c.pendingDecisions) > 0
 }
 
+// Only a deferred runtime may return from its producer while retaining a run
+// for user input. An inline runtime's return ends execution even when a late
+// decision notification was lost; durable finalization reconciles those rows.
+func (c *runControl) canParkForDecision() bool {
+	if c == nil {
+		return false
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	return !c.decisionInline && len(c.pendingDecisions) > 0
+}
+
 // decisionKey identifies one decision across its pending and terminal
 // events. An event without any id collapses onto a shared key, degrading to
 // the historical single-flag behavior instead of leaking set entries.
@@ -925,9 +937,10 @@ func (m *Manager) LivenessGeneration(ctx context.Context) (string, error) {
 // only in whether they carry a fencing token, and that difference should be
 // visible at the call site instead of being a positional zero.
 type runStart struct {
-	botID     string
-	sessionID string
-	runID     string
+	configurationOnly bool
+	botID             string
+	sessionID         string
+	runID             string
 	// fencingToken is the durable ownership token from the ledger claim. Zero
 	// means this reservation has no ledger row, so it gets no lease index entry
 	// either: there would be nothing for the reaper to transition.
@@ -1082,6 +1095,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 			RunID:               runID,
 			TurnID:              start.turnID,
 			InvocationID:        start.invocationID,
+			ConfigurationOnly:   start.configurationOnly,
 			Generation:          runGeneration,
 			FencingToken:        start.fencingToken,
 			Status:              RunStatusAdmitting,
@@ -1317,14 +1331,12 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 		}
 		if ok && runMatchesHandle(snapshot.CurrentRunView, handle) &&
 			strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision) &&
-			ctrl.decisionWaitActive() {
+			ctrl.canParkForDecision() {
 			// The native stream ends after emitting a deferred decision. That is
 			// a parked execution, not a terminal run: retain ownership and the
 			// command executor so the response can resume this same run.
-			// The decisionWaitActive gate keeps an inline runtime whose turn
-			// died after its decision was already decided (or whose terminal
-			// decision event was lost) from being mistaken for a park — that
-			// mistake left runs in waiting_decision forever.
+			// Inline runtimes never park on return, including when their
+			// decision's terminal notification did not reach this manager.
 			ctrl.markDecisionReady()
 			return nil
 		}
@@ -1668,7 +1680,7 @@ func (m *Manager) prepareAgentTerminalEvent(
 		return agentTerminalProposal{}, ErrRunOwnershipLost
 	}
 	run := snapshot.CurrentRunView
-	if strings.EqualFold(run.Status, RunStatusWaitingDecision) {
+	if strings.EqualFold(run.Status, RunStatusWaitingDecision) && m.localControlForHandle(handle).canParkForDecision() {
 		return agentTerminalProposal{}, nil
 	}
 	status := RunStatusCompleted
@@ -1688,7 +1700,7 @@ func (m *Manager) prepareAgentTerminalEvent(
 		status,
 		errorCode,
 		"",
-		false,
+		m.localControlForHandle(handle).resumesOnTerminalDecision(),
 	)
 	if err != nil {
 		return agentTerminalProposal{}, err
@@ -1831,7 +1843,12 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	resumeLiveOnTerminal := ctrl.resumesOnTerminalDecision() && !ctrl.decisionWaitActive()
 	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
-		if !runMatchesHandle(run, handle) || !m.runOwnerMatches(run) || !isEventAcceptingRunStatus(run.Status) {
+		// Finalization may replay a durable decision after the run entered
+		// finishing. Accept only terminal decision snapshots in that window;
+		// ordinary output and new pending requests cannot reopen execution.
+		acceptsEvent := run != nil && (isEventAcceptingRunStatus(run.Status) ||
+			(strings.EqualFold(run.Status, RunStatusFinishing) && terminalDecisionEvent(event)))
+		if !runMatchesHandle(run, handle) || !m.runOwnerMatches(run) || !acceptsEvent {
 			return snapshot, false, nil
 		}
 		snapshot.Seq++

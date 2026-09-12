@@ -106,7 +106,7 @@ func (h *ExternalAgentCodexHandler) AuthorizeDevice(c echo.Context) error {
 	start, err := h.driver.StartChatGPTDeviceLogin(c.Request().Context(), botID, botAgentID)
 	if err != nil {
 		h.logger.Error("codex device login start failed", slog.String("bot_id", botID), slog.Any("error", err))
-		if feedbackErr := acpFeedbackHTTPError(err); feedbackErr != nil {
+		if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
 			return feedbackErr
 		}
 		if apperror.CodeOf(err) != "" {

@@ -35,6 +35,10 @@ type compactionCapabilityQueries struct {
 	chatModelErr error
 }
 
+func (q *compactionCapabilityQueries) GetSessionByID(_ context.Context, id pgtype.UUID) (sqlc.BotSession, error) {
+	return sqlc.BotSession{ID: id, BotID: q.bot.ID, Type: "chat", RuntimeType: "native"}, nil
+}
+
 func (q *compactionCapabilityQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return q.bot, nil
 }

@@ -25,7 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/application"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
-	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -68,7 +68,7 @@ type LocalChannelHandler struct {
 	sessionRuntime      wsTurnAdmitter
 	commandHandler      *command.Handler
 	skillResolver       runtimeSkillResolver
-	acpRuntimeStatus    acpRuntimeStatusReader
+	runtimeControls     runtimeControlReader
 	mediaService        *media.Service
 	speechService       localSpeechSynthesizer
 	speechModelResolver localSpeechModelResolver
@@ -84,12 +84,9 @@ type runtimeSkillResolver interface {
 	ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skillset.ResolvedSkill, error)
 }
 
-// acpRuntimeStatusReader is the live, server-owned capability snapshot used
-// to recognize Agent-declared commands. The client never supplies this list:
-// accepting a stale composer cache would let arbitrary slash text bypass the
-// fail-closed skill classifier.
-type acpRuntimeStatusReader interface {
-	RuntimeStatus(sessionID, agentID, projectPath string) acpagent.RuntimeStatus
+// runtimeControlReader reads the server-owned declarations for this actor/thread.
+type runtimeControlReader interface {
+	RuntimeCommands(context.Context, application.RuntimeControlRequest) ([]external.Command, error)
 }
 
 // wsTurnAdmitter is the durable admission this entry point depends on. It is
@@ -119,6 +116,7 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 // SetAgentService configures the application service used for WebSocket turns.
 func (h *LocalChannelHandler) SetAgentService(service *application.Service) {
 	h.agentService = service
+	h.runtimeControls = service
 }
 
 // SetSessionRuntime installs the durable admission gate for turn-starting
@@ -135,13 +133,7 @@ func (h *LocalChannelHandler) SetRuntimeSkillResolver(resolver runtimeSkillResol
 	h.skillResolver = resolver
 }
 
-// SetACPRuntimeStatusReader configures the authoritative live ACP capability
-// source used by Web slash-command classification.
-func (h *LocalChannelHandler) SetACPRuntimeStatusReader(reader acpRuntimeStatusReader) {
-	h.acpRuntimeStatus = reader
-}
-
-// SetAuthTokenConfig configures runtime token minting for ACP-backed local WS streams.
+// SetAuthTokenConfig configures runtime token minting for external-agent local WS streams.
 func (h *LocalChannelHandler) SetAuthTokenConfig(jwtSecret string, ttl time.Duration) {
 	h.jwtSecret = strings.TrimSpace(jwtSecret)
 	h.tokenTTL = ttl
@@ -236,7 +228,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	sessionID := strings.TrimSpace(req.SessionID)
 	skillActivationAllowed := true
 	if actionID == "permission" {
-		// The permission action targets a live ACP session, so enforce session
+		// The permission action targets a live external-agent session, so enforce session
 		// visibility (chat or workspace_exec plus canAccessSession) instead of
 		// the chat-only bot access check. An empty session falls through so the
 		// executor returns its session-required command error.
@@ -267,7 +259,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 		SessionID: sessionID,
 		ActorID:   channelIdentityID,
 		ModeID:    quickActionStringParam(req.Params, "mode_id"),
-		ToolURL:   buildACPMCPToolsURL(c, botID),
+		ToolURL:   buildExternalAgentToolsURL(c, botID),
 	})
 	event := commandEvent(req.InvocationID, req.ComposerScope, sessionID, actionID)
 	if slashErr != nil {
@@ -320,7 +312,7 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 		}
 		labels := []string{"/help", "/new", "/compact"}
 		text := "Available Web quick actions: %s."
-		// skillActivationAllowed already reflects a plain (non-ACP) chat
+		// skillActivationAllowed already reflects a native chat
 		// session, which is also the only context where the model picker
 		// applies, so it doubles as the /model gate.
 		if skillActivationAllowed {
@@ -378,34 +370,38 @@ func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Contex
 		err := slash.Error{Code: slash.CodePermissionSessionRequired}
 		return nil, &err
 	}
-	state, err := h.agentService.ConfigureACPMode(ctx, application.ACPModeRequest{
-		BotID:                  strings.TrimSpace(botID),
-		ThreadID:               strings.TrimSpace(control.SessionID),
-		ActorChannelIdentityID: strings.TrimSpace(control.ActorID),
-		ActorUserID:            strings.TrimSpace(control.ActorID),
-		ModeID:                 control.ModeID,
-		ToolHTTPURL:            strings.TrimSpace(control.ToolURL),
-	})
+	request := application.RuntimeControlRequest{BotID: strings.TrimSpace(botID), ThreadID: strings.TrimSpace(control.SessionID), ActorID: strings.TrimSpace(control.ActorID), ModeID: control.ModeID, ToolHTTPURL: strings.TrimSpace(control.ToolURL)}
+	var state external.ModeState
+	var err error
+	if strings.TrimSpace(control.ModeID) == "" {
+		var controls external.Controls
+		controls, err = h.agentService.RuntimeControls(ctx, request)
+		state = controls.Modes
+		if err == nil && !state.Supported {
+			err = external.ErrControlUnsupported
+		}
+	} else {
+		state, err = h.agentService.SetRuntimeMode(ctx, request)
+	}
+
 	if err != nil {
 		code := slash.CodePermissionModeFailed
 		switch {
 		case errors.Is(err, toolapproval.ErrForbidden):
 			code = slash.CodePermissionDenied
-		case errors.Is(err, application.ErrACPModeSessionRequired):
-			code = slash.CodePermissionSessionRequired
-		case errors.Is(err, application.ErrACPModeUnsupported):
+		case errors.Is(err, external.ErrControlUnsupported):
 			code = slash.CodePermissionModeUnsupported
-		case errors.Is(err, application.ErrACPModeUnavailable):
+		case errors.Is(err, external.ErrModeUnavailable):
 			code = slash.CodePermissionModeUnavailable
 		}
 		slashErr := slash.Error{Code: code}
 		return nil, &slashErr
 	}
-	items := make([]CommandActionListItem, 0, len(state.Available))
-	for _, mode := range state.Available {
-		kind := "acp_mode"
+	items := make([]CommandActionListItem, 0, len(state.AvailableModes))
+	for _, mode := range state.AvailableModes {
+		kind := "runtime_mode"
 		if mode.ID == state.CurrentModeID {
-			kind = "acp_mode_current"
+			kind = "runtime_mode_current"
 		}
 		items = append(items, CommandActionListItem{
 			ID:          mode.ID,
@@ -415,7 +411,7 @@ func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Contex
 		})
 	}
 	resultKind := "permission_modes"
-	if state.Changed {
+	if strings.TrimSpace(control.ModeID) != "" {
 		resultKind = "permission_mode_changed"
 	}
 	return &CommandActionResult{Kind: resultKind, Items: items}, nil
@@ -518,51 +514,34 @@ func (h *LocalChannelHandler) classifyWebSlash(text string, hasAttachments bool,
 	})
 }
 
-func (h *LocalChannelHandler) classifyWebSlashForSession(ctx context.Context, text string, hasAttachments bool, sessionID string) slash.Decision {
+type webSlashDecision struct {
+	slash.Decision
+	RuntimeCommand *external.Command
+}
+
+func (h *LocalChannelHandler) classifyWebSlashForSession(ctx context.Context, text string, hasAttachments bool, request application.RuntimeControlRequest) webSlashDecision {
 	decision := h.classifyWebSlash(text, hasAttachments, slash.SurfaceWebWS)
 	selector := exactWebSlashSelector(text)
-	liveCommand, liveACP := h.liveACPCommandAuthority(sessionID, selector)
-	if liveCommand {
-		// Preserve the parsed invocation for diagnostics, but deliberately leave
-		// the message text alone. The ordinary message path below must send the
-		// exact `/name args` input to the ACP prompt instead of turning it into a
-		// Memoh command or stripping the selector like a skill activation.
-		// AgentCommand carries the matched selector so the session pool can
-		// re-validate it against the final runtime at prompt time.
-		return slash.Decision{
-			Kind:         slash.DecisionNormalChat,
-			Directed:     decision.Directed,
-			Invocation:   decision.Invocation,
-			AgentCommand: selector,
+	if selector == "" || isReservedWebRuntimeControl(strings.ToLower(selector)) {
+		return webSlashDecision{Decision: decision}
+	}
+	sessionID := request.ThreadID
+	if h.runtimeControls != nil && sessionID != "" {
+		commands, err := h.runtimeControls.RuntimeCommands(ctx, request)
+		if err == nil {
+			if command, ok := external.FindCommand(commands, selector); ok {
+				return webSlashDecision{Decision: slash.Decision{Kind: slash.DecisionNormalChat, Directed: decision.Directed, Invocation: decision.Invocation, AgentCommand: selector}, RuntimeCommand: &command}
+			}
 		}
 	}
-	if decision.Kind == slash.DecisionCommandAction && (decision.Command.Resource == "steer" || decision.Command.Resource == "queue") {
-		return decision
-	}
-	if isReservedWebACPControl(selector) ||
-		(decision.Invocation != nil && isReservedWebACPControl(decision.Invocation.Parsed.Resource)) {
-		return decision
+	if decision.Kind == slash.DecisionCommandAction || decision.Kind == slash.DecisionUnsupportedCommand {
+		return webSlashDecision{Decision: decision}
 	}
 	pathProse := decision.Kind == slash.DecisionNormalChat && strings.Contains(selector, "/")
-	if selector != "" && !pathProse &&
-		(liveACP || h.isACPRuntimeSession(ctx, sessionID)) {
-		// ACP sessions never reinterpret an unadvertised Agent command as a
-		// Memoh skill activation. SessionPool's live full replacement is the sole
-		// command authority, so stale or unknown selectors fail with one stable
-		// command error (attachments included). One exception: the classifier's
-		// prose carve-out for a Unix path or URL after the slash ("/etc/hosts
-		// what does this line mean" — the head token itself contains a "/")
-		// stays normal chat and reaches the agent as text. Opaque command-ish
-		// tokens without a "/" (including case near-misses of advertised
-		// commands) still fail closed here.
-		return slash.Decision{
-			Kind:       slash.DecisionUnknownSlash,
-			Code:       slash.CodeUnknownSlash,
-			Directed:   decision.Directed,
-			Invocation: decision.Invocation,
-		}
+	if !pathProse && h.isExternalRuntimeSession(ctx, sessionID) {
+		return webSlashDecision{Decision: slash.Decision{Kind: slash.DecisionUnknownSlash, Code: slash.CodeUnknownSlash, Directed: decision.Directed, Invocation: decision.Invocation}}
 	}
-	return decision
+	return webSlashDecision{Decision: decision}
 }
 
 func exactWebSlashSelector(text string) string {
@@ -577,40 +556,12 @@ func exactWebSlashSelector(text string) string {
 	return selector
 }
 
-func (h *LocalChannelHandler) liveACPCommandAuthority(sessionID, selector string) (bool, bool) {
-	if h == nil || h.acpRuntimeStatus == nil {
-		return false, false
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || selector == "" || isReservedWebACPControl(strings.ToLower(selector)) {
-		return false, false
-	}
-
-	status := h.acpRuntimeStatus.RuntimeStatus(sessionID, "", "")
-	if strings.TrimSpace(status.SessionID) != sessionID {
-		return false, false
-	}
-	liveACP := strings.TrimSpace(status.ACPSession) != ""
-	if !liveACP {
-		return false, false
-	}
-	for _, advertised := range status.AvailableCommands {
-		// ACP command IDs are opaque and case-sensitive. Compare the exact selector
-		// extracted from the original slash input; descriptions and input hints are
-		// display metadata, never authority.
-		if advertised.Name == selector {
-			return true, true
-		}
-	}
-	return false, true
-}
-
-func (h *LocalChannelHandler) isACPRuntimeSession(ctx context.Context, sessionID string) bool {
+func (h *LocalChannelHandler) isExternalRuntimeSession(ctx context.Context, sessionID string) bool {
 	if h == nil || h.sessionService == nil || strings.TrimSpace(sessionID) == "" {
 		return false
 	}
 	sess, err := h.sessionService.Get(ctx, strings.TrimSpace(sessionID))
-	return err == nil && sessionpkg.IsACPRuntime(sess)
+	return err == nil && sessionpkg.UsesDecisionWaiter(sess)
 }
 
 // wsSessionAuthAckCode maps a session pre-authorization failure onto the ack
@@ -625,7 +576,7 @@ func wsSessionAuthAckCode(err error, forbidden, failed apperror.Code) apperror.C
 	return forbidden
 }
 
-func isReservedWebACPControl(resource string) bool {
+func isReservedWebRuntimeControl(resource string) bool {
 	switch strings.ToLower(strings.TrimSpace(resource)) {
 	case "help", "new", "permission", "skill":
 		return true
@@ -1229,7 +1180,7 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 	signed, _, err := auth.GenerateToken(runtimeOwnerAccountID, h.jwtSecret, h.tokenTTL)
 	if err != nil {
 		if h.logger != nil {
-			h.logger.Warn("issue ACP runtime token failed", slog.Any("error", err))
+			h.logger.Warn("issue external-agent runtime token failed", slog.Any("error", err))
 		}
 		return fallbackBearerToken
 	}
@@ -1381,7 +1332,7 @@ func sendWSErrorFromError(writer *wsWriter, ref wsTurnRef, err error) {
 		writer.SendJSON(event)
 		return
 	}
-	feedback := acpFeedbackError(err)
+	feedback := externalAgentFeedbackError(err)
 	if feedback == nil {
 		sendWSError(writer, ref, wsErrorMessage(err))
 		return
@@ -1460,7 +1411,7 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 }
 
 // wsStreamRunner receives the run it is executing as, because the run id is
-// minted at admission and everything downstream — compaction barriers, ACP
+// minted at admission and everything downstream — compaction barriers, external-agent
 // sessions, interactive tool headers — has to agree on that one name.
 //
 // turn is the turn admission allocated for this run. It is separate from ref
@@ -2047,7 +1998,44 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSCommandError(writer, msg, slash.CodeInvalidSkillSlashSyntax)
 				continue
 			}
-			decision := h.classifyWebSlashForSession(streamBaseCtx, text, len(msg.Attachments) > 0, sessionID)
+			controlRequest := application.RuntimeControlRequest{BotID: botID, ThreadID: sessionID, ActorID: channelIdentityID, Language: c.Request().Header.Get("Accept-Language"), ToolHTTPURL: buildExternalAgentToolsURL(c, botID)}
+			decision := h.classifyWebSlashForSession(streamBaseCtx, text, len(msg.Attachments) > 0, controlRequest)
+			if command := decision.RuntimeCommand; command != nil {
+				controlRequest.Command = command.Name
+				if command.Kind != external.CommandTurn {
+					if len(msg.Attachments) > 0 {
+						sendWSCommandError(writer, msg, slash.CodeSlashAttachmentsUnsupported)
+						continue
+					}
+					go func(controlCtx context.Context, request application.RuntimeControlRequest, command external.Command, message wsClientMessage) {
+						if command.RunningText != "" {
+							event := commandEvent(message.InvocationID, message.ComposerScope, message.SessionID, request.Command)
+							event.Type = "command_result"
+							event.Terminal = false
+							event.Result = &CommandActionResult{Kind: "text", Title: "/" + request.Command, Text: command.RunningText}
+							writer.SendJSON(event)
+						}
+						result, err := h.agentService.ExecuteRuntimeCommand(controlCtx, request)
+						if err != nil {
+							event := commandEvent(message.InvocationID, message.ComposerScope, message.SessionID, request.Command)
+							event.Type = "command_error"
+							mapped := runtimeControlError(err)
+							code := apperror.CodeOf(mapped)
+							if code == "" {
+								code = apperror.CodeRuntimeControlFailed
+							}
+							event.Error = &CommandActionError{Code: string(code)}
+							writer.SendJSON(event)
+							return
+						}
+						if result == "" {
+							result = command.CompletedText
+						}
+						sendWSCommandResult(writer, message, request.Command, &CommandActionResult{Kind: "text", Title: "/" + request.Command, Text: result})
+					}(streamBaseCtx, controlRequest, *command, msg)
+					continue
+				}
+			}
 			var pendingSkillIntent *slash.SkillIntent
 			switch decision.Kind {
 			case slash.DecisionNormalChat:
@@ -2062,7 +2050,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				actionID := webActionID(decision.Command.Resource, decision.Command.Action)
 				permissionAction := actionID == "permission"
 				if permissionAction {
-					// The permission action targets a live ACP session, so enforce
+					// The permission action targets a live external-agent session, so enforce
 					// session visibility with the same check the WS approval path
 					// uses. An empty session falls through so the executor returns
 					// its session-required command error.
@@ -2094,7 +2082,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				control := webQuickActionContext{
 					SessionID: sessionID,
 					ActorID:   channelIdentityID,
-					ToolURL:   buildACPMCPToolsURL(c, botID),
+					ToolURL:   buildExternalAgentToolsURL(c, botID),
 				}
 				if decision.Invocation != nil {
 					control.ModeID = decision.Invocation.Rest
@@ -2374,7 +2362,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						Model:                   strings.TrimSpace(msg.ModelID),
 						ReasoningEffort:         strings.TrimSpace(msg.ReasoningEffort),
 						WorkspaceTargetID:       workspaceTargetID,
-						ToolHTTPURL:             buildACPMCPToolsURL(c, botID),
+						ToolHTTPURL:             buildExternalAgentToolsURL(c, botID),
 						AgentCommand:            decision.AgentCommand,
 						RunHandle:               admittedTurn.Handle,
 						InjectCh:                admittedTurn.InjectCh,
@@ -2444,7 +2432,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				Model:                  strings.TrimSpace(msg.ModelID),
 				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
 				WorkspaceTargetID:      workspaceTargetID,
-				ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+				ToolHTTPURL:            buildExternalAgentToolsURL(c, botID),
 			}
 			retryAdmission := &wsReplacementAdmission{
 				kind: sessionruntime.RunOperationRetry,
@@ -2537,7 +2525,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				Model:                  strings.TrimSpace(msg.ModelID),
 				ReasoningEffort:        strings.TrimSpace(msg.ReasoningEffort),
 				WorkspaceTargetID:      workspaceTargetID,
-				ToolHTTPURL:            buildACPMCPToolsURL(c, botID),
+				ToolHTTPURL:            buildExternalAgentToolsURL(c, botID),
 			}
 			editAdmission := &wsReplacementAdmission{
 				handler: h,

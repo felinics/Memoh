@@ -92,13 +92,14 @@
 </template>
 
 <script setup lang="ts">
+import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH, normalizeAgentID } from '@/utils/external-agent'
 import { computed, watch } from 'vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SettingsRow, SettingsSection, Switch } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import ModelSelect from './model-select.vue'
 import { reconcileStoredEffort } from './reasoning-effort'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, ModelsGetResponse, ProvidersGetResponse } from '@memohai/sdk'
-import { ACP_DEFAULT_PROJECT_MODE, ACP_DEFAULT_PROJECT_PATH, findMissingRequiredManagedField, isACPAgentEnabled, normalizeACPAgentID, readACPAgentConfig } from '@/utils/acp'
+import { findMissingRequiredManagedField, isACPAgentEnabled, readACPAgentConfig } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, normalizeBotAgentRuntime } from '@/utils/bot-agent'
 
 type InteractionSettingsForm = SettingsSettings & {
@@ -127,7 +128,7 @@ function isAgentConfigured(agent: BotagentsBotAgent): boolean {
   const directConfigured = isDirectBotAgentConfigured(agent)
   if (directConfigured !== null) return directConfigured
   const provider = botAgentProvider(agent)
-  const profile = props.acpProfiles.find(item => normalizeACPAgentID(item.id) === provider)
+  const profile = props.acpProfiles.find(item => normalizeAgentID(item.id) === provider)
   if (!profile || !isACPAgentEnabled(props.botMetadata, provider)) return false
   const config = readACPAgentConfig(props.botMetadata, provider)
   return !config.setupModeSet || findMissingRequiredManagedField(profile, config.managed, config.setupMode) === null
@@ -164,9 +165,9 @@ function agentOptionValue(agentID: unknown): string {
 
 function ensureDefaultACPProject() {
   // eslint-disable-next-line vue/no-mutating-props
-  props.form.chat_acp_project_path = props.form.chat_acp_project_path || ACP_DEFAULT_PROJECT_PATH
+  props.form.chat_acp_project_path = props.form.chat_acp_project_path || EXTERNAL_AGENT_DEFAULT_PROJECT_PATH
   // eslint-disable-next-line vue/no-mutating-props
-  props.form.chat_acp_project_mode = props.form.chat_acp_project_mode || ACP_DEFAULT_PROJECT_MODE
+  props.form.chat_acp_project_mode = props.form.chat_acp_project_mode || EXTERNAL_AGENT_DEFAULT_PROJECT_MODE
 }
 
 function setDefaultBotAgent(agent: BotagentsBotAgent) {

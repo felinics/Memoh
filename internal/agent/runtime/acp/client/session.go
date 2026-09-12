@@ -202,7 +202,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	var toolHTTPStop func()
 	if backend == WorkspaceBackendContainer && toolHTTPHandler != nil &&
 		toolHTTPURL != "" &&
-		toolHTTPURL == strings.TrimSpace(info.ACPToolsHTTPURL) {
+		toolHTTPURL == strings.TrimSpace(info.ToolsHTTPURL) {
 		guardedURL, guardedPath, guardedHandler, err := guardToolHTTPHandler(toolHTTPURL, toolHTTPHandler)
 		if err != nil {
 			cancel()

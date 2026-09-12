@@ -1,8 +1,8 @@
+import { externalAgentDisplayName } from '@/utils/external-agent'
 import type { SessionSession } from '@memohai/sdk'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import type { SessionKind } from './session-kind-icon.vue'
-import { acpAgentDisplayName } from '@/utils/acp'
 import { sessionAgentProvider } from '@/utils/bot-agent'
 import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
 
@@ -43,7 +43,7 @@ export function sessionMark(session: SessionSession, labels: SessionSelectLabels
     return { kind: 'schedule', agentId, label: labels.schedule }
   }
   if (isAgentRuntimeType(runtimeType)) {
-    return { kind: 'acp', agentId, label: acpAgentDisplayName(agentId, labels.agent) }
+    return { kind: 'acp', agentId, label: externalAgentDisplayName(agentId, labels.agent) }
   }
   return NO_MARK
 }

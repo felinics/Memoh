@@ -20,6 +20,14 @@ export const useChatSelectionStore = defineStore('chat-selection', () => {
   // a fresh/never-selected load (flag false) still auto-opens the latest session.
   const draftIntent = useTabScopedStorage<boolean>('chat-draft-intent', false)
 
+  // Draft Agent choices live in memory. On reload, preserve the empty-draft
+  // intent but discard its stale explicit-choice flag so Bot defaults can load.
+  // Real sessions retain their persisted selection and runtime.
+  if (!sessionId.value && explicitSelection.value) {
+    draftIntent.value = true
+    explicitSelection.value = false
+  }
+
   function setBot(botId: string | null) {
     currentBotId.value = (botId ?? '').trim() || null
   }

@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestACPToolsProxyAddrMustBeLoopback(t *testing.T) {
+func TestToolsProxyAddrMustBeLoopback(t *testing.T) {
 	for _, addr := range []string{"127.0.0.1:18732", "localhost:18732", "[::1]:18732"} {
 		if !isLoopbackTCPAddr(addr) {
 			t.Fatalf("isLoopbackTCPAddr(%q) = false", addr)

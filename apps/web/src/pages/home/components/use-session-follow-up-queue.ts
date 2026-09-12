@@ -45,12 +45,14 @@ export function useSessionFollowUpQueue(
   const busy = ref(new Set<string>())
   const hasItems = computed(() => items.value.length > 0)
   let requestVersion = 0
+  let scopeVersion = 0
   let refreshTimer: ReturnType<typeof setInterval> | undefined
 
   function queueTarget() {
     return {
       bot: String(toValue(botId) ?? '').trim(),
       session: String(toValue(sessionId) ?? '').trim(),
+      scope: scopeVersion,
     }
   }
 
@@ -79,6 +81,7 @@ export function useSessionFollowUpQueue(
     const { bot, session } = queueTarget()
     const version = ++requestVersion
     if (!bot || !session) {
+      loading.value = false
       items.value = []
       return
     }
@@ -95,7 +98,7 @@ export function useSessionFollowUpQueue(
   }
 
   async function update(item: EditableFollowUpQueueItem) {
-    const { bot, session } = queueTarget()
+    const { bot, session, scope } = queueTarget()
     const id = item.item_id?.trim()
     const text = item.text.trim()
     if (!bot || !session || !id) return
@@ -108,45 +111,57 @@ export function useSessionFollowUpQueue(
       const updated = item.queueKind === 'steer'
         ? await updateSteerQueueItem(bot, session, id, text)
         : await updateFollowUpQueueItem(bot, session, id, text)
+      if (scope !== scopeVersion) return
       const index = items.value.findIndex(entry => entry.item_id === id)
       if (index >= 0) items.value[index] = editable(updated, item.queueKind)
     } catch (error) {
+      if (scope !== scopeVersion) return
       await refresh()
+      if (scope !== scopeVersion) return
       throw error
     } finally {
-      markBusy(id, false)
+      if (scope === scopeVersion) markBusy(id, false)
     }
   }
 
   async function remove(item: EditableFollowUpQueueItem) {
-    const { bot, session } = queueTarget()
+    const { bot, session, scope } = queueTarget()
     const id = item.item_id?.trim()
     if (!bot || !session || !id) return
     markBusy(id, true)
     try {
       if (item.queueKind === 'steer') await deleteSteerQueueItem(bot, session, id)
       else await deleteFollowUpQueueItem(bot, session, id)
+      if (scope !== scopeVersion) return
       items.value = items.value.filter(entry => entry.item_id !== id)
+    } catch (error) {
+      if (scope !== scopeVersion) return
+      await refresh()
+      if (scope !== scopeVersion) return
+      throw error
     } finally {
-      markBusy(id, false)
+      if (scope === scopeVersion) markBusy(id, false)
     }
   }
 
   async function steer(item: EditableFollowUpQueueItem) {
-    const { bot, session } = queueTarget()
+    const { bot, session, scope } = queueTarget()
     const id = item.item_id?.trim()
     if (!bot || !session || !id) return
     markBusy(id, true)
     try {
       await promoteFollowUpQueueItemToSteer(bot, session, id)
+      if (scope !== scopeVersion) return
       const index = items.value.findIndex(entry => entry.item_id === id)
       if (index >= 0) items.value[index] = editable(items.value[index]!, 'steer')
       await refresh()
     } catch (error) {
+      if (scope !== scopeVersion) return
       await refresh()
+      if (scope !== scopeVersion) return
       throw error
     } finally {
-      markBusy(id, false)
+      if (scope === scopeVersion) markBusy(id, false)
     }
   }
 
@@ -160,26 +175,40 @@ export function useSessionFollowUpQueue(
     const beforeId = ordered
       .slice(newIndex + 1)
       .find(entry => entry.queueKind === moved.queueKind)?.item_id ?? ''
-    const { bot, session } = queueTarget()
+    const { bot, session, scope } = queueTarget()
     if (!bot || !session) return
     markBusy(moved.item_id, true)
     try {
       // The server answers with the reordered queue of one kind only. Keep the
       // other kind as-is rather than dropping it until the next refresh.
       if (moved.queueKind === 'steer') {
-        items.value = merge(await reorderSteerQueue(bot, session, moved.item_id, beforeId), ofKind('follow-up'))
+        const response = await reorderSteerQueue(bot, session, moved.item_id, beforeId)
+        if (scope !== scopeVersion) return
+        items.value = merge(response, ofKind('follow-up'))
       } else {
-        items.value = merge(ofKind('steer'), await reorderFollowUpQueue(bot, session, moved.item_id, beforeId))
+        const response = await reorderFollowUpQueue(bot, session, moved.item_id, beforeId)
+        if (scope !== scopeVersion) return
+        items.value = merge(ofKind('steer'), response)
       }
     } catch (error) {
+      if (scope !== scopeVersion) return
       await refresh()
+      if (scope !== scopeVersion) return
       throw error
     } finally {
-      markBusy(moved.item_id, false)
+      if (scope === scopeVersion) markBusy(moved.item_id, false)
     }
   }
 
-  watch([() => toValue(botId), () => toValue(sessionId)], refresh, { immediate: true })
+  watch([() => toValue(botId), () => toValue(sessionId)], () => {
+    // A new session owns a new queue view. Late responses from any previous
+    // visit (including A → B → A) must not mutate it.
+    scopeVersion++
+    items.value = []
+    busy.value = new Set()
+    steerSupported.value = false
+    void refresh().catch(() => {})
+  }, { immediate: true, flush: 'sync' })
   watch(() => toValue(changeSignal), () => { void refresh().catch(() => {}) })
 
   function stopAutoRefresh() {
@@ -198,7 +227,11 @@ export function useSessionFollowUpQueue(
   }
 
   watch([() => toValue(active), hasItems], syncAutoRefresh)
-  if (getCurrentScope()) onScopeDispose(stopAutoRefresh)
+  if (getCurrentScope()) onScopeDispose(() => {
+    scopeVersion++
+    requestVersion++
+    stopAutoRefresh()
+  })
 
   return { items, loading, steerSupported, busy, hasItems, refresh, update, remove, steer, reorder }
 }

@@ -136,6 +136,7 @@ export interface ChatUserTurn {
 }
 
 export interface ChatAssistantTurn {
+  runtimeForkable?: boolean
   id: string
   serverId?: string
   role: 'assistant'
@@ -212,6 +213,8 @@ export interface SendMessageOptions {
   workspaceTargetId?: string
   requestedSkills?: RequestedSkillSelection[]
   composerScope?: string
+  /** Defaults to true. Actions that do not consume a composer draft opt out. */
+  restoreDraftOnFailure?: boolean
   /** Called after command handling, before creating a session or sending a message. */
   onBeforeMessageSend?: () => void
   /** The server has finished this turn's preference write, before generation ends. */
@@ -231,6 +234,9 @@ export interface ChatWorkspaceTargetSnapshot {
 export type ChatWorkspaceTargetSelectionSource = 'unset' | 'default' | 'session' | 'user'
 
 export interface ExternalAgentSessionInput {
+  /** Explicit permission override for this draft; persisted on first send. */
+  permissionMode?: string
+  planMode?: boolean
   /** Persisted Agent instance selected for this session. */
   botAgentId?: string
   /** Runtime owned by the selected Agent. Omitted by legacy ACP callers. */

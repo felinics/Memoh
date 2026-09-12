@@ -36,7 +36,7 @@
                   >
                     <span class="flex min-w-0 items-center gap-2">
                       <component
-                        :is="acpAgentIcon(selectedOption?.value ?? '', true)"
+                        :is="externalAgentIcon(selectedOption?.value ?? '', true)"
                         v-if="selectedOption"
                         class="size-4 shrink-0"
                       />
@@ -47,7 +47,7 @@
                 </template>
                 <template #option-icon="{ option }">
                   <component
-                    :is="acpAgentIcon(option.value, true)"
+                    :is="externalAgentIcon(option.value, true)"
                     class="size-4 shrink-0"
                   />
                 </template>
@@ -81,6 +81,7 @@
 </template>
 
 <script setup lang="ts">
+import { externalAgentIcon, normalizeAgentID } from '@/utils/external-agent'
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMutation, useQueryCache } from '@pinia/colada'
@@ -107,8 +108,6 @@ import {
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import {
-  acpAgentIcon,
-  normalizeACPAgentID,
   withEnabledACPAgentMetadataIfConfigured,
 } from '@/utils/acp'
 import {
@@ -161,20 +160,20 @@ function resetForm() {
 }
 
 function selectProvider(provider: string, handleChange: (value: string) => void) {
-  const normalized = normalizeACPAgentID(provider)
+  const normalized = normalizeAgentID(provider)
   handleChange(normalized)
   form.setFieldValue('name', normalized ? providerDefaultName(normalized) : '')
 }
 
 const { mutateAsync: createMutation, isLoading } = useMutation({
   mutation: async (value: { provider: string; name: string }) => {
-    const provider = normalizeACPAgentID(value.provider)
+    const provider = normalizeAgentID(value.provider)
     const option = providerOptions.value.find(item => item.value === provider)
     if (!option) throw new Error(t('bots.agent.providerRequired'))
 
     let agentMetadata: Record<string, unknown> = { provider }
     if (option.runtime === BOT_AGENT_RUNTIME_ACP) {
-      const profile = props.profiles.find(item => normalizeACPAgentID(item.id) === provider)
+      const profile = props.profiles.find(item => normalizeAgentID(item.id) === provider)
       if (!profile) throw new Error(t('bots.agent.providerRequired'))
       const metadata = withEnabledACPAgentMetadataIfConfigured(props.botMetadata, profile)
       if (metadata) {

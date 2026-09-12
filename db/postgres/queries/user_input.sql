@@ -111,6 +111,14 @@ WHERE team_id = public.memoh_current_team_id()
   AND (expires_at IS NULL OR expires_at > now())
 ORDER BY created_at ASC, short_id ASC;
 
+-- name: ListUserInputsByRun :many
+-- Include expired and terminal rows when reconciling a finished run's decisions.
+SELECT *
+FROM user_input_requests
+WHERE team_id = public.memoh_current_team_id()
+  AND run_id = $1
+ORDER BY created_at ASC, short_id ASC;
+
 -- name: GetRespondableUserInputRequest :one
 SELECT *
 FROM user_input_requests

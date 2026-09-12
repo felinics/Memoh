@@ -2,7 +2,7 @@ import type { CommandActionListItem, CommandActionResult } from '@/composables/a
 
 export type CommandResultSelection
   = | { kind: 'quick_action', id: string, text: string }
-    | { kind: 'acp_permission', modeId: string }
+    | { kind: 'runtime_permission', modeId: string }
     | { kind: 'skill', id: string, title: string, description?: string }
 
 export interface PermissionCommandResultCopy {
@@ -36,10 +36,10 @@ export function resolveCommandResultSelection(
   currentActionID = '',
 ): CommandResultSelection | null {
   const kind = commandResultItemKind(item)
-  if (kind === 'acp_mode') {
+  if (kind === 'runtime_mode') {
     const modeId = item.id ?? ''
     return modeId
-      ? { kind: 'acp_permission', modeId }
+      ? { kind: 'runtime_permission', modeId }
       : null
   }
   const id = commandResultQuickActionID(item)
@@ -65,10 +65,10 @@ export function isCommandResultItemSelectable(item: CommandActionListItem, curre
 }
 
 // The current ACP mode is reported as its own non-selectable row
-// (`acp_mode_current`): the panel must show it so `/permission` answers "which
+// (`runtime_mode_current`): the panel must show it so `/permission` answers "which
 // mode am I in", but selecting it would be a no-op mode switch.
 export function isCommandResultItemDisplayOnly(item: CommandActionListItem): boolean {
-  return commandResultItemKind(item) === 'acp_mode_current'
+  return commandResultItemKind(item) === 'runtime_mode_current'
 }
 
 export function isCommandResultItemVisible(item: CommandActionListItem, currentActionID = ''): boolean {
@@ -86,7 +86,7 @@ export function commandResultPresentation(
     title: changed ? copy.changedTitle : copy.modesTitle,
     text: changed ? copy.changedText : copy.modesText,
     items: (result.items ?? []).map(item => {
-      if (item.kind !== 'acp_mode_current') return item
+      if (item.kind !== 'runtime_mode_current') return item
       const description = item.description?.trim() ?? ''
       return {
         ...item,

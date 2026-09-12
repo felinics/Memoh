@@ -120,6 +120,10 @@ type UIUserInput struct {
 
 // UITurn is the normalized chat turn used by the web frontend.
 type UITurn struct {
+	// RuntimeForkable means this persisted turn has a runtime fork anchor.
+	// Session-level runtime support and access permissions still apply.
+	RuntimeForkable bool `json:"runtime_forkable"`
+
 	TurnID string `json:"turn_id" validate:"required" format:"uuid"`
 	// TurnPosition is the immutable turn-level sequence reserved at admission.
 	// The frontend uses it to order turns and reconcile the settled list

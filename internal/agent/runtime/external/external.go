@@ -170,7 +170,9 @@ type ReasoningEffortOption struct {
 
 // PromptInput is one turn's worth of work for a Driver.
 type PromptInput struct {
+	Steering   Steering
 	BotID      string
+	Language   string
 	BotAgentID string
 	ChatID     string
 	ThreadID   string
@@ -203,6 +205,8 @@ type PromptInput struct {
 	// runtime that advertises commands must re-validate it at dispatch.
 	// Runtimes without a command vocabulary ignore it.
 	Command string
+	// CommandArgs is the original user input after the runtime command selector.
+	CommandArgs string
 
 	// ForceFreshRuntime asks the driver to abandon any resumable runtime
 	// session and start this turn on a fresh one.
@@ -266,6 +270,8 @@ func (f EventSinkFunc) EmitStreamEvent(ev event.StreamEvent) { f(ev) }
 
 // PromptResult is the durable outcome of one turn.
 type PromptResult struct {
+	// SteerInputIDs correspond to the user messages in Output, in arrival order.
+	SteerInputIDs []string
 	// Output is the transcript to persist, in provider-message form.
 	Output []sdk.Message
 	// Text is the final assistant message text (for surfaces that report a
@@ -279,6 +285,8 @@ type PromptResult struct {
 	// AgentTurnID is the runtime's own identifier for this turn (e.g. the
 	// codex turn id); it anchors turn-level operations such as forking.
 	AgentTurnID string
+	// FinalTurnAnchorOnly restricts a multi-turn transcript to its final fork boundary.
+	FinalTurnAnchorOnly bool
 	// TurnCompleted reports whether the runtime finished the turn (as opposed
 	// to an interrupt or failure part-way).
 	TurnCompleted bool

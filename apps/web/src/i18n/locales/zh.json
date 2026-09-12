@@ -287,6 +287,24 @@
       "limit": "请关闭其他待完成的授权，然后重试。",
       "failed": "账号授权失败，请重试。",
       "code_invalid": "授权码无效或已过期，请复制 Claude 页面上的完整授权码，或重新连接。"
+    },
+    "workdir": {
+      "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支。",
+      "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支。",
+      "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用。",
+      "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。"
+    },
+    "runtime_control": {
+      "goal_requires_default_mode": "请先退出计划模式，再创建或继续目标。",
+      "steer_failed": "补充指令未能送达。请等本轮结束后重新发送。",
+      "unsupported": "当前运行时不支持此操作。",
+      "command_unavailable": "此命令已不可用，请刷新后重试。",
+      "mode_unavailable": "此权限模式已不可用，请刷新后重新选择。",
+      "thread_unavailable": "请先开始对话，再执行此操作。",
+      "failed": "操作未能完成，请重试。",
+      "forbidden": "你没有访问此会话的权限。",
+      "request_invalid": "请求无效，请刷新后重试。",
+      "cancelled": "操作已中止。"
     }
   },
   "auth": {
@@ -811,6 +829,18 @@
     "folder": "文件夹",
     "folders": "文件夹",
     "folderUnavailable": "不可用的文件夹",
+    "codexProject": {
+      "chooseBranch": "切换分支",
+      "noBranches": "暂无本地分支",
+      "detachedHead": "分离的 HEAD",
+      "expand": "查看工作区",
+      "collapse": "收起工作区",
+      "choose": "选择项目",
+      "clear": "不在项目中工作",
+      "none": "未选择项目",
+      "workspace": "Memoh 工作区",
+      "empty": "请先在侧边栏添加文件夹，再选择项目。"
+    },
     "folderDetachDraft": "不放入文件夹",
     "folderNewSession": "在 {name} 中新建会话",
     "manageConnectors": "管理连接器",
@@ -1451,7 +1481,37 @@
         "rtt": "RTT"
       }
     },
-    "modelDefaultNamed": "默认（{model}）"
+    "modelDefaultNamed": "默认（{model}）",
+    "planMode": {
+      "commandLabel": "计划模式",
+      "label": "计划",
+      "enable": "开启计划模式",
+      "disable": "关闭计划模式",
+      "placeholder": "描述你的任务以生成计划…",
+      "changeFailed": "无法切换计划模式，请重试。"
+    },
+    "sessionPermissionMode": "会话权限模式",
+    "permissionMode": "权限模式",
+    "goal": {
+      "label": "目标",
+      "description": "设置一个持续推进的目标",
+      "placeholder": "描述你的目标，以及怎样才算完成",
+      "cancelDraft": "取消目标输入",
+      "sentAsGoal": "已作为目标发送",
+      "pause": "暂停目标",
+      "resume": "继续目标",
+      "clear": "清除目标",
+      "elapsed": "{seconds} 秒",
+      "textOnly": "请用纯文本设置目标，不附带附件或技能。",
+      "status": {
+        "active": "正在推进目标",
+        "paused": "目标已暂停",
+        "blocked": "目标受阻",
+        "usageLimited": "已达到用量上限",
+        "budgetLimited": "已达到 Token 预算",
+        "complete": "目标已完成"
+      }
+    }
   },
   "models": {
     "title": "模型",
@@ -2399,7 +2459,9 @@
       "openAuthorizationPage": "打开授权页面",
       "authorizationCode": "授权码",
       "authorizationCodePlaceholder": "粘贴完整授权码",
-      "completeAuthorization": "完成授权"
+      "completeAuthorization": "完成授权",
+      "defaultPermissionMode": "默认权限模式",
+      "defaultPermissionModeDescription": "新会话使用此模式，会话内的选择会覆盖默认值。"
     },
     "dependencies": {
       "title": "工作区依赖",

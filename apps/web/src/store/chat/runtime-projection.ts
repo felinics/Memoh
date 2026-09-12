@@ -47,6 +47,12 @@ export function isRuntimeRunActive(status?: string | null): boolean {
   return activeRunStatuses.has(status as RuntimeCurrentRunView['status'])
 }
 
+// Configuration saves still own the session execution slot, but are not an
+// assistant response. The server marks them from the first admitting frame.
+export function isRuntimeRunStreaming(run?: RuntimeCurrentRunView | null): boolean {
+  return !run?.configuration_only && isRuntimeRunActive(run?.status)
+}
+
 function cloneUIMessage(message: UIMessage): UIMessage {
   if (message.type === 'tool') {
     return {
@@ -128,7 +134,7 @@ function userTurnsForRun(run: RuntimeCurrentRunView) {
 }
 
 function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptSlice {
-  if (!run) return emptyTranscript()
+  if (!run || run.configuration_only) return emptyTranscript()
   const turnId = run.turn_id.trim()
   const turns: UITurn[] = []
   const userTurns = userTurnsForRun(run)

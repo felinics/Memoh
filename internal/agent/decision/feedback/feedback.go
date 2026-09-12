@@ -26,7 +26,7 @@ const (
 	CodeRuntimeBusy           = "acp_runtime_busy"
 	CodeAttachmentInvalid     = "acp_attachment_invalid"
 	CodeAttachmentUnavailable = "acp_attachment_unavailable"
-	CodeAgentCommandStale     = "acp_agent_command_stale"
+	CodeAgentCommandStale     = "runtime_agent_command_stale"
 	CodeImageInputUnsupported = "acp_image_input_unsupported"
 	CodeInvalidChatRuntime    = "invalid_chat_runtime"
 	// Workspace dependency feedback: a missing dependency blocks

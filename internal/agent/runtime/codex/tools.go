@@ -1,6 +1,6 @@
 // Memoh tool-gateway injection for codex threads. Each thread gets its own
 // reverse-HTTP route into the workspace tools proxy, configured through the
-// thread's `mcp_servers` config override at start/resume. The route outlives
+// thread's `mcp_servers` config override at start/resume/fork. The route outlives
 // individual turns (thread config is start-time), so the tool session
 // identity resolves live from the thread's active turn.
 package codex
@@ -46,8 +46,8 @@ func (r *threadRef) get() string {
 	return r.id
 }
 
-// prepareThreadTools mounts the gateway for a thread about to start or
-// resume. The returned function binds the mount to the created thread or
+// prepareThreadTools mounts the gateway for a thread about to start,
+// resume, or fork. The returned function binds the mount to the thread or
 // closes it when creation fails.
 func (d *Driver) prepareThreadTools(srv *appServer, input external.PromptInput) (map[string]any, func(threadID string), error) {
 	baseURL := toolmount.ResolveBaseURL(srv.workspaceInfo, input.ToolHTTPURL)

@@ -148,7 +148,7 @@
                 <Lightbulb :style="{ opacity: EFFORT_OPACITY[option.value] ?? 0.5 }" />
                 <span class="min-w-0 flex-1 truncate text-left">{{ option.label || $t(option.labelKey ?? 'chat.reasoningOff') }}</span>
                 <Check
-                  v-if="selectedReasoningValue === option.value"
+                  v-if="currentReasoningValue === option.value"
                   class="ml-2 size-4 shrink-0"
                 />
               </button>
@@ -492,21 +492,22 @@ const availableReasoningOptions = computed<ReasoningOption[]>(() => {
 
 const canSelectReasoning = computed(() => availableReasoningOptions.value.length > 0)
 
-const selectedReasoningValue = computed(() =>
-  reasoningEffort.value || REASONING_EFFORT_DISABLE,
-)
-
-const currentReasoningValue = computed(() =>
-  canSelectReasoning.value ? selectedReasoningValue.value : REASONING_EFFORT_DISABLE,
-)
+const currentReasoningValue = computed(() => {
+  // External runtimes own their effort vocabulary. An unset value inherits
+  // their defaults; it does not mean the native composer's "off" state.
+  if (props.reasoningOptions !== undefined) return reasoningEffort.value
+  return canSelectReasoning.value ? reasoningEffort.value || REASONING_EFFORT_DISABLE : REASONING_EFFORT_DISABLE
+})
 
 const currentReasoningOption = computed(() =>
   availableReasoningOptions.value.find(option => option.value === currentReasoningValue.value),
 )
 
-const currentReasoningLabel = computed(() => currentReasoningOption.value?.label ?? '')
+const currentReasoningLabel = computed(() => currentReasoningOption.value?.label
+  ?? (props.reasoningOptions !== undefined ? currentReasoningValue.value : ''))
 const currentReasoningLabelKey = computed(() =>
-  currentReasoningOption.value?.labelKey ?? EFFORT_LABELS[currentReasoningValue.value] ?? 'chat.reasoningOff',
+  currentReasoningOption.value?.labelKey ?? EFFORT_LABELS[currentReasoningValue.value]
+  ?? (props.reasoningOptions !== undefined ? 'chat.reasoningEffort' : 'chat.reasoningOff'),
 )
 
 function setEffort(level: string) {

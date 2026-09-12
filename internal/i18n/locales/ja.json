@@ -508,10 +508,10 @@
     }
   },
   "slash": {
-      "error": {
-        "unknownSlash": "不明な slash コマンドです。",
-        "unsupportedWebCommand": "その slash コマンドは Web Chat では利用できません。",
-        "invalidSkillSlashSyntax": "skill slash の構文が無効です。/<skill-name> [prompt] を使用してください。",
+    "error": {
+      "unknownSlash": "不明な slash コマンドです。",
+      "unsupportedWebCommand": "その slash コマンドは Web Chat では利用できません。",
+      "invalidSkillSlashSyntax": "skill slash の構文が無効です。/<skill-name> [prompt] を使用してください。",
       "requestedSkillNotFound": "指定された skill が見つかりません。",
       "requestedSkillAmbiguous": "指定された skill は曖昧です。",
       "requestedSkillDisabled": "指定された skill は無効です。",
@@ -562,5 +562,24 @@
     "compact": "コンパクトな会話コンテキスト",
     "queue": "入力をキューに追加",
     "steer": "現在の応答を Steer"
+  },
+  "errors": {
+    "runtime_control": {
+      "goal_requires_default_mode": "目標を作成・再開するには、先にプランモードを終了してください。",
+      "unsupported": "このランタイムはこの操作に対応していません。",
+      "command_unavailable": "このコマンドは利用できません。更新して再試行してください。",
+      "mode_unavailable": "この権限モードは利用できません。更新して選び直してください。",
+      "thread_unavailable": "会話を開始してから、この操作を実行してください。",
+      "failed": "操作を完了できませんでした。再試行してください。",
+      "forbidden": "この会話へのアクセス権がありません。",
+      "request_invalid": "リクエストが無効です。更新して再試行してください。",
+      "cancelled": "操作は中止されました。"
+    },
+    "session_runtime": {
+      "session_busy": "このセッションはまだ前のメッセージを処理しています。しばらくしてからもう一度お試しください。"
+    },
+    "external_runtime": {
+      "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。"
+    }
   }
 }

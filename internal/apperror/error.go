@@ -86,6 +86,20 @@ const (
 	CodeACPModeIDRequired                        Code = "acp.mode_id_required"
 	CodeACPModeUnavailable                       Code = "acp.mode_unavailable"
 	CodeACPConfigUpdateFailed                    Code = "acp.config_update_failed"
+	CodeRuntimeControlUnsupported                Code = "runtime_control.unsupported"
+	CodeRuntimeControlCommandUnavailable         Code = "runtime_control.command_unavailable"
+	CodeRuntimeControlModeUnavailable            Code = "runtime_control.mode_unavailable"
+	CodeRuntimeControlGoalRequiresDefaultMode    Code = "runtime_control.goal_requires_default_mode"
+	CodeWorkdirGitBusy                           Code = "workdir.git_busy"
+	CodeWorkdirGitBranchUnavailable              Code = "workdir.git_branch_unavailable"
+	CodeWorkdirGitSwitchFailed                   Code = "workdir.git_switch_failed"
+	CodeWorkdirGitUnavailable                    Code = "workdir.git_unavailable"
+	CodeRuntimeControlThreadUnavailable          Code = "runtime_control.thread_unavailable"
+	CodeRuntimeControlCancelled                  Code = "runtime_control.cancelled"
+	CodeRuntimeControlFailed                     Code = "runtime_control.failed"
+	CodeRuntimeControlSteerFailed                Code = "runtime_control.steer_failed"
+	CodeRuntimeControlForbidden                  Code = "runtime_control.forbidden"
+	CodeRuntimeControlRequestInvalid             Code = "runtime_control.request_invalid"
 	CodeExternalRuntimeAuthRequired              Code = "external_runtime.auth_required"
 	CodeExternalRuntimeUnavailable               Code = "external_runtime.unavailable"
 	CodeToolApprovalForbidden                    Code = "tool_approval.forbidden"
@@ -447,6 +461,20 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
 	},
+	CodeRuntimeControlUnsupported:             {HTTPStatus: http.StatusBadRequest, Detail: "This runtime does not support this control."},
+	CodeRuntimeControlCommandUnavailable:      {HTTPStatus: http.StatusConflict, Detail: "This runtime command is no longer available. Refresh and try again."},
+	CodeRuntimeControlModeUnavailable:         {HTTPStatus: http.StatusBadRequest, Detail: "This permission mode is unavailable. Refresh and choose a supported mode."},
+	CodeRuntimeControlGoalRequiresDefaultMode: {HTTPStatus: http.StatusConflict, Detail: "Exit Plan mode before creating or resuming a goal."},
+	CodeWorkdirGitBusy:                        {HTTPStatus: http.StatusConflict, Detail: "An agent is using this working directory. Wait for it to finish before switching branches."},
+	CodeWorkdirGitBranchUnavailable:           {HTTPStatus: http.StatusBadRequest, Detail: "This local branch is unavailable. Refresh and select an existing branch."},
+	CodeWorkdirGitSwitchFailed:                {HTTPStatus: http.StatusConflict, Detail: "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree."},
+	CodeWorkdirGitUnavailable:                 {HTTPStatus: http.StatusInternalServerError, Detail: "The Git working directory could not be read. Check the workspace and try again."},
+	CodeRuntimeControlThreadUnavailable:       {HTTPStatus: http.StatusConflict, Detail: "Start a conversation before using this operation."},
+	CodeRuntimeControlCancelled:               {HTTPStatus: http.StatusConflict, Detail: "The runtime operation was cancelled."},
+	CodeRuntimeControlSteerFailed:             {HTTPStatus: http.StatusConflict, Detail: "The additional instruction could not be delivered. Send it again after this turn finishes."},
+	CodeRuntimeControlFailed:                  {HTTPStatus: http.StatusInternalServerError, Detail: "The runtime control could not be completed. Try again."},
+	CodeRuntimeControlForbidden:               {HTTPStatus: http.StatusForbidden, Detail: "You do not have access to this conversation."},
+	CodeRuntimeControlRequestInvalid:          {HTTPStatus: http.StatusBadRequest, Detail: "The runtime control request is invalid."},
 	CodeExternalRuntimeAuthRequired: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "The External Agent runtime requires account authorization before it can be used.",
