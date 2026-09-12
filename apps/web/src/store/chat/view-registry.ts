@@ -45,6 +45,11 @@ export interface ChatViewEntry {
   // successful refresh clears it. Events cannot arrive for a view that does
   // not exist yet, so entries start unmarked.
   staleWhileHidden: boolean
+  // Bumped on every stale mark. A refresh clears the flag only when no mark
+  // arrived after that refresh began: its fetched history may predate a
+  // mid-refresh touch (the commit can wait on the runtime snapshot while
+  // another client writes) and cannot vouch for it.
+  staleMarkVersion: number
 }
 
 interface ChatViewRegistryDeps extends Omit<TranscriptDeps, 'currentBotId' | 'sessionId'> {
@@ -130,6 +135,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       fetchMessages: deps.fetchMessages,
       locateMessage: deps.locateMessage,
       isTurnLive: deps.isTurnLive,
+      historyRefreshToken: () => view.staleMarkVersion,
     })
     const view: ChatViewEntry = {
       key: chatViewKey({ botId, sessionId, viewId }),
@@ -150,10 +156,15 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       pairSource: ref('unset'),
       lastAccess: 0,
       staleWhileHidden: false,
+      staleMarkVersion: 0,
     }
-    transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
+    transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp, refreshToken) => {
       view.initialized = true
-      view.staleWhileHidden = false
+      // A mark that landed mid-refresh is not covered by the history this
+      // refresh fetched — keep the flag so the next revisit still masks.
+      if (refreshToken === undefined || refreshToken === view.staleMarkVersion) {
+        view.staleWhileHidden = false
+      }
       deps.onRefreshApplied?.(view, targetSessionId, latestTimestamp)
     })
     views.set(view.key, view)
@@ -293,7 +304,10 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
   // which it hides and would otherwise revisit with an untrusted cache.
   function markSessionStale(botId: string, sessionId: string) {
     const view = views.get(chatSessionViewKey(botId, sessionId))
-    if (view) view.staleWhileHidden = true
+    if (view) {
+      view.staleWhileHidden = true
+      view.staleMarkVersion += 1
+    }
   }
 
   // The activity stream is the only staleness signal; any gap in it (buffer
@@ -302,7 +316,10 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
   function markAllSessionsStale(botId: string) {
     const prefix = `session:${normalize(botId)}:`
     for (const view of views.values()) {
-      if (view.key.startsWith(prefix)) view.staleWhileHidden = true
+      if (view.key.startsWith(prefix)) {
+        view.staleWhileHidden = true
+        view.staleMarkVersion += 1
+      }
     }
   }
 

@@ -364,21 +364,26 @@ describe('activity stream interruption', () => {
   it('absorbs sub-grace reconnects and interrupts only after the grace window', async () => {
     vi.useFakeTimers()
     try {
-      vi.setSystemTime(1_000_000)
-      const { controller, callbacks, retryingStreams } = makeController()
+      const { controller, callbacks, retryingStreams, activityHandlers } = makeController()
       controller.startBotSessionsActivityStream('bot-1')
 
-      // First attempt ends → gap starts.
+      // First attempt ends → the gap and its grace timer start.
       await retryingStreams[0]!.attempt!(new AbortController().signal)
-      // Reconnect 1s later: inside the 3s grace → no interruption.
-      vi.setSystemTime(1_001_000)
+      // 1s in, a new attempt delivers a frame: coverage provably restored
+      // inside the grace window, so the pending invalidation is cancelled.
+      await vi.advanceTimersByTimeAsync(1_000)
+      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      activityHandlers[1]!({ type: 'ping' })
+
+      // That attempt ends too → a FRESH gap starts now. The old grace timer
+      // must be gone: another 2.9s of outage stays sub-grace.
+      await vi.advanceTimersByTimeAsync(2_900)
       await retryingStreams[0]!.attempt!(new AbortController().signal)
       expect(callbacks.onActivityStreamInterrupted).not.toHaveBeenCalled()
 
-      // That attempt ends too; the gap continues from the original start.
-      // Next attempt begins 4s after the gap began → interrupted.
-      vi.setSystemTime(1_004_001)
-      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      // The new gap crosses the grace at its own 3s mark — fired by the
+      // timer, with no further attempt needed.
+      await vi.advanceTimersByTimeAsync(3_001)
       expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
       expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
     } finally {
@@ -389,7 +394,6 @@ describe('activity stream interruption', () => {
   it('accumulates instant-close cycles into one outage instead of forgiving each', async () => {
     vi.useFakeTimers()
     try {
-      vi.setSystemTime(2_000_000)
       const { controller, callbacks, retryingStreams } = makeController()
       controller.startBotSessionsActivityStream('bot-1')
 
@@ -398,20 +402,21 @@ describe('activity stream interruption', () => {
       // sub-grace, but there is never any real coverage.
       for (let cycle = 0; cycle < 9; cycle++) {
         await retryingStreams[0]!.attempt!(new AbortController().signal)
-        vi.setSystemTime(2_000_000 + (cycle + 1) * 300)
+        await vi.advanceTimersByTimeAsync(300)
       }
+      // 9 × 300ms = 2.7s of cumulative outage — still sub-grace.
       expect(callbacks.onActivityStreamInterrupted).not.toHaveBeenCalled()
 
-      // The outage clock has been running since the first close: once the
-      // cumulative outage passes the grace, the interruption trips.
-      vi.setSystemTime(2_000_000 + 3_300)
-      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      // The outage clock has been running since the first close: crossing the
+      // grace trips the interruption even while the current attempt hangs and
+      // no new attempt starts.
+      await vi.advanceTimersByTimeAsync(400)
       expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
       expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
 
       // It does not re-fire while the same outage continues.
-      vi.setSystemTime(2_000_000 + 4_500)
       await retryingStreams[0]!.attempt!(new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(1_000)
       expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()

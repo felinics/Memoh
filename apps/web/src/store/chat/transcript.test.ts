@@ -876,7 +876,7 @@ describe('chat transcript controller', () => {
 
     expect(transcript.loadingMessages.value).toBe(false)
     expect(transcript.hasMoreOlder.value).toBe(true)
-    expect(onRefreshApplied).toHaveBeenCalledWith('session-1', '2026-01-01T00:00:02.000Z')
+    expect(onRefreshApplied).toHaveBeenCalledWith('session-1', '2026-01-01T00:00:02.000Z', undefined)
   })
 
   it('drops an older-page response that resolves after the active session changes', async () => {

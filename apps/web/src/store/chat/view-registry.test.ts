@@ -73,12 +73,13 @@ function pendingUserInputTurn(id: string): ChatAssistantTurn {
 
 function makeRegistry(options: { cacheLimit?: number, streaming?: Set<string> } = {}) {
   const onEvict = vi.fn()
+  const fetchMessages = vi.fn().mockResolvedValue([])
   const registry = createChatViewRegistry({
     cacheLimit: options.cacheLimit,
     rememberBackgroundTask: task => task,
     applyPendingBackgroundEventsToTool: () => {},
     bumpFsChangedAtIfFsMutation: () => {},
-    fetchMessages: vi.fn().mockResolvedValue([]),
+    fetchMessages,
       locateMessage: vi.fn().mockResolvedValue({
         items: [],
         target_id: '',
@@ -87,7 +88,7 @@ function makeRegistry(options: { cacheLimit?: number, streaming?: Set<string> } 
     isSessionStreaming: (botId, sessionId) => options.streaming?.has(`${botId}:${sessionId}`) === true,
     onEvict,
   })
-  return { registry, onEvict }
+  return { registry, onEvict, fetchMessages }
 }
 
 describe('chat view registry', () => {
@@ -306,5 +307,29 @@ describe('stale-while-hidden marks', () => {
 
     registry.markSessionStale('bot-1', 'session-1')
     expect(view.staleWhileHidden).toBe(true)
+  })
+
+  it('keeps a stale mark that landed while the refresh was still in flight', async () => {
+    const { registry, fetchMessages } = makeRegistry()
+    const view = registry.getOrCreate({ botId: 'bot-1', sessionId: 'session-1', viewId: 'chat:1' })
+    let release!: (turns: []) => void
+    fetchMessages.mockImplementationOnce(() => new Promise<[]>((resolve) => { release = resolve }))
+
+    // A revisit starts revalidating; before the fetched history commits, a
+    // touch marks the view stale. That mark postdates the fetch's snapshot —
+    // the history being committed may not include the write — so the refresh
+    // must not clear it.
+    const loading = view.transcript.loadInitialMessages('bot-1', 'session-1', async applyHistory => applyHistory())
+    await Promise.resolve()
+    registry.markSessionStale('bot-1', 'session-1')
+    release([])
+    await loading
+
+    expect(view.staleWhileHidden).toBe(true)
+
+    // A refresh started after the mark covers it and clears the flag.
+    fetchMessages.mockResolvedValueOnce([])
+    await view.transcript.loadInitialMessages('bot-1', 'session-1', async applyHistory => applyHistory())
+    expect(view.staleWhileHidden).toBe(false)
   })
 })
