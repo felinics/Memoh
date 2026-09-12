@@ -82,6 +82,7 @@ export function createChatRealtimeController(
   let botSessionsActivityGeneration = 0
   let activityStreamBotId = ''
   let activityGapStartedAt = 0
+  let activityOutageMarked = false
   const sessionRuntimeConnections = new Map<string, SessionRuntimeConnection>()
   const botSessionsActivityStream = transport.createRetryingStream()
   const runtimeClient = createRuntimeClient({
@@ -258,6 +259,7 @@ export function createChatRealtimeController(
       activityStreamBotId = ''
     }
     activityGapStartedAt = 0
+    activityOutageMarked = false
   }
 
   function startBotSessionsActivityStream(botId: string) {
@@ -269,21 +271,29 @@ export function createChatRealtimeController(
     const generation = botSessionsActivityGeneration
     botSessionsActivityStream.start(async (signal) => {
       if (generation !== botSessionsActivityGeneration || signal.aborted) return
-      // A previous attempt ended and this one is only now starting: the gap
-      // between them had no coverage. Below the grace window the miss risk is
-      // a touch landing inside a routine reconnect (rare, self-correcting —
-      // the revisit revalidation replaces atomically); beyond it a touch was
-      // probably missed, so the bot's hidden views must be distrusted.
-      if (activityGapStartedAt && Date.now() - activityGapStartedAt > ACTIVITY_GAP_GRACE_MS) {
+      // An attempt STARTING proves nothing — a proxy can accept the SSE and
+      // close it immediately, cycling forever with sub-grace gaps between
+      // attempts. So the outage clock is only cleared by an attempt that
+      // actually STAYS connected past the grace window. Instant-close cycles
+      // keep the clock running and trip the interruption once the cumulative
+      // outage exceeds the grace, exactly like one long outage.
+      if (activityGapStartedAt
+        && Date.now() - activityGapStartedAt > ACTIVITY_GAP_GRACE_MS
+        && !activityOutageMarked) {
+        activityOutageMarked = true
         callbacks.onActivityStreamInterrupted?.(bid)
       }
-      activityGapStartedAt = 0
+      const coverageRestored = setTimeout(() => {
+        activityGapStartedAt = 0
+        activityOutageMarked = false
+      }, ACTIVITY_GAP_GRACE_MS)
       try {
         await transport.streamBotSessionsActivityEvents(bid, signal, (event) => {
           if (generation !== botSessionsActivityGeneration) return
           callbacks.onBotSessionsActivityEvent(bid, event)
         })
       } finally {
+        clearTimeout(coverageRestored)
         if (generation === botSessionsActivityGeneration) {
           if (!activityGapStartedAt) activityGapStartedAt = Date.now()
           // A disconnected stream cannot vouch for a still-running compaction.

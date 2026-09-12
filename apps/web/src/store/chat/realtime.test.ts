@@ -385,4 +385,36 @@ describe('activity stream interruption', () => {
       vi.useRealTimers()
     }
   })
+
+  it('accumulates instant-close cycles into one outage instead of forgiving each', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(2_000_000)
+      const { controller, callbacks, retryingStreams } = makeController()
+      controller.startBotSessionsActivityStream('bot-1')
+
+      // A proxy accepting then instantly closing the SSE: every attempt ends
+      // immediately and the next starts ~300ms later. Each individual gap is
+      // sub-grace, but there is never any real coverage.
+      for (let cycle = 0; cycle < 9; cycle++) {
+        await retryingStreams[0]!.attempt!(new AbortController().signal)
+        vi.setSystemTime(2_000_000 + (cycle + 1) * 300)
+      }
+      expect(callbacks.onActivityStreamInterrupted).not.toHaveBeenCalled()
+
+      // The outage clock has been running since the first close: once the
+      // cumulative outage passes the grace, the interruption trips.
+      vi.setSystemTime(2_000_000 + 3_300)
+      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
+      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
+
+      // It does not re-fire while the same outage continues.
+      vi.setSystemTime(2_000_000 + 4_500)
+      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
