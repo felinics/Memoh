@@ -161,6 +161,7 @@ Most PR descriptions in this repository are written by AI agents, and an agent m
 - Each bot can have an isolated **workspace container** (file editing, exec, MCP tool hosting, optional headed browser/display); host↔container communication is a **gRPC bridge over Unix Domain Sockets**, not TCP.
 - The canonical workspace image is built from `docker/Dockerfile.workspace`; per-bot managed dependencies install into `/data` via `internal/workspacedeps/`.
 - `internal/container/` provides the runtime abstraction (`docker`, `containerd`, `apple` adapters). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker or archive-backed flows.
+- Workspace dependencies (`internal/workspacedeps/`): launcher resolution is read-only — discover existing CLIs without a warm Supermarket cache; chat and device-code login never authorize installation — a Manage-authorized action confirms a frozen recipe revision; remote dependency management does not imply remote runtime support (direct Codex/Claude Code requires a native workspace). Upgrade boundary: `docs/workspace-dependencies-upgrade.md`.
 - Bridge layout, image contract, and display stack details: `docs/codebase-map.md`.
 
 ## Database Tables
