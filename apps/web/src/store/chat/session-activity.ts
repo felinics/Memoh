@@ -26,6 +26,11 @@ export function createSessionActivity(deps: {
   updateKnownSessionTitle: (sessionId: string, title: string) => void
   refreshSessionsList: (botId: string) => Promise<void>
   refreshSessionMessages: (botId: string, sessionId: string) => Promise<void>
+  // Staleness signals for cached session views (see view-registry): a touch
+  // marks one view, a dropped frame means events were lost and every hidden
+  // view of the bot becomes unknowable.
+  markSessionViewStale?: (botId: string, sessionId: string) => void
+  markAllSessionViewsStale?: (botId: string) => void
 }) {
   const visibleSummaryRequests = new Map<string, Promise<SessionSummary | null>>()
   const compactingSessions = ref<Record<string, string[]>>({})
@@ -170,6 +175,7 @@ export function createSessionActivity(deps: {
     }
     if (event.type === 'ping') return
     if (event.type === 'dropped') {
+      deps.markAllSessionViewsStale?.(botId)
       void deps.refreshSessionsList(botId)
       return
     }
@@ -177,6 +183,7 @@ export function createSessionActivity(deps: {
       const sessionId = event.session_id.trim()
       if (!sessionId) return
       if (event.reason === 'background_task') refreshNotification(botId, sessionId)
+      deps.markSessionViewStale?.(botId, sessionId)
       const touched = deps.touchKnownSession(sessionId, event.updated_at)
       if (touched.source === 'listed') return
       if (touched.source === 'remembered') {

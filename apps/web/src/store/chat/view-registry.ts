@@ -39,6 +39,12 @@ export interface ChatViewEntry {
   pairEffort: Ref<string>
   pairSource: Ref<ChatWorkspaceTargetSelectionSource>
   lastAccess: number
+  // Set when the session may have changed while this view was hidden (a
+  // session_touched activity event, or a coverage gap in the activity stream).
+  // Revisit revalidation masks the cached transcript while this is set; a
+  // successful refresh clears it. Events cannot arrive for a view that does
+  // not exist yet, so entries start unmarked.
+  staleWhileHidden: boolean
 }
 
 interface ChatViewRegistryDeps extends Omit<TranscriptDeps, 'currentBotId' | 'sessionId'> {
@@ -143,9 +149,11 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
       pairEffort: ref(''),
       pairSource: ref('unset'),
       lastAccess: 0,
+      staleWhileHidden: false,
     }
     transcript.setRefreshAppliedHook((targetSessionId, latestTimestamp) => {
       view.initialized = true
+      view.staleWhileHidden = false
       deps.onRefreshApplied?.(view, targetSessionId, latestTimestamp)
     })
     views.set(view.key, view)
@@ -279,6 +287,25 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     return deactivated
   }
 
+  // Staleness only needs flagging while the view is hidden: a visible view
+  // receives its updates live, and a refresh clears the flag on commit.
+  function markSessionStale(botId: string, sessionId: string) {
+    const view = views.get(chatSessionViewKey(botId, sessionId))
+    if (view && view.visiblePanelIds.size === 0) view.staleWhileHidden = true
+  }
+
+  // The activity stream is the only staleness signal; any gap in it (buffer
+  // drop, reconnect, bot switch) makes every hidden view of that bot
+  // unknowable, so they all become conservative.
+  function markAllSessionsStale(botId: string) {
+    const prefix = `session:${normalize(botId)}:`
+    for (const view of views.values()) {
+      if (view.key.startsWith(prefix) && view.visiblePanelIds.size === 0) {
+        view.staleWhileHidden = true
+      }
+    }
+  }
+
   function promoteDraft(botId: string, viewId: string, sessionId: string): ChatViewEntry {
     const bid = normalize(botId)
     const vid = normalize(viewId)
@@ -383,6 +410,8 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     unbindPanel,
     promoteDraft,
     removeSession,
+    markSessionStale,
+    markAllSessionsStale,
     prune,
     resetBot,
     resetAll,

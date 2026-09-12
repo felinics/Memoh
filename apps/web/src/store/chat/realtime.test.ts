@@ -62,6 +62,7 @@ function makeController(options: { socketConnected?: boolean } = {}) {
     }),
     onRuntimeProjection: vi.fn(),
     onBotSessionsActivityEvent: vi.fn(),
+    onActivityStreamInterrupted: vi.fn(),
   }
   const transport: ChatRealtimeTransport = {
     connectWebSocket: vi.fn((botId, handler) => {
@@ -346,5 +347,42 @@ describe('chat realtime controller', () => {
     expect(callbacks.onBotSessionsActivityEvent).toHaveBeenLastCalledWith('bot-1', {
       type: 'session_compaction', session_ids: [],
     })
+  })
+})
+
+describe('activity stream interruption', () => {
+  it('interrupts the bot when its activity stream is explicitly stopped', async () => {
+    const { controller, callbacks, retryingStreams } = makeController()
+    controller.startBotSessionsActivityStream('bot-1')
+    await retryingStreams[0]!.attempt!(new AbortController().signal)
+
+    controller.stopStreams()
+
+    expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
+  })
+
+  it('absorbs sub-grace reconnects and interrupts only after the grace window', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_000_000)
+      const { controller, callbacks, retryingStreams } = makeController()
+      controller.startBotSessionsActivityStream('bot-1')
+
+      // First attempt ends → gap starts.
+      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      // Reconnect 1s later: inside the 3s grace → no interruption.
+      vi.setSystemTime(1_001_000)
+      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      expect(callbacks.onActivityStreamInterrupted).not.toHaveBeenCalled()
+
+      // That attempt ends too; the gap continues from the original start.
+      // Next attempt begins 4s after the gap began → interrupted.
+      vi.setSystemTime(1_004_001)
+      await retryingStreams[0]!.attempt!(new AbortController().signal)
+      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
+      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

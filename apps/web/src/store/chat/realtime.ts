@@ -38,6 +38,12 @@ export interface ChatRealtimeCallbacks {
     change: RuntimeProjectionChange,
   ) => void
   onBotSessionsActivityEvent: (botId: string, event: BotSessionActivityEvent) => void
+  // Fired when the activity stream stops covering a bot for long enough that
+  // touches were probably missed (bot switch, explicit stop, or an outage
+  // beyond the grace window): cached views of the bot can no longer be
+  // trusted as fresh. Sub-grace reconnects do not fire — see
+  // ACTIVITY_GAP_GRACE_MS for the tradeoff.
+  onActivityStreamInterrupted?: (botId: string) => void
 }
 
 export interface ChatRealtimeTransport {
@@ -58,6 +64,12 @@ function isRuntimeEvent(event: UIStreamEvent): event is UIRuntimeEvent {
     || event.type === 'runtime_dropped'
 }
 
+// How long the activity stream may be down before its bot's hidden views are
+// distrusted. RetryingStream reconnects routine drops in ~0.3–5s; a grace of
+// a few seconds absorbs those without masking every cached view, while still
+// catching real outages (bot switch excepted — that interrupts immediately).
+const ACTIVITY_GAP_GRACE_MS = 3_000
+
 // Owns chat transport lifecycles. The WebSocket carries both turn commands and
 // session runtime subscriptions; the bot-wide SSE carries lightweight activity.
 export function createChatRealtimeController(
@@ -68,6 +80,8 @@ export function createChatRealtimeController(
   let activeWebSocketBotId = ''
   let webSocketGeneration = 0
   let botSessionsActivityGeneration = 0
+  let activityStreamBotId = ''
+  let activityGapStartedAt = 0
   const sessionRuntimeConnections = new Map<string, SessionRuntimeConnection>()
   const botSessionsActivityStream = transport.createRetryingStream()
   const runtimeClient = createRuntimeClient({
@@ -237,25 +251,43 @@ export function createChatRealtimeController(
   function stopBotSessionsActivityStream() {
     botSessionsActivityGeneration += 1
     botSessionsActivityStream.stop()
+    // An explicit stop (bot switch, teardown) ends coverage with no quick
+    // reconnect coming; the bot's hidden views can no longer be trusted fresh.
+    if (activityStreamBotId) {
+      callbacks.onActivityStreamInterrupted?.(activityStreamBotId)
+      activityStreamBotId = ''
+    }
+    activityGapStartedAt = 0
   }
 
   function startBotSessionsActivityStream(botId: string) {
     stopBotSessionsActivityStream()
     const bid = botId.trim()
     if (!bid) return
+    activityStreamBotId = bid
 
     const generation = botSessionsActivityGeneration
     botSessionsActivityStream.start(async (signal) => {
       if (generation !== botSessionsActivityGeneration || signal.aborted) return
+      // A previous attempt ended and this one is only now starting: the gap
+      // between them had no coverage. Below the grace window the miss risk is
+      // a touch landing inside a routine reconnect (rare, self-correcting —
+      // the revisit revalidation replaces atomically); beyond it a touch was
+      // probably missed, so the bot's hidden views must be distrusted.
+      if (activityGapStartedAt && Date.now() - activityGapStartedAt > ACTIVITY_GAP_GRACE_MS) {
+        callbacks.onActivityStreamInterrupted?.(bid)
+      }
+      activityGapStartedAt = 0
       try {
         await transport.streamBotSessionsActivityEvents(bid, signal, (event) => {
           if (generation !== botSessionsActivityGeneration) return
           callbacks.onBotSessionsActivityEvent(bid, event)
         })
       } finally {
-        // A disconnected stream cannot vouch for a still-running compaction.
-        // The server sends a fresh snapshot when this stream reconnects.
         if (generation === botSessionsActivityGeneration) {
+          if (!activityGapStartedAt) activityGapStartedAt = Date.now()
+          // A disconnected stream cannot vouch for a still-running compaction.
+          // The server sends a fresh snapshot when this stream reconnects.
           callbacks.onBotSessionsActivityEvent(bid, { type: 'session_compaction', session_ids: [] })
         }
       }

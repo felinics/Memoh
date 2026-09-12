@@ -81,3 +81,33 @@ describe('persisted background notifications', () => {
     expect(displayed).toEqual(['Installing', 'Installed'])
   })
 })
+
+describe('session view staleness signals', () => {
+  function activityWithStaleDeps() {
+    const markSessionViewStale = vi.fn()
+    const markAllSessionViewsStale = vi.fn()
+    const state = createSessionActivity({
+      currentBotId: ref('bot-1'), sessionId: ref('session-1'),
+      userScopeGeneration: () => 0, currentSessionListRevision: () => 0, currentSelectRequest: () => 0,
+      knownSession: () => null, rememberSession: vi.fn(), sessionsCursor: ref(null),
+      hasMoreSessions: ref(false), loadingMoreSessions: ref(false), appendSessions: vi.fn(),
+      hasListedSession: () => true, touchKnownSession: () => ({ source: 'listed' }),
+      updateKnownSessionTitle: vi.fn(), refreshSessionsList: vi.fn(async () => {}),
+      refreshSessionMessages: vi.fn(async () => {}),
+      markSessionViewStale, markAllSessionViewsStale,
+    })
+    return { state, markSessionViewStale, markAllSessionViewsStale }
+  }
+
+  it('marks the touched session view stale', () => {
+    const { state, markSessionViewStale } = activityWithStaleDeps()
+    state.handleActivity('bot-1', { type: 'session_touched', session_id: 'session-9' })
+    expect(markSessionViewStale).toHaveBeenCalledWith('bot-1', 'session-9')
+  })
+
+  it('marks every hidden view stale when events were dropped', () => {
+    const { state, markAllSessionViewsStale } = activityWithStaleDeps()
+    state.handleActivity('bot-1', { type: 'dropped', count: 3 })
+    expect(markAllSessionViewsStale).toHaveBeenCalledWith('bot-1')
+  })
+})
