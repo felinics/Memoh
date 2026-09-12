@@ -395,6 +395,21 @@ function patchLineCounts(patch: string): { add: number; remove: number } {
   return { add, remove }
 }
 
+// The server-attached unified diff is the ground truth for what changed, so
+// its +/- lines are what the row badge counts — input-param line counts
+// (old_text/new_text, content) can overstate the change: a model may wrap the
+// replaced fragment in extra unchanged lines just to make old_text unique.
+function unifiedDiffLineCounts(diff: string): { add: number; remove: number } {
+  let add = 0
+  let remove = 0
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---')) continue
+    if (line.startsWith('+')) add++
+    else if (line.startsWith('-')) remove++
+  }
+  return { add, remove }
+}
+
 function changeLineCounts(value: unknown): { add: number; remove: number } {
   if (!Array.isArray(value)) return { add: 0, remove: 0 }
   let add = 0
@@ -668,6 +683,7 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       const path = pickString(input, 'path')
       const content = pickString(input, 'content')
       const contentLineCount = pickNumber(input, 'content_line_count')
+      const diffCounts = block.diff ? unifiedDiffLineCounts(block.diff) : null
       return {
         icon: FilePlus2,
         actionKey: 'write',
@@ -675,22 +691,23 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         fullTarget: path,
         detail: ToolCallDetailWrite,
         defaultOpen: false,
-        diffAdd: contentLineCount || lineCount(content),
-        hideAction: true,
+        diffAdd: diffCounts?.add ?? (contentLineCount || lineCount(content)),
+        diffRemove: diffCounts?.remove,
       }
     }
     case 'edit': {
       const path = pickString(input, 'path')
       const oldText = pickString(input, 'old_text')
       const newText = pickString(input, 'new_text')
+      const diffCounts = block.diff ? unifiedDiffLineCounts(block.diff) : null
       return {
         icon: FilePen,
         actionKey: 'edit',
         target: basename(path),
         fullTarget: path,
         detail: ToolCallDetailEdit,
-        diffAdd: lineCount(newText),
-        diffRemove: lineCount(oldText),
+        diffAdd: diffCounts?.add ?? lineCount(newText),
+        diffRemove: diffCounts?.remove ?? lineCount(oldText),
       }
     }
     case 'apply_patch': {

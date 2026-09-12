@@ -166,4 +166,45 @@ describe('tool call registry', () => {
     expect(getToolDisplay({ ...block, result: { isError: true } } as ToolCallBlock))
       .toEqual(getToolDisplay(block))
   })
+
+  it('counts edit badges from the real diff, not the old_text/new_text line counts', () => {
+    // The model wrapped the replaced line in extra unchanged context to keep
+    // old_text unique: the input line counts would report 3 removals and 3
+    // additions while only one line actually changed each way.
+    const block = {
+      ...toolBlock('edit', {
+        path: 'a.md',
+        old_text: 'keep\nold\ntail',
+        new_text: 'keep\nnew\ntail',
+      }),
+      diff: '--- a/a.md\n+++ b/a.md\n@@ -1,3 +1,3 @@\n keep\n-old\n+new\n tail\n',
+    } as unknown as ToolCallBlock
+    expect(getToolDisplay(block)).toMatchObject({ diffAdd: 1, diffRemove: 1 })
+  })
+
+  it('counts write badges from the real diff, all-add for a new file', () => {
+    const block = {
+      ...toolBlock('write', { path: 'new.md', content: '# Title\n\n- a\n- b\n' }),
+      diff: '--- /dev/null\n+++ b/new.md\n@@ -0,0 +1,4 @@\n+# Title\n+\n+- a\n+- b\n',
+    } as unknown as ToolCallBlock
+    expect(getToolDisplay(block)).toMatchObject({ diffAdd: 4, diffRemove: 0 })
+  })
+
+  it('shows a remove count for a write overwrite diff', () => {
+    const block = {
+      ...toolBlock('write', { path: 'a.md', content: 'keep\nnew\ntail\n' }),
+      diff: '--- a/a.md\n+++ b/a.md\n@@ -1,3 +1,3 @@\n keep\n-old\n+new\n tail\n',
+    } as unknown as ToolCallBlock
+    expect(getToolDisplay(block)).toMatchObject({ diffAdd: 1, diffRemove: 1 })
+  })
+
+  it('falls back to input line counts when no server diff exists', () => {
+    expect(getToolDisplay(toolBlock('edit', {
+      path: 'a.md',
+      old_text: 'old\n',
+      new_text: 'new\nmore\n',
+    }))).toMatchObject({ diffAdd: 2, diffRemove: 1 })
+    expect(getToolDisplay(toolBlock('write', { path: 'a.md', content: 'one\ntwo\n' })))
+      .toMatchObject({ diffAdd: 2, diffRemove: undefined })
+  })
 })

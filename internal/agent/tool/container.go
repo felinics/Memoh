@@ -864,6 +864,33 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	}
 
 	data := []byte(content)
+	// Capture the current content (if the file exists) before overwriting, so
+	// the chat UI can render the write as a diff: a brand-new file diffs from
+	// empty (every line an addition), an overwrite diffs against the previous
+	// content. Best effort: the write must not fail because the diff input
+	// could not be read. hasBefore stays false when the old content is
+	// unknown (oversized, unreadable, stat failure) — rendering an all-add
+	// diff for what was really an overwrite would mislead, so no diff is
+	// attached in that case. Files above the diff size limit are never read:
+	// editContextDiff would skip them anyway, so the read would be pure waste.
+	before := ""
+	hasBefore := false
+	if stat, statErr := client.Stat(opCtx, filePath); statErr == nil && stat != nil && !stat.GetIsDir() {
+		if stat.GetSize() <= largeFileThreshold {
+			if reader, readErr := client.ReadRaw(opCtx, filePath); readErr == nil {
+				if raw, ioErr := io.ReadAll(reader); ioErr == nil {
+					before = string(raw)
+					hasBefore = true
+				}
+				_ = reader.Close()
+			}
+		}
+	} else if statErr != nil && errors.Is(statErr, bridge.ErrNotFound) {
+		// Genuinely a new file: the diff from empty is exact. (The bridge
+		// client maps gRPC NotFound to its ErrNotFound sentinel, so check
+		// that, not status.Code.)
+		hasBefore = true
+	}
 	if res, err := p.runWorkspaceToolHook(ctx, session, target.hookWorkspaceInfo(p.execWorkDir), hooks.EventBeforeFileWrite, map[string]any{
 		"path":  filePath,
 		"bytes": len(data),
@@ -891,7 +918,18 @@ func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContex
 	}); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
-	return map[string]any{"ok": true}, nil
+	result := map[string]any{"ok": true}
+	// Same UI-only diff channel as edit (see execEdit): computed from the
+	// content actually read and written, stripped before the model sees the
+	// tool result, and best effort — a diff failure must not fail the write
+	// that already succeeded. A no-op write (identical content) yields no
+	// diff; large content is skipped by editContextDiff itself.
+	if hasBefore {
+		if diff, err := editContextDiff(filePath, before, content); err == nil && diff != "" {
+			result[UIOutputMetadataKey] = map[string]any{"diff": diff}
+		}
+	}
+	return result, nil
 }
 
 func (p *ContainerProvider) execList(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -1027,7 +1065,16 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	}); err != nil {
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
-	return map[string]any{"ok": true}, nil
+	result := map[string]any{"ok": true}
+	// The diff is computed from the content actually read and written, so the
+	// chat UI can render the edit with its real surrounding context. Best
+	// effort: a diff failure must not fail the edit that already succeeded.
+	// It rides the reserved UI-only key — the runtime strips it before the
+	// model ever sees the tool result.
+	if diff, err := editContextDiff(filePath, string(raw), updated); err == nil && diff != "" {
+		result[UIOutputMetadataKey] = map[string]any{"diff": diff}
+	}
+	return result, nil
 }
 
 func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args map[string]any) (any, error) {

@@ -1020,6 +1020,8 @@
       "approve": "許可する",
       "reject": "拒否する",
       "pendingApproval": "承認待ち",
+      "approvalDeclined": "拒否",
+      "approvalCanceled": "キャンセル",
       "executionLocation": "実行場所",
       "pendingUserInput": "入力を待っています",
       "userInputSubmitted": "答えた",

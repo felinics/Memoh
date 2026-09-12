@@ -1,13 +1,18 @@
 <template>
   <div class="space-y-1.5">
     <p
-      v-if="contentTruncated"
+      v-if="contentTruncated && !diffText"
       class="rounded-sm border border-border bg-muted/30 px-2 py-1 text-xs text-muted-foreground"
     >
       {{ t('chat.tools.detail.contentTruncated', { bytes: contentBytes }) }}
     </p>
+    <DiffPanel
+      v-if="diffText"
+      :diff="diffText"
+      :filename="extractFilename(filePath)"
+    />
     <CodeBlock
-      v-if="content"
+      v-else-if="content"
       :code="content"
       :filename="filePath"
       class="max-h-96 overflow-y-auto overflow-x-auto text-xs leading-relaxed"
@@ -22,11 +27,19 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ToolCallBlock } from '@/store/chat-list'
+import { extractFilename } from '@/composables/useShikiHighlighter'
 import CodeBlock from './code-block.vue'
 import EmptyRow from './tool-detail/empty-row.vue'
+import DiffPanel from './tool-call-diff-panel.vue'
 
 const props = defineProps<{ block: ToolCallBlock }>()
 const { t } = useI18n()
+
+// New write calls carry the same server-computed UI-only diff as edit: a
+// brand-new file renders as all additions, an overwrite as a real diff
+// against the previous content. Older records without it keep the plain
+// content block below.
+const diffText = computed(() => props.block.diff ?? '')
 
 const filePath = computed(() => {
   const input = props.block.input as Record<string, unknown> | undefined
