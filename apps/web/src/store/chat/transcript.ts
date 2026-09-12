@@ -211,12 +211,21 @@ export function createTranscriptController({
     botId: string,
     targetSessionId: string,
     commitInitialHistory: CommitInitialHistory,
+    // mask=true (default) hides the cached transcript behind loadingMessages
+    // until fresh history commits. mask=false keeps a trusted cache visible
+    // and revalidates in the open; the fetched history still commits through
+    // the same atomic path, so a superseded turn never paints either way.
+    options: { mask?: boolean } = {},
   ) {
     const bid = botId.trim()
     const sid = targetSessionId.trim()
     if (!bid || !sid) return
-    loadingMessages.value = true
-    const version = ++loadingMessagesVersion
+    const mask = options.mask !== false
+    if (mask) loadingMessages.value = true
+    // Only a masked load owns the loadingMessages lifecycle: bumping the
+    // version here (or clearing in finally) when unmasked could strand a
+    // concurrent masked load's flag.
+    const version = mask ? ++loadingMessagesVersion : loadingMessagesVersion
     const generation = historyGeneration
     try {
       const turns = await fetchMessages(bid, sid, { limit: PAGE_SIZE })
@@ -225,7 +234,7 @@ export function createTranscriptController({
         applyFetchedHistory(bid, sid, generation, turns)
       })
     } finally {
-      if (version === loadingMessagesVersion) loadingMessages.value = false
+      if (mask && version === loadingMessagesVersion) loadingMessages.value = false
     }
   }
 

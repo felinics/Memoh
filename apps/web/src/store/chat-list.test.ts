@@ -3906,7 +3906,7 @@ describe('chat-list store', () => {
       await sending
     })
 
-  it('does not expose a cached Session transcript while it rehydrates', async () => {
+  it('keeps a fresh cached Session transcript visible while it rehydrates', async () => {
       api.fetchSessions.mockResolvedValueOnce({ items: [
         { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
         { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
@@ -3931,11 +3931,62 @@ describe('chat-list store', () => {
       await flushPromises()
       await store.selectSession('session-a')
 
+      // Untouched while hidden: the cache stays on screen (optimistic
+      // revisit) and the revalidation commits through the same atomic path.
       expect(store.chatView({
         botId: 'bot-1',
         sessionId: 'session-a',
         viewId: 'chat',
       }).transcript.messages.map(turn => turn.id)).toEqual(['cached-a'])
+      expect(store.loadingMessages).toBe(false)
+      expect(store.messages.map(turn => turn.id)).toEqual(['cached-a'])
+
+      freshSessionA.resolve([{
+        id: 'fresh-a',
+        turn_id: 'fresh-a',
+        role: 'user',
+        text: 'fresh',
+        attachments: [],
+        timestamp: '2026-01-02T00:00:00.000Z',
+      }])
+      await flushPromises()
+
+      expect(store.messages.map(turn => turn.id)).toEqual(['fresh-a'])
+    })
+
+  it('masks a stale-marked cached Session transcript while it rehydrates', async () => {
+      api.fetchSessions.mockResolvedValueOnce({ items: [
+        { id: 'session-a', bot_id: 'bot-1', title: 'A', type: 'chat' },
+        { id: 'session-b', bot_id: 'bot-1', title: 'B', type: 'chat' },
+      ], nextCursor: null })
+      const freshSessionA = deferred<UITurn[]>()
+      api.fetchMessagesUI
+        .mockResolvedValueOnce([{
+          id: 'cached-a',
+          turn_id: 'cached-a',
+          role: 'user',
+          text: 'cached',
+          attachments: [],
+          timestamp: '2026-01-01T00:00:00.000Z',
+        }])
+        .mockResolvedValueOnce([])
+        .mockReturnValueOnce(freshSessionA.promise)
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      await flushPromises()
+      await store.selectSession('session-b')
+      await flushPromises()
+
+      // A touch arrived while session-a was hidden: the cache can no longer
+      // be trusted, so the revisit masks until fresh history commits (#933).
+      store.chatView({
+        botId: 'bot-1',
+        sessionId: 'session-a',
+        viewId: 'chat',
+      }).staleWhileHidden = true
+      await store.selectSession('session-a')
+
       expect(store.loadingMessages).toBe(true)
       expect(store.messages).toEqual([])
 

@@ -166,7 +166,11 @@ export function createChatViews(deps: ChatViewsDeps) {
       sessionId,
       viewId: focusedViewId.value,
     })
-    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory)
+    // Revisit of a view whose cache is present and untouched-while-hidden:
+    // show the cache and revalidate in the open. An empty or stale cache
+    // keeps the #933 behavior — mask until fresh history commits atomically.
+    const mask = view.transcript.messages.length === 0 || view.staleWhileHidden
+    await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
     view.initialized = true
   }
   const fetchSessionWindow = (botId: string, sessionId: string) =>
