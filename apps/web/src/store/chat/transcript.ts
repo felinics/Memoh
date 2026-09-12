@@ -221,8 +221,8 @@ export function createTranscriptController({
     commitInitialHistory: CommitInitialHistory,
     // mask=true (default) hides the cached transcript behind loadingMessages
     // until fresh history commits. mask=false keeps a trusted cache visible
-    // and revalidates in the open; the fetched history still commits through
-    // the same atomic path, so a superseded turn never paints either way.
+    // and revalidates in the open. Both paths commit fetched history and its
+    // runtime projection together, without a database-only intermediate frame.
     options: { mask?: boolean } = {},
   ) {
     const bid = botId.trim()

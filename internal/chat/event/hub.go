@@ -32,7 +32,24 @@ const (
 	EventTypeBackgroundTask EventType = "background_task"
 	// EventTypeCompactionChanged invalidates the bot's live compaction snapshot.
 	EventTypeCompactionChanged EventType = "compaction_changed"
+	// EventTypeSessionInvalidated marks cached transcripts stale when runtime
+	// admission changes them, or after history is cleared without a new message.
+	EventTypeSessionInvalidated EventType = "session_invalidated"
 )
+
+// SessionInvalidation contains only an address. An empty SessionID invalidates
+// all cached sessions of the bot, without exposing any private session ids.
+type SessionInvalidation struct {
+	SessionID string `json:"session_id"`
+}
+
+func InvalidateSession(publisher Publisher, botID, sessionID string) {
+	if publisher == nil {
+		return
+	}
+	payload, _ := json.Marshal(SessionInvalidation{SessionID: strings.TrimSpace(sessionID)})
+	publisher.Publish(Event{Type: EventTypeSessionInvalidated, BotID: strings.TrimSpace(botID), Data: payload})
+}
 
 // Event is the normalized payload emitted by the in-process message event hub.
 type Event struct {

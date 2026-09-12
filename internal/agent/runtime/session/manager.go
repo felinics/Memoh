@@ -55,6 +55,7 @@ type Manager struct {
 	commandHandler         func(context.Context, Command) error
 	decisionStore          DecisionStore
 	terminalObserver       func(context.Context, TerminalRun)
+	admissionObserver      func(botID, sessionID string)
 	decisionFinalizer      func(context.Context, RunHandle) error
 	terminalReconciler     func(context.Context) error
 	cancelLostRunDecisions func(context.Context, string, string, string, int64, string) error
@@ -1242,6 +1243,10 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 	if !ctrl.completeAdmissionForAbort() {
 		return RunHandle{}, Cursor{}, context.Canceled
 	}
+	// Runtime edits/retries replace visible content before their messages are
+	// persisted. Notify cached-view observers before the admitted run returns
+	// to its caller and starts generating output.
+	m.observeAdmission(botID, sessionID)
 	ctrl.markReady()
 	return handle, activated.cursor(), nil
 }

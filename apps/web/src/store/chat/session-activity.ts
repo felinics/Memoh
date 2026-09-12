@@ -169,6 +169,13 @@ export function createSessionActivity(deps: {
   }
 
   function handleActivity(botId: string, event: BotSessionActivityEvent) {
+    if (event.type === 'activity_ready') return
+    if (event.type === 'session_invalidated') {
+      const sessionId = event.session_id.trim()
+      if (sessionId) deps.markSessionViewStale?.(botId, sessionId)
+      else deps.markAllSessionViewsStale?.(botId)
+      return
+    }
     if (event.type === 'session_compaction') {
       compactingSessions.value[botId] = event.session_ids
       return

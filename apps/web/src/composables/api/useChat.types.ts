@@ -69,6 +69,8 @@ export interface SessionCompactionEvent {
 }
 
 export type BotSessionActivityEvent =
+  | { type: 'activity_ready', cache_invalidation: boolean }
+  | { type: 'session_invalidated', session_id: string }
   | SessionTouchedEvent
   | SessionTitleChangedEvent
   | SessionCreatedEvent

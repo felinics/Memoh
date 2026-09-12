@@ -105,6 +105,16 @@ describe('session view staleness signals', () => {
     expect(markSessionViewStale).toHaveBeenCalledWith('bot-1', 'session-9')
   })
 
+  it('invalidates runtime replacements before persisted message activity arrives', () => {
+    const { state, markSessionViewStale, markAllSessionViewsStale } = activityWithStaleDeps()
+    state.handleActivity('bot-1', { type: 'session_invalidated', session_id: 'session-9' })
+    expect(markSessionViewStale).toHaveBeenCalledWith('bot-1', 'session-9')
+    expect(markAllSessionViewsStale).not.toHaveBeenCalled()
+
+    state.handleActivity('bot-1', { type: 'session_invalidated', session_id: '' })
+    expect(markAllSessionViewsStale).toHaveBeenCalledWith('bot-1')
+  })
+
   it('marks every hidden view stale when events were dropped', () => {
     const { state, markAllSessionViewsStale } = activityWithStaleDeps()
     state.handleActivity('bot-1', { type: 'dropped', count: 3 })

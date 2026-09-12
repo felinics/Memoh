@@ -166,10 +166,12 @@ export function createChatViews(deps: ChatViewsDeps) {
       sessionId,
       viewId: focusedViewId.value,
     })
-    // Revisit of a view whose cache is present and untouched-while-hidden:
-    // show the cache and revalidate in the open. An empty or stale cache
-    // keeps the #933 behavior — mask until fresh history commits atomically.
-    const mask = view.transcript.messages.length === 0 || view.staleWhileHidden
+    // A populated, untouched cache can render immediately only while the bot's
+    // activity stream covers changes. Otherwise keep the #933 behavior: mask
+    // until fresh history and the initial runtime snapshot commit together.
+    const mask = view.transcript.messages.length === 0
+      || view.staleWhileHidden
+      || !chatViews.isActivityStreamCovered(botId)
     await view.transcript.loadInitialMessages(botId, sessionId, commitInitialHistory, { mask })
     view.initialized = true
   }

@@ -35,6 +35,30 @@ func TestCompactionActivityFiltersUnreadableSessions(t *testing.T) {
 	}
 }
 
+func TestSessionInvalidationActivityFiltersUnreadableSessions(t *testing.T) {
+	t.Parallel()
+	cache := newSessionCache(nil, nil)
+	cache.rows["mine"] = session.Thread{ID: "mine", BotID: "bot", Type: session.TypeChat, CreatedByUserID: "me"}
+	cache.rows["private"] = session.Thread{ID: "private", BotID: "bot", Type: session.TypeChat, CreatedByUserID: "other"}
+	cache.rows["internal"] = session.Thread{ID: "internal", BotID: "bot", Type: session.TypeSubagent, CreatedByUserID: "me"}
+	for _, sid := range []string{"mine", "private", "internal", ""} {
+		data, err := json.Marshal(messageevent.SessionInvalidation{SessionID: sid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		activity := sessionInvalidationActivity(context.Background(), "me", "bot", []string{bots.PermissionChat}, cache, data)
+		if sid == "private" || sid == "internal" {
+			if activity != nil {
+				t.Fatalf("invalidation leaked unreadable session %q", sid)
+			}
+			continue
+		}
+		if len(activity) != 2 || activity["type"] != "session_invalidated" || activity["session_id"] != sid {
+			t.Fatalf("unexpected invalidation for %q: %+v", sid, activity)
+		}
+	}
+}
+
 // sessionCreateRecorder is a minimal sqlc-shaped fake that records the row a
 // CreateSession call returns so we can assert what the service publishes.
 type sessionCreateRecorder struct {

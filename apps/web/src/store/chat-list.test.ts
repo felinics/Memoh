@@ -402,6 +402,7 @@ beforeEach(() => {
     sdk.getBotsByBotIdSettings.mockResolvedValue({ data: { chat_runtime: 'model' } })
     api.streamBotSessionsActivityEvents.mockImplementation((_botId: string, signal: AbortSignal, onEvent: (event: BotSessionActivityEvent) => void) => new Promise<void>((resolve) => {
       h.sessionsActivityHandler = onEvent
+      onEvent({ type: 'activity_ready', cache_invalidation: true })
       signal.addEventListener('abort', () => resolve(), { once: true })
     }))
     api.connectWebSocket.mockImplementation((_botId: string, onStreamEvent: UIStreamEventHandler) => {

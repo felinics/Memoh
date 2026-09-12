@@ -9,6 +9,7 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/config"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -40,11 +41,14 @@ func provideRuntimeFenceActivator(queries dbstore.Queries) sessionruntime.FenceA
 // elects the reaper leader, and begins the fail-closed generation sweep — for a
 // single OSS instance that sweep is what turns the previous process's runs into
 // `lost` instead of leaving them active forever.
-func provideSessionRuntimeManager(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, runs ledger.Store, fence sessionruntime.FenceActivator) (*sessionruntime.Manager, error) {
+func provideSessionRuntimeManager(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, runs ledger.Store, fence sessionruntime.FenceActivator, hub *event.Hub) (*sessionruntime.Manager, error) {
 	manager, err := sessionruntime.NewManagerFromConfig(log, cfg.SessionRuntime, runs, fence)
 	if err != nil {
 		return nil, err
 	}
+	manager.SetAdmissionObserver(func(botID, sessionID string) {
+		event.InvalidateSession(hub, botID, sessionID)
+	})
 	lc.Append(fx.Hook{
 		OnStart: manager.Start,
 		OnStop: func(ctx context.Context) error {

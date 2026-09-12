@@ -255,7 +255,7 @@ export const useChatStore = defineStore('chat', () => {
     resolveErrorMessage: resolveApiErrorMessage,
     showError: message => toast.error(message),
     onBotSessionsActivityEvent: handleBotSessionsActivityEvent,
-    onActivityStreamInterrupted: chatViews.markAllSessionsStale,
+    onActivityStreamCoverageChanged: chatViews.setActivityStreamCoverage,
   })
   const {
     startWebSocket,

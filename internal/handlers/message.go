@@ -31,19 +31,21 @@ import (
 
 // MessageHandler handles bot-scoped messaging endpoints.
 type MessageHandler struct {
-	messageService     messagepkg.Service
-	sessionService     *session.Service
-	runtimeResets      messageRuntimeResetService
-	messageEvents      messageevent.Subscriber
-	mediaService       *media.Service
-	botService         *bots.Service
-	accountService     *accounts.Service
-	toolApproval       *toolapproval.Service
-	userInput          *userinput.Service
-	bgManager          *background.Manager
-	projectionCache    messageProjectionCache
-	compactionActivity interface{ ActiveSessions(string) []string }
-	logger             *slog.Logger
+	messageService                messagepkg.Service
+	sessionService                *session.Service
+	runtimeResets                 messageRuntimeResetService
+	messageEvents                 messageevent.Subscriber
+	messagePublisher              messageevent.Publisher
+	activityInvalidationSupported bool
+	mediaService                  *media.Service
+	botService                    *bots.Service
+	accountService                *accounts.Service
+	toolApproval                  *toolapproval.Service
+	userInput                     *userinput.Service
+	bgManager                     *background.Manager
+	projectionCache               messageProjectionCache
+	compactionActivity            interface{ ActiveSessions(string) []string }
+	logger                        *slog.Logger
 }
 
 type messageProjectionCache interface {
@@ -78,13 +80,15 @@ func NewMessageHandler(log *slog.Logger, messageService messagepkg.Service, sess
 	if len(eventSubscribers) > 0 {
 		messageEvents = eventSubscribers[0]
 	}
+	messagePublisher, _ := messageEvents.(messageevent.Publisher)
 	return &MessageHandler{
-		messageService: messageService,
-		sessionService: sessionService,
-		messageEvents:  messageEvents,
-		botService:     botService,
-		accountService: accountService,
-		logger:         log.With(slog.String("handler", "conversation")),
+		messageService:   messageService,
+		sessionService:   sessionService,
+		messageEvents:    messageEvents,
+		messagePublisher: messagePublisher,
+		botService:       botService,
+		accountService:   accountService,
+		logger:           log.With(slog.String("handler", "conversation")),
 	}
 }
 
@@ -99,6 +103,10 @@ func (h *MessageHandler) SetProjectionCache(cache messageProjectionCache) {
 
 func (h *MessageHandler) SetCompactionActivity(activity interface{ ActiveSessions(string) []string }) {
 	h.compactionActivity = activity
+}
+
+func (h *MessageHandler) SetSessionActivityInvalidationSupported(supported bool) {
+	h.activityInvalidationSupported = supported
 }
 
 func (h *MessageHandler) SetToolApprovalService(svc *toolapproval.Service) {
@@ -737,6 +745,7 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 			h.projectionCache.DropAll()
 		}
 	}
+	messageevent.InvalidateSession(h.messagePublisher, botID, sessionID)
 	return c.NoContent(http.StatusNoContent)
 }
 

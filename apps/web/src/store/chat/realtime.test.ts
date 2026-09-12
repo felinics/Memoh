@@ -62,7 +62,7 @@ function makeController(options: { socketConnected?: boolean } = {}) {
     }),
     onRuntimeProjection: vi.fn(),
     onBotSessionsActivityEvent: vi.fn(),
-    onActivityStreamInterrupted: vi.fn(),
+    onActivityStreamCoverageChanged: vi.fn(),
   }
   const transport: ChatRealtimeTransport = {
     connectWebSocket: vi.fn((botId, handler) => {
@@ -350,76 +350,48 @@ describe('chat realtime controller', () => {
   })
 })
 
-describe('activity stream interruption', () => {
-  it('interrupts the bot when its activity stream is explicitly stopped', async () => {
-    const { controller, callbacks, retryingStreams } = makeController()
+describe('activity stream coverage', () => {
+  it('stays uncovered before a supported ready frame and after an explicit stop', async () => {
+    let onEvent!: (event: BotSessionActivityEvent) => void
+    let close!: () => void
+    const stream = createFakeRetryingStream()
+    const coverage = vi.fn()
+    const controller = createChatRealtimeController({
+      onWebSocketEvent: vi.fn(), prepareSessionRuntime: vi.fn(), onRuntimeProjection: vi.fn(),
+      onBotSessionsActivityEvent: vi.fn(), onActivityStreamCoverageChanged: coverage,
+    }, {
+      connectWebSocket: vi.fn(), createRetryingStream: () => stream,
+      streamBotSessionsActivityEvents: (_bot, _signal, handler) => {
+        onEvent = handler
+        return new Promise<void>(resolve => { close = resolve })
+      },
+    })
+    controller.startBotSessionsActivityStream('bot-1')
+    const attempt = stream.attempt!(new AbortController().signal)
+    expect(coverage).toHaveBeenLastCalledWith('bot-1', false)
+    onEvent({ type: 'ping' })
+    expect(coverage).toHaveBeenCalledTimes(1)
+    onEvent({ type: 'activity_ready', cache_invalidation: false })
+    expect(coverage).toHaveBeenLastCalledWith('bot-1', false)
+    onEvent({ type: 'activity_ready', cache_invalidation: true })
+    expect(coverage).toHaveBeenLastCalledWith('bot-1', true)
+    controller.stopStreams()
+    expect(coverage).toHaveBeenLastCalledWith('bot-1', false)
+    const count = coverage.mock.calls.length
+    onEvent({ type: 'activity_ready', cache_invalidation: true })
+    close()
+    await attempt
+    expect(coverage).toHaveBeenCalledTimes(count)
+  })
+
+  it('invalidates even a short gap and ignores frames from a completed attempt', async () => {
+    const { controller, callbacks, retryingStreams, activityHandlers } = makeController()
     controller.startBotSessionsActivityStream('bot-1')
     await retryingStreams[0]!.attempt!(new AbortController().signal)
-
+    expect(callbacks.onActivityStreamCoverageChanged).toHaveBeenLastCalledWith('bot-1', false)
+    vi.mocked(callbacks.onActivityStreamCoverageChanged!).mockClear()
+    activityHandlers[0]!({ type: 'activity_ready', cache_invalidation: true })
+    expect(callbacks.onActivityStreamCoverageChanged).not.toHaveBeenCalled()
     controller.stopStreams()
-
-    expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
-  })
-
-  it('absorbs sub-grace reconnects and interrupts only after the grace window', async () => {
-    vi.useFakeTimers()
-    try {
-      const { controller, callbacks, retryingStreams, activityHandlers } = makeController()
-      controller.startBotSessionsActivityStream('bot-1')
-
-      // First attempt ends → the gap and its grace timer start.
-      await retryingStreams[0]!.attempt!(new AbortController().signal)
-      // 1s in, a new attempt delivers a frame: coverage provably restored
-      // inside the grace window, so the pending invalidation is cancelled.
-      await vi.advanceTimersByTimeAsync(1_000)
-      await retryingStreams[0]!.attempt!(new AbortController().signal)
-      activityHandlers[1]!({ type: 'ping' })
-
-      // That attempt ends too → a FRESH gap starts now. The old grace timer
-      // must be gone: another 2.9s of outage stays sub-grace.
-      await vi.advanceTimersByTimeAsync(2_900)
-      await retryingStreams[0]!.attempt!(new AbortController().signal)
-      expect(callbacks.onActivityStreamInterrupted).not.toHaveBeenCalled()
-
-      // The new gap crosses the grace at its own 3s mark — fired by the
-      // timer, with no further attempt needed.
-      await vi.advanceTimersByTimeAsync(3_001)
-      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
-      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('accumulates instant-close cycles into one outage instead of forgiving each', async () => {
-    vi.useFakeTimers()
-    try {
-      const { controller, callbacks, retryingStreams } = makeController()
-      controller.startBotSessionsActivityStream('bot-1')
-
-      // A proxy accepting then instantly closing the SSE: every attempt ends
-      // immediately and the next starts ~300ms later. Each individual gap is
-      // sub-grace, but there is never any real coverage.
-      for (let cycle = 0; cycle < 9; cycle++) {
-        await retryingStreams[0]!.attempt!(new AbortController().signal)
-        await vi.advanceTimersByTimeAsync(300)
-      }
-      // 9 × 300ms = 2.7s of cumulative outage — still sub-grace.
-      expect(callbacks.onActivityStreamInterrupted).not.toHaveBeenCalled()
-
-      // The outage clock has been running since the first close: crossing the
-      // grace trips the interruption even while the current attempt hangs and
-      // no new attempt starts.
-      await vi.advanceTimersByTimeAsync(400)
-      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledWith('bot-1')
-      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
-
-      // It does not re-fire while the same outage continues.
-      await retryingStreams[0]!.attempt!(new AbortController().signal)
-      await vi.advanceTimersByTimeAsync(1_000)
-      expect(callbacks.onActivityStreamInterrupted).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
   })
 })

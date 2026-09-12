@@ -77,7 +77,7 @@ func provideSessionQueueHandler(queries dbstore.Queries, agentService *applicati
 	return handlers.NewSessionQueueHandler(queries, agentService, botService, accountService)
 }
 
-func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool, pipeline *timeline.Pipeline, compactionService *compaction.Service) *handlers.MessageHandler {
+func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sessionService *sessionpkg.Service, mediaService *media.Service, botService *bots.Service, accountService *accounts.Service, hub *event.Hub, toolApproval *toolapproval.Service, userInput *userinput.Service, bgManager *background.Manager, acpPool *acpagent.SessionPool, pipeline *timeline.Pipeline, compactionService *compaction.Service, cfg config.Config) *handlers.MessageHandler {
 	h := handlers.NewMessageHandler(log, msgService, sessionService, botService, accountService, hub)
 	h.SetMediaService(mediaService)
 	h.SetToolApprovalService(toolApproval)
@@ -86,6 +86,9 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	h.SetRuntimeResetService(acpPool)
 	h.SetProjectionCache(pipeline)
 	h.SetCompactionActivity(compactionService)
+	// This hub is process-local. A cluster cannot promise it observes runtime
+	// admissions and persisted writes performed by another instance.
+	h.SetSessionActivityInvalidationSupported(!cfg.SessionRuntime.Cluster)
 	return h
 }
 

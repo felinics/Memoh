@@ -110,6 +110,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
   const cacheLimit = Math.max(0, deps.cacheLimit ?? CHAT_SESSION_VIEW_CACHE_LIMIT)
   const views = new Map<string, ChatViewEntry>()
   const panelKeys = new Map<string, string>()
+  const coveredBots = new Set<string>()
   let accessClock = 0
 
   function touch(view: ChatViewEntry) {
@@ -323,6 +324,21 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     }
   }
 
+  function isActivityStreamCovered(botId: string): boolean {
+    return coveredBots.has(normalize(botId))
+  }
+
+  function setActivityStreamCoverage(botId: string, covered: boolean) {
+    const bid = normalize(botId)
+    if (!bid || covered === coveredBots.has(bid)) return
+    if (covered) coveredBots.add(bid)
+    else coveredBots.delete(bid)
+    // Mark both edges. History refreshed during an outage may already be
+    // outdated when coverage returns; the ready frame does not replay the
+    // changes that were missed before this subscription was established.
+    markAllSessionsStale(bid)
+  }
+
   function promoteDraft(botId: string, viewId: string, sessionId: string): ChatViewEntry {
     const bid = normalize(botId)
     const vid = normalize(viewId)
@@ -402,6 +418,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
 
   function resetBot(botId: string) {
     const bid = normalize(botId)
+    coveredBots.delete(bid)
     for (const view of [...views.values()]) {
       if (view.botId === bid) evict(view)
     }
@@ -410,6 +427,7 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
   function resetAll() {
     for (const view of [...views.values()]) evict(view)
     panelKeys.clear()
+    coveredBots.clear()
   }
 
   function entries(): ChatViewEntry[] {
@@ -429,6 +447,8 @@ export function createChatViewRegistry(deps: ChatViewRegistryDeps) {
     removeSession,
     markSessionStale,
     markAllSessionsStale,
+    isActivityStreamCovered,
+    setActivityStreamCoverage,
     prune,
     resetBot,
     resetAll,

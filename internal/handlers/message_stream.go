@@ -71,6 +71,13 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	// propagate within one reconnect window.
 	sub, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
+	if err := writeSSEJSON(writer, flusher, map[string]any{
+		"type": "activity_ready", "cache_invalidation": h.activityInvalidationSupported,
+		// Older clients treat unknown types as session_created and read this id.
+		"session_id": "",
+	}); err != nil {
+		return nil
+	}
 
 	cache := newSessionCache(h.logger, h.sessionService)
 	// Subscribe before sampling: changes racing the snapshot remain queued.
@@ -127,6 +134,13 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 			}
 
 			switch event.Type {
+			case messageevent.EventTypeSessionInvalidated:
+				activity := sessionInvalidationActivity(c.Request().Context(), channelIdentityID, botID, perms, cache, event.Data)
+				if activity != nil {
+					if err := writeSSEJSON(writer, flusher, activity); err != nil {
+						return nil
+					}
+				}
 			case messageevent.EventTypeCompactionChanged:
 				if err := writeCompaction(); err != nil {
 					return nil
@@ -221,6 +235,18 @@ func messageSessionActivity(message messagepkg.Message) map[string]any {
 		activity["reason"] = "background_task"
 	}
 	return activity
+}
+
+func sessionInvalidationActivity(ctx context.Context, userID, botID string, perms []string, cache *sessionCache, data json.RawMessage) map[string]any {
+	var invalidation messageevent.SessionInvalidation
+	if err := json.Unmarshal(data, &invalidation); err != nil {
+		return nil
+	}
+	sessionID := strings.TrimSpace(invalidation.SessionID)
+	if sessionID != "" && !canDeliverSessionActivity(ctx, userID, botID, perms, cache, sessionID) {
+		return nil
+	}
+	return map[string]any{"type": "session_invalidated", "session_id": sessionID}
 }
 
 func (h *MessageHandler) visibleCompactingSessions(ctx context.Context, userID, botID string, perms []string, cache *sessionCache) []string {
