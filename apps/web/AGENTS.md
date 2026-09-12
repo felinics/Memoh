@@ -505,7 +505,11 @@ Live conversation turns are read over the **WebSocket**. SSE carries identifiers
 
 #### Sessions activity SSE
 - **Endpoint**: `GET /bots/{bot_id}/sessions/events` — bot-wide lightweight activity stream; `session_touched` / `session_title_changed` / `session_created` for sidebar live-sort. Never carries message bodies.
+- **First frame**: `activity_ready {cache_invalidation}` — sent right after subscription so events racing connection setup are queued behind it. `cache_invalidation: true` declares the server emits `session_invalidated` for every runtime admission and history deletion; `false` (or a missing ready frame on older servers) means no coverage and every revisit must reload under the mask.
+- `session_invalidated {session_id}` — a session's visible projection changed while another tab/client could have been holding a cached copy; empty `session_id` invalidates all sessions of the bot. Marks the transcript stale so the next revisit reloads instead of trusting its cache.
+- `dropped` — emitted when the server's per-subscriber buffer overflowed; the client conservatively marks all sessions stale because it cannot know which events were lost.
 - `session_touched` with `reason: background_task` also refreshes persisted messages for an already loaded session. Notifications can arrive without a live turn; use the transcript merge path so active output survives. Coalesce pending notifications and perform a trailing refresh for the final outcome.
+- **Optimistic revisit contract**: a hidden session's cached transcript may render immediately on revisit only while coverage holds (ready frame declared `cache_invalidation`, stream still connected, no `dropped`, no pending `session_invalidated`). Any disconnect or capability gap revokes coverage until the next ready frame — there is no client-side grace window.
 - **Parsing**: handled by the generated SDK (`@memohai/sdk` `sse.get`); wrappers live in `composables/api/useChat.message-api.ts`.
 - **Retry**: `useRetryingStream` composable drives reconnection with exponential backoff.
 - There is no per-session SSE. A session's messages and run state come from the session runtime over the WebSocket, so that every subscriber of a session — this tab, another tab, another device — is reading the same projection instead of each building its own.

@@ -71,8 +71,12 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	// propagate within one reconnect window.
 	sub, cancel := h.messageEvents.Subscribe(botID, sessionMessageStreamBuffer)
 	defer cancel()
+	// Declare coverage only when this handler can actually emit every
+	// invalidation source: admission events flow through the runtime observer,
+	// delete-history events flow through messagePublisher. A Subscriber that
+	// lacks Publish must not leave clients trusting deletions they never hear.
 	if err := writeSSEJSON(writer, flusher, map[string]any{
-		"type": "activity_ready", "cache_invalidation": h.activityInvalidationSupported,
+		"type": "activity_ready", "cache_invalidation": h.activityInvalidationSupported && h.messagePublisher != nil,
 		// Older clients treat unknown types as session_created and read this id.
 		"session_id": "",
 	}); err != nil {

@@ -1243,9 +1243,10 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 	if !ctrl.completeAdmissionForAbort() {
 		return RunHandle{}, Cursor{}, context.Canceled
 	}
-	// Runtime edits/retries replace visible content before their messages are
-	// persisted. Notify cached-view observers before the admitted run returns
-	// to its caller and starts generating output.
+	// Every admitted run — not only edits/retries — changes the visible
+	// projection before its messages are persisted (a plain user turn already
+	// commits visible content at admission). Notify cached-view observers
+	// before the admitted run returns to its caller and starts generating.
 	m.observeAdmission(botID, sessionID)
 	ctrl.markReady()
 	return handle, activated.cursor(), nil
