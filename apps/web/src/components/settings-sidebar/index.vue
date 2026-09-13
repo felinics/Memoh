@@ -114,18 +114,15 @@ import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  AudioLines,
   Box,
   ChartNoAxesColumn,
   ChevronLeft,
   CircleUserRound,
-  Globe,
   Info,
   Keyboard,
   MousePointer2,
   Store,
   Users,
-  Video,
 } from 'lucide-vue-next'
 import AppearanceIcon from './appearance-icon.vue'
 import { NavItem } from '@felinic/ui'
@@ -243,6 +240,8 @@ function isItemActive(name: string): boolean {
   if (name === 'supermarket') {
     return route.path.startsWith('/settings/supermarket')
   }
+  // The provider family's four scopes all live ON the 'providers' route
+  // (?tab=), so the plain name check below already covers every scope.
   return route.name === name
 }
 
@@ -264,9 +263,9 @@ function filterItems(items: NavItem[]): NavItem[] {
 // Four groups, ordered by what the user came here to do: the things they own
 // (bots, computers, the market they install from), the service providers those
 // things draw on, the org-level view (who is in it, what it consumes), and
-// their own preferences. `providers`/`memory` sit with search/voice/video
-// because all six are the same page: a provider gallery you configure once and
-// then pick from inside a bot — splitting them across groups only hid that.
+// their own preferences. `providers` is the single entry to the whole provider
+// family — web search / voice / video live behind it, navigated by the
+// in-page provider-scope-tabs rail (see lib/provider-scopes.ts).
 // Groups that end up empty after filtering drop out entirely.
 const navGroups = computed<NavGroup[]>(() => [
   {
@@ -282,9 +281,6 @@ const navGroups = computed<NavGroup[]>(() => [
     label: t('sidebar.group.capabilities'),
     items: [
       { title: t('sidebar.providers'), name: 'providers', icon: Box },
-      { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
-      { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
-      { title: t('sidebar.video'), name: 'video', icon: Video },
     ],
   },
   {
