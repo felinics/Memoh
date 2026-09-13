@@ -1652,7 +1652,7 @@ func toMessageFromCreate(row sqlc.CreateMessageRow) Message {
 }
 
 func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
-	return toMessageFieldsWithMetadata(
+	message := toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
 		createArg.SessionID,
@@ -1674,10 +1674,13 @@ func toMessageFromCreateWithHistoryTurn(row sqlc.CreateMessageWithHistoryTurnRow
 		row.CreatedAt,
 		metadata,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	message.TurnPosition = int8Ptr(row.TurnPosition)
+	return message
 }
 
 func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHistoryTurnByRequestAndBindRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {
-	return toMessageFieldsWithMetadata(
+	message := toMessageFieldsWithMetadata(
 		row.ID,
 		createArg.BotID,
 		createArg.SessionID,
@@ -1699,6 +1702,9 @@ func toMessageFromCreateInHistoryTurnByRequestAndBind(row sqlc.CreateMessageInHi
 		row.CreatedAt,
 		metadata,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	message.TurnPosition = int8Ptr(row.TurnPosition)
+	return message
 }
 
 func toMessageFromToolTailRound(row sqlc.CreateToolTailRoundRow, createArg sqlc.CreateMessageParams, metadata map[string]any) Message {

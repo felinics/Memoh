@@ -208,11 +208,15 @@ inserted_message AS (
   FROM turn_slot
   RETURNING
     id,
-    created_at
+    created_at,
+    turn_id,
+    turn_position
 )
 SELECT
   inserted_message.id,
-  inserted_message.created_at
+  inserted_message.created_at,
+  inserted_message.turn_id,
+  inserted_message.turn_position
 FROM inserted_message;
 
 -- name: CreateMessageInHistoryTurnByRequest :one
@@ -427,11 +431,15 @@ inserted AS (
   RETURNING
     id,
     role,
-    created_at
+    created_at,
+    turn_id,
+    turn_position
 )
 SELECT
   inserted.id,
-  inserted.created_at
+  inserted.created_at,
+  inserted.turn_id,
+  inserted.turn_position
 FROM inserted
 JOIN target ON true;
 

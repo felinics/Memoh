@@ -1254,11 +1254,15 @@ inserted AS (
   RETURNING
     id,
     role,
-    created_at
+    created_at,
+    turn_id,
+    turn_position
 )
 SELECT
   inserted.id,
-  inserted.created_at
+  inserted.created_at,
+  inserted.turn_id,
+  inserted.turn_position
 FROM inserted
 JOIN target ON true
 `
@@ -1284,8 +1288,10 @@ type CreateMessageInHistoryTurnByRequestAndBindParams struct {
 }
 
 type CreateMessageInHistoryTurnByRequestAndBindRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID           pgtype.UUID        `json:"id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	TurnID       pgtype.UUID        `json:"turn_id"`
+	TurnPosition pgtype.Int8        `json:"turn_position"`
 }
 
 func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context, arg CreateMessageInHistoryTurnByRequestAndBindParams) (CreateMessageInHistoryTurnByRequestAndBindRow, error) {
@@ -1309,7 +1315,12 @@ func (q *Queries) CreateMessageInHistoryTurnByRequestAndBind(ctx context.Context
 		arg.RunID,
 	)
 	var i CreateMessageInHistoryTurnByRequestAndBindRow
-	err := row.Scan(&i.ID, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.TurnID,
+		&i.TurnPosition,
+	)
 	return i, err
 }
 
@@ -1377,11 +1388,15 @@ inserted_message AS (
   FROM turn_slot
   RETURNING
     id,
-    created_at
+    created_at,
+    turn_id,
+    turn_position
 )
 SELECT
   inserted_message.id,
-  inserted_message.created_at
+  inserted_message.created_at,
+  inserted_message.turn_id,
+  inserted_message.turn_position
 FROM inserted_message
 `
 
@@ -1409,8 +1424,10 @@ type CreateMessageWithHistoryTurnParams struct {
 }
 
 type CreateMessageWithHistoryTurnRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID           pgtype.UUID        `json:"id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	TurnID       pgtype.UUID        `json:"turn_id"`
+	TurnPosition pgtype.Int8        `json:"turn_position"`
 }
 
 // Writes the request message of a turn.
@@ -1445,7 +1462,12 @@ func (q *Queries) CreateMessageWithHistoryTurn(ctx context.Context, arg CreateMe
 		arg.TurnMessageSeq,
 	)
 	var i CreateMessageWithHistoryTurnRow
-	err := row.Scan(&i.ID, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.TurnID,
+		&i.TurnPosition,
+	)
 	return i, err
 }
 
