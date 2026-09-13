@@ -1003,10 +1003,52 @@
                          loadingMessages). Split onto two elements, the two
                          opacity systems compound instead of fight: hidden
                          stays hidden, while a VISIBLE disabled button still
-                         dims as designed. -->
+                         dims as designed. The mic itself is only shelved
+                         (voiceInputEnabled, see script): its wrapper stays
+                         here, v-if'd out of the tree, until the default
+                         transcription model lands. -->
+                    <!-- Inactive stand-in while voice input is shelved: the
+                         send circle's grayed self — the same primary fill the
+                         mic wore, dimmed by the design system's disabled
+                         opacity-40, carrying the send glyph so activation
+                         reads as the SAME button waking up (it scales down
+                         while brand send springs in on the original
+                         cross-fade timing). `disabled` is safe here BECAUSE
+                         visibility lives on the wrapper: the button's own
+                         dimming never fights the fade. Delete it when
+                         voiceInputEnabled flips on. -->
                     <div
+                      v-if="!voiceInputEnabled"
                       class="absolute inset-0 transition-[opacity,scale] duration-[188ms] ease-[ease] motion-reduce:transition-none"
-                      :class="micVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-70 opacity-0'"
+                      :class="inactiveSlotVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-70 opacity-0'"
+                    >
+                      <Button
+                        type="button"
+                        variant="primary"
+                        shape="circle"
+                        disabled
+                        aria-hidden="true"
+                        class="size-full"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          class="size-[18px] max-md:size-5"
+                          aria-hidden="true"
+                        >
+                          <path d="M12 19 V5.75" />
+                          <path d="M6.5 10.5 L12 5 L17.5 10.5" />
+                        </svg>
+                      </Button>
+                    </div>
+                    <div
+                      v-if="voiceInputEnabled"
+                      class="absolute inset-0 transition-[opacity,scale] duration-[188ms] ease-[ease] motion-reduce:transition-none"
+                      :class="inactiveSlotVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-70 opacity-0'"
                     >
                       <Button
                         type="button"
@@ -3202,17 +3244,29 @@ useUnfocusedComposerInput({
 
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)
 
-// Whether the trailing slot shows the send button (vs. mic — see micVisible
-// just below, its exact complement). Streaming always wins the slot for stop,
-// same as before; unlike the old ring-era rule this no longer special-cases
-// ACP, because mic — not a dimmed disabled send — is what now fills the slot
-// on empty input in EVERY mode.
+// TODO(voice-input): shelved until a default transcription model ships —
+// today the mic dead-ends users into a settings detour. The whole path (mic
+// button, MediaRecorder/transcription plumbing, the mic⇄send cross-fade)
+// stays in place behind this flag; a disabled send-styled placeholder holds
+// the inactive slot meanwhile. Once the default model lands, open an issue
+// to restore voice input: flip this to true and delete the placeholder.
+const voiceInputEnabled = false
+
+// Whether the trailing slot shows the send button (vs. its inactive
+// occupant — see inactiveSlotVisible just below, its exact complement).
+// Streaming always wins the slot for stop, same as before; unlike the old
+// ring-era rule this no longer special-cases ACP: the inactive occupant —
+// not a dimmed disabled send — is what fills the slot on empty input in
+// EVERY mode (the mic when voice input is on, a look-alike placeholder while
+// it's shelved).
 const sendButtonVisible = computed(() => showSend.value || streaming.value)
 
-// Mic owns the trailing slot whenever send doesn't: nothing to send is
-// exactly when voice input is the useful affordance there. Exact complement
-// of sendButtonVisible so the two can never both show (or both hide).
-const micVisible = computed(() => !sendButtonVisible.value)
+// The slot's inactive occupant: a grayed send stand-in while voice input is
+// shelved, the mic itself once voiceInputEnabled flips back on (nothing to
+// send is exactly when voice input is the useful affordance there). Exact
+// complement of sendButtonVisible so the two can never both show (or both
+// hide).
+const inactiveSlotVisible = computed(() => !sendButtonVisible.value)
 
 // Voice input: MediaRecorder → the bot's configured transcription model →
 // transcript appended into the draft. The recorder/stream live outside
