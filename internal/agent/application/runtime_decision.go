@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -284,6 +285,11 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			Input:       committed.request.Input,
 			Metadata:    userinput.DeferredMetadata(committed.request),
 		})
+		if committed.isExternalAgent || committed.ackOnly {
+			defer runCancel()
+			s.ackInlineRuntimeDecision(runCtx, command)
+			return nil
+		}
 		go func() {
 			defer runCancel()
 			s.continueRuntimeDecision(runCtx, command, func(
@@ -329,6 +335,11 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 			Input:      committed.request.ToolInput,
 			Metadata:   approvalResultMetadata(committed.request),
 		})
+		if committed.isExternalAgent || committed.ackOnly {
+			defer runCancel()
+			s.ackInlineRuntimeDecision(runCtx, command)
+			return nil
+		}
 		go func() {
 			defer runCancel()
 			s.continueRuntimeDecision(runCtx, command, func(
@@ -343,6 +354,20 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 	default:
 		runCancel()
 		return errors.New("unsupported runtime decision command")
+	}
+}
+
+// Inline runtimes consume the committed answer inside their original run.
+// Close only this command's output; synthetic agent start/end events or a
+// deferred continuation would race the original producer's lifecycle.
+func (s *Service) ackInlineRuntimeDecision(ctx context.Context, command sessionruntime.Command) {
+	ackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.decisionRuntime.PublishDecisionOutput(ackCtx, command, 1, nil); err != nil && s.logger != nil {
+		// The answer is already durable. An output transport failure must not
+		// fail the independently running producer or undo the accepted answer.
+		s.logger.Warn("close inline decision output failed", slog.Any("error", err),
+			slog.String("run_id", command.RunID), slog.String("decision_id", command.TargetID))
 	}
 }
 
