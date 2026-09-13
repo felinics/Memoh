@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,8 +16,10 @@ import (
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 )
@@ -23,18 +28,16 @@ const (
 	// maxLineBytes bounds one NDJSON line from the CLI; large tool results
 	// ride inside, so the ceiling is generous.
 	maxLineBytes = 32 * 1024 * 1024
-	// interruptSettleTimeout bounds how long an interrupted turn may take to
-	// deliver its result before the process is torn down.
-	interruptSettleTimeout = 10 * time.Second
 )
 
-// turnRunner drives one CLI process through one turn.
+// turnRunner drives one Memoh run, including native turns started by steering.
 type turnRunner struct {
-	input    external.PromptInput
-	approval approval.FlowService
-	waiter   func(approvalID string) func()
-	logger   *slog.Logger
-	proc     cliProcess
+	input     external.PromptInput
+	approval  approval.FlowService
+	waiter    func(approvalID string) func()
+	logger    *slog.Logger
+	proc      cliProcess
+	userInput userinput.FlowService
 
 	// ctx is the turn-scoped context bounding approval decisions.
 	ctx    context.Context
@@ -45,22 +48,44 @@ type turnRunner struct {
 	// It runs on the read loop and must return quickly.
 	onCLIVersion func(ctx context.Context, version string)
 
-	writeMu sync.Mutex
-	nextID  atomic.Uint64
+	writeMu      sync.Mutex
+	submissionMu sync.Mutex
+	nextID       atomic.Uint64
 
-	done chan struct{}
+	done     chan struct{}
+	readDone chan struct{}
 
 	mu              sync.Mutex
 	closed          bool
 	events          []event.StreamEvent
 	assistantTxt    strings.Builder
+	streamedText    strings.Builder // deltas for the current native assistant message
+	turnHasText     bool
 	sessionID       string
-	cliVersion      string
 	result          *inboundMessage
-	pendingCtrl     map[string]chan json.RawMessage
+	pendingCtrl     map[string]chan controlResult
 	inboundCancels  map[string]context.CancelFunc
 	memohMCPCallIDs map[string]struct{}
 	doneOnce        sync.Once
+	permissionMode  string
+	runtimeMetadata map[string]any
+	protocolErr     error
+	// exitErr records a process teardown failure (non-zero exit, transport
+	// loss, or no exit after stdin EOF). It never changes the protocol
+	// outcome the CLI already reported; it only gates checkpoint staging and
+	// explains a turn that ended without a result.
+	exitErr         error
+	compactBoundary bool
+	compactFailed   bool
+	ready           chan struct{}
+	readyOnce       sync.Once
+	steerSupported  bool
+	steers          map[string]*pendingSteer
+	awaitingResult  bool
+	ending          bool
+	usage           resultUsage
+	hasUsage        bool
+	resultIDs       map[string]struct{}
 }
 
 func newTurnRunner(parent context.Context, input external.PromptInput, proc cliProcess, approvalSvc approval.FlowService, waiter func(string) func(), logger *slog.Logger) *turnRunner {
@@ -74,9 +99,13 @@ func newTurnRunner(parent context.Context, input external.PromptInput, proc cliP
 		ctx:             ctx,
 		cancel:          cancel,
 		done:            make(chan struct{}),
-		pendingCtrl:     map[string]chan json.RawMessage{},
+		readDone:        make(chan struct{}),
+		pendingCtrl:     map[string]chan controlResult{},
 		inboundCancels:  map[string]context.CancelFunc{},
 		memohMCPCallIDs: map[string]struct{}{},
+		runtimeMetadata: map[string]any{},
+		ready:           make(chan struct{}), steers: map[string]*pendingSteer{},
+		resultIDs: map[string]struct{}{},
 	}
 }
 
@@ -113,29 +142,74 @@ func (t *turnRunner) writeLine(line []byte) error {
 	return err
 }
 
-// sendControl issues a Memoh → CLI control request and returns the pending
-// response channel.
-func (t *turnRunner) sendControl(subtype string, extra map[string]any) (chan json.RawMessage, string, error) {
-	requestID := "memoh-" + strconv.FormatUint(t.nextID.Add(1), 10)
-	ch := make(chan json.RawMessage, 1)
-	t.mu.Lock()
-	t.pendingCtrl[requestID] = ch
-	t.mu.Unlock()
-	line, err := controlRequestLine(requestID, subtype, extra)
+type controlResult struct {
+	response json.RawMessage
+	err      error
+}
+
+type controlRejection struct{ diagnostic string }
+
+func (e *controlRejection) Error() string { return e.diagnostic }
+
+// callControl bounds every handshake and removes abandoned waiters. Wire
+// errors remain private diagnostics and are mapped at the application boundary.
+func (t *turnRunner) callControl(ctx context.Context, subtype string, extra map[string]any) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	id := "memoh-" + strconv.FormatUint(t.nextID.Add(1), 10)
+	line, err := controlRequestLine(id, subtype, extra)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	if err := t.writeLine(line); err != nil {
+	ch := make(chan controlResult, 1)
+	t.mu.Lock()
+	t.pendingCtrl[id] = ch
+	t.mu.Unlock()
+	defer func() {
 		t.mu.Lock()
-		delete(t.pendingCtrl, requestID)
+		delete(t.pendingCtrl, id)
 		t.mu.Unlock()
-		return nil, "", err
+	}()
+	if err := t.writeLine(line); err != nil {
+		return nil, err
 	}
-	return ch, requestID, nil
+	select {
+	case result := <-ch:
+		return result.response, result.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-t.ctx.Done():
+		return nil, t.ctx.Err()
+	case <-t.proc.Done():
+		return nil, t.processError(subtype)
+	case <-t.done:
+		return nil, t.processError(subtype)
+	}
+}
+
+func (t *turnRunner) processError(operation string) error {
+	t.mu.Lock()
+	protocolErr := t.protocolErr
+	t.mu.Unlock()
+	return errors.Join(
+		fmt.Errorf("claude %s: stream ended; stderr: %s", operation, t.proc.StderrTail()),
+		t.proc.Err(), protocolErr,
+	)
+}
+
+func (t *turnRunner) getSettings(ctx context.Context) (settingsResponse, error) {
+	raw, err := t.callControl(ctx, "get_settings", nil)
+	if err != nil {
+		return settingsResponse{}, err
+	}
+	var settings settingsResponse
+	err = json.Unmarshal(raw, &settings)
+	return settings, err
 }
 
 // readLoop consumes the CLI's NDJSON stream until the process exits.
 func (t *turnRunner) readLoop() {
+	defer close(t.readDone)
 	scanner := bufio.NewScanner(t.proc)
 	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
 	for scanner.Scan() {
@@ -151,17 +225,80 @@ func (t *turnRunner) readLoop() {
 		}
 		t.handleMessage(msg)
 	}
+	if err := scanner.Err(); err != nil {
+		t.observeExit(err)
+	}
 	t.finish()
 }
 
 func (t *turnRunner) handleMessage(msg *inboundMessage) {
+	t.mu.Lock()
+	closed := t.closed
+	t.mu.Unlock()
+	if closed {
+		return
+	}
 	switch msg.Type {
+	case "command_lifecycle":
+		t.handleCommandLifecycle(msg)
+	case "tool_progress":
+		if msg.ParentToolUseID == nil && msg.ToolUseID != "" && !t.isMemohMCPWrapper(msg.ToolUseID, msg.ToolName) {
+			t.emit(event.StreamEvent{
+				Type: event.ToolCallMetadata, ToolCallID: msg.ToolUseID, ToolName: canonicalDisplayToolName(msg.ToolName),
+				Metadata: map[string]any{"execution_progress": map[string]any{"elapsed_time_seconds": msg.ElapsedTimeSeconds}},
+			})
+		}
 	case messageTypeSystem:
+		switch msg.Subtype {
+		case "status":
+			code := ""
+			if msg.Status != nil && *msg.Status == "compacting" {
+				code = "compacting"
+			}
+			t.emit(event.StreamEvent{Type: event.RuntimeStatus, Code: code})
+		case "api_retry":
+			t.emit(event.StreamEvent{Type: event.RuntimeStatus, Code: "api_retry", Metadata: map[string]any{
+				"attempt": strconv.Itoa(msg.Attempt), "max_retries": strconv.Itoa(msg.MaxRetries),
+				"seconds": strconv.Itoa((msg.RetryDelayMS + 999) / 1000),
+			}})
+		}
+		if msg.Subtype == "commands_changed" {
+			// This is a full replacement, including an empty list after removal.
+			t.mu.Lock()
+			t.runtimeMetadata["claude_commands"] = msg.Commands
+			t.mu.Unlock()
+		}
+		if msg.Subtype == "local_command_output" && msg.Content != "" {
+			// Command receipts keep their own identity in the transcript; they
+			// never join the model prose that result.result may replace.
+			t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: msg.Content})
+		}
+		if msg.Subtype == "compact_boundary" && msg.CompactMetadata != nil && msg.CompactMetadata.Trigger == "manual" {
+			t.mu.Lock()
+			t.compactBoundary = true
+			t.mu.Unlock()
+		}
+		if msg.CompactResult == "failed" {
+			t.mu.Lock()
+			t.compactFailed = true
+			t.mu.Unlock()
+		}
+		t.observePermissionMode(msg.PermissionMode)
 		if msg.Subtype == "init" {
 			t.mu.Lock()
+			t.steerSupported = slices.Contains(msg.Capabilities, "msg_lifecycle_v1") && slices.Contains(msg.Capabilities, "interrupt_cancel_queued_v1")
+			if msg.Model != "" {
+				t.runtimeMetadata["claude_model"] = msg.Model
+			}
+			if msg.Skills != nil {
+				t.runtimeMetadata["claude_skills"] = msg.Skills
+			}
+			if msg.MCPServers != nil {
+				t.runtimeMetadata["claude_mcp_servers"] = msg.MCPServers
+			}
 			t.sessionID = msg.SessionID
-			t.cliVersion = msg.ClaudeCodeVersion
 			t.mu.Unlock()
+			t.readyOnce.Do(func() { close(t.ready) })
 			if msg.ClaudeCodeVersion != "" && msg.ClaudeCodeVersion != PinnedCLIVersion {
 				t.logger.Warn("claude CLI version differs from the pinned wire contract",
 					slog.String("cli_version", msg.ClaudeCodeVersion), slog.String("pinned", PinnedCLIVersion))
@@ -174,9 +311,19 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		if msg.ParentToolUseID != nil {
 			return // subagent traffic surfaces through its Task tool events
 		}
+		if msg.Error != "" {
+			// API diagnostics are not model prose. The native result owns failure
+			// settlement; an error frame may be followed by a successful recovery.
+			t.logger.Warn("claude API error", slog.String("code", msg.Error), slog.String("message", truncateForLog(msg.Message)))
+			return
+		}
 		chat, ok := decodeChatMessage(msg.Message)
 		if !ok {
 			return
+		}
+		streamed := t.streamedText.String()
+		if msg.LocalCommandSource == "" {
+			t.streamedText.Reset()
 		}
 		for _, block := range chat.Content {
 			switch block.Type {
@@ -191,9 +338,19 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 				toolName, input := canonicalDisplayToolCall(block.Name, input)
 				t.emit(event.StreamEvent{Type: event.ToolCallStart, ToolCallID: block.ID, ToolName: toolName, Input: input})
 			case "text":
-				t.mu.Lock()
-				t.assistantTxt.WriteString(block.Text)
-				t.mu.Unlock()
+				if msg.LocalCommandSource != "" {
+					t.emit(event.StreamEvent{Type: event.CommandOutput, ToolName: t.input.Command, Delta: block.Text})
+					continue
+				}
+				// Complete each native message at its own boundary. A full
+				// assistant reply may arrive without deltas (or after a partial
+				// stream); normalize the missing text onto the same event path.
+				if strings.HasPrefix(streamed, block.Text) {
+					streamed = strings.TrimPrefix(streamed, block.Text)
+				} else {
+					t.emitModelText(strings.TrimPrefix(block.Text, streamed))
+					streamed = ""
+				}
 			}
 		}
 	case messageTypeUser:
@@ -229,14 +386,17 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		if err := json.Unmarshal(msg.Event, &ev); err != nil {
 			return
 		}
+		if ev.Type == "message_start" {
+			t.streamedText.Reset()
+			t.emit(event.StreamEvent{Type: event.RuntimeStatus})
+		}
 		if ev.Type != "content_block_delta" {
 			return
 		}
 		switch ev.Delta.Type {
 		case "text_delta":
-			if ev.Delta.Text != "" && strings.TrimSpace(ev.Delta.Text) != noResponseRequested {
-				t.emit(event.StreamEvent{Type: event.TextDelta, Delta: ev.Delta.Text})
-			}
+			t.streamedText.WriteString(ev.Delta.Text)
+			t.emitModelText(ev.Delta.Text)
 		case "thinking_delta":
 			if ev.Delta.Thinking != "" {
 				t.emit(event.StreamEvent{Type: event.ReasoningDelta, Delta: ev.Delta.Thinking})
@@ -244,9 +404,37 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		}
 	case messageTypeResult:
 		t.mu.Lock()
+		if msg.UUID != "" {
+			if _, exists := t.resultIDs[msg.UUID]; exists {
+				t.mu.Unlock()
+				return
+			}
+			t.resultIDs[msg.UUID] = struct{}{}
+		}
 		t.result = msg
+		t.awaitingResult = false
+		if msg.Usage != nil {
+			t.hasUsage = true
+			t.usage.InputTokens += msg.Usage.InputTokens
+			t.usage.OutputTokens += msg.Usage.OutputTokens
+			t.usage.CacheReadInputTokens += msg.Usage.CacheReadInputTokens
+			t.usage.CacheCreationInputTokens += msg.Usage.CacheCreationInputTokens
+			// Local commands can report zero usage without a model request.
+			// Keep the last observed model usage in that case.
+			if t.usage != (resultUsage{}) {
+				t.runtimeMetadata["claude_usage"] = t.usage
+			}
+		}
+		hasText := t.turnHasText
 		t.mu.Unlock()
-		t.finish()
+		if !hasText && !msg.IsError {
+			t.emitModelText(msg.Result)
+		}
+		t.mu.Lock()
+		t.turnHasText = false
+		t.mu.Unlock()
+		t.streamedText.Reset()
+		t.maybeFinishResult()
 	case messageTypeControlRequest:
 		var payload controlRequestPayload
 		if err := json.Unmarshal(msg.Request, &payload); err != nil {
@@ -254,6 +442,12 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 			return
 		}
 		switch payload.Subtype {
+		case "elicitation":
+			requestCtx, done := t.beginInboundControl(msg.RequestID)
+			go func() {
+				defer done()
+				t.handleElicitation(requestCtx, msg.RequestID, msg.Request)
+			}()
 		case "can_use_tool":
 			requestCtx, done := t.beginInboundControl(msg.RequestID)
 			go func() {
@@ -281,7 +475,11 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		delete(t.pendingCtrl, envelope.RequestID)
 		t.mu.Unlock()
 		if ch != nil {
-			ch <- envelope.Response
+			result := controlResult{response: envelope.Response}
+			if envelope.Subtype != "success" {
+				result.err = &controlRejection{diagnostic: fmt.Sprintf("claude control %s: %s", envelope.Subtype, envelope.Error)}
+			}
+			ch <- result
 		}
 	}
 }
@@ -334,11 +532,42 @@ func (t *turnRunner) respondControlError(requestID, message string) {
 // handleCanUseTool routes one permission callback through the Memoh approval
 // flow. Runs on its own goroutine, bounded by the turn-scoped context.
 func (t *turnRunner) handleCanUseTool(ctx context.Context, requestID string, payload *controlRequestPayload) {
+	if payload.ToolName == "AskUserQuestion" {
+		t.answerQuestions(ctx, requestID, payload)
+		return
+	}
+	if t.isMemohMCPWrapper(payload.ToolUseID, payload.ToolName) {
+		// Memoh tools enforce Memoh's own approval rules inside the tool
+		// gateway when they execute, whatever Claude's permission mode is.
+		// Claude's question about the wrapper would only add a second card.
+		line, err := permissionAllowResponse(requestID, payload.Input, payload.ToolUseID)
+		if err != nil {
+			t.respondControlError(requestID, "memoh could not encode the decision")
+			return
+		}
+		_ = t.writeLine(line)
+		return
+	}
 	callID := strings.TrimSpace(payload.ToolUseID)
 	if callID == "" {
 		callID = requestID
 	}
-	result := t.decide(ctx, callID, canonicalPolicyToolName(payload.ToolName), payload.Input)
+	// Reuse the transcript's presentation mapping without changing the native
+	// input returned to Claude. Other requests use the existing permission card.
+	toolName, toolInput := canonicalDisplayToolCall(payload.ToolName, maps.Clone(payload.Input))
+	if _, ok := approval.OperationForTool(toolName); !ok {
+		raw, err := json.MarshalIndent(payload.Input, "", "  ")
+		if err != nil {
+			t.respondControlError(requestID, "memoh could not encode the permission request")
+			return
+		}
+		// The card is its own transcript entry. Under the real tool_use id the
+		// recorder would replace the tool call's arguments with the card body.
+		callID = "claude-permission-" + uuid.NewString()
+		toolName = "permission"
+		toolInput = map[string]any{"title": payload.ToolName, "request": string(raw), "request_lang": "json"}
+	}
+	result := t.decide(ctx, callID, toolName, toolInput)
 	if ctx.Err() != nil {
 		return
 	}
@@ -360,25 +589,6 @@ func (t *turnRunner) handleCanUseTool(ctx context.Context, requestID string, pay
 	_ = t.writeLine(line)
 }
 
-// canonicalPolicyToolName maps Claude Code CLI tool names onto the approval
-// policy's operation vocabulary (the same translation the codex driver does
-// with "exec"/"write"). Without it a CLI-native name like "Bash" matches no
-// policy operation and bypasses the bot's exec policy entirely. Names outside
-// the workspace surface keep their identity: non-workspace tools are not
-// policy-governed, matching the native runtime.
-func canonicalPolicyToolName(toolName string) string {
-	switch strings.ToLower(strings.TrimSpace(toolName)) {
-	case "bash":
-		return "exec"
-	case "write", "edit", "multiedit", "notebookedit":
-		return "write"
-	case "read", "glob", "grep":
-		return "read"
-	default:
-		return toolName
-	}
-}
-
 func canonicalDisplayToolName(toolName string) string {
 	name := strings.TrimSpace(toolName)
 	lower := strings.ToLower(name)
@@ -386,6 +596,8 @@ func canonicalDisplayToolName(toolName string) string {
 		return strings.TrimPrefix(lower, "mcp__"+memohMCPServerName+"__")
 	}
 	switch lower {
+	case "askuserquestion":
+		return userinput.ToolNameAskUser
 	case "bash":
 		return "exec"
 	case "write":
@@ -433,12 +645,16 @@ func renameDisplayInputField(fields map[string]any, from, to string) {
 	}
 }
 
-// decide runs one approval through policy and the interactive decision flow.
-func (t *turnRunner) decide(ctx context.Context, callID, toolName string, input map[string]any) approval.FlowResult {
+// decide forwards a native tool question to a user who holds the matching
+// workspace permission. Claude's own permission mode is the first and only
+// policy layer for Claude's native tools; Memoh's allow/ask/deny rules govern
+// Memoh-provided tools, which enforce them in the gateway. This mirrors the
+// Codex runtime, so neither external agent re-runs Memoh policy here.
+func (t *turnRunner) decide(ctx context.Context, callID, toolName string, input any) approval.FlowResult {
 	if t.approval == nil {
 		return approval.FlowResult{Status: approval.StatusRejected, DecisionReason: "approval service unavailable"}
 	}
-	result, err := approval.RunFlow(ctx, t.approval, approval.FlowRequest{
+	result, err := approval.RunRuntimeFlow(ctx, t.approval, approval.FlowRequest{
 		Input: approval.CreatePendingInput{
 			BotID:                        t.input.BotID,
 			SessionID:                    t.input.ThreadID,
@@ -482,19 +698,45 @@ func (t *turnRunner) emitApprovalRequest(req approval.Request) bool {
 	return true
 }
 
-// interrupt asks the CLI to stop the running turn.
-func (t *turnRunner) interrupt() {
-	//nolint:contextcheck // the turn context is cancelled; the interrupt must still go out
-	ch, _, err := t.sendControl("interrupt", nil)
-	if err != nil {
-		t.logger.Warn("claude interrupt send failed", slog.Any("error", err))
+// observeExit records how the process teardown failed after the turn settled.
+func (t *turnRunner) observeExit(err error) {
+	if err == nil {
 		return
 	}
-	select {
-	case <-ch:
-	case <-time.After(interruptSettleTimeout):
-	case <-t.proc.Done():
+	t.mu.Lock()
+	t.exitErr = errors.Join(t.exitErr, err)
+	t.mu.Unlock()
+	t.logger.Warn("claude CLI did not exit cleanly", slog.Any("error", err), slog.String("stderr", t.proc.StderrTail()))
+}
+
+// exitFailed reports whether the process teardown failed.
+func (t *turnRunner) exitFailed() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.exitErr != nil
+}
+
+// interrupt asks the CLI to stop the running turn.
+func (t *turnRunner) interrupt() {
+	// No response waiter: teardown waits for the native result and process exit.
+	line, err := controlRequestLine("memoh-interrupt", "interrupt", map[string]any{"cancel_queued": true})
+	if err == nil {
+		err = t.writeLine(line)
 	}
+	if err != nil {
+		t.logger.Warn("claude interrupt send failed", slog.Any("error", err))
+	}
+}
+
+func (t *turnRunner) emitModelText(text string) {
+	if text == "" || strings.TrimSpace(text) == noResponseRequested {
+		return
+	}
+	t.mu.Lock()
+	t.assistantTxt.WriteString(text)
+	t.turnHasText = true
+	t.mu.Unlock()
+	t.emit(event.StreamEvent{Type: event.TextDelta, Delta: text})
 }
 
 // buildResult assembles the durable outcome after the turn settled.
@@ -503,7 +745,7 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 	defer t.mu.Unlock()
 
 	finalText := t.assistantTxt.String()
-	if t.result != nil {
+	if t.result != nil && !t.result.IsError {
 		reported := strings.TrimSpace(t.result.Result)
 		if reported != "" && reported != noResponseRequested {
 			finalText = t.result.Result
@@ -512,12 +754,19 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 	if strings.TrimSpace(finalText) == noResponseRequested {
 		finalText = ""
 	}
-	out := external.PromptResult{
-		Output: withoutNoResponseSentinel(external.TranscriptFromEvents(t.events, finalText)),
-		Text:   finalText,
+	recorder := external.NewTranscriptRecorder(t.input.ToolOutputLimit)
+	var steerIDs []string
+	for _, ev := range t.events {
+		if ev.Type == steerInputEvent {
+			recorder.AddUser(ev.Delta)
+			steerIDs = append(steerIDs, ev.ToolCallID)
+		} else {
+			recorder.Add(ev)
+		}
 	}
-	if t.result != nil && t.result.Usage != nil {
-		usage := t.result.Usage
+	out := external.PromptResult{Output: withoutNoResponseSentinel(recorder.Messages(finalText)), Text: finalText, SteerInputIDs: steerIDs}
+	if t.hasUsage {
+		usage := t.usage
 		out.Usage = &sdk.Usage{
 			InputTokens:       usage.InputTokens,
 			OutputTokens:      usage.OutputTokens,
@@ -526,16 +775,34 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 		}
 	}
 	if t.sessionID != "" && t.sessionID != storedSessionID {
-		out.RuntimeMetadata = map[string]any{metadataSessionIDKey: t.sessionID}
+		t.runtimeMetadata[metadataSessionIDKey] = t.sessionID
+	}
+	if len(t.runtimeMetadata) > 0 {
+		out.RuntimeMetadata = maps.Clone(t.runtimeMetadata)
 	}
 
 	switch {
+	case t.protocolErr != nil:
+		out.StopReason = "control_error"
+		return out, t.protocolErr
+	case len(t.steers) > 0 && !t.ending:
+		out.StopReason = "process_exit"
+		return out, errors.New("claude exited with unsettled queued input")
+	case t.input.Command == "compact" && (!t.compactBoundary || t.compactFailed):
+		out.StopReason = "compaction_failed"
+		return out, errors.New("claude did not complete manual compaction")
 	case t.result == nil:
 		out.StopReason = "process_exit"
+		if t.exitErr != nil {
+			return out, fmt.Errorf("claude CLI exited without a result: %w: %s", t.exitErr, t.proc.StderrTail())
+		}
 		return out, fmt.Errorf("claude CLI exited without a result: %s", t.proc.StderrTail())
 	case t.result.IsError:
 		out.StopReason = t.result.Subtype
 		message := strings.TrimSpace(t.result.Result)
+		if message == "" {
+			message = strings.Join(t.result.Errors, "; ")
+		}
 		if message == "" {
 			message = "claude turn failed (" + t.result.Subtype + ")"
 		}
@@ -574,7 +841,7 @@ func withoutNoResponseSentinel(messages []sdk.Message) []sdk.Message {
 func truncateForLog(line []byte) string {
 	const limit = 512
 	if len(line) <= limit {
-		return string(line[:limit])
+		return string(line)
 	}
 	return string(line[:limit]) + "…"
 }

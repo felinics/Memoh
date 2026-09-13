@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
+	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
@@ -53,6 +56,7 @@ type Driver struct {
 	agents      *botagents.Service
 	credentials *agentcredential.Service
 	approval    ApprovalService
+	userInput   userinput.FlowService
 	stateStore  agentstate.SessionStateStore
 	toolGateway toolmount.Gateway
 	logger      *slog.Logger
@@ -85,6 +89,8 @@ func NewDriver(
 
 // RuntimeType implements external.Driver.
 func (*Driver) RuntimeType() string { return RuntimeType }
+
+func (d *Driver) SetUserInputService(service userinput.FlowService) { d.userInput = service }
 
 func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID string) (claudecfg.Config, error) {
 	agent, err := d.agents.Get(ctx, botID, botAgentID)
@@ -119,7 +125,10 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 
 // ModelCatalog returns the model vocabulary advertised by Claude Code's
 // control-channel initialize response under this Agent's actual configuration.
-func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (external.ModelCatalog, error) {
+func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalogRequest) (external.ModelCatalog, error) {
+	botID, botAgentID, projectPath := request.BotID, request.BotAgentID, request.ProjectPath
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	cfg, err := d.resolveAgentConfig(ctx, botID, botAgentID)
 	if err != nil {
 		return external.ModelCatalog{}, err
@@ -141,7 +150,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (ex
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	proc, err := startCLI(ctx, client, defaultProjectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg), launcher.Path)
+	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg), launcher.Path)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
@@ -156,24 +165,63 @@ func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (ex
 	turn.onCLIVersion = d.versionObserver(botID)
 	defer turn.close()
 	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
-	responseCh, _, err := turn.sendControl("initialize", nil)
+	raw, err := turn.callControl(ctx, "initialize", nil)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	var raw json.RawMessage
-	select {
-	case raw = <-responseCh:
-	case <-proc.Done():
-		return external.ModelCatalog{}, fmt.Errorf("claude initialize exited: %s", proc.StderrTail())
-	case <-ctx.Done():
-		return external.ModelCatalog{}, ctx.Err()
-	}
-	proc.CloseStdin()
 	var response initializeResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return external.ModelCatalog{}, fmt.Errorf("decode claude initialize response: %w", err)
 	}
-	return modelCatalogFromInitialize(cfg.Model, response), nil
+	catalog := modelCatalogFromInitialize(cfg.Model, response)
+	if request.ResolveDefaults {
+		// The CLI's applied settings resolve workspace/account defaults. They
+		// enrich the picker, but must not invalidate a usable native catalog.
+		settings, err := turn.getSettings(ctx)
+		if err != nil {
+			d.logger.Warn("claude model defaults unavailable", slog.Any("error", err))
+		} else {
+			catalog = modelCatalogFromInitialize(firstNonEmpty(cfg.Model, settings.Applied.Model), response)
+			if err := turn.resolveModelDefaults(ctx, &catalog, request.ModelID, settings); err != nil {
+				d.logger.Warn("claude selected model defaults unavailable", slog.Any("error", err))
+			}
+		}
+	}
+	proc.CloseStdin()
+	return catalog, nil
+}
+
+// Resolve only the selected model. Other models already carry initialize's
+// capabilities; switching through them adds no validation information.
+func (t *turnRunner) resolveModelDefaults(ctx context.Context, catalog *external.ModelCatalog, selected string, settings settingsResponse) error {
+	selected = firstNonEmpty(selected, catalog.ConfiguredModelID)
+	if selected == "" {
+		return nil
+	}
+	for i := range catalog.Models {
+		model := &catalog.Models[i]
+		if model.ID != selected && model.ResolvedModelID != selected {
+			continue
+		}
+		if model.ID != settings.Applied.Model && model.ResolvedModelID != settings.Applied.Model {
+			if _, err := t.callControl(ctx, "set_model", map[string]any{"model": model.ID}); err != nil {
+				return err
+			}
+			var err error
+			settings, err = t.getSettings(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		model.ResolvedModelID = firstNonEmpty(settings.Applied.Model, model.ResolvedModelID)
+		for _, effort := range model.ReasoningEfforts {
+			if effort.ID == settings.Applied.Effort {
+				model.DefaultReasoningEffort = effort.ID
+			}
+		}
+		break
+	}
+	return nil
 }
 
 func modelCatalogFromInitialize(configuredModel string, response initializeResponse) external.ModelCatalog {
@@ -222,12 +270,13 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 		isDefault := configuredModel == "" && !defaultAssigned && id == defaultModelID
 		defaultAssigned = defaultAssigned || isDefault
 		models = append(models, external.ModelOption{
-			ID:               id,
-			ResolvedModelID:  resolved,
-			Name:             firstNonEmpty(model.DisplayName, id),
-			Description:      strings.TrimSpace(model.Description),
-			Default:          isDefault,
-			ReasoningEfforts: efforts,
+			ID:                         id,
+			ResolvedModelID:            resolved,
+			Name:                       firstNonEmpty(model.DisplayName, id),
+			Description:                strings.TrimSpace(model.Description),
+			Default:                    isDefault,
+			ReasoningEfforts:           efforts,
+			UnavailablePermissionModes: unavailablePermissionModes(model),
 		})
 	}
 	if !configuredFound {
@@ -299,16 +348,49 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	turn := newTurnRunner(ctx, input, proc, d.approval, d.approval.RegisterWaiter, d.logger)
 	turn.onCLIVersion = d.versionObserver(input.BotID)
+	turn.userInput = d.userInput
 	defer turn.close()
 	go turn.readLoop() //nolint:contextcheck // turnRunner owns the control-channel lifetime
 	unregisterToolEvents := toolmount.RegisterTurnSink(d.toolGateway.Contexts, input.BotID, input.ThreadID, input.RunID, turn.emit)
 	defer unregisterToolEvents()
 
-	// The SDK opens with a control-channel initialize; mirror it so the CLI
-	// treats this client as control-capable before the first permission
-	// callback. The response lands in the pending map and needs no reader.
-	if _, _, err := turn.sendControl("initialize", nil); err != nil {
-		d.logger.Warn("claude initialize send failed", slog.Any("error", err))
+	// Do not send input until the CLI has accepted the host control contract.
+	initialized, err := turn.callControl(ctx, "initialize", nil)
+	if err != nil {
+		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+	}
+	var capabilities initializeResponse
+	if err := json.Unmarshal(initialized, &capabilities); err != nil {
+		return external.PromptResult{}, err
+	}
+	turn.mu.Lock()
+	turn.runtimeMetadata["claude_commands"] = capabilities.Commands
+	turn.mu.Unlock()
+	if input.Command != "" {
+		available := claudeTurnCommands(capabilities.Commands, nil)
+		if input.Command == "compact" {
+			available = capabilities.Commands
+		} else if !slices.ContainsFunc(available, func(command initializeCommand) bool { return command.Name == input.Command }) {
+			skills, err := turn.reloadSkillNames(ctx)
+			if err != nil {
+				return external.PromptResult{}, apperror.Wrap(apperror.CodeRuntimeControlFailed, err, nil)
+			}
+			available = claudeTurnCommands(capabilities.Commands, skills)
+		}
+		if !slices.ContainsFunc(available, func(command initializeCommand) bool { return command.Name == input.Command }) {
+			return external.PromptResult{}, external.ErrCommandUnavailable
+		}
+		input.Prompt = "/" + input.Command
+		if input.CommandArgs != "" {
+			input.Prompt += " " + input.CommandArgs
+		}
+		input.ContextMarkdown = ""
+	}
+	if err := turn.configureModes(ctx, cfg, capabilities.Models); err != nil {
+		if errors.Is(err, external.ErrModeUnavailable) {
+			return external.PromptResult{}, apperror.Wrap(apperror.CodeRuntimeControlModeUnavailable, err, nil)
+		}
+		return external.PromptResult{}, apperror.Wrap(apperror.CodeRuntimeControlFailed, err, nil)
 	}
 
 	content := buildUserContent(input)
@@ -319,15 +401,19 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err := turn.writeLine(line); err != nil {
 		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
+	stopSteering := turn.startSteering(ctx)
+	defer stopSteering()
 
+	drainTimeout := interruptGraceTimeout
 	select {
 	case <-turn.done:
 	case <-ctx.Done():
+		deadline := time.Now().Add(interruptGraceTimeout)
 		turn.interrupt()
 		// Grace window for the CLI to flush its result after the interrupt;
 		// a wedged process must not pin this turn (and the session's single
 		// active slot) forever, so terminate it when the window closes.
-		grace := time.NewTimer(interruptGraceTimeout)
+		grace := time.NewTimer(time.Until(deadline))
 		select {
 		case <-turn.done:
 		case <-proc.Done():
@@ -335,16 +421,33 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			_ = proc.Close()
 		}
 		grace.Stop()
+		drainTimeout = time.Until(deadline)
 	}
-	// End the input stream so the process exits cleanly.
-	proc.CloseStdin()
+	// End the input stream so the process exits cleanly. The CLI's durable
+	// writes may trail its result, so the teardown outcome is observed
+	// separately from the protocol outcome the CLI already reported.
+	stopSteering()
+	turn.observeExit(drainCLI(proc, drainTimeout))
+	// Process completion closes stdout; finish reading its buffered result and
+	// transport outcome before taking the immutable turn snapshot.
+	<-turn.readDone
+	turn.close()
 
 	result, resultErr := turn.buildResult(storedSessionID)
 	if resultErr == nil && result.TurnCompleted {
 		// A completed turn checkpoints regardless of a racing stop: the round
 		// commits (as succeeded or aborted-after-completion) either way, and
 		// its publication head must have a staged snapshot to point at.
-		result.Checkpoint = d.stageTurnCheckpoint(ctx, client, input, result)
+		// A teardown that timed out, lost transport, or exited non-zero
+		// leaves the transcript's completeness unknown; the round still
+		// commits, but its head publishes a reset instead of a snapshot.
+		if turn.exitFailed() {
+			d.logger.Warn("claude checkpoint skipped after an unclean exit; the round publishes a reset head",
+				slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID))
+			result.Checkpoint = external.CheckpointDeclined
+		} else {
+			result.Checkpoint = d.stageTurnCheckpoint(ctx, client, input, result)
+		}
 	}
 	if ctx.Err() != nil {
 		// The application layer distinguishes stop from failure by context
@@ -437,6 +540,9 @@ func cliArgs(cfg claudecfg.Config, input external.PromptInput, sessionID, mcpCon
 		"--include-partial-messages",
 		"--permission-prompt-tool", "stdio",
 	}
+	if firstNonEmpty(metadataString(input.RuntimeMetadata, "permission_mode"), cfg.PermissionMode) == "bypassPermissions" {
+		args = append(args, "--allow-dangerously-skip-permissions")
+	}
 	if model := firstNonEmpty(input.ModelID, cfg.Model); model != "" {
 		args = append(args, "--model", shellQuote(model))
 	}
@@ -460,6 +566,9 @@ func cliEnv(cfg claudecfg.Config) []string {
 		"HOME=" + defaultProjectPath,
 		"CLAUDE_CONFIG_DIR=" + configDir,
 		"CLAUDE_CODE_ENTRYPOINT=sdk-go",
+		// Both callers require a container workspace. Declare that existing
+		// isolation so the CLI accepts bypass mode when the container runs as root.
+		"IS_SANDBOX=1",
 	}
 	switch cfg.Auth {
 	case claudecfg.AuthAPIKey:

@@ -34,6 +34,10 @@ const (
 	// in the conversation (tools unavailable, an interaction declined).
 	// Code carries the machine-readable reason, Delta the human text.
 	RuntimeNotice StreamEventType = "runtime_notice"
+	// CommandOutput is native command output, separate from model prose.
+	CommandOutput StreamEventType = "command_output"
+	// RuntimeStatus replaces the current transient activity; an empty Code clears it.
+	RuntimeStatus StreamEventType = "runtime_status"
 	// StepEnd marks that every streamed part of one model step has been
 	// emitted. StepNumber carries the durable step index. It is a sequencing
 	// marker for the session runtime, carries no visible content, and is

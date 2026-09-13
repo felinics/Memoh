@@ -12,26 +12,26 @@ import (
 
 var _ external.Compactor = (*Driver)(nil)
 
-func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (map[string]any, error) {
+func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (external.CompactionResult, error) {
 	if metadataString(input.RuntimeMetadata, metadataThreadIDKey) == "" {
-		return nil, external.ErrThreadUnavailable
+		return external.CompactionResult{}, external.ErrThreadUnavailable
 	}
 	cfg, _, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID, true)
 	if err != nil {
-		return nil, err
+		return external.CompactionResult{}, err
 	}
 	srv, release, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
-		return nil, err
+		return external.CompactionResult{}, err
 	}
 	defer release()
 	if err := srv.ensureAuth(ctx, cfg); err != nil {
-		return nil, err
+		return external.CompactionResult{}, err
 	}
 	input.Command = "compact"
 	threadID, _, err := d.ensureThread(ctx, srv, cfg, input)
 	if err != nil {
-		return nil, err
+		return external.CompactionResult{}, err
 	}
 	// Compaction uses the runtime's turn lifecycle, but none of its transcript
 	// events become chat messages. The caller publishes operation state.
@@ -45,7 +45,8 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (map[s
 	defer turn.close()
 	srv.registerTurn(threadID, turn)
 	defer srv.unregisterTurn(threadID, turn)
-	return awaitCompaction(ctx, srv.conn, turn, srv.proc.Done(), func() { d.cancelOperation(srv, input, turn) })
+	metadata, err := awaitCompaction(ctx, srv.conn, turn, srv.proc.Done(), func() { d.cancelOperation(srv, input, turn) })
+	return external.CompactionResult{RuntimeMetadata: metadata}, err
 }
 
 // Acknowledgement only starts the operation; turn/completed owns its outcome.

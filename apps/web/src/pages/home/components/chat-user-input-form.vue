@@ -9,8 +9,24 @@
         :key="question.id"
         :class="questionIndex > 0 ? 'mt-3 border-t border-border-soft pt-3' : ''"
       >
+        <!-- Question text is verbatim (no markdown): runtimes phrase it freely
+             and "i<n" or "__init__" must survive. Only bare addresses become
+             links, so an MCP browser step stays actionable. -->
         <p class="whitespace-pre-wrap break-words px-3 py-1.5 text-label font-medium text-foreground">
-          {{ question.text }}
+          <template
+            v-for="(segment, segmentIndex) in splitTextLinks(question.text)"
+            :key="segmentIndex"
+          >
+            <a
+              v-if="segment.href"
+              :href="segment.href"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="break-all underline underline-offset-2"
+              @click="openWorkspaceLink($event, segment.href)"
+            >{{ segment.text }}</a>
+            <span v-else>{{ segment.text }}</span>
+          </template>
         </p>
         <div
           v-if="question.kind !== 'text' && question.options?.length"
@@ -99,6 +115,8 @@ import { Button, Input } from '@felinic/ui'
 import { Circle, CircleDot, Square, SquareCheck } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/store/chat-list'
+import { splitTextLinks } from '@/utils/text-links'
+import { useWorkspaceLink } from '@/composables/useWorkspaceLink'
 import type { UIUserInput, UIUserInputQuestion, WSUserInputAnswer } from '@/composables/api/useChat'
 import { useChatViewTarget } from '../composables/useChatViewContext'
 import ComposerCapsule from './composer-capsule.vue'
@@ -128,10 +146,14 @@ interface PendingUserInputDraft {
 
 const { t } = useI18n()
 const chatStore = useChatStore()
+const openWorkspaceLink = useWorkspaceLink()
 const chatViewTarget = useChatViewTarget()
 const drafts = ref<Record<string, PendingUserInputDraft>>({})
 
-const questions = computed(() => props.userInput.questions ?? [])
+const questions = computed(() => (props.userInput.questions ?? []).map(question => ({
+  ...question,
+  options: question.options?.map(option => ({ ...option, label: option.label_key ? t(option.label_key) : option.label })),
+})))
 const isSingle = computed(() => questions.value.length === 1)
 const singleQuestion = computed(() => (isSingle.value ? questions.value[0] ?? null : null))
 

@@ -1,7 +1,6 @@
 import { computed, type Ref } from 'vue'
 import { useQuery } from '@pinia/colada'
 import { useDocumentVisibility, useIntervalFn } from '@vueuse/core'
-import { useI18n } from 'vue-i18n'
 import {
   getBotsByBotIdAgentsByIdRuntimeControls,
   getBotsByBotIdSessionsBySessionIdRuntimeControls,
@@ -17,25 +16,24 @@ export function useRuntimeControls(options: {
   draftAgentId?: Ref<string>
   visible: Ref<boolean>
 }) {
-  const { locale } = useI18n()
   const visibility = useDocumentVisibility()
   const scope = computed(() => `${options.botId.value ?? ''}:${options.sessionId.value || options.draftAgentId?.value || ''}`)
   const enabled = () => !!options.botId.value && !!(options.sessionId.value || options.draftAgentId?.value) && options.visible.value && visibility.value === 'visible'
   const query = useQuery({
-    key: () => ['runtime-controls', options.botId.value ?? '', options.sessionId.value ?? '', options.draftAgentId?.value ?? '', locale.value],
+    key: () => ['runtime-controls', options.botId.value ?? '', options.sessionId.value ?? '', options.draftAgentId?.value ?? ''],
     enabled,
     query: async ({ signal }) => {
       const target = scope.value
       if (!options.sessionId.value) {
         const { data } = await getBotsByBotIdAgentsByIdRuntimeControls({
           path: { bot_id: options.botId.value!, id: options.draftAgentId!.value },
-          headers: { 'Accept-Language': locale.value }, signal, throwOnError: true,
+          signal, throwOnError: true,
         })
         return { target, controls: data }
       }
       const { data } = await getBotsByBotIdSessionsBySessionIdRuntimeControls({
         path: { bot_id: options.botId.value!, session_id: options.sessionId.value! },
-        headers: { 'Accept-Language': locale.value }, signal, throwOnError: true,
+        signal, throwOnError: true,
       })
       return { target, controls: data }
     },
@@ -72,7 +70,7 @@ export function useRuntimeControls(options: {
     const target = scope.value
     await patchBotsByBotIdSessionsBySessionIdRuntimeControlsMode({
       path: { bot_id: options.botId.value!, session_id: options.sessionId.value! },
-      body: { mode_id: modeId, mode_kind: modeKind }, headers: { 'Accept-Language': locale.value }, throwOnError: true,
+      body: { mode_id: modeId, mode_kind: modeKind }, throwOnError: true,
     })
     if (scope.value === target) await query.refetch()
   }
@@ -80,9 +78,9 @@ export function useRuntimeControls(options: {
   async function execute(command: string) {
     const { data } = await postBotsByBotIdSessionsBySessionIdRuntimeControlsCommands({
       path: { bot_id: options.botId.value!, session_id: options.sessionId.value! },
-      body: { command }, headers: { 'Accept-Language': locale.value }, throwOnError: true,
+      body: { command }, throwOnError: true,
     })
-    return data?.text ?? ''
+    return data ?? {}
   }
 
   async function controlGoal(action: 'pause' | 'clear') {

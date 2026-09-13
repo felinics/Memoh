@@ -2200,6 +2200,18 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Model whose effective defaults should be displayed",
+                        "name": "model_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace project path for runtime model settings",
+                        "name": "project_path",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -21338,6 +21350,9 @@ const docTemplate = `{
                     "description": "Diff is a UI-only unified diff attached to the tool call at execution\ntime (edit/write tools). It never reaches the model: rows persist it\nunder the diffs metadata key — on the assistant row (lifted out of\nproviderMetadata at store time) or, for the deferred-approval path, on\nthe tool message row — never inside the tool result.",
                     "type": "string"
                 },
+                "elapsed_time_seconds": {
+                    "type": "number"
+                },
                 "execution_location": {
                     "$ref": "#/definitions/conversation.UIExecutionLocation"
                 },
@@ -21378,6 +21393,8 @@ const docTemplate = `{
                 "tool",
                 "attachments",
                 "error",
+                "command",
+                "status",
                 "notice"
             ],
             "x-enum-varnames": [
@@ -21386,6 +21403,8 @@ const docTemplate = `{
                 "UIMessageTool",
                 "UIMessageAttachments",
                 "UIMessageError",
+                "UIMessageCommand",
+                "UIMessageStatus",
                 "UIMessageNotice"
             ]
         },
@@ -21882,6 +21901,10 @@ const docTemplate = `{
         "external.ModeState": {
             "type": "object",
             "properties": {
+                "apply_on_next_turn": {
+                    "description": "Direct runtimes save a preference and apply it when starting the next turn.",
+                    "type": "boolean"
+                },
                 "available_modes": {
                     "type": "array",
                     "items": {
@@ -21889,6 +21912,10 @@ const docTemplate = `{
                     }
                 },
                 "current_mode_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "description": "Kind distinguishes permission presets from arbitrary agent session modes.",
                     "type": "string"
                 },
                 "supported": {
@@ -21935,6 +21962,17 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/external.ReasoningEffortOption"
+                    }
+                },
+                "resolved_model_id": {
+                    "description": "ResolvedModelID preserves a runtime-advertised full model name for\nvalidation without duplicating its alias in the model picker.",
+                    "type": "string"
+                },
+                "unavailable_permission_modes": {
+                    "description": "IDs belong to this runtime's permission menu, not a shared preset enum.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
                     }
                 }
             }
@@ -22724,6 +22762,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "i18n_key": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -22738,6 +22779,7 @@ const docTemplate = `{
         "handlers.CommandActionResult": {
             "type": "object",
             "properties": {
+                "data": {},
                 "items": {
                     "type": "array",
                     "items": {
@@ -22747,7 +22789,13 @@ const docTemplate = `{
                 "kind": {
                     "type": "string"
                 },
+                "notice": {
+                    "type": "string"
+                },
                 "text": {
+                    "type": "string"
+                },
+                "text_key": {
                     "type": "string"
                 },
                 "title": {
@@ -23766,6 +23814,10 @@ const docTemplate = `{
         "handlers.RuntimeCommandResponse": {
             "type": "object",
             "properties": {
+                "data": {},
+                "notice": {
+                    "type": "string"
+                },
                 "text": {
                     "type": "string"
                 }
@@ -27678,6 +27730,10 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "i18n_key": {
+                    "description": "I18nKey identifies host-owned copy. Native descriptions take precedence.",
+                    "type": "string"
+                },
                 "input_hint": {
                     "type": "string"
                 },
@@ -27728,6 +27784,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "i18n_key": {
+                    "type": "string"
+                },
                 "icon": {
                     "description": "Icon is a presentation hint; clients may fall back for unknown values.",
                     "type": "string"
@@ -27747,6 +27806,10 @@ const docTemplate = `{
         "turn.RuntimeModeState": {
             "type": "object",
             "properties": {
+                "apply_on_next_turn": {
+                    "description": "Direct runtimes save a preference and apply it when starting the next turn.",
+                    "type": "boolean"
+                },
                 "available_modes": {
                     "type": "array",
                     "items": {
@@ -27754,6 +27817,10 @@ const docTemplate = `{
                     }
                 },
                 "current_mode_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "description": "Kind distinguishes permission presets from arbitrary agent session modes.",
                     "type": "string"
                 },
                 "supported": {
@@ -27797,6 +27864,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "label": {
+                    "type": "string"
+                },
+                "label_key": {
                     "type": "string"
                 }
             }

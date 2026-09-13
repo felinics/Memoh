@@ -5,7 +5,50 @@ import (
 	"encoding/json"
 	"log/slog"
 	"testing"
+
+	"github.com/felinics/memoh/internal/i18n"
 )
+
+func TestBrowserStepLabelsSurviveStorageAndTextReplies(t *testing.T) {
+	input, err := ElicitationURLInput("Confirm access", "https://example.com/confirm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := ParseAskUserPayload(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Serialized tool arguments cannot inherit the constructor's trusted keys.
+	wire, _ := json.Marshal(input)
+	var untrusted map[string]any
+	if err := json.Unmarshal(wire, &untrusted); err != nil {
+		t.Fatal(err)
+	}
+	optionInput := untrusted["questions"].([]any)[0].(map[string]any)["options"].([]any)[0].(map[string]any)
+	optionInput["label_key"] = "elicitation.cancel"
+	if _, err := ParseAskUserPayload(untrusted); err == nil {
+		t.Fatal("tool arguments were allowed to rewrite display labels")
+	}
+	raw, _ := json.Marshal(payload)
+	stored := PayloadFromStored(raw)
+	localized := stored.Localized(i18n.New("zh"))
+	label := localized.Questions[0].Options[0].Label
+	if label != "已完成" || stored.Questions[0].Options[0].LabelKey != "elicitation.done" || stored.Questions[0].Options[0].Label == label {
+		t.Fatalf("storage and presentation were conflated: %+v", stored)
+	}
+	state, invalid, _, err := advanceTextState(localized, TextInteractionState{}, label)
+	if err != nil || invalid || !state.Completed {
+		t.Fatalf("localized reply was not recognized: %+v, %v", state, err)
+	}
+	result, err := submittedResult(stored, state.Answers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	option := AnswersFromResult(result)[0].Selected[0]
+	if option.ID != "q1.o1" || option.LabelKey != "elicitation.done" {
+		t.Fatalf("answer lost its native identity or display key: %+v", option)
+	}
+}
 
 func TestStoredSelectAnswerPolicy(t *testing.T) {
 	for _, source := range []string{"", ProviderSourceACPMCP, ProviderSourceACPElicitation, ProviderSourceCodexElicitation, ProviderSourceCodexUserInput, "unknown"} {

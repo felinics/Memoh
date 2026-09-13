@@ -193,34 +193,22 @@ func (t *turnState) runMCPToolConsent(ctx context.Context, message string, meta 
 // user confirms, decline when they cancel.
 func (t *turnState) runURLElicitation(ctx context.Context, params *protocol.URLMcpServerElicitationRequestParams) protocol.McpServerElicitationRequestResponse {
 	decline := protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionDecline}
-	url := strings.TrimSpace(params.URL)
-	if url == "" {
+	input, err := userinput.ElicitationURLInput(params.Message, params.URL)
+	if err != nil {
 		return decline
 	}
-	text := strings.TrimSpace(params.Message)
-	if text == "" {
-		text = "The agent needs you to complete a step in your browser"
-	}
-	input := map[string]any{"questions": []map[string]any{{
-		"text": text + ": " + url,
-		"kind": userinput.QuestionKindSingleSelect,
-		"options": []map[string]any{
-			{"label": "Done", "description": "I completed the step"},
-			{"label": "Cancel", "description": "Do not continue"},
-		},
-	}}}
 	flow, ok := t.runElicitationFlow(ctx, input)
 	if !ok || flow.Status != userinput.StatusSubmitted {
 		return decline
 	}
 	answers := userinput.AnswersFromResult(flow.Result)
-	if len(answers) == 1 && len(answers[0].Selected) == 1 && answers[0].Selected[0].Label == "Done" {
+	if len(answers) == 1 && len(answers[0].Selected) == 1 && answers[0].Selected[0].ID == "q1.o1" {
 		return protocol.McpServerElicitationRequestResponse{Action: protocol.McpServerElicitationActionAccept}
 	}
 	return decline
 }
 
-func (t *turnState) runElicitationFlow(ctx context.Context, input map[string]any) (userinput.Request, bool) {
+func (t *turnState) runElicitationFlow(ctx context.Context, input any) (userinput.Request, bool) {
 	expiresAt := time.Now().Add(userinput.DefaultWaitTimeout + time.Minute)
 	flow, err := userinput.RunFlow(ctx, t.userInput, userinput.FlowRequest{
 		Input: userinput.CreatePendingInput{

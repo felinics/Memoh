@@ -34,6 +34,7 @@ type UIMessageStreamConverter struct {
 	nextID    int
 	text      *uiTextStreamState
 	reasoning *uiTextStreamState
+	status    *UIMessage
 	tools     map[string]*uiToolStreamState
 	emitted   []uiEmittedBlock
 }
@@ -58,6 +59,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		// block. IDs (c.nextID) keep advancing so re-emitted blocks stay unique.
 		c.text = nil
 		c.reasoning = nil
+		c.status = nil
 		c.tools = map[string]*uiToolStreamState{}
 		c.emitted = nil
 		return nil
@@ -65,6 +67,19 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 	case "text_start":
 		c.text = &uiTextStreamState{ID: c.allocBlockID(UIMessageText, "")}
 		return nil
+	case "command_output":
+		c.finalizeTextBlock()
+		return []UIMessage{{ID: c.allocBlockID(UIMessageCommand, ""), Type: UIMessageCommand, Name: event.ToolName, Content: event.Delta}}
+	case "runtime_status":
+		if c.status == nil {
+			if event.Code == "" {
+				return nil
+			}
+			c.status = &UIMessage{ID: c.allocBlockID(UIMessageStatus, ""), Type: UIMessageStatus}
+		}
+		c.status.Name = event.Code
+		c.status.Args = noticeArgsFromMetadata(event.Metadata)
+		return []UIMessage{*c.status}
 
 	case "text_delta":
 		if c.text == nil {
@@ -114,7 +129,23 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 			Args:    noticeArgsFromMetadata(event.Metadata),
 		}}
 
-	case "tool_call_start", "tool_call_input_start", "tool_call_metadata":
+	case "tool_call_metadata":
+		if state := c.findToolState(event.ToolCallID, event.ToolName); state != nil {
+			if event.Input != nil {
+				state.Message.Input = event.Input
+			}
+			if event.ToolName != "" {
+				state.Message.Name = event.ToolName
+			}
+			applyToolExecutionMetadata(&state.Message, event.Metadata)
+			return []UIMessage{cloneToolStreamMessage(state.Message)}
+		}
+		// A late heartbeat must not resurrect a completed tool.
+		if extractElapsedTimeMetadata(event.Metadata) != nil {
+			return nil
+		}
+		fallthrough
+	case "tool_call_start", "tool_call_input_start":
 		state := c.findToolState(event.ToolCallID, event.ToolName)
 		if state == nil {
 			state = &uiToolStreamState{
@@ -134,7 +165,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
-		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyToolExecutionMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolCallID); trimmed != "" {
 			state.Message.ToolCallID = trimmed
 			c.tools[trimmed] = state
@@ -164,7 +195,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
-		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyToolExecutionMetadata(&state.Message, event.Metadata)
 		return []UIMessage{cloneToolStreamMessage(state.Message)}
 
 	case "tool_approval_request":
@@ -186,7 +217,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
-		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyToolExecutionMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
 			state.Message.Name = trimmed
 		}
@@ -235,7 +266,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
-		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyToolExecutionMetadata(&state.Message, event.Metadata)
 		if trimmed := strings.TrimSpace(event.ToolName); trimmed != "" {
 			state.Message.Name = trimmed
 		}
@@ -278,7 +309,7 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 		if event.Input != nil {
 			state.Message.Input = event.Input
 		}
-		applyExecutionLocationMetadata(&state.Message, event.Metadata)
+		applyToolExecutionMetadata(&state.Message, event.Metadata)
 		applyDiffMetadata(&state.Message, event.Metadata)
 		applyToolResultToUIMessage(&state.Message, event.Output)
 		if state.Message.ToolCallID != "" && !isBackgroundToolStillRunning(state.Message) {
@@ -347,9 +378,6 @@ func (c *UIMessageStreamConverter) finalizeTextBlock() {
 func (c *UIMessageStreamConverter) ConvertTerminalMessages(raw json.RawMessage) []UIMessage {
 	c.finalizeTextBlock()
 	blocks := ConvertRawModelMessagesToUIAssistantMessages(raw)
-	if len(blocks) == 0 {
-		return nil
-	}
 	consumed := make([]bool, len(c.emitted))
 	for i := range blocks {
 		if id, ok := c.reuseEmittedBlockID(blocks[i].Type, blocks[i].ToolCallID, consumed); ok {
@@ -357,6 +385,10 @@ func (c *UIMessageStreamConverter) ConvertTerminalMessages(raw json.RawMessage) 
 			continue
 		}
 		blocks[i].ID = c.nextMessageID()
+	}
+	if c.status != nil {
+		c.status.Name, c.status.Args = "", nil
+		blocks = append(blocks, *c.status)
 	}
 	return blocks
 }
@@ -446,13 +478,24 @@ func noticeArgsFromMetadata(metadata map[string]any) map[string]string {
 	return args
 }
 
-func applyExecutionLocationMetadata(message *UIMessage, metadata map[string]any) {
+func applyToolExecutionMetadata(message *UIMessage, metadata map[string]any) {
 	if message == nil {
 		return
 	}
 	if location := extractExecutionLocationMetadata(metadata); location != nil {
 		message.ExecutionLocation = location
 	}
+	if elapsed := extractElapsedTimeMetadata(metadata); elapsed != nil {
+		message.ElapsedTimeSeconds = elapsed
+	}
+}
+
+func extractElapsedTimeMetadata(metadata map[string]any) *float64 {
+	progress, _ := metadata["execution_progress"].(map[string]any)
+	if seconds, ok := progress["elapsed_time_seconds"].(float64); ok && seconds >= 0 {
+		return &seconds
+	}
+	return nil
 }
 
 func applyDiffMetadata(message *UIMessage, metadata map[string]any) {

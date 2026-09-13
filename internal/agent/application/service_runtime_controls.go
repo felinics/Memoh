@@ -16,6 +16,9 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	dbpkg "github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -73,7 +76,7 @@ func runtimeControlInput(sess session.Thread, request RuntimeControlRequest) ext
 	meta := runtimeSessionMeta(sess)
 	input := external.PromptInput{
 		BotID: sess.BotID, BotAgentID: sess.BotAgentID, ThreadID: sess.ID,
-		Language: request.Language, RuntimeMetadata: meta, Command: request.Command,
+		RuntimeMetadata: meta, Command: request.Command,
 		RuntimeOwnerAccountID: metadataString(meta, "runtime_owner_account_id"),
 		ChannelIdentityID:     request.ActorID, ToolHTTPURL: request.ToolHTTPURL,
 	}
@@ -188,33 +191,33 @@ func runtimeModeAccessors(driver external.Driver, kind string) (readRuntimeMode,
 
 // ExecuteRuntimeCommand handles commands which do not create a conversation
 // turn. Turn commands go through the existing chat admission/persistence path.
-func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeControlRequest) (text string, resultErr error) {
+func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeControlRequest) (result turn.RuntimeCommandResult, resultErr error) {
 	defer func() { resultErr = publicRuntimeControlError(resultErr) }()
 	_, driver, input, err := s.runtimeControlTarget(ctx, request)
 	if err != nil {
-		return "", err
+		return turn.RuntimeCommandResult{}, err
 	}
 	provider, ok := driver.(external.CommandProvider)
 	if !ok {
-		return "", external.ErrCommandUnavailable
+		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
 	}
 	commands, err := provider.Commands(ctx, input)
 	if err != nil {
-		return "", err
+		return turn.RuntimeCommandResult{}, err
 	}
 	command, ok := external.FindCommand(commands, request.Command)
 	if !ok {
-		return "", external.ErrCommandUnavailable
+		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
 	}
 	if command.Kind == external.CommandRead {
 		controlCtx, err := s.runtimeControlContext(ctx, request)
 		if err != nil {
-			return "", err
+			return turn.RuntimeCommandResult{}, err
 		}
 		return provider.ReadCommand(controlCtx, input)
 	}
 	if command.Kind != external.CommandOperation {
-		return "", external.ErrCommandUnavailable
+		return turn.RuntimeCommandResult{}, external.ErrCommandUnavailable
 	}
 	err = s.runRuntimeControl(ctx, request, func(ctx context.Context, sess session.Thread, driver external.Driver, input external.PromptInput) error {
 		provider, ok := driver.(external.CommandProvider)
@@ -233,14 +236,46 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 		if !ok {
 			return external.ErrControlUnsupported
 		}
-		delta, err := compactor.Compact(ctx, input)
+		result, err := compactor.Compact(ctx, input)
 		if err != nil {
 			return err
 		}
-		_, err = s.sessionService.MergeRuntimeMetadata(ctx, sess.ID, sess.RuntimeType, delta)
-		return err
+		_, err = s.sessionService.MergeRuntimeMetadata(ctx, sess.ID, sess.RuntimeType, result.RuntimeMetadata)
+		if err != nil || result.Checkpoint == external.CheckpointNone {
+			return err
+		}
+		return s.publishRuntimeOperation(ctx, input, result.Checkpoint)
 	})
-	return "", err
+	return turn.RuntimeCommandResult{}, err
+}
+
+// Operations publish native state under their own run without inserting a
+// user/assistant message. The same guarded publication query serves chat rounds.
+func (s *Service) publishRuntimeOperation(ctx context.Context, input external.PromptInput, checkpoint external.CheckpointOutcome) error {
+	botID, err := dbpkg.ParseUUID(input.BotID)
+	if err != nil {
+		return err
+	}
+	sessionID, err := dbpkg.ParseUUID(input.ThreadID)
+	if err != nil {
+		return err
+	}
+	runID, err := dbpkg.ParseUUID(input.RunID)
+	if err != nil {
+		return err
+	}
+	return runtimefence.InTransaction(ctx, s.queries, input.BotID, input.ThreadID, func(queries dbstore.Queries) error {
+		moved, err := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
+			BotID: botID, SessionID: sessionID, RunID: runID, CheckpointReset: checkpoint != external.CheckpointStaged,
+		})
+		if err != nil {
+			return err
+		}
+		if moved == 0 {
+			return runtimefence.ErrStale
+		}
+		return nil
+	})
 }
 
 func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlRequest, run func(context.Context, session.Thread, external.Driver, external.PromptInput) error) (resultErr error) {

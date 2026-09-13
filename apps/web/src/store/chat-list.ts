@@ -204,7 +204,7 @@ export const useChatStore = defineStore('chat', () => {
   })
   const commandEventRegistry = createCommandEventRegistry({ currentBotId, sessionId })
   const {
-    commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
+    commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     clearCommandEvent, rescopeSessionCommandEventToComposer, resetCommandEvents,
   } = commandEventRegistry
   const userSentInSession = ref<{
@@ -607,7 +607,7 @@ export const useChatStore = defineStore('chat', () => {
     _hasLoadedOlder: hasLoadedOlder,
 
     startupSendFailure, startupSendFailureFor,
-    commandEvent, commandEventForScope, rememberCommandEvent, showCommandError,
+    commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
     backgroundTaskFor,
     initialize, initializeWithRecovery, refreshBots, selectBot, selectSession, createNewSession,

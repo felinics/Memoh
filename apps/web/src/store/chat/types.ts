@@ -8,6 +8,8 @@ import type {
   UIForwardRef,
   UIReasoningMessage,
   UINoticeMessage,
+  UICommandMessage,
+  UIStatusMessage,
   UIReplyRef,
   UISkillActivation,
   UITextMessage,
@@ -62,7 +64,7 @@ export interface ToolCallBlock extends UIToolMessage {
   backgroundTask?: BackgroundTask
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock | NoticeBlock
+export type ContentBlock = TextBlock | ThinkingBlock | ToolCallBlock | AttachmentBlock | ErrorBlock | NoticeBlock | UICommandMessage | UIStatusMessage
 
 export interface ChatViewTarget {
   botId: string

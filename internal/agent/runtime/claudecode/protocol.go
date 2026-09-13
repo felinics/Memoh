@@ -1,17 +1,17 @@
 // Package claudecode implements the direct Claude Code runtime driver: it
-// drives a pinned Claude Code CLI inside the bot workspace over the
+// drives a Claude Code CLI inside the bot workspace over the
 // stream-json wire protocol (NDJSON stdio plus the bidirectional control
 // channel), with no ACP adapter and no Node sidecar in between.
 //
-// The wire contract is not officially documented; it is pinned against the
-// dissected @anthropic-ai/claude-agent-sdk 0.3.250 ↔ CLI 2.1.250 pair (see
-// PinnedCLIVersion) and defended by tolerant decoding: unknown message types,
-// control subtypes, and fields never fail the stream.
+// The wire contract is checked against @anthropic-ai/claude-agent-sdk
+// 0.3.269 and CLI 2.1.269 (see protocolref/VERSION.json). Only the protocol
+// surface used by this driver is modeled; optional fields and unconsumed
+// events do not require version-specific adapters. Unsupported inbound
+// control requests receive an error response.
 //
-// One process serves one turn: the CLI is spawned per turn with `--resume`
-// carrying the durable session id from Memoh session runtime metadata, and
-// exits when stdin closes after the result. This makes the cumulative
-// cost/usage fields in `result` equal to the turn's own usage.
+// One process serves one Memoh run and resumes its durable native session.
+// Steering may start several native turns before stdin closes. Token usage
+// belongs to each native result and is summed across distinct result UUIDs.
 package claudecode
 
 import (
@@ -19,10 +19,10 @@ import (
 	"strings"
 )
 
-// PinnedCLIVersion is the Claude Code CLI version the wire contract was
-// dissected from. A different runtime version logs a warning; the toolkit pin
-// and this constant must move together.
-const PinnedCLIVersion = "2.1.250"
+// PinnedCLIVersion is the CLI version verified by the protocol fixtures.
+// A different installed version logs a warning. The workspace dependency
+// manager owns CLI installation; changing this baseline does not install it.
+const PinnedCLIVersion = "2.1.269"
 
 const noResponseRequested = "No response requested."
 
@@ -41,36 +41,67 @@ const (
 // inboundMessage is one decoded NDJSON line from the CLI, probed just far
 // enough to route it; payloads stay raw until the consumer needs them.
 type inboundMessage struct {
-	Type      string `json:"type"`
-	Subtype   string `json:"subtype,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
+	UUID            string `json:"uuid,omitempty"`
+	CommandUUID     string `json:"command_uuid,omitempty"`
+	State           string `json:"state,omitempty"`
+	QueuedTurnCount int    `json:"queued_turn_count,omitempty"`
+	Type            string `json:"type"`
+	Subtype         string `json:"subtype,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
 
 	// system/init fields.
-	Model             string   `json:"model,omitempty"`
-	ClaudeCodeVersion string   `json:"claude_code_version,omitempty"`
-	Capabilities      []string `json:"capabilities,omitempty"`
+	Model              string              `json:"model,omitempty"`
+	ClaudeCodeVersion  string              `json:"claude_code_version,omitempty"`
+	Capabilities       []string            `json:"capabilities,omitempty"`
+	PermissionMode     string              `json:"permissionMode,omitempty"`
+	Skills             []string            `json:"skills,omitempty"`
+	Commands           []initializeCommand `json:"commands,omitempty"`
+	Content            string              `json:"content,omitempty"`
+	LocalCommandSource string              `json:"local_command_source,omitempty"`
+	MCPServers         []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"mcp_servers,omitempty"`
+	CompactResult      string  `json:"compact_result,omitempty"`
+	Status             *string `json:"status,omitempty"`
+	Attempt            int     `json:"attempt,omitempty"`
+	MaxRetries         int     `json:"max_retries,omitempty"`
+	RetryDelayMS       int     `json:"retry_delay_ms,omitempty"`
+	ToolUseID          string  `json:"tool_use_id,omitempty"`
+	ToolName           string  `json:"tool_name,omitempty"`
+	ElapsedTimeSeconds float64 `json:"elapsed_time_seconds,omitempty"`
+	CompactMetadata    *struct {
+		Trigger string `json:"trigger"`
+	} `json:"compact_metadata,omitempty"`
 
 	// assistant / user replay messages.
 	Message         json.RawMessage `json:"message,omitempty"`
 	ParentToolUseID *string         `json:"parent_tool_use_id,omitempty"`
+	Error           string          `json:"error,omitempty"`
 
 	// stream_event payload.
 	Event json.RawMessage `json:"event,omitempty"`
 
 	// result fields.
-	IsError      bool            `json:"is_error,omitempty"`
-	Result       string          `json:"result,omitempty"`
-	Usage        *resultUsage    `json:"usage,omitempty"`
-	TotalCostUSD *float64        `json:"total_cost_usd,omitempty"`
-	Request      json.RawMessage `json:"request,omitempty"`
-	RequestID    string          `json:"request_id,omitempty"`
-	Response     json.RawMessage `json:"response,omitempty"`
-
-	Raw json.RawMessage `json:"-"`
+	IsError   bool            `json:"is_error,omitempty"`
+	Errors    []string        `json:"errors,omitempty"`
+	Result    string          `json:"result,omitempty"`
+	Usage     *resultUsage    `json:"usage,omitempty"`
+	Request   json.RawMessage `json:"request,omitempty"`
+	RequestID string          `json:"request_id,omitempty"`
+	Response  json.RawMessage `json:"response,omitempty"`
 }
 
 type initializeResponse struct {
-	Models []initializeModel `json:"models"`
+	Models   []initializeModel   `json:"models"`
+	Commands []initializeCommand `json:"commands"`
+}
+
+type initializeCommand struct {
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	ArgumentHint string   `json:"argumentHint"`
+	Aliases      []string `json:"aliases,omitempty"`
 }
 
 type initializeModel struct {
@@ -80,6 +111,19 @@ type initializeModel struct {
 	Description           string   `json:"description"`
 	SupportsEffort        bool     `json:"supportsEffort"`
 	SupportedEffortLevels []string `json:"supportedEffortLevels"`
+	SupportsAutoMode      bool     `json:"supportsAutoMode,omitempty"`
+}
+
+type settingsResponse struct {
+	Effective struct {
+		Permissions struct {
+			DefaultMode string `json:"defaultMode"`
+		} `json:"permissions"`
+	} `json:"effective"`
+	Applied struct {
+		Model  string `json:"model"`
+		Effort string `json:"effort"`
+	} `json:"applied"`
 }
 
 func decodeInbound(line []byte) (*inboundMessage, error) {
@@ -87,7 +131,6 @@ func decodeInbound(line []byte) (*inboundMessage, error) {
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return nil, err
 	}
-	msg.Raw = append(json.RawMessage(nil), line...)
 	return &msg, nil
 }
 
@@ -104,8 +147,7 @@ type resultUsage struct {
 type contentBlock struct {
 	Type string `json:"type"`
 
-	Text     string `json:"text,omitempty"`
-	Thinking string `json:"thinking,omitempty"`
+	Text string `json:"text,omitempty"`
 
 	// tool_use fields.
 	ID    string          `json:"id,omitempty"`
@@ -120,7 +162,6 @@ type contentBlock struct {
 
 // chatMessage is the Anthropic message envelope inside assistant/user lines.
 type chatMessage struct {
-	Role    string         `json:"role"`
 	Content []contentBlock `json:"content"`
 }
 
@@ -150,12 +191,9 @@ type controlRequestPayload struct {
 	Subtype string `json:"subtype"`
 
 	// can_use_tool fields.
-	ToolName              string          `json:"tool_name,omitempty"`
-	Input                 map[string]any  `json:"input,omitempty"`
-	ToolUseID             string          `json:"tool_use_id,omitempty"`
-	PermissionSuggestions json.RawMessage `json:"permission_suggestions,omitempty"`
-	BlockedPath           *string         `json:"blocked_path,omitempty"`
-	DecisionReason        json.RawMessage `json:"decision_reason,omitempty"`
+	ToolName  string         `json:"tool_name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
 }
 
 // Outbound message builders.

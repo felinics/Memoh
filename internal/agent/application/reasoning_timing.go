@@ -39,6 +39,10 @@ func (t *reasoningTimingTracker) observe(event native.StreamEvent) {
 	if t == nil {
 		return
 	}
+	// A concurrent tool's heartbeat does not end the model's thinking block.
+	if event.Type == native.EventToolCallMetadata && event.Metadata["execution_progress"] != nil {
+		return
+	}
 	now := t.now()
 	t.mu.Lock()
 	defer t.mu.Unlock()

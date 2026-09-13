@@ -358,6 +358,17 @@ describe('chat transcript controller', () => {
     expect(transcript.messages).toHaveLength(1)
   })
 
+  it('removes a stopped assistant with only transient runtime status', () => {
+    const { transcript } = makeTranscript()
+    const stopped = assistant('assistant-local', [{ id: 0, type: 'status', name: 'compacting' }])
+    stopped.turnId = 'turn-stopped'
+    transcript.appendToView(stopped)
+
+    transcript.finalizeStreamFailure(stopped, 'bot-1', 'session-1', Object.assign(new Error('stopped'), { name: 'AbortError' }))
+
+    expect(transcript.messages).toEqual([])
+  })
+
   it('routes completed tool messages through the fs mutation beacon', () => {
     const { transcript, bumpFsChangedAtIfFsMutation } = makeTranscript()
     const turn = assistant('assistant-1')

@@ -16,8 +16,9 @@ var (
 )
 
 type (
-	CommandKind = turn.RuntimeCommandKind
-	Command     = turn.RuntimeCommand
+	CommandKind   = turn.RuntimeCommandKind
+	Command       = turn.RuntimeCommand
+	CommandResult = turn.RuntimeCommandResult
 )
 
 const (
@@ -30,7 +31,7 @@ const (
 // Turn commands use Driver.Prompt; operation commands use Compactor.
 type CommandProvider interface {
 	Commands(context.Context, PromptInput) ([]Command, error)
-	ReadCommand(context.Context, PromptInput) (string, error)
+	ReadCommand(context.Context, PromptInput) (CommandResult, error)
 }
 
 type (
@@ -53,7 +54,14 @@ type PlanModeProvider interface {
 // interrupts the operation. The caller owns the thread's execution slot and
 // persists returned runtime metadata, without adding conversation messages.
 type Compactor interface {
-	Compact(context.Context, PromptInput) (map[string]any, error)
+	Compact(context.Context, PromptInput) (CompactionResult, error)
+}
+
+// CompactionResult lets a runtime publish a staged native snapshot without
+// manufacturing a chat round. Publication remains application-owned.
+type CompactionResult struct {
+	RuntimeMetadata map[string]any
+	Checkpoint      CheckpointOutcome
 }
 
 type (
@@ -63,6 +71,9 @@ type (
 
 type Goal = turn.RuntimeGoal
 
+// GoalProvider requires structured state, pause/clear controls and resumption
+// through an admitted /goal resume turn. A runtime with command-only goals
+// exposes its native command via CommandProvider instead.
 type GoalProvider interface {
 	Goal(context.Context, PromptInput) (*Goal, error)
 	ControlGoal(context.Context, PromptInput, string) error
@@ -84,8 +95,11 @@ func ReadControls(ctx context.Context, driver Driver, input PromptInput) (Contro
 		if err != nil {
 			return out, err
 		}
+		if modes.Kind == "" {
+			modes.Kind = "session"
+		}
 		out.Modes = modes
-		out.Capabilities.PermissionModes = modes.Supported
+		out.Capabilities.PermissionModes = modes.Supported && modes.Kind == "permission"
 	}
 	_, out.Capabilities.Compact = driver.(Compactor)
 	if provider, ok := driver.(PlanModeProvider); ok {

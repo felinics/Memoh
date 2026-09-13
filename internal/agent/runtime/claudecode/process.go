@@ -2,9 +2,11 @@ package claudecode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -32,6 +34,7 @@ type cliProcess interface {
 	io.Writer
 	CloseStdin()
 	Done() <-chan struct{}
+	Err() error
 	StderrTail() string
 	Close() error
 }
@@ -57,4 +60,19 @@ func cliCommand(launcher string, args []string) string {
 		return command
 	}
 	return command + " " + strings.Join(args, " ")
+}
+
+// drainCLI closes input and waits for the CLI's durable writes to finish.
+// A result event can precede transcript flush, especially after /compact.
+func drainCLI(proc cliProcess, timeout time.Duration) error {
+	proc.CloseStdin()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-proc.Done():
+		return proc.Err()
+	case <-timer.C:
+		_ = proc.Close()
+		return errors.New("claude did not exit after closing stdin")
+	}
 }

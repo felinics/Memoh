@@ -86,7 +86,7 @@ func TestFormatAskUserRendersQuestionsWithoutMetadata(t *testing.T) {
 						"text": "Pick one",
 						"kind": "single_select",
 						"options": []any{
-							map[string]any{"id": "q1.o1", "label": "Alpha", "description": "First choice"},
+							map[string]any{"id": "q1.o1", "label": "elicitation.done", "label_key": "elicitation.done", "description": "First choice"},
 							map[string]any{"id": "q1.o2", "label": "Beta"},
 						},
 					},
@@ -100,7 +100,7 @@ func TestFormatAskUserRendersQuestionsWithoutMetadata(t *testing.T) {
 		t.Fatalf("presentation = %#v", p)
 	}
 	rendered := RenderToolCallMessage(p)
-	for _, want := range []string{"Pick one", "1) Alpha - First choice", "2) Beta", "Reply with an option number or its text.", "skip"} {
+	for _, want := range []string{"Pick one", "1) Done - First choice", "2) Beta", "Reply with an option number or its text.", "skip"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered output missing %q:\n%s", want, rendered)
 		}

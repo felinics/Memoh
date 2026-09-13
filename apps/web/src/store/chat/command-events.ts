@@ -86,6 +86,18 @@ export function createCommandEventRegistry({ currentBotId, sessionId }: CommandE
     }, scope)
   }
 
+  // A completion belongs to the operation that opened the panel. Dismissing it
+  // or starting another command makes that completion obsolete.
+  function beginCommandEvent(event: CommandEventResponse, scope: CommandEventScope) {
+    const invocationId = createInvocationId()
+    const target = { ...scope }
+    rememberCommandEvent({ ...event, invocation_id: invocationId }, target)
+    return (result: CommandEventResponse | null) => {
+      if (commandEventForScope(target)?.invocation_id !== invocationId) return
+      rememberCommandEvent(result && { ...result, invocation_id: invocationId }, target)
+    }
+  }
+
   function clearCommandEvent(scope: CommandEventScope = currentCommandScope()) {
     const key = commandEventKey(scope)
     if (!commandEvents.value[key]) return
@@ -122,6 +134,7 @@ export function createCommandEventRegistry({ currentBotId, sessionId }: CommandE
     commandEventKey,
     commandEventForScope,
     rememberCommandEvent,
+    beginCommandEvent,
     showCommandError,
     clearCommandEvent,
     rescopeSessionCommandEventToComposer,

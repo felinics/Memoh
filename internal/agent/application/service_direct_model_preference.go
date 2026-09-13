@@ -21,12 +21,14 @@ var ErrDirectModelUnavailable = errors.New("direct runtime model unavailable")
 // Direct runtimes use agent-owned model IDs, never models-table UUIDs. Keep
 // their preference in a separate column so the native foreign key remains
 // meaningful and runtime-owned conversation metadata is not read/modified.
-func (s *Service) reconcileDirectModelPreference(ctx context.Context, botID, botAgentID, runtimeType, modelID, effort string) (string, string, error) {
+func (s *Service) reconcileDirectModelPreference(ctx context.Context, botID, botAgentID, runtimeType, projectPath, modelID, effort string) (string, string, error) {
 	provider, ok := s.externalDrivers[runtimeType].(external.ModelCatalogProvider)
 	if !ok {
 		return "", "", external.ErrModelCatalogUnavailable
 	}
-	catalog, err := provider.ModelCatalog(ctx, botID, botAgentID)
+	catalog, err := provider.ModelCatalog(ctx, external.ModelCatalogRequest{
+		BotID: botID, BotAgentID: botAgentID, ProjectPath: projectPath, ModelID: modelID, ResolveDefaults: strings.TrimSpace(modelID) == "",
+	})
 	if err != nil {
 		return "", "", err
 	}
@@ -93,7 +95,7 @@ func (s *Service) applyDirectModelPreference(ctx context.Context, req ChatReques
 	// PATCH cannot overwrite this send.
 	if modelID == "" || modelID != sess.PreferredExternalModelID || effort != sess.PreferredReasoningEffort {
 		var err error
-		modelID, effort, err = s.reconcileDirectModelPreference(ctx, req.BotID, sess.BotAgentID, sess.RuntimeType, modelID, effort)
+		modelID, effort, err = s.reconcileDirectModelPreference(ctx, req.BotID, sess.BotAgentID, sess.RuntimeType, metadataString(runtimeSessionMeta(sess), "project_path"), modelID, effort)
 		if err != nil {
 			return req, err
 		}

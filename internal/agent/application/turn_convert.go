@@ -101,6 +101,7 @@ func userInputInputFromResponse(in turn.UserInputResponse) UserInputResponseInpu
 		ReplyExternalMessageID:     in.ReplyExternalMessageID,
 		Answers:                    questionAnswersToUserInput(in.Answers),
 		TextAnswer:                 in.TextAnswer,
+		UILanguage:                 in.UILanguage,
 		Canceled:                   in.Canceled,
 		Reason:                     in.Reason,
 		ChatToken:                  in.ChatToken,

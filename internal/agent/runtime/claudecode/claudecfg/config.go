@@ -32,14 +32,19 @@ type Config struct {
 	OAuthToken string //nolint:gosec // decrypted runtime credential, not a hardcoded secret
 	BaseURL    string
 	// A per-turn model override wins over this value.
-	Model string
+	Model          string
+	PermissionMode string
 }
 
 func ParseAgentConfig(metadata map[string]any) (Config, error) {
 	cfg := Config{
-		Auth:    AuthMode(strings.TrimSpace(metadataString(metadata, "auth"))),
-		BaseURL: strings.TrimSpace(metadataString(metadata, "base_url")),
-		Model:   strings.TrimSpace(metadataString(metadata, "model")),
+		Auth:           AuthMode(strings.TrimSpace(metadataString(metadata, "auth"))),
+		BaseURL:        strings.TrimSpace(metadataString(metadata, "base_url")),
+		Model:          strings.TrimSpace(metadataString(metadata, "model")),
+		PermissionMode: strings.TrimSpace(metadataString(metadata, "permission_mode")),
+	}
+	if !ValidPermissionMode(cfg.PermissionMode) {
+		return Config{}, ErrNotConfigured
 	}
 	switch cfg.Auth {
 	case AuthAPIKey, AuthOAuthToken, AuthWorkspace:
@@ -47,6 +52,16 @@ func ParseAgentConfig(metadata map[string]any) (Config, error) {
 		return Config{}, ErrNotConfigured
 	}
 	return cfg, nil
+}
+
+// Empty and inherit preserve workspace configuration for existing Agents.
+func ValidPermissionMode(mode string) bool {
+	switch mode {
+	case "", "inherit", "default", "acceptEdits", "auto", "bypassPermissions":
+		return true
+	default:
+		return false
+	}
 }
 
 func metadataString(meta map[string]any, key string) string {

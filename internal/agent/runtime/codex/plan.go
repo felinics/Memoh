@@ -24,7 +24,7 @@ func codexPlanMode(mode string) (external.ModeState, error) {
 	}
 	return external.ModeState{
 		Supported: true, CurrentModeID: mode,
-		AvailableModes: []external.Mode{{ID: "default", Name: "Default"}, {ID: "plan", Name: "Plan"}},
+		AvailableModes: []external.Mode{{ID: "default", I18nKey: "runtime.planModes.default"}, {ID: "plan", I18nKey: "runtime.planModes.plan"}},
 	}, nil
 }
 

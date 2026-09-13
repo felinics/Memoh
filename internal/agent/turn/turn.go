@@ -192,6 +192,7 @@ type UserInputResponse struct {
 	ExplicitID                 string
 	ReplyExternalMessageID     string
 	Answers                    []QuestionAnswer
+	UILanguage                 string
 	TextAnswer                 string
 	Canceled                   bool
 	Reason                     string

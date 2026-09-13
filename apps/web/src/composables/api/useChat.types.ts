@@ -105,6 +105,7 @@ export interface RequestedSkillRequest {
 }
 
 export interface CommandActionListItem {
+  i18n_key?: string
   id?: string
   title: string
   description?: string
@@ -112,6 +113,9 @@ export interface CommandActionListItem {
 }
 
 export interface CommandActionResult {
+  data?: unknown
+  notice?: string
+  text_key?: string
   kind: string
   title?: string
   text?: string
@@ -190,6 +194,8 @@ export interface UIToolMessage {
   tool_call_id: string
   running: boolean
   progress?: unknown[]
+  /** Last elapsed time reported by the executing runtime. */
+  elapsed_time_seconds?: number
   approval?: UIToolApproval
   execution_location?: UIExecutionLocation
   user_input?: UIUserInput
@@ -270,6 +276,7 @@ export interface UIUserInputQuestion {
 }
 
 export interface UIUserInputOption {
+  label_key?: string
   id: string
   label: string
   description?: string
@@ -303,7 +310,21 @@ export interface UINoticeMessage {
   args?: Record<string, string>
 }
 
-export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage | UINoticeMessage
+export interface UICommandMessage {
+  id: number
+  type: 'command'
+  name?: string
+  content: string
+}
+
+export interface UIStatusMessage {
+  id: number
+  type: 'status'
+  name?: string
+  args?: Record<string, string>
+}
+
+export type UIMessage = UITextMessage | UIReasoningMessage | UIToolMessage | UIAttachmentsMessage | UIErrorMessage | UINoticeMessage | UICommandMessage | UIStatusMessage
 
 export interface UISkillActivationSkill {
   name: string

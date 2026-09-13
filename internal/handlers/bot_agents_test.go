@@ -314,7 +314,7 @@ type catalogDriver struct {
 	err error
 }
 
-func (d catalogDriver) ModelCatalog(context.Context, string, string) (external.ModelCatalog, error) {
+func (d catalogDriver) ModelCatalog(context.Context, external.ModelCatalogRequest) (external.ModelCatalog, error) {
 	return external.ModelCatalog{}, d.err
 }
 

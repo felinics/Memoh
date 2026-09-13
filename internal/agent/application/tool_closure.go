@@ -185,7 +185,7 @@ func normalizeDecisionProjectionResults(messages []ModelMessage) []ModelMessage 
 					key := projectedToolCallKey{segment, strings.TrimSpace(call.ToolCallID)}
 					projected[key] = struct{}{}
 					if _, exists := results[key]; !exists {
-						if result, ok := resolvedUserInputResult(call); ok {
+						if result, ok := resolvedDecisionResult(call); ok {
 							results[key] = result
 						}
 					}
@@ -268,8 +268,13 @@ func isDecisionProjection(call sdk.ToolCallPart) bool {
 	return userInput || approval
 }
 
-func resolvedUserInputResult(call sdk.ToolCallPart) (sdk.ToolResultPart, bool) {
+func resolvedDecisionResult(call sdk.ToolCallPart) (sdk.ToolResultPart, bool) {
 	metadata, ok := call.ProviderMetadata["user_input"].(map[string]any)
+	// A standalone permission card represents only the decision. Approval
+	// metadata on a real tool call must still wait for that tool's result.
+	if !ok && call.ToolName == "permission" {
+		metadata, ok = call.ProviderMetadata["approval"].(map[string]any)
+	}
 	if !ok {
 		return sdk.ToolResultPart{}, false
 	}

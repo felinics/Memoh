@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/felinics/memoh/internal/acl"
@@ -9,6 +10,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/slash"
 )
 
@@ -48,7 +50,7 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 			return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodePermissionDenied)
 		}
 	}
-	request := turn.RuntimeControlRequest{TeamID: cfg.TeamID, BotID: identity.BotID, ThreadID: sess.ID, ActorID: identity.UserID, Command: selector, Language: p.localizer(ctx, identity.BotID).Locale()}
+	request := turn.RuntimeControlRequest{TeamID: cfg.TeamID, BotID: identity.BotID, ThreadID: sess.ID, ActorID: identity.UserID, Command: selector}
 	if selector == "permission" {
 		if hasSlashControlAttachments(msg) {
 			return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodeSlashAttachmentsUnsupported)
@@ -70,7 +72,7 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 		}
 		var lines []string
 		for _, mode := range modes.AvailableModes {
-			label := mode.Name + " — /permission " + mode.ID
+			label := runtimeControlCopy(p.localizer(ctx, identity.BotID), mode.I18nKey, "name", mode.Name, mode.ID) + " — /permission " + mode.ID
 			if mode.ID == modes.CurrentModeID {
 				label = "✓ " + label
 			}
@@ -107,8 +109,10 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 	if hasSlashControlAttachments(msg) {
 		return decision, true, p.sendSlashError(ctx, sender, msg, slash.CodeSlashAttachmentsUnsupported)
 	}
-	if command.RunningText != "" {
-		if err := p.sendRuntimeControlText(ctx, sender, msg, command.RunningText); err != nil {
+	loc := p.localizer(ctx, identity.BotID)
+	running := runtimeControlCopy(loc, command.I18nKey, "running_text", command.RunningText, "")
+	if running != "" {
+		if err := p.sendRuntimeControlText(ctx, sender, msg, running); err != nil {
 			return decision, true, err
 		}
 	}
@@ -116,10 +120,28 @@ func (p *ChannelInboundProcessor) runtimeSlash(ctx context.Context, cfg channel.
 	if err != nil {
 		return decision, true, p.sendRuntimeControlError(ctx, sender, msg, identity, err)
 	}
-	if result == "" {
-		result = command.CompletedText
+	var parts []string
+	if result.Notice != "" {
+		parts = append(parts, loc.T("runtime.result.notices."+result.Notice))
 	}
-	return decision, true, p.sendRuntimeControlText(ctx, sender, msg, result)
+	if result.Text != "" {
+		parts = append(parts, result.Text)
+	}
+	if result.Data != nil {
+		raw, err := json.MarshalIndent(result.Data, "", "  ")
+		if err != nil {
+			return decision, true, err
+		}
+		if string(raw) == "[]" {
+			parts = append(parts, loc.T("runtime.result.empty"))
+		} else {
+			parts = append(parts, "```json\n"+string(raw)+"\n```")
+		}
+	}
+	if len(parts) == 0 {
+		parts = append(parts, runtimeControlCopy(loc, command.I18nKey, "completed_text", command.CompletedText, ""))
+	}
+	return decision, true, p.sendRuntimeControlText(ctx, sender, msg, strings.Join(parts, "\n\n"))
 }
 
 func (p *ChannelInboundProcessor) sendRuntimeControlText(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, text string) error {
@@ -145,4 +167,18 @@ func (p *ChannelInboundProcessor) sendRuntimeControlError(ctx context.Context, s
 		text = loc.T("errors.runtime_control.failed")
 	}
 	return p.sendRuntimeControlText(ctx, sender, msg, text)
+}
+
+// Native copy wins. Only host-declared keys are looked up in the channel catalog.
+func runtimeControlCopy(loc *i18n.Localizer, prefix, field, native, fallback string) string {
+	if native != "" {
+		return native
+	}
+	if prefix != "" {
+		key := prefix + "." + field
+		if text := loc.T(key); text != key {
+			return text
+		}
+	}
+	return fallback
 }

@@ -49,6 +49,8 @@ func (h *BotAgentsHandler) Register(e *echo.Echo) {
 // @Tags bot-agents
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
+// @Param model_id query string false "Model whose effective defaults should be displayed"
+// @Param project_path query string false "Workspace project path for runtime model settings"
 // @Success 200 {object} external.ModelCatalog
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} apperror.Problem
@@ -63,7 +65,10 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 	if err != nil {
 		return h.publicError("list models", err)
 	}
-	catalog, err := h.runtimes.ModelCatalog(c.Request().Context(), agent.Runtime, botID, agent.ID)
+	catalog, err := h.runtimes.ModelCatalog(c.Request().Context(), agent.Runtime, external.ModelCatalogRequest{
+		BotID: botID, BotAgentID: agent.ID, ProjectPath: strings.TrimSpace(c.QueryParam("project_path")),
+		ModelID: strings.TrimSpace(c.QueryParam("model_id")), ResolveDefaults: true,
+	})
 	if err != nil {
 		// Stable runtime feedback (agent_dependency_missing and friends) keeps
 		// its own status and args; wrapping it as runtime-unavailable would
@@ -317,7 +322,7 @@ func (h *BotAgentsHandler) RuntimeControls(c echo.Context) error {
 			break
 		}
 	}
-	controls, err := external.ReadControls(c.Request().Context(), driver, external.PromptInput{BotID: botID, BotAgentID: agent.ID, Language: c.Request().Header.Get("Accept-Language"), RuntimeMetadata: agent.Metadata})
+	controls, err := external.ReadControls(c.Request().Context(), driver, external.PromptInput{BotID: botID, BotAgentID: agent.ID, RuntimeMetadata: agent.Metadata})
 	if err != nil {
 		return runtimeControlError(err)
 	}

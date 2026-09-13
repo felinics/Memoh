@@ -6,6 +6,7 @@ package agentprocess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -25,9 +26,10 @@ type Process struct {
 	stdout *io.PipeReader
 	done   chan struct{}
 
-	mu     sync.Mutex
-	closed bool
-	tail   []byte
+	mu      sync.Mutex
+	closed  bool
+	tail    []byte
+	exitErr error
 }
 
 // Start launches command without a bridge-side timeout. Closing the returned
@@ -59,6 +61,9 @@ func Start(ctx context.Context, client *bridge.Client, command, workDir string, 
 				}
 			}
 			if readErr != nil {
+				if errors.Is(readErr, io.EOF) {
+					_ = stream.CloseSend()
+				}
 				return
 			}
 		}
@@ -70,6 +75,12 @@ func Start(ctx context.Context, client *bridge.Client, command, workDir string, 
 		for {
 			output, recvErr := stream.Recv()
 			if recvErr != nil {
+				proc.mu.Lock()
+				proc.exitErr = recvErr
+				if errors.Is(recvErr, io.EOF) {
+					proc.exitErr = io.ErrUnexpectedEOF
+				}
+				proc.mu.Unlock()
 				if errors.Is(recvErr, io.EOF) {
 					_ = stdoutW.Close()
 				} else {
@@ -86,6 +97,11 @@ func Start(ctx context.Context, client *bridge.Client, command, workDir string, 
 			case pb.ExecOutput_STDERR:
 				proc.appendStderr(output.GetData())
 			case pb.ExecOutput_EXIT:
+				if output.GetExitCode() != 0 {
+					proc.mu.Lock()
+					proc.exitErr = fmt.Errorf("agent process exited with code %d", output.GetExitCode())
+					proc.mu.Unlock()
+				}
 				_ = stdoutW.Close()
 				return
 			}
@@ -119,6 +135,13 @@ func (p *Process) CloseStdin() { _ = p.stdin.Close() }
 
 // Done is closed when the process exits.
 func (p *Process) Done() <-chan struct{} { return p.done }
+
+// Err reports a transport failure or nonzero exit after Done closes.
+func (p *Process) Err() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.exitErr
+}
 
 // Close terminates the process and waits briefly for the stream to settle.
 func (p *Process) Close() error {

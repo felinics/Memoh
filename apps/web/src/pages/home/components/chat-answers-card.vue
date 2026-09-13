@@ -42,7 +42,7 @@ const { t } = useI18n()
 // display-safe shape, so the card never touches the raw input JSON (#868).
 type ResultAnswer = {
   question?: string
-  selected?: { label?: string }[]
+  selected?: { label?: string, label_key?: string }[]
   custom_text?: string
   text?: string
   skipped?: boolean
@@ -81,7 +81,7 @@ function terminalNote(status?: string): string {
 function answerText(a: ResultAnswer): string {
   if (a.skipped) return t('chat.answers.skipped')
   const parts: string[] = []
-  if (a.selected?.length) parts.push(a.selected.map(s => s.label ?? '').filter(Boolean).join(', '))
+  if (a.selected?.length) parts.push(a.selected.map(s => s.label_key ? t(s.label_key) : s.label ?? '').filter(Boolean).join(', '))
   if (a.custom_text) parts.push(a.custom_text)
   if (a.text) parts.push(a.text)
   return parts.filter(Boolean).join(', ')

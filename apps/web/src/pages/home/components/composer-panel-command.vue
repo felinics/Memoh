@@ -14,10 +14,21 @@
         </p>
         <p
           v-if="text"
-          class="mt-0.5 whitespace-pre-wrap break-words text-body text-muted-foreground"
+          class="mt-0.5 max-h-[min(20rem,45dvh)] overflow-y-auto whitespace-pre-wrap break-words text-body text-muted-foreground overscroll-contain"
         >
           {{ text }}
         </p>
+        <Collapsible
+          v-if="data !== undefined"
+          v-model:open="detailsOpen"
+        >
+          <CollapsibleTrigger as-child>
+            <TextButton>{{ $t('runtime.result.details') }}</TextButton>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <pre class="max-h-[min(20rem,45dvh)] overflow-auto whitespace-pre-wrap break-words text-caption text-muted-foreground">{{ JSON.stringify(data, null, 2) }}</pre>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
       <Button
         type="button"
@@ -80,13 +91,14 @@
 // component owns only the layout and the keyboard bridge, exposed so the
 // pane's composer keydown can arbitrate arrows/Enter between this list and
 // the slash picker.
-import { ref } from 'vue'
-import { Button, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList } from '@felinic/ui'
+import { ref, watch } from 'vue'
+import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, TextButton, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList } from '@felinic/ui'
 import { Check, CircleAlert, List, Sparkles, X } from 'lucide-vue-next'
 import type { CommandActionListItem } from '@/composables/api/useChat'
 import { isCommandResultItemDisplayOnly } from './slash-command-result'
 
-defineProps<{
+const props = defineProps<{
+  data?: unknown
   isError: boolean
   title: string
   text: string
@@ -97,6 +109,9 @@ const emit = defineEmits<{
   (e: 'select', item: CommandActionListItem): void
   (e: 'dismiss'): void
 }>()
+
+const detailsOpen = ref(false)
+watch(() => props.data, () => { detailsOpen.value = false })
 
 const bridge = ref<InstanceType<typeof CommandKeyBridge> | null>(null)
 defineExpose({ bridge })

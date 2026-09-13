@@ -110,6 +110,9 @@ func ConvertModelMessagesToUIAssistantMessages(messages []turn.ModelMessage) []U
 		decoded := decodeUIModelMessage(modelMessage)
 		switch strings.ToLower(strings.TrimSpace(decoded.Role)) {
 		case "assistant":
+			for _, command := range extractCommandOutputs(&decoded) {
+				appendPendingAssistantMessage(pending, command)
+			}
 			for _, reasoning := range extractPersistedReasoning(&decoded) {
 				appendPendingAssistantMessage(pending, UIMessage{
 					Type:    UIMessageReasoning,
@@ -328,10 +331,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			text := extractPersistedMessageText(raw, &modelMessage)
 			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
+			commands := extractCommandOutputs(&modelMessage)
 
 			// A persisted turn_id is the only grouping key. Plain-text assistant
 			// messages and tool calls with that same id remain one reply.
-			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 {
+			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 {
 				if code := persistedHistoryErrorCode(raw.Metadata); code != "" {
 					if pending == nil {
 						pending = newPendingAssistantTurn(raw)
@@ -350,6 +354,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			}
 
 			reasoningTimings := uiReasoningTimingsByOrdinal(raw.Metadata)
+			for _, command := range commands {
+				appendPendingAssistantMessage(pending, command)
+			}
 			for ordinal, reasoning := range reasonings {
 				appendPendingAssistantMessage(pending, UIMessage{
 					ID:              pending.NextID,
@@ -735,6 +742,9 @@ func (message *uiDecodedModelMessage) textContent() string {
 func textFromUIParts(parts []uiContentPart) string {
 	var builder strings.Builder
 	for _, part := range parts {
+		if _, command := part.ProviderMetadata["runtime_command"]; command {
+			continue
+		}
 		partType := strings.TrimSpace(part.Type)
 		if strings.EqualFold(partType, "reasoning") {
 			continue
@@ -778,6 +788,16 @@ func extractPersistedReasoning(message *uiDecodedModelMessage) []string {
 		}
 	}
 	return reasonings
+}
+
+func extractCommandOutputs(message *uiDecodedModelMessage) []UIMessage {
+	var commands []UIMessage
+	for _, part := range message.parts() {
+		if name, ok := part.ProviderMetadata["runtime_command"].(string); ok && part.Text != "" {
+			commands = append(commands, UIMessage{Type: UIMessageCommand, Name: name, Content: part.Text})
+		}
+	}
+	return commands
 }
 
 func uiReasoningTimingsByOrdinal(metadata map[string]any) map[int]*UIReasoningTiming {

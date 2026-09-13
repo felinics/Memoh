@@ -571,6 +571,7 @@ export function createTranscriptController({
       output: incoming.output ?? existing.output,
       approval: mergeApprovalState(existing.approval, incoming.approval),
       execution_location: incoming.execution_location ?? existing.execution_location,
+      elapsed_time_seconds: incoming.elapsed_time_seconds ?? existing.elapsed_time_seconds,
       userInput: incoming.userInput ?? existing.userInput,
       user_input: incoming.user_input ?? existing.user_input,
       backgroundTask: incoming.backgroundTask ?? existing.backgroundTask,
@@ -601,7 +602,7 @@ export function createTranscriptController({
 
   function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
     return turn.messages.some(block =>
-      block.type !== 'error' || Boolean(block.code || block.content),
+      block.type !== 'status' && (block.type !== 'error' || Boolean(block.code || block.content)),
     )
   }
 

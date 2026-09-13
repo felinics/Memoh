@@ -50,6 +50,12 @@ func ParseAskUserPayload(input any) (UIPayload, error) {
 		}
 		payload.Questions = append(payload.Questions, question)
 	}
+	// Only the in-process URL constructor owns these display keys. JSON tool
+	// arguments cannot create this private type or override option labels.
+	if _, trusted := input.(elicitationURLInput); trusted {
+		payload.Questions[0].Options[0].LabelKey = "elicitation.done"
+		payload.Questions[0].Options[1].LabelKey = "elicitation.cancel"
+	}
 	return payload, nil
 }
 
@@ -258,6 +264,7 @@ func decodeStoredV2(raw map[string]any) UIPayload {
 				option := UIOption{
 					ID:          stringValue(optObj["id"]),
 					Label:       stringValue(optObj["label"]),
+					LabelKey:    stringValue(optObj["label_key"]),
 					Description: stringValue(optObj["description"]),
 				}
 				if option.ID == "" {

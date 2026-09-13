@@ -456,3 +456,34 @@ func TestEnsureResumableSessionPrefersCheckpointOverStaleMetadata(t *testing.T) 
 		t.Fatal("transcript was not materialized")
 	}
 }
+
+func TestCompactedCheckpointRestoresAfterLocalTranscriptLoss(t *testing.T) {
+	fs := newFakeCheckpointFS()
+	store := &fakeStateStore{}
+	driver := checkpointDriver(store)
+	request := checkpointRequest{BotID: "bot-1", ThreadID: "thread-1", RunID: "chat-run", RuntimeMetadata: map[string]any{metadataSessionIDKey: claudeTestSession}}
+	before := `{"type":"user","message":{"role":"user","content":"hello"}}` + "\n"
+	fs.addFile(transcriptFullPath(), before)
+	if staged, err := driver.stageWithFS(stagingContext(t), fs, request); err != nil || !staged {
+		t.Fatalf("chat stage: %v %v", staged, err)
+	}
+	original := store.replacedState.Files[0].SessionStateFileShape
+	store.canonical = map[string]agentstate.SessionStateFileShape{original.Path: original}
+	after := before + `{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"manual"}}` + "\n" + `{"type":"user","message":{"role":"user","content":"summary"},"isCompactSummary":true}` + "\n"
+	fs.addFile(transcriptFullPath(), after)
+	request.RunID = "compact-operation"
+	if staged, err := driver.stageWithFS(stagingContext(t), fs, request); err != nil || !staged {
+		t.Fatalf("compact stage: %v %v", staged, err)
+	}
+	state := store.replacedState
+	if state.ThroughRunID != request.RunID || state.Files[0].PrefixDigest != original.Digest || state.RecordCount != 3 {
+		t.Fatalf("checkpoint %+v", state)
+	}
+	// The application publishes this operation run; Load then serves that snapshot.
+	store.loadState, store.loadRecords = state, store.replacedRecords
+	delete(fs.files, transcriptFullPath())
+	id, err := driver.restoreSessionCheckpoint(t.Context(), fs, request.BotID, request.ThreadID)
+	if err != nil || id != claudeTestSession || fs.files[transcriptFullPath()] != after {
+		t.Fatalf("restored %s, %v", id, err)
+	}
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Hand, Shield, ShieldAlert, ShieldCheck, Terminal } from 'lucide-vue-next'
+import { FilePen, Hand, Shield, ShieldAlert, ShieldCheck, Terminal } from 'lucide-vue-next'
 
 defineProps<{
   icon?: string
@@ -21,6 +21,10 @@ defineProps<{
       <Shield class="size-4 text-inherit" />
       <Terminal class="absolute size-2.5 text-inherit" />
     </template>
+    <FilePen
+      v-else-if="icon === 'file-pen'"
+      class="size-4 text-inherit"
+    />
     <ShieldAlert
       v-else-if="icon === 'shield-alert' || warning"
       class="size-4 text-inherit"

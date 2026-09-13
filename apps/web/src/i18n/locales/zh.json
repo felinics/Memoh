@@ -298,7 +298,7 @@
       "steer_failed": "补充指令未能送达。请等本轮结束后重新发送。",
       "unsupported": "当前运行时不支持此操作。",
       "command_unavailable": "此命令已不可用，请刷新后重试。",
-      "mode_unavailable": "此权限模式已不可用，请刷新后重新选择。",
+      "mode_unavailable": "此模式已不可用，请刷新后重新选择。",
       "thread_unavailable": "请先开始对话，再执行此操作。",
       "failed": "操作未能完成，请重试。",
       "forbidden": "你没有访问此会话的权限。",
@@ -689,6 +689,10 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "runtimeStatus": {
+      "compacting": "正在压缩上下文…",
+      "api_retry": "{seconds} 秒后重试（{attempt}/{max_retries}）…"
+    },
     "selectSession": "选择会话",
     "welcome": {
       "folder": "要在 {name} 里做点什么？",
@@ -841,7 +845,7 @@
     "folder": "文件夹",
     "folders": "文件夹",
     "folderUnavailable": "不可用的文件夹",
-    "codexProject": {
+    "runtimeProject": {
       "chooseBranch": "切换分支",
       "noBranches": "暂无本地分支",
       "detachedHead": "分离的 HEAD",
@@ -933,6 +937,7 @@
       "unanswered": "未作答"
     },
     "tools": {
+      "elapsedRunning": "执行中 · {seconds} 秒",
       "read": "读取",
       "read_image": "查看图片",
       "read_document": "阅读文档",
@@ -1315,11 +1320,9 @@
       "helpDescription": "显示可用的快捷操作",
       "skillListDescription": "显示本轮可用的 Skills",
       "newDescription": "开始新会话",
-      "permissionDescription": "查看或切换当前 Agent 会话的权限模式",
-      "permissionModesTitle": "权限模式",
       "permissionModesText": "请选择该 Agent 声明的模式。更改仅作用于当前会话。",
-      "permissionModeChangedTitle": "权限模式已切换",
-      "permissionModeChangedText": "当前 Agent 会话已使用所选权限模式。工具授权仍需单独确认。",
+      "permissionModeChangedTitle": "会话模式已更新",
+      "permissionModeChangedText": "已应用所选会话模式。",
       "permissionCurrentMode": "当前模式",
       "compactDescription": "压缩当前会话上下文（已用 {percent}%）",
       "compactDescriptionNoStats": "压缩当前会话上下文",
@@ -1507,7 +1510,8 @@
       "placeholder": "描述你的任务以生成计划…",
       "changeFailed": "无法切换计划模式，请重试。"
     },
-    "sessionPermissionMode": "会话权限模式",
+    "runtimeModeNextTurn": "在下次运行开始时生效。",
+    "runtimeModeModelUnavailable": "当前模型不支持此权限模式，请选择其他模式或模型。",
     "permissionMode": "权限模式",
     "goal": {
       "label": "目标",
@@ -1518,7 +1522,6 @@
       "pause": "暂停目标",
       "resume": "继续目标",
       "clear": "清除目标",
-      "elapsed": "{seconds} 秒",
       "textOnly": "请用纯文本设置目标，不附带附件或技能。",
       "status": {
         "active": "正在推进目标",
@@ -2045,7 +2048,7 @@
   "bots": {
     "toolApproval": {
       "title": "工具调用审核",
-      "intro": "分别设置这个 Bot 在工作区和每台已连接电脑上可以执行的操作。",
+      "intro": "分别设置这个 Bot 在工作区和每台已连接电脑上可以执行的操作。这些规则只约束 Memoh 提供的工具；Claude Code 与 Codex 的内置工具遵循各自的权限模式，它们发来的询问会以卡片展示，由持有对应工作区权限的用户决定。",
       "loading": "正在加载审核规则...",
       "loadFailed": "无法加载工具审核",
       "loadFailedDescription": "请检查服务器连接后重试。",
@@ -2477,7 +2480,7 @@
       "authorizationCodePlaceholder": "粘贴完整授权码",
       "completeAuthorization": "完成授权",
       "defaultPermissionMode": "默认权限模式",
-      "defaultPermissionModeDescription": "新会话使用此模式，会话内的选择会覆盖默认值。"
+      "defaultPermissionModeDescription": "新会话使用此模式，会话内的选择会覆盖默认值。该模式只管 Agent 的内置工具；Memoh 提供的工具始终按「工具调用审核」规则执行。"
     },
     "dependencies": {
       "title": "工作区依赖",
@@ -3974,5 +3977,127 @@
       "confirm": "更新 {count} 项",
       "none": "没有可更新的项目。"
     }
+  },
+  "runtime": {
+    "claudeCode": {
+      "modes": {
+        "inherit": {
+          "name": "跟随工作区配置",
+          "description": "使用工作区中的权限配置。"
+        },
+        "default": {
+          "name": "手动确认",
+          "description": "需要授权的操作由你确认。"
+        },
+        "acceptEdits": {
+          "name": "自动接受编辑",
+          "description": "自动允许工作目录内的编辑和常见文件操作。"
+        },
+        "auto": {
+          "name": "自动审批",
+          "description": "由 Claude 判断操作是否允许，减少人工审批。"
+        },
+        "bypassPermissions": {
+          "name": "跳过权限检查",
+          "description": "跳过普通审批；显式规则和 Memoh 工具权限仍然生效。"
+        }
+      },
+      "commands": {
+        "status": {
+          "description": "查看最近一次 Claude 会话状态"
+        },
+        "skills": {
+          "description": "查看此 Claude 会话记录的技能"
+        },
+        "mcp": {
+          "description": "查看此 Claude 会话记录的 MCP 服务状态"
+        },
+        "compact": {
+          "description": "压缩 Claude 会话上下文",
+          "running_text": "压缩中",
+          "completed_text": "压缩已完成"
+        },
+        "goal": {
+          "description": "设置持续执行的目标",
+          "input_hint": "描述你的目标"
+        }
+      }
+    },
+    "codex": {
+      "modes": {
+        "strict": {
+          "name": "请求批准",
+          "description": "编辑外部文件和使用互联网时始终询问"
+        },
+        "policy": {
+          "name": "帮我批准",
+          "description": "仅在检测到可能不安全的操作时询问"
+        },
+        "yolo": {
+          "name": "完全访问",
+          "description": "不受限制地访问互联网和工作区中的任何文件"
+        }
+      },
+      "commands": {
+        "review": {
+          "description": "审查工作区改动",
+          "input_hint": "可选的审查说明"
+        },
+        "status": {
+          "description": "查看会话状态、Token 用量和账户额度"
+        },
+        "skills": {
+          "description": "查看可用技能"
+        },
+        "mcp": {
+          "description": "查看 MCP 服务状态"
+        },
+        "compact": {
+          "description": "压缩会话上下文",
+          "running_text": "压缩中",
+          "completed_text": "压缩已完成"
+        },
+        "goal": {
+          "description": "设置持续执行的目标",
+          "input_hint": "描述你的目标"
+        }
+      }
+    },
+    "planModes": {
+      "default": {
+        "name": "默认"
+      },
+      "plan": {
+        "name": "规划"
+      }
+    },
+    "result": {
+      "notices": {
+        "last_observed": "最近一次会话记录"
+      },
+      "fields": {
+        "session_id": "会话",
+        "model": "模型",
+        "permission_mode": "权限",
+        "input_tokens": "输入",
+        "output_tokens": "输出",
+        "cache_read_input_tokens": "缓存读取",
+        "cache_creation_input_tokens": "缓存写入",
+        "thread_id": "会话",
+        "status": "状态",
+        "tokens": "Token",
+        "context_window": "上下文窗口",
+        "limits": "账户额度",
+        "primary": "主要额度已用",
+        "secondary": "次要额度已用"
+      },
+      "empty": "暂无记录。",
+      "unknown": "暂无数据",
+      "details": "查看 JSON"
+    }
+  },
+  "elicitation": {
+    "done": "已完成",
+    "cancel": "取消"
   }
 }

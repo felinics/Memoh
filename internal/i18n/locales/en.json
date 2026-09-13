@@ -581,5 +581,61 @@
     "external_runtime": {
       "auth_required": "Codex is not connected yet. Open Agent settings to connect ChatGPT or configure an API key."
     }
+  },
+  "runtime": {
+    "claudeCode": {
+      "modes": {
+        "inherit": {
+          "name": "Runtime default"
+        },
+        "default": {
+          "name": "Manual"
+        },
+        "acceptEdits": {
+          "name": "Accept edits"
+        },
+        "auto": {
+          "name": "Auto"
+        },
+        "bypassPermissions": {
+          "name": "Bypass permissions"
+        }
+      },
+      "commands": {
+        "compact": {
+          "running_text": "Compacting",
+          "completed_text": "Compaction completed"
+        }
+      }
+    },
+    "codex": {
+      "modes": {
+        "strict": {
+          "name": "Ask for approval"
+        },
+        "policy": {
+          "name": "Approve for me"
+        },
+        "yolo": {
+          "name": "Full access"
+        }
+      },
+      "commands": {
+        "compact": {
+          "running_text": "Compacting",
+          "completed_text": "Compaction completed"
+        }
+      }
+    },
+    "result": {
+      "empty": "No entries available.",
+      "notices": {
+        "last_observed": "Last observed session data"
+      }
+    }
+  },
+  "elicitation": {
+    "done": "Done",
+    "cancel": "Cancel"
   }
 }

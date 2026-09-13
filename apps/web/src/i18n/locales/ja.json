@@ -295,7 +295,7 @@
       "steer_failed": "追加の指示を送信できませんでした。このターンが終了してから再送信してください。",
       "unsupported": "このランタイムはこの操作に対応していません。",
       "command_unavailable": "このコマンドは利用できません。更新して再試行してください。",
-      "mode_unavailable": "この権限モードは利用できません。更新して選び直してください。",
+      "mode_unavailable": "このモードは利用できません。更新して選び直してください。",
       "thread_unavailable": "会話を開始してから、この操作を実行してください。",
       "failed": "操作を完了できませんでした。再試行してください。",
       "forbidden": "この会話へのアクセス権がありません。",
@@ -686,6 +686,10 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "runtimeStatus": {
+      "compacting": "コンテキストを圧縮中…",
+      "api_retry": "{seconds} 秒後に再試行（{attempt}/{max_retries}）…"
+    },
     "selectSession": "セッションを選択",
     "welcome": {
       "folder": "{name} で何をしましょうか？"
@@ -902,6 +906,7 @@
       "unanswered": "未回答"
     },
     "tools": {
+      "elapsedRunning": "実行中 · {seconds} 秒",
       "read": "読む",
       "read_image": "画像を見る",
       "read_document": "ドキュメントを読む",
@@ -1281,11 +1286,9 @@
       "helpDescription": "利用できるクイック操作を表示します",
       "skillListDescription": "このターンで使えるスキルを表示します",
       "newDescription": "新しいセッションを開始します",
-      "permissionDescription": "この Agent セッションの権限モードを表示または変更します",
-      "permissionModesTitle": "権限モード",
       "permissionModesText": "この Agent が提示したモードを選択してください。変更はこのセッションにのみ適用されます。",
-      "permissionModeChangedTitle": "権限モードを切り替えました",
-      "permissionModeChangedText": "この Agent セッションでは、選択した権限モードが使用されています。ツールの承認は引き続き別途必要です。",
+      "permissionModeChangedTitle": "セッションモードを更新しました",
+      "permissionModeChangedText": "選択したセッションモードが適用されました。",
       "permissionCurrentMode": "現在のモード",
       "compactDescription": "このセッションのコンテキストを圧縮します（{percent}% 使用中）",
       "compactDescriptionNoStats": "このセッションのコンテキストを圧縮します",
@@ -1456,7 +1459,7 @@
       }
     },
     "modelDefaultNamed": "デフォルト（{model}）",
-    "codexProject": {
+    "runtimeProject": {
       "chooseBranch": "ブランチを切り替え",
       "noBranches": "ローカルブランチはまだありません",
       "detachedHead": "Detached HEAD",
@@ -1476,7 +1479,8 @@
       "placeholder": "プランを作成するタスクを説明してください…",
       "changeFailed": "プランモードを切り替えられませんでした。もう一度お試しください。"
     },
-    "sessionPermissionMode": "セッションの権限モード",
+    "runtimeModeNextTurn": "次の実行開始時に適用されます。",
+    "runtimeModeModelUnavailable": "このモデルは選択した権限モードに対応していません。別のモードまたはモデルを選択してください。",
     "permissionMode": "権限モード",
     "goal": {
       "label": "目標",
@@ -1487,7 +1491,6 @@
       "pause": "目標を一時停止",
       "resume": "目標を再開",
       "clear": "目標を削除",
-      "elapsed": "{seconds} 秒",
       "textOnly": "添付ファイルやスキルを含めず、テキストで目標を設定してください。",
       "status": {
         "active": "目標に取り組み中",
@@ -2047,7 +2050,7 @@
       "confirmReset": "すべてのツール承認ルールをデフォルト状態に戻しますか?",
       "resetWarningExtra": "カスタムのバイパスルールとレビュー必須ルールは失われます。",
       "title": "ツール呼び出しの承認",
-      "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。",
+      "intro": "この Bot が Workspace と各接続済みコンピューターで実行できる操作を設定します。これらのルールは Memoh が提供するツールにのみ適用されます。Claude Code と Codex の組み込みツールはそれぞれの権限モードに従い、確認の要求はカードとして表示され、該当する Workspace 権限を持つユーザーが判断します。",
       "loading": "承認ルールを読み込んでいます...",
       "loadFailed": "Tool の承認設定を読み込めませんでした",
       "loadFailedDescription": "Server への接続を確認して、もう一度お試しください。",
@@ -2475,7 +2478,7 @@
       "authorizationCodePlaceholder": "認証コードをすべて貼り付けてください",
       "completeAuthorization": "認証を完了",
       "defaultPermissionMode": "デフォルトの権限モード",
-      "defaultPermissionModeDescription": "新しいセッションで使用するモードです。セッション内の選択が優先されます。"
+      "defaultPermissionModeDescription": "新しいセッションで使用するモードです。セッション内の選択が優先されます。このモードは Agent の組み込みツールにのみ適用され、Memoh が提供するツールは常に「ツール呼び出しの承認」ルールに従います。"
     },
     "dependencies": {
       "title": "Workspace の依存関係",
@@ -3968,5 +3971,127 @@
       "confirm": "{count} 件を更新",
       "none": "更新できる項目はありません。"
     }
+  },
+  "runtime": {
+    "claudeCode": {
+      "modes": {
+        "inherit": {
+          "name": "Workspace の設定に従う",
+          "description": "Workspace の権限設定を使用します。"
+        },
+        "default": {
+          "name": "手動で確認",
+          "description": "承認が必要な操作を確認します。"
+        },
+        "acceptEdits": {
+          "name": "編集を自動承認",
+          "description": "作業ディレクトリ内の編集と一般的なファイル操作を自動承認します。"
+        },
+        "auto": {
+          "name": "自動承認",
+          "description": "Claude が操作の可否を判断し、手動での承認を減らします。"
+        },
+        "bypassPermissions": {
+          "name": "権限チェックをスキップ",
+          "description": "通常の承認をスキップします。明示的なルールと Memoh ツールの権限は引き続き適用されます。"
+        }
+      },
+      "commands": {
+        "status": {
+          "description": "最後に取得した Claude セッションの状態を表示"
+        },
+        "skills": {
+          "description": "この Claude セッションで取得したスキルを表示"
+        },
+        "mcp": {
+          "description": "この Claude セッションで取得した MCP サーバーの状態を表示"
+        },
+        "compact": {
+          "description": "Claude セッションのコンテキストを圧縮",
+          "running_text": "圧縮中",
+          "completed_text": "圧縮が完了しました"
+        },
+        "goal": {
+          "description": "継続して取り組む目標を設定",
+          "input_hint": "目標を入力"
+        }
+      }
+    },
+    "codex": {
+      "modes": {
+        "strict": {
+          "name": "承認を求める",
+          "description": "外部ファイルの編集やインターネットの使用時に常に確認する"
+        },
+        "policy": {
+          "name": "代わりに承認",
+          "description": "安全でない可能性があると検出された操作のみ確認する"
+        },
+        "yolo": {
+          "name": "フルアクセス",
+          "description": "インターネットとワークスペース内のすべてのファイルに制限なくアクセスする"
+        }
+      },
+      "commands": {
+        "review": {
+          "description": "ワークスペースの変更をレビュー",
+          "input_hint": "レビューの指示（任意）"
+        },
+        "status": {
+          "description": "スレッドの状態、トークン使用量、アカウント上限を表示"
+        },
+        "skills": {
+          "description": "利用可能なスキルを表示"
+        },
+        "mcp": {
+          "description": "MCP サーバーの状態を表示"
+        },
+        "compact": {
+          "description": "スレッドのコンテキストを圧縮",
+          "running_text": "圧縮中",
+          "completed_text": "圧縮が完了しました"
+        },
+        "goal": {
+          "description": "継続して取り組む目標を設定",
+          "input_hint": "目標を入力"
+        }
+      }
+    },
+    "planModes": {
+      "default": {
+        "name": "デフォルト"
+      },
+      "plan": {
+        "name": "プラン"
+      }
+    },
+    "result": {
+      "notices": {
+        "last_observed": "最後に取得したセッション情報"
+      },
+      "fields": {
+        "session_id": "セッション",
+        "model": "モデル",
+        "permission_mode": "権限",
+        "input_tokens": "入力",
+        "output_tokens": "出力",
+        "cache_read_input_tokens": "キャッシュ読み取り",
+        "cache_creation_input_tokens": "キャッシュ作成",
+        "thread_id": "スレッド",
+        "status": "状態",
+        "tokens": "トークン",
+        "context_window": "コンテキストウィンドウ",
+        "limits": "アカウント上限",
+        "primary": "プライマリ枠の使用率",
+        "secondary": "セカンダリ枠の使用率"
+      },
+      "empty": "記録はありません。",
+      "unknown": "未取得",
+      "details": "JSON を表示"
+    }
+  },
+  "elicitation": {
+    "done": "完了",
+    "cancel": "キャンセル"
   }
 }

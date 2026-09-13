@@ -46,8 +46,19 @@ type BotAgentAuthPurger interface {
 	PurgeBotAgentAuth(ctx context.Context, botID, botAgentID string) error
 }
 
+type ModelCatalogRequest struct {
+	BotID       string
+	BotAgentID  string
+	ProjectPath string
+	// ModelID selects the model whose defaults the picker is displaying.
+	ModelID string
+	// Preference validation needs only capabilities; resolved defaults are a
+	// separate, optional observation for display.
+	ResolveDefaults bool
+}
+
 type ModelCatalogProvider interface {
-	ModelCatalog(ctx context.Context, botID, botAgentID string) (ModelCatalog, error)
+	ModelCatalog(ctx context.Context, request ModelCatalogRequest) (ModelCatalog, error)
 }
 
 var ErrModelCatalogUnavailable = errors.New("external agent model catalog unavailable")
@@ -87,7 +98,7 @@ func (drivers Drivers) PurgeBotAgentAuth(ctx context.Context, runtimeType, botID
 	return nil
 }
 
-func (drivers Drivers) ModelCatalog(ctx context.Context, runtimeType, botID, botAgentID string) (ModelCatalog, error) {
+func (drivers Drivers) ModelCatalog(ctx context.Context, runtimeType string, request ModelCatalogRequest) (ModelCatalog, error) {
 	runtimeType = strings.TrimSpace(runtimeType)
 	for _, driver := range drivers {
 		if driver == nil || driver.RuntimeType() != runtimeType {
@@ -97,7 +108,7 @@ func (drivers Drivers) ModelCatalog(ctx context.Context, runtimeType, botID, bot
 		if !ok {
 			return ModelCatalog{}, ErrModelCatalogUnavailable
 		}
-		return provider.ModelCatalog(ctx, botID, botAgentID)
+		return provider.ModelCatalog(ctx, request)
 	}
 	return ModelCatalog{}, ErrModelCatalogUnavailable
 }
@@ -152,13 +163,15 @@ type ModelCatalog struct {
 type ModelOption struct {
 	// ResolvedModelID preserves a runtime-advertised full model name for
 	// validation without duplicating its alias in the model picker.
-	ResolvedModelID        string                  `json:"-"`
+	ResolvedModelID        string                  `json:"resolved_model_id,omitempty"`
 	ID                     string                  `json:"id"`
 	Name                   string                  `json:"name"`
 	Description            string                  `json:"description,omitempty"`
 	Default                bool                    `json:"default,omitempty"`
 	DefaultReasoningEffort string                  `json:"default_reasoning_effort,omitempty"`
 	ReasoningEfforts       []ReasoningEffortOption `json:"reasoning_efforts"`
+	// IDs belong to this runtime's permission menu, not a shared preset enum.
+	UnavailablePermissionModes []string `json:"unavailable_permission_modes,omitempty"`
 }
 
 // ReasoningEffortOption is one runtime-defined reasoning level.
@@ -172,7 +185,6 @@ type ReasoningEffortOption struct {
 type PromptInput struct {
 	Steering   Steering
 	BotID      string
-	Language   string
 	BotAgentID string
 	ChatID     string
 	ThreadID   string

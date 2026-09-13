@@ -78,11 +78,12 @@ export function useACPRuntime(options: UseACPRuntimeOptions) {
     session_id: runtime.value?.session_id,
     commands: availableCommands.value.map(command => ({ ...command, kind: 'turn' as const })),
     modes: {
+      kind: 'session',
       available_modes: modes.value,
       current_mode_id: currentModeId.value,
       supported: runtime.value?.modes?.supported ?? false,
     },
-    capabilities: { permission_modes: runtime.value?.modes?.supported ?? false, compact: false, plan_mode: false },
+    capabilities: { permission_modes: false, compact: false, plan_mode: false },
   }))
 
   function requestScope() {

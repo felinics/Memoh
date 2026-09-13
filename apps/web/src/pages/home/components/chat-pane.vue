@@ -141,7 +141,7 @@
                         :can-edit-latest-user="isEditableTurn(msg)"
                         :can-fork-assistant="isForkableTurn(msg)"
                         :inline-actions="activeChatTarget.runtimeType === BOT_AGENT_RUNTIME_CODEX"
-                        :goal-supported="activeChatTarget.runtimeType === BOT_AGENT_RUNTIME_CODEX"
+                        :goal-runtime="activeChatTarget.runtimeType"
                         :is-scrolling="isScrolling"
                         :is-last-message="msg.id === lastMessageId"
                         @active="onMessageActive"
@@ -410,7 +410,7 @@
               ref="dockEl"
               :approvals="pendingApprovals"
               :command-panel="composerCommandPanel"
-              :error-message="goalSubmissionBlocked ? goalExecutionBlockedReason : composerError"
+              :error-message="goalSubmissionBlocked ? goalExecutionBlockedReason : runtimeModeUnavailableReason || composerError"
               :pending-user-input="pendingUserInput"
               :compacting="isCompactingSession"
               @select-command-item="selectCommandResultItem"
@@ -900,7 +900,7 @@
                         type="button"
                         variant="brand"
                         shape="circle"
-                        :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel || goalSubmissionBlocked)"
+                        :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel || goalSubmissionBlocked || !!runtimeModeUnavailableReason)"
                         :title="goalSubmissionBlocked ? goalExecutionBlockedReason : undefined"
                         :class="runtimeModeChanging && !streaming && showSend && !!currentBotId && !activeChatReadOnly && !loadingMessages && !composerAgentConfigPending && !composerHasNoModel ? 'disabled:opacity-100' : undefined"
                         :aria-label="streaming && showSend ? $t(composerQueueCommand?.mode === 'steer' ? 'chat.queue.enqueueSteer' : 'chat.queue.enqueueFollowUp') : (streaming ? 'Stop generating response' : 'Send message')"
@@ -978,15 +978,15 @@
                   />
 
                   <ComposerFolderMenu
-                    v-if="voiceInputState === 'idle' && (composerFolderPickable || composerFolderLocked || activeChatTarget.runtimeType === BOT_AGENT_RUNTIME_CODEX)"
+                    v-if="voiceInputState === 'idle' && (composerFolderPickable || composerFolderLocked || activeUsesDirectRuntime)"
                     :bot-id="currentBotId || ''"
-                    :project="codexProject"
+                    :project="runtimeProject"
                     :projects="selectableFolders"
                     :editable="!hasRenderedSession"
                     :locked="computerSwitchLocked || composerConfigPending || !canWorkspaceRead"
                     :visible="isVisible && canWorkspaceRead"
                     :streaming="streaming"
-                    :codex="activeChatTarget.runtimeType === BOT_AGENT_RUNTIME_CODEX"
+                    :git-branches="activeUsesDirectRuntime"
                     :pickable="composerFolderPickable"
                     :locked-folder="composerFolderLocked"
                     :folder-name="composerFolderName"
@@ -1091,7 +1091,7 @@
                         :class="runtimeModeChanging ? 'disabled:opacity-100' : undefined"
                         class="min-w-14 shrink max-w-48 gap-1.5 px-1.5 font-normal max-md:h-11"
                         :title="currentRuntimeMode?.name || currentRuntimeModeId"
-                        :aria-label="$t('chat.permissionMode') + ': ' + (currentRuntimeMode?.name || currentRuntimeModeId)"
+                        :aria-label="runtimeModeLabel + ': ' + (currentRuntimeMode?.name || currentRuntimeModeId)"
                       >
                         <RuntimeModeIcon
                           :icon="currentRuntimeMode?.icon"
@@ -1113,13 +1113,17 @@
                       class="w-80 max-w-[calc(100vw-2rem)] sm:w-md"
                     >
                       <DropdownMenuLabel class="text-label font-normal">
-                        {{ $t('chat.sessionPermissionMode') }}
+                        {{ runtimeModeLabel }}
+                        <span
+                          v-if="runtimeControlSnapshot?.modes?.apply_on_next_turn"
+                          class="block whitespace-normal text-caption font-normal text-muted-foreground"
+                        >{{ $t('chat.runtimeModeNextTurn') }}</span>
                       </DropdownMenuLabel>
                       <DropdownMenuItem
                         v-for="mode in runtimeModes"
                         :key="mode.id"
                         class="py-1 max-md:py-1.5"
-                        :disabled="runtimeModeDisabled"
+                        :disabled="runtimeModeDisabled || unavailableRuntimeModes.includes(mode.id ?? '')"
                         @select="onRuntimeModeSelected(mode.id)"
                       >
                         <RuntimeModeIcon
@@ -1135,11 +1139,11 @@
                             v-if="mode.description"
                             class="block whitespace-normal text-body"
                             :class="mode.warning ? 'text-warning-foreground' : 'text-muted-foreground'"
-                          >{{ mode.description }}</span>
+                          >{{ unavailableRuntimeModes.includes(mode.id ?? '') ? $t('chat.runtimeModeModelUnavailable') : mode.description }}</span>
                         </span>
                         <Check v-if="mode.id === currentRuntimeModeId" />
                       </DropdownMenuItem>
-                      <template v-if="planModeSupported || goalSupported">
+                      <template v-if="planModeSupported || goalCommandAvailable">
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           v-if="planModeSupported"
@@ -1151,7 +1155,7 @@
                           <Check v-if="planModeEnabled" />
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          v-if="goalSupported"
+                          v-if="goalCommandAvailable"
                           :disabled="runtimeModeDisabled || !!goalExecutionBlockedReason"
                           :title="goalExecutionBlockedReason"
                           @select="goalDraftScope = goalDraftEnabled ? '' : runtimeModeScope"
@@ -1301,6 +1305,7 @@ import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { provideConnectorLogos } from '../composables/useConnectorLogos'
 import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { parseSessionQueueCommand, SessionQueueSubmissionGate } from './session-queue-submission'
+import { localizeRuntimeControls, localizeRuntimeCommandResult } from '@/utils/runtime-control-presentation'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
 import { captureChatPaneSendContext, clearComposerPairDraft, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
@@ -1336,7 +1341,8 @@ const props = withDefaults(defineProps<{
   active: true,
 })
 
-const { t } = useI18n()
+const { t, te, locale } = useI18n()
+const runtimeText = (key: string, fallback: string) => te(key) || te(key, 'en') ? t(key) : fallback
 const router = useRouter()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
@@ -1737,9 +1743,9 @@ const draftWorkingFolder = computed(() => {
   if (activeUsesExternalAgentComposer.value && workdir.target_kind === 'remote') return null
   return workdir
 })
-// Codex displays its existing folder binding in the context row. Only drafts
+// Direct runtimes display their folder binding in the context row. Only drafts
 // may change it; existing sessions keep their creation-time directory.
-const codexProject = computed<BotWorkdir | null>(() => {
+const runtimeProject = computed<BotWorkdir | null>(() => {
   if (!activeSessionWorkdirId.value) return draftWorkingFolder.value
   return workdirsStore.workdirById(currentBotId.value, activeSessionWorkdirId.value) ?? {
     id: activeSessionWorkdirId.value,
@@ -1814,7 +1820,7 @@ const selectedWorkspaceTargetMissing = computed(() => (
 // A folder owns its target. Display that target without overwriting the free
 // draft selection, so clearing the folder restores the previous computer.
 const composerComputerTargetId = computed(() => composerFolderLocked.value
-  ? codexProject.value?.workspace_target_id?.trim() || ''
+  ? runtimeProject.value?.workspace_target_id?.trim() || ''
   : selectedWorkspaceTargetId.value)
 const composerComputerTargetMissing = computed(() => composerFolderLocked.value
   ? !workspaceTargetsInitialLoading.value && !workspaceTargets.value.some(target => target.target_id === composerComputerTargetId.value)
@@ -2056,11 +2062,11 @@ const slashQuickActions = computed(() => [
     ? [{
         id: 'permission',
         label: '/permission',
-        description: t('chat.slash.permissionDescription'),
+        description: runtimeModeLabel.value,
         icon: ShieldCheck,
       }]
     : []),
-  ...(goalSupported.value
+  ...(goalCommandAvailable.value
     ? [{ id: 'goal', label: '/goal', description: goalExecutionBlockedReason.value || t('chat.goal.description'), icon: Target }]
     : []),
   ...(planModeSupported.value
@@ -2125,11 +2131,13 @@ const runtimeControls = useRuntimeControls({
   visible: computed(() => isVisible.value && activeUsesExternalAgentComposer.value),
   draftAgentId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? activeBotAgentID.value : ''),
 })
-const runtimeControlSnapshot = computed(() => activeIsPendingExternalAgent.value && activeUsesACPRuntime.value ? pendingRuntimeControls.value : runtimeControls.controls.value)
+const rawRuntimeControlSnapshot = computed(() => activeIsPendingExternalAgent.value && activeUsesACPRuntime.value ? pendingRuntimeControls.value : runtimeControls.controls.value)
+const runtimeControlSnapshot = computed(() => localizeRuntimeControls(rawRuntimeControlSnapshot.value, runtimeText))
 const composerRuntimeCommands = computed(() =>
   activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? [] : runtimeControlSnapshot.value?.commands ?? [],
 )
 const runtimeModes = computed(() => runtimeControlSnapshot.value?.modes?.available_modes ?? [])
+const runtimeModeLabel = computed(() => t(runtimeControlSnapshot.value?.modes?.kind === 'permission' ? 'chat.permissionMode' : 'chat.sessionMode'))
 const currentRuntimeModeId = computed(() =>
   chatStore.pendingExternalAgentStateFor(paneTarget.value)?.input.permissionMode
   || runtimeControlSnapshot.value?.modes?.current_mode_id
@@ -2139,9 +2147,12 @@ const runtimeGoalError = computed(() => runtimeControls.goalError.value
   ? resolveApiErrorMessage(runtimeControls.goalError.value, t('errors.runtime_control.failed'))
   : '')
 const goalSupported = computed(() => runtimeControlSnapshot.value?.capabilities?.goal === true)
+// A native /goal command is enough for the shared goal composer. Live goal
+// state and pause/resume controls require the separate runtime capability.
+const goalCommandAvailable = computed(() => runtimeControlSnapshot.value?.commands?.some(command => command.name === 'goal' && command.kind === 'turn') === true)
 const goalDraftScope = ref('')
-const goalDraftEnabled = computed(() => goalSupported.value && goalDraftScope.value === runtimeModeScope.value)
-const goalExecutionBlockedReason = computed(() => planModeEnabled.value ? t('errors.runtime_control.goal_requires_default_mode') : '')
+const goalDraftEnabled = computed(() => goalCommandAvailable.value && goalDraftScope.value === runtimeModeScope.value)
+const goalExecutionBlockedReason = computed(() => goalSupported.value && planModeEnabled.value ? t('errors.runtime_control.goal_requires_default_mode') : '')
 const goalSubmissionBlocked = computed(() => {
   if (streaming.value || !goalSupported.value || !goalExecutionBlockedReason.value) return false
   const text = inputText.value.trim()
@@ -2150,7 +2161,7 @@ const goalSubmissionBlocked = computed(() => {
 const goalRequests = reactive(new Map<string, symbol>())
 const goalChanging = computed(() => goalRequests.has(runtimeModeScope.value))
 const goalControlsDisabled = computed(() => activeChatReadOnly.value || !paneTarget.value.sessionId || loadingMessages.value || goalChanging.value)
-const goalResumeDisabled = computed(() => !!goalExecutionBlockedReason.value || streaming.value || creatingSession.value || composerConfigPending.value || composerHasNoModel.value || isCompactingSession.value)
+const goalResumeDisabled = computed(() => !!goalExecutionBlockedReason.value || !!runtimeModeUnavailableReason.value || streaming.value || creatingSession.value || composerConfigPending.value || composerHasNoModel.value || isCompactingSession.value)
 
 async function controlGoal(action: 'pause' | 'clear' | 'resume') {
   if (goalControlsDisabled.value || !runtimeControls.goal.value) return
@@ -2202,7 +2213,7 @@ const runtimeModeScope = computed(() => JSON.stringify([paneTarget.value, active
 const runtimeModeChanging = computed(() => runtimeModeRequestScope.value === runtimeModeScope.value)
 const runtimeModeDisabled = computed(() => activeChatReadOnly.value || streaming.value || creatingSession.value || loadingMessages.value || agentChanging.value || runtimeModeChanging.value)
 const visibleRuntimeAgentCommands = computed(() =>
-  visibleRuntimeCommands(composerRuntimeCommands.value, slashQuery.value).filter(command => command.name !== 'goal' || !goalSupported.value),
+  visibleRuntimeCommands(composerRuntimeCommands.value, slashQuery.value).filter(command => command.name !== 'goal' || !goalCommandAvailable.value),
 )
 const slashPanelHasResults = computed(() =>
   visibleSlashQuickActions.value.length > 0
@@ -2242,15 +2253,26 @@ const canCompactViaSlash = computed(() =>
 async function runPendingPermission(text: string) {
   if (runtimeModeDisabled.value) return
   const modeId = text.trim().replace(/^\/permission(?:\s+|$)/i, '').trim()
+  if (unavailableRuntimeModes.value.includes(modeId)) {
+    composerError.value = t('chat.runtimeModeModelUnavailable')
+    return
+  }
+  const operationScope = runtimeModeScope.value
+  const complete = chatStore.beginCommandEvent({
+    type: 'command_result', terminal: false, action_id: 'permission',
+    result: { kind: 'runtime_command', title: '/permission', text_key: 'common.loading' },
+  }, currentPaneCommandScope())
   try {
     if (modeId) await setRuntimeMode(modeId)
     else if (activeUsesACPRuntime.value) await ensureACPRuntime()
-    const modes = runtimeControlSnapshot.value?.modes
-    if (!modes) return
+    const modes = rawRuntimeControlSnapshot.value?.modes
+    if (runtimeModeScope.value !== operationScope || !modes) {
+      complete(null)
+      return
+    }
     const currentModeId = currentRuntimeModeId.value
-    chatStore.rememberCommandEvent({
+    complete({
       type: 'command_result',
-      composer_scope: paneComposerScope.value,
       action_id: 'permission',
       terminal: true,
       result: {
@@ -2260,20 +2282,21 @@ async function runPendingPermission(text: string) {
           if (!id) return []
           return [{
             id,
-            title: mode.name || id,
+            i18n_key: mode.i18n_key,
+            title: mode.name || (mode.i18n_key ? '' : id),
             description: mode.description,
             kind: id === currentModeId ? 'runtime_mode_current' : 'runtime_mode',
           }]
         }),
       },
-    }, currentPaneCommandScope())
+    })
   } catch (error) {
-    composerError.value = resolveApiErrorMessage(error, t('chat.modeSwitchFailed'))
+    complete({ type: 'command_error', terminal: true, error: { code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('chat.modeSwitchFailed')) } })
   }
 }
 
 function runLocalQuickAction(id: string, text = ''): boolean {
-  if (id === 'goal' && goalSupported.value) {
+  if (id === 'goal' && goalCommandAvailable.value) {
     if (goalExecutionBlockedReason.value) {
       composerError.value = goalExecutionBlockedReason.value
       return true
@@ -2356,7 +2379,7 @@ function localQuickActionIDForSlash(text: string): string {
     text,
     activeIsExternalAgent.value || activeIsPendingExternalAgent.value,
     planModeSupported.value,
-    goalSupported.value,
+    goalCommandAvailable.value,
   )
 }
 
@@ -2379,11 +2402,11 @@ const commandError = computed(() => commandPanelEvent.value?.type === 'command_e
 const commandPanelActionID = computed(() => commandPanelEvent.value?.action_id?.trim() ?? '')
 const commandPanelIsError = computed(() => !!commandError.value)
 const presentedCommandResult = computed(() => commandResult.value
-  ? commandResultPresentation(commandResult.value, {
-      modesTitle: t('chat.slash.permissionModesTitle'),
+  ? commandResultPresentation(localizeRuntimeCommandResult(commandResult.value, runtimeText, locale.value, commandPanelActionID.value), {
+      modesTitle: runtimeModeLabel.value,
       modesText: t('chat.slash.permissionModesText'),
       changedTitle: t('chat.slash.permissionModeChangedTitle'),
-      changedText: t('chat.slash.permissionModeChangedText'),
+      changedText: t(runtimeControlSnapshot.value?.modes?.apply_on_next_turn ? 'chat.runtimeModeNextTurn' : 'chat.slash.permissionModeChangedText'),
       currentMode: t('chat.slash.permissionCurrentMode'),
     })
   : null)
@@ -2416,6 +2439,7 @@ const composerCommandPanel = computed(() => {
     title: commandPanelTitle.value,
     text: commandPanelText.value,
     items: commandResultItems.value,
+    data: presentedCommandResult.value?.data,
   }
 })
 
@@ -2480,6 +2504,7 @@ const {
   botAgentId: activeBotAgentID,
   runtime: computed(() => activeChatTarget.value.runtimeType),
   selectedModelId: overrideModelId,
+  projectPath: computed(() => runtimeProject.value?.path || activeACPProjectPath.value),
   acpModels,
   acpCurrentModelId: currentACPModelId,
   acpReasoningEfforts,
@@ -2524,6 +2549,10 @@ const canChangeAgent = computed(() => !!currentBotId.value
   && messages.value.length === 0)
 
 const composerModels = computed(() => composerModelCatalog.value.models)
+const unavailableRuntimeModes = computed(() => composerModelCatalog.value.unavailablePermissionModes ?? [])
+const runtimeModeUnavailableReason = computed(() => unavailableRuntimeModes.value.includes(currentRuntimeModeId.value)
+  ? t('chat.runtimeModeModelUnavailable')
+  : '')
 const composerModelProviders = computed(() => composerModelCatalog.value.providers)
 
 // "Default" alone tells the user nothing — resolve what it actually means:
@@ -2547,8 +2576,12 @@ const composerDefaultModelLabel = computed(() =>
     ? t('chat.modelDefaultNamed', { model: composerDefaultModelName.value })
     : t('chat.modelDefault'))
 // Resolve inherited values for display without turning them into user overrides.
-const composerModelId = computed(() => overrideModelId.value
-  || (activeUsesDirectRuntime.value ? composerDefaultModelId.value : ''))
+const composerModelId = computed(() => {
+  const id = overrideModelId.value || (activeUsesDirectRuntime.value ? composerDefaultModelId.value : '')
+  // A session can remember the resolved ID while the picker uses an alias.
+  // Normalize only the displayed selection; the stored preference stays intact.
+  return composerModels.value.find(model => model.id === id || model.model_id === id)?.id || id
+})
 const composerReasoningEffort = computed(() => {
   if (!activeUsesDirectRuntime.value || overrideReasoningEffort.value) return overrideReasoningEffort.value
   const catalog = composerModelCatalog.value
@@ -3113,6 +3146,7 @@ async function togglePlanMode() {
 
 async function onRuntimeModeSelected(value: unknown) {
   if (typeof value !== 'string' || !value || runtimeModeDisabled.value || value === currentRuntimeModeId.value) return
+  if (unavailableRuntimeModes.value.includes(value)) return
   const scope = currentPaneCommandScope()
   composerError.value = ''
   try {
@@ -3927,21 +3961,22 @@ async function handleSend() {
       await runSessionCompaction(() => runtimeControls.execute(runtimeCommand.name!))
       return
     }
-    const scope = currentPaneCommandScope()
     const draftKey = inputDraftKey.value
     const title = `/${runtimeCommand.name}`
-    const remember = (message: string, terminal: boolean) => chatStore.rememberCommandEvent({
-      type: 'command_result', terminal, action_id: runtimeCommand.name,
-      result: { kind: 'runtime_command', title, text: message },
-    }, scope)
-    remember(runtimeCommand.running_text || t('common.loading'), false)
+    const complete = chatStore.beginCommandEvent({
+      type: 'command_result', terminal: false, action_id: runtimeCommand.name,
+      result: { kind: 'runtime_command', title, text: runtimeCommand.running_text, text_key: 'common.loading' },
+    }, currentPaneCommandScope())
     inputText.value = ''
     saveInputDraft(draftKey, '')
     try {
       const result = await runtimeControls.execute(runtimeCommand.name!)
-      remember(result || runtimeCommand.completed_text || t('common.toast.success'), true)
+      complete({
+        type: 'command_result', terminal: true, action_id: runtimeCommand.name,
+        result: { kind: 'runtime_command', title, ...(Object.keys(result).length ? result : { text: runtimeCommand.completed_text, text_key: 'common.toast.success' }) },
+      })
     } catch (error) {
-      chatStore.showCommandError(parseMemohError(error)?.code || 'runtime_control.failed', resolveApiErrorMessage(error, t('errors.runtime_control.failed')), scope)
+      complete({ type: 'command_error', terminal: true, error: { code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('errors.runtime_control.failed')) } })
     }
     return
   }
@@ -4015,6 +4050,7 @@ async function handleSend() {
     // Keyboard send bypasses the disabled button, so the no-model gate is
     // repeated here rather than living only on the control.
     || composerHasNoModel.value
+    || !!runtimeModeUnavailableReason.value
   ) return
   const localAction = localQuickActionIDForSlash(text)
   if (localAction && localQuickActionBlocked()) return

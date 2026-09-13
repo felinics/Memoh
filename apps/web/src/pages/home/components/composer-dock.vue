@@ -75,6 +75,7 @@ import type { CommandActionListItem, UIUserInput } from '@/composables/api/useCh
 // Same view-model shape ComposerPanel takes (kept structurally identical so
 // the pane's computed needs no cast).
 interface CommandPanelData {
+  data?: unknown
   isError: boolean
   title: string
   text: string

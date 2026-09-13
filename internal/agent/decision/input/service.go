@@ -857,7 +857,11 @@ func answerEntry(question UIQuestion, answer QuestionAnswer) (map[string]any, er
 		if !ok {
 			return nil, fmt.Errorf("question %q has no option %q", question.ID, id)
 		}
-		selected = append(selected, map[string]any{"id": option.ID, "label": option.Label})
+		selection := map[string]any{"id": option.ID, "label": option.Label}
+		if option.LabelKey != "" {
+			selection["label_key"] = option.LabelKey
+		}
+		selected = append(selected, selection)
 	}
 	if len(selected) > 0 {
 		entry["selected"] = selected

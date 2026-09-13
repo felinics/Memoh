@@ -180,13 +180,17 @@ type CommandEventResponse struct {
 }
 
 type CommandActionResult struct {
-	Kind  string                  `json:"kind"`
-	Title string                  `json:"title,omitempty"`
-	Text  string                  `json:"text,omitempty"`
-	Items []CommandActionListItem `json:"items,omitempty"`
+	Data    any                     `json:"data,omitempty"`
+	Notice  string                  `json:"notice,omitempty"`
+	TextKey string                  `json:"text_key,omitempty"`
+	Kind    string                  `json:"kind"`
+	Title   string                  `json:"title,omitempty"`
+	Text    string                  `json:"text,omitempty"`
+	Items   []CommandActionListItem `json:"items,omitempty"`
 }
 
 type CommandActionListItem struct {
+	I18nKey     string `json:"i18n_key,omitempty"`
 	ID          string `json:"id,omitempty"`
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
@@ -404,6 +408,7 @@ func (h *LocalChannelHandler) executeWebPermissionQuickAction(ctx context.Contex
 			kind = "runtime_mode_current"
 		}
 		items = append(items, CommandActionListItem{
+			I18nKey:     mode.I18nKey,
 			ID:          mode.ID,
 			Title:       mode.Name,
 			Description: mode.Description,
@@ -1998,7 +2003,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				sendWSCommandError(writer, msg, slash.CodeInvalidSkillSlashSyntax)
 				continue
 			}
-			controlRequest := application.RuntimeControlRequest{BotID: botID, ThreadID: sessionID, ActorID: channelIdentityID, Language: c.Request().Header.Get("Accept-Language"), ToolHTTPURL: buildExternalAgentToolsURL(c, botID)}
+			controlRequest := application.RuntimeControlRequest{BotID: botID, ThreadID: sessionID, ActorID: channelIdentityID, ToolHTTPURL: buildExternalAgentToolsURL(c, botID)}
 			decision := h.classifyWebSlashForSession(streamBaseCtx, text, len(msg.Attachments) > 0, controlRequest)
 			if command := decision.RuntimeCommand; command != nil {
 				controlRequest.Command = command.Name
@@ -2008,11 +2013,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						continue
 					}
 					go func(controlCtx context.Context, request application.RuntimeControlRequest, command external.Command, message wsClientMessage) {
-						if command.RunningText != "" {
+						if command.RunningText != "" || command.Kind == external.CommandOperation {
 							event := commandEvent(message.InvocationID, message.ComposerScope, message.SessionID, request.Command)
 							event.Type = "command_result"
 							event.Terminal = false
-							event.Result = &CommandActionResult{Kind: "text", Title: "/" + request.Command, Text: command.RunningText}
+							event.Result = &CommandActionResult{Kind: "runtime_command", Title: "/" + request.Command, Text: command.RunningText, TextKey: runtimeCommandTextKey(command, "running_text")}
 							writer.SendJSON(event)
 						}
 						result, err := h.agentService.ExecuteRuntimeCommand(controlCtx, request)
@@ -2028,10 +2033,12 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 							writer.SendJSON(event)
 							return
 						}
-						if result == "" {
-							result = command.CompletedText
+						textKey := ""
+						if result.Text == "" && result.Data == nil && result.Notice == "" {
+							result.Text = command.CompletedText
+							textKey = runtimeCommandTextKey(command, "completed_text")
 						}
-						sendWSCommandResult(writer, message, request.Command, &CommandActionResult{Kind: "text", Title: "/" + request.Command, Text: result})
+						sendWSCommandResult(writer, message, request.Command, &CommandActionResult{Kind: "runtime_command", Title: "/" + request.Command, Text: result.Text, Data: result.Data, Notice: result.Notice, TextKey: textKey})
 					}(streamBaseCtx, controlRequest, *command, msg)
 					continue
 				}

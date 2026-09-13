@@ -298,7 +298,7 @@
       "steer_failed": "The additional instruction could not be delivered. Send it again after this turn finishes.",
       "unsupported": "This runtime does not support this control.",
       "command_unavailable": "This runtime command is no longer available. Refresh and try again.",
-      "mode_unavailable": "This permission mode is unavailable. Refresh and choose a supported mode.",
+      "mode_unavailable": "This mode is unavailable. Refresh and choose a supported mode.",
       "thread_unavailable": "Start a conversation before using this operation.",
       "failed": "The runtime control could not be completed. Try again.",
       "forbidden": "You do not have access to this conversation.",
@@ -689,6 +689,10 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "runtimeStatus": {
+      "compacting": "Compacting context…",
+      "api_retry": "Retry {attempt}/{max_retries} in {seconds}s…"
+    },
     "selectSession": "Select a session",
     "welcome": {
       "folder": "What can I do in {name}?",
@@ -921,6 +925,7 @@
       "unanswered": "No answer"
     },
     "tools": {
+      "elapsedRunning": "Running · {seconds}s",
       "read": "Read",
       "read_image": "View image",
       "read_document": "Read document",
@@ -1303,11 +1308,9 @@
       "helpDescription": "Show available quick actions",
       "skillListDescription": "Show skills available for this turn",
       "newDescription": "Start a new session",
-      "permissionDescription": "View or change this Agent session's permission mode",
-      "permissionModesTitle": "Permission modes",
       "permissionModesText": "Choose a mode declared by this Agent. The change applies only to this session.",
-      "permissionModeChangedTitle": "Permission mode changed",
-      "permissionModeChangedText": "This Agent session now uses the selected permission mode. Tool consent remains a separate decision.",
+      "permissionModeChangedTitle": "Session mode updated",
+      "permissionModeChangedText": "The selected session mode is now applied.",
       "permissionCurrentMode": "Current mode",
       "compactDescription": "Compact this session's context ({percent}% full)",
       "compactDescriptionNoStats": "Compact this session's context",
@@ -1487,7 +1490,7 @@
       }
     },
     "modelDefaultNamed": "Default ({model})",
-    "codexProject": {
+    "runtimeProject": {
       "chooseBranch": "Switch branch",
       "noBranches": "No local branches yet",
       "detachedHead": "Detached HEAD",
@@ -1507,7 +1510,8 @@
       "placeholder": "Describe your task to generate a plan…",
       "changeFailed": "Could not change plan mode. Please try again."
     },
-    "sessionPermissionMode": "Session permission mode",
+    "runtimeModeNextTurn": "Applies when the next run starts.",
+    "runtimeModeModelUnavailable": "This model does not support this permission mode. Choose another mode or model.",
     "permissionMode": "Permission mode",
     "goal": {
       "label": "Goal",
@@ -1518,7 +1522,6 @@
       "pause": "Pause goal",
       "resume": "Resume goal",
       "clear": "Clear goal",
-      "elapsed": "{seconds}s",
       "textOnly": "Send the goal as text without attachments or skills.",
       "status": {
         "active": "Pursuing goal",
@@ -2045,7 +2048,7 @@
   "bots": {
     "toolApproval": {
       "title": "Tool Call Approval",
-      "intro": "Choose what this Bot may do in its Workspace and on each connected computer.",
+      "intro": "Choose what this Bot may do in its Workspace and on each connected computer. These rules govern the tools Memoh provides. Claude Code and Codex apply their own permission mode to their built-in tools; when one of them asks, Memoh shows the request as a card for a user with the matching Workspace permission to decide.",
       "loading": "Loading approval rules...",
       "loadFailed": "Couldn’t load tool approval",
       "loadFailedDescription": "Check the server connection and try again.",
@@ -2477,7 +2480,7 @@
       "authorizationCodePlaceholder": "Paste the complete authorization code",
       "completeAuthorization": "Complete authorization",
       "defaultPermissionMode": "Default permission mode",
-      "defaultPermissionModeDescription": "New sessions use this mode. A session selection overrides the default."
+      "defaultPermissionModeDescription": "New sessions use this mode. A session selection overrides the default. The mode governs the agent's built-in tools; tools Memoh provides always follow the Tool Call Approval rules."
     },
     "dependencies": {
       "title": "Workspace dependencies",
@@ -3974,5 +3977,127 @@
       "confirm": "Update {count} item | Update {count} items",
       "none": "Nothing to update."
     }
+  },
+  "runtime": {
+    "claudeCode": {
+      "modes": {
+        "inherit": {
+          "name": "Runtime default",
+          "description": "Use the workspace permission configuration."
+        },
+        "default": {
+          "name": "Manual",
+          "description": "Ask before operations that need approval."
+        },
+        "acceptEdits": {
+          "name": "Accept edits",
+          "description": "Automatically allow edits and common file operations in the working directory."
+        },
+        "auto": {
+          "name": "Auto",
+          "description": "Let Claude assess operations and handle ordinary permission checks."
+        },
+        "bypassPermissions": {
+          "name": "Bypass permissions",
+          "description": "Skip ordinary approval prompts. Explicit rules and Memoh tool permissions still apply."
+        }
+      },
+      "commands": {
+        "status": {
+          "description": "Show the last observed Claude session state"
+        },
+        "skills": {
+          "description": "List skills observed in this Claude session"
+        },
+        "mcp": {
+          "description": "Show MCP servers observed in this Claude session"
+        },
+        "compact": {
+          "description": "Compact Claude session context",
+          "running_text": "Compacting",
+          "completed_text": "Compaction completed"
+        },
+        "goal": {
+          "description": "Set a goal to keep pursuing",
+          "input_hint": "Describe your goal"
+        }
+      }
+    },
+    "codex": {
+      "modes": {
+        "strict": {
+          "name": "Ask for approval",
+          "description": "Always ask to edit external files and use the internet"
+        },
+        "policy": {
+          "name": "Approve for me",
+          "description": "Only ask for actions detected as potentially unsafe"
+        },
+        "yolo": {
+          "name": "Full access",
+          "description": "Unrestricted access to the internet and any file in your workspace"
+        }
+      },
+      "commands": {
+        "review": {
+          "description": "Review workspace changes",
+          "input_hint": "Optional review instructions"
+        },
+        "status": {
+          "description": "Show thread status, token usage and account limits"
+        },
+        "skills": {
+          "description": "List available skills"
+        },
+        "mcp": {
+          "description": "List MCP server status"
+        },
+        "compact": {
+          "description": "Compact thread context",
+          "running_text": "Compacting",
+          "completed_text": "Compaction completed"
+        },
+        "goal": {
+          "description": "Set a goal to keep pursuing",
+          "input_hint": "Describe your goal"
+        }
+      }
+    },
+    "planModes": {
+      "default": {
+        "name": "Default"
+      },
+      "plan": {
+        "name": "Plan"
+      }
+    },
+    "result": {
+      "notices": {
+        "last_observed": "Last observed session data"
+      },
+      "fields": {
+        "session_id": "Session",
+        "model": "Model",
+        "permission_mode": "Permissions",
+        "input_tokens": "Input",
+        "output_tokens": "Output",
+        "cache_read_input_tokens": "Cache read",
+        "cache_creation_input_tokens": "Cache creation",
+        "thread_id": "Thread",
+        "status": "Status",
+        "tokens": "Tokens",
+        "context_window": "Context window",
+        "limits": "Account limits",
+        "primary": "Primary quota used",
+        "secondary": "Secondary quota used"
+      },
+      "empty": "No entries available.",
+      "unknown": "Unavailable",
+      "details": "View JSON"
+    }
+  },
+  "elicitation": {
+    "done": "Done",
+    "cancel": "Cancel"
   }
 }

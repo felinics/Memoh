@@ -10,7 +10,17 @@ const (
 	RuntimeCommandOperation RuntimeCommandKind = "operation"
 )
 
+// RuntimeCommandResult preserves structured observations for each surface to render.
+// Text is reserved for native, already textual output; Notice is a stable catalog code.
+type RuntimeCommandResult struct {
+	Text   string `json:"text,omitempty"`
+	Data   any    `json:"data,omitempty"`
+	Notice string `json:"notice,omitempty"`
+}
+
 type RuntimeCommand struct {
+	// I18nKey identifies host-owned copy. Native descriptions take precedence.
+	I18nKey       string             `json:"i18n_key,omitempty"`
 	Name          string             `json:"name"`
 	Description   string             `json:"description"`
 	InputHint     string             `json:"input_hint,omitempty"`
@@ -20,6 +30,7 @@ type RuntimeCommand struct {
 }
 
 type RuntimeMode struct {
+	I18nKey     string `json:"i18n_key,omitempty"`
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -30,9 +41,13 @@ type RuntimeMode struct {
 }
 
 type RuntimeModeState struct {
-	AvailableModes []RuntimeMode `json:"available_modes"`
-	CurrentModeID  string        `json:"current_mode_id"`
-	Supported      bool          `json:"supported"`
+	// Kind distinguishes permission presets from arbitrary agent session modes.
+	Kind string `json:"kind,omitempty"`
+	// Direct runtimes save a preference and apply it when starting the next turn.
+	ApplyOnNextTurn bool          `json:"apply_on_next_turn,omitempty"`
+	AvailableModes  []RuntimeMode `json:"available_modes"`
+	CurrentModeID   string        `json:"current_mode_id"`
+	Supported       bool          `json:"supported"`
 }
 
 type RuntimeControlCapabilities struct {
@@ -52,7 +67,6 @@ type RuntimeControls struct {
 
 type RuntimeControlRequest struct {
 	TeamID      string `json:"team_id,omitempty"`
-	Language    string `json:"language,omitempty"`
 	BotID       string `json:"bot_id"`
 	ThreadID    string `json:"session_id"`
 	ActorID     string `json:"actor_id"`
@@ -67,7 +81,7 @@ type RuntimeControlService interface {
 	RuntimeCommands(context.Context, RuntimeControlRequest) ([]RuntimeCommand, error)
 	RuntimeControls(context.Context, RuntimeControlRequest) (RuntimeControls, error)
 	SetRuntimeMode(context.Context, RuntimeControlRequest) (RuntimeModeState, error)
-	ExecuteRuntimeCommand(context.Context, RuntimeControlRequest) (string, error)
+	ExecuteRuntimeCommand(context.Context, RuntimeControlRequest) (RuntimeCommandResult, error)
 }
 
 // RuntimeGoal is a view of the runtime-owned goal, not another goal store.

@@ -458,7 +458,7 @@ var catalog = map[Code]Definition{
 	},
 	CodeRuntimeControlUnsupported:             {HTTPStatus: http.StatusBadRequest, Detail: "This runtime does not support this control."},
 	CodeRuntimeControlCommandUnavailable:      {HTTPStatus: http.StatusConflict, Detail: "This runtime command is no longer available. Refresh and try again."},
-	CodeRuntimeControlModeUnavailable:         {HTTPStatus: http.StatusBadRequest, Detail: "This permission mode is unavailable. Refresh and choose a supported mode."},
+	CodeRuntimeControlModeUnavailable:         {HTTPStatus: http.StatusBadRequest, Detail: "This mode is unavailable. Refresh and choose a supported mode."},
 	CodeRuntimeControlGoalRequiresDefaultMode: {HTTPStatus: http.StatusConflict, Detail: "Exit Plan mode before creating or resuming a goal."},
 	CodeWorkdirGitBusy:                        {HTTPStatus: http.StatusConflict, Detail: "An agent is using this working directory. Wait for it to finish before switching branches."},
 	CodeWorkdirGitBranchUnavailable:           {HTTPStatus: http.StatusBadRequest, Detail: "This local branch is unavailable. Refresh and select an existing branch."},

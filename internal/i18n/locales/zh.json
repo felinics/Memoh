@@ -581,5 +581,61 @@
     "external_runtime": {
       "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。"
     }
+  },
+  "runtime": {
+    "claudeCode": {
+      "modes": {
+        "inherit": {
+          "name": "跟随工作区配置"
+        },
+        "default": {
+          "name": "手动确认"
+        },
+        "acceptEdits": {
+          "name": "自动接受编辑"
+        },
+        "auto": {
+          "name": "自动审批"
+        },
+        "bypassPermissions": {
+          "name": "跳过权限检查"
+        }
+      },
+      "commands": {
+        "compact": {
+          "running_text": "压缩中",
+          "completed_text": "压缩已完成"
+        }
+      }
+    },
+    "codex": {
+      "modes": {
+        "strict": {
+          "name": "请求批准"
+        },
+        "policy": {
+          "name": "帮我批准"
+        },
+        "yolo": {
+          "name": "完全访问"
+        }
+      },
+      "commands": {
+        "compact": {
+          "running_text": "压缩中",
+          "completed_text": "压缩已完成"
+        }
+      }
+    },
+    "result": {
+      "empty": "暂无记录。",
+      "notices": {
+        "last_observed": "最近一次会话记录"
+      }
+    }
+  },
+  "elicitation": {
+    "done": "已完成",
+    "cancel": "取消"
   }
 }

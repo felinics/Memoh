@@ -17,6 +17,7 @@
           :title="section.panel.title"
           :text="section.panel.text"
           :items="section.panel.items"
+          :data="section.panel.data"
           @select="emit('selectCommandItem', $event)"
           @dismiss="emit('dismissCommand')"
         />
@@ -86,6 +87,7 @@ import type { CommandActionListItem } from '@/composables/api/useChat'
 // The pane pre-digests the raw command event into this shape (it also drives
 // the pane's keyboard arbitration); this component only renders it.
 interface CommandPanelData {
+  data?: unknown
   isError: boolean
   title: string
   text: string

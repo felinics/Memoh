@@ -135,8 +135,8 @@ func (s *Server) ExecuteRuntimeCommand(ctx context.Context, req *turnpb.JsonRequ
 	return &turnpb.JsonResponse{Json: data}, nil
 }
 
-func (c *Client) ExecuteRuntimeCommand(ctx context.Context, input turn.RuntimeControlRequest) (string, error) {
-	var out string
+func (c *Client) ExecuteRuntimeCommand(ctx context.Context, input turn.RuntimeControlRequest) (turn.RuntimeCommandResult, error) {
+	var out turn.RuntimeCommandResult
 	data, err := json.Marshal(input)
 	if err != nil {
 		return out, err

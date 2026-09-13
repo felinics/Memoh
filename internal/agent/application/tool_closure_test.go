@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 )
 
 func TestRepairToolCallClosures_AppendsSyntheticToolResultForDanglingAssistantCall(t *testing.T) {
@@ -190,5 +193,38 @@ func TestRepairToolCallClosures_UsesResolvedUserInputResult(t *testing.T) {
 	result, ok := results[0].Result.(map[string]any)
 	if !ok || result["status"] != "submitted" || result["answers"] == nil {
 		t.Fatalf("resolved ask_user payload = %#v", results[0].Result)
+	}
+}
+
+// Native consent is a completed decision, not evidence that a real tool ran.
+func TestRepairPermissionDecisionKeepsExecutionOutcomeSeparate(t *testing.T) {
+	for _, status := range []string{"approved", "rejected", "cancelled", "expired", "pending"} {
+		t.Run(status, func(t *testing.T) {
+			output := external.TranscriptFromEvents([]event.StreamEvent{
+				{Type: event.ToolCallStart, ToolCallID: "real", ToolName: "exec", Input: map[string]any{"command": "echo hi"}},
+				{Type: event.ToolApprovalRequest, ToolCallID: "real", ToolName: "exec", Status: "approved"},
+				{Type: event.ToolApprovalRequest, ToolCallID: "consent", ToolName: "permission", Status: status},
+			}, "")
+			repaired := repairToolCallClosures(sdkMessagesToModelMessages(output), syntheticToolClosureError)
+			results := map[string]sdk.ToolResultPart{}
+			for _, message := range repaired {
+				for _, result := range extractToolResultParts(message) {
+					results[result.ToolCallID] = result
+				}
+			}
+			if len(results) != 2 || !results["real"].IsError {
+				t.Fatalf("approval manufactured execution success: %#v", results)
+			}
+			consent := results["consent"]
+			if consent.IsError != (status == "expired" || status == "pending") {
+				t.Fatalf("wrong consent outcome: %#v", consent)
+			}
+			if status != "pending" {
+				value, ok := consent.Result.(map[string]any)
+				if !ok || value["status"] != status {
+					t.Fatalf("decision lost: %#v", consent)
+				}
+			}
+		})
 	}
 }

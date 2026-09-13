@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 const maxTextInteractionRetries = 3
@@ -37,7 +39,7 @@ func (s *Service) AdvanceText(ctx context.Context, input AdvanceTextInput) (Adva
 		if strings.TrimSpace(resolve.ExplicitID) == "" {
 			resolve.ExplicitID = req.ID
 		}
-		state, invalid, changed, err := advanceTextState(req.UIPayload, req.Interaction, input.Text)
+		state, invalid, changed, err := advanceTextState(req.UIPayload.Localized(i18n.New(input.UILanguage)), req.Interaction, input.Text)
 		if err != nil {
 			return AdvanceTextResult{}, err
 		}

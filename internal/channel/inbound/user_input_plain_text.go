@@ -37,16 +37,17 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 	if msg.Message.Reply != nil {
 		replyExternalID = strings.TrimSpace(msg.Message.Reply.MessageID)
 	}
+	loc := p.localizer(ctx, identity.BotID)
 	result, err := advanceRunner.AdvancePlainTextUserInput(ctx, userinput.AdvanceTextInput{
 		BotID:                  strings.TrimSpace(identity.BotID),
 		SessionID:              strings.TrimSpace(sessionID),
 		ReplyExternalMessageID: replyExternalID,
 		Text:                   text,
+		UILanguage:             loc.Locale(),
 	})
 	if err != nil || !result.Handled {
 		return result.Handled, err
 	}
-	loc := p.localizer(ctx, identity.BotID)
 	if !result.Request.Interaction.Completed {
 		if p.updateUserInputCard(ctx, cfg, result.Request.ID, loc) && !result.Invalid {
 			return true, nil
@@ -83,7 +84,7 @@ func (p *ChannelInboundProcessor) handlePlainTextUserInput(
 }
 
 func plainTextUserInputMessage(req userinput.Request, invalid bool, loc *i18n.Localizer, replyMessageID string) channel.Message {
-	questions := req.UIPayload.Questions
+	questions := req.UIPayload.Localized(loc).Questions
 	index := req.Interaction.QuestionIndex
 	if index < 0 || index >= len(questions) {
 		return channel.Message{}
@@ -126,7 +127,7 @@ func plainTextUserInputSummary(req userinput.Request, loc *i18n.Localizer, reply
 		answers[answer.QuestionID] = answer
 	}
 	blocks := make([]string, 0, len(req.UIPayload.Questions))
-	for index, question := range req.UIPayload.Questions {
+	for index, question := range req.UIPayload.Localized(loc).Questions {
 		answer := answers[question.ID]
 		value := plainTextAnswerLabel(question, answer, loc)
 		blocks = append(blocks, fmt.Sprintf("%d. %s\n%s: %s", index+1, question.Text, loc.T("cmd.userInput.answerLabel"), value))

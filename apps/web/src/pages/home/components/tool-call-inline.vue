@@ -59,6 +59,10 @@
         :open="open"
         class="ml-0.5"
       />
+      <span
+        v-if="elapsedLabel"
+        class="shrink-0 text-xs text-muted-foreground"
+      >{{ elapsedLabel }}</span>
     </HeaderRow>
 
     <div
@@ -112,6 +116,10 @@
         v-if="userInputLabel"
         class="shrink-0 text-xs text-muted-foreground"
       >{{ userInputLabel }}</span>
+      <span
+        v-if="elapsedLabel"
+        class="shrink-0 text-xs text-muted-foreground"
+      >{{ elapsedLabel }}</span>
     </div>
 
     <CollapseSection
@@ -184,6 +192,11 @@ import Capsule from './tool-detail/capsule.vue'
 
 const props = defineProps<{ block: ToolCallBlock, messageId: string, inGroup?: boolean, showExecutionLocation?: boolean }>()
 const { t } = useI18n()
+const elapsedLabel = computed(() => {
+  const seconds = props.block.elapsed_time_seconds
+  if (seconds === undefined || !props.block.running || props.block.approval?.status === 'pending' || props.block.userInput?.status === 'pending') return ''
+  return t('chat.tools.elapsedRunning', { seconds: Math.floor(seconds) })
+})
 
 const openInFileManager = inject(openInFileManagerKey, undefined)
 

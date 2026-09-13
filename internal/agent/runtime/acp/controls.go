@@ -26,8 +26,8 @@ func (d *Driver) Commands(_ context.Context, input external.PromptInput) ([]exte
 	return commands, nil
 }
 
-func (*Driver) ReadCommand(context.Context, external.PromptInput) (string, error) {
-	return "", external.ErrCommandUnavailable
+func (*Driver) ReadCommand(context.Context, external.PromptInput) (external.CommandResult, error) {
+	return external.CommandResult{}, external.ErrCommandUnavailable
 }
 
 func controlPrompt(input external.PromptInput) PromptInput {

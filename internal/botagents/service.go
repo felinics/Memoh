@@ -468,6 +468,14 @@ func normalizeDescriptor(runtime string, metadata map[string]any) (string, map[s
 		normalized[MetadataProviderKey] = provider
 		return runtime, normalized, nil
 	case RuntimeCodex, RuntimeClaudeCode:
+		if runtime == RuntimeClaudeCode {
+			if value, exists := metadata["permission_mode"]; exists {
+				mode, ok := value.(string)
+				if !ok || !claudecfg.ValidPermissionMode(mode) {
+					return "", nil, ErrInvalidMetadata
+				}
+			}
+		}
 		if runtime == RuntimeCodex {
 			if value, exists := metadata["permission_mode"]; exists {
 				mode, ok := value.(string)

@@ -581,5 +581,61 @@
     "external_runtime": {
       "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。"
     }
+  },
+  "runtime": {
+    "claudeCode": {
+      "modes": {
+        "inherit": {
+          "name": "Workspace の設定に従う"
+        },
+        "default": {
+          "name": "手動で確認"
+        },
+        "acceptEdits": {
+          "name": "編集を自動承認"
+        },
+        "auto": {
+          "name": "自動承認"
+        },
+        "bypassPermissions": {
+          "name": "権限チェックをスキップ"
+        }
+      },
+      "commands": {
+        "compact": {
+          "running_text": "圧縮中",
+          "completed_text": "圧縮が完了しました"
+        }
+      }
+    },
+    "codex": {
+      "modes": {
+        "strict": {
+          "name": "承認を求める"
+        },
+        "policy": {
+          "name": "代わりに承認"
+        },
+        "yolo": {
+          "name": "フルアクセス"
+        }
+      },
+      "commands": {
+        "compact": {
+          "running_text": "圧縮中",
+          "completed_text": "圧縮が完了しました"
+        }
+      }
+    },
+    "result": {
+      "empty": "記録はありません。",
+      "notices": {
+        "last_observed": "最後に取得したセッション情報"
+      }
+    }
+  },
+  "elicitation": {
+    "done": "完了",
+    "cancel": "キャンセル"
   }
 }

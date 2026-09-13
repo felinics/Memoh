@@ -36,6 +36,9 @@ func TestReasoningTimingTrackerMeasuresExplicitBlock(t *testing.T) {
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningStart})
 	clock.advance(400 * time.Millisecond)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "inspect"})
+	tracker.observe(native.StreamEvent{Type: native.EventToolCallMetadata, Metadata: map[string]any{
+		"execution_progress": map[string]any{"elapsed_time_seconds": float64(1)},
+	}})
 	clock.advance(1600 * time.Millisecond)
 	tracker.observe(native.StreamEvent{Type: native.EventReasoningEnd})
 

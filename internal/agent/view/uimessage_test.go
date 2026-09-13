@@ -2067,3 +2067,40 @@ func TestUIMessageStreamConverterAppliesDiffMetadataOnToolEnd(t *testing.T) {
 		t.Fatalf("update = %#v, want diff %q", update, diff)
 	}
 }
+
+func TestRuntimeFeedbackLiveAndHistoryProjection(t *testing.T) {
+	c := NewUIMessageStreamConverter()
+	command := c.HandleEvent(UIMessageStreamEvent{Type: "command_output", ToolName: "goal", Delta: "Goal set: review"})[0]
+	tool := c.HandleEvent(UIMessageStreamEvent{Type: "tool_call_start", ToolCallID: "exec-1", ToolName: "exec"})[0]
+	text := c.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "Review"})[0]
+	for _, seconds := range []float64{2, 5} {
+		update := c.HandleEvent(UIMessageStreamEvent{Type: "tool_call_metadata", ToolCallID: "exec-1", Metadata: map[string]any{
+			"execution_progress": map[string]any{"elapsed_time_seconds": seconds},
+		}})[0]
+		if update.ID != tool.ID || *update.ElapsedTimeSeconds != seconds || len(update.Progress) != 0 {
+			t.Fatalf("heartbeat appended instead of updating: %#v", update)
+		}
+	}
+	status := c.HandleEvent(UIMessageStreamEvent{Type: "runtime_status", Code: "api_retry"})[0]
+	if next := c.HandleEvent(UIMessageStreamEvent{Type: "runtime_status", Code: "compacting"})[0]; next.ID != status.ID {
+		t.Fatal("runtime status accumulated")
+	}
+	if next := c.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "ed."})[0]; next.ID != text.ID || next.Content != "Reviewed." {
+		t.Fatal("status or heartbeat interrupted model text")
+	}
+	raw := json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"Goal set: review","providerMetadata":{"runtime_command":"goal"}}]},{"role":"assistant","content":[{"type":"tool-call","toolCallId":"exec-1","toolName":"exec","providerMetadata":{"execution_progress":{"elapsed_time_seconds":5}}}]},{"role":"assistant","content":[{"type":"text","text":"Reviewed."}]}]`)
+	terminal := c.ConvertTerminalMessages(raw)
+	if len(terminal) != 4 || terminal[0].ID != command.ID || terminal[0].Type != UIMessageCommand || terminal[2].ID != text.ID || terminal[3].Name != "" {
+		t.Fatalf("terminal feedback mismatch: %#v", terminal)
+	}
+	var modelMessages []json.RawMessage
+	_ = json.Unmarshal(raw, &modelMessages)
+	var rows []messagepkg.Message
+	for _, content := range modelMessages {
+		rows = append(rows, messagepkg.Message{Role: "assistant", Content: content, TurnID: "turn-1"})
+	}
+	history := ConvertMessagesToUITurns(rows)
+	if len(history) != 1 || len(history[0].Messages) != 3 || history[0].Messages[0].Type != UIMessageCommand {
+		t.Fatalf("history lost command identity: %#v", history)
+	}
+}

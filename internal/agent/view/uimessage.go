@@ -17,6 +17,8 @@ const (
 	UIMessageTool        UIMessageType = "tool"
 	UIMessageAttachments UIMessageType = "attachments"
 	UIMessageError       UIMessageType = "error"
+	UIMessageCommand     UIMessageType = "command"
+	UIMessageStatus      UIMessageType = "status"
 	// UIMessageNotice is an inline runtime degradation notice (tools
 	// unavailable, an interaction declined). Name carries the machine code,
 	// Content the human-readable text.
@@ -56,17 +58,18 @@ type UIForwardRef struct {
 
 // UIMessage is the normalized assistant output block used by the web frontend.
 type UIMessage struct {
-	ID                int                  `json:"id"`
-	Type              UIMessageType        `json:"type"`
-	Content           string               `json:"content,omitempty"`
-	Name              string               `json:"name,omitempty"`
-	Input             any                  `json:"input,omitempty"`
-	Output            any                  `json:"output,omitempty"`
-	ToolCallID        string               `json:"tool_call_id,omitempty"`
-	Running           *bool                `json:"running,omitempty"`
-	Progress          []any                `json:"progress,omitempty"`
-	Approval          *UIToolApproval      `json:"approval,omitempty"`
-	ExecutionLocation *UIExecutionLocation `json:"execution_location,omitempty"`
+	ID                 int                  `json:"id"`
+	Type               UIMessageType        `json:"type"`
+	Content            string               `json:"content,omitempty"`
+	Name               string               `json:"name,omitempty"`
+	Input              any                  `json:"input,omitempty"`
+	Output             any                  `json:"output,omitempty"`
+	ToolCallID         string               `json:"tool_call_id,omitempty"`
+	Running            *bool                `json:"running,omitempty"`
+	Progress           []any                `json:"progress,omitempty"`
+	ElapsedTimeSeconds *float64             `json:"elapsed_time_seconds,omitempty"`
+	Approval           *UIToolApproval      `json:"approval,omitempty"`
+	ExecutionLocation  *UIExecutionLocation `json:"execution_location,omitempty"`
 	// Diff is a UI-only unified diff attached to the tool call at execution
 	// time (edit/write tools). It never reaches the model: rows persist it
 	// under the diffs metadata key — on the assistant row (lifted out of

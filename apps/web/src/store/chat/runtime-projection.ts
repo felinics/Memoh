@@ -159,15 +159,18 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   // database history is authoritative, and idle snapshots arrive with
   // messages:null (e.g. after a backend restart, whose ledger view carries no
   // streamed blocks).
+  // Runtime activity belongs to the current run, even when a steer splits its
+  // transcript. Keep it out of the historical segments defined by message IDs.
+  const runtimeStatus = active ? run.messages.find(message => message.type === 'status') : undefined
+  const assistantMessages = run.messages.filter(message => message.type !== 'status')
   const projectsAssistantContent = active
-    || run.messages.length > 0
+    || assistantMessages.length > 0
     || Boolean(run.error_code)
     || Boolean(run.error)
   if (projectsAssistantContent) {
-    const assistantMessages = [...run.messages]
     if ((run.error_code || run.error) && !assistantMessages.some(message => message.type === 'error')) {
       assistantMessages.push({
-        id: nextMessageId(assistantMessages),
+        id: nextMessageId(run.messages),
         type: 'error',
         code: run.error_code,
         content: run.error ?? '',
@@ -215,7 +218,8 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
     // intentionally exists while empty so the running indicator stays below
     // the newly admitted user input until the next model delta arrives. Once
     // the run has settled an empty segment would only render a blank turn.
-    const finalSegment = assistantMessages.slice(segmentStart)
+    const finalSegment: UIMessage[] = assistantMessages.slice(segmentStart)
+    if (runtimeStatus) finalSegment.push(runtimeStatus)
     if (active || finalSegment.length > 0 || turns.every(turn => turn.role !== 'assistant')) {
       turns.push(runtimeAssistantTurn(segmentTurnId, segmentTimestamp, finalSegment))
     }

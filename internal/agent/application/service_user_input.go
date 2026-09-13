@@ -12,6 +12,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -45,6 +46,7 @@ type UserInputResponseInput struct {
 	ExplicitID                 string
 	ReplyExternalMessageID     string
 	Answers                    []userinput.QuestionAnswer
+	UILanguage                 string
 	TextAnswer                 string
 	Canceled                   bool
 	Reason                     string
@@ -128,7 +130,7 @@ func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputRe
 	} else {
 		answers := input.Answers
 		if len(answers) == 0 && strings.TrimSpace(input.TextAnswer) != "" {
-			answers, err = userInputAnswersFromText(target.UIPayload, input.TextAnswer)
+			answers, err = userInputAnswersFromText(target.UIPayload.Localized(i18n.New(input.UILanguage)), input.TextAnswer)
 			if err != nil {
 				if activePrompt != nil {
 					activePrompt.release()

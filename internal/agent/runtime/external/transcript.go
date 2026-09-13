@@ -46,6 +46,13 @@ func (b *TranscriptRecorder) Add(ev event.StreamEvent) {
 		b.appendReasoning(ev.Delta)
 	case event.TextDelta:
 		b.appendText(ev.Delta)
+	case event.CommandOutput:
+		// A command receipt is not model text: the final-text fallback in
+		// Messages must still apply when the reply never streamed as deltas.
+		b.flushAssistant()
+		b.output = append(b.output, sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
+			sdk.TextPart{Text: ev.Delta, ProviderMetadata: map[string]any{"runtime_command": ev.ToolName}},
+		}})
 	case event.ToolCallStart:
 		b.upsertToolCallStart(ev)
 	case event.ToolCallEnd:
@@ -144,7 +151,7 @@ func (b *TranscriptRecorder) appendReasoning(delta string) {
 
 func (b *TranscriptRecorder) appendToolResult(ev event.StreamEvent) {
 	result := ev.Result
-	isError := strings.TrimSpace(ev.Error) != "" || resultIsMCPError(result)
+	isError := ev.Status == "failed" || strings.TrimSpace(ev.Error) != "" || resultIsMCPError(result)
 	if result == nil && isError {
 		result = strings.TrimSpace(ev.Error)
 	}

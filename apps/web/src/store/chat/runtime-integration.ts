@@ -235,7 +235,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
         rejected.assistantTurn,
       ) ? 'stream' : 'startup'
-      if (rejected.assistantTurn.messages.length === 0) {
+      if (!deps.hasVisibleAssistantBlocks(rejected.assistantTurn)) {
         deps.removeTurnFromSession(
           rejected.botId,
           rejected.sessionId,
@@ -277,7 +277,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
         pending.assistantTurn,
       ) ? 'stream' : 'startup'
-      if (pending.assistantTurn.messages.length === 0 && !event.code) {
+      if (!deps.hasVisibleAssistantBlocks(pending.assistantTurn) && !event.code) {
         deps.removeTurnFromSession(
           pending.botId,
           pending.sessionId,
@@ -393,7 +393,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
           aborted.name = 'AbortError'
           deps.assistantStreams.rejectAssistantStream(invocationId, aborted)
         } else {
-          const stage: SendMessageStage = currentRun.messages.length > 0
+          const stage: SendMessageStage = currentRun.messages.some(message => message.type !== 'status')
             || Boolean(currentRun.error_code)
             ? 'stream'
             : 'startup'

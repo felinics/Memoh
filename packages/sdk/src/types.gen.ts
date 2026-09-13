@@ -1452,6 +1452,7 @@ export type ConversationUiMessage = {
      * the tool message row — never inside the tool result.
      */
     diff?: string;
+    elapsed_time_seconds?: number;
     execution_location?: ConversationUiExecutionLocation;
     id?: number;
     input?: unknown;
@@ -1465,7 +1466,7 @@ export type ConversationUiMessage = {
     user_input?: ConversationUiUserInput;
 };
 
-export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments' | 'error' | 'notice';
+export type ConversationUiMessageType = 'text' | 'reasoning' | 'tool' | 'attachments' | 'error' | 'command' | 'status' | 'notice';
 
 export type ConversationUiReasoningTiming = {
     duration_ms?: number;
@@ -1665,8 +1666,16 @@ export type ExternalGoal = {
 };
 
 export type ExternalModeState = {
+    /**
+     * Direct runtimes save a preference and apply it when starting the next turn.
+     */
+    apply_on_next_turn?: boolean;
     available_modes?: Array<TurnRuntimeMode>;
     current_mode_id?: string;
+    /**
+     * Kind distinguishes permission presets from arbitrary agent session modes.
+     */
+    kind?: string;
     supported?: boolean;
 };
 
@@ -1683,6 +1692,15 @@ export type ExternalModelOption = {
     id?: string;
     name?: string;
     reasoning_efforts?: Array<ExternalReasoningEffortOption>;
+    /**
+     * ResolvedModelID preserves a runtime-advertised full model name for
+     * validation without duplicating its alias in the model picker.
+     */
+    resolved_model_id?: string;
+    /**
+     * IDs belong to this runtime's permission menu, not a shared preset enum.
+     */
+    unavailable_permission_modes?: Array<string>;
 };
 
 export type ExternalReasoningEffortOption = {
@@ -1978,15 +1996,19 @@ export type HandlersCommandActionError = {
 
 export type HandlersCommandActionListItem = {
     description?: string;
+    i18n_key?: string;
     id?: string;
     kind?: string;
     title?: string;
 };
 
 export type HandlersCommandActionResult = {
+    data?: unknown;
     items?: Array<HandlersCommandActionListItem>;
     kind?: string;
+    notice?: string;
     text?: string;
+    text_key?: string;
     title?: string;
 };
 
@@ -2417,6 +2439,8 @@ export type HandlersRuntimeCommandRequest = {
 };
 
 export type HandlersRuntimeCommandResponse = {
+    data?: unknown;
+    notice?: string;
     text?: string;
 };
 
@@ -4092,6 +4116,10 @@ export type SkillsSafeCatalogItem = {
 export type TurnRuntimeCommand = {
     completed_text?: string;
     description?: string;
+    /**
+     * I18nKey identifies host-owned copy. Native descriptions take precedence.
+     */
+    i18n_key?: string;
     input_hint?: string;
     kind?: TurnRuntimeCommandKind;
     name?: string;
@@ -4109,6 +4137,7 @@ export type TurnRuntimeControlCapabilities = {
 
 export type TurnRuntimeMode = {
     description?: string;
+    i18n_key?: string;
     /**
      * Icon is a presentation hint; clients may fall back for unknown values.
      */
@@ -4122,8 +4151,16 @@ export type TurnRuntimeMode = {
 };
 
 export type TurnRuntimeModeState = {
+    /**
+     * Direct runtimes save a preference and apply it when starting the next turn.
+     */
+    apply_on_next_turn?: boolean;
     available_modes?: Array<TurnRuntimeMode>;
     current_mode_id?: string;
+    /**
+     * Kind distinguishes permission presets from arbitrary agent session modes.
+     */
+    kind?: string;
     supported?: boolean;
 };
 
@@ -4140,6 +4177,7 @@ export type UserinputUiOption = {
     description?: string;
     id?: string;
     label?: string;
+    label_key?: string;
 };
 
 export type UserinputUiQuestion = {
@@ -6073,7 +6111,16 @@ export type GetBotsByBotIdAgentsByIdModelsData = {
          */
         id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Model whose effective defaults should be displayed
+         */
+        model_id?: string;
+        /**
+         * Workspace project path for runtime model settings
+         */
+        project_path?: string;
+    };
     url: '/bots/{bot_id}/agents/{id}/models';
 };
 

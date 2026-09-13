@@ -1,4 +1,5 @@
 import type { TurnRuntimeCommand } from '@memohai/sdk'
+import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX } from './bot-agent'
 
 export type RuntimeCommand = TurnRuntimeCommand
 export type VisibleRuntimeCommand = RuntimeCommand & { name: string }
@@ -51,9 +52,9 @@ export function composerLocalQuickActionID(
   text: string,
   usesExternalAgentComposer: boolean,
   planModeSupported = false,
-  goalSupported = false,
+  goalShortcutSupported = false,
 ): '' | 'compact' | 'model' | 'plan' | 'goal' {
-  if (goalSupported && text.trim().toLowerCase() === '/goal') return 'goal'
+  if (goalShortcutSupported && text.trim().toLowerCase() === '/goal') return 'goal'
   if (planModeSupported && text.trim().toLowerCase() === '/plan') return 'plan'
   if (usesExternalAgentComposer) return ''
   switch (text.trim().toLowerCase()) {
@@ -65,4 +66,15 @@ export function composerLocalQuickActionID(
     default:
       return ''
   }
+}
+
+// Native Goal grammars differ; control commands are not objective messages.
+export function runtimeGoalObjective(text: string, runtime?: string): string | null {
+  const objective = /^\/goal\s+(.+)$/s.exec(text.trim())?.[1]?.trim()
+  if (!objective) return null
+  if (runtime === BOT_AGENT_RUNTIME_CODEX) return objective === 'resume' ? null : objective
+  if (runtime === BOT_AGENT_RUNTIME_CLAUDE_CODE) {
+    return ['clear', 'stop', 'off', 'reset', 'none', 'cancel'].includes(objective.toLowerCase()) ? null : objective
+  }
+  return null
 }

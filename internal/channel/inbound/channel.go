@@ -3698,6 +3698,7 @@ func (p *ChannelInboundProcessor) handleUserInputResponseCommand(ctx context.Con
 		ReplyExternalMessageID: replyExternalID,
 		Answers:                answers,
 		TextAnswer:             answerText,
+		UILanguage:             loc.Locale(),
 		ChatToken:              p.issueChatToken(identity, routeID, msg),
 	})
 }

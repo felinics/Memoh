@@ -1,9 +1,8 @@
 <template>
   <!-- Folder session-attribute trigger: a bare text trigger under the composer.
        Drafts may pick a folder; once the session exists the binding is pinned
-       and the label goes read-only (Codex still opens the menu for its branch
-       switcher). Codex project + git-branch logic lifted verbatim from the
-       removed codex-project-bar — same queries, same 5s poll, same switch. -->
+       and the label goes read-only. Direct runtimes can still use the menu
+       to inspect and switch the project branch. -->
   <DropdownMenu v-model:open="menuOpen">
     <DropdownMenuTrigger as-child>
       <Button
@@ -12,7 +11,7 @@
         :disabled="locked"
         class="min-w-14 shrink max-w-48 gap-1.5 px-1.5 font-normal max-md:h-11"
         :title="project?.path || folderName"
-        :aria-label="t('chat.folder') + ': ' + (project?.name || folderName || t('chat.codexProject.none'))"
+        :aria-label="t('chat.folder') + ': ' + (project?.name || folderName || t('chat.runtimeProject.none'))"
       >
         <Folder class="size-3.5 shrink-0" />
         <span class="truncate text-label">{{ triggerLabel }}</span>
@@ -35,7 +34,7 @@
         @select="emit('clear')"
       >
         <X class="size-4 shrink-0" />
-        <span class="min-w-0 flex-1 truncate">{{ t(codex ? 'chat.codexProject.clear' : 'chat.folderDetachDraft') }}</span>
+        <span class="min-w-0 flex-1 truncate">{{ t(gitBranches ? 'chat.runtimeProject.clear' : 'chat.folderDetachDraft') }}</span>
         <Check
           v-if="!project"
           class="ml-auto"
@@ -46,7 +45,7 @@
         disabled
         class="whitespace-normal"
       >
-        {{ t('chat.codexProject.empty') }}
+        {{ t('chat.runtimeProject.empty') }}
       </DropdownMenuItem>
       <DropdownMenuItem
         v-for="folder in projects"
@@ -58,7 +57,7 @@
         <span class="min-w-0 flex-1">
           <span class="block truncate">{{ folder.name }}</span>
           <span
-            v-if="codex"
+            v-if="gitBranches"
             class="block truncate text-caption text-muted-foreground"
           >{{ folder.path }}</span>
         </span>
@@ -86,9 +85,9 @@
         <span class="min-w-0 flex-1 truncate">{{ folderName }}</span>
       </DropdownMenuItem>
 
-      <template v-if="codex && project">
+      <template v-if="gitBranches && project">
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>{{ t('chat.codexProject.chooseBranch') }}</DropdownMenuLabel>
+        <DropdownMenuLabel>{{ t('chat.runtimeProject.chooseBranch') }}</DropdownMenuLabel>
         <DropdownMenuItem
           v-if="branchState?.busy"
           disabled
@@ -101,7 +100,7 @@
           disabled
           class="whitespace-normal"
         >
-          {{ t('chat.codexProject.noBranches') }}
+          {{ t('chat.runtimeProject.noBranches') }}
         </DropdownMenuItem>
         <DropdownMenuItem
           v-for="name in branchState?.branches ?? []"
@@ -141,7 +140,7 @@ const props = defineProps<{
   visible: boolean
   streaming: boolean
   canExecute: boolean
-  codex: boolean
+  gitBranches: boolean
   pickable: boolean
   lockedFolder: boolean
   folderName: string
@@ -154,7 +153,7 @@ const queryCache = useQueryCache()
 const visibility = useDocumentVisibility()
 
 // The trigger only opens a menu when there's something to pick or show: a
-// draft with folders, a locked binding worth reading, or a Codex project
+// draft with folders, a locked binding worth reading, or a project
 // whose branch can be switched. A draft with no folders and no binding reads
 // as a plain label instead of an empty menu.
 const menuEnabled = computed(() => (
@@ -169,7 +168,7 @@ const triggerLabel = computed(() => (
   || t('chat.folder')
 ))
 
-const branchQueryEnabled = () => props.codex && props.visible && visibility.value === 'visible' && !!props.botId && !!props.project?.id
+const branchQueryEnabled = () => props.gitBranches && props.visible && visibility.value === 'visible' && !!props.botId && !!props.project?.id
 const branchQuery = useQuery({
   key: () => ['workdir-git-branch', props.botId, props.project?.id ?? ''],
   enabled: branchQueryEnabled,

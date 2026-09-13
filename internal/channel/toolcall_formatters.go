@@ -164,7 +164,7 @@ func formatAskUser(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentati
 		}
 		// Plain-text channels collect one durable page at a time. Native
 		// adapters strip this body and render their own controls.
-		appendAskUserOptions(&p, questions[0])
+		appendAskUserOptions(&p, questions[0], loc)
 	}
 
 	if status == ToolCallStatusRunning {
@@ -183,10 +183,13 @@ func formatAskUser(tc *StreamToolCall, status ToolCallStatus) ToolCallPresentati
 	return p
 }
 
-func appendAskUserOptions(p *ToolCallPresentation, question map[string]any) {
+func appendAskUserOptions(p *ToolCallPresentation, question map[string]any, loc *i18n.Localizer) {
 	options := asSliceOfMaps(question["options"])
 	for idx, option := range options {
 		label := pickStringField(option, "label")
+		if key := pickStringField(option, "label_key"); key != "" {
+			label = loc.T(key)
+		}
 		if label == "" {
 			continue
 		}

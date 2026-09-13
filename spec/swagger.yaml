@@ -2594,6 +2594,8 @@ definitions:
           providerMetadata at store time) or, for the deferred-approval path, on
           the tool message row — never inside the tool result.
         type: string
+      elapsed_time_seconds:
+        type: number
       execution_location:
         $ref: '#/definitions/conversation.UIExecutionLocation'
       id:
@@ -2623,6 +2625,8 @@ definitions:
     - tool
     - attachments
     - error
+    - command
+    - status
     - notice
     type: string
     x-enum-varnames:
@@ -2631,6 +2635,8 @@ definitions:
     - UIMessageTool
     - UIMessageAttachments
     - UIMessageError
+    - UIMessageCommand
+    - UIMessageStatus
     - UIMessageNotice
   conversation.UIReasoningTiming:
     properties:
@@ -2967,11 +2973,19 @@ definitions:
     type: object
   external.ModeState:
     properties:
+      apply_on_next_turn:
+        description: Direct runtimes save a preference and apply it when starting
+          the next turn.
+        type: boolean
       available_modes:
         items:
           $ref: '#/definitions/turn.RuntimeMode'
         type: array
       current_mode_id:
+        type: string
+      kind:
+        description: Kind distinguishes permission presets from arbitrary agent session
+          modes.
         type: string
       supported:
         type: boolean
@@ -3002,6 +3016,17 @@ definitions:
       reasoning_efforts:
         items:
           $ref: '#/definitions/external.ReasoningEffortOption'
+        type: array
+      resolved_model_id:
+        description: |-
+          ResolvedModelID preserves a runtime-advertised full model name for
+          validation without duplicating its alias in the model picker.
+        type: string
+      unavailable_permission_modes:
+        description: IDs belong to this runtime's permission menu, not a shared preset
+          enum.
+        items:
+          type: string
         type: array
     type: object
   external.ReasoningEffortOption:
@@ -3539,6 +3564,8 @@ definitions:
     properties:
       description:
         type: string
+      i18n_key:
+        type: string
       id:
         type: string
       kind:
@@ -3548,13 +3575,18 @@ definitions:
     type: object
   handlers.CommandActionResult:
     properties:
+      data: {}
       items:
         items:
           $ref: '#/definitions/handlers.CommandActionListItem'
         type: array
       kind:
         type: string
+      notice:
+        type: string
       text:
+        type: string
+      text_key:
         type: string
       title:
         type: string
@@ -4230,6 +4262,9 @@ definitions:
     type: object
   handlers.RuntimeCommandResponse:
     properties:
+      data: {}
+      notice:
+        type: string
       text:
         type: string
     type: object
@@ -7012,6 +7047,10 @@ definitions:
         type: string
       description:
         type: string
+      i18n_key:
+        description: I18nKey identifies host-owned copy. Native descriptions take
+          precedence.
+        type: string
       input_hint:
         type: string
       kind:
@@ -7046,6 +7085,8 @@ definitions:
     properties:
       description:
         type: string
+      i18n_key:
+        type: string
       icon:
         description: Icon is a presentation hint; clients may fall back for unknown
           values.
@@ -7060,11 +7101,19 @@ definitions:
     type: object
   turn.RuntimeModeState:
     properties:
+      apply_on_next_turn:
+        description: Direct runtimes save a preference and apply it when starting
+          the next turn.
+        type: boolean
       available_modes:
         items:
           $ref: '#/definitions/turn.RuntimeMode'
         type: array
       current_mode_id:
+        type: string
+      kind:
+        description: Kind distinguishes permission presets from arbitrary agent session
+          modes.
         type: string
       supported:
         type: boolean
@@ -7093,6 +7142,8 @@ definitions:
       id:
         type: string
       label:
+        type: string
+      label_key:
         type: string
     type: object
   userinput.UIQuestion:
@@ -8745,6 +8796,14 @@ paths:
         in: path
         name: id
         required: true
+        type: string
+      - description: Model whose effective defaults should be displayed
+        in: query
+        name: model_id
+        type: string
+      - description: Workspace project path for runtime model settings
+        in: query
+        name: project_path
         type: string
       responses:
         "200":

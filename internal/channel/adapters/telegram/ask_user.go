@@ -218,6 +218,7 @@ func askUserAnswered(state userinput.TextInteractionState, questionID string) (u
 // Choice buttons show selection state (✓ prefix); free text and custom values
 // stay in the body because they cannot fit in a button label.
 func renderAskUserPage(requestID string, loc *i18n.Localizer, payload userinput.UIPayload, state userinput.TextInteractionState) (text string, actions []channel.Action) {
+	payload = payload.Localized(loc)
 	if len(payload.Questions) == 0 {
 		return loc.T("cmd.userInput.inputRequested"), nil
 	}
@@ -403,6 +404,7 @@ func askUserAnswerLabel(q userinput.UIQuestion, state userinput.TextInteractionS
 // formatAskUserSubmittedSummary replaces the active page with a stable record
 // of every question and final answer once the request is submitted.
 func formatAskUserSubmittedSummary(loc *i18n.Localizer, payload userinput.UIPayload, state userinput.TextInteractionState) string {
+	payload = payload.Localized(loc)
 	if len(payload.Questions) == 0 {
 		return loc.T("cmd.userInput.inputRequested")
 	}

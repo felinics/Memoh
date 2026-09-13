@@ -16,13 +16,17 @@ import (
 
 type preferenceCatalogDriver struct {
 	external.Driver
-	catalog external.ModelCatalog
-	calls   *int
+	catalog      external.ModelCatalog
+	calls        *int
+	projectPaths *[]string
 }
 
-func (d preferenceCatalogDriver) ModelCatalog(context.Context, string, string) (external.ModelCatalog, error) {
+func (d preferenceCatalogDriver) ModelCatalog(_ context.Context, request external.ModelCatalogRequest) (external.ModelCatalog, error) {
 	if d.calls != nil {
 		*d.calls++
+	}
+	if d.projectPaths != nil {
+		*d.projectPaths = append(*d.projectPaths, request.ProjectPath)
 	}
 	return d.catalog, nil
 }
@@ -79,11 +83,13 @@ func TestDirectDefaultSelectionReplacesSavedModel(t *testing.T) {
 			}}
 			fake := &modelSelectionFakeQueries{session: sqlc.BotSession{
 				ID: db.ParseUUIDOrEmpty(sid), RuntimeType: tc.runtime,
+				Metadata: []byte(`{"project_path":"/data/old"}`), RuntimeMetadata: []byte(`{"project_path":"/data/project"}`),
 				PreferredExternalModelID: pgtype.Text{String: "A", Valid: true},
 				PreferredReasoningEffort: pgtype.Text{String: "high", Valid: true},
 			}}
 			svc := newModelSelectionService(t, fake)
-			svc.externalDrivers = map[string]external.Driver{tc.runtime: preferenceCatalogDriver{catalog: catalog}}
+			var projectPaths []string
+			svc.externalDrivers = map[string]external.Driver{tc.runtime: preferenceCatalogDriver{catalog: catalog, projectPaths: &projectPaths}}
 			// The picker resolves Default to an explicit ID before either the
 			// PATCH or a send. Both entry points must replace the saved A/high.
 			model, effort := tc.selected, "medium"
@@ -94,12 +100,17 @@ func TestDirectDefaultSelectionReplacesSavedModel(t *testing.T) {
 				t.Fatalf("PATCH=%+v", fake.patchedPrefs)
 			}
 			sess := session.Thread{ID: sid, BotID: "bot", RuntimeType: tc.runtime, PreferredExternalModelID: "A", PreferredReasoningEffort: "high"}
+			sess.Metadata = map[string]any{"project_path": "/data/old"}
+			sess.RuntimeMetadata = map[string]any{"project_path": "/data/project"}
 			req, err := svc.applyDirectModelPreference(context.Background(), ChatRequest{BotID: "bot", Model: model, ReasoningEffort: effort}, sess)
 			if err != nil || req.Model != model || req.ReasoningEffort != effort {
 				t.Fatalf("send=%+v err=%v", req, err)
 			}
 			if len(fake.updatedPrefs) != 1 {
 				t.Fatalf("send write-back=%+v", fake.updatedPrefs)
+			}
+			if len(projectPaths) != 2 || projectPaths[0] != "/data/project" || projectPaths[1] != "/data/project" {
+				t.Fatalf("PATCH and send must discover settings in the runtime project: %v", projectPaths)
 			}
 			stored := fake.updatedPrefs[0]
 			sess.PreferredExternalModelID = stored.PreferredExternalModelID.String

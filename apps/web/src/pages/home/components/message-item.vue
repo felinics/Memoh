@@ -215,7 +215,7 @@
               :items="node.items"
               :show-execution-location="showExecutionLocation"
               :message-id="message.id"
-              :active="message.streaming && node.lastIndex === message.messages.length - 1"
+              :active="isAssistantBlockStreaming(node.lastIndex)"
             />
 
             <!-- Completed ask_user: the Q&A card, broken out of the process
@@ -267,7 +267,19 @@
                 :session-id="sessionId"
               />
 
-              <!-- Error block -->
+              <!-- Native command output, kept separate from model prose. -->
+              <div
+                v-else-if="node.block.type === 'command'"
+                class="space-y-1 text-sm text-muted-foreground"
+              >
+                <div class="font-medium">
+                  {{ node.block.name ? `/${node.block.name}` : $t('chat.slash.commandResult') }}
+                </div>
+                <div class="whitespace-pre-wrap break-words">
+                  {{ node.block.content }}
+                </div>
+              </div>
+
               <div
                 v-else-if="node.block.type === 'error' && (node.block.code || node.block.content)"
                 class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
@@ -299,6 +311,14 @@
             </template>
           </template>
 
+          <div
+            v-if="runtimeStatusText"
+            role="status"
+            class="text-sm text-cop-title"
+          >
+            {{ runtimeStatusText }}
+          </div>
+
           <!-- Local "the turn is running" indicator: shown only before the first
                block streams in. Same scale/weight as the process headers, and the
                same shimmer the Thinking/running states use (running = shimmer,
@@ -307,7 +327,7 @@
                also types in (a stepped clip-path wipe) on entry; keyed by the message
                so it replays once per turn. -->
           <div
-            v-if="message.streaming && !hasVisibleAssistantBlocks"
+            v-if="message.streaming && !hasVisibleAssistantBlocks && !runtimeStatusText"
             class="font-[400] text-[0.90625rem]"
           >
             <div class="flex items-center gap-1.5 py-px text-cop-title select-none">
@@ -413,6 +433,7 @@ import type {
   AttachmentBlock as AttachmentBlockType,
 } from '@/store/chat-list'
 import { structuredToolResult } from '@/store/chat-list.normalize'
+import { runtimeGoalObjective } from '@/utils/runtime-slash-commands'
 
 import { resolveUrl } from '../composables/useMediaGallery'
 import { useElementVisibility } from '@vueuse/core'
@@ -453,7 +474,7 @@ const props = defineProps<{
   canEditLatestUser?: boolean
   canForkAssistant?: boolean
   inlineActions?: boolean
-  goalSupported?: boolean
+  goalRuntime?: string
   isScrolling: boolean
   isLastMessage?: boolean
 }>()
@@ -568,12 +589,14 @@ const skillActivationNames = computed(() => {
 
 const skillActivationPrompt = computed(() => skillActivation.value?.prompt?.trim() ?? '')
 
-const isGoalMessage = computed(() => props.goalSupported && props.message.role === 'user'
-  && /^\/goal\s+(?!resume$)/.test(cleanUserText(props.message.text)))
+const goalObjective = computed(() => props.message.role === 'user'
+  ? runtimeGoalObjective(cleanUserText(props.message.text), props.goalRuntime)
+  : null)
+const isGoalMessage = computed(() => goalObjective.value !== null)
 const userBubbleText = computed(() => {
   if (props.message.role !== 'user') return ''
   const text = cleanUserText(props.message.text)
-  if (isGoalMessage.value) return text.replace(/^\/goal\s+/, '')
+  if (goalObjective.value !== null) return goalObjective.value
   if (!isSkillActivationMessage.value) return text
   if (skillActivationPrompt.value) return skillActivationPrompt.value
   if (text.startsWith('/') || text.startsWith('The user activated the following skill for this turn without an additional prompt:')) {
@@ -776,7 +799,7 @@ const userBubbleRadiusClass = computed(() => {
 })
 
 function hasLaterAssistantMessage(index: number): boolean {
-  return props.message.role === 'assistant' && props.message.messages.slice(index + 1).length > 0
+  return props.message.role === 'assistant' && props.message.messages.slice(index + 1).some(block => block.type !== 'status')
 }
 
 function isAssistantBlockStreaming(index: number): boolean {
@@ -804,13 +827,23 @@ const hasVisibleAssistantBlocks = computed(() =>
   && props.message.messages.some(isVisibleAssistantBlock),
 )
 
+const runtimeStatusText = computed(() => {
+  if (props.message.role !== 'assistant' || !props.message.streaming) return ''
+  const status = props.message.messages.find(block => block.type === 'status')
+  if (status?.type !== 'status' || !status.name) return ''
+  const key = `chat.runtimeStatus.${status.name}`
+  return te(key) ? t(key, status.args ?? {}) : ''
+})
+
 const shouldRenderMessage = computed(() =>
   props.message.role !== 'assistant' || hasVisibleAssistantBlocks.value || props.message.streaming,
 )
 
 function isVisibleAssistantBlock(block: ContentBlock): boolean {
+  if (block.type === 'status') return false
   if (block.type === 'tool') return true
   if (block.type === 'text') return Boolean(block.content)
+  if (block.type === 'command') return Boolean(block.content)
   if (block.type === 'error') return Boolean(block.code || block.content)
   if (block.type === 'notice') return Boolean(block.content)
   if (block.type === 'attachments') return block.attachments.length > 0
@@ -885,7 +918,7 @@ const renderNodes = computed<RenderNode[]>(() => {
 // call — so they show a real "Thought for Ns" instead of a bare "Thought".
 watch(
   () => (props.message.role === 'assistant' && props.message.streaming
-    ? `${props.message.id}|${props.message.messages.map(block => `${block.type}:${block.id}`).join('|')}`
+    ? `${props.message.id}|${props.message.messages.filter(block => block.type !== 'status').map(block => `${block.type}:${block.id}`).join('|')}`
     : ''),
   () => {
     if (props.message.role !== 'assistant' || !props.message.streaming) return
@@ -893,7 +926,7 @@ watch(
     blocks.forEach((block, index) => {
       if (block.type !== 'reasoning') return
       markReasoningSeen(props.message.id, block)
-      if (index < blocks.length - 1) finalizeReasoning(props.message.id, block)
+      if (hasLaterAssistantMessage(index)) finalizeReasoning(props.message.id, block)
     })
   },
   { immediate: true },
@@ -931,8 +964,8 @@ const userCopyText = computed(() =>
 const assistantPlainText = computed(() => {
   if (props.message.role !== 'assistant') return ''
   return props.message.messages
-    .filter((block): block is Extract<ContentBlock, { type: 'text' }> =>
-      block.type === 'text' && Boolean((block as { content?: string }).content),
+    .filter((block): block is Extract<ContentBlock, { type: 'text' | 'command' }> =>
+      (block.type === 'text' || block.type === 'command') && Boolean(block.content),
     )
     .map(block => block.content)
     .join('\n\n')

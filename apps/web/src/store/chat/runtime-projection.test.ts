@@ -196,16 +196,20 @@ describe('runtime projection', () => {
 
   it('replaces a claimed steer with its durable turn without adding another user', () => {
     const claimed = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
-      messages: [{ id: 0, type: 'text', content: 'before' }],
+      messages: [
+        { id: 0, type: 'text', content: 'before' },
+        { id: 1, type: 'status', name: 'compacting' },
+      ],
       steer_turns: [{
         item_id: 'steer-item-1',
         status: 'claimed',
         text: 'change direction',
-        after_message_id: 0,
+        after_message_id: 1,
         timestamp: '2026-07-27T08:00:01.000Z',
       }],
     })))
     const applied = reduceRuntimeProjection(claimed, delta(5, {
+      message_upserts: [{ id: 1, type: 'status', name: 'api_retry' }],
       user_turn_upserts: [{
         turn_id: 'turn-steer-1',
         turn_position: 2,
@@ -218,7 +222,7 @@ describe('runtime projection', () => {
         status: 'applied',
         text: 'change direction',
         turn_id: 'turn-steer-1',
-        after_message_id: 0,
+        after_message_id: 1,
         timestamp: '2026-07-27T08:00:02.000Z',
       }],
     }))
@@ -235,6 +239,20 @@ describe('runtime projection', () => {
       ['user', 'turn-steer-1'],
       ['assistant', 'turn-steer-1'],
     ])
+    expect(applied.transcript.turns[1]).toMatchObject({ messages: [{ id: 0, type: 'text', content: 'before' }] })
+    expect(applied.transcript.turns[3]).toMatchObject({ messages: [{ id: 1, type: 'status', name: 'api_retry' }] })
+    const failed = reduceRuntimeProjection(applied, delta(6, {
+      run: { run_id: 'run-1', error_code: 'agent.response_timeout' },
+    }))
+    expect(failed.transcript.turns[3]).toMatchObject({ messages: [{ id: 2, type: 'error' }, { id: 1, type: 'status' }] })
+    const cleared = reduceRuntimeProjection(applied, delta(6, {
+      message_upserts: [{ id: 1, type: 'status' }],
+    }))
+    expect(cleared.transcript.turns[3]).toMatchObject({ messages: [{ id: 1, type: 'status' }] })
+    const completed = reduceRuntimeProjection(cleared, delta(7, {
+      run: { run_id: 'run-1', status: 'completed' },
+    }))
+    expect(completed.transcript.turns.flatMap(turn => turn.role === 'assistant' ? turn.messages : []).some(message => message.type === 'status')).toBe(false)
   })
 
   it('drops the empty trailing assistant segment once the run has settled', () => {
@@ -473,12 +491,17 @@ describe('runtime projection', () => {
 
 describe('idle settled run projection', () => {
   it('emits no assistant turn for a settled run without streamed content', () => {
-    const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
-      status: 'completed',
-      messages: null as unknown as RuntimeCurrentRunView['messages'],
-    })))
+    for (const messages of [
+      null as unknown as RuntimeCurrentRunView['messages'],
+      [{ id: 0, type: 'status', name: 'api_retry' }] as RuntimeCurrentRunView['messages'],
+    ]) {
+      const state = reduceRuntimeProjection(createEmptyRuntimeProjection(), snapshot(runView({
+        status: 'completed',
+        messages,
+      })))
 
-    expect(state.transcript.turns.map(turn => turn.role)).toEqual(['user'])
+      expect(state.transcript.turns.map(turn => turn.role)).toEqual(['user'])
+    }
   })
 
   it('emits an empty slice when the settled run also lacks a user turn', () => {

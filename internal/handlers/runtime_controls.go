@@ -23,9 +23,7 @@ type RuntimeModeRequest struct {
 type RuntimeCommandRequest struct {
 	Command string `json:"command"`
 }
-type RuntimeCommandResponse struct {
-	Text string `json:"text"`
-}
+type RuntimeCommandResponse = turn.RuntimeCommandResult
 
 func (h *SessionHandler) runtimeControlRequest(c echo.Context) (application.RuntimeControlRequest, error) {
 	actor, err := RequireChannelIdentityID(c)
@@ -36,7 +34,6 @@ func (h *SessionHandler) runtimeControlRequest(c echo.Context) (application.Runt
 		BotID:    strings.TrimSpace(c.Param("bot_id")),
 		ThreadID: strings.TrimSpace(c.Param("session_id")),
 		ActorID:  actor,
-		Language: c.Request().Header.Get("Accept-Language"),
 	}
 	if _, _, _, err := h.authorizeSession(c, actor, request.BotID, request.ThreadID); err != nil {
 		return request, err
@@ -125,7 +122,7 @@ func (h *SessionHandler) ExecuteRuntimeCommand(c echo.Context) error {
 	if err != nil {
 		return runtimeControlError(err)
 	}
-	return c.JSON(http.StatusOK, RuntimeCommandResponse{Text: result})
+	return c.JSON(http.StatusOK, result)
 }
 
 func runtimeControlError(err error) error {
@@ -222,4 +219,11 @@ func (h *SessionHandler) GetRuntimeGoal(c echo.Context) error {
 		return runtimeControlError(err)
 	}
 	return c.JSON(http.StatusOK, RuntimeGoalResponse{Goal: goal})
+}
+
+func runtimeCommandTextKey(command external.Command, field string) string {
+	if command.I18nKey == "" {
+		return ""
+	}
+	return command.I18nKey + "." + field
 }

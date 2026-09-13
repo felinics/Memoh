@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -233,7 +234,11 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 		if modelRef == nil || strings.TrimSpace(*modelRef) == "" {
 			modelID = db.TextToString(sess.PreferredExternalModelID)
 		}
-		modelID, reconciledEffort, err = s.reconcileDirectModelPreference(ctx, sess.BotID.String(), sess.BotAgentID.String(), sess.RuntimeType, modelID, targetEffort)
+		var thread sessionpkg.Thread
+		_ = json.Unmarshal(sess.Metadata, &thread.Metadata)
+		_ = json.Unmarshal(sess.RuntimeMetadata, &thread.RuntimeMetadata)
+		projectPath := metadataString(runtimeSessionMeta(thread), "project_path")
+		modelID, reconciledEffort, err = s.reconcileDirectModelPreference(ctx, sess.BotID.String(), sess.BotAgentID.String(), sess.RuntimeType, projectPath, modelID, targetEffort)
 		externalID = pgtype.Text{String: modelID, Valid: modelID != ""}
 	case sess.RuntimeType == sessionpkg.RuntimeACPAgent:
 		return errors.New("ACP preferences must be changed through the ACP runtime")

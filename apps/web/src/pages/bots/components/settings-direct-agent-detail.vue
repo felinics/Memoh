@@ -99,7 +99,7 @@
           @update:model-value="setDefaultPermission"
         >
           <SelectTrigger class="w-full sm:w-56">
-            <SelectValue />
+            <SelectValue>{{ defaultMode?.name }}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem
@@ -221,6 +221,7 @@ import {
   type BotagentsBotAgent,
 } from '@memohai/sdk'
 import AgentCredentialInput from './agent-credential-input.vue'
+import { localizeRuntimeControls } from '@/utils/runtime-control-presentation'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   BOT_AGENT_RUNTIME_CODEX,
@@ -246,7 +247,7 @@ const props = defineProps<{
   agent: BotagentsBotAgent
 }>()
 const emit = defineEmits<{ authorized: [] }>()
-const { t, locale } = useI18n()
+const { t, te } = useI18n()
 const router = useRouter()
 const queryCache = useQueryCache()
 
@@ -254,17 +255,21 @@ const runtime = computed(() => normalizeBotAgentRuntime(props.agent.runtime))
 const isCodex = computed(() => runtime.value === BOT_AGENT_RUNTIME_CODEX)
 const config = reactive<DirectAgentConfig>({ auth: '', base_url: '', model: '', reasoning_effort: '', permission_mode: '' })
 const defaultControls = useQuery({
-  key: () => ['bot-agent-runtime-controls', props.botId, props.agent.id ?? '', locale.value, props.agent.metadata?.permission_mode ?? ''],
+  key: () => ['bot-agent-runtime-controls', props.botId, props.agent.id ?? '', props.agent.metadata?.permission_mode ?? ''],
   enabled: () => !!props.agent.id,
   query: async ({ signal }) => {
     const { data } = await getBotsByBotIdAgentsByIdRuntimeControls({
       path: { bot_id: props.botId, id: props.agent.id! },
-      headers: { 'Accept-Language': locale.value }, signal, throwOnError: true,
+      signal, throwOnError: true,
     })
     return data
   },
 })
-const defaultModes = computed(() => defaultControls.data.value?.modes)
+const defaultModes = computed(() => localizeRuntimeControls(
+  defaultControls.data.value,
+  (key, fallback) => te(key) || te(key, 'en') ? t(key) : fallback,
+)?.modes)
+const defaultMode = computed(() => defaultModes.value?.available_modes?.find(mode => mode.id === (config.permission_mode || defaultModes.value?.current_mode_id)))
 async function setDefaultPermission(value: unknown) {
   if (typeof value !== 'string') return
   const previous = config.permission_mode

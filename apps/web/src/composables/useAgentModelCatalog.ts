@@ -30,6 +30,7 @@ export interface AgentModelCatalog {
   defaultModelId: string
   defaultReasoningEffort: string
   reasoningEfforts?: AcpclientReasoningEffortInfo[]
+  unavailablePermissionModes?: string[]
 }
 
 interface UseAgentModelCatalogOptions {
@@ -37,6 +38,7 @@ interface UseAgentModelCatalogOptions {
   botAgentId: MaybeRefOrGetter<string | null | undefined>
   runtime: MaybeRefOrGetter<string | null | undefined>
   selectedModelId: MaybeRefOrGetter<string | null | undefined>
+  projectPath: MaybeRefOrGetter<string | null | undefined>
   acpModels: MaybeRefOrGetter<AcpclientModelInfo[]>
   acpCurrentModelId: MaybeRefOrGetter<string | null | undefined>
   acpReasoningEfforts: MaybeRefOrGetter<AcpclientReasoningEffortInfo[]>
@@ -46,14 +48,14 @@ interface UseAgentModelCatalogOptions {
 }
 
 function normalizePickerModels(
-  models: Array<Pick<ExternalModelOption, 'id' | 'name' | 'description'>>,
+  models: Array<Pick<ExternalModelOption, 'id' | 'resolved_model_id' | 'name' | 'description'>>,
 ): ModelsGetResponse[] {
   return models.flatMap((model) => {
     const id = model.id?.trim() ?? ''
     if (!id) return []
     return [{
       id,
-      model_id: id,
+      model_id: model.resolved_model_id?.trim() || id,
       name: model.name?.trim() || id,
       provider_id: '',
       type: 'chat' as const,
@@ -72,7 +74,7 @@ function externalCatalog(
   const defaultModelId = models.find(model => model.default)?.id?.trim() ?? ''
   const configuredModelId = source?.configured_model_id?.trim() ?? ''
   const effectiveModelId = selectedModelId || configuredModelId || defaultModelId
-  const selectedModel = models.find(model => model.id?.trim() === effectiveModelId)
+  const selectedModel = models.find(model => model.id?.trim() === effectiveModelId || model.resolved_model_id?.trim() === effectiveModelId)
   return {
     models: normalizePickerModels(models),
     providers: [],
@@ -81,6 +83,7 @@ function externalCatalog(
     defaultModelId,
     defaultReasoningEffort: selectedModel?.default_reasoning_effort?.trim() ?? '',
     reasoningEfforts: selectedModel?.reasoning_efforts ?? [],
+    unavailablePermissionModes: selectedModel?.unavailable_permission_modes ?? [],
   }
 }
 
@@ -91,6 +94,7 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
   const runtime = computed(() => toValue(options.runtime)?.trim() || 'model')
   const botId = computed(() => toValue(options.botId)?.trim() ?? '')
   const botAgentId = computed(() => toValue(options.botAgentId)?.trim() ?? '')
+  const projectPath = computed(() => runtime.value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? toValue(options.projectPath)?.trim() ?? '' : '')
   const isNative = computed(() => ![
     ACP_SESSION_RUNTIME,
     BOT_AGENT_RUNTIME_CODEX,
@@ -113,21 +117,29 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
     },
     enabled: () => isNative.value,
   })
+  const selectedModelId = computed(() => toValue(options.selectedModelId)?.trim() ?? '')
+  const defaultsModelId = computed(() => runtime.value === BOT_AGENT_RUNTIME_CLAUDE_CODE ? selectedModelId.value : '')
+  const directScope = computed(() => JSON.stringify([runtime.value, botId.value, botAgentId.value, projectPath.value]))
   const directQuery = useQuery({
-    key: () => externalAgentModelsQueryKey(runtime.value, botId.value, botAgentId.value),
-    query: async () => {
+    key: () => [...externalAgentModelsQueryKey(runtime.value, botId.value, botAgentId.value), projectPath.value, defaultsModelId.value],
+    query: async ({ signal }) => {
+      const target = directScope.value
       const { data } = await getBotsByBotIdAgentsByIdModels({
         path: { bot_id: botId.value, id: botAgentId.value },
+        query: { project_path: projectPath.value || undefined, model_id: defaultsModelId.value || undefined },
+        signal,
         throwOnError: true,
       })
-      return data
+      return { target, catalog: data }
     },
     enabled: () => [BOT_AGENT_RUNTIME_CODEX, BOT_AGENT_RUNTIME_CLAUDE_CODE].includes(runtime.value) && !!botId.value && !!botAgentId.value,
     refetchOnWindowFocus: false,
+    // Keep the same Agent's capabilities visible while resolving another
+    // model's defaults; never carry a catalog across workspaces or Agents.
+    placeholderData: previous => previous?.target === directScope.value ? previous : undefined,
   })
 
   const nativeModels = computed<ModelsGetResponse[]>(() => nativeModelsQuery.data.value ?? [])
-  const selectedModelId = computed(() => toValue(options.selectedModelId)?.trim() ?? '')
   const catalog = computed<AgentModelCatalog>(() => {
     switch (runtime.value) {
       case ACP_SESSION_RUNTIME:
@@ -142,7 +154,7 @@ export function useAgentModelCatalog(options: UseAgentModelCatalogOptions) {
         }
       case BOT_AGENT_RUNTIME_CODEX:
       case BOT_AGENT_RUNTIME_CLAUDE_CODE:
-        return externalCatalog(directQuery.data.value, selectedModelId.value)
+        return externalCatalog(directQuery.data.value?.target === directScope.value ? directQuery.data.value.catalog : undefined, selectedModelId.value)
       default:
         return {
           models: nativeModels.value,

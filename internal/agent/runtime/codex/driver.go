@@ -146,7 +146,8 @@ func (d *Driver) resolveAgentConfig(ctx context.Context, botID, botAgentID strin
 // ModelCatalog returns the models available to this Agent. API-key Agents with
 // an explicit Base URL use that provider's OpenAI-compatible /models endpoint;
 // ChatGPT and default-OpenAI Agents retain Codex's richer native catalog.
-func (d *Driver) ModelCatalog(ctx context.Context, botID, botAgentID string) (external.ModelCatalog, error) {
+func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalogRequest) (external.ModelCatalog, error) {
+	botID, botAgentID := request.BotID, request.BotAgentID
 	cfg, _, err := d.resolveAgentConfig(ctx, botID, botAgentID, true)
 	if err != nil {
 		return external.ModelCatalog{}, err
