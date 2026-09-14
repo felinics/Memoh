@@ -2,21 +2,30 @@
   <div class="flex min-w-0 flex-col">
     <!-- Unified Recents: one timeline for chats, ACP chats, and schedule
          runs (each row carries its own type mark — see session-item.vue).
-         The header folds the section, mirroring the Folders header above.
-         Recents does not own a scrollport: it is the tail of the sessions
-         panel's single scroll container (passed in as `scrollEl`), so the
-         folders above it and this timeline scroll as one list. -->
+         The header is the same Arkloop group header as every folder above
+         (group-header.vue): click to fold, hover reveals the chevron and
+         the trailing plus. The plus starts a session bound to NO folder
+         (clears the bot's working-workdir binding), mirroring the folders'
+         per-folder plus. Recents does not own a scrollport: it is the tail
+         of the sessions panel's single scroll container (passed in as
+         `scrollEl`), so the folders above it and this timeline scroll as
+         one list. -->
     <div class="shrink-0 px-2 pb-0.5 pt-1">
-      <TextButton
-        :class="sectionHeaderClass"
-        @click="toggleSectionCollapsed"
+      <GroupHeader
+        :label="t('chat.recents')"
+        :expanded="!sectionCollapsed"
+        :label-class="sectionLabelClass"
+        compact
+        @toggle="toggleSectionCollapsed"
       >
-        {{ t('chat.recents') }}
-        <ChevronDown
-          class="size-2.5 transition-transform"
-          :class="sectionCollapsed ? '-rotate-90' : ''"
-        />
-      </TextButton>
+        <TextButton
+          :class="rowActionRevealClass"
+          :aria-label="t('chat.newSession')"
+          @click.stop="startUnfiledSession"
+        >
+          <Plus />
+        </TextButton>
+      </GroupHeader>
     </div>
 
     <!-- Cursor-paginated rows render as a plain list; load-more still uses a
@@ -90,7 +99,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, toRef, watch } from 'vue'
-import { ChevronDown } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
@@ -103,6 +112,7 @@ import { useSidebarInfiniteScroll } from './use-sidebar-infinite-scroll'
 import { TextButton, Skeleton } from '@felinic/ui'
 import SessionItem from './session-item.vue'
 import SessionDialogs from './session-dialogs.vue'
+import GroupHeader from './group-header.vue'
 
 // The sessions panel owns the scrollport shared with Folders; Recents pages
 // against it (sentinel root + reset-to-top) instead of nesting its own.
@@ -145,7 +155,13 @@ const SESSION_SKELETON_WIDTHS = [
 const initialSkeletonRows = SESSION_SKELETON_WIDTHS
 const loadMoreSkeletonRows = SESSION_SKELETON_WIDTHS.slice(0, 3)
 
-const sectionHeaderClass = 'text-xs font-[550] tracking-[-0.02em] pl-[11px] select-none' /* ui-allow-px: aligns the sidebar 19px label column (see panel-header.vue) */ /* ui-allow-style */
+// 区头 label 沿用改造前 TextButton 的渲染:静态 muted、hover 行变 foreground
+// (旧区头是 ghost TextButton,text-muted-foreground hover:text-foreground)
+const sectionLabelClass = 'text-xs font-[550] tracking-[-0.02em] text-muted-foreground transition-colors group-hover/group-header:text-foreground' /* ui-allow-style */
+
+// 组头 trailing 动作的显现类,与 folders-section 的组头按钮同一套
+// (见 group-header.vue 头注释)。
+const rowActionRevealClass = 'opacity-0 group-hover/group-header:opacity-100 focus-visible:opacity-100'
 
 const sectionCollapsedByBot = useLocalStorage<Record<string, boolean>>(
   'workspace-sidebar-recents-collapsed',
@@ -195,6 +211,17 @@ watch(currentBotId, () => {
     resetScrollTop()
   })
 })
+
+// The Recents group-header plus: start a session bound to no folder, so it
+// lands in this unfiled timeline (mirrors folders-section.startFolderSession
+// with the working-workdir binding cleared).
+function startUnfiledSession() {
+  const botId = (currentBotId.value ?? '').trim()
+  if (!botId) return
+  workdirsStore.setWorkingWorkdir(botId, null)
+  workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false })
+  workspaceTabs.closeMobileNav()
+}
 
 function handleSelect(session: SessionSummary) {
   // Pass the raw title (possibly empty): openSessionChat's fallback derives

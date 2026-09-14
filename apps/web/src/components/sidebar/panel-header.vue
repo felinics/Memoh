@@ -6,8 +6,8 @@
        容器几何(px-2 / mx-1 / mt-2 / h-8 / min-h)是各面板对齐各自图标列的
        调校值,经根 class 透传;标签缩进(pl-[11px] 对齐 19px 标签列,或
        files-pane 的容器级缩进对齐 chevron 列)经 labelClass / 根 class 传入。
-       recents.vue 的组标题是可交互的 DropdownMenu TextButton——关系不同
-       (可点击的视图切换器,不是静态标签),留在本地,但字型与这里一致。 -->
+       folders/recents 的可折叠分组标题是另一种关系(整行可点的组头),
+       归 group-header.vue,不用本组件。 -->
   <div class="flex shrink-0 select-none items-center">
     <slot name="label">
       <span
