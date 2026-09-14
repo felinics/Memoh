@@ -22,7 +22,7 @@
     </PopoverTrigger>
     <PopoverContent
       menu
-      align="end"
+      align="start"
       class="min-w-[var(--reka-popover-trigger-width)] w-80 p-0"
     >
       <div :class="menuChromeClass">
