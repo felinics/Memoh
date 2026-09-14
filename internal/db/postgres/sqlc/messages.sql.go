@@ -1991,6 +1991,41 @@ func (q *Queries) DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) er
 	return err
 }
 
+const findAgentFailureCheckpoint = `-- name: FindAgentFailureCheckpoint :one
+SELECT id FROM bot_history_messages
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
+  AND session_id = $2
+  AND run_id = $3
+  AND turn_id = $4
+  AND role = 'assistant'
+  AND metadata->>'error_code' = $5::text
+ORDER BY turn_message_seq DESC
+LIMIT 1
+`
+
+type FindAgentFailureCheckpointParams struct {
+	BotID     pgtype.UUID `json:"bot_id"`
+	SessionID pgtype.UUID `json:"session_id"`
+	RunID     pgtype.UUID `json:"run_id"`
+	TurnID    pgtype.UUID `json:"turn_id"`
+	ErrorCode string      `json:"error_code"`
+}
+
+// Called while holding the fenced run lock, including after a lost commit response.
+func (q *Queries) FindAgentFailureCheckpoint(ctx context.Context, arg FindAgentFailureCheckpointParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, findAgentFailureCheckpoint,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+		arg.TurnID,
+		arg.ErrorCode,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getHistoryTurnByID = `-- name: GetHistoryTurnByID :one
 WITH target AS (
   SELECT m.turn_id, m.session_id, m.turn_position

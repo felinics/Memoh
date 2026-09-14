@@ -1800,6 +1800,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	var messages []chatview.UIMessage
 	switch event.Type {
 	case native.EventAgentStart:
+		ctrl.converter.BeginInvocation()
 	case native.EventAgentEnd, native.EventAgentAbort:
 		messages = ctrl.converter.ConvertTerminalMessages(event.Messages)
 	case native.EventError:

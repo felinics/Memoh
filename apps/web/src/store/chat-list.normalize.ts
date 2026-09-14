@@ -235,8 +235,7 @@ export function cloneRequestedSkills(items: RequestedSkillSelection[]): Requeste
 // This identity is allowed to fall back to the render id because reconciliation
 // must still find optimistic/runtime turns before their settled twin arrives.
 // It is a lookup key, never a name to send to the server: retry, edit and fork
-// name a turn, and the history cursor is taken from a turn the database has
-// already numbered, so nothing needs to sniff whether an id looks persisted.
+// name a turn, and history pagination requires an explicit serverId.
 export function messageIdentityId(turn: ChatMessage): string {
   return (turn.serverId ?? turn.id).trim()
 }

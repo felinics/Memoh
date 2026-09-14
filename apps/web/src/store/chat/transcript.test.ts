@@ -73,6 +73,48 @@ function approvalMessage(status = 'pending'): UIMessage {
 }
 
 describe('chat transcript controller', () => {
+  it('deduplicates an overlapping page against render identities without replacing live content', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.appendToView({ ...assistant('render-assistant', [{ id: 1, type: 'text', content: 'newer live output' }]), turnId: 'turn-current' })
+    transcript.replaceHistoryView([
+      { ...rawUser(persistedUserId), turn_id: 'turn-current', turn_position: 9 },
+      { ...rawAssistant('db-assistant', [{ id: 1, type: 'text', content: 'newer live output' }]), turn_id: 'turn-current', turn_position: 9 },
+    ], 'session-1')
+    fetchMessages.mockResolvedValueOnce([
+      { ...rawUser('older-user'), turn_id: 'turn-old', turn_position: 8 },
+      { ...rawAssistant('db-assistant', [{ id: 1, type: 'text', content: 'stale page output' }]), turn_id: 'turn-current', turn_position: 9 },
+    ])
+    expect(await transcript.loadOlderMessages()).toBe(1)
+    expect(transcript.messages).toHaveLength(3)
+    const reply = transcript.findTurnByTurnId('turn-current', 'assistant') as ChatAssistantTurn
+    expect(reply.id).toBe('render-assistant')
+    expect(reply.serverId).toBe('db-assistant')
+    expect(reply.messages).toEqual([{ id: 1, type: 'text', content: 'newer live output' }])
+  })
+
+  it('retains a persisted runtime user id while preserving its optimistic render key', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.appendToView({
+      id: 'optimistic-user', role: 'user', turnId: 'turn-live', text: 'hi',
+      attachments: [], timestamp: '2026-01-01T00:00:00.000Z', streaming: false, isSelf: true,
+    })
+    transcript.applyRuntimeTranscript({
+      runId: 'run-1', turnId: 'turn-live', invocationId: '', status: 'running', operation: null, streaming: true,
+      turns: [{ ...rawUser(persistedUserId), turn_id: 'turn-live', turn_position: 7 }],
+    })
+    expect(transcript.messages[0]?.id).toBe('optimistic-user')
+    expect(transcript.messages[0]?.serverId).toBe(persistedUserId)
+    await transcript.loadOlderMessages()
+    expect(fetchMessages).toHaveBeenCalledWith('bot-1', 'session-1', { limit: 30, beforeMessageId: persistedUserId })
+  })
+
+  it('does not use a numbered runtime render id as a database cursor', async () => {
+    const { transcript, fetchMessages } = makeTranscript()
+    transcript.appendToView({ ...assistant('runtime:turn-live:assistant'), turnId: 'turn-live', turnPosition: 7 })
+    expect(await transcript.loadOlderMessages()).toBe(0)
+    expect(fetchMessages).not.toHaveBeenCalled()
+  })
+
   it('is the single context gate for appending active-session turns', () => {
     const { transcript } = makeTranscript()
     const turn = assistant('assistant-1')

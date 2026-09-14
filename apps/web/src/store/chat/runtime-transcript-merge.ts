@@ -19,6 +19,9 @@ export function markRuntimeTurn(
   if (originalUser || !turn.turnId || (turn.role === 'assistant' && !nestedAssistantSegment)) {
     turn.turnId = slice.turnId
   }
+  if (turn.turnPosition !== undefined && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(turn.id)) {
+    turn.serverId = turn.id
+  }
   turn.runtimeRunId = slice.runId
   if (turn.role === 'user' && slice.continuation) turn.runtimeContinuation = true
   turn.__optimistic = false

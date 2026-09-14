@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	textprune "github.com/felinics/memoh/internal/prune"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 const (
@@ -38,7 +39,7 @@ func LimitToolOutput(output any, label string, limit ToolOutputLimit) any {
 }
 
 func LimitString(text, label string, limit ToolOutputLimit) string {
-	return textprune.PruneWithEdges(text, label, toolOutputPruneConfig(limit))
+	return textprune.PruneWithEdges(textutil.StorageText(text), label, toolOutputPruneConfig(limit))
 }
 
 func LimitError(err error, label string, limit ToolOutputLimit) error {
@@ -89,11 +90,11 @@ func NormalizedLimit(limit ToolOutputLimit) ToolOutputLimit {
 func limitToolOutputValue(value any, label string, cfg textprune.Config) any {
 	switch v := value.(type) {
 	case string:
-		return textprune.PruneWithEdges(v, label, cfg)
+		return textprune.PruneWithEdges(textutil.StorageText(v), label, cfg)
 	case []string:
 		out := make([]string, len(v))
 		for i, item := range v {
-			out[i] = textprune.PruneWithEdges(item, fmt.Sprintf("%s[%d]", label, i), cfg)
+			out[i] = textprune.PruneWithEdges(textutil.StorageText(item), fmt.Sprintf("%s[%d]", label, i), cfg)
 		}
 		return out
 	case []any:
@@ -111,7 +112,7 @@ func limitToolOutputValue(value any, label string, cfg textprune.Config) any {
 	case map[string]string:
 		out := make(map[string]string, len(v))
 		for key, item := range v {
-			out[key] = textprune.PruneWithEdges(item, toolOutputChildLabel(label, key), cfg)
+			out[key] = textprune.PruneWithEdges(textutil.StorageText(item), toolOutputChildLabel(label, key), cfg)
 		}
 		return out
 	case map[string]any:

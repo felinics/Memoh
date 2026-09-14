@@ -234,8 +234,17 @@ func (m *fakeModel) handleChatCompletions(writer http.ResponseWriter, request *h
 			return
 		}
 	}
-	if directive.mode == "ask_user" && !hasToolResult(payload) {
+	if (directive.mode == "ask_user" || directive.mode == "ask_user_prefix") && !hasToolResult(payload) {
+		if directive.mode == "ask_user_prefix" {
+			_ = writeSSE(writer, flusher, completionChunk(requestID, map[string]any{"content": directive.marker + "-before-decision"}, nil))
+		}
 		if err := writeAskUserCall(writer, flusher, requestID, directive.marker); err != nil {
+			m.markDisconnected(directive.marker)
+		}
+		return
+	}
+	if directive.mode == "binary_output" && !hasToolResult(payload) {
+		if err := writeExecToolCall(writer, flusher, requestID, directive.marker, `printf 'SQLite format 3\000中文'`); err != nil {
 			m.markDisconnected(directive.marker)
 		}
 		return
@@ -465,8 +474,12 @@ func writeAskUserCall(writer http.ResponseWriter, flusher http.Flusher, requestI
 }
 
 func writeApprovalRequiredToolCall(writer http.ResponseWriter, flusher http.Flusher, requestID, marker string) error {
+	return writeExecToolCall(writer, flusher, requestID, marker, "printf 'session-runtime-approval-"+marker+"'")
+}
+
+func writeExecToolCall(writer http.ResponseWriter, flusher http.Flusher, requestID, marker, command string) error {
 	arguments, err := json.Marshal(map[string]any{
-		"command": "printf 'session-runtime-approval-" + marker + "'",
+		"command": command,
 	})
 	if err != nil {
 		return err

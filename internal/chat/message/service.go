@@ -22,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/runtimekind"
+	"github.com/felinics/memoh/internal/textutil"
 )
 
 // DBService persists and reads bot history messages.
@@ -517,6 +518,14 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 	if len(content) == 0 {
 		content = []byte("{}")
 	}
+	content, err = textutil.StorageJSON(content)
+	if err != nil {
+		return preparedPersistMessage{}, fmt.Errorf("normalize message content: %w", err)
+	}
+	metaBytes, err = textutil.StorageJSON(metaBytes)
+	if err != nil {
+		return preparedPersistMessage{}, fmt.Errorf("normalize message metadata: %w", err)
+	}
 
 	sessionMode, runtimeType := resolveRuntimeSnapshotWithQueries(ctx, s.queries, pgSessionID, input.SessionMode, input.RuntimeType)
 	prepared := preparedPersistMessage{
@@ -535,7 +544,7 @@ func (s *DBService) preparePersistMessage(ctx context.Context, input PersistInpu
 			RuntimeType:             runtimeType,
 			ModelID:                 pgModelID,
 			EventID:                 pgEventID,
-			DisplayText:             toPgText(input.DisplayText),
+			DisplayText:             toPgText(textutil.StorageText(input.DisplayText)),
 			RunID:                   pgRunID,
 		},
 		metadata:     metadata,

@@ -3262,3 +3262,16 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND btrim(COALESCE(message.metadata->>'agent_turn_id', '')) <> ''
 ORDER BY message.created_at DESC, message.id DESC
 LIMIT 1;
+
+-- name: FindAgentFailureCheckpoint :one
+-- Called while holding the fenced run lock, including after a lost commit response.
+SELECT id FROM bot_history_messages
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id)
+  AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id)
+  AND turn_id = sqlc.arg(turn_id)
+  AND role = 'assistant'
+  AND metadata->>'error_code' = sqlc.arg(error_code)::text
+ORDER BY turn_message_seq DESC
+LIMIT 1;

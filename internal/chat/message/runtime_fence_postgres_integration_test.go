@@ -602,3 +602,70 @@ func acquireRuntimeFenceToken(t *testing.T, ctx context.Context, queries *dbsqlc
 	}
 	return token
 }
+
+func TestPostgresRuntimeFenceAgentFailureCheckpointIsIdempotent(t *testing.T) {
+	for _, alreadyCommitted := range []bool{false, true} {
+		t.Run(fmt.Sprint(alreadyCommitted), func(t *testing.T) {
+			ctx := context.Background()
+			pool := openRuntimeFencePostgresPool(t, ctx)
+			botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)
+			queries := dbsqlc.New(pool)
+			token := acquireRuntimeFenceToken(t, ctx, queries, botID, sessionID)
+			runID, turnID := uuid.New(), uuid.New()
+			_, err := pool.Exec(ctx, `INSERT INTO session_runs
+    (run_id,bot_id,session_id,invocation_id,turn_id,turn_position,state,input_json,input_fingerprint,owner_id,fencing_token,owner_since,live_generation)
+    VALUES ($1,$2,$3,$4,$5,0,'running','{}','test','test-owner',$6,now(),'test')`, runID, botID, sessionID, uuid.NewString(), turnID, token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			position := int64(0)
+			user := PersistInput{BotID: botID.String(), SessionID: sessionID.String(), RunID: runID.String(), TurnID: turnID.String(), TurnPosition: &position, Role: "user", Content: []byte(`{"role":"user","content":"request"}`)}
+			assistant := user
+			assistant.Role = "assistant"
+			assistant.Content = []byte(`{"role":"assistant","content":""}`)
+			assistant.Metadata = map[string]any{HistoryErrorCodeMetadataKey: "agent.persistence_failed", AgentStepInterruptedMetadataKey: true}
+			service := NewService(nil, postgresstore.NewQueriesWithPool(pool, queries))
+			owner := runtimefence.WithContext(ctx, runtimefence.Fence{BotID: botID.String(), SessionID: sessionID.String(), Token: token})
+			if alreadyCommitted {
+				prior := assistant
+				prior.Content = []byte(`{"role":"assistant","content":"already executed"}`)
+				prior.Metadata = nil
+				if _, err := service.PersistAgentStep(owner, AgentStep{RunID: runID.String(), Messages: []PersistInput{user, prior}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			checkpoint := AgentStep{RunID: runID.String(), Messages: []PersistInput{user, assistant}}
+			first, err := service.PersistAgentFailure(owner, checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := service.PersistAgentFailure(owner, checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first[len(first)-1].ID != second[len(second)-1].ID {
+				t.Fatal("failure checkpoint was duplicated")
+			}
+			history, err := service.ListBySession(ctx, sessionID.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			users, failures := 0, 0
+			for _, msg := range history {
+				if msg.Role == "user" {
+					users++
+				}
+				if msg.Metadata[HistoryErrorCodeMetadataKey] == "agent.persistence_failed" {
+					failures++
+				}
+			}
+			if users != 1 || failures != 1 {
+				t.Fatalf("history duplicated request or failure: %#v", history)
+			}
+			acquireRuntimeFenceToken(t, ctx, queries, botID, sessionID)
+			if _, err := service.PersistAgentFailure(owner, checkpoint); err == nil {
+				t.Fatal("stale owner appended a failure")
+			}
+		})
+	}
+}

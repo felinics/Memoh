@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -40,6 +41,7 @@ type agentStepCommitter struct {
 	nextStep             int // In-process ordering guard, not a durable replay cursor.
 	commitErr            error
 	finalized            bool
+	failureRecorded      bool
 	replacementFinalized bool
 }
 
@@ -157,6 +159,14 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		}
 		return err
 	}
+	failPersistence := func(err error) error {
+		fail(err)
+		if mode != stepInterrupted && err != nil && apperror.CodeOf(err) == "" &&
+			!errors.Is(err, messagepkg.ErrAgentStepNotWritable) && !errors.Is(err, context.Canceled) {
+			c.commitErr = apperror.Wrap(apperror.CodeAgentPersistenceFailed, err, nil)
+		}
+		return err
+	}
 	if stepIndex != c.nextStep {
 		return fail(fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep))
 	}
@@ -197,7 +207,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	if len(messages) > 0 {
 		inputs, err = c.service.buildPersistInputs(context.WithoutCancel(ctx), storeReq, messages, c.rc.model.ID, opts)
 		if err != nil {
-			return fail(err)
+			return failPersistence(err)
 		}
 	}
 	for i := range inputs {
@@ -216,7 +226,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 			stepCtx, kind, agentStep, c.persisted,
 		)
 		if !outcome.historyCommitted {
-			return fail(commitErr)
+			return failPersistence(commitErr)
 		}
 		// History is already durable even if later queue coordination failed.
 		// Record that prefix below before returning the error; a cleanup must
@@ -237,7 +247,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		persisted, err = c.persister.PersistAgentStep(context.WithoutCancel(ctx), agentStep)
 	}
 	if err != nil {
-		return fail(err)
+		return failPersistence(err)
 	}
 	if len(persisted) > 0 {
 		c.rc.runConfig.ContextLifecycle.SetAssistantMessageID(lastPersistedAssistantMessageID(persisted))
@@ -314,9 +324,64 @@ func (c *agentStepCommitter) err() error {
 	return c.commitErr
 }
 
+// Record only a safe error checkpoint after the SDK has quiesced. The failed
+// tool output is never replayed, and the repository reconciles the request
+// atomically if a previous commit had an unknown outcome.
+func (c *agentStepCommitter) recordFailure(ctx context.Context) error {
+	c.mu.Lock()
+	code := apperror.CodeOf(c.commitErr)
+	if code != apperror.CodeAgentPersistenceFailed || c.failureRecorded || c.req.TurnReplacement != nil {
+		c.mu.Unlock()
+		return nil
+	}
+	writer, ok := c.persister.(messagepkg.AgentFailurePersister)
+	if !ok {
+		c.mu.Unlock()
+		return nil
+	}
+	c.failureRecorded = true
+	req := c.req
+	req.OutboundAssetCollector = nil
+	req.PersistedUserMessageID = c.turnRequestMessageID
+	req.UserMessagePersisted = c.turnRequestMessageID != ""
+	for _, msg := range c.persisted {
+		if msg.Role == "user" && msg.ID == c.turnRequestMessageID {
+			req.TurnID, req.TurnPosition = msg.TurnID, msg.TurnPosition
+		}
+	}
+	c.mu.Unlock()
+	output := []ModelMessage{{Role: "assistant", Content: newTextContent("")}}
+	if !req.UserMessagePersisted {
+		output = prependTurnUserMessage(req, output)
+	}
+	inputs, err := c.service.buildPersistInputs(ctx, req, output, c.rc.model.ID, storeRoundOptions{
+		AllowEmptyAssistantText: true,
+		MessageMetadataByIndex: map[int]map[string]any{len(output) - 1: {
+			messagepkg.AgentStepInterruptedMetadataKey: true,
+			messagepkg.HistoryErrorCodeMetadataKey:     string(code),
+		}},
+	})
+	if err != nil {
+		return err
+	}
+	persisted, err := writer.PersistAgentFailure(ctx, messagepkg.AgentStep{RunID: req.RunID, Messages: inputs, Interrupted: true})
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.persisted = append(c.persisted, persisted...)
+	c.mu.Unlock()
+	return nil
+}
+
 func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error {
 	if c == nil {
 		return nil
+	}
+	if !runOwnershipLost(ctx) {
+		if err := c.recordFailure(context.WithoutCancel(ctx)); err != nil {
+			c.service.logger.Error("persist safe step failure checkpoint failed", slog.Any("error", err))
+		}
 	}
 	c.mu.Lock()
 	if c.finalized {

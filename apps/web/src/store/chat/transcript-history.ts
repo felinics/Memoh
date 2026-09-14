@@ -127,7 +127,7 @@ export function createTranscriptHistory(deps: {
   }
 
   function normalizeTurns(items: UITurn[], _targetSessionId?: string) {
-    const normalized = items.map(normalizeTurn)
+    const normalized = items.map(item => ({ ...normalizeTurn(item), serverId: item.id }))
     reconcileBackgroundTasksInMessages(normalized)
     return normalized
   }
@@ -161,6 +161,34 @@ export function createTranscriptHistory(deps: {
       twin.serverId = twin.serverId ?? twin.id
       twin.id = prior.id
     }
+  }
+
+  // An older page may overlap a live turn under its database identity. Keep
+  // the newer on-screen content and render key, but learn its persisted id.
+  function prependMessages(items: UITurn[], targetSessionId?: string): number {
+    const incoming = normalizeTurns(items, targetSessionId)
+    const byIdentity = new Map<string, ChatMessage>()
+    const byId = new Map<string, ChatMessage>()
+    for (const turn of deps.messages) {
+      const key = turnIdentityKey(turn)
+      if (key) byIdentity.set(key, turn)
+      byId.set(turn.serverId ?? turn.id, turn)
+    }
+    const older: ChatMessage[] = []
+    for (const turn of incoming) {
+      const key = turnIdentityKey(turn)
+      const prior = (key ? byIdentity.get(key) : undefined) ?? byId.get(turn.serverId ?? turn.id)
+      if (prior) {
+        prior.serverId = turn.serverId
+        prior.turnPosition ??= turn.turnPosition
+        continue
+      }
+      older.push(turn)
+      if (key) byIdentity.set(key, turn)
+      byId.set(turn.serverId ?? turn.id, turn)
+    }
+    deps.messages.unshift(...older)
+    return older.length
   }
 
   // An on-screen turn survives a settled replacement only while it is the
@@ -220,5 +248,6 @@ export function createTranscriptHistory(deps: {
     normalizeTurns,
     replaceMessages,
     mergeMessages,
+    prependMessages,
   }
 }

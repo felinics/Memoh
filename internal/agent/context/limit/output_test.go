@@ -30,3 +30,18 @@ func countLines(text string) int {
 	}
 	return strings.Count(text, "\n") + 1
 }
+
+func TestToolOutputMakesBinaryTextSafeBeforeReplay(t *testing.T) {
+	input := map[string]any{"output": []any{"SQLite format 3\x00中文", map[string]string{"stderr": "bad\xffbyte", "literal": `\u0000`}}}
+	got := LimitToolOutput(input, "exec", ToolOutputLimit{}).(map[string]any)["output"].([]any)
+	if got[0] != `SQLite format 3\x00中文` {
+		t.Fatalf("NUL reached replay: %q", got[0])
+	}
+	fields := got[1].(map[string]string)
+	if fields["stderr"] != "bad�byte" || fields["literal"] != `\u0000` {
+		t.Fatalf("unexpected output: %#v", fields)
+	}
+	if input["output"].([]any)[0] != "SQLite format 3\x00中文" {
+		t.Fatal("mutated tool-owned result")
+	}
+}

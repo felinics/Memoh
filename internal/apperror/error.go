@@ -116,6 +116,7 @@ const (
 	CodeSessionHistoryInconsistent               Code = "session_runtime.history_inconsistent"
 	CodeAgentResponseTimeout                     Code = "agent.response_timeout"
 	CodeAgentResponseInterrupted                 Code = "agent.response_interrupted"
+	CodeAgentPersistenceFailed                   Code = "agent.persistence_failed"
 	CodeAgentProviderOverloaded                  Code = "agent.provider_overloaded"
 	CodeAgentProviderRateLimited                 Code = "agent.provider_rate_limited"
 	CodeAgentProviderQuotaExhausted              Code = "agent.provider_quota_exhausted"
@@ -579,6 +580,10 @@ var catalog = map[Code]Definition{
 	CodeAgentResponseInterrupted: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model response was interrupted. Please try again.",
+	},
+	CodeAgentPersistenceFailed: {
+		HTTPStatus: http.StatusInternalServerError,
+		Detail:     "The execution result could not be saved. Some actions may have completed. Check their results before trying again.",
 	},
 	CodeAgentProviderOverloaded: {
 		HTTPStatus: http.StatusServiceUnavailable,

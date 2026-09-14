@@ -10,6 +10,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -60,6 +61,13 @@ func TestStepCommitSeparatesHistoryFailureFromQueueFailure(t *testing.T) {
 			step := &sdk.StepResult{FinishReason: sdk.FinishReasonStop, Messages: []sdk.Message{sdk.AssistantMessage("committed response")}}
 			if err := committer.commit(ctx, 0, step); !errors.Is(err, failure) {
 				t.Fatalf("commit error=%v", err)
+			}
+			if historyFails {
+				if apperror.CodeOf(committer.err()) != apperror.CodeAgentPersistenceFailed || !errors.Is(apperror.CauseOf(committer.err()), failure) {
+					t.Fatalf("history error lost its public classification or private cause: %v", committer.err())
+				}
+			} else if apperror.CodeOf(committer.err()) != "" {
+				t.Fatal("queue failure after a successful write was mislabeled as persistence failure")
 			}
 			pending, _, err := service.sessionManager.PendingQueues(ctx, sessionruntime.Key{BotID: handle.BotID, SessionID: handle.SessionID}, 0)
 			if err != nil {

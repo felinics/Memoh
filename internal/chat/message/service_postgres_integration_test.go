@@ -356,3 +356,42 @@ func assertPostgresMessageVisibility(t *testing.T, ctx context.Context, tx pgx.T
 		t.Fatalf("message %s visible/superseded = %v/%v, want %v/%v", messageID, visible, superseded, wantVisible, wantSuperseded)
 	}
 }
+
+func TestPostgresPersistsBinaryToolOutputAndFollowingMessage(t *testing.T) {
+	ctx := context.Background()
+	tx := beginPostgresMessageTestTx(t, ctx)
+	setupPostgresMessageTestFixtures(t, ctx, tx)
+	svc := NewService(nil, postgresstore.NewQueries(dbsqlc.New(tx)))
+	for _, row := range []PersistInput{
+		{BotID: postgresMessageTestBotID, SessionID: postgresMessageTestSessionID, Role: "user", Content: []byte(`{"role":"user","content":"read cache"}`)},
+		{BotID: postgresMessageTestBotID, SessionID: postgresMessageTestSessionID, Role: "assistant", Content: []byte(`{"role":"assistant","content":[{"type":"tool-call","toolCallId":"sqlite-read","toolName":"exec","input":{}}]}`)},
+	} {
+		if _, err := svc.Persist(ctx, row); err != nil {
+			t.Fatalf("persist step prefix: %v", err)
+		}
+	}
+	output, err := svc.Persist(ctx, PersistInput{
+		BotID: postgresMessageTestBotID, SessionID: postgresMessageTestSessionID, Role: "tool",
+		Content:     []byte(`{"role":"tool","content":[{"type":"tool-result","toolCallId":"sqlite-read","result":{"stdout":"SQLite format 3\u0000中文","literal":"\\u0000","size":9007199254740993}}]}`),
+		Metadata:    map[string]any{"diagnostic": "binary\x00output"},
+		DisplayText: "SQLite\x00preview",
+	})
+	if err != nil {
+		t.Fatalf("persist binary tool result: %v", err)
+	}
+	following, err := svc.Persist(ctx, PersistInput{BotID: postgresMessageTestBotID, SessionID: postgresMessageTestSessionID, Role: "assistant", Content: []byte(`{"role":"assistant","content":"continued"}`)})
+	if err != nil {
+		t.Fatalf("persist following step: %v", err)
+	}
+	var stdout, literal, size, metadata, preview string
+	err = tx.QueryRow(ctx, `SELECT content #>> '{content,0,result,stdout}', content #>> '{content,0,result,literal}', content #>> '{content,0,result,size}', metadata->>'diagnostic', display_text FROM bot_history_messages WHERE id=$1`, output.ID).Scan(&stdout, &literal, &size, &metadata, &preview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != `SQLite format 3\x00中文` || literal != `\u0000` || size != "9007199254740993" || metadata != `binary\x00output` || preview != `SQLite\x00preview` {
+		t.Fatalf("roundtrip changed content: %q %q %q %q %q", stdout, literal, size, metadata, preview)
+	}
+	if following.ID == "" {
+		t.Fatal("following message missing")
+	}
+}

@@ -212,6 +212,12 @@ type AgentStepPersister interface {
 	PersistAgentStep(ctx context.Context, step AgentStep) ([]Message, error)
 }
 
+// AgentFailurePersister records a safe error checkpoint without replaying the
+// failed step. It resolves an already-committed request under the run lock.
+type AgentFailurePersister interface {
+	PersistAgentFailure(context.Context, AgentStep) ([]Message, error)
+}
+
 // AgentReplacementPersister owns the fenced database transactions for hidden
 // retry/edit steps and their final visible-turn replacement.
 type AgentReplacementPersister interface {

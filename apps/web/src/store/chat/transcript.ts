@@ -107,6 +107,7 @@ export function createTranscriptController({
     normalizeTurns,
     replaceMessages,
     mergeMessages,
+    prependMessages,
   } = history
   const {
     snapshotToolApprovalStates,
@@ -253,13 +254,10 @@ export function createTranscriptController({
     return fetchMessages(botId, targetSessionId, { limit: PAGE_SIZE })
   }
 
-  // The oldest turn the database has actually numbered. turnPosition is that
-  // signal exactly: the visible-history view cannot return a row without one,
-  // and a live turn carries none until its settled twin arrives. Paging from
-  // messages[0] instead would hand the server a render identity whenever a
-  // live turn sits at the head of an otherwise unsettled transcript.
+  // Position alone is not a cursor: a runtime projection can have a settled
+  // position while retaining its optimistic render id.
   function oldestSettledTurn(): ChatMessage | undefined {
-    return messages.find(turn => turn.turnPosition !== undefined)
+    return messages.find(turn => turn.turnPosition !== undefined && turn.serverId)
   }
 
   async function loadOlderMessages(): Promise<number> {
@@ -268,7 +266,7 @@ export function createTranscriptController({
     if (!bid || !sid || loadingOlder.value || !hasMoreOlder.value) return 0
     const first = oldestSettledTurn()
     if (!first) return 0
-    const firstId = messageIdentityId(first)
+    const firstId = first.serverId
     if (!firstId) return 0
 
     const generation = historyGeneration
@@ -285,16 +283,13 @@ export function createTranscriptController({
           return 0
         }
 
-        const existingIds = new Set(messages.map(message => message.id))
-        const normalized = normalizeTurns(turns, sid)
-        const older = normalized.filter(turn => !existingIds.has(turn.id))
-        if (older.length > 0) {
-          prependToView(...older)
+        const added = prependMessages(turns, sid)
+        if (added > 0) {
           hasLoadedOlder.value = true
-          return older.length
+          return added
         }
 
-        const earliest = normalized[0] ? messageIdentityId(normalized[0]) : ''
+        const earliest = turns[0]?.id ?? ''
         if (!earliest || earliest === cursor) {
           hasMoreOlder.value = false
           return 0

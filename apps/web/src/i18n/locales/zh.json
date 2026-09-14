@@ -142,6 +142,7 @@
     "agent": {
       "response_timeout": "模型未能及时响应，请重试。",
       "response_interrupted": "模型响应意外中断，请重试。",
+      "persistence_failed": "执行结果未能保存。部分操作可能已经完成，请先检查执行结果再重试。",
       "provider_overloaded": "模型服务当前过载，请稍后重试。",
       "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
       "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",

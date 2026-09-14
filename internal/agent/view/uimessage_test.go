@@ -2104,3 +2104,21 @@ func TestRuntimeFeedbackLiveAndHistoryProjection(t *testing.T) {
 		t.Fatalf("history lost command identity: %#v", history)
 	}
 }
+
+func TestContinuationTerminalPreservesEarlierBlockIDs(t *testing.T) {
+	c := NewUIMessageStreamConverter()
+	c.BeginInvocation()
+	prior := c.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "before decision"})[0]
+	tool := c.HandleEvent(UIMessageStreamEvent{Type: "tool_call_start", ToolName: "ask_user", ToolCallID: "ask-1"})[0]
+	c.BeginInvocation()
+	next := c.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "after decision"})[0]
+	raw := json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"after decision"}]}]`)
+	terminal := c.ConvertTerminalMessages(raw)
+	if len(terminal) != 1 || terminal[0].ID != next.ID || terminal[0].ID == prior.ID {
+		t.Fatalf("continuation overwrote prior text: before=%#v after=%#v terminal=%#v", prior, next, terminal)
+	}
+	update := c.HandleEvent(UIMessageStreamEvent{Type: "user_input_request", ToolName: "ask_user", ToolCallID: "ask-1", Status: "submitted"})
+	if len(update) != 1 || update[0].ID != tool.ID {
+		t.Fatalf("late decision changed tool identity: %#v", update)
+	}
+}

@@ -46,6 +46,17 @@ func NewUIMessageStreamConverter() *UIMessageStreamConverter {
 	}
 }
 
+// BeginInvocation scopes terminal text/reasoning alignment to the new
+// invocation. A decision continuation returns only its own model messages,
+// while the session still displays earlier invocations. Keep IDs monotonic
+// and retain tool identities for late decision updates.
+func (c *UIMessageStreamConverter) BeginInvocation() {
+	c.text = nil
+	c.reasoning = nil
+	c.status = nil
+	c.emitted = nil
+}
+
 // HandleEvent updates converter state and returns zero or one complete UI messages.
 func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIMessage {
 	switch strings.ToLower(strings.TrimSpace(event.Type)) {

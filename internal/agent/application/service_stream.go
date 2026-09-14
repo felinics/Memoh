@@ -38,6 +38,7 @@ func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 	}
 	switch code := apperror.CodeOf(cause); code {
 	case apperror.CodeAgentResponseTimeout,
+		apperror.CodeAgentPersistenceFailed,
 		apperror.CodeAgentResponseInterrupted,
 		apperror.CodeAgentProviderOverloaded,
 		apperror.CodeAgentProviderRateLimited,
@@ -285,6 +286,11 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				idleCancel.RecordToolCall()
 			}
 
+			if event.Type == native.EventError {
+				if commitErr := stepCommitter.err(); commitErr != nil {
+					event.Code = string(apperror.CodeOf(commitErr))
+				}
+			}
 			if eventErr := agentStreamLifecycleError(event); eventErr != nil {
 				if lifecycleCause == nil {
 					lifecycleCause = eventErr
@@ -306,8 +312,8 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				if !lifecycleDeferred {
 					switch event.Type {
 					case native.EventAgentEnd:
-						// A terminal success means an earlier retryable stream error recovered.
-						lifecycleCause = nil
+						// A provider retry cannot recover a failed persistence barrier.
+						lifecycleCause = stepCommitter.err()
 					case native.EventAgentAbort:
 						if idleCancel.DidFire() {
 							lifecycleCause = context.Cause(idleCtx)
@@ -657,6 +663,11 @@ func (s *Service) streamChatWSResultWithHooks(
 			idleCancel.RecordToolCall()
 		}
 
+		if event.Type == native.EventError {
+			if commitErr := stepCommitter.err(); commitErr != nil {
+				event.Code = string(apperror.CodeOf(commitErr))
+			}
+		}
 		if eventErr := agentStreamLifecycleError(event); eventErr != nil {
 			if lifecycleCause == nil {
 				lifecycleCause = eventErr
@@ -674,7 +685,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			if !lifecycleDeferred {
 				switch event.Type {
 				case native.EventAgentEnd:
-					lifecycleCause = nil
+					lifecycleCause = stepCommitter.err()
 				case native.EventAgentAbort:
 					if idleCancel.DidFire() {
 						lifecycleCause = context.Cause(idleCtx)
@@ -739,6 +750,21 @@ func (s *Service) streamChatWSResultWithHooks(
 						stored = true
 					}
 				}
+			}
+		}
+
+		// A commit failure can end with an empty SDK snapshot. Cross the
+		// failure checkpoint barrier before forwarding that terminal event,
+		// otherwise the runtime enters finishing and rejects the history write.
+		if event.IsTerminal() && !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
+			if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+				if lifecycleCause == nil {
+					lifecycleCause = storeErr
+				}
+				s.logger.Error("ws step finalization failed", slog.Any("error", storeErr))
+			} else {
+				persistedMessages = stepCommitter.persistedMessages()
+				stored = true
 			}
 		}
 

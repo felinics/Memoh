@@ -142,6 +142,7 @@
     "agent": {
       "response_timeout": "The model did not respond in time. Please try again.",
       "response_interrupted": "The model response was interrupted. Please try again.",
+      "persistence_failed": "The execution result could not be saved. Some actions may have completed. Check their results before trying again.",
       "provider_overloaded": "The model provider is overloaded right now. Please try again in a moment.",
       "provider_rate_limited": "The model provider rate limit was reached. Please wait a moment before sending again.",
       "provider_quota_exhausted": "The model provider account has no remaining balance or quota.",
