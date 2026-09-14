@@ -33,6 +33,8 @@ The suite has two isolated deployment shapes:
 Both use real PostgreSQL 18 and a controllable OpenAI-compatible fake model.
 The cluster topology uses a test-only TOML config and a non-persistent Valkey on
 host port `16379`. Normal development and production configs are not modified.
+Set `MEMOH_SESSION_RUNTIME_FIXTURE_NAME` to a distinct Bot/provider name when
+running in a shared development environment to preserve existing model settings.
 
 Start one topology, run it, then stop it before switching:
 

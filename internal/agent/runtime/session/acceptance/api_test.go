@@ -77,7 +77,7 @@ func (c *apiClient) ensureProvider(fakeBaseURL string) (string, error) {
 		return "", err
 	}
 	payload := map[string]any{
-		"name":        "session-runtime-acceptance",
+		"name":        envOr("MEMOH_SESSION_RUNTIME_FIXTURE_NAME", "session-runtime-acceptance"),
 		"client_type": "openai-completions",
 		"config": map[string]any{
 			"base_url": fakeBaseURL,
@@ -85,7 +85,7 @@ func (c *apiClient) ensureProvider(fakeBaseURL string) (string, error) {
 		},
 	}
 	for _, provider := range objectList(body) {
-		if stringValue(provider["name"]) != "session-runtime-acceptance" {
+		if stringValue(provider["name"]) != envOr("MEMOH_SESSION_RUNTIME_FIXTURE_NAME", "session-runtime-acceptance") {
 			continue
 		}
 		id := stringValue(provider["id"])
@@ -139,14 +139,14 @@ func (c *apiClient) ensureBot() (string, error) {
 		return "", err
 	}
 	for _, bot := range objectList(body) {
-		if stringValue(bot["name"]) == "session-runtime-acceptance" {
+		if stringValue(bot["name"]) == envOr("MEMOH_SESSION_RUNTIME_FIXTURE_NAME", "session-runtime-acceptance") {
 			return c.waitForBot(stringValue(bot["id"]))
 		}
 	}
 
 	var created map[string]any
 	if err := c.request(http.MethodPost, "/bots", map[string]any{
-		"name":           "session-runtime-acceptance",
+		"name":           envOr("MEMOH_SESSION_RUNTIME_FIXTURE_NAME", "session-runtime-acceptance"),
 		"display_name":   "Session Runtime Acceptance",
 		"wait_for_ready": true,
 	}, &created, http.StatusCreated); err != nil {

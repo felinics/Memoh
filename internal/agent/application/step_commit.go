@@ -329,17 +329,15 @@ func (c *agentStepCommitter) err() error {
 // atomically if a previous commit had an unknown outcome.
 func (c *agentStepCommitter) recordFailure(ctx context.Context) error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	code := apperror.CodeOf(c.commitErr)
 	if code != apperror.CodeAgentPersistenceFailed || c.failureRecorded || c.req.TurnReplacement != nil {
-		c.mu.Unlock()
 		return nil
 	}
 	writer, ok := c.persister.(messagepkg.AgentFailurePersister)
 	if !ok {
-		c.mu.Unlock()
 		return nil
 	}
-	c.failureRecorded = true
 	req := c.req
 	req.OutboundAssetCollector = nil
 	req.PersistedUserMessageID = c.turnRequestMessageID
@@ -349,7 +347,6 @@ func (c *agentStepCommitter) recordFailure(ctx context.Context) error {
 			req.TurnID, req.TurnPosition = msg.TurnID, msg.TurnPosition
 		}
 	}
-	c.mu.Unlock()
 	output := []ModelMessage{{Role: "assistant", Content: newTextContent("")}}
 	if !req.UserMessagePersisted {
 		output = prependTurnUserMessage(req, output)
@@ -364,13 +361,15 @@ func (c *agentStepCommitter) recordFailure(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The failure lookup needs the admitted turn even when the request is
+	// already durable and buildPersistInputs emits only an assistant row.
+	inputs[0].TurnID, inputs[0].TurnPosition = req.TurnID, req.TurnPosition
 	persisted, err := writer.PersistAgentFailure(ctx, messagepkg.AgentStep{RunID: req.RunID, Messages: inputs, Interrupted: true})
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
+	c.failureRecorded = true
 	c.persisted = append(c.persisted, persisted...)
-	c.mu.Unlock()
 	return nil
 }
 
@@ -380,7 +379,7 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 	}
 	if !runOwnershipLost(ctx) {
 		if err := c.recordFailure(context.WithoutCancel(ctx)); err != nil {
-			c.service.logger.Error("persist safe step failure checkpoint failed", slog.Any("error", err))
+			return err
 		}
 	}
 	c.mu.Lock()

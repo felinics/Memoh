@@ -397,14 +397,14 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			}
 			if event.IsTerminal() && !stored && !runOwnershipLost(streamCtx) && terminalPersistErr == nil {
 				switch {
-				case !hasVisibleOutput:
-					stored = true
 				case stepCommitter != nil:
 					if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
 						terminalPersistErr = runtimeHistoryError(storeErr)
 					} else {
 						stored = true
 					}
+				case !hasVisibleOutput:
+					stored = true
 				default:
 					terminalPersistErr = runtimeHistoryError(errors.New("agent terminal event has no persistable snapshot"))
 				}
@@ -715,6 +715,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			continue
 		}
 
+		var terminalPersistErr error
 		if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				if stepCommitter == nil {
@@ -730,6 +731,7 @@ func (s *Service) streamChatWSResultWithHooks(
 				}
 				if !stored && !runOwnershipLost(ctx) && stepCommitter != nil {
 					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+						terminalPersistErr = storeErr
 						if lifecycleCause == nil {
 							lifecycleCause = storeErr
 						}
@@ -756,8 +758,9 @@ func (s *Service) streamChatWSResultWithHooks(
 		// A commit failure can end with an empty SDK snapshot. Cross the
 		// failure checkpoint barrier before forwarding that terminal event,
 		// otherwise the runtime enters finishing and rejects the history write.
-		if event.IsTerminal() && !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
+		if event.IsTerminal() && !stored && stepCommitter != nil && !runOwnershipLost(ctx) && terminalPersistErr == nil {
 			if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+				terminalPersistErr = storeErr
 				if lifecycleCause == nil {
 					lifecycleCause = storeErr
 				}
@@ -766,6 +769,11 @@ func (s *Service) streamChatWSResultWithHooks(
 				persistedMessages = stepCommitter.persistedMessages()
 				stored = true
 			}
+		}
+		if terminalPersistErr != nil {
+			// Keep the run writable for the cleanup attempt below. Forwarding
+			// this event would move it to finishing and fence that write out.
+			continue
 		}
 
 		if event.IsTerminal() && postPersist != nil && stepCommitter == nil && !postPersistApplied {
