@@ -3,7 +3,7 @@ package textutil
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"unicode/utf8"
 )
@@ -19,7 +19,7 @@ func StorageText(text string) string {
 // potentially unsafe input, preserving numeric precision and literal escapes.
 func StorageJSON(raw []byte) ([]byte, error) {
 	if !json.Valid(raw) {
-		return nil, fmt.Errorf("invalid JSON content")
+		return nil, errors.New("invalid JSON content")
 	}
 	if utf8.Valid(raw) && !bytes.Contains(raw, []byte(`\u`)) {
 		return raw, nil
@@ -54,7 +54,7 @@ func storageJSONValue(value any) (any, error) {
 		for key, item := range v {
 			key = StorageText(key)
 			if _, exists := clean[key]; exists {
-				return nil, fmt.Errorf("JSON keys collide after text normalization")
+				return nil, errors.New("JSON keys collide after text normalization")
 			}
 			next, err := storageJSONValue(item)
 			if err != nil {

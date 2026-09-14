@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -605,7 +606,7 @@ func acquireRuntimeFenceToken(t *testing.T, ctx context.Context, queries *dbsqlc
 
 func TestPostgresRuntimeFenceAgentFailureCheckpointIsIdempotent(t *testing.T) {
 	for _, alreadyCommitted := range []bool{false, true} {
-		t.Run(fmt.Sprint(alreadyCommitted), func(t *testing.T) {
+		t.Run(strconv.FormatBool(alreadyCommitted), func(t *testing.T) {
 			ctx := context.Background()
 			pool := openRuntimeFencePostgresPool(t, ctx)
 			botID, sessionID := createRuntimeFenceFixtures(t, ctx, pool)

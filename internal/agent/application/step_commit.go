@@ -160,7 +160,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		return err
 	}
 	failPersistence := func(err error) error {
-		fail(err)
+		err = fail(err)
 		if mode != stepInterrupted && err != nil && apperror.CodeOf(err) == "" &&
 			!errors.Is(err, messagepkg.ErrAgentStepNotWritable) && !errors.Is(err, context.Canceled) {
 			c.commitErr = apperror.Wrap(apperror.CodeAgentPersistenceFailed, err, nil)
