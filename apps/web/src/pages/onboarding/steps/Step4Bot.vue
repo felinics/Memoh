@@ -377,6 +377,7 @@ async function handleSubmit() {
                   :providers="providers"
                   model-type="chat"
                   :placeholder="$t('onboarding.bot.model.selectPlaceholder')"
+                  hover-lighten
                 />
               </template>
             </div>

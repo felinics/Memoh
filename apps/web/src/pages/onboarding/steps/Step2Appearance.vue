@@ -39,7 +39,10 @@ const { visible, exiting, leave } = useStepTransition()
                 :model-value="language"
                 @update:model-value="(value) => value && setLanguage(value as Locale)"
               >
-                <SelectTrigger class="w-full">
+                <SelectTrigger
+                  class="w-full"
+                  data-hover-lighten
+                >
                   <SelectValue :placeholder="t('settings.languagePlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>

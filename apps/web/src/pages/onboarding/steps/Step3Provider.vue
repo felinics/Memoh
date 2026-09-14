@@ -259,7 +259,10 @@ onMounted(() => {
                 </Label>
               </template>
               <Select v-model="formValues.client_type">
-                <SelectTrigger class="w-full">
+                <SelectTrigger
+                  class="w-full"
+                  data-hover-lighten
+                >
                   <SelectValue :placeholder="t('onboarding.provider.form.clientTypePlaceholder')" />
                 </SelectTrigger>
                 <SelectContent>

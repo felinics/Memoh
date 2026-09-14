@@ -5,6 +5,7 @@
         data-slot="select-trigger"
         data-size="default"
         :data-placeholder="displayLabel ? undefined : ''"
+        :data-hover-lighten="hoverLighten || undefined"
         type="button"
         :aria-expanded="open"
         :aria-invalid="invalid || undefined"
@@ -56,6 +57,10 @@ const props = defineProps<{
   providers: ProvidersGetResponse[]
   modelType: ModelsModelType
   invalid?: boolean
+  // Opts into the ui package's data-hover-lighten escape hatch (white hover
+  // overlay in dark). For instances sitting directly on the near-black app
+  // canvas (onboarding), where the default pure-black hover fill is invisible.
+  hoverLighten?: boolean
   placeholder?: string
   noneLabel?: string
   showReasoning?: boolean
