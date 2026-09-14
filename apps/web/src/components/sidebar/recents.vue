@@ -161,7 +161,7 @@ const sectionLabelClass = 'text-xs font-[550] tracking-[-0.02em] text-muted-fore
 
 // 组头 trailing 动作的显现类,与 folders-section 的组头按钮同一套
 // (见 group-header.vue 头注释)。
-const rowActionRevealClass = 'opacity-0 group-hover/group-header:opacity-100 focus-visible:opacity-100'
+const rowActionRevealClass = 'opacity-0 pointer-events-none group-hover/group-header:pointer-events-auto group-hover/group-header:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100'
 
 const sectionCollapsedByBot = useLocalStorage<Record<string, boolean>>(
   'workspace-sidebar-recents-collapsed',

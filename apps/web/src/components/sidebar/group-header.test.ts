@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+/* eslint-disable vue/one-component-per-file */
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, type App } from 'vue'
 import GroupHeader from './group-header.vue'
@@ -59,6 +60,27 @@ it('reveals the chevron only on hover/focus and rotates it when expanded', async
   expect(cls).toContain('opacity-0')
   expect(cls).toContain('group-hover/group-header:opacity-100')
   expect(cls).toContain('rotate-90')
+})
+
+it('does not toggle or swallow native activation when a nested button receives Enter/Space', async () => {
+  const onToggle = vi.fn()
+  const onInnerClick = vi.fn()
+  root = document.createElement('div')
+  document.body.appendChild(root)
+  app = createApp({
+    setup: () => () => h(GroupHeader, { label: 'work', expanded: false, onToggle }, {
+      default: () => h('button', { class: 'trailing-action', onClick: onInnerClick }, '+'),
+    }),
+  })
+  app.mount(root)
+  await flush()
+  const inner = root.querySelector<HTMLElement>('.trailing-action')!
+  inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+  inner.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+  await flush()
+  expect(onToggle).not.toHaveBeenCalled()
+  inner.click()
+  expect(onInnerClick).toHaveBeenCalledTimes(1)
 })
 
 it('renders trailing slot content at the far right', async () => {

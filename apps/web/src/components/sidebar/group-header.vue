@@ -17,8 +17,8 @@
     :aria-expanded="expanded"
     :class="[rowClass, compact ? compactClass : rowHeightClass, hoverFill ? hoverFillClass : '']"
     @click="emit('toggle')"
-    @keydown.enter.prevent="emit('toggle')"
-    @keydown.space.prevent="emit('toggle')"
+    @keydown.enter="onRowKeydown"
+    @keydown.space="onRowKeydown"
   >
     <slot name="leading" />
     <span :class="['min-w-0 shrink truncate', labelClass]">{{ label }}</span>
@@ -74,4 +74,14 @@ withDefaults(defineProps<{
 const emit = defineEmits<{
   toggle: []
 }>()
+
+// 内嵌按钮(trailing 动作)的 Enter/Space 会冒泡到行:放行——它们应触发
+// 按钮自身,而不是折叠;preventDefault 也只对行本人生效(否则内嵌按钮的
+// 原生键盘激活会被取消)。session-item.vue 的内嵌按钮用 .stop 防同一手,
+// 这里在中央挡,调用方不用再管。
+function onRowKeydown(event: KeyboardEvent) {
+  if (event.target !== event.currentTarget) return
+  event.preventDefault()
+  emit('toggle')
+}
 </script>

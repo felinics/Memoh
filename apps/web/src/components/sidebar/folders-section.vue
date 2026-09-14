@@ -197,10 +197,11 @@ const sectionLabelClass = 'text-xs font-[550] tracking-[-0.02em] text-muted-fore
 // folder 行的 label 沿用改造前的列表行字型(前景 text-control)
 const folderRowLabelClass = 'text-control text-foreground'
 
-// 组头 trailing 动作的显现类:menu trigger 额外带 data-[state=open]——reka
-// 菜单打开时页面 pointer-events 被关,组头 hover 失效,trigger 靠自己的
-// data-[state=open] 保持显现(见 group-header.vue 头注释)。
-const rowActionRevealClass = 'opacity-0 group-hover/group-header:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
+// 组头 trailing 动作的显现类:pointer-events-none 让隐形时不可点(对齐
+// session-item.vue 的既有范式);menu trigger 额外带 data-[state=open]——
+// reka 菜单打开时页面 pointer-events 被关,组头 hover 失效,trigger 靠
+// 自己的 data-[state=open] 保持显现(见 group-header.vue 头注释)。
+const rowActionRevealClass = 'opacity-0 pointer-events-none group-hover/group-header:pointer-events-auto group-hover/group-header:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 data-[state=open]:pointer-events-auto data-[state=open]:opacity-100'
 
 const sessionDialogs = ref<InstanceType<typeof SessionDialogs> | null>(null)
 
