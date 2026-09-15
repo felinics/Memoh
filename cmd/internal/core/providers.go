@@ -828,7 +828,7 @@ func provideWorkspaceDependencyCatalog(cfg config.Config, queries dbstore.Querie
 }
 
 func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Manager, queries dbstore.Queries, provider *workspacedeps.RemoteCatalog, bgManager *background.Manager, sessions *sessionpkg.Service, cfg config.Config) *workspacedeps.Service {
-	return workspacedeps.NewService(workspacedeps.Options{
+	service := workspacedeps.NewService(workspacedeps.Options{
 		Workspace: workspacedeps.NewManagerWorkspaceAccess(manager),
 		Store:     workspacedeps.NewPostgresStore(queries),
 		Provider:  provider,
@@ -858,6 +858,9 @@ func provideWorkspaceDependencyService(log *slog.Logger, manager *workspace.Mana
 		},
 		Background: bgManager,
 	})
+	manager.OnNativeWorkspaceQuiescent(service.ReapPayloadsAtStartup)
+	manager.OnNativeWorkspaceReady(service.NotifyWorkspaceReady)
+	return service
 }
 
 func provideWorkspaceDependencyUpdateWorker(log *slog.Logger, service *workspacedeps.Service, cfg config.Config) *workspacedeps.UpdateWorker {
@@ -870,16 +873,21 @@ func provideWorkspaceDependencyUpdateWorker(log *slog.Logger, service *workspace
 func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, service *workspacedeps.Service, worker *workspacedeps.UpdateWorker, provider *workspacedeps.RemoteCatalog, cfg config.Config) {
 	var stopReaper func()
 	var stopCatalog func()
+	var stopRepair func()
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			stopCatalog = provider.Start(context.WithoutCancel(ctx))
 			stopReaper = workspacedeps.StartReaper(context.WithoutCancel(ctx), service, cfg.WorkspaceDependencies.ReapInterval(), log)
+			stopRepair = workspacedeps.StartRepairWorker(context.WithoutCancel(ctx), service, cfg.WorkspaceDependencies.ReapInterval(), log)
 			if !cfg.WorkspaceDependencies.Offline {
 				worker.Start(ctx)
 			}
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
+			if stopRepair != nil {
+				stopRepair()
+			}
 			if stopReaper != nil {
 				stopReaper()
 			}

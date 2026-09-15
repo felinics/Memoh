@@ -68,3 +68,9 @@ func (a *managerWorkspaceAccess) EnsureRunning(ctx context.Context, botID string
 }
 
 func (a *managerWorkspaceAccess) OnBridgeReset(fn func(botID string)) { a.manager.OnBridgeReset(fn) }
+
+// ListBots enumerates existing native workspaces, including Bots whose last
+// dependency was removed while an old process still held its payload.
+func (a *managerWorkspaceAccess) ListBots(ctx context.Context) ([]string, error) {
+	return a.manager.ListBots(ctx)
+}

@@ -60,7 +60,7 @@ var publicSentinels = []error{
 	connectors.ErrInvalidInput, connectors.ErrNotConfigured, connectors.ErrUpstreamUnavailable,
 	workspacedeps.ErrDependencyNotFound, workspacedeps.ErrPlatformUnsupported, workspacedeps.ErrBusy,
 	workspacedeps.ErrWorkspaceNotRunning, workspacedeps.ErrWorkspaceMissing,
-	workspacedeps.ErrRollbackUnavailable, workspacedeps.ErrActionUnsupported, workspacedeps.ErrOperationUncertain,
+	workspacedeps.ErrActionUnsupported, workspacedeps.ErrOperationUncertain,
 	workspacedeps.ErrCatalogUnavailable, workspacedeps.ErrDefinitionInvalid, workspacedeps.ErrDefinitionUnavailable,
 }
 

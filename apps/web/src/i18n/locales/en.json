@@ -216,12 +216,17 @@
       "busy": "Another operation on this dependency is in progress.",
       "workspace_not_running": "The workspace isn't running. Start it first.",
       "workspace_missing": "The workspace hasn't been created yet.",
-      "rollback_unavailable": "No previous version to roll back to.",
       "operation_failed": "The dependency operation failed. Check the log and try again.",
       "catalog_unavailable": "The dependency catalog is unavailable. Please try again later.",
       "definition_invalid": "The dependency definition could not be verified. Please refresh the catalog.",
       "definition_unavailable": "The dependency definition is not cached. Please reconnect to Supermarket and try again.",
-      "discovery_failed": "Workspace dependencies could not be inspected. Please try again."
+      "discovery_failed": "Workspace dependencies could not be inspected. Please try again.",
+      "recipe_upgrade_required": "This recipe cannot safely reinstall the same version. Review and confirm an updated recipe first.",
+      "repair_authorization_required": "A bot manager must review and authorize this dependency before it can be restored automatically.",
+      "target_changed": "The installation target changed. Refresh and review it again.",
+      "repair_pending": "Recovery is already queued or running. Wait for it to finish.",
+      "repair_manual_required": "Automatic recovery needs attention. Review the dependency and retry recovery.",
+      "repair_failed": "Recovery failed. Review the dependency status and try again."
     },
     "acp": {
       "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
@@ -1213,7 +1218,14 @@
       "attachmentUnavailable": "The attachment could not be made available to the external agent. Please attach it again.",
       "imageInputUnsupported": "This external agent cannot read the attached image.",
       "invalidChatRuntime": "The selected chat runtime is invalid.",
-      "dependencyMissing": "{dep_id} isn't installed in this workspace; installing it in the background. Resend your message when it finishes.",
+      "dependencyMissing": "{dep_id} is unavailable. Ask a bot administrator to install it from Apps, then resend your message.",
+      "dependencyMissingInstalling": "A dependency operation for {dep_id} is in progress. Resend your message when it finishes.",
+      "dependencyRepair": {
+        "queued": "Recovery of {dep_id} {desired_version} is queued. Resend your message after it finishes.",
+        "installing": "Restoring {dep_id} {desired_version}. Resend your message when it finishes.",
+        "backoff": "Recovery of {dep_id} {desired_version} is waiting to retry. Check Apps for its status.",
+        "manual_required": "Recovery of {dep_id} {desired_version} needs a bot administrator. Open Apps to resolve it."
+      },
       "dependencyMissingProgress": "Installing in the background…",
       "dependencyMissingDone": "Installed. You can resend now.",
       "dependencyMissingFailed": "Background install failed. Retry from the bot's Dependencies tab.",
@@ -2510,8 +2522,6 @@
         "install": "Install",
         "reinstall": "Reinstall",
         "update": "Update",
-        "rollback": "Roll back to {version}",
-        "rollbackPlain": "Roll back",
         "remove": "Remove",
         "viewScript": "View script",
         "viewProgress": "View progress"
@@ -2529,18 +2539,23 @@
         "installTitle": "Install {name}",
         "reinstallTitle": "Reinstall {name}",
         "updateTitle": "Update {name}",
-        "updateDescription": "Currently {from}. The new version installs first and switches over only on success; the current one stays untouched on failure, and you can roll back afterwards.",
+        "updateDescription": "Currently {from}. The new version becomes active after installation succeeds.",
         "installDescription": "Downloads and installs {name} into the workspace.",
-        "reinstallDescription": "Downloads and reinstalls {name} in the workspace.",
+        "reinstallDescription": "Downloads and reinstalls {name}. Choose the same version or enter another release.",
         "dependency": "Dependency",
         "installPath": "Install location",
         "version": "Version",
-        "versionPlaceholder": "Latest",
-        "versionHelp": "Leave blank to install the latest version.",
+        "versionPlaceholder": "Latest release",
+        "versionHelp": "Leave blank to resolve the latest release, or enter an exact version, including an older release. Review the target before installing.",
         "installConfirm": "Install",
         "updateConfirm": "Update",
         "installAndEnable": "Install and enable",
-        "versionInvalid": "Enter a release identifier such as 1.2.3 or latest."
+        "versionInvalid": "Enter a release identifier such as 1.2.3 or latest.",
+        "review": "Review installation",
+        "preparing": "Resolving installation target…",
+        "prepareFailed": "Could not prepare an exact installation target. Try again.",
+        "source": "Source",
+        "repairConsent": "Installs version {version} with this recipe. If its files are lost, Memoh can restore this same release automatically."
       },
       "progress": {
         "installing": "Installing {name}",
@@ -2555,8 +2570,9 @@
         "version": "Version",
         "entrypoint": "Entrypoint",
         "log": "Operation log",
+        "reconciling": "Checking the recorded operation…",
         "unknownTitle": "Result not confirmed",
-        "unknownHint": "The operation result is not yet confirmed. Refresh dependencies to check its status."
+        "unknownHint": "The result could not be confirmed. Refresh dependencies to check its status before starting another installation."
       },
       "script": {
         "title": "Script that will run in the workspace",
@@ -2570,16 +2586,7 @@
       },
       "remove": {
         "title": "Remove {name}?",
-        "description": "Removes {name} and its installed versions from this workspace. Programs that depend on it may stop working."
-      },
-      "rollback": {
-        "title": "Roll back {name}",
-        "description": "Switches from {from} back to {to}. Rollback only swaps the locally kept version; nothing is downloaded.",
-        "current": "Current",
-        "target": "Roll back to",
-        "confirm": "Roll back to {to}",
-        "success": "Rolled back to {to}",
-        "failed": "Rollback failed"
+        "description": "Removes {name} from this workspace. Programs that depend on it may stop working."
       },
       "preflight": {
         "failed": "Couldn't check dependencies",
@@ -2601,7 +2608,23 @@
       },
       "busy": "Another dependency operation is still running in this workspace.",
       "catalogStaleTitle": "Showing cached dependencies",
-      "catalogStaleDescription": "Supermarket is unavailable. You can retry to get the latest catalog."
+      "catalogStaleDescription": "Supermarket is unavailable. You can retry to get the latest catalog.",
+      "repair": {
+        "authorize": "Enable automatic recovery",
+        "authorizeTitle": "Enable recovery for {name}",
+        "authorizeDescription": "Reinstall a reviewed release of {name} so Memoh can restore it automatically if its files are lost.",
+        "authorizeConfirm": "Reinstall and enable recovery",
+        "retry": "Retry recovery",
+        "retryFailed": "Could not request recovery. Try again.",
+        "targetVersion": "Recovery target: {version}",
+        "managerRequired": "Ask a bot manager to review the installation and enable recovery.",
+        "status": {
+          "queued": "Recovery queued",
+          "installing": "Restoring",
+          "backoff": "Waiting to retry",
+          "manual_required": "Needs attention"
+        }
+      }
     },
     "folders": {
       "create": "New folder",
@@ -3871,6 +3894,20 @@
     "copyFailed": "Failed to copy the code"
   },
   "apps": {
+    "prepare": {
+      "review": "Review installation",
+      "failed": "Could not prepare the installation plan. Try again.",
+      "dependencies": "Dependency changes",
+      "noDependencies": "No dependency installation scripts are needed.",
+      "action": "Action",
+      "version": "Version",
+      "definitionRevision": "Recipe revision",
+      "registry": "Registry",
+      "source": "Source URL",
+      "appRevision": "App revision",
+      "resumeTitle": "Continue installing {name}",
+      "resumeDescription": "Review the dependencies to restore before continuing."
+    },
     "diagnostics": {
       "failed": "Operation failed",
       "partial": "Needs attention",

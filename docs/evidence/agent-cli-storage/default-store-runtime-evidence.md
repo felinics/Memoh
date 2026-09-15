@@ -1,0 +1,9 @@
+# OSS default payload store verification
+
+OSS default-store verification passed with one entrypoint repair. A disposable Bot in an isolated Server, PostgreSQL database and containerd namespace used `dependency_store_root = ""`. The real UI reviewed and confirmed uv 0.12.12 and frozen definition `c08c6b3cd8ad226a7652c1f67ac42eb24dc65aeab75f2245c99cdcc8b65f4667`. Its managed payload was installed under `/data/.memoh/deps/uv/installs/`, and the real managed launcher returned `uv 0.12.12 (aarch64-unknown-linux-gnu)`.
+
+A real preserve-data delete/recreate replaced the root filesystem. The payload installation ID, path, executable hash, exact version, desired revision and original authorization audit remained unchanged, and the managed launcher still executed successfully. This was not a zero-operation rebuild: the existing containerd archive omits symlinks, so the ready handler restored `current` through one trusted entrypoint repair. It reused the existing payload and did not run the download recipe. Data restoration completes before workspace startup; no readiness-before-restore race was observed.
+
+The fresh fixture account used the normal authenticated `PUT /users/me` onboarding preference contract after the Bot was created by API. Its user ID matched the Bot owner; no model or Agent credentials were added. Existing 18080 settings, Bots and credentials were unchanged. The screenshots show confirmation, completed installation and the fresh post-rebuild UI. This is agent verification, not human QA or E2B performance evidence.
+
+Verification ran on API `http://localhost:18100` and Web `http://localhost:18102`. After capture, only this isolated Server, Web, proxy and Bot task were stopped. Its fixture database, containerd namespace metadata, snapshot and data were retained for review. The original Server on 18080 remained healthy; port 18102 is now offline.

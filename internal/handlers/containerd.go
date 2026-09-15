@@ -349,10 +349,13 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	deps.POST("/preflight", h.PreflightWorkspaceDependencies)
 	deps.POST("/check-updates", h.CheckWorkspaceDependencyUpdates)
 	deps.GET("/:dep_id/script", h.GetWorkspaceDependencyScript)
+	deps.POST("/:dep_id/prepare", h.PrepareWorkspaceDependency)
+	deps.POST("/:dep_id/repair/prepare", h.PrepareWorkspaceDependencyRepair)
+	deps.POST("/:dep_id/repair/authorize", h.AuthorizeWorkspaceDependencyRepair)
+	deps.POST("/:dep_id/repair/retry", h.RetryWorkspaceDependencyRepair)
 	deps.POST("/:dep_id/install", h.InstallWorkspaceDependency)
 	deps.POST("/:dep_id/update", h.UpdateWorkspaceDependency)
 	deps.POST("/:dep_id/reinstall", h.ReinstallWorkspaceDependency)
-	deps.POST("/:dep_id/rollback", h.RollbackWorkspaceDependency)
 }
 
 // CreateContainer godoc

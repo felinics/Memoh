@@ -1823,6 +1823,16 @@ export type HandlersAppConnectorOAuthRequest = {
     auth_method: string;
 };
 
+export type HandlersAppDependencyConfirmation = {
+    action?: 'install' | 'update';
+    definition_revision?: string;
+    dependency_id?: string;
+    manifest_digest?: string;
+    registry_id?: string;
+    source_url?: string;
+    version?: string;
+};
+
 export type HandlersAppDependencyItem = {
     dependency?: HandlersWorkspaceDependencyItem;
     id?: string;
@@ -1835,6 +1845,7 @@ export type HandlersAppDependencyItem = {
 
 export type HandlersAppInstallRequest = {
     app_id: string;
+    dependency_confirmations?: Array<HandlersAppDependencyConfirmation>;
     registry_id: string;
     revision: string;
 };
@@ -1889,6 +1900,23 @@ export type HandlersAppListResponse = {
     workspace_state?: 'running' | 'not_running' | 'missing';
 };
 
+export type HandlersAppPrepareRequest = {
+    action?: 'install' | 'resume' | 'update';
+    app_id?: string;
+    dependencies?: Array<string>;
+    installation_id?: string;
+    registry_id?: string;
+    release?: boolean;
+    revision?: string;
+};
+
+export type HandlersAppPrepareResponse = {
+    app_id?: string;
+    dependencies?: Array<HandlersAppDependencyConfirmation>;
+    registry_id?: string;
+    revision?: string;
+};
+
 export type HandlersAppRemovalPreviewApp = {
     app_id?: string;
     installation_id?: string;
@@ -1914,6 +1942,11 @@ export type HandlersAppRemovalPreviewResponse = {
     dependencies?: Array<HandlersAppRemovalPreviewDependency>;
     installation_id?: string;
     required_apps?: Array<HandlersAppRemovalPreviewApp>;
+};
+
+export type HandlersAppResumeRequest = {
+    dependency_confirmations?: Array<HandlersAppDependencyConfirmation>;
+    revision: string;
 };
 
 export type HandlersAppSkillItem = {
@@ -1944,14 +1977,19 @@ export type HandlersAppStreamEvent = {
 export type HandlersAppUpdateRequest = {
     app_id: string;
     /**
-     * Dependencies are updated to their latest version.
+     * Dependencies are updated to their confirmed version.
      */
     dependencies?: Array<string>;
+    dependency_confirmations?: Array<HandlersAppDependencyConfirmation>;
     registry_id: string;
     /**
-     * Release moves the installation to the registry's current release.
+     * Release moves the installation to the prepared release_revision.
      */
     release?: boolean;
+    /**
+     * ReleaseRevision is the immutable App release returned by prepare.
+     */
+    release_revision?: string;
 };
 
 export type HandlersBatchDeleteRequest = {
@@ -2803,6 +2841,21 @@ export type HandlersWorkspaceDependencyCatalogResponse = {
     items?: Array<HandlersWorkspaceDependencyCatalogItem>;
 };
 
+export type HandlersWorkspaceDependencyDesired = {
+    auto_repair_authorized_at?: string;
+    definition_revision?: string;
+    manifest_digest?: string;
+    registry_id?: string;
+    repair_attempts?: number;
+    repair_last_error_code?: string;
+    repair_next_attempt_at?: string;
+    repair_operation_id?: string;
+    repair_status?: 'ready' | 'queued' | 'installing' | 'backoff' | 'manual_required';
+    revision?: string;
+    source_url?: string;
+    version?: string;
+};
+
 export type HandlersWorkspaceDependencyInstallRequest = {
     definition_revision?: string;
     /**
@@ -2810,9 +2863,8 @@ export type HandlersWorkspaceDependencyInstallRequest = {
      */
     session_id?: string;
     /**
-     * Version to install. Empty (or no body) installs the latest version the
-     * catalog script resolves, or the manifest pin when the dependency has
-     * one. The version recorded afterwards is the one the script reports.
+     * Version is the exact target returned by preparation; mutable aliases
+     * and empty values are rejected before an operation is admitted.
      */
     version?: string;
 };
@@ -2821,13 +2873,14 @@ export type HandlersWorkspaceDependencyItem = {
     /**
      * Actions lists what may be requested right now.
      */
-    actions?: Array<'install' | 'update' | 'reinstall' | 'remove' | 'rollback' | 'check_update'>;
+    actions?: Array<'install' | 'update' | 'reinstall' | 'remove' | 'check_update' | 'authorize_repair' | 'retry_repair'>;
     /**
      * Category is agent, runtime, or tool.
      */
     category?: 'agent' | 'runtime' | 'tool';
     definition_revision?: string;
     description?: string;
+    desired?: HandlersWorkspaceDependencyDesired;
     icon?: string;
     icon_url?: string;
     id?: string;
@@ -2851,12 +2904,14 @@ export type HandlersWorkspaceDependencyItem = {
     last_checked_at?: string;
     last_error?: string;
     last_error_code?: string;
+    last_operation_id?: string;
     /**
      * LatestVersion is the last upstream check result, omitted until a check
      * ran.
      */
     latest_version?: string;
     name?: string;
+    operation_id?: string;
     /**
      * Overlay is set when the copy in effect is a managed one installed over
      * an image copy.
@@ -2868,10 +2923,6 @@ export type HandlersWorkspaceDependencyItem = {
      * listed by the catalog manifest; PlatformReason then says why.
      */
     platform_supported?: boolean;
-    /**
-     * PreviousVersion is the version rollback would switch back to.
-     */
-    previous_version?: string;
     /**
      * Provides lists the commands the dependency makes available.
      */
@@ -2913,17 +2964,6 @@ export type HandlersWorkspaceDependencyListResponse = {
     workspace_state?: 'running' | 'not_running' | 'missing';
 };
 
-export type HandlersWorkspaceDependencyOperationResponse = {
-    action?: string;
-    definition_revision?: string;
-    dependency_id?: string;
-    entrypoints?: {
-        [key: string]: string;
-    };
-    status?: string;
-    version?: string;
-};
-
 export type HandlersWorkspaceDependencyPlatform = {
     arch?: string;
     libc?: string;
@@ -2946,6 +2986,27 @@ export type HandlersWorkspaceDependencyPreflightResponse = {
     workspace_state?: 'running' | 'not_running' | 'missing';
 };
 
+export type HandlersWorkspaceDependencyPrepareRequest = {
+    action?: 'install' | 'update' | 'reinstall';
+    definition_revision?: string;
+    version?: string;
+};
+
+export type HandlersWorkspaceDependencyPreparedResponse = {
+    action?: string;
+    definition_revision?: string;
+    dependency_id?: string;
+    manifest_digest?: string;
+    registry_id?: string;
+    source_url?: string;
+    version?: string;
+};
+
+export type HandlersWorkspaceDependencyRepairRequest = {
+    definition_revision?: string;
+    version?: string;
+};
+
 export type HandlersWorkspaceDependencyScriptEnv = {
     key?: string;
     secret?: boolean;
@@ -2956,7 +3017,7 @@ export type HandlersWorkspaceDependencyScriptEnv = {
 };
 
 export type HandlersWorkspaceDependencyScriptResponse = {
-    action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
+    action?: 'install' | 'update' | 'remove' | 'reinstall';
     definition_revision?: string;
     dependency_id?: string;
     digest?: string;
@@ -2979,6 +3040,7 @@ export type HandlersWorkspaceDependencyStreamEvent = {
         [key: string]: string;
     };
     message?: string;
+    operation_id?: string;
     request_id?: string;
     stream?: 'stdout' | 'stderr';
     type?: 'started' | 'log' | 'done' | 'error';
@@ -6341,6 +6403,55 @@ export type PostBotsByBotIdAppsCheckUpdatesResponses = {
 
 export type PostBotsByBotIdAppsCheckUpdatesResponse = PostBotsByBotIdAppsCheckUpdatesResponses[keyof PostBotsByBotIdAppsCheckUpdatesResponses];
 
+export type PostBotsByBotIdAppsPrepareData = {
+    /**
+     * App operation to prepare
+     */
+    body: HandlersAppPrepareRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/prepare';
+};
+
+export type PostBotsByBotIdAppsPrepareErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsPrepareError = PostBotsByBotIdAppsPrepareErrors[keyof PostBotsByBotIdAppsPrepareErrors];
+
+export type PostBotsByBotIdAppsPrepareResponses = {
+    /**
+     * OK
+     */
+    200: HandlersAppPrepareResponse;
+};
+
+export type PostBotsByBotIdAppsPrepareResponse = PostBotsByBotIdAppsPrepareResponses[keyof PostBotsByBotIdAppsPrepareResponses];
+
 export type PostBotsByBotIdAppsUpdateData = {
     /**
      * What to update
@@ -6628,7 +6739,10 @@ export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses = {
 export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponse = GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses[keyof GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses];
 
 export type PostBotsByBotIdAppsByInstallationIdResumeData = {
-    body?: never;
+    /**
+     * Confirmed dependency targets
+     */
+    body: HandlersAppResumeRequest;
     path: {
         /**
          * Bot ID
@@ -8818,9 +8932,9 @@ export type PostBotsByBotIdDependenciesPreflightResponse = PostBotsByBotIdDepend
 
 export type PostBotsByBotIdDependenciesByDepIdInstallData = {
     /**
-     * Version to install (optional)
+     * Confirmed exact version and recipe
      */
-    body?: HandlersWorkspaceDependencyInstallRequest;
+    body: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID
@@ -8869,11 +8983,60 @@ export type PostBotsByBotIdDependenciesByDepIdInstallResponses = {
 
 export type PostBotsByBotIdDependenciesByDepIdInstallResponse = PostBotsByBotIdDependenciesByDepIdInstallResponses[keyof PostBotsByBotIdDependenciesByDepIdInstallResponses];
 
+export type PostBotsByBotIdDependenciesByDepIdPrepareData = {
+    /**
+     * Target to prepare
+     */
+    body: HandlersWorkspaceDependencyPrepareRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/dependencies/{dep_id}/prepare';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdPrepareErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdPrepareError = PostBotsByBotIdDependenciesByDepIdPrepareErrors[keyof PostBotsByBotIdDependenciesByDepIdPrepareErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdPrepareResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyPreparedResponse;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdPrepareResponse = PostBotsByBotIdDependenciesByDepIdPrepareResponses[keyof PostBotsByBotIdDependenciesByDepIdPrepareResponses];
+
 export type PostBotsByBotIdDependenciesByDepIdReinstallData = {
     /**
-     * Version to install (optional)
+     * Confirmed exact version and recipe
      */
-    body?: HandlersWorkspaceDependencyInstallRequest;
+    body: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID
@@ -8922,7 +9085,105 @@ export type PostBotsByBotIdDependenciesByDepIdReinstallResponses = {
 
 export type PostBotsByBotIdDependenciesByDepIdReinstallResponse = PostBotsByBotIdDependenciesByDepIdReinstallResponses[keyof PostBotsByBotIdDependenciesByDepIdReinstallResponses];
 
-export type PostBotsByBotIdDependenciesByDepIdRollbackData = {
+export type PostBotsByBotIdDependenciesByDepIdRepairAuthorizeData = {
+    /**
+     * Confirmed target
+     */
+    body: HandlersWorkspaceDependencyRepairRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/dependencies/{dep_id}/repair/authorize';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRepairAuthorizeErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRepairAuthorizeError = PostBotsByBotIdDependenciesByDepIdRepairAuthorizeErrors[keyof PostBotsByBotIdDependenciesByDepIdRepairAuthorizeErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdRepairAuthorizeResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyDesired;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRepairAuthorizeResponse = PostBotsByBotIdDependenciesByDepIdRepairAuthorizeResponses[keyof PostBotsByBotIdDependenciesByDepIdRepairAuthorizeResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdRepairPrepareData = {
+    /**
+     * Target to prepare
+     */
+    body: HandlersWorkspaceDependencyRepairRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/dependencies/{dep_id}/repair/prepare';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRepairPrepareErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRepairPrepareError = PostBotsByBotIdDependenciesByDepIdRepairPrepareErrors[keyof PostBotsByBotIdDependenciesByDepIdRepairPrepareErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdRepairPrepareResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyPreparedResponse;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRepairPrepareResponse = PostBotsByBotIdDependenciesByDepIdRepairPrepareResponses[keyof PostBotsByBotIdDependenciesByDepIdRepairPrepareResponses];
+
+export type PostBotsByBotIdDependenciesByDepIdRepairRetryData = {
     body?: never;
     path: {
         /**
@@ -8935,10 +9196,10 @@ export type PostBotsByBotIdDependenciesByDepIdRollbackData = {
         dep_id: string;
     };
     query?: never;
-    url: '/bots/{bot_id}/dependencies/{dep_id}/rollback';
+    url: '/bots/{bot_id}/dependencies/{dep_id}/repair/retry';
 };
 
-export type PostBotsByBotIdDependenciesByDepIdRollbackErrors = {
+export type PostBotsByBotIdDependenciesByDepIdRepairRetryErrors = {
     /**
      * Bad Request
      */
@@ -8946,39 +9207,27 @@ export type PostBotsByBotIdDependenciesByDepIdRollbackErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
+    403: ApperrorProblem;
     /**
      * Conflict
      */
     409: ApperrorProblem;
-    /**
-     * Unprocessable Entity
-     */
-    422: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
     503: ApperrorProblem;
 };
 
-export type PostBotsByBotIdDependenciesByDepIdRollbackError = PostBotsByBotIdDependenciesByDepIdRollbackErrors[keyof PostBotsByBotIdDependenciesByDepIdRollbackErrors];
+export type PostBotsByBotIdDependenciesByDepIdRepairRetryError = PostBotsByBotIdDependenciesByDepIdRepairRetryErrors[keyof PostBotsByBotIdDependenciesByDepIdRepairRetryErrors];
 
-export type PostBotsByBotIdDependenciesByDepIdRollbackResponses = {
+export type PostBotsByBotIdDependenciesByDepIdRepairRetryResponses = {
     /**
      * OK
      */
-    200: HandlersWorkspaceDependencyOperationResponse;
+    200: HandlersWorkspaceDependencyDesired;
 };
 
-export type PostBotsByBotIdDependenciesByDepIdRollbackResponse = PostBotsByBotIdDependenciesByDepIdRollbackResponses[keyof PostBotsByBotIdDependenciesByDepIdRollbackResponses];
+export type PostBotsByBotIdDependenciesByDepIdRepairRetryResponse = PostBotsByBotIdDependenciesByDepIdRepairRetryResponses[keyof PostBotsByBotIdDependenciesByDepIdRepairRetryResponses];
 
 export type GetBotsByBotIdDependenciesByDepIdScriptData = {
     body?: never;
@@ -8996,7 +9245,7 @@ export type GetBotsByBotIdDependenciesByDepIdScriptData = {
         /**
          * Action
          */
-        action?: 'install' | 'update' | 'remove' | 'reinstall' | 'rollback';
+        action?: 'install' | 'update' | 'remove' | 'reinstall';
         /**
          * Keep a previously prepared definition revision
          */
@@ -9041,9 +9290,9 @@ export type GetBotsByBotIdDependenciesByDepIdScriptResponse = GetBotsByBotIdDepe
 
 export type PostBotsByBotIdDependenciesByDepIdUpdateData = {
     /**
-     * Version to update to (optional)
+     * Confirmed exact version and recipe
      */
-    body?: HandlersWorkspaceDependencyInstallRequest;
+    body: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID

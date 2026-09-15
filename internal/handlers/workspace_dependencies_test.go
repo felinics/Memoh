@@ -29,24 +29,26 @@ import (
 )
 
 const (
-	depsTestBotID   = "11111111-1111-1111-1111-111111111111"
-	depsTestOwnerID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	depsTestOtherID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	depsTestBotID       = "11111111-1111-1111-1111-111111111111"
+	depsTestOwnerID     = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	depsTestOtherID     = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	depsTestOperationID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
 )
 
 // depsAuthQueries answers the bot lookup and reports no user grants, so only
 // the owner and admins pass the manage check.
 type depsAuthQueries struct {
 	dbstore.Queries
-	bot sqlc.GetBotByIDRow
+	bot    sqlc.GetBotByIDRow
+	grants []sqlc.ListBotUserGrantsForUserRow
 }
 
 func (q depsAuthQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return q.bot, nil
 }
 
-func (depsAuthQueries) ListBotUserGrantsForUser(context.Context, sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
-	return nil, nil
+func (q depsAuthQueries) ListBotUserGrantsForUser(context.Context, sqlc.ListBotUserGrantsForUserParams) ([]sqlc.ListBotUserGrantsForUserRow, error) {
+	return q.grants, nil
 }
 
 // fakeWorkspaceDependencyService records the arguments of every call and
@@ -54,15 +56,16 @@ func (depsAuthQueries) ListBotUserGrantsForUser(context.Context, sqlc.ListBotUse
 type fakeWorkspaceDependencyService struct {
 	deps map[string]catalog.Dependency
 
-	list       workspacedeps.ListResult
-	listErr    error
-	preflight  workspacedeps.PreflightResult
-	operation  workspacedeps.OperationResult
-	opErr      error
-	beforeRun  func(context.Context)
-	opLogs     [][2]string
-	preview    workspacedeps.ScriptPreview
-	previewErr error
+	list        workspacedeps.ListResult
+	listErr     error
+	preflight   workspacedeps.PreflightResult
+	operation   workspacedeps.OperationResult
+	opErr       error
+	operationID string
+	beforeRun   func(context.Context)
+	opLogs      [][2]string
+	preview     workspacedeps.ScriptPreview
+	previewErr  error
 
 	calls []string
 
@@ -120,6 +123,14 @@ func (f *fakeWorkspaceDependencyService) Preflight(_ context.Context, _ string, 
 
 func (f *fakeWorkspaceDependencyService) run(ctx context.Context, name string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
 	f.record(name)
+	if errors.Is(f.opErr, workspacedeps.ErrBusy) {
+		return workspacedeps.OperationResult{}, f.opErr
+	}
+	operationID := f.operationID
+	if operationID == "" {
+		operationID = depsTestOperationID
+	}
+	workspacedeps.NotifyOperationStarted(ctx, operationID)
 	if f.beforeRun != nil {
 		f.beforeRun(ctx)
 	}
@@ -149,11 +160,6 @@ func (f *fakeWorkspaceDependencyService) Reinstall(ctx context.Context, _, _, ve
 
 func (f *fakeWorkspaceDependencyService) Remove(ctx context.Context, _, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
 	return f.run(ctx, "remove", sink)
-}
-
-func (f *fakeWorkspaceDependencyService) Rollback(_ context.Context, _, _ string) (workspacedeps.OperationResult, error) {
-	f.record("rollback")
-	return f.operation, f.opErr
 }
 
 func (f *fakeWorkspaceDependencyService) CheckUpdates(_ context.Context, _ string) (workspacedeps.ListResult, error) {
@@ -229,10 +235,10 @@ type depsCall struct {
 
 func (call depsCall) invoke(t *testing.T, fn func(echo.Context) error) (*httptest.ResponseRecorder, error) {
 	t.Helper()
-	if !call.omitRevision && call.depID != "" && (call.method == http.MethodPost || call.method == http.MethodDelete) && !strings.Contains(call.target, "/rollback") {
+	if !call.omitRevision && call.depID != "" && (call.method == http.MethodPost || call.method == http.MethodDelete) {
 		switch body := call.body.(type) {
 		case nil:
-			call.body = WorkspaceDependencyInstallRequest{DefinitionRevision: strings.Repeat("a", 64)}
+			call.body = WorkspaceDependencyInstallRequest{Version: "0.151.0", DefinitionRevision: strings.Repeat("a", 64)}
 		case WorkspaceDependencyInstallRequest:
 			if body.DefinitionRevision == "" {
 				body.DefinitionRevision = strings.Repeat("a", 64)
@@ -329,11 +335,11 @@ func TestListWorkspaceDependenciesMapsEntries(t *testing.T) {
 					},
 					Observed: workspacedeps.Observed{
 						Present: true, Source: workspacedeps.SourceManaged, Version: "0.147.0",
-						State: &workspacedeps.State{Version: "0.147.0", PreviousVersion: "0.140.0"},
+						State: &workspacedeps.State{Version: "0.147.0"},
 					},
 					Status: workspacedeps.StatusInstalled, InstalledVersion: "0.147.0",
 					LatestVersion: "0.151.0", UpdateAvailable: true, PlatformSupported: true,
-					Actions: []catalog.Action{catalog.ActionUpdate, catalog.ActionReinstall, catalog.ActionRemove, workspacedeps.ActionRollback},
+					Actions: []catalog.Action{catalog.ActionUpdate, catalog.ActionReinstall, catalog.ActionRemove},
 				},
 				{
 					Dependency:        deps["node"],
@@ -397,8 +403,8 @@ func TestListWorkspaceDependenciesMapsEntries(t *testing.T) {
 			t.Errorf("codex must not carry %s: %v", gone, codex)
 		}
 	}
-	if codex["previous_version"] != "0.140.0" {
-		t.Errorf("codex previous_version = %v", codex["previous_version"])
+	if _, exists := codex["previous_version"]; exists {
+		t.Errorf("removed previous_version leaked: %v", codex)
 	}
 	if codex["install_path"] != "/data/.memoh/deps/codex" {
 		t.Errorf("codex install_path = %v", codex["install_path"])
@@ -406,7 +412,7 @@ func TestListWorkspaceDependenciesMapsEntries(t *testing.T) {
 	if codex["last_checked_at"] == nil {
 		t.Errorf("codex last_checked_at missing: %v", codex)
 	}
-	if actions, _ := codex["actions"].([]any); len(actions) != 4 || actions[3] != "rollback" {
+	if actions, _ := codex["actions"].([]any); len(actions) != 3 {
 		t.Errorf("codex actions = %v", codex["actions"])
 	}
 	if _, ok := codex["last_error"]; ok {
@@ -641,7 +647,7 @@ func TestUpdateWorkspaceDependencyStreamsEvents(t *testing.T) {
 		t.Fatalf("frames = %v", frames)
 	}
 	// started echoes the requested version; the service receives it trimmed.
-	if frames[0]["type"] != "started" || frames[0]["dependency_id"] != "codex" || frames[0]["version"] != "0.151.0" {
+	if frames[0]["type"] != "started" || frames[0]["dependency_id"] != "codex" || frames[0]["version"] != "0.151.0" || frames[0]["operation_id"] != depsTestOperationID {
 		t.Errorf("started = %v", frames[0])
 	}
 	if len(svc.versions) != 1 || svc.versions[0] != "0.151.0" {
@@ -663,22 +669,19 @@ func TestUpdateWorkspaceDependencyStreamsEvents(t *testing.T) {
 		t.Errorf("service call = %v", svc.calls)
 	}
 
-	// No body means latest: started carries no version and the service gets
-	// an empty one. A body naming no version is the same.
+	// Confirmation must identify an exact version; neither a missing body nor
+	// a revision without a version can authorize a mutable upstream target.
 	for _, call := range []depsCall{
-		{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"},
-		{method: http.MethodPost, target: "/bots/x/dependencies/codex/reinstall", depID: "codex", body: WorkspaceDependencyInstallRequest{}},
+		{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex", omitRevision: true},
+		{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex", body: WorkspaceDependencyInstallRequest{}},
 	} {
 		rec, err := call.invoke(t, h.UpdateWorkspaceDependency)
-		if err != nil {
-			t.Fatalf("%s: %v", call.target, err)
-		}
-		started := sseFrames(t, rec.Body.String())[0]
-		if _, ok := started["version"]; ok || started["type"] != "started" {
-			t.Errorf("%s started = %v, want no version", call.target, started)
+		requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyRequestInvalid)
+		if rec.Body.Len() != 0 || strings.HasPrefix(rec.Header().Get(echo.HeaderContentType), "text/event-stream") {
+			t.Errorf("invalid target opened a stream: %s", rec.Body.String())
 		}
 	}
-	if len(svc.versions) != 3 || svc.versions[1] != "" || svc.versions[2] != "" {
+	if len(svc.versions) != 1 {
 		t.Errorf("versions passed = %q", svc.versions)
 	}
 
@@ -691,7 +694,7 @@ func TestUpdateWorkspaceDependencyStreamsEvents(t *testing.T) {
 	ctx.SetParamValues(depsTestBotID, "codex")
 	ctx.Set("user", &jwt.Token{Valid: true, Claims: jwt.MapClaims{"user_id": depsTestOwnerID, "sub": depsTestOwnerID}})
 	requireAppErrorCode(t, h.UpdateWorkspaceDependency(ctx), apperror.CodeWorkspaceDependencyRequestInvalid)
-	if len(svc.calls) != 6 {
+	if len(svc.calls) != 2 {
 		t.Errorf("service called for a malformed body: %v", svc.calls)
 	}
 }
@@ -704,17 +707,17 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 		t.Fatalf("UpdateWorkspaceDependency: %v", err)
 	}
 	frames := sseFrames(t, rec.Body.String())
-	if len(frames) != 3 || frames[2]["type"] != "error" {
+	if len(frames) != 1 || frames[0]["type"] != "error" {
 		t.Fatalf("frames = %v", frames)
 	}
-	if frames[2]["code"] != string(apperror.CodeWorkspaceDependencyBusy) {
-		t.Errorf("error code = %v", frames[2]["code"])
+	if frames[0]["code"] != string(apperror.CodeWorkspaceDependencyBusy) {
+		t.Errorf("error code = %v", frames[0]["code"])
 	}
-	if msg, _ := frames[2]["message"].(string); msg == "" || strings.Contains(msg, "already in progress\n") {
+	if msg, _ := frames[0]["message"].(string); msg == "" || strings.Contains(msg, "already in progress\n") {
 		t.Errorf("error message = %q", msg)
 	}
-	if _, ok := frames[2]["args"].(map[string]any); !ok {
-		t.Errorf("error args must be an object: %v", frames[2])
+	if _, ok := frames[0]["args"].(map[string]any); !ok {
+		t.Errorf("error args must be an object: %v", frames[0])
 	}
 
 	// Structured errors must not leak private diagnostics. Execution logs
@@ -786,33 +789,6 @@ func TestWorkspaceDependencyStreamValidatesBeforeOpening(t *testing.T) {
 	}
 }
 
-func TestRollbackWorkspaceDependency(t *testing.T) {
-	svc := &fakeWorkspaceDependencyService{
-		deps: depsTestCatalog(),
-		operation: workspacedeps.OperationResult{
-			DependencyID: "codex", Action: workspacedeps.ActionRollback, Version: "0.147.0",
-			Entrypoints:  map[string]string{"codex": "/data/.memoh/deps/codex/current/bin/codex"},
-			Installation: workspacedeps.Installation{Status: workspacedeps.StatusInstalled},
-		},
-	}
-	h := newDepsTestHandler("admin", svc)
-	rec, err := depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/rollback", depID: "codex"}.invoke(t, h.RollbackWorkspaceDependency)
-	if err != nil {
-		t.Fatalf("RollbackWorkspaceDependency: %v", err)
-	}
-	resp := decodeJSON[WorkspaceDependencyOperationResponse](t, rec)
-	if resp.DependencyID != "codex" || resp.Action != "rollback" || resp.Version != "0.147.0" || resp.Status != "installed" {
-		t.Errorf("response = %+v", resp)
-	}
-
-	svc.opErr = workspacedeps.ErrRollbackUnavailable
-	_, err = depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/rollback", depID: "codex"}.invoke(t, h.RollbackWorkspaceDependency)
-	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyRollbackUnavailable)
-	if definition, _ := apperror.Lookup(apperror.CodeWorkspaceDependencyRollbackUnavailable); definition.HTTPStatus != http.StatusConflict {
-		t.Errorf("rollback_unavailable status = %d, want 409", definition.HTTPStatus)
-	}
-}
-
 func TestCheckWorkspaceDependencyUpdatesReturnsList(t *testing.T) {
 	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog(), list: workspacedeps.ListResult{Workspace: workspacedeps.WorkspaceRunning}}
 	h := newDepsTestHandler("admin", svc)
@@ -867,7 +843,7 @@ func TestGetWorkspaceDependencyScript(t *testing.T) {
 
 	svc.previewErr = workspacedeps.ErrActionUnsupported
 	_, err = depsCall{method: http.MethodGet, target: "/bots/x/dependencies/codex/script?action=rollback", depID: "codex"}.invoke(t, h.GetWorkspaceDependencyScript)
-	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyActionUnsupported)
+	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyRequestInvalid)
 }
 
 func TestWorkspaceDependencyStreamHeartbeatIsComment(t *testing.T) {
@@ -932,7 +908,6 @@ func TestWorkspaceDependencyErrorMapping(t *testing.T) {
 		apperror.CodeWorkspaceDependencyBusy:                workspacedeps.ErrBusy,
 		apperror.CodeWorkspaceDependencyWorkspaceNotRunning: workspacedeps.ErrWorkspaceNotRunning,
 		apperror.CodeWorkspaceDependencyWorkspaceMissing:    workspacedeps.ErrWorkspaceMissing,
-		apperror.CodeWorkspaceDependencyRollbackUnavailable: workspacedeps.ErrRollbackUnavailable,
 		apperror.CodeWorkspaceDependencyOperationFailed:     errors.New("unexpected"),
 	}
 	for want, sentinel := range cases {
@@ -950,8 +925,8 @@ func TestWorkspaceDependencyErrorMapping(t *testing.T) {
 	}
 }
 
-func TestWorkspaceDependencyMutationPreparesRevisionWithoutClientPreview(t *testing.T) {
-	for _, action := range []string{"update", "reinstall"} {
+func TestWorkspaceDependencyMutationPreservesConfirmedRevision(t *testing.T) {
+	for _, action := range []string{"install", "update", "reinstall"} {
 		t.Run(action, func(t *testing.T) {
 			revision := strings.Repeat("b", 64)
 			svc := &fakeWorkspaceDependencyService{
@@ -961,10 +936,11 @@ func TestWorkspaceDependencyMutationPreparesRevisionWithoutClientPreview(t *test
 			}
 			h := newDepsTestHandler("admin", svc)
 			handlers := map[string]func(echo.Context) error{
+				"install":   h.InstallWorkspaceDependency,
 				"update":    h.UpdateWorkspaceDependency,
 				"reinstall": h.ReinstallWorkspaceDependency,
 			}
-			rec, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/" + action, depID: "codex", omitRevision: true}).invoke(t, handlers[action])
+			rec, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/" + action, depID: "codex", body: WorkspaceDependencyInstallRequest{Version: "0.151.0", DefinitionRevision: revision}}).invoke(t, handlers[action])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -978,7 +954,7 @@ func TestWorkspaceDependencyMutationPreparesRevisionWithoutClientPreview(t *test
 				}
 			}
 			if len(svc.calls) != 2 || svc.calls[0] != "script" || svc.calls[1] != action {
-				t.Fatalf("expected server preparation followed by operation: %v", svc.calls)
+				t.Fatalf("expected frozen preview followed by operation: %v", svc.calls)
 			}
 		})
 	}

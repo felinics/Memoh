@@ -257,6 +257,13 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err != nil {
 		return external.PromptResult{}, err
 	}
+	if err := external.PrepareDependency(ctx, d.launchers, input.BotID, dependencyID); err != nil {
+		var missing *external.DependencyMissingError
+		if errors.As(err, &missing) {
+			return external.PromptResult{}, dependencyMissingFeedback(missing)
+		}
+		return external.PromptResult{}, wrapServerError(err)
+	}
 
 	srv, releaseServer, err := d.acquireServer(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
@@ -578,14 +585,19 @@ func (d *Driver) startServer(ctx context.Context, key string) (recyclable, error
 			return nil, external.CredentialError(err)
 		}
 	}
-	launcher, err := d.resolveLauncher(ctx, botID)
+	launcher, lease, err := d.acquireLauncher(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
 	srv, err := startAppServerSession(context.WithoutCancel(ctx), botID, botAgentID, client, cfg, launcher, d.logger)
 	if err != nil {
+		lease.Release()
 		return nil, err
 	}
+	// Initialize proves the child acquired its inherited payload lock. Release
+	// the namespace startup lease; existing turns retain the process lock while
+	// the lifecycle table drains this app-server after a launcher replacement.
+	lease.Release()
 	// The handshake reports the version actually running; feed it back so the
 	// resolver's discovery cache is corrected without a second probe.
 	d.observeLauncherVersion(ctx, botID, srv.codexVersion)
@@ -622,17 +634,27 @@ func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentf
 	if operationInProgress {
 		message = "Codex is not installed in this workspace yet; a dependency operation is already in progress. Send the message again when it finishes."
 	}
+	args := map[string]string{
+		"dep_id":                firstNonEmpty(missing.DependencyID, dependencyID),
+		"install_task_id":       strings.TrimSpace(missing.TaskID),
+		"operation_in_progress": strconv.FormatBool(operationInProgress),
+	}
+	for key, value := range map[string]string{
+		"repair_status":       missing.RepairStatus,
+		"repair_operation_id": missing.RepairOperationID,
+		"desired_version":     missing.DesiredVersion,
+	} {
+		if value != "" {
+			args[key] = value
+		}
+	}
 	return agentfeedback.New(
 		agentfeedback.CodeAgentDependencyMissing,
 		"dependency_missing",
 		http.StatusConflict,
 		"chat.externalAgent.dependencyMissing",
 		message,
-		map[string]string{
-			"dep_id":                firstNonEmpty(missing.DependencyID, dependencyID),
-			"install_task_id":       strings.TrimSpace(missing.TaskID),
-			"operation_in_progress": strconv.FormatBool(operationInProgress),
-		},
+		args,
 	)
 }
 

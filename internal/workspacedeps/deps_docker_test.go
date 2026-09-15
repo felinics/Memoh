@@ -74,55 +74,12 @@ func TestDockerCatalogScripts(t *testing.T) {
 	}
 }
 
-// Uses disposable containers and no network: removal must clear the actual
-// image binaries, not just make the database row disappear.
-func TestDockerRemoveImageDependencies(t *testing.T) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker not installed")
-	}
-	image := os.Getenv("MEMOH_DEPS_TEST_IMAGE")
-	if image == "" {
-		image = dockerTestDefaultImage
-	}
-	for _, dep := range []catalog.Dependency{
-		{ID: "node", Provides: []string{"node", "npm", "npx"}},
-		{ID: "python", Provides: []string{"python3", "python", "pip", "pip3"}},
-		{ID: "uv", Provides: []string{"uv", "uvx"}},
-	} {
-		t.Run(dep.ID, func(t *testing.T) {
-			home := Home("/data", dep.ID)
-			script := "set -eu\nexport MEMOH_DEP_OS=linux\nexport MEMOH_DEP_WORKSPACE_TARGET=native\nexport MEMOH_DEP_HOME=" + shellQuote(home) + "\nexport MEMOH_DEP_BIN=" + shellQuote(ShimDir("/data")) + "\n"
-			script += "command -v " + shellQuote(dep.Provides[0]) + " >/dev/null\n"
-			script += "mkdir -p \"$MEMOH_DEP_HOME\"\nprintf '{}' > \"$MEMOH_DEP_HOME/state.json\"\n"
-			script += "(\n" + WrapScript(actionScript(dep, catalog.ActionRemove, "exit 0")) + ")\nhash -r\n"
-			for _, command := range dep.Provides {
-				script += "if command -v " + shellQuote(command) + "; then exit 1; fi\n"
-			}
-			script += "[ ! -e \"$MEMOH_DEP_HOME\" ]\n"
-			script += buildDiscoveryScript("/data", []catalog.Dependency{dep})
-			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-i", "--network", "none", "--entrypoint", "sh", image, "-s")
-			cmd.Stdin = strings.NewReader(script)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("remove from image: %v\n%s", err, out)
-			}
-			probes, complete := parseDiscoveryOutput(string(out))
-			probe := probes[dep.ID]
-			if !complete || probe == nil || probe.hasState || len(probe.toolkit) != 0 || len(probe.path) != 0 {
-				t.Fatalf("removed dependency was rediscovered: %s", out)
-			}
-		})
-	}
-}
-
 const (
 	dockerTestDefaultImage = "memohai/workspace:debian"
 	// dockerTestDepsRoot is where the per-dependency volume is mounted inside
 	// the container. It plays the role of DepsRoot(dataRoot), so the home is
-	// /tmp/deps/<id>, the shim dir /tmp/deps/bin, and the lock directory
-	// /tmp/deps/.locks exactly as the prelude derives it.
+	// /tmp/deps/<id> and the shim dir /tmp/deps/bin. Kernel locks are isolated
+	// under the local control root using this metadata root's hash.
 	dockerTestDepsRoot    = "/tmp/deps"
 	dockerTestStepTimeout = 25 * time.Minute
 	dockerTestShTimeout   = 3 * time.Minute
@@ -172,7 +129,7 @@ func newDockerDep(t *testing.T, cat *catalog.Catalog, image string, platform Pla
 		_ = dockerCommand(ctx, "volume", "rm", "-f", d.volume).Run()
 	})
 	// Run creates these before any script starts (runner.go).
-	if out, err := d.sh(ctx, `mkdir -p -- "$@"`, d.home, VersionsDir(d.home), d.shimDir, path.Dir(lockPath(d.home, dep.ID)), path.Join(dockerTestDepsRoot, ".results")); err != nil {
+	if out, err := d.sh(ctx, `mkdir -p -- "$@"`, d.home, VersionsDir(d.home), d.shimDir, path.Dir(executionLockPath(d.home, dep.ID, "linux")), path.Join(dockerTestDepsRoot, ".results")); err != nil {
 		t.Fatalf("prepare volume: %v\n%s", err, out)
 	}
 	return d
@@ -275,7 +232,7 @@ func (d *dockerDep) runScript(action catalog.Action, version, currentVersion str
 	elapsed := time.Since(start).Round(time.Second)
 
 	// Read the result and release the lock the way cleanupRun does.
-	raw, readErr := d.sh(ctx, `cat -- "$1" 2>/dev/null; rm -f -- "$1"; rmdir -- "$2" 2>/dev/null; true`, resultPath, lockPath(d.home, d.dep.ID))
+	raw, readErr := d.sh(ctx, `cat -- "$1" 2>/dev/null; rm -f -- "$1"; rmdir -- "$2" 2>/dev/null; true`, resultPath, executionLockPath(d.home, d.dep.ID, "linux"))
 	if runErr != nil {
 		code := -1
 		var exitErr *exec.ExitError

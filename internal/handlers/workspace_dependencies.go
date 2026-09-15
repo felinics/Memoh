@@ -36,7 +36,6 @@ type workspaceDependencyService interface {
 	Update(ctx context.Context, botID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Reinstall(ctx context.Context, botID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Remove(ctx context.Context, botID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
-	Rollback(ctx context.Context, botID, depID string) (workspacedeps.OperationResult, error)
 	CheckUpdates(ctx context.Context, botID string) (workspacedeps.ListResult, error)
 	ScriptPreviewDetails(ctx context.Context, botID, depID string, action catalog.Action) (workspacedeps.ScriptPreview, error)
 }
@@ -67,6 +66,9 @@ type WorkspaceDependencyPlatform struct {
 // WorkspaceDependencyItem is one catalog dependency reconciled with its
 // installation record and the workspace.
 type WorkspaceDependencyItem struct {
+	Desired            *WorkspaceDependencyDesired               `json:"desired,omitempty"`
+	OperationID        string                                    `json:"operation_id,omitempty"`
+	LastOperationID    string                                    `json:"last_operation_id,omitempty"`
 	LastErrorCode      string                                    `json:"last_error_code,omitempty"`
 	RegistryID         string                                    `json:"registry_id,omitempty"`
 	DefinitionRevision string                                    `json:"definition_revision,omitempty"`
@@ -109,14 +111,12 @@ type WorkspaceDependencyItem struct {
 	UpdateAvailable bool       `json:"update_available,omitempty"`
 	LastCheckedAt   *time.Time `json:"last_checked_at,omitempty"`
 	LastError       string     `json:"last_error,omitempty"`
-	// PreviousVersion is the version rollback would switch back to.
-	PreviousVersion string `json:"previous_version,omitempty"`
 	// InstallPath is the dependency home when a managed copy is in effect or
 	// can be installed, and the discovered command path when the image copy
 	// is in effect.
 	InstallPath string `json:"install_path,omitempty"`
 	// Actions lists what may be requested right now.
-	Actions []string `json:"actions" enums:"install,update,reinstall,remove,rollback,check_update"`
+	Actions []string `json:"actions" enums:"install,update,reinstall,remove,check_update,authorize_repair,retry_repair"`
 }
 
 type WorkspaceDependencyTranslation struct {
@@ -201,14 +201,13 @@ type WorkspaceDependencyPreflightItem struct {
 }
 
 // WorkspaceDependencyInstallRequest is the optional body of install, update,
-// and reinstall.
+// and reinstall. The exact version and definition revision must be confirmed.
 type WorkspaceDependencyInstallRequest struct {
 	// SessionID optionally routes operation progress to its originating conversation.
 	SessionID          string `json:"session_id,omitempty"`
 	DefinitionRevision string `json:"definition_revision,omitempty"`
-	// Version to install. Empty (or no body) installs the latest version the
-	// catalog script resolves, or the manifest pin when the dependency has
-	// one. The version recorded afterwards is the one the script reports.
+	// Version is the exact target returned by preparation; mutable aliases
+	// and empty values are rejected before an operation is admitted.
 	Version string `json:"version,omitempty"`
 }
 
@@ -220,7 +219,7 @@ type WorkspaceDependencyPreflightResponse struct {
 }
 
 // WorkspaceDependencyOperationResponse is the receipt of a synchronous
-// operation such as rollback.
+// operation.
 type WorkspaceDependencyOperationResponse struct {
 	DefinitionRevision string            `json:"definition_revision,omitempty"`
 	DependencyID       string            `json:"dependency_id"`
@@ -242,7 +241,7 @@ type WorkspaceDependencyScriptEnv struct {
 type WorkspaceDependencyScriptResponse struct {
 	DefinitionRevision string                         `json:"definition_revision,omitempty"`
 	DependencyID       string                         `json:"dependency_id"`
-	Action             string                         `json:"action" enums:"install,update,remove,reinstall,rollback"`
+	Action             string                         `json:"action" enums:"install,update,remove,reinstall"`
 	Digest             string                         `json:"digest"`
 	Exec               string                         `json:"exec"`
 	TimeoutSeconds     int                            `json:"timeout_seconds"`
@@ -259,6 +258,7 @@ type WorkspaceDependencyScriptResponse struct {
 // codesync(workspace-dependency-stream): keep in sync with
 // apps/web/src/composables/api/useWorkspaceDependencyStream.ts.
 type WorkspaceDependencyStreamEvent struct {
+	OperationID        string            `json:"operation_id,omitempty"`
 	DefinitionRevision string            `json:"definition_revision,omitempty"`
 	Type               string            `json:"type" enums:"started,log,done,error"`
 	DependencyID       string            `json:"dependency_id,omitempty"`
@@ -276,6 +276,7 @@ type WorkspaceDependencyStreamEvent struct {
 // The frames actually written. They are separate from the documentation
 // struct so a log line that is empty still carries its data field.
 type workspaceDependencyStartedEvent struct {
+	OperationID        string `json:"operation_id,omitempty"`
 	DefinitionRevision string `json:"definition_revision,omitempty"`
 	Type               string `json:"type"`
 	DependencyID       string `json:"dependency_id"`
@@ -319,7 +320,7 @@ type workspaceDependencyErrorEvent struct {
 // @Param refresh query bool false "Refresh definitions and workspace discovery"
 // @Router /bots/{bot_id}/dependencies [get].
 func (h *ContainerdHandler) ListWorkspaceDependencies(c echo.Context) error {
-	botID, svc, err := h.workspaceDependencyRequest(c)
+	botID, svc, err := h.workspaceDependencyRequestWithPermission(c, bots.PermissionWorkspaceRead)
 	if err != nil {
 		return err
 	}
@@ -378,7 +379,7 @@ func (h *ContainerdHandler) CheckWorkspaceDependencyUpdates(c echo.Context) erro
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/dependencies/preflight [post].
 func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error {
-	botID, svc, err := h.workspaceDependencyRequest(c)
+	botID, svc, err := h.workspaceDependencyRequestWithPermission(c, bots.PermissionWorkspaceRead)
 	if err != nil {
 		return err
 	}
@@ -423,7 +424,7 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
-// @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
+// @Param payload body WorkspaceDependencyInstallRequest true "Confirmed exact version and recipe"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
@@ -437,13 +438,13 @@ func (h *ContainerdHandler) InstallWorkspaceDependency(c echo.Context) error {
 
 // UpdateWorkspaceDependency godoc
 // @Summary Update a workspace dependency
-// @Description Runs the catalog update script (or the install script when the manifest has none) and streams its output. The optional body names the version to update to; without one the script picks the latest version (or the manifest pin). The previous version is kept for rollback.
+// @Description Runs the catalog update script (or the install script when the manifest has none) and streams its output. The body must confirm the exact version and frozen recipe revision returned by preparation.
 // @Tags containerd
 // @Accept json
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
-// @Param payload body WorkspaceDependencyInstallRequest false "Version to update to (optional)"
+// @Param payload body WorkspaceDependencyInstallRequest true "Confirmed exact version and recipe"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
@@ -457,13 +458,13 @@ func (h *ContainerdHandler) UpdateWorkspaceDependency(c echo.Context) error {
 
 // ReinstallWorkspaceDependency godoc
 // @Summary Reinstall a workspace dependency
-// @Description Runs the catalog reinstall script, or remove followed by install, and streams the output. The optional body names the version to install; without one the script picks the latest version (or the manifest pin).
+// @Description Prepares a fresh candidate for the confirmed target and streams the output. The body must confirm the exact version and frozen recipe revision returned by preparation.
 // @Tags containerd
 // @Accept json
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
-// @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
+// @Param payload body WorkspaceDependencyInstallRequest true "Confirmed exact version and recipe"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
@@ -475,46 +476,6 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 	return h.streamWorkspaceDependencyOperation(c, catalog.ActionReinstall, workspaceDependencyService.Reinstall)
 }
 
-// RollbackWorkspaceDependency godoc
-// @Summary Roll a workspace dependency back to its previous version
-// @Description Switches the dependency back to the previous version kept in the workspace. A pure data operation: nothing is downloaded and no log is streamed.
-// @Tags containerd
-// @Produce json
-// @Param bot_id path string true "Bot ID"
-// @Param dep_id path string true "Dependency ID"
-// @Success 200 {object} WorkspaceDependencyOperationResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
-// @Router /bots/{bot_id}/dependencies/{dep_id}/rollback [post].
-func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
-	botID, svc, err := h.workspaceDependencyRequest(c)
-	if err != nil {
-		return err
-	}
-	depID := strings.TrimSpace(c.Param("dep_id"))
-	if !workspaceDependencyIDPattern.MatchString(depID) {
-		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
-	}
-	ctx := c.Request().Context()
-	result, err := svc.Rollback(ctx, botID, depID)
-	if err != nil {
-		return workspaceDependencyError(err)
-	}
-	return c.JSON(http.StatusOK, WorkspaceDependencyOperationResponse{
-		DependencyID:       result.DependencyID,
-		DefinitionRevision: result.DefinitionRevision,
-		Action:             string(result.Action),
-		Version:            result.Version,
-		Entrypoints:        result.Entrypoints,
-		Status:             string(result.Installation.Status),
-	})
-}
-
 // GetWorkspaceDependencyScript godoc
 // @Summary Show the script a dependency action would run
 // @Description The exact stdin text the workspace shell receives, prelude included, with the command, time budget, and environment the runner uses. Scripts never touch the workspace disk, so this is the only way to inspect them.
@@ -522,7 +483,7 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
-// @Param action query string false "Action" Enums(install, update, remove, reinstall, rollback) default(install)
+// @Param action query string false "Action" Enums(install, update, remove, reinstall) default(install)
 // @Success 200 {object} WorkspaceDependencyScriptResponse
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} ErrorResponse
@@ -604,6 +565,11 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 		return workspaceDependencyError(err)
 	}
 	ctx = workspacedeps.WithDefinitionRevision(ctx, preview.Revision)
+	actor, err := h.requireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	ctx = workspacedeps.WithRepairActor(ctx, actor)
 	if validator, ok := svc.(interface {
 		ValidateOperationSession(context.Context, string, string) error
 	}); ok {
@@ -624,7 +590,9 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	stream := newWorkspaceDependencyStream(writer, flusher, workspaceDependencyHeartbeatInterval)
 	defer stream.close()
 
-	stream.send(workspaceDependencyStartedEvent{Type: "started", DependencyID: depID, Version: version, DefinitionRevision: preview.Revision})
+	ctx = workspacedeps.WithOperationStarted(ctx, func(operationID string) {
+		stream.send(workspaceDependencyStartedEvent{Type: "started", DependencyID: depID, Version: version, DefinitionRevision: preview.Revision, OperationID: operationID})
+	})
 	sink := workspacedeps.LogFunc(func(name, line string) {
 		stream.send(workspaceDependencyLogEvent{Type: "log", Stream: name, Data: line})
 	})
@@ -770,10 +738,14 @@ func writeSSEComment(writer io.Writer, flusher http.Flusher, text string) error 
 // workspaceDependencyRequest authorizes the manage permission on the bot and
 // resolves the service.
 func (h *ContainerdHandler) workspaceDependencyRequest(c echo.Context) (string, workspaceDependencyService, error) {
+	return h.workspaceDependencyRequestWithPermission(c, bots.PermissionManage)
+}
+
+func (h *ContainerdHandler) workspaceDependencyRequestWithPermission(c echo.Context, permission string) (string, workspaceDependencyService, error) {
 	if c.QueryParams().Has("workspace_target_id") {
 		return "", nil, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
-	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionManage)
+	botID, err := h.requireBotAccessWithPermission(c, permission)
 	if err != nil {
 		return "", nil, err
 	}
@@ -795,15 +767,15 @@ func workspaceDependencyOperationRequest(c echo.Context, action catalog.Action) 
 	req.Version = strings.TrimSpace(req.Version)
 	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.DefinitionRevision = strings.TrimSpace(req.DefinitionRevision)
-	// A normal confirmation need not open the script viewer. The handler
-	// prepares and pins the current definition before it admits the operation.
-	if req.DefinitionRevision != "" && !catalog.ValidRevision(req.DefinitionRevision) {
+	// Confirmation carries the exact target returned by preparation. Never
+	// resolve a mutable version or definition after the user confirms.
+	if !catalog.ValidRevision(req.DefinitionRevision) {
 		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
 	if action == catalog.ActionRemove {
 		req.Version = ""
 	}
-	if !workspacedeps.ValidRequestedVersion(req.Version) {
+	if action != catalog.ActionRemove && !workspacedeps.ExactVersion(req.Version) {
 		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
 	return req, nil
@@ -825,7 +797,7 @@ func workspaceDependencyScriptAction(raw string) (catalog.Action, error) {
 	switch action := catalog.Action(strings.TrimSpace(raw)); action {
 	case "", catalog.ActionInstall:
 		return catalog.ActionInstall, nil
-	case catalog.ActionUpdate, catalog.ActionRemove, catalog.ActionReinstall, workspacedeps.ActionRollback:
+	case catalog.ActionUpdate, catalog.ActionRemove, catalog.ActionReinstall:
 		return action, nil
 	default:
 		return "", apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, errors.New("unsupported script action "+string(action)), nil)
@@ -841,6 +813,16 @@ func workspaceDependencyError(err error) error {
 		return nil
 	case apperror.CodeOf(err) != "":
 		return err
+	case errors.Is(err, workspacedeps.ErrRepairAuthorizationRequired):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyRepairAuthorizationRequired, err, nil)
+	case errors.Is(err, workspacedeps.ErrDesiredTargetChanged):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyTargetChanged, err, nil)
+	case errors.Is(err, workspacedeps.ErrRepairPending):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyRepairPending, err, nil)
+	case errors.Is(err, workspacedeps.ErrRepairManualRequired):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyRepairManualRequired, err, nil)
+	case errors.Is(err, workspacedeps.ErrLegacyReinstallUnsafe):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyRecipeUpgradeRequired, err, nil)
 	case errors.Is(err, workspacedeps.ErrInvalidVersion):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, err, nil)
 	case errors.Is(err, workspacedeps.ErrCatalogUnavailable):
@@ -861,8 +843,6 @@ func workspaceDependencyError(err error) error {
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyWorkspaceNotRunning, err, nil)
 	case errors.Is(err, workspacedeps.ErrWorkspaceMissing):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyWorkspaceMissing, err, nil)
-	case errors.Is(err, workspacedeps.ErrRollbackUnavailable):
-		return apperror.Wrap(apperror.CodeWorkspaceDependencyRollbackUnavailable, err, nil)
 	case errors.Is(err, bridge.ErrUnavailable):
 		return apperror.Wrap(apperror.CodeWorkspaceUnreachable, err, nil)
 	default:
@@ -990,15 +970,18 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 	if !entry.PlatformSupported {
 		item.PlatformReason = platformReasonUnsupported
 	}
+	if entry.Desired != nil {
+		desired := workspaceDependencyDesired(*entry.Desired)
+		item.Desired = &desired
+	}
 	if rec := entry.Installation; rec != nil {
+		item.OperationID = rec.OperationID
+		item.LastOperationID = rec.LastOperationID
 		item.LastCheckedAt = rec.LastCheckedAt
 		if rec.LastError != "" {
 			item.LastErrorCode = string(apperror.CodeWorkspaceDependencyOperationFailed)
 			item.LastError = workspacedeps.SafeErrorDetail(rec.LastError)
 		}
-	}
-	if state := entry.Observed.State; state != nil {
-		item.PreviousVersion = strings.TrimSpace(state.PreviousVersion)
 	}
 	switch {
 	case entry.Observed.Present && entry.Observed.Source != workspacedeps.SourceManaged:
@@ -1008,6 +991,14 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 	}
 	for _, action := range entry.Actions {
 		item.Actions = append(item.Actions, string(action))
+	}
+	if !dep.Retired && entry.PlatformSupported && !entry.Status.InProgress() {
+		if entry.Desired == nil && entry.Installation != nil && workspacedeps.ExactVersion(entry.InstalledVersion) && catalog.ValidRevision(dep.Revision) && workspacedeps.ActionSupported(dep, catalog.ActionReinstall) {
+			item.Actions = append(item.Actions, "authorize_repair")
+		}
+		if desired := entry.Desired; desired != nil && (desired.RepairStatus == workspacedeps.RepairBackoff || desired.RepairStatus == workspacedeps.RepairManualRequired) {
+			item.Actions = append(item.Actions, "retry_repair")
+		}
 	}
 	return item
 }

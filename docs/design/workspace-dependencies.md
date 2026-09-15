@@ -1,214 +1,317 @@
 # Workspace dependencies from Supermarket
 
-## Ownership
+## Ownership and definitions
 
-Supermarket publishes the official `memoh` dependency registry. Memoh contains the
-manifest parser, verified artifact loader, discovery, script runner, installation
-state machine, and runtime integration. It does not embed dependency definitions or
-installation scripts. Adding a CLI or correcting its recipe is a registry release,
-not a Memoh release. Adding an Agent runtime driver still requires Memoh code.
+Supermarket publishes the official `memoh` dependency registry. Memoh owns verified
+artifact loading, discovery, script execution, installation transactions,
+authorized recovery and runtime integration. It does not embed production
+recipes. A recipe correction is a registry release; adding an Agent runtime driver
+still requires Memoh code. The initial five recipes have expanded to 32 official
+recipes supporting the isolated payload protocol.
 
-The first release supports the official registry only and includes Codex, Claude
-Code, Node.js, Python, and uv. Apps compose Skills, workspace dependencies and
-connectors as one installable unit. Dependencies retain their independent definitions
-and releases; Apps orchestrate their installation. See [Apps](apps.md).
+Apps compose Skills, dependencies and connectors. Dependencies keep independent
+releases; an App references them and prepares the exact installations that need
+confirmation. See [Apps](apps.md) and the [upgrade guide](../workspace-dependencies-upgrade.md).
 
-## Definition protocol
+A definition artifact contains `dependency.yaml`, referenced POSIX sh scripts and
+an optional icon. Manifest version 1 describes identity, translations, category,
+source, prerequisites, commands, platforms, optional version pin and timeouts.
+Unknown fields and unsupported schema versions are rejected.
 
-A dependency directory in Supermarket contains `dependency.yaml`, its referenced
-POSIX sh scripts, and an optional icon. The version 1 manifest describes identity,
-localized display text, category, image baseline or managed source, prerequisites,
-provided commands, platform support, optional software version pin, and per-action
-timeouts. Unknown fields and unsupported schema versions are rejected.
-
-Supermarket publishes four HTTP surfaces:
-
-| Method | Path | Meaning |
+| Method | Supermarket path | Meaning |
 | --- | --- | --- |
-| GET | `/api/dependencies` | Current catalog; search, registry/category filtering and pagination |
-| GET | `/api/registries/memoh/dependencies/{id}` | Current dependency descriptor |
-| GET | `/api/registries/memoh/dependencies/{id}/releases/{revision}` | Immutable release document |
-| GET | `/api/artifacts/dependency/{digest}` | Immutable compressed definition artifact |
+| GET | `/api/dependencies` | Current catalog with filtering and pagination |
+| GET | `/api/registries/memoh/dependencies/{id}` | Current descriptor |
+| GET | `/api/registries/memoh/dependencies/{id}/releases/{revision}` | Immutable release |
+| GET | `/api/artifacts/dependency/{digest}` | Immutable compressed artifact |
 
-Dependency snapshots and their reviewed `dependencies.lock.json` are independent of
-Skill snapshots. The shared blob backends, immutable writes and conditional state
-updates are reused. Publishing one resource cannot overwrite the other's pointer.
+Dependency snapshots and `dependencies.lock.json` are independent of Skill
+snapshots. Immutable blob writes and conditional updates protect their pointers.
+Three identities serve different purposes:
 
-There are three distinct identities:
+- **Definition revision:** SHA-256 of the immutable release JSON bytes.
+- **Artifact digest:** SHA-256 of the compressed archive, with declared compressed,
+  uncompressed, serialized-tar and file-count budgets.
+- **Software version:** the canonical identifier confirmed for installation and
+  verified against the recipe result before publication.
 
-- **Definition revision:** SHA-256 of the exact immutable release JSON bytes.
-- **Artifact digest:** SHA-256 of the compressed archive bytes. The descriptor also
-  carries compressed, uncompressed, serialized-tar and file-count budgets.
-- **Software version:** the version actually installed by the script, recorded from
-  its result rather than assumed from the request.
+The manifest digest frames sorted manifest/script filenames, lengths and contents
+as `name + NUL + byte length + NUL + contents`. Icons have separate digests. Memoh
+validates release, archive, manifest projection, scripts and icons before execution.
+Links, unsafe or duplicate paths, undeclared files and exceeded budgets are rejected.
+The publisher validates prerequisite references and rejects cycles.
 
-The manifest digest additionally frames the sorted manifest/script filenames,
-lengths and contents. Both implementations use `name + NUL + byte length + NUL +
-contents`. Icons have their own digest. Memoh checks the release, archive, manifest
-projection, script digest and icon contents before making a definition usable.
-Archives are parsed in memory; links, unsafe paths, duplicate files, undeclared
-files, malformed metadata and budget violations are rejected before execution.
+## Preparation and confirmation
 
-The reference publisher enforces valid prerequisite references and rejects cycles.
-Version 1 does not introduce a recursive dependency solver: prerequisites retain the
-existing behavior of the workspace image and installation scripts.
+Management preparation freezes a definition revision and exact software version
+before confirmation. For a direct dependency operation, the client supplies the
+revision from the catalog or script preview. A blank version during preparation
+resolves the recipe pin or runs that frozen recipe's `check_update` action.
+Preparation may start a workspace for that check; it never provisions a dependency
+or grants automatic recovery authority.
 
-## Latest policy and immutable operations
+Install, update and reinstall requests require both `version` and
+`definition_revision`. Missing values, mutable aliases and ranges cannot authorize
+an installation. The recipe must report the confirmed canonical version unchanged;
+a partial selector cannot silently expand into another target. Generated recipes
+also use distribution labels, four-part versions and composite identifiers, so the
+protocol is not limited to three-part SemVer.
 
-Every scripted management operation resolves the latest published definition:
-install, update, reinstall, remove, manual update checks and background update
-checks. A software version request is independent of that choice. In particular,
-requesting an older CLI version still uses the current installation recipe.
+App preparation freezes the App release and every dependency operation that will
+run a script. Referencing an existing usable dependency does not authorize its
+future reinstallation. A publication between confirmation and execution cannot
+replace the frozen recipe.
 
-Preparation freezes one revision for the operation. After the user confirms an
-action, the Server resolves and pins its definition; viewing the script is optional.
-Requests may carry `definition_revision` from catalog metadata or the script viewer.
-A refresh or publication between preparation and execution cannot swap the script.
-A new operation resolves latest when no revision is supplied, while retries retain
-the prepared revision reported by the started event. Reinstall keeps the prior installation available
-while the replacement is staged. If the definition has no dedicated reinstall
-script, Memoh reruns install without removing the existing versions first.
+Install, update, reinstall, explicit downgrade and repair share provision and
+commit. Reinstall allocates a new physical installation even for the same version.
+Downgrade means confirming an older version for a new installation. There is no
+dependency Rollback action, historical-version selector or `previous_version`
+response field.
 
-Same-schema recipe changes must preserve the managed directory and result contract,
-including the ability to remove installations produced by prior recipe revisions.
-New scripts never replace a running operation's in-memory definition.
+## Persistent state and availability
 
-Rollback is different: it executes Memoh's fixed symlink-switch operation, not a
-registry rollback script. The previous software version, entrypoints and recorded
-publication identity are restored together. No registry request is needed.
+`bot_dependency_installations` records observations and current operation state.
+`bot_dependency_desired_installations` holds one authorized target per
+Team/Bot/dependency: exact version, publication identity, desired revision,
+authorization identity, registered payload and repair scheduling state. Successful
+confirmed installation commits this target. Failed installation, discovery,
+adoption of an existing command and App reference creation do not grant it.
 
-## Persistent cache and availability
+Authorization events are durable audit records, not binary history. Removing a
+managed dependency revokes its target; queued repair cannot recreate it. An
+accepted update invalidates earlier queued work, and successful commit replaces
+the target. Queueing, claiming and finishing repairs compare desired revision
+and operation identity in addition to filesystem locks.
 
-Memoh uses the configured `supermarket.base_url` and accepts only `memoh` dependency
-releases from that origin. Downloads and redirects stay on the configured origin;
-artifact URLs are constructed from verified digests, not arbitrary metadata URLs.
-Compiled runtime requirements bind official dependency IDs to launcher commands.
+Memoh accepts `memoh` releases from the configured `supermarket.base_url` origin.
+Artifact URLs derive from verified digests; redirects remain on that origin.
+PostgreSQL caches immutable release/archive bytes under source URL, registry,
+dependency ID and revision. Connection-bound team RLS isolates records, and catalog
+pointer updates use generation CAS.
 
-PostgreSQL stores immutable release/archive bytes separately from installation
-intent. The cache key includes normalized source URL, registry, dependency ID and
-revision. Tables use the existing connection-bound team RLS. Catalog pointer updates
-use a generation compare-and-swap so a delayed Server cannot overwrite a newer
-snapshot published by another Server. Definitions needed by installed or historical
-operations remain available in the persistent cache.
+Definition collection retains current catalog references, current installation
+definitions, active operation definitions and authorized targets. Other definitions
+have a 30-day access grace period, renewed on lookup. Historical authorization
+events do not indefinitely pin old recipes or payloads.
 
-- The Server starts without connecting to Supermarket. A nonblocking worker refreshes
-  the catalog at startup and at the configured interval (ten minutes by default).
-  Offline mode disables automatic registry access.
-- Catalog reads use a fresh cached snapshot; an explicit refresh or operation fetches
-  current metadata. Unchanged release blobs are reused by digest.
-- Availability failures use the last verified snapshot and mark the response stale.
-  With no cache, catalog-dependent operations return a retryable error.
-- Invalid content is rejected and cannot replace the cache. It is not silently
-  treated as an availability failure.
-- Retired entries disappear from the installable catalog. Cached definitions remain
-  available to manage existing records; a new install of a retired entry is refused.
-- Runtime startup discovers the required CLI even when the definition cache is
-  empty. Existing managed, image-provided and PATH copies do not require registry
-  access. A missing CLI produces actionable feedback; chat messages and device-code
-  login never authorize a script execution. Installation requires Manage permission
-  and confirmation of the operation; the Server fixes its revision before execution.
-- Script caching is not binary caching. Reinstalling software may still require npm,
-  GitHub or the relevant upstream download service.
+- Server startup does not require Supermarket. A background worker refreshes the
+  catalog; offline mode disables registry refresh and automatic upstream checks.
+- Availability failures preserve the last verified snapshot and mark it stale.
+  Invalid content cannot replace the cache.
+- A retired definition cannot authorize new installation or automatic repair.
+  Retained immutable bytes are not permission to bypass retirement.
+- Discovery finds supported managed, image and PATH commands with a cold catalog
+  cache. Read-only discovery never enqueues installation.
+- Repair reads the stored, verified publication for its authorized target. It
+  cannot replace an unavailable definition with the current registry release.
+- Recipe caching is not binary caching. Installs and previously authorized repairs
+  may still need upstream downloads; offline mode is not a network sandbox.
 
-## Workspace layout and execution
+## Workspace layout
 
-Managed dependencies live under `<data root>/.memoh/deps/<id>/versions/<version>`.
-`current` identifies the active version, `state.json` records its publication and
-entrypoints, and generated shims in `.memoh/deps/bin` precede the image toolkit on
-PATH for every bridge command, including both pipe and PTY exec, not just the Codex
-and Claude Code drivers. Dependency management always uses the bot container and
-its `/data` root, independently of the selected computer. The direct runtimes retain
-their container requirement before launcher resolution.
+Management uses only the Bot's native workspace. A selected user computer or
+remote target is not an installation target. Agent Home and credential ownership
+remain unchanged: Codex uses `/data/.codex/agents/<bot_agent_id>`, including
+`auth.json`; Claude Code keeps `HOME=/data` and `CLAUDE_CONFIG_DIR=/data/.claude`.
 
-The image keeps Node.js, Python, uv, display tools and the bridge contract paths.
-Node.js/Python/uv installations add managed copies. Removing a dependency from a
-native workspace deletes both the managed copy and the toolkit commands and runtime
-files in that container. The Debian image's additional system Python is removed
-through its package manager, including packages that require the interpreter; unrelated
-packages are not autoremoved. A removed dependency is no longer discovered or listed
-as installed. Recreating the container from an image restores that image's contents.
-User computers are not dependency-management targets. Codex and Claude Code
-are downloaded per workspace and are absent from the
-image. The old workspace-contract JSON gate is removed. Server and image upgrades
-must follow the [upgrade and rollback procedure](../workspace-dependencies-upgrade.md);
-an old Server cannot initialize this new image.
+Dependency payloads and caches use the fixed workspace path `/data/.memoh/deps`.
+There is no dependency-store path setting. The workspace image prepares the
+required directories; metadata and Agent Homes remain persistent.
 
-Scripts run through bridge stdin with the shared prelude, a result file, timeouts,
-per-dependency locks and streamed stdout/stderr. Discovery does not execute registry
-`scripts.version`; fixed, bounded command probes determine available copies.
-Execution and finalization share a stable operating-system lock. Lock files are
-never deleted to reclaim ownership. Linux targets require `flock` from util-linux;
-macOS targets use the system `lockf`. Legacy directory locks require operator
-recovery after confirming that the old operation has stopped.
+```text
+/data/.memoh/deps/
+  bin/                                  # Stable generated launchers
+  .execution-window.json                # Persistent lifetime/owner/admission proof
+  .operations/<dependency>/
+    <operation_id>/                     # Durable transaction receipt
+    .cleanup/<operation_id>.json         # Pending payload cleanup
+  <dependency>/
+    state.json                          # Committed observation, not authority
+    current -> <store>/<dependency>/installs/<installation_id>
+    resolutions/                        # Composite version metadata, when needed
 
-Each accepted mutation owns a database operation id and a durable receipt below
-`deps/.operations`, outside the dependency's removable home. The workspace process
-records completion there even if its Server observer disconnects. Recovery holds
-the same lock, checks ownership and applies the recorded result before clearing
-the operation id. A lost observer is an unknown result until recovery can establish
-what happened; elapsed time alone is not evidence that a live script failed.
-For an abandoned claim that never started, recovery first writes a permanent
-cancellation marker under the same kernel lock. A paused old Server checks that
-marker before executing its recipe, so it cannot resume after a newer claim.
-Unreachable workspaces retain intent until they can be fenced; legacy intents
-without operation ids require explicit operator recovery.
+<store>/<dependency>/
+  installs/<installation_id>/            # Unique candidate or current payload
+  .staging-<operation_id>/               # Per-operation staging, when used
+  cache/                                # Disposable package cache
 
-Installs stage a complete version before switching `current` and preserve the prior
-tree when publication fails. Discovery reconciles installation intent with workspace
-state, including missing files and copies restored by workspace snapshots. Its cache
-is invalidated by bridge resets and by the definition fingerprint.
+/run/memoh/deps/                         # Linux local kernel control, default /data
+  .locks/<dependency>.lock              # Operation and finalization lock
+  .leases/<dependency>.lock             # Launch admission lease
+  .leases/<dependency>-<installation_id>.lock  # Running installation lease
+  .execution-window.lock               # Exec/PTY and maintenance admission lock
+```
 
-Installation records distinguish current software version from definition revision.
-Script operation logs and SSE receipts identify the revision actually used. Private
-errors are not exposed on public endpoints. HTTP and SSE failures expose stable
-`workspace_dependency.*` codes, and the UI localizes them. Manage-authorized dependency
-rows also include bounded, redacted diagnostic details that remain available after
-the initiating tab closes.
+Linux kernel control uses the fixed local root `/run/memoh/deps`, independently of
+the payload location; a non-default data root gets a separate internal hashed
+namespace. The image provides a default directory, but adapters must ensure the
+actual mounted path is writable by the runtime user and supports local kernel
+locking. OSS binds the host `<workspace data root>/run/<bot>` directory at
+`/run/memoh`, hiding the image directory; that host runtime directory must be on
+a local filesystem, not NFS. The canonical root runtime can create `deps` inside
+the mount. Cloud startup prepares the directory when `/run` is tmpfs. This does
+not extend the UID/GID contract for arbitrary non-root custom images.
+
+Control files can survive rootfs replacement through a runtime mount. Safety
+depends on the whole-workspace lifetime proof and kernel locks, not deletion of
+those files. macOS retains its existing data-root lock paths and `lockf` support.
+
+Committed state records format version 2, installation identity, actual
+payload/store paths, desired revision and publication identity. It has no
+selectable previous installation. Entry points are validated inside the unique
+payload; stable generated launchers preserve PATH integration. Metadata, Agent
+Homes, cancellation markers and stable locks are outside payload collection.
+
+## Isolated recipe protocol
+
+Install and update scripts opt in through a leading comment covered by their
+definition digests:
+
+```sh
+# memoh-storage-layout: isolated
+```
+
+This is not a new manifest field. New runners detect it before supplying isolated
+paths; old runners ignore the comment and use the compatible version-directory
+branch.
+
+| Variable | Meaning |
+| --- | --- |
+| `MEMOH_DEP_HOME` | Persistent metadata directory for this dependency |
+| `MEMOH_DEP_STORE` | This dependency's payload/cache directory |
+| `MEMOH_DEP_INSTALL_DIR` | Unique candidate allocated by the runner |
+| `MEMOH_DEP_STAGING` | This operation's staging directory |
+| `MEMOH_DEP_VERSION` | Confirmed canonical version |
+| `MEMOH_DEP_OPERATION_DIR` | Durable operation receipt directory |
+| `MEMOH_DEP_RESULT` | Runner-owned result file outside the payload |
+| `MEMOH_DEP_CANDIDATE` | Candidate executable for a frozen health probe |
+
+The five shell recipes stage and rename complete trees. The other 27 generated
+recipes may install directly into a unique unpublished candidate because venv,
+Conda and wrappers embed absolute paths. Neither path may overwrite a published
+installation. The recipe records its candidate; Server transaction checks and
+finalization own publication of `current`.
+
+The frozen health action verifies release and commands. Generated Node/Python
+bundles also import declared modules. Composite resolutions retain small,
+hash-checked package-version mappings in persistent `resolutions/`; these are
+reconstruction metadata and never execution authority. Recipes retain checksum,
+mirror and install-script restrictions.
+
+An old frozen recipe keeps its original layout. Server does not repurpose
+`MEMOH_DEP_HOME` to force it onto local storage. Same-version replacement of an
+existing executable with an unsafe legacy recipe requires confirmation of an
+isolated revision. Repair never upgrades that recipe silently.
+
+## Transactions, recovery and collection
+
+Scripts run through bridge stdin with result files, manifest time budgets,
+per-dependency kernel locks and streamed output. Execution and filesystem
+finalization share the lock. Linux runner, probes, finalization, payload collection
+and launch leases use the local control namespace above. Linux uses `flock`;
+macOS uses `lockf`. Lock files are not removed to reclaim ownership. Receipts,
+state and the execution-window lifetime record remain persistent on `/data`;
+database operation intent remains in PostgreSQL.
+
+An accepted mutation atomically claims a database operation ID and its trusted
+operation intent (action, target, publication and authorization identity). A
+workspace receipt is evidence of execution, never the source of authorization.
+Its immutable metadata must exactly match the database intent. Missing or
+mismatched trusted intent is fenced under the kernel lock and marked failed,
+preserving the previous usable payload and receipt evidence without granting
+recovery authority. A new Manage confirmation is required. The receipt lives
+outside the payload, and records completion even if its Server observer disconnects.
+Recovery reads the stored frozen version probe without requiring the current
+catalog's prerequisite graph. It checks ownership, exit status, candidate path,
+exact version and actual files before reconciling
+filesystem and database state. A canceled, never-started claim receives a persistent
+cancellation marker before its claim is released. Unreachable workspaces retain
+uncertain intent; timeout alone never proves that a script stopped.
+
+A failed download, health probe or same-version replacement preserves the current
+installation. An unpublished failed candidate can be cleaned after its completed
+receipt proves safety. A committed replacement queues its retired published tree
+for cleanup rather than exposing a rollback target.
+
+Published payload collection requires a controlled **whole Linux workspace
+restart** and a bridge-confirmed startup window before ordinary Exec or PTY work
+has been admitted in that lifetime. Create/setup, API Start and lazy startup all
+run Manager's maintenance boundary before declaring the workspace ready. The
+persistent execution-window record prevents a bridge restart from presenting an
+already-used lifetime as unused. Server restart, bridge-process restart, an empty process
+scan or elapsed time is insufficient. Launch leases protect resolved commands and
+their processes; launchers from an earlier workspace lifetime are rejected.
+
+When startup proof is unavailable, including an old bridge or non-Linux workspace,
+published payloads remain pending. This temporarily uses more disk than one
+installation and requires a suitable maintenance window. Held leases, bootstrap
+process references or incomplete process-access evidence also defer deletion.
+Backends without the startup proof require operator-controlled maintenance for
+published payloads. Cleanup follows only
+explicitly recorded, validated paths, including a recorded legacy
+`versions/<version>` path. It does not scan all old version folders or provide a
+bulk-cleanup CLI. Store-root changes outside known namespaces require operator
+review rather than deletion of unverified locations.
+
+After isolated operations, cache cleanup runs under the dependency lock: files
+older than seven days are eligible for removal, and caches above 512 MiB are
+discarded. Persistent `resolutions/` and transaction metadata are not package caches.
+
+Automatic recovery runs at workspace readiness and explicit execution preparation,
+with persistent queue state and bounded backoff. It verifies the registered
+managed payload even if a toolkit/PATH fallback exists. Surviving verified payloads
+can have their launchers restored without another download. Missing payloads are
+reinstalled from the same authorized version and stored recipe. Prerequisites
+needing installation require their own targets. Missing authority, unavailable or
+retired definitions and unsupported platforms require management attention.
+`ResolveLauncher`, List and Preflight remain queries.
 
 ## Memoh API and UI
 
-Existing `/bots/{bot_id}/dependencies` actions remain. Install/update/reinstall and
-remove accept an optional `definition_revision`; install-like actions also accept
-`version`. The script endpoint accepts an optional prepared revision and returns the
-same revision with the preview. Started/done events include definition revision.
+| Method | Path | Permission and behavior |
+| --- | --- | --- |
+| GET | `/workspace-dependencies` | Verified catalog metadata; optional `refresh=true` |
+| GET | `/bots/{bot_id}/dependencies` | Workspace Read; observation and repair status |
+| POST | `/bots/{bot_id}/dependencies/preflight` | Workspace Read; readiness query |
+| POST | `/bots/{bot_id}/dependencies/check-updates` | Manage; upstream version checks |
+| GET | `/bots/{bot_id}/dependencies/{dep_id}/script` | Manage; frozen script preview |
+| POST | `/bots/{bot_id}/dependencies/{dep_id}/prepare` | Manage; exact installation target |
+| POST | `/bots/{bot_id}/dependencies/{dep_id}/install` | Manage; confirmed target, SSE |
+| POST | `/bots/{bot_id}/dependencies/{dep_id}/update` | Manage; confirmed target, SSE |
+| POST | `/bots/{bot_id}/dependencies/{dep_id}/reinstall` | Manage; confirmed target, SSE |
+| POST | `/bots/{bot_id}/dependencies/{dep_id}/repair/prepare` | Manage; recovery confirmation target |
+| POST | `/bots/{bot_id}/dependencies/{dep_id}/repair/authorize` | Manage; reinstall and authorize recovery on success |
+| POST | `/bots/{bot_id}/dependencies/{dep_id}/repair/retry` | Manage; retry the existing authorized target |
+| POST | `/bots/{bot_id}/apps/prepare` | Manage; freeze App and dependency confirmations |
 
-`GET /workspace-dependencies/catalog` serves verified remote metadata, and
-`refresh=true` explicitly retries the source. Bot listing has the same refresh knob.
-Responses include cache freshness, localized names/descriptions, publication
-identity and digest-addressed cached icon URLs. Icons are served with immutable
-caching, a sandbox CSP and nosniff; no authentication token is embedded in image URLs.
+Dependency removal belongs to App removal and its shared-reference checks. The
+removed dependency Rollback URL has no executable alias or redirect.
 
-The existing Supermarket Dependencies tab, installed dependency rows, confirm dialogs,
-background progress store, Agent enable preflight and missing-dependency chat card
-remain the user flow. A cached/offline catalog has an actionable retry notice. A
-new dependency's presentation does not require a frontend ID-to-text or ID-to-icon
-mapping. The script dialog is the diagnostic surface for revision and execution
-information; these details do not become extra root-page controls.
+SSE `started` is emitted only after durable acceptance and carries the actual
+operation ID and frozen definition revision. Disconnecting does not cancel
+admitted work. List responses expose active and last completed operation IDs,
+plus desired version, repair status, attempt count, next attempt and public error
+code. The desired DTO excludes private payload paths and authorization actors.
 
-## Initialization and validation
+Apps, dependency details and confirmation dialogs show one target and its recovery
+state. Read-only members inspect status but cannot confirm scripts or retry.
+HTTP/SSE failures use stable `workspace_dependency.*` codes localized by Web.
+Icons retain immutable caching, sandbox CSP and nosniff without tokens in URLs.
 
-This replaces an unmerged experimental implementation. Existing released databases
-upgrade through the next free incremental migration, while fresh installations use
-the equivalent canonical schema. Experimental dependency records are not a supported
-migration source. Existing local development volumes are retained while validation
-uses isolated databases.
+## Upgrade and validation
 
-Required validation includes:
+Fresh installations use the canonical schema; deployed databases apply paired
+incremental migrations. Legacy observations are not backfilled into recovery
+authorizations. Drain old operations and deploy matching Server, bridge/image,
+Web and SDK. Moving Linux locks from `/data` to `/run/memoh/deps` requires a full
+workspace restart with the old scripts stopped before admitting new operations;
+an idle new lock does not prove that an old-path owner has exited. Then
+confirm isolated recipes before depending on ephemeral payload recovery. Follow
+the [upgrade guide](../workspace-dependencies-upgrade.md).
 
-- Deterministic publication, reviewed locks, immutable history, corrupt content
-  rejection, bounded archives and concurrent publisher behavior.
-- Producer-generated wire fixtures consumed by Go, including manifest/script and
-  archive digests.
-- Persistent cache across restarts, source/team isolation, generation CAS, absent
-  upstream with/without cache, retirement and runtime command validation.
-- Preview/execute revision consistency while a newer definition is published.
-- Real HTTP installation, software version selection, update, reinstall, removal,
-  overlays and rollback for the five official dependencies.
-- Publishing an additional test dependency without changing Go/TS and installing it
-  through Memoh; current-definition behavior for subsequent operations.
-- Fresh PostgreSQL initialization and incremental down/up, Go tests/race/lint,
-  frontend tests/type checks/UI guard, Supermarket tests/type checks/build, and all
-  six stacked PR CI summaries.
-
-Human UI verification is disclosed separately in PR descriptions; automated checks
-and agent-run API verification do not remove the No human QA marker.
+Validation covers publication integrity, source/team isolation, frozen targets,
+authorization and revocation races, failed transactions, same-version reinstall,
+launch leases, rootfs-loss repair, controlled cleanup, API/UI permissions and
+current generated SQL/OpenAPI/SDK. Actual checks, Cloud/E2B limits and outstanding
+work belong in the [validation record](agent-cli-storage-validation.md). This
+design does not declare those checks complete. Agent verification is not Human QA.

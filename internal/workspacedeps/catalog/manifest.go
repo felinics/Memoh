@@ -27,7 +27,7 @@ const (
 	// CategoryAgent is an external coding agent CLI (Codex, Claude Code). It is
 	// managed like any other dependency: the newest release installs by
 	// default, an explicit version can be requested, upstream can be checked
-	// for updates, and rollback is available.
+	// for updates.
 	CategoryAgent Category = "agent"
 	// CategoryRuntime is a language runtime such as Node.js or Python.
 	CategoryRuntime Category = "runtime"
@@ -50,7 +50,7 @@ type Source string
 // Dependency sources.
 const (
 	// SourceManaged dependencies are installed by the catalog scripts into
-	// MEMOH_DEP_HOME and can be updated, rolled back, and removed.
+	// MEMOH_DEP_HOME and can be updated and removed.
 	SourceManaged Source = "managed"
 	// SourceImage dependencies ship with the workspace image, which provides
 	// the baseline copy under the toolkit. When the manifest declares scripts
@@ -72,8 +72,7 @@ func (s Source) valid() bool {
 // Action is one of the scripted operations a dependency may support.
 type Action string
 
-// Scripted actions. Rollback is intentionally absent: it is a pure data
-// operation performed by the runner and never backed by a script.
+// Actions supported by dependency recipes.
 const (
 	ActionInstall     Action = "install"
 	ActionUpdate      Action = "update"
@@ -226,6 +225,8 @@ func (s Scripts) configured() []scriptRef {
 
 // Dependency is one validated catalog entry.
 type Dependency struct {
+	// StorageLayout opts into server-owned isolated installation directories.
+	StorageLayout string   `yaml:"-" json:"-"`
 	SchemaVersion string   `yaml:"schema_version,omitempty" json:"schema_version,omitempty"`
 	ID            string   `yaml:"id" json:"id"`
 	Name          string   `yaml:"name" json:"name"`

@@ -22,11 +22,6 @@ import (
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
-// ActionRollback is the sixth action. It is never scripted by a
-// manifest, so it is not a catalog.Action constant; the service performs it as
-// a pure data operation and only reports it under this name.
-const ActionRollback catalog.Action = "rollback"
-
 // Preflight reasons a dependency requirement is not satisfied.
 const (
 	PreflightReasonMissing             = "missing"
@@ -39,8 +34,6 @@ const (
 	defaultCacheTTL = 10 * time.Minute
 	// lastErrorLimit caps the text stored in last_error.
 	lastErrorLimit = 2048
-	// rollbackTimeout bounds the symlink switch; it touches no network.
-	rollbackTimeout = 2 * time.Minute
 	// interruptedMessage is written to last_error when List finds an
 	// in-progress record whose operation is provably gone.
 	interruptedMessage = "operation interrupted"
@@ -58,9 +51,6 @@ const (
 	// untouched before List may treat it as interrupted. An operation that
 	// is running has taken its workspace lock well within that time.
 	staleOperationAge = 60 * time.Second
-	// rollbackScript is the whole body run by Rollback: switch `current` to
-	// the previous version. state.json is rewritten by the Server afterwards.
-	rollbackScript = `dep_switch "$MEMOH_DEP_HOME/versions/$MEMOH_DEP_VERSION"` + "\n"
 )
 
 // Options configures NewService. Workspace, Store, and Catalog are required.
@@ -83,7 +73,7 @@ type Options struct {
 }
 
 // Service reconciles the catalog, the installation records, and the
-// workspace and runs the six dependency actions.
+// workspace and runs dependency actions.
 type Service struct {
 	workspace WorkspaceAccess
 	store     Store
@@ -93,6 +83,9 @@ type Service struct {
 	logger    *slog.Logger
 	now       func() time.Time
 	scriptEnv func(ctx context.Context) []string
+	// Tests can substitute a temporary root; production uses the fixed distribution layout.
+	dependencyStoreRoot string
+	repairWake          chan struct{}
 
 	// Package functions behind fields so tests can replace them.
 	probe    func(ctx context.Context, client *bridge.Client) (Platform, error)
@@ -138,18 +131,19 @@ func NewService(opts Options) *Service {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	s := &Service{
 		shutdownCtx: shutdownCtx, shutdownCancel: shutdownCancel,
-		workspace: opts.Workspace,
-		store:     opts.Store,
-		catalog:   opts.Catalog,
-		provider:  opts.Provider,
-		cache:     opts.Cache,
-		logger:    opts.Logger,
-		now:       opts.Now,
-		scriptEnv: opts.ScriptEnv,
-		probe:     ProbePlatform,
-		discover:  Discover,
-		run:       Run,
-		locks:     operationLocks{held: make(map[InstallationKey]struct{})},
+		workspace:  opts.Workspace,
+		store:      opts.Store,
+		catalog:    opts.Catalog,
+		provider:   opts.Provider,
+		cache:      opts.Cache,
+		logger:     opts.Logger,
+		now:        opts.Now,
+		scriptEnv:  opts.ScriptEnv,
+		repairWake: make(chan struct{}, 1),
+		probe:      ProbePlatform,
+		discover:   Discover,
+		run:        Run,
+		locks:      operationLocks{held: make(map[InstallationKey]struct{})},
 
 		background:                opts.Background,
 		operationSessionValidator: opts.OperationSessionValidator,
@@ -176,6 +170,7 @@ func NewService(opts Options) *Service {
 // Entry is one catalog dependency as seen for a bot after
 // reconciliation.
 type Entry struct {
+	Desired    *DesiredInstallation
 	Dependency catalog.Dependency
 	// Installation is the reconciled record, nil when the dependency is
 	// neither recorded nor present.
@@ -192,7 +187,7 @@ type Entry struct {
 	// its toolkit, empty when the workspace has no toolkit copy.
 	ImageVersion string
 	// Overlay is set when the copy in effect is a managed one installed over
-	// an image copy. Native removal clears both copies.
+	// an image copy. Removing the overlay restores the image copy.
 	Overlay bool
 	// LatestVersion is the last check_update result recorded for the
 	// dependency, empty until a check ran.
@@ -313,7 +308,7 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		for _, dep := range deps {
 			result.Entries = append(result.Entries, offlineEntry(dep, byDep[dep.ID], result.Platform))
 		}
-		return result, nil
+		return s.attachDesired(ctx, botID, result)
 	}
 
 	snap, err := s.snapshot(ctx, botID, force)
@@ -337,7 +332,7 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		for _, dep := range deps {
 			result.Entries = append(result.Entries, offlineEntry(dep, byDep[dep.ID], result.Platform))
 		}
-		return result, nil
+		return s.attachDesired(ctx, botID, result)
 	}
 	result.Platform = snap.Platform
 	for _, dep := range deps {
@@ -348,7 +343,7 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		}
 		result.Entries = append(result.Entries, entry)
 	}
-	return result, nil
+	return s.attachDesired(ctx, botID, result)
 }
 
 // snapshot returns the cached discovery for the bot or performs one.
@@ -648,7 +643,7 @@ func offlineEntry(dep catalog.Dependency, rec *Installation, platform Platform) 
 
 // ActionSupported reports whether the catalog gives the dependency a way to
 // perform action: its own script, or the documented fallback (update runs
-// install; reinstall runs remove then install). Rollback needs no script.
+// install; reinstall repeats install).
 // Dependencies without an install script only ship with the image; nothing
 // can be installed over them or removed from them.
 func ActionSupported(dep catalog.Dependency, action catalog.Action) bool {
@@ -665,23 +660,18 @@ func ActionSupported(dep catalog.Dependency, action catalog.Action) bool {
 		return dep.Scripts.CheckUpdate != ""
 	case catalog.ActionVersion:
 		return dep.Scripts.Version != ""
-	case ActionRollback:
-		// Rollback needs no script, but only an installed overlay keeps a
-		// previous version to switch back to.
-		return dep.Scripts.Install != ""
 	default:
 		return false
 	}
 }
 
 // UserActions is the order in which the actions a user may request are
-// reported: the five scripted actions plus rollback.
+// reported.
 var UserActions = []catalog.Action{
 	catalog.ActionInstall,
 	catalog.ActionUpdate,
 	catalog.ActionReinstall,
 	catalog.ActionRemove,
-	ActionRollback,
 	catalog.ActionCheckUpdate,
 }
 
@@ -698,8 +688,8 @@ func SupportedActions(dep catalog.Dependency) []catalog.Action {
 }
 
 // availableActions lists the actions the current state allows. A managed
-// copy is what install produces and what update, reinstall, and rollback
-// operate on. Remove also clears commands supplied by the workspace image.
+// copy is what install produces and what update and reinstall
+// operate on. Remove clears the overlay; image commands remain available.
 // Update checks follow the script and the pin, not the category: an agent
 // CLI is checked upstream like any other tool.
 func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) []catalog.Action {
@@ -716,17 +706,12 @@ func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) [
 		} else if rec != nil {
 			actions = append(actions, catalog.ActionReinstall)
 		}
-		imageCopy := rec != nil && (imageCandidate(obs).Path != "" || obs.Source == SourceToolkit)
-		if ActionSupported(dep, catalog.ActionRemove) && ((rec != nil && !obs.Present) || imageCopy) {
-			// Remove clears native image copies as well as missing/failed
-			// installation records.
+		if ActionSupported(dep, catalog.ActionRemove) && rec != nil && !obs.Present {
+			// Missing or failed managed records can still be removed.
 			actions = append(actions, catalog.ActionRemove)
 		}
 	default:
 		actions = append(actions, catalog.ActionUpdate, catalog.ActionReinstall, catalog.ActionRemove)
-		if obs.State != nil && strings.TrimSpace(obs.State.PreviousVersion) != "" {
-			actions = append(actions, ActionRollback)
-		}
 	}
 	if obs.Present && upstreamCheckable(dep) {
 		actions = append(actions, catalog.ActionCheckUpdate)
@@ -824,7 +809,7 @@ func (s *Service) Update(ctx context.Context, botID, depID, version string, sink
 
 // Reinstall runs the explicit reinstall script, or repeats install. Keeping
 // the existing tree until install commits its staged replacement preserves both
-// the working copy on failure and the previous version used by rollback.
+// the working copy on failure.
 func (s *Service) Reinstall(ctx context.Context, botID, depID, version string, sink LogSink) (OperationResult, error) {
 	ctx, cancelOperation := context.WithCancel(ctx)
 	defer cancelOperation()
@@ -838,9 +823,8 @@ func (s *Service) Reinstall(ctx context.Context, botID, depID, version string, s
 	return s.provision(ctx, op, catalog.ActionReinstall, StatusInstalling, sink)
 }
 
-// Remove runs the remove script, deletes the shims, and drops the record.
-// Native workspaces also remove the image's copy so discovery cannot adopt
-// the same dependency again immediately after a successful removal.
+// Remove revokes the desired installation and removes its managed overlay.
+// Image-provided tools remain available to other workspace consumers.
 func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink) (OperationResult, error) {
 	ctx, cancelOperation := context.WithCancel(ctx)
 	defer cancelOperation()
@@ -856,8 +840,11 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 		return OperationResult{}, fmt.Errorf("%w: %s has no remove script", ErrActionUnsupported, op.dep.ID)
 	}
 	previous := s.readStateBestEffort(ctx, op)
-	if err := s.markInProgress(ctx, op, StatusRemoving); err != nil {
+	if err := s.markInProgress(ctx, op, StatusRemoving, catalog.ActionRemove); err != nil {
 		return OperationResult{}, err
+	}
+	if err := s.invalidateDesired(ctx, op.key, op.operationID); err != nil {
+		return OperationResult{}, s.fail(ctx, op, err)
 	}
 	if _, err := s.runScript(ctx, op, catalog.ActionRemove, script, "", stateVersion(previous), 0, sink); err != nil {
 		return OperationResult{}, s.fail(ctx, op, err)
@@ -873,72 +860,11 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 	if _, err := s.store.FinishOperation(finalCtx, op.key, op.operationID, nil); err != nil {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: delete record for %s: %w", op.dep.ID, err))
 	}
-	s.cleanupReceipt(ctx, op)
 	s.cache.Invalidate(op.key.BotID)
+	s.trimPayloadCache(ctx, op)
+	s.cleanPreviousPayload(ctx, op)
+	s.cleanupReceipt(ctx, op)
 	return OperationResult{DependencyID: op.dep.ID, Action: catalog.ActionRemove, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID, DefinitionRevision: op.dep.Revision}, nil
-}
-
-// Rollback switches `current` back to the previous version recorded in
-// state.json. It runs no catalog script and needs no network;
-// the only workspace command is the symlink switch through the prelude.
-func (s *Service) Rollback(ctx context.Context, botID, depID string) (OperationResult, error) {
-	ctx, cancelOperation := context.WithCancel(ctx)
-	defer cancelOperation()
-	stopShutdown := s.cancelOnShutdown(cancelOperation)
-	defer stopShutdown()
-	ctx, _, err := s.prepareCatalog(ctx, false, true)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	op, err := s.begin(ctx, botID, depID, "", false)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	defer op.release()
-	current, err := op.readState(ctx)
-	op.previous = current
-	if err != nil {
-		return OperationResult{}, err
-	}
-	if current == nil || strings.TrimSpace(current.PreviousVersion) == "" {
-		return OperationResult{}, ErrRollbackUnavailable
-	}
-	previous := strings.TrimSpace(current.PreviousVersion)
-	if _, err := op.client.Stat(ctx, path.Join(VersionsDir(op.home), previous)); err != nil {
-		if errors.Is(err, bridge.ErrNotFound) {
-			return OperationResult{}, fmt.Errorf("%w: versions/%s is gone", ErrRollbackUnavailable, previous)
-		}
-		return OperationResult{}, fmt.Errorf("workspacedeps: stat previous version of %s: %w", op.dep.ID, err)
-	}
-	if err := s.markInProgress(ctx, op, StatusUpdating); err != nil {
-		return OperationResult{}, err
-	}
-	if _, err := s.runScript(ctx, op, ActionRollback, rollbackScript, previous, current.Version, rollbackTimeout, nil); err != nil {
-		return OperationResult{}, s.fail(ctx, op, err)
-	}
-	state := State{
-		DependencyID:    op.dep.ID,
-		Version:         previous,
-		InstalledAt:     s.now().UTC(),
-		ManifestDigest:  current.ManifestDigest,
-		Entrypoints:     current.Entrypoints,
-		PreviousVersion: current.Version,
-	}
-	state.Previous = previousInstallation(*current)
-	if current.Previous != nil && current.Previous.Version == previous {
-		state.SourceURL = current.Previous.SourceURL
-		state.RegistryID = current.Previous.RegistryID
-		state.DefinitionRevision = current.Previous.DefinitionRevision
-		state.ManifestDigest = current.Previous.ManifestDigest
-		state.Entrypoints = cloneStringMap(current.Previous.Entrypoints)
-	}
-	finalCtx, cancel := finalizeContext(ctx)
-	defer cancel()
-	op.finalizing = true
-	if err := s.finalizeFilesystem(finalCtx, op, &state, current); err != nil {
-		return OperationResult{}, s.fail(ctx, op, err)
-	}
-	return s.record(finalCtx, op, ActionRollback, state)
 }
 
 // CheckUpdates is the manual refresh: it re-discovers the
@@ -990,11 +916,8 @@ func (s *Service) ScriptPreview(ctx context.Context, depID string, action catalo
 	if err != nil {
 		return "", err
 	}
-	if action == ActionRollback {
-		return WrapScript(rollbackScript), nil
-	}
 	if script, ok := s.catalogFor(ctx).Script(dep.ID, action); ok {
-		return WrapScript(actionScript(dep, action, script)), nil
+		return WrapScript(script), nil
 	}
 	switch action {
 	case catalog.ActionUpdate:
@@ -1082,13 +1005,20 @@ type operation struct {
 	// marked is set once markInProgress wrote the record; prior is what the
 	// record said before that, nil when it did not exist. Both let a busy
 	// verdict from the prelude undo the write (see restore).
-	marked      bool
-	prior       *Installation
-	startedAt   time.Time
-	previous    *State
-	receipt     *OperationReceipt
-	operationID string
-	finalizing  bool
+	marked                bool
+	prior                 *Installation
+	startedAt             time.Time
+	previous              *State
+	receipt               *OperationReceipt
+	operationID           string
+	finalizing            bool
+	storeRoot             string
+	desiredRevision       string
+	repair                bool
+	authorizedByActor     string
+	restorePayloadPath    string
+	restoreInstallationID string
+	frozenDefinition      *catalog.Definition
 }
 
 // begin validates the dependency, takes the in-memory lock, makes sure the
@@ -1123,6 +1053,7 @@ func (s *Service) begin(ctx context.Context, botID, depID, version string, requi
 		op.release()
 		return nil, ErrInvalidVersion
 	}
+	s.bindDesiredOperation(ctx, op)
 	if err := s.prepare(ctx, op, requirePlatform); err != nil {
 		op.release()
 		return nil, err
@@ -1151,6 +1082,7 @@ func (s *Service) prepare(ctx context.Context, op *operation, requirePlatform bo
 	op.home = Home(dataRoot, op.dep.ID)
 	op.shimDir = ShimDir(dataRoot)
 	op.platform = platform
+	op.storeRoot = s.effectiveStoreRoot(dataRoot)
 	return nil
 }
 
@@ -1208,7 +1140,10 @@ func (s *Service) provision(ctx context.Context, op *operation, action catalog.A
 		return OperationResult{}, fmt.Errorf("%w: %s has no %s script", ErrActionUnsupported, op.dep.ID, action)
 	}
 	previous := s.readStateBestEffort(ctx, op)
-	if err := s.markInProgress(ctx, op, status); err != nil {
+	if err := s.validateProvision(ctx, op, previous); err != nil {
+		return OperationResult{}, err
+	}
+	if err := s.markInProgress(ctx, op, status, action); err != nil {
 		return OperationResult{}, err
 	}
 	result, err := s.runScript(ctx, op, action, script, op.version, stateVersion(previous), 0, sink)
@@ -1233,6 +1168,9 @@ func (s *Service) commit(ctx context.Context, op *operation, action catalog.Acti
 	if version == "" {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("%w: script reported no version", errInvalidResult))
 	}
+	if op.version != "" && version != op.version {
+		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("%w: recipe returned a different version", errInvalidResult))
+	}
 	if len(result.Entrypoints) == 0 {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("%w: script reported no entrypoints", errInvalidResult))
 	}
@@ -1244,16 +1182,11 @@ func (s *Service) commit(ctx context.Context, op *operation, action catalog.Acti
 		SourceURL:      op.dep.SourceURL, RegistryID: op.dep.RegistryID, DefinitionRevision: op.dep.Revision,
 		Entrypoints: result.Entrypoints,
 	}
-	if previous != nil {
-		switch strings.TrimSpace(previous.Version) {
-		case "", version:
-			// Reinstalling the same version keeps the older fallback.
-			state.PreviousVersion = previous.PreviousVersion
-			state.Previous = previous.Previous
-		default:
-			state.PreviousVersion = previous.Version
-			state.Previous = previousInstallation(*previous)
-		}
+	if err := s.installationState(ctx, op, &state); err != nil {
+		return OperationResult{}, s.fail(ctx, op, err)
+	}
+	if err := s.validateDesiredOperation(ctx, op); err != nil {
+		return OperationResult{}, s.fail(ctx, op, err)
 	}
 	finalCtx, cancel := finalizeContext(ctx)
 	defer cancel()
@@ -1283,12 +1216,14 @@ func (s *Service) record(ctx context.Context, op *operation, action catalog.Acti
 	terminal.InstalledVersion, terminal.ManifestDigest = state.Version, state.ManifestDigest
 	terminal.SourceURL, terminal.RegistryID, terminal.DefinitionRevision = state.SourceURL, state.RegistryID, state.DefinitionRevision
 	terminal.LastError = ""
-	rec, err := s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
+	rec, err := s.finishManagedOperation(storeCtx, op, state, terminal)
 	if err != nil {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: record %s %s: %w", action, op.dep.ID, err))
 	}
-	s.cleanupReceipt(ctx, op)
 	s.cache.Invalidate(op.key.BotID)
+	s.trimPayloadCache(ctx, op)
+	s.cleanPreviousPayload(ctx, op)
+	s.cleanupReceipt(ctx, op)
 	return OperationResult{
 		DependencyID: op.dep.ID,
 		SourceURL:    state.SourceURL, RegistryID: state.RegistryID, DefinitionRevision: state.DefinitionRevision,
@@ -1306,7 +1241,7 @@ func (s *Service) runScript(ctx context.Context, op *operation, action catalog.A
 	spec := RunSpec{
 		DepID:  op.dep.ID,
 		Action: action,
-		Script: actionScript(op.dep, action, script),
+		Script: script,
 
 		Home:           op.home,
 		ShimDir:        op.shimDir,
@@ -1315,14 +1250,25 @@ func (s *Service) runScript(ctx context.Context, op *operation, action catalog.A
 		Platform:       op.platform,
 		Timeout:        timeout,
 	}
+	if op.dep.StorageLayout == "isolated" {
+		spec.Store = path.Join(op.storeRoot, op.dep.ID)
+		spec.InstallDir = path.Join(spec.Store, "installs", op.operationID)
+		spec.StagingDir = path.Join(spec.Store, ".staging-"+op.operationID)
+		if op.restorePayloadPath != "" {
+			spec.InstallDir = op.restorePayloadPath
+		}
+	}
 	if s.scriptEnv != nil {
 		spec.ExtraEnv = s.scriptEnv(ctx)
 	}
 	s.logger.Info("execute dependency definition", slog.String("bot_id", op.key.BotID), slog.String("dependency_id", op.dep.ID), slog.String("action", string(action)), slog.String("definition_revision", op.dep.Revision))
-	spec.Receipt = &OperationReceipt{
-		ID: op.operationID, DependencyID: op.dep.ID, Action: action, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID,
-		DefinitionRevision: op.dep.Revision, ManifestDigest: op.dep.ManifestDigest,
-		RequestedVersion: version, StartedAt: op.startedAt, Previous: op.previous,
+	if op.receipt == nil || op.receipt.Action != action || op.receipt.RequestedVersion != version {
+		return Result{}, fmt.Errorf("%w: script does not match the persisted operation intent", ErrDefinitionInvalid)
+	}
+	intent := *op.receipt
+	spec.Receipt = &intent
+	if err := s.validateDesiredOperation(ctx, op); err != nil {
+		return Result{}, err
 	}
 	result, err := s.run(
 
@@ -1342,7 +1288,7 @@ func (s *Service) runScript(ctx context.Context, op *operation, action catalog.A
 	return result, err
 }
 
-func (s *Service) markInProgress(ctx context.Context, op *operation, status Status) error {
+func (s *Service) markInProgress(ctx context.Context, op *operation, status Status, action catalog.Action) error {
 	prior, err := s.store.Get(
 
 		// fail records a failed operation and returns the cause. When the cause is
@@ -1357,8 +1303,15 @@ func (s *Service) markInProgress(ctx context.Context, op *operation, status Stat
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return err
 	}
-	op.operationID = hex.EncodeToString(nonce[:])
-	marked, err := s.store.ClaimOperation(ctx, UpsertInstallation{InstallationKey: op.key, Source: InstallationSourceManaged, Status: status, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID, DefinitionRevision: op.dep.Revision}, op.operationID)
+	if !op.repair {
+		op.operationID = hex.EncodeToString(nonce[:])
+	}
+	if !validReceiptID(op.operationID) {
+		return ErrDesiredTargetChanged
+	}
+	op.startedAt = s.now().UTC()
+	op.receipt = newOperationIntent(op, action)
+	marked, err := s.claimDesiredOperation(ctx, op, UpsertInstallation{InstallationKey: op.key, Source: InstallationSourceManaged, Status: status, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID, DefinitionRevision: op.dep.Revision, ManifestDigest: op.dep.ManifestDigest, OperationIntent: op.receipt})
 	if err != nil {
 		return err
 	}
@@ -1367,6 +1320,7 @@ func (s *Service) markInProgress(ctx context.Context, op *operation, status Stat
 		op.prior = &prior
 	}
 	op.startedAt = marked.UpdatedAt
+	NotifyOperationStarted(ctx, op.operationID)
 	return nil
 }
 
@@ -1417,6 +1371,10 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 			slog.String("dependency_id", op.dep.ID),
 			slog.Any("error", err),
 		)
+	}
+	if err == nil {
+		s.discardFailedPayload(storeCtx, op)
+		s.trimPayloadCache(storeCtx, op)
 	}
 	s.cache.Invalidate(op.key.BotID)
 	return cause
@@ -1475,6 +1433,19 @@ func (s *Service) readStateBestEffort(ctx context.Context, op *operation) *State
 		)
 		return nil
 	}
+	if state != nil && state.PayloadPath == "" {
+		link, err := op.client.ExecWithOptions(ctx, "readlink "+shellQuote(CurrentDir(op.home)), "", 10, nil, bridge.ExecOptions{})
+		if err == nil && link.ExitCode == 0 {
+			candidate := strings.TrimSpace(link.Stdout)
+			if !path.IsAbs(candidate) {
+				candidate = path.Join(op.home, candidate)
+			}
+			if path.Dir(candidate) == VersionsDir(op.home) && isPlainFileName(path.Base(candidate)) {
+				state.PayloadPath = candidate
+				state.StoreRoot = DepsRoot(op.dataRoot)
+			}
+		}
+	}
 	return state
 }
 
@@ -1532,6 +1503,10 @@ func (s *Service) checkUpdate(ctx context.Context, client *bridge.Client, dataRo
 		Platform:       platform,
 		Timeout:        dep.Timeouts.Duration(catalog.ActionCheckUpdate),
 	}
+	if dep.StorageLayout == "isolated" {
+		root := s.effectiveStoreRoot(dataRoot)
+		spec.Store = path.Join(root, dep.ID)
+	}
 	if s.scriptEnv != nil {
 		spec.ExtraEnv = s.scriptEnv(ctx)
 	}
@@ -1557,7 +1532,7 @@ func (s *Service) checkUpdate(ctx context.Context, client *bridge.Client, dataRo
 	}
 	check.Latest = strings.TrimSpace(check.Latest)
 	if check.Latest == "" {
-		return updateCheck{}, fmt.Errorf("workspacedeps: check_update for %s reported no latest version", dep.ID)
+		return updateCheck{}, fmt.Errorf("%w: check_update for %s reported no latest version", ErrInvalidVersion, dep.ID)
 	}
 	return check, nil
 }
@@ -1735,9 +1710,17 @@ func truncateMessage(message string) string {
 	return textutil.TruncateRunesWithSuffix(strings.TrimSpace(message), lastErrorLimit, "...")
 }
 
-func previousInstallation(state State) *PreviousInstallation {
-	return &PreviousInstallation{
-		Version: state.Version, SourceURL: state.SourceURL, RegistryID: state.RegistryID,
-		DefinitionRevision: state.DefinitionRevision, ManifestDigest: state.ManifestDigest, Entrypoints: cloneStringMap(state.Entrypoints),
+func (s *Service) attachDesired(ctx context.Context, botID string, result ListResult) (ListResult, error) {
+	targets, err := s.DesiredForBot(ctx, botID)
+	if err != nil {
+		return ListResult{}, err
 	}
+	byDependency := make(map[string]*DesiredInstallation, len(targets))
+	for i := range targets {
+		byDependency[targets[i].DependencyID] = &targets[i]
+	}
+	for i := range result.Entries {
+		projectDesired(&result.Entries[i], byDependency[result.Entries[i].Dependency.ID], result.Workspace == WorkspaceRunning && result.DiscoveryError == "")
+	}
+	return result, nil
 }

@@ -131,7 +131,7 @@ func TestCacheSnapshotsDoNotShareMutableState(t *testing.T) {
 	snapshot := Snapshot{Observed: map[string]Observed{"tool": {
 		Entrypoints: map[string]string{"tool": "/original"},
 		Candidates:  []Candidate{{Path: "/original"}},
-		State:       &State{Entrypoints: map[string]string{"tool": "/original"}, Previous: &PreviousInstallation{Entrypoints: map[string]string{"tool": "/previous"}}},
+		State:       &State{Entrypoints: map[string]string{"tool": "/original"}},
 	}}}
 	cache.Put("bot", snapshot)
 	// Put and Get must each detach all nested values, including the top-level
@@ -141,11 +141,10 @@ func TestCacheSnapshotsDoNotShareMutableState(t *testing.T) {
 	first.Observed["tool"].Entrypoints["tool"] = "/changed-on-get"
 	first.Observed["tool"].Candidates[0].Path = "/changed-candidate"
 	first.Observed["tool"].State.Entrypoints["tool"] = "/changed-state"
-	first.Observed["tool"].State.Previous.Entrypoints["tool"] = "/changed-previous"
 	delete(first.Observed, "missing")
 	second, _ := cache.Get("bot")
 	got := second.Observed["tool"]
-	if got.Entrypoints["tool"] != "/original" || got.Candidates[0].Path != "/original" || got.State.Entrypoints["tool"] != "/original" || got.State.Previous.Entrypoints["tool"] != "/previous" {
+	if got.Entrypoints["tool"] != "/original" || got.Candidates[0].Path != "/original" || got.State.Entrypoints["tool"] != "/original" {
 		t.Fatalf("caller mutation leaked into cached discovery: %+v", got)
 	}
 }

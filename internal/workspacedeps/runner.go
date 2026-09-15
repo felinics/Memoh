@@ -18,6 +18,7 @@ import (
 
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/controlpath"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
@@ -46,9 +47,12 @@ type RunSpec struct {
 	DepID  string
 	Action catalog.Action
 	// Script is the catalog script body without the prelude.
-	Script  string
-	Home    string
-	ShimDir string
+	Script     string
+	Home       string
+	ShimDir    string
+	Store      string
+	InstallDir string
+	StagingDir string
 
 	// Version is exported as MEMOH_DEP_VERSION: the version to install (the
 	// one requested, else the manifest pin) and empty for "latest".
@@ -154,14 +158,22 @@ func Run(ctx context.Context, client *bridge.Client, spec RunSpec, sink LogSink)
 		workDir = defaultWorkDir
 	}
 
-	lock := lockPath(spec.Home, spec.DepID)
+	lock := executionLockPath(spec.Home, spec.DepID, spec.Platform.OS)
 	// Version probes are read-only and may target copies that were never
 	// installed by us; creating their home would litter the workspace. The
 	// prelude still creates the locks directory it needs.
 	if spec.Action != catalog.ActionVersion {
-		for _, dir := range []string{spec.Home, VersionsDir(spec.Home), spec.ShimDir, path.Dir(lock)} {
+		for _, dir := range []string{spec.Home, spec.ShimDir, path.Dir(lock)} {
 			if err := client.Mkdir(ctx, dir); err != nil {
 				return Result{}, fmt.Errorf("workspacedeps: create %s: %w", dir, err)
+			}
+		}
+	}
+
+	if spec.InstallDir != "" {
+		for _, dir := range []string{spec.Store, path.Dir(spec.InstallDir)} {
+			if err := client.Mkdir(ctx, dir); err != nil {
+				return Result{}, err
 			}
 		}
 	}
@@ -276,7 +288,11 @@ func buildEnv(spec RunSpec, resultPath string, timeout time.Duration) []string {
 		"MEMOH_DEP_ACTION=" + string(spec.Action),
 		"MEMOH_DEP_WORKSPACE_TARGET=native",
 		"MEMOH_DEP_HOME=" + spec.Home,
+		"MEMOH_DEP_CONTROL_ROOT=" + controlpath.Directory(path.Dir(spec.Home)),
 		"MEMOH_DEP_BIN=" + spec.ShimDir,
+		"MEMOH_DEP_STORE=" + spec.Store,
+		"MEMOH_DEP_INSTALL_DIR=" + spec.InstallDir,
+		"MEMOH_DEP_STAGING=" + spec.StagingDir,
 		"MEMOH_DEP_VERSION=" + spec.Version,
 		"MEMOH_DEP_CURRENT_VERSION=" + spec.CurrentVersion,
 		"MEMOH_DEP_RESULT=" + resultPath,

@@ -268,24 +268,73 @@ type BotChannelRoute struct {
 	TeamID                 pgtype.UUID        `json:"team_id"`
 }
 
-type BotDependencyInstallation struct {
-	ID                 pgtype.UUID        `json:"id"`
+type BotDependencyAuthorizationEvent struct {
 	TeamID             pgtype.UUID        `json:"team_id"`
 	BotID              pgtype.UUID        `json:"bot_id"`
 	DependencyID       string             `json:"dependency_id"`
-	Source             string             `json:"source"`
-	Status             string             `json:"status"`
-	InstalledVersion   string             `json:"installed_version"`
-	LatestVersion      string             `json:"latest_version"`
-	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
-	LastError          string             `json:"last_error"`
-	ManifestDigest     string             `json:"manifest_digest"`
+	OperationID        string             `json:"operation_id"`
+	Action             string             `json:"action"`
+	Actor              string             `json:"actor"`
+	Version            string             `json:"version"`
 	SourceUrl          string             `json:"source_url"`
 	RegistryID         string             `json:"registry_id"`
 	DefinitionRevision string             `json:"definition_revision"`
-	OperationID        string             `json:"operation_id"`
+	ManifestDigest     string             `json:"manifest_digest"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotDependencyDesiredInstallation struct {
+	TeamID                  pgtype.UUID        `json:"team_id"`
+	BotID                   pgtype.UUID        `json:"bot_id"`
+	DependencyID            string             `json:"dependency_id"`
+	DesiredRevision         string             `json:"desired_revision"`
+	Version                 string             `json:"version"`
+	SourceUrl               string             `json:"source_url"`
+	RegistryID              string             `json:"registry_id"`
+	DefinitionRevision      string             `json:"definition_revision"`
+	ManifestDigest          string             `json:"manifest_digest"`
+	AuthorizedAt            pgtype.Timestamptz `json:"authorized_at"`
+	AuthorizedByOperationID string             `json:"authorized_by_operation_id"`
+	AuthorizedByActor       string             `json:"authorized_by_actor"`
+	PlatformOs              string             `json:"platform_os"`
+	PlatformArch            string             `json:"platform_arch"`
+	PlatformLibc            string             `json:"platform_libc"`
+	Entrypoints             []byte             `json:"entrypoints"`
+	InstallationID          string             `json:"installation_id"`
+	PayloadPath             string             `json:"payload_path"`
+	StoreRoot               string             `json:"store_root"`
+	RepairStatus            string             `json:"repair_status"`
+	RepairOperationID       string             `json:"repair_operation_id"`
+	RepairAttempts          int32              `json:"repair_attempts"`
+	RepairNextAttemptAt     pgtype.Timestamptz `json:"repair_next_attempt_at"`
+	RepairLastErrorCode     string             `json:"repair_last_error_code"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotDependencyInstallation struct {
+	ID                          pgtype.UUID        `json:"id"`
+	TeamID                      pgtype.UUID        `json:"team_id"`
+	BotID                       pgtype.UUID        `json:"bot_id"`
+	DependencyID                string             `json:"dependency_id"`
+	Source                      string             `json:"source"`
+	Status                      string             `json:"status"`
+	InstalledVersion            string             `json:"installed_version"`
+	LatestVersion               string             `json:"latest_version"`
+	LastCheckedAt               pgtype.Timestamptz `json:"last_checked_at"`
+	LastError                   string             `json:"last_error"`
+	ManifestDigest              string             `json:"manifest_digest"`
+	SourceUrl                   string             `json:"source_url"`
+	RegistryID                  string             `json:"registry_id"`
+	DefinitionRevision          string             `json:"definition_revision"`
+	OperationID                 string             `json:"operation_id"`
+	LastOperationID             string             `json:"last_operation_id"`
+	OperationSourceUrl          string             `json:"operation_source_url"`
+	OperationRegistryID         string             `json:"operation_registry_id"`
+	OperationDefinitionRevision string             `json:"operation_definition_revision"`
+	OperationIntent             []byte             `json:"operation_intent"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BotEmailBinding struct {

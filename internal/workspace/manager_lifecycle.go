@@ -213,7 +213,10 @@ func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 	taskInfo, err := m.service.GetTaskInfo(ctx, containerID)
 	if err == nil {
 		if taskInfo.Status == ctr.TaskStatusRunning {
-			return m.ensureContainerNetwork(ctx, containerID, botID)
+			if err := m.ensureContainerNetwork(ctx, containerID, botID); err != nil {
+				return err
+			}
+			return m.WaitForWorkspaceReady(ctx, botID)
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
 			if !ctr.IsNotFound(err) {
@@ -226,7 +229,12 @@ func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 		return err
 	}
 
-	return m.startTaskAndEnsureNetwork(ctx, botID, containerID)
+	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
+		return err
+	}
+	// API stop/start and lazy startup must pass the same maintenance boundary
+	// as initial setup before reporting a usable workspace to their callers.
+	return m.WaitForWorkspaceReady(ctx, botID)
 }
 
 // StopBot stops the container task for a bot and marks it stopped in DB.

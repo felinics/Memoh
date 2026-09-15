@@ -40,7 +40,9 @@ const (
 
 // Installation is one row of bot_dependency_installations.
 type Installation struct {
+	OperationIntent    *OperationReceipt
 	OperationID        string
+	LastOperationID    string
 	SourceURL          string
 	RegistryID         string
 	DefinitionRevision string
@@ -66,8 +68,19 @@ type InstallationKey struct {
 	DependencyID string
 }
 
+// LegacyOperationEpochStore records the first complete workspace lifetime seen
+// for an old in-flight operation. It never authorizes recovery or changes the
+// operation's timestamp; later observations return the original epoch.
+type LegacyOperationEpochStore interface {
+	EnrollLegacyOperationEpoch(context.Context, InstallationKey, string, string) (string, error)
+}
+
 // UpsertInstallation creates or replaces the intent portion of a record.
 type UpsertInstallation struct {
+	// OperationIntent freezes authorized execution independently of workspace files.
+	OperationIntent *OperationReceipt
+	// AuthorizedByActor is only used when a management claim writes its audit.
+	AuthorizedByActor  string
 	SourceURL          string
 	RegistryID         string
 	DefinitionRevision string

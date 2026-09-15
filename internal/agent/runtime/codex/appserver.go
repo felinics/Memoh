@@ -76,7 +76,7 @@ var ErrAuthRequired = external.ErrAuthRequired
 const handshakeTimeout = 60 * time.Second
 
 func startAppServerSession(ctx context.Context, botID, botAgentID string, client *bridge.Client, cfg Config, launcher external.Launcher, logger *slog.Logger) (*appServer, error) {
-	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg, launcher.Path)
+	proc, err := startAppServer(ctx, client, defaultProjectPath, codexHome(botAgentID), cfg, launcher)
 	if err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}

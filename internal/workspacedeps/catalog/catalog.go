@@ -112,6 +112,18 @@ func loadEntryFiles(dir string, read func(string) ([]byte, error)) (*entry, erro
 		}
 		loaded.scripts[ref.action] = script
 	}
+	if install, ok := loaded.scripts[ActionInstall]; ok {
+		for _, line := range strings.Split(install.content, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "# memoh-storage-layout: isolated" {
+				loaded.dep.StorageLayout = "isolated"
+				break
+			}
+			if line != "" && !strings.HasPrefix(line, "#") {
+				break
+			}
+		}
+	}
 	loaded.dep.ManifestDigest = DigestFiles(files)
 	return loaded, nil
 }

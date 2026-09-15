@@ -7,7 +7,7 @@
 // afterwards like anything else installed from the Supermarket. Cancellation,
 // an unavailable workspace or platform, and failed or backgrounded
 // installation all leave the agent disabled.
-import { computed, onBeforeUnmount, onDeactivated, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -25,6 +25,7 @@ import {
   getSupermarketRegistriesByRegistryIdAppsByAppId,
   postBotsByBotIdContainerStart,
   type BotagentsBotAgent,
+  type HandlersSupermarketAppDescriptor,
 } from '@memohai/sdk'
 import {
   preflightDependencies,
@@ -36,6 +37,8 @@ import { resolveApiErrorMessage } from '@/utils/api-error'
 import { dependencyDisplayName } from '@/utils/workspace-dependency'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
 import AppProgressDialog from './app-progress-dialog.vue'
+import AppDependencyConfirmations from './app-dependency-confirmations.vue'
+import { useAppPreparation } from '../composables/useAppPreparation'
 import {
   agentDependencyRequirement,
   dependencyItemFromPreflight,
@@ -67,6 +70,17 @@ const starting = ref(false)
 
 const confirmOpen = ref(false)
 const installing = ref(false)
+const loadingApp = ref(false)
+const canonicalApp = shallowRef<HandlersSupermarketAppDescriptor | null>(null)
+const { prepared, preparing, error: prepareError, prepare } = useAppPreparation(() => {
+  const app = canonicalApp.value
+  const depId = item.value?.id
+  if (!confirmOpen.value || !props.botId || !depId || !app?.revision) return null
+  return {
+    botId: props.botId,
+    request: { action: 'install', registry_id: DEPENDENCY_REGISTRY, app_id: depId, revision: app.revision },
+  }
+})
 
 const VIEWER_ID = 'dependency-enable-flow'
 const progressOpen = ref(false)
@@ -91,6 +105,8 @@ async function run(agent: BotagentsBotAgent): Promise<boolean> {
 function finish(ok: boolean) {
   generation += 1
   checking.value = false
+  loadingApp.value = false
+  canonicalApp.value = null
   const resolve = settle
   settle = null
   workspaceOpen.value = false
@@ -155,15 +171,19 @@ function goToContainer() {
 
 async function startAndContinue() {
   if (starting.value) return
+  const currentGeneration = generation
+  const botId = props.botId
   starting.value = true
   try {
-    await postBotsByBotIdContainerStart({ path: { bot_id: props.botId }, throwOnError: true })
+    await postBotsByBotIdContainerStart({ path: { bot_id: botId }, throwOnError: true })
   } catch (error) {
+    if (currentGeneration !== generation || props.botId !== botId) return
     toast.error(resolveApiErrorMessage(error, t('bots.container.startFailed')))
     return
   } finally {
     starting.value = false
   }
+  if (currentGeneration !== generation || props.botId !== botId) return
   workspaceOpen.value = false
   await preflight()
 }
@@ -172,26 +192,45 @@ function onConfirmOpenChange(value: boolean) {
   if (!value && !installing.value) finish(false)
 }
 
-// The canonical App of the dependency carries it; installing that
-// App's current release installs the dependency.
-async function onConfirmed() {
+// Resolve the canonical App and its dependency recipes before the user confirms.
+async function prepareInstall() {
   const current = item.value
   const depId = current?.id
-  if (!current || !depId) return finish(false)
-  installing.value = true
+  if (!current || !depId || loadingApp.value || preparing.value) return
+  const currentGeneration = generation
+  const botId = props.botId
+  loadingApp.value = true
   try {
     const { data } = await getSupermarketRegistriesByRegistryIdAppsByAppId({
       path: { registry_id: DEPENDENCY_REGISTRY, app_id: depId },
       throwOnError: true,
     })
+    if (currentGeneration !== generation || props.botId !== botId || !confirmOpen.value) return
     if (!data.revision) throw new Error('missing revision')
+    canonicalApp.value = data
+    await prepare()
+  } catch (error) {
+    if (currentGeneration !== generation || props.botId !== botId || !confirmOpen.value) return
+    toast.error(resolveApiErrorMessage(error, t('apps.prepare.failed')))
+  } finally {
+    if (currentGeneration === generation) loadingApp.value = false
+  }
+}
+
+function onConfirmed() {
+  const confirmation = prepared.value
+  const app = canonicalApp.value
+  if (installing.value || !app || !confirmation?.result.revision || confirmation.request.action !== 'install') return
+  installing.value = true
+  try {
     const result = store.start({
-      botId: props.botId,
+      botId: confirmation.botId,
       registryId: DEPENDENCY_REGISTRY,
-      appId: depId,
-      name: appDisplayName(data, locale.value),
+      appId: confirmation.request.app_id,
+      name: appDisplayName(app, locale.value),
       action: 'install',
-      install: { registryId: DEPENDENCY_REGISTRY, appId: depId, revision: data.revision },
+      install: { registryId: DEPENDENCY_REGISTRY, appId: confirmation.request.app_id, revision: confirmation.result.revision },
+      dependencyConfirmations: confirmation.result.dependencies ?? [],
       onBackgroundDone,
     })
     confirmOpen.value = false
@@ -241,6 +280,7 @@ function onProgressOpenChange(value: boolean) {
 
 onDeactivated(() => finish(false))
 onBeforeUnmount(() => finish(false))
+watch(() => props.botId, () => finish(false), { flush: 'sync' })
 
 defineExpose({ run, checking })
 </script>
@@ -311,8 +351,19 @@ defineExpose({ run, checking })
           {{ t('apps.enableFlow.installDescription', { name }) }}
         </DialogDescription>
       </DialogHeader>
-      <DialogBody class="min-w-0">
+      <DialogBody class="min-w-0 space-y-4">
         <DependencyKvList :rows="workspaceRows" />
+        <AppDependencyConfirmations
+          v-if="prepared"
+          :dependencies="prepared.result.dependencies ?? []"
+        />
+        <p
+          v-if="prepareError"
+          role="alert"
+          class="text-body text-destructive"
+        >
+          {{ prepareError }}
+        </p>
       </DialogBody>
       <DialogFooter class="min-w-0 items-center gap-2">
         <Button
@@ -323,7 +374,16 @@ defineExpose({ run, checking })
           {{ t('common.cancel') }}
         </Button>
         <Button
+          v-if="!prepared"
+          :loading="loadingApp || preparing"
+          @click="prepareInstall"
+        >
+          {{ t('apps.prepare.review') }}
+        </Button>
+        <Button
+          v-else
           :loading="installing"
+          :disabled="!prepared.result.revision"
           @click="onConfirmed"
         >
           {{ t('bots.dependencies.confirm.installAndEnable') }}

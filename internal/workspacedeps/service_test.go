@@ -212,6 +212,12 @@ func (f *fakeStore) ClaimOperation(_ context.Context, in UpsertInstallation, ope
 		rec = Installation{ID: "rec-" + strconv.Itoa(f.nextID), BotID: in.BotID, DependencyID: in.DependencyID, Source: in.Source, SourceURL: in.SourceURL, RegistryID: in.RegistryID, DefinitionRevision: in.DefinitionRevision, CreatedAt: f.now()}
 	}
 	rec.Status, rec.LastError, rec.OperationID = in.Status, "", operationID
+	if in.OperationIntent != nil {
+		copied := *in.OperationIntent
+		rec.OperationIntent = &copied
+	} else {
+		rec.OperationIntent = nil
+	}
 	rec.UpdatedAt = f.now()
 	f.records[in.InstallationKey] = rec
 	f.writes++
@@ -232,6 +238,7 @@ func (f *fakeStore) FinishOperation(_ context.Context, key InstallationKey, oper
 		return rec, nil
 	}
 	finished := *terminal
+	finished.OperationIntent = nil
 	finished.ID, finished.BotID, finished.DependencyID = rec.ID, rec.BotID, rec.DependencyID
 	finished.CreatedAt, finished.UpdatedAt, finished.OperationID = rec.CreatedAt, f.now(), ""
 	f.records[key] = finished
@@ -744,14 +751,14 @@ func TestListLeavesInProgressAndFailedRecordsAlone(t *testing.T) {
 // TestListImageBaselineAndOverlay covers the two shapes an installable
 // dependency the image also ships can take: image copy only (a baseline the
 // panel offers to install over) and a managed overlay on top of it (what
-// remove clears along with the managed copy).
+// remove clears while preserving the image baseline).
 func TestListImageBaselineAndOverlay(t *testing.T) {
 	f := newServiceFixture(t)
 	f.present("agent-x", SourceToolkit, "1.9.0", nil)
 	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalled, InstalledVersion: "1.0.0", LatestVersion: "1.2.0"})
 	managedTool := Candidate{Source: SourceManaged, Path: filepath.Join(f.home("tool-y"), "current", "bin", "tool-y"), Version: "1.0.0"}
 	imageTool := Candidate{Source: SourceToolkit, Path: "/opt/memoh/toolkit/bin/tool-y", Version: "0.9.0"}
-	f.presentCandidates("tool-y", &State{Version: "1.0.0", PreviousVersion: "0.9.5"}, managedTool, imageTool)
+	f.presentCandidates("tool-y", &State{Version: "1.0.0"}, managedTool, imageTool)
 
 	result, err := f.svc.List(f.ctx(), testBot)
 	if err != nil {
@@ -761,8 +768,8 @@ func TestListImageBaselineAndOverlay(t *testing.T) {
 	if agent.InstalledVersion != "1.9.0" || agent.ImageVersion != "1.9.0" || agent.Overlay || agent.Installation.Source != InstallationSourceImage {
 		t.Errorf("agent-x entry = %+v, want the image copy as baseline", agent)
 	}
-	if got := actionsOf(agent); got != "install,remove" {
-		t.Errorf("agent-x actions = %s, want install and remove", got)
+	if got := actionsOf(agent); got != "install" {
+		t.Errorf("agent-x actions = %s, want install", got)
 	}
 	tool := f.entry(t, result, "tool-y")
 	if !tool.Overlay || tool.InstalledVersion != "1.0.0" || tool.ImageVersion != "0.9.0" || tool.Installation.Source != InstallationSourceManaged {
@@ -771,26 +778,25 @@ func TestListImageBaselineAndOverlay(t *testing.T) {
 	if !tool.UpdateAvailable || tool.LatestVersion != "1.2.0" {
 		t.Errorf("tool-y update state = %+v", tool)
 	}
-	if got := actionsOf(tool); got != "update,reinstall,remove,rollback,check_update" {
+	if got := actionsOf(tool); got != "update,reinstall,remove,check_update" {
 		t.Errorf("tool-y actions = %s", got)
 	}
 
-	// Removing the dependency clears both copies; discovery has nothing left
-	// to adopt and the installed list must drop the row.
+	// Removing the overlay reveals the image baseline without authorizing it.
 	f.writeState(t, "tool-y", State{Version: "1.0.0", Entrypoints: map[string]string{"tool-y": managedTool.Path}})
 	if _, err := f.svc.Remove(f.ctx(), testBot, "tool-y", nil); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	f.absent("tool-y")
+	f.presentCandidates("tool-y", nil, imageTool)
 	result, err = f.svc.List(f.ctx(), testBot)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	tool = f.entry(t, result, "tool-y")
-	if tool.Status != "" || tool.InstalledVersion != "" || tool.Installation != nil || tool.Observed.Present {
-		t.Errorf("tool-y entry after remove = %+v, want an absent dependency", tool)
+	if tool.Status != StatusInstalled || tool.InstalledVersion != "0.9.0" || tool.Overlay || tool.Installation.Source != InstallationSourceImage {
+		t.Errorf("tool-y entry after remove = %+v, want the image baseline", tool)
 	}
-	if got := actionsOf(tool); got != "install" {
+	if got := actionsOf(tool); got != "install,check_update" {
 		t.Errorf("tool-y actions after remove = %s", got)
 	}
 }
@@ -873,7 +879,13 @@ func TestPreflight(t *testing.T) {
 func TestInstallSucceeds(t *testing.T) {
 	f := newServiceFixture(t)
 	f.env = []string{"NPM_MIRROR=https://mirror"}
-	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, "1.0.0"), nil })
+	f.setRun(func(spec RunSpec) (Result, error) {
+		version := spec.Version
+		if version == "" {
+			version = "1.0.0"
+		}
+		return f.installResult(spec.DepID, version), nil
+	})
 	if _, err := f.svc.List(f.ctx(), testBot); err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -908,7 +920,7 @@ func TestInstallSucceeds(t *testing.T) {
 	}
 
 	state := f.readState(t, "tool-y")
-	if state.DependencyID != "tool-y" || state.Version != "1.0.0" || state.ManifestDigest != dep.ManifestDigest || !state.InstalledAt.Equal(f.now) || state.PreviousVersion != "" {
+	if state.DependencyID != "tool-y" || state.Version != "1.0.0" || state.ManifestDigest != dep.ManifestDigest || !state.InstalledAt.Equal(f.now) {
 		t.Errorf("state.json = %+v", state)
 	}
 	if state.Entrypoints["tool-y"] != result.Entrypoints["tool-y"] {
@@ -949,16 +961,16 @@ func TestInstallSucceeds(t *testing.T) {
 
 // TestInstallRequestedVersion pins the version contract: the requested
 // version reaches the script as MEMOH_DEP_VERSION (over a manifest pin), and
-// the version recorded is the one the script reports, not the request.
+// the script must report the exact version that was requested.
 func TestInstallRequestedVersion(t *testing.T) {
 	f := newServiceFixture(t)
-	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, "1.3.1"), nil })
+	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, spec.Version), nil })
 
-	result, err := f.svc.Install(f.ctx(), testBot, "tool-y", " 1.3 ", nil)
+	result, err := f.svc.Install(f.ctx(), testBot, "tool-y", " 1.3.1 ", nil)
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if spec := f.runSpecs()[0]; spec.Version != "1.3" {
+	if spec := f.runSpecs()[0]; spec.Version != "1.3.1" {
 		t.Errorf("MEMOH_DEP_VERSION = %q, want the trimmed request", spec.Version)
 	}
 	if result.Version != "1.3.1" || result.Installation.InstalledVersion != "1.3.1" || f.readState(t, "tool-y").Version != "1.3.1" {
@@ -1033,7 +1045,11 @@ func TestInstallBusy(t *testing.T) {
 			once.Do(func() { close(started) })
 			<-release
 		}
-		return f.installResult(spec.DepID, "1.0.0"), nil
+		version := spec.Version
+		if version == "" {
+			version = "1.0.0"
+		}
+		return f.installResult(spec.DepID, version), nil
 	})
 
 	done := make(chan error, 1)
@@ -1211,7 +1227,11 @@ func TestCancelledRequestStillCommitsFinishedScript(t *testing.T) {
 		if spec.Action == catalog.ActionRemove {
 			return Result{}, nil
 		}
-		return f.installResult(spec.DepID, "1.0.0"), nil
+		version := spec.Version
+		if version == "" {
+			version = "1.0.0"
+		}
+		return f.installResult(spec.DepID, version), nil
 	}
 
 	result, err := f.svc.Install(ctx, testBot, "tool-y", "", nil)
@@ -1269,7 +1289,7 @@ func TestListReclaimsInterruptedOperations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newServiceFixture(t)
 			dep := f.cat.MustGet("tool-y")
-			f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalling, OperationID: strings.Repeat("a", 32), UpdatedAt: f.now.Add(-tc.age(dep))})
+			f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalling, OperationID: strings.Repeat("a", 32), OperationIntent: &OperationReceipt{ControlProtocol: controlProtocol}, UpdatedAt: f.now.Add(-tc.age(dep))})
 			if tc.lockHeld || tc.lockAbandoned {
 				f.mu.Lock()
 				f.observed["tool-y"] = Observed{DepID: "tool-y", LockHeld: tc.lockHeld, LockAbandoned: tc.lockAbandoned, Receipt: &OperationReceipt{ID: strings.Repeat("a", 32), DependencyID: "tool-y"}}
@@ -1311,7 +1331,7 @@ func TestListReclaimOnlyTrustsSnapshotsTakenAfterTheOperation(t *testing.T) {
 	if _, err := f.svc.List(f.ctx(), testBot); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalling, OperationID: strings.Repeat("b", 32), UpdatedAt: f.now})
+	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusInstalling, OperationID: strings.Repeat("b", 32), OperationIntent: &OperationReceipt{ControlProtocol: controlProtocol}, UpdatedAt: f.now})
 	f.now = f.now.Add(2 * time.Minute)
 
 	result, err := f.svc.List(f.ctx(), testBot)
@@ -1395,7 +1415,13 @@ func TestListDegradesWhenDiscoveryFails(t *testing.T) {
 
 func TestInstallGuards(t *testing.T) {
 	f := newServiceFixture(t)
-	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, "1.0.0"), nil })
+	f.setRun(func(spec RunSpec) (Result, error) {
+		version := spec.Version
+		if version == "" {
+			version = "1.0.0"
+		}
+		return f.installResult(spec.DepID, version), nil
+	})
 
 	if _, err := f.svc.Install(f.ctx(), testBot, "img-z", "", nil); !errors.Is(err, ErrActionUnsupported) {
 		t.Errorf("image install error = %v", err)
@@ -1444,11 +1470,17 @@ func TestInstallGuards(t *testing.T) {
 	}
 }
 
-func TestUpdateFallsBackToInstallScriptAndKeepsPrevious(t *testing.T) {
+func TestUpdateFallsBackToInstallScript(t *testing.T) {
 	f := newServiceFixture(t)
 	f.seed("tool-y", StatusInstalled, "1.0.0")
 	f.writeState(t, "tool-y", State{DependencyID: "tool-y", Version: "1.0.0", Entrypoints: map[string]string{"tool-y": "/old"}})
-	f.setRun(func(spec RunSpec) (Result, error) { return f.installResult(spec.DepID, "1.1.0"), nil })
+	f.setRun(func(spec RunSpec) (Result, error) {
+		version := spec.Version
+		if version == "" {
+			version = "1.1.0"
+		}
+		return f.installResult(spec.DepID, version), nil
+	})
 
 	result, err := f.svc.Update(f.ctx(), testBot, "tool-y", "", nil)
 	if err != nil {
@@ -1465,15 +1497,15 @@ func TestUpdateFallsBackToInstallScriptAndKeepsPrevious(t *testing.T) {
 		t.Errorf("status history = %v", got)
 	}
 	state := f.readState(t, "tool-y")
-	if state.Version != "1.1.0" || state.PreviousVersion != "1.0.0" {
+	if state.Version != "1.1.0" {
 		t.Errorf("state.json = %+v", state)
 	}
 
-	// Updating to the same version keeps the older fallback.
+	// A subsequent update records one current version.
 	if _, err := f.svc.Update(f.ctx(), testBot, "tool-y", "", nil); err != nil {
 		t.Fatalf("Update again: %v", err)
 	}
-	if state := f.readState(t, "tool-y"); state.Version != "1.1.0" || state.PreviousVersion != "1.0.0" {
+	if state := f.readState(t, "tool-y"); state.Version != "1.1.0" {
 		t.Errorf("state.json after same-version update = %+v", state)
 	}
 
@@ -1486,17 +1518,21 @@ func TestUpdateFallsBackToInstallScriptAndKeepsPrevious(t *testing.T) {
 	}
 }
 
-func TestReinstallPreservesWorkingCopyAndRollbackChain(t *testing.T) {
+func TestReinstallPreservesWorkingCopy(t *testing.T) {
 	f := newServiceFixture(t)
 	f.seed("tool-y", StatusInstalled, "1.0.0")
-	f.writeState(t, "tool-y", State{Version: "1.0.0", PreviousVersion: "0.9.0", Previous: &PreviousInstallation{Version: "0.9.0", ManifestDigest: "previous-digest"}, Entrypoints: map[string]string{"tool-y": "/x", "obsolete": "/y"}})
+	f.writeState(t, "tool-y", State{Version: "1.0.0", Entrypoints: map[string]string{"tool-y": "/x", "obsolete": "/y"}})
 	f.writeShim(t, "tool-y")
 	f.writeShim(t, "obsolete")
 	f.setRun(func(spec RunSpec) (Result, error) {
 		if spec.Action != catalog.ActionReinstall || spec.Script != svcToolInstallScript {
 			t.Errorf("unsafe reinstall script: %+v", spec)
 		}
-		return f.installResult(spec.DepID, "1.0.0"), nil
+		version := spec.Version
+		if version == "" {
+			version = "1.0.0"
+		}
+		return f.installResult(spec.DepID, version), nil
 	})
 	result, err := f.svc.Reinstall(f.ctx(), testBot, "tool-y", "", nil)
 	if err != nil {
@@ -1505,9 +1541,7 @@ func TestReinstallPreservesWorkingCopyAndRollbackChain(t *testing.T) {
 	if result.Action != catalog.ActionReinstall {
 		t.Errorf("action = %s", result.Action)
 	}
-	if state := f.readState(t, "tool-y"); state.PreviousVersion != "0.9.0" || state.Previous.ManifestDigest != "previous-digest" {
-		t.Errorf("rollback chain lost: %+v", state)
-	}
+
 	if _, err := os.Stat(f.shimPath("obsolete")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("obsolete shim survived: %v", err)
 	}
@@ -1517,7 +1551,7 @@ func TestReinstallPreservesWorkingCopyAndRollbackChain(t *testing.T) {
 	if _, err := f.svc.Reinstall(f.ctx(), testBot, "tool-y", "", nil); err == nil {
 		t.Fatal("expected failed download")
 	}
-	if state := f.readState(t, "tool-y"); state.Version != "1.0.0" || state.PreviousVersion != "0.9.0" {
+	if state := f.readState(t, "tool-y"); state.Version != "1.0.0" {
 		t.Errorf("failed reinstall removed working state: %+v", state)
 	}
 	if _, err := os.Stat(f.shimPath("tool-y")); err != nil {
@@ -1576,60 +1610,10 @@ func TestRemoveDeletesShimsAndRecord(t *testing.T) {
 	}
 }
 
-func TestRollback(t *testing.T) {
-	f := newServiceFixture(t)
-	entrypoints := map[string]string{"tool-y": filepath.Join(f.home("tool-y"), "current", "bin", "tool-y")}
-	f.seed("tool-y", StatusInstalled, "1.1.0")
-
-	_, err := f.svc.Rollback(f.ctx(), testBot, "tool-y")
-	if !errors.Is(err, ErrRollbackUnavailable) {
-		t.Errorf("Rollback without state error = %v", err)
-	}
-	f.writeState(t, "tool-y", State{Version: "1.1.0", Entrypoints: entrypoints})
-	if _, err := f.svc.Rollback(f.ctx(), testBot, "tool-y"); !errors.Is(err, ErrRollbackUnavailable) {
-		t.Errorf("Rollback without previous version error = %v", err)
-	}
-	f.writeState(t, "tool-y", State{Version: "1.1.0", PreviousVersion: "1.0.0", ManifestDigest: "sha256:old", Entrypoints: entrypoints})
-	if _, err := f.svc.Rollback(f.ctx(), testBot, "tool-y"); !errors.Is(err, ErrRollbackUnavailable) {
-		t.Errorf("Rollback with missing versions dir error = %v", err)
-	}
-	if len(f.runSpecs()) != 0 {
-		t.Fatalf("unavailable rollbacks ran scripts: %+v", f.runSpecs())
-	}
-	if got := f.store.statuses(f.key("tool-y")); len(got) != 0 {
-		t.Errorf("unavailable rollbacks changed status: %v", got)
-	}
-
-	if err := os.MkdirAll(filepath.Join(VersionsDir(f.home("tool-y")), "1.0.0"), 0o750); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	result, err := f.svc.Rollback(f.ctx(), testBot, "tool-y")
-	if err != nil {
-		t.Fatalf("Rollback: %v", err)
-	}
-	if result.Action != ActionRollback || result.Version != "1.0.0" || result.Installation.InstalledVersion != "1.0.0" || result.Entrypoints["tool-y"] != entrypoints["tool-y"] {
-		t.Errorf("result = %+v", result)
-	}
-	specs := f.runSpecs()
-	if len(specs) != 1 {
-		t.Fatalf("runs = %d, want 1", len(specs))
-	}
-	if spec := specs[0]; spec.Action != ActionRollback || spec.Script != rollbackScript || spec.Version != "1.0.0" || spec.CurrentVersion != "1.1.0" || spec.Timeout != rollbackTimeout {
-		t.Errorf("spec = %+v", spec)
-	}
-	if got := f.store.statuses(f.key("tool-y")); !statusesEqual(got, StatusUpdating, StatusInstalled) {
-		t.Errorf("status history = %v", got)
-	}
-	state := f.readState(t, "tool-y")
-	if state.Version != "1.0.0" || state.PreviousVersion != "1.1.0" || state.ManifestDigest != "sha256:old" || state.Entrypoints["tool-y"] != entrypoints["tool-y"] || !state.InstalledAt.Equal(f.now) {
-		t.Errorf("state.json = %+v", state)
-	}
-}
-
 func TestReapStaleUsesWorkspaceLiveness(t *testing.T) {
 	f := newServiceFixture(t)
 	for _, bot := range []string{"live", "dead", "stopped", "offline", "local"} {
-		f.store.seed(Installation{BotID: bot, DependencyID: "agent-x", Status: StatusInstalling, OperationID: strings.Repeat("c", 32), UpdatedAt: f.now.Add(-48 * time.Hour)})
+		f.store.seed(Installation{BotID: bot, DependencyID: "agent-x", Status: StatusInstalling, OperationID: strings.Repeat("c", 32), OperationIntent: &OperationReceipt{ControlProtocol: controlProtocol}, UpdatedAt: f.now.Add(-48 * time.Hour)})
 	}
 	f.ws.setState("stopped", WorkspaceNotRunning)
 	f.ws.setState("offline", WorkspaceMissing)
@@ -1669,10 +1653,10 @@ func TestReapStaleUsesWorkspaceLiveness(t *testing.T) {
 func TestActionSupportedFollowsScripts(t *testing.T) {
 	f := newServiceFixture(t)
 	want := map[string]string{
-		"agent-x":  "install,update,reinstall,remove,rollback",
-		"tool-y":   "install,update,reinstall,remove,rollback,check_update",
+		"agent-x":  "install,update,reinstall,remove",
+		"tool-y":   "install,update,reinstall,remove,check_update",
 		"img-z":    "",
-		"mac-only": "install,update,reinstall,remove,rollback",
+		"mac-only": "install,update,reinstall,remove",
 	}
 	result, err := f.svc.Catalog(t.Context(), false)
 	if err != nil {
@@ -1717,9 +1701,7 @@ func TestScriptPreview(t *testing.T) {
 	if preview != WrapScript(svcToolInstallScript) {
 		t.Errorf("reinstall preview = %q", preview)
 	}
-	if preview, err := f.svc.ScriptPreview(t.Context(), "agent-x", ActionRollback); err != nil || !strings.Contains(preview, `dep_switch "$MEMOH_DEP_HOME/versions/$MEMOH_DEP_VERSION"`) {
-		t.Errorf("rollback preview = %q, %v", preview, err)
-	}
+
 	if _, err := f.svc.ScriptPreview(t.Context(), "agent-x", catalog.ActionCheckUpdate); !errors.Is(err, ErrActionUnsupported) {
 		t.Errorf("agent check_update preview error = %v", err)
 	}
@@ -1830,7 +1812,7 @@ rm -rf "$MEMOH_DEP_HOME"
 dep_result '{}'
 `
 
-func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
+func TestInstallUpdateRemoveEndToEnd(t *testing.T) {
 	f := newServiceFixture(t)
 	fsys := fstest.MapFS{
 		"foo/dependency.yaml": &fstest.MapFile{Data: []byte(e2eFooYAML)},
@@ -1889,30 +1871,15 @@ func TestInstallUpdateRollbackRemoveEndToEnd(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 	assertShimPrints("foo 1.1.0")
-	if state := f.readState(t, "foo"); state.Version != "1.1.0" || state.PreviousVersion != "1.0.0" {
+	if state := f.readState(t, "foo"); state.Version != "1.1.0" {
 		t.Errorf("state.json after update = %+v", state)
 	}
 	list, err = f.svc.List(f.ctx(), testBot)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if foo := f.entry(t, list, "foo"); foo.InstalledVersion != "1.1.0" || !strings.Contains(actionsOf(foo), "rollback") {
+	if foo := f.entry(t, list, "foo"); foo.InstalledVersion != "1.1.0" {
 		t.Errorf("entry after update = %+v", foo)
-	}
-
-	rolled, err := f.svc.Rollback(f.ctx(), testBot, "foo")
-	if err != nil {
-		t.Fatalf("Rollback: %v", err)
-	}
-	if rolled.Version != "1.0.0" {
-		t.Errorf("rollback result = %+v", rolled)
-	}
-	assertShimPrints("foo 1.0.0")
-	if state := f.readState(t, "foo"); state.Version != "1.0.0" || state.PreviousVersion != "1.1.0" {
-		t.Errorf("state.json after rollback = %+v", state)
-	}
-	if rec, _ := f.store.get(f.key("foo")); rec.InstalledVersion != "1.0.0" || rec.Status != StatusInstalled {
-		t.Errorf("record after rollback = %+v", rec)
 	}
 
 	if _, err := f.svc.Remove(f.ctx(), testBot, "foo", nil); err != nil {

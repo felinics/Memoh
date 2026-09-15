@@ -16,12 +16,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
 
 	"github.com/creack/pty"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
@@ -57,6 +59,8 @@ type Server struct {
 	dataMount         string
 	allowHostAbsolute bool
 	reverseHTTP       *ReverseHTTPBroker
+	executionOwner    string
+	executionUsed     atomic.Bool
 }
 
 func New(opts Options) *Server {
@@ -80,6 +84,7 @@ func New(opts Options) *Server {
 		dataMount:         filepath.Clean(dataMount),
 		allowHostAbsolute: opts.AllowHostAbsolute,
 		reverseHTTP:       opts.ReverseHTTP,
+		executionOwner:    fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()),
 	}
 }
 
@@ -379,6 +384,27 @@ func (s *Server) Exec(stream pb.ContainerService_ExecServer) error {
 		return status.Error(codes.InvalidArgument, "command is required")
 	}
 
+	md, _ := metadata.FromIncomingContext(stream.Context())
+	maintenance := len(md.Get("x-memoh-exec-purpose")) == 1 && md.Get("x-memoh-exec-purpose")[0] == "payload-gc"
+	if maintenance && (command != "exec sh -s" || firstMsg.GetPty()) {
+		return status.Error(codes.InvalidArgument, "invalid maintenance command")
+	}
+	release, admissionErr := s.beginExecution(stream.Context(), maintenance)
+	if admissionErr != nil {
+		if maintenance {
+			return status.Error(codes.FailedPrecondition, "workspace cleanup window is closed")
+		}
+		// Failure to persist ownership must never permit maintenance later in
+		// this bridge lifetime, but does not prevent ordinary workspace use.
+		s.executionUsed.Store(true)
+	} else {
+		defer release()
+	}
+	if maintenance {
+		if err := stream.SendHeader(metadata.Pairs("x-memoh-payload-gc-window", "accepted")); err != nil {
+			return err
+		}
+	}
 	if firstMsg.GetPty() {
 		return s.execPTY(stream, firstMsg)
 	}

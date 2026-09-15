@@ -12,20 +12,49 @@ import (
 )
 
 const claimBotDependencyOperation = `-- name: ClaimBotDependencyOperation :one
+WITH target_lock AS MATERIALIZED (
+  SELECT d.desired_revision FROM bot_dependency_desired_installations d
+  WHERE d.team_id = public.memoh_current_team_id() AND d.bot_id = $1 AND d.dependency_id = $2
+  FOR UPDATE
+), target_lock_count AS MATERIALIZED (
+  SELECT count(*) FROM target_lock
+), claimed AS (
 INSERT INTO bot_dependency_installations (
   bot_id, dependency_id, source, status,
-  installed_version, manifest_digest, source_url, registry_id, definition_revision, operation_id
+  installed_version, manifest_digest, source_url, registry_id, definition_revision, operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ((SELECT $1::uuid FROM target_lock_count), $2, $3, $4, $5, $6, $7, $8, $9, $10, $7, $8, $9, $11::jsonb)
 ON CONFLICT (team_id, bot_id, dependency_id)
 DO UPDATE SET status = EXCLUDED.status,
               last_error = '',
               operation_id = EXCLUDED.operation_id,
+              operation_source_url = EXCLUDED.operation_source_url,
+              operation_registry_id = EXCLUDED.operation_registry_id,
+              operation_definition_revision = EXCLUDED.operation_definition_revision,
+              operation_intent = EXCLUDED.operation_intent,
               updated_at = now()
 WHERE bot_dependency_installations.status NOT IN ('installing', 'updating', 'removing')
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
+), invalidated AS (
+  UPDATE bot_dependency_desired_installations d
+  SET desired_revision = c.operation_id, repair_status = 'ready', repair_operation_id = '',
+      repair_attempts = 0, repair_next_attempt_at = NULL, repair_last_error_code = '', updated_at = now()
+  FROM claimed c
+  WHERE d.team_id = c.team_id AND d.bot_id = c.bot_id AND d.dependency_id = c.dependency_id AND c.status <> 'removing'
+  RETURNING d.bot_id
+), revoked AS (
+  DELETE FROM bot_dependency_desired_installations d USING claimed c
+  WHERE d.team_id = c.team_id AND d.bot_id = c.bot_id AND d.dependency_id = c.dependency_id AND c.status = 'removing'
+  RETURNING d.team_id, d.bot_id, d.dependency_id, d.desired_revision, d.version, d.source_url, d.registry_id, d.definition_revision, d.manifest_digest, d.authorized_at, d.authorized_by_operation_id, d.authorized_by_actor, d.platform_os, d.platform_arch, d.platform_libc, d.entrypoints, d.installation_id, d.payload_path, d.store_root, d.repair_status, d.repair_operation_id, d.repair_attempts, d.repair_next_attempt_at, d.repair_last_error_code, d.created_at, d.updated_at
+), audited AS (
+  INSERT INTO bot_dependency_authorization_events (bot_id, dependency_id, operation_id, action, actor, version, source_url, registry_id, definition_revision, manifest_digest)
+  SELECT r.bot_id, r.dependency_id, c.operation_id, 'revoke', $12::text, r.version, r.source_url, r.registry_id, r.definition_revision, r.manifest_digest
+  FROM revoked r JOIN claimed c ON r.bot_id = c.bot_id AND r.dependency_id = c.dependency_id
+  ON CONFLICT DO NOTHING
+)
+SELECT id, team_id, bot_id, dependency_id, source, status, installed_version, latest_version, last_checked_at, last_error, manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at FROM claimed
 `
 
 type ClaimBotDependencyOperationParams struct {
@@ -39,9 +68,38 @@ type ClaimBotDependencyOperationParams struct {
 	RegistryID         string      `json:"registry_id"`
 	DefinitionRevision string      `json:"definition_revision"`
 	OperationID        string      `json:"operation_id"`
+	OperationIntent    []byte      `json:"operation_intent"`
+	Actor              string      `json:"actor"`
 }
 
-func (q *Queries) ClaimBotDependencyOperation(ctx context.Context, arg ClaimBotDependencyOperationParams) (BotDependencyInstallation, error) {
+type ClaimBotDependencyOperationRow struct {
+	ID                          pgtype.UUID        `json:"id"`
+	TeamID                      pgtype.UUID        `json:"team_id"`
+	BotID                       pgtype.UUID        `json:"bot_id"`
+	DependencyID                string             `json:"dependency_id"`
+	Source                      string             `json:"source"`
+	Status                      string             `json:"status"`
+	InstalledVersion            string             `json:"installed_version"`
+	LatestVersion               string             `json:"latest_version"`
+	LastCheckedAt               pgtype.Timestamptz `json:"last_checked_at"`
+	LastError                   string             `json:"last_error"`
+	ManifestDigest              string             `json:"manifest_digest"`
+	SourceUrl                   string             `json:"source_url"`
+	RegistryID                  string             `json:"registry_id"`
+	DefinitionRevision          string             `json:"definition_revision"`
+	OperationID                 string             `json:"operation_id"`
+	LastOperationID             string             `json:"last_operation_id"`
+	OperationSourceUrl          string             `json:"operation_source_url"`
+	OperationRegistryID         string             `json:"operation_registry_id"`
+	OperationDefinitionRevision string             `json:"operation_definition_revision"`
+	OperationIntent             []byte             `json:"operation_intent"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// All claims and successful finishes lock desired before installation. The
+// aggregate preserves one input row when no target has been authorized yet.
+func (q *Queries) ClaimBotDependencyOperation(ctx context.Context, arg ClaimBotDependencyOperationParams) (ClaimBotDependencyOperationRow, error) {
 	row := q.db.QueryRow(ctx, claimBotDependencyOperation,
 		arg.BotID,
 		arg.DependencyID,
@@ -53,8 +111,10 @@ func (q *Queries) ClaimBotDependencyOperation(ctx context.Context, arg ClaimBotD
 		arg.RegistryID,
 		arg.DefinitionRevision,
 		arg.OperationID,
+		arg.OperationIntent,
+		arg.Actor,
 	)
-	var i BotDependencyInstallation
+	var i ClaimBotDependencyOperationRow
 	err := row.Scan(
 		&i.ID,
 		&i.TeamID,
@@ -71,6 +131,11 @@ func (q *Queries) ClaimBotDependencyOperation(ctx context.Context, arg ClaimBotD
 		&i.RegistryID,
 		&i.DefinitionRevision,
 		&i.OperationID,
+		&i.LastOperationID,
+		&i.OperationSourceUrl,
+		&i.OperationRegistryID,
+		&i.OperationDefinitionRevision,
+		&i.OperationIntent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -106,7 +171,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND operation_id = $3 AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 `
 
 type DeleteBotDependencyOperationParams struct {
@@ -134,10 +199,49 @@ func (q *Queries) DeleteBotDependencyOperation(ctx context.Context, arg DeleteBo
 		&i.RegistryID,
 		&i.DefinitionRevision,
 		&i.OperationID,
+		&i.LastOperationID,
+		&i.OperationSourceUrl,
+		&i.OperationRegistryID,
+		&i.OperationDefinitionRevision,
+		&i.OperationIntent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const enrollLegacyDependencyOperationEpoch = `-- name: EnrollLegacyDependencyOperationEpoch :one
+UPDATE bot_dependency_installations
+SET operation_intent = CASE
+    WHEN COALESCE(operation_intent ->> 'control_migration_epoch', '') <> '' THEN operation_intent
+    ELSE COALESCE(operation_intent, '{}'::jsonb) || jsonb_build_object('control_migration_epoch', $1::text)
+END
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $2 AND dependency_id = $3
+  AND operation_id = $4
+  AND status IN ('installing', 'updating', 'removing')
+RETURNING COALESCE(operation_intent ->> 'control_migration_epoch', '')::text AS epoch
+`
+
+type EnrollLegacyDependencyOperationEpochParams struct {
+	Epoch        string      `json:"epoch"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	DependencyID string      `json:"dependency_id"`
+	OperationID  string      `json:"operation_id"`
+}
+
+// The first observation is a lifetime fence, not a heartbeat or new approval.
+// Preserve it across Server restarts and do not change stale-operation timing.
+func (q *Queries) EnrollLegacyDependencyOperationEpoch(ctx context.Context, arg EnrollLegacyDependencyOperationEpochParams) (string, error) {
+	row := q.db.QueryRow(ctx, enrollLegacyDependencyOperationEpoch,
+		arg.Epoch,
+		arg.BotID,
+		arg.DependencyID,
+		arg.OperationID,
+	)
+	var epoch string
+	err := row.Scan(&epoch)
+	return epoch, err
 }
 
 const finishBotDependencyOperation = `-- name: FinishBotDependencyOperation :one
@@ -152,7 +256,8 @@ SET source = $1,
     source_url = $8,
     registry_id = $9,
     definition_revision = $10,
-    operation_id = '',
+    last_operation_id = operation_id, operation_id = '',
+    operation_source_url = '', operation_registry_id = '', operation_definition_revision = '', operation_intent = NULL,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $11
@@ -160,7 +265,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND operation_id = $13 AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 `
 
 type FinishBotDependencyOperationParams struct {
@@ -212,6 +317,11 @@ func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBo
 		&i.RegistryID,
 		&i.DefinitionRevision,
 		&i.OperationID,
+		&i.LastOperationID,
+		&i.OperationSourceUrl,
+		&i.OperationRegistryID,
+		&i.OperationDefinitionRevision,
+		&i.OperationIntent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -221,7 +331,7 @@ func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBo
 const getBotDependencyInstallation = `-- name: GetBotDependencyInstallation :one
 SELECT id, team_id, bot_id, dependency_id, source, status,
        installed_version, latest_version, last_checked_at, last_error,
-       manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+       manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -253,6 +363,11 @@ func (q *Queries) GetBotDependencyInstallation(ctx context.Context, arg GetBotDe
 		&i.RegistryID,
 		&i.DefinitionRevision,
 		&i.OperationID,
+		&i.LastOperationID,
+		&i.OperationSourceUrl,
+		&i.OperationRegistryID,
+		&i.OperationDefinitionRevision,
+		&i.OperationIntent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -262,7 +377,7 @@ func (q *Queries) GetBotDependencyInstallation(ctx context.Context, arg GetBotDe
 const listBotDependencyInstallations = `-- name: ListBotDependencyInstallations :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
        installed_version, latest_version, last_checked_at, last_error,
-       manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+       manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
   AND bot_id = $1
@@ -294,6 +409,11 @@ func (q *Queries) ListBotDependencyInstallations(ctx context.Context, botID pgty
 			&i.RegistryID,
 			&i.DefinitionRevision,
 			&i.OperationID,
+			&i.LastOperationID,
+			&i.OperationSourceUrl,
+			&i.OperationRegistryID,
+			&i.OperationDefinitionRevision,
+			&i.OperationIntent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -310,7 +430,7 @@ func (q *Queries) ListBotDependencyInstallations(ctx context.Context, botID pgty
 const listBotDependencyInstallationsByStatus = `-- name: ListBotDependencyInstallationsByStatus :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
        installed_version, latest_version, last_checked_at, last_error,
-       manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+       manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
   AND status = $1
@@ -342,6 +462,11 @@ func (q *Queries) ListBotDependencyInstallationsByStatus(ctx context.Context, st
 			&i.RegistryID,
 			&i.DefinitionRevision,
 			&i.OperationID,
+			&i.LastOperationID,
+			&i.OperationSourceUrl,
+			&i.OperationRegistryID,
+			&i.OperationDefinitionRevision,
+			&i.OperationIntent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -358,7 +483,7 @@ func (q *Queries) ListBotDependencyInstallationsByStatus(ctx context.Context, st
 const listStaleBotDependencyOperations = `-- name: ListStaleBotDependencyOperations :many
 SELECT id, team_id, bot_id, dependency_id, source, status,
        installed_version, latest_version, last_checked_at, last_error,
-       manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+       manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
   AND status IN ('installing', 'updating', 'removing')
@@ -391,6 +516,11 @@ func (q *Queries) ListStaleBotDependencyOperations(ctx context.Context, olderTha
 			&i.RegistryID,
 			&i.DefinitionRevision,
 			&i.OperationID,
+			&i.LastOperationID,
+			&i.OperationSourceUrl,
+			&i.OperationRegistryID,
+			&i.OperationDefinitionRevision,
+			&i.OperationIntent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -422,7 +552,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 `
 
 type UpdateBotDependencyInstallationObservedParams struct {
@@ -470,6 +600,11 @@ func (q *Queries) UpdateBotDependencyInstallationObserved(ctx context.Context, a
 		&i.RegistryID,
 		&i.DefinitionRevision,
 		&i.OperationID,
+		&i.LastOperationID,
+		&i.OperationSourceUrl,
+		&i.OperationRegistryID,
+		&i.OperationDefinitionRevision,
+		&i.OperationIntent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -487,7 +622,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 `
 
 type UpdateBotDependencyInstallationStatusParams struct {
@@ -521,6 +656,11 @@ func (q *Queries) UpdateBotDependencyInstallationStatus(ctx context.Context, arg
 		&i.RegistryID,
 		&i.DefinitionRevision,
 		&i.OperationID,
+		&i.LastOperationID,
+		&i.OperationSourceUrl,
+		&i.OperationRegistryID,
+		&i.OperationDefinitionRevision,
+		&i.OperationIntent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -545,7 +685,7 @@ DO UPDATE SET source = EXCLUDED.source,
 WHERE bot_dependency_installations.operation_id = ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, last_operation_id, operation_source_url, operation_registry_id, operation_definition_revision, operation_intent, created_at, updated_at
 `
 
 type UpsertBotDependencyInstallationIntentParams struct {
@@ -589,6 +729,11 @@ func (q *Queries) UpsertBotDependencyInstallationIntent(ctx context.Context, arg
 		&i.RegistryID,
 		&i.DefinitionRevision,
 		&i.OperationID,
+		&i.LastOperationID,
+		&i.OperationSourceUrl,
+		&i.OperationRegistryID,
+		&i.OperationDefinitionRevision,
+		&i.OperationIntent,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

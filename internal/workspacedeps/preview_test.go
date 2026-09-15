@@ -98,18 +98,12 @@ func TestScriptPreviewDetailsMirrorsRunnerEnvironment(t *testing.T) {
 	if _, err := f.svc.List(f.ctx(), testBot); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	preview, err = f.svc.ScriptPreviewDetails(f.ctx(), testBot, "agent-x", ActionRollback)
+	preview, err = f.svc.ScriptPreviewDetails(f.ctx(), testBot, "agent-x", catalog.ActionInstall)
 	if err != nil {
-		t.Fatalf("rollback preview: %v", err)
+		t.Fatalf("install preview: %v", err)
 	}
 	if got := previewEnv(t, preview, "MEMOH_DEP_OS"); got.Value != "linux" {
 		t.Errorf("MEMOH_DEP_OS after probe = %q", got.Value)
-	}
-	if got := previewEnv(t, preview, "MEMOH_DEP_VERSION"); got.Value != previewPreviousVersion {
-		t.Errorf("rollback MEMOH_DEP_VERSION = %q", got.Value)
-	}
-	if preview.TimeoutSeconds != int(rollbackTimeout.Seconds()) {
-		t.Errorf("rollback timeout = %d", preview.TimeoutSeconds)
 	}
 }
 

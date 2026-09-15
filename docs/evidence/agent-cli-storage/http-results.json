@@ -1,0 +1,534 @@
+{
+  "base_url": "http://localhost:18080",
+  "started_at": "2026-09-14T15:57:21.386567+00:00",
+  "finished_at": "2026-09-14T15:57:36.874925+00:00",
+  "operation_state_unchanged": true,
+  "passed": true,
+  "cases": [
+    {
+      "name": "unauthenticated prepare",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/prepare",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "unauthenticated install",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/install",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "unauthenticated update",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/update",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "unauthenticated reinstall",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/reinstall",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "unauthenticated repair/prepare",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/prepare",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "unauthenticated repair/authorize",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/authorize",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "unauthenticated repair/retry",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/retry",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "unauthenticated list",
+      "method": "GET",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies",
+      "status": 401,
+      "expected_status": [
+        401
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "ungranted user cannot read",
+      "method": "GET",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer list",
+      "method": "GET",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies",
+      "status": 200,
+      "expected_status": [
+        200
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer refresh list",
+      "method": "GET",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies?refresh=true",
+      "status": 200,
+      "expected_status": [
+        200
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer preflight includes missing dependency",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/preflight",
+      "status": 200,
+      "expected_status": [
+        200
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot prepare",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/prepare",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot install",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/install",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot update",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/update",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot reinstall",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/reinstall",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot repair/prepare",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/prepare",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot repair/authorize",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/authorize",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot retry repair",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/qa-missing-dependency/repair/retry",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "viewer cannot check updates",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/check-updates",
+      "status": 403,
+      "expected_status": [
+        403
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin install missing exact version",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/install",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin install mutable latest alias",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/install",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin install missing recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/install",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin install malformed recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/install",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin install unavailable frozen recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/install",
+      "status": 503,
+      "expected_status": [
+        409,
+        503
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin update missing exact version",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/update",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin update mutable latest alias",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/update",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin update missing recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/update",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin update malformed recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/update",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin update unavailable frozen recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/update",
+      "status": 503,
+      "expected_status": [
+        409,
+        503
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin reinstall missing exact version",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/reinstall",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin reinstall mutable latest alias",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/reinstall",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin reinstall missing recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/reinstall",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin reinstall malformed recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/reinstall",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin reinstall unavailable frozen recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/reinstall",
+      "status": 503,
+      "expected_status": [
+        409,
+        503
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin repair/authorize missing exact version",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/authorize",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin repair/authorize mutable latest alias",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/authorize",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin repair/authorize missing recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/authorize",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin repair/authorize malformed recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/authorize",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin repair/authorize unavailable frozen recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/authorize",
+      "status": 503,
+      "expected_status": [
+        409,
+        503
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin prepare invalid recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/prepare",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin prepare unavailable recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/prepare",
+      "status": 503,
+      "expected_status": [
+        409,
+        503
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin repair/prepare invalid recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/prepare",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin repair/prepare unavailable recipe",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/repair/prepare",
+      "status": 503,
+      "expected_status": [
+        409,
+        503
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "admin read frozen install preview",
+      "method": "GET",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/script?action=install&definition_revision=b018873f251187dc5747a1f357ec7b5793036a6fb15f062dfbc555555d3a6f79",
+      "status": 200,
+      "expected_status": [
+        200
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "removed dependency rollback route",
+      "method": "POST",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/rollback",
+      "status": 404,
+      "expected_status": [
+        404,
+        405
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    },
+    {
+      "name": "removed dependency rollback preview",
+      "method": "GET",
+      "path": "/bots/2fe80839-9793-455a-bcea-4f5b740fb4a9/dependencies/codex/script?action=rollback",
+      "status": 400,
+      "expected_status": [
+        400
+      ],
+      "operation_state_unchanged": true,
+      "passed": true
+    }
+  ],
+  "temporary_access_revoked": true
+}

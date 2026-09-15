@@ -2467,9 +2467,80 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/apps/prepare": {
+            "post": {
+                "description": "Resolves the immutable App release and exact dependency versions. It may start the workspace and run version checks, but never installs dependencies or grants automatic repair authority. Confirm the returned dependencies before install, resume or update.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "Prepare an App operation for confirmation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "App operation to prepare",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AppPrepareRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AppPrepareResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/apps/update": {
             "post": {
-                "description": "Updates the selected dependencies to their latest version and, when release is set, moves the installation to the registry's current release, streaming progress. A discovered App may update its own dependency. Events: started, step, log, step_done, done, error.",
+                "description": "Updates the selected dependencies to their confirmed exact versions and, when release is set, moves the installation to release_revision, streaming progress. A discovered App may update its own dependency. Events: started, step, log, step_done, done, error.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2863,6 +2934,9 @@ const docTemplate = `{
         "/bots/{bot_id}/apps/{installation_id}/resume": {
             "post": {
                 "description": "Installs dependencies that are still missing, reconciles the Skills and links connectors that were authorized since. Events: started, step, log, step_done, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "text/event-stream"
                 ],
@@ -2884,6 +2958,15 @@ const docTemplate = `{
                         "name": "installation_id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Confirmed dependency targets",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AppResumeRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -5582,9 +5665,10 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Version to install (optional)",
+                        "description": "Confirmed exact version and recipe",
                         "name": "payload",
                         "in": "body",
+                        "required": true,
                         "schema": {
                             "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
                         }
@@ -5630,9 +5714,81 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/dependencies/{dep_id}/prepare": {
+            "post": {
+                "description": "Requires Manage. Freezes a recipe revision and exact version before confirmation. An unspecified version runs only the frozen recipe's upstream version check; it never installs a dependency.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Prepare an exact workspace dependency installation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Target to prepare",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyPrepareRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyPreparedResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/dependencies/{dep_id}/reinstall": {
             "post": {
-                "description": "Runs the catalog reinstall script, or remove followed by install, and streams the output. The optional body names the version to install; without one the script picks the latest version (or the manifest pin).",
+                "description": "Prepares a fresh candidate for the confirmed target and streams the output. The body must confirm the exact version and frozen recipe revision returned by preparation.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5659,9 +5815,10 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Version to install (optional)",
+                        "description": "Confirmed exact version and recipe",
                         "name": "payload",
                         "in": "body",
+                        "required": true,
                         "schema": {
                             "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
                         }
@@ -5707,16 +5864,160 @@ const docTemplate = `{
                 }
             }
         },
-        "/bots/{bot_id}/dependencies/{dep_id}/rollback": {
+        "/bots/{bot_id}/dependencies/{dep_id}/repair/authorize": {
             "post": {
-                "description": "Switches the dependency back to the previous version kept in the workspace. A pure data operation: nothing is downloaded and no log is streamed.",
+                "description": "Requires Manage and an exact version with a frozen recipe revision. Successful installation authorizes restoring that same target after payload loss. Disconnecting observation does not cancel the admitted installation.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Roll a workspace dependency back to its previous version",
+                "summary": "Reinstall a confirmed dependency and authorize recovery",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Confirmed target",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyRepairRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyDesired"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}/repair/prepare": {
+            "post": {
+                "description": "Requires Manage. Returns the exact version and frozen recipe to confirm before reinstalling and enabling automatic recovery.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Prepare authorization to restore a workspace dependency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Target to prepare",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyRepairRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyPreparedResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
+        "/bots/{bot_id}/dependencies/{dep_id}/repair/retry": {
+            "post": {
+                "description": "Requires Manage. Requests recovery of the existing frozen target without changing its version or authorization.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Retry recovery of the current authorized dependency target",
                 "parameters": [
                     {
                         "type": "string",
@@ -5737,7 +6038,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.WorkspaceDependencyOperationResponse"
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyDesired"
                         }
                     },
                     "400": {
@@ -5749,29 +6050,11 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -5815,8 +6098,7 @@ const docTemplate = `{
                             "install",
                             "update",
                             "remove",
-                            "reinstall",
-                            "rollback"
+                            "reinstall"
                         ],
                         "type": "string",
                         "default": "install",
@@ -5873,7 +6155,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/dependencies/{dep_id}/update": {
             "post": {
-                "description": "Runs the catalog update script (or the install script when the manifest has none) and streams its output. The optional body names the version to update to; without one the script picks the latest version (or the manifest pin). The previous version is kept for rollback.",
+                "description": "Runs the catalog update script (or the install script when the manifest has none) and streams its output. The body must confirm the exact version and frozen recipe revision returned by preparation.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5900,9 +6182,10 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Version to update to (optional)",
+                        "description": "Confirmed exact version and recipe",
                         "name": "payload",
                         "in": "body",
+                        "required": true,
                         "schema": {
                             "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
                         }
@@ -22309,6 +22592,36 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.AppDependencyConfirmation": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "install",
+                        "update"
+                    ]
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "manifest_digest": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.AppDependencyItem": {
             "type": "object",
             "properties": {
@@ -22334,6 +22647,12 @@ const docTemplate = `{
             "properties": {
                 "app_id": {
                     "type": "string"
+                },
+                "dependency_confirmations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.AppDependencyConfirmation"
+                    }
                 },
                 "registry_id": {
                     "type": "string"
@@ -22482,6 +22801,60 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.AppPrepareRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "install",
+                        "resume",
+                        "update"
+                    ]
+                },
+                "app_id": {
+                    "type": "string"
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "installation_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "release": {
+                    "type": "boolean"
+                },
+                "revision": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.AppPrepareResponse": {
+            "type": "object",
+            "properties": {
+                "app_id": {
+                    "type": "string"
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.AppDependencyConfirmation"
+                    }
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.AppRemovalPreviewApp": {
             "type": "object",
             "properties": {
@@ -22570,6 +22943,23 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/handlers.AppRemovalPreviewApp"
                     }
+                }
+            }
+        },
+        "handlers.AppResumeRequest": {
+            "type": "object",
+            "required": [
+                "revision"
+            ],
+            "properties": {
+                "dependency_confirmations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.AppDependencyConfirmation"
+                    }
+                },
+                "revision": {
+                    "type": "string"
                 }
             }
         },
@@ -22666,18 +23056,28 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "dependencies": {
-                    "description": "Dependencies are updated to their latest version.",
+                    "description": "Dependencies are updated to their confirmed version.",
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                },
+                "dependency_confirmations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.AppDependencyConfirmation"
                     }
                 },
                 "registry_id": {
                     "type": "string"
                 },
                 "release": {
-                    "description": "Release moves the installation to the registry's current release.",
+                    "description": "Release moves the installation to the prepared release_revision.",
                     "type": "boolean"
+                },
+                "release_revision": {
+                    "description": "ReleaseRevision is the immutable App release returned by prepare.",
+                    "type": "string"
                 }
             }
         },
@@ -24918,6 +25318,54 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.WorkspaceDependencyDesired": {
+            "type": "object",
+            "properties": {
+                "auto_repair_authorized_at": {
+                    "type": "string"
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "manifest_digest": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "repair_attempts": {
+                    "type": "integer"
+                },
+                "repair_last_error_code": {
+                    "type": "string"
+                },
+                "repair_next_attempt_at": {
+                    "type": "string"
+                },
+                "repair_operation_id": {
+                    "type": "string"
+                },
+                "repair_status": {
+                    "type": "string",
+                    "enum": [
+                        "ready",
+                        "queued",
+                        "installing",
+                        "backoff",
+                        "manual_required"
+                    ]
+                },
+                "revision": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.WorkspaceDependencyInstallRequest": {
             "type": "object",
             "properties": {
@@ -24929,7 +25377,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "version": {
-                    "description": "Version to install. Empty (or no body) installs the latest version the\ncatalog script resolves, or the manifest pin when the dependency has\none. The version recorded afterwards is the one the script reports.",
+                    "description": "Version is the exact target returned by preparation; mutable aliases\nand empty values are rejected before an operation is admitted.",
                     "type": "string"
                 }
             }
@@ -24947,8 +25395,9 @@ const docTemplate = `{
                             "update",
                             "reinstall",
                             "remove",
-                            "rollback",
-                            "check_update"
+                            "check_update",
+                            "authorize_repair",
+                            "retry_repair"
                         ]
                     }
                 },
@@ -24966,6 +25415,9 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string"
+                },
+                "desired": {
+                    "$ref": "#/definitions/handlers.WorkspaceDependencyDesired"
                 },
                 "icon": {
                     "type": "string"
@@ -24997,11 +25449,17 @@ const docTemplate = `{
                 "last_error_code": {
                     "type": "string"
                 },
+                "last_operation_id": {
+                    "type": "string"
+                },
                 "latest_version": {
                     "description": "LatestVersion is the last upstream check result, omitted until a check\nran.",
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "operation_id": {
                     "type": "string"
                 },
                 "overlay": {
@@ -25017,10 +25475,6 @@ const docTemplate = `{
                 "platform_supported": {
                     "description": "PlatformSupported is false when the probed workspace platform is not\nlisted by the catalog manifest; PlatformReason then says why.",
                     "type": "boolean"
-                },
-                "previous_version": {
-                    "description": "PreviousVersion is the version rollback would switch back to.",
-                    "type": "string"
                 },
                 "provides": {
                     "description": "Provides lists the commands the dependency makes available.",
@@ -25099,32 +25553,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.WorkspaceDependencyOperationResponse": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string"
-                },
-                "definition_revision": {
-                    "type": "string"
-                },
-                "dependency_id": {
-                    "type": "string"
-                },
-                "entrypoints": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "status": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.WorkspaceDependencyPlatform": {
             "type": "object",
             "properties": {
@@ -25192,6 +25620,62 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.WorkspaceDependencyPrepareRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "install",
+                        "update",
+                        "reinstall"
+                    ]
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyPreparedResponse": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "manifest_digest": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.WorkspaceDependencyRepairRequest": {
+            "type": "object",
+            "properties": {
+                "definition_revision": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.WorkspaceDependencyScriptEnv": {
             "type": "object",
             "properties": {
@@ -25216,8 +25700,7 @@ const docTemplate = `{
                         "install",
                         "update",
                         "remove",
-                        "reinstall",
-                        "rollback"
+                        "reinstall"
                     ]
                 },
                 "definition_revision": {
@@ -25277,6 +25760,9 @@ const docTemplate = `{
                     }
                 },
                 "message": {
+                    "type": "string"
+                },
+                "operation_id": {
                     "type": "string"
                 },
                 "request_id": {

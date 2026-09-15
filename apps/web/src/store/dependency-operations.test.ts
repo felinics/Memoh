@@ -1,14 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createApp, nextTick } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import type { WorkspaceDependencyStreamEvent } from '@/composables/api/useWorkspaceDependencyStream'
 
 const streamDependencyOperation = vi.fn()
+const getDependencies = vi.fn()
 const toastSuccess = vi.fn()
 const toastError = vi.fn()
 const toastWarning = vi.fn()
 let router: Router
+
+vi.mock('@memohai/sdk', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@memohai/sdk')>(),
+  getBotsByBotIdDependencies: (...args: unknown[]) => getDependencies(...args),
+}))
 
 vi.mock('@/composables/api/useWorkspaceDependencyStream', () => ({
   streamDependencyOperation: (...args: unknown[]) => streamDependencyOperation(...args),
@@ -70,6 +76,7 @@ const codex = { id: 'codex', name: 'Codex', category: 'agent' as const }
 const node = { id: 'node', name: 'Node.js', category: 'runtime' as const }
 
 describe('useDependencyOperationsStore', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
     const pinia = createPinia()
     router = createRouter({
@@ -79,6 +86,7 @@ describe('useDependencyOperationsStore', () => {
     createApp({ render: () => null }).use(pinia).use(router)
     setActivePinia(pinia)
     streamDependencyOperation.mockReset()
+    getDependencies.mockReset()
     toastSuccess.mockReset()
     toastError.mockReset()
     toastWarning.mockReset()
@@ -246,6 +254,64 @@ describe('useDependencyOperationsStore', () => {
     expect(store.retry(key)).toBe(false)
     expect(streamDependencyOperation).toHaveBeenCalledTimes(1)
     expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it('reconciles an interrupted stream by operation identity without replaying installation', async () => {
+    vi.useFakeTimers()
+    const stream = controlledStream()
+    streamDependencyOperation.mockReturnValue(stream.generator)
+    getDependencies.mockResolvedValueOnce({ data: { items: [{ ...codex, status: 'installing', operation_id: 'accepted-1' }] } })
+    getDependencies.mockResolvedValueOnce({ data: { items: [{ ...codex, status: 'installed', installed_version: '1.2.3', last_operation_id: 'accepted-1' }] } })
+    const store = useDependencyOperationsStore()
+    const key = operationKey('bot-1', 'codex')
+    store.start({ botId: 'bot-1', item: codex, action: 'install', version: '1.2.3' })
+    store.view(key, 'panel')
+    stream.emit({ type: 'started', dependency_id: 'codex', operation_id: 'accepted-1' })
+    stream.end()
+    await settleMicrotasks()
+
+    expect(store.get('bot-1', 'codex')).toMatchObject({ status: 'running', reconciling: true })
+    expect(store.retry(key)).toBe(false)
+    expect(store.start({ botId: 'bot-1', item: codex, action: 'install' }).kind).toBe('running')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(store.get('bot-1', 'codex')).toMatchObject({ status: 'done', reconciling: false, resultVersion: '1.2.3' })
+    expect(streamDependencyOperation).toHaveBeenCalledTimes(1)
+    expect(getDependencies).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not mistake a newer operation at the same version for this operation succeeding', async () => {
+    const stream = controlledStream()
+    streamDependencyOperation.mockReturnValue(stream.generator)
+    getDependencies.mockResolvedValue({ data: { items: [{ ...codex, status: 'installed', installed_version: '1.2.3', last_operation_id: 'different-operation' }] } })
+    const store = useDependencyOperationsStore()
+    const key = operationKey('bot-1', 'codex')
+    store.start({ botId: 'bot-1', item: codex, action: 'reinstall', version: '1.2.3' })
+    store.view(key, 'panel')
+    stream.emit({ type: 'started', dependency_id: 'codex', operation_id: 'accepted-1' })
+    stream.end()
+    await settleMicrotasks()
+    expect(store.get('bot-1', 'codex')).toMatchObject({ status: 'unknown', reconciling: false })
+    expect(store.retry(key)).toBe(false)
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(streamDependencyOperation).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts pending reconciliation when the auth session is cleared', async () => {
+    vi.useFakeTimers()
+    const stream = controlledStream()
+    streamDependencyOperation.mockReturnValue(stream.generator)
+    getDependencies.mockResolvedValue({ data: { items: [{ ...codex, status: 'installing', operation_id: 'accepted-1' }] } })
+    const store = useDependencyOperationsStore()
+    store.start({ botId: 'bot-1', item: codex, action: 'install', version: '1.2.3' })
+    stream.emit({ type: 'started', dependency_id: 'codex', operation_id: 'accepted-1' })
+    stream.end()
+    await settleMicrotasks()
+    store.reset()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getDependencies).toHaveBeenCalledTimes(1)
+    expect(store.runningFor('bot-1')).toBeUndefined()
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(toastWarning).not.toHaveBeenCalled()
   })
 
   it('drops everything silently on reset', async () => {

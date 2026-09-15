@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
-	"strings"
 
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
@@ -29,12 +28,31 @@ func (s *Service) cleanupReceipt(ctx context.Context, op *operation) {
 // record's operation ID and a previously verified immutable definition.
 // It never downloads a replacement recipe or executes a script on recovery.
 func (s *Service) recoverReceipt(ctx context.Context, key InstallationKey, dep catalog.Dependency, platform Platform, receipt *OperationReceipt) (*Installation, error) {
+	rec, err := s.store.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Status.InProgress() || !receiptMatches(rec, receipt) {
+		return nil, ErrBusy
+	}
+	if !currentControlIntent(rec) {
+		return s.rejectUntrustedReceipt(ctx, key, rec)
+	}
+	if !receiptIntentMatches(rec.OperationIntent, receipt) {
+		return s.rejectUntrustedReceipt(ctx, key, rec)
+	}
+	trusted := *rec.OperationIntent
+	trusted.Result, trusted.ExitCode, trusted.Completed = receipt.Result, receipt.ExitCode, receipt.Completed
+	receipt = &trusted
+
+	var frozen *catalog.Definition
 	if s.provider != nil {
 		definition, err := s.provider.StoredDefinition(ctx, DefinitionKey{SourceURL: receipt.SourceURL, DependencyID: receipt.DependencyID, Revision: receipt.DefinitionRevision})
 		if err != nil {
 			return nil, err
 		}
 		dep = definition.Dependency()
+		frozen = &definition
 	}
 	if dep.ID != receipt.DependencyID || dep.ManifestDigest != receipt.ManifestDigest || dep.SourceURL != receipt.SourceURL || dep.RegistryID != receipt.RegistryID || dep.Revision != receipt.DefinitionRevision {
 		return nil, fmt.Errorf("%w: receipt publication does not match the verified definition", ErrDefinitionInvalid)
@@ -43,7 +61,13 @@ func (s *Service) recoverReceipt(ctx context.Context, key InstallationKey, dep c
 	if err != nil {
 		return nil, err
 	}
-	op := &operation{key: key, dep: dep, client: client, dataRoot: root, home: Home(root, dep.ID), shimDir: ShimDir(root), platform: platform, version: receipt.RequestedVersion, receipt: receipt, previous: receipt.Previous, operationID: receipt.ID}
+	receipt.Directory = path.Join(operationRoot(Home(root, dep.ID), dep.ID), receipt.ID)
+	op := &operation{key: key, dep: dep, client: client, dataRoot: root, home: Home(root, dep.ID), shimDir: ShimDir(root), platform: platform, version: receipt.RequestedVersion, receipt: receipt, previous: receipt.Previous, operationID: receipt.ID, storeRoot: receipt.StoreRoot, desiredRevision: receipt.DesiredRevision, repair: receipt.Repair, authorizedByActor: receipt.AuthorizedByActor, restorePayloadPath: receipt.RestorePayloadPath, restoreInstallationID: receipt.RestoreInstallationID}
+	if op.storeRoot == "" {
+		op.storeRoot = s.effectiveStoreRoot(root)
+	}
+	op.catalog = s.catalogFor(ctx)
+	op.frozenDefinition = frozen
 	finalizeCtx, cancel := finalizeContext(ctx)
 	defer cancel()
 	ctx = finalizeCtx
@@ -69,26 +93,9 @@ func (s *Service) recoverReceipt(ctx context.Context, key InstallationKey, dep c
 			return nil, err
 		}
 		s.cache.Invalidate(key.BotID)
+		s.cleanPreviousPayload(ctx, op)
 		s.cleanupReceipt(ctx, op)
 		return nil, nil
-	case ActionRollback:
-		current := receipt.Previous
-		if current == nil || strings.TrimSpace(current.PreviousVersion) == "" {
-			return nil, ErrRollbackUnavailable
-		}
-		state := State{DependencyID: dep.ID, Version: current.PreviousVersion, InstalledAt: s.now().UTC(), ManifestDigest: current.ManifestDigest, Entrypoints: current.Entrypoints, PreviousVersion: current.Version, Previous: previousInstallation(*current)}
-		if previous := current.Previous; previous != nil && previous.Version == state.Version {
-			state.SourceURL, state.RegistryID, state.DefinitionRevision = previous.SourceURL, previous.RegistryID, previous.DefinitionRevision
-			state.ManifestDigest, state.Entrypoints = previous.ManifestDigest, cloneStringMap(previous.Entrypoints)
-		}
-		if err := s.finalizeFilesystem(ctx, op, &state, current); err != nil {
-			return nil, err
-		}
-		result, err := s.record(ctx, op, ActionRollback, state)
-		if err != nil {
-			return nil, err
-		}
-		return &result.Installation, nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported recovery action %s", ErrActionUnsupported, receipt.Action)
 	}
@@ -107,6 +114,9 @@ func (s *Service) markInterrupted(ctx context.Context, key InstallationKey, rec 
 	if err != nil {
 		return Installation{}, err
 	}
+	if err := s.requireLegacyOperationDrained(ctx, key, rec, client); err != nil {
+		return Installation{}, err
+	}
 	home := Home(root, key.DependencyID)
 	operations := operationRoot(home, key.DependencyID)
 	completed := path.Join(operations, rec.OperationID, "exit-code")
@@ -119,4 +129,30 @@ func (s *Service) markInterrupted(ctx context.Context, key InstallationKey, rec 
 	}
 	rec.Status, rec.LastError = StatusFailed, interruptedMessage
 	return s.store.FinishOperation(ctx, key, rec.OperationID, &rec)
+}
+
+// Rejecting a tampered or pre-protocol receipt must not strand its claim or
+// publish new authorization. Fence the workspace process under the same kernel
+// lock, retain all payload/evidence files, and require a new Manage action.
+func (s *Service) rejectUntrustedReceipt(ctx context.Context, key InstallationKey, rec Installation) (*Installation, error) {
+	client, root, err := s.target(ctx, key.BotID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireLegacyOperationDrained(ctx, key, rec, client); err != nil {
+		return nil, err
+	}
+	home := Home(root, key.DependencyID)
+	tombstone := path.Join(operationRoot(home, key.DependencyID), ".cancelled-"+rec.OperationID)
+	script := fmt.Sprintf("set -eu\nmkdir -p %s\n: > %s\n", shellQuote(path.Dir(tombstone)), shellQuote(tombstone))
+	if err := runFilesystemScript(ctx, client, home, key.DependencyID, script); err != nil {
+		return nil, err
+	}
+	rec.Status, rec.LastError = StatusFailed, "operation receipt does not match its trusted intent; management confirmation is required"
+	terminal, err := s.store.FinishOperation(ctx, key, rec.OperationID, &rec)
+	if err != nil {
+		return nil, err
+	}
+	s.cache.Invalidate(key.BotID)
+	return &terminal, nil
 }

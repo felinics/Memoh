@@ -115,7 +115,7 @@ func TestDiscoveryErrorNeverBecomesPublicFailureText(t *testing.T) {
 	view := f.deps.list()
 	view.DiscoveryError = "bridge dial 10.0.0.8 password=synthetic-test-secret"
 	f.depFaults.view = &view
-	_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{})
+	_, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, &recorder{})
 	if err == nil || !strings.Contains(err.Error(), view.DiscoveryError) {
 		t.Fatalf("logs must retain the cause: %v", err)
 	}

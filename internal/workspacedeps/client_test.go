@@ -30,8 +30,13 @@ func newExecTestClient(t *testing.T) *bridge.Client {
 	if runtime.GOOS == "windows" {
 		t.Skip("bridgesvc exec runs commands via /bin/sh")
 	}
+	return newExecTestClientAtRoot(t, t.TempDir())
+}
+
+func newExecTestClientAtRoot(t *testing.T, root string) *bridge.Client {
+	t.Helper()
 	server := bridgesvc.New(bridgesvc.Options{
-		DefaultWorkDir:    t.TempDir(),
+		DefaultWorkDir:    root,
 		AllowHostAbsolute: true,
 	})
 

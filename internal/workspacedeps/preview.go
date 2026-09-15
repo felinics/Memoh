@@ -47,7 +47,6 @@ type ScriptPreview struct {
 const (
 	previewInstalledVersion = "<installed version>"
 	previewRequestedVersion = "<requested version or latest>"
-	previewPreviousVersion  = "<previous version>"
 	previewProbedAtRunTime  = "<probed at run time>"
 	previewResultNonce      = "<nonce>"
 )
@@ -62,13 +61,6 @@ var secretEnvMarkers = []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDEN
 // and the platform entries come from the last probe when there is one.
 // Nothing is executed and the workspace is never started.
 func (s *Service) ScriptPreviewDetails(ctx context.Context, botID, depID string, action catalog.Action) (ScriptPreview, error) {
-	if action == ActionRollback {
-		offline, _, err := s.prepareCatalog(ctx, false, true)
-		if err != nil {
-			return ScriptPreview{}, err
-		}
-		ctx = offline
-	}
 	cat, err := s.operationCatalog(ctx, depID)
 	if err != nil {
 		return ScriptPreview{}, err
@@ -109,6 +101,12 @@ func (s *Service) ScriptPreviewDetails(ctx context.Context, botID, depID string,
 		Platform:       platform,
 		Timeout:        timeout,
 	}
+	if dep.StorageLayout == "isolated" {
+		root := s.effectiveStoreRoot(dataRoot)
+		spec.Store = path.Join(root, dep.ID)
+		spec.InstallDir = path.Join(spec.Store, "installs", previewResultNonce)
+		spec.StagingDir = path.Join(spec.Store, ".staging-"+previewResultNonce)
+	}
 	if s.scriptEnv != nil {
 		spec.ExtraEnv = s.scriptEnv(ctx)
 	}
@@ -137,9 +135,6 @@ func (s *Service) ScriptPreviewDetails(ctx context.Context, botID, depID string,
 
 // previewTimeout mirrors the budget runScript gives each action.
 func previewTimeout(dep catalog.Dependency, action catalog.Action) time.Duration {
-	if action == ActionRollback {
-		return rollbackTimeout
-	}
 	return dep.Timeouts.Duration(action)
 }
 
@@ -153,8 +148,6 @@ func previewVersion(dep catalog.Dependency, action catalog.Action) string {
 			return dep.Version.Pin
 		}
 		return previewRequestedVersion
-	case ActionRollback:
-		return previewPreviousVersion
 	default:
 		return ""
 	}
@@ -166,7 +159,7 @@ func previewCurrentVersion(action catalog.Action) string {
 	switch action {
 	case catalog.ActionInstall, catalog.ActionUpdate, catalog.ActionReinstall:
 		return previewInstalledVersion + " (if any)"
-	case catalog.ActionRemove, ActionRollback, catalog.ActionCheckUpdate:
+	case catalog.ActionRemove, catalog.ActionCheckUpdate:
 		return previewInstalledVersion
 	default:
 		return ""

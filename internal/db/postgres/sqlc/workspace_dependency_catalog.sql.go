@@ -183,12 +183,21 @@ WHERE definition.team_id = public.memoh_current_team_id()
     SELECT 1 FROM bot_dependency_installations AS installation
     WHERE installation.team_id = definition.team_id
       AND installation.dependency_id = definition.dependency_id
+      AND ((installation.source_url = definition.source_url AND installation.registry_id = definition.registry_id AND installation.definition_revision = definition.revision)
+        OR (installation.operation_id <> '' AND installation.operation_source_url = definition.source_url AND installation.operation_registry_id = definition.registry_id AND installation.operation_definition_revision = definition.revision))
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM bot_dependency_desired_installations AS desired
+    WHERE desired.team_id = definition.team_id
+      AND desired.dependency_id = definition.dependency_id
+      AND desired.source_url = definition.source_url
+      AND desired.registry_id = definition.registry_id
+      AND desired.definition_revision = definition.revision
   )
 `
 
-// Keep current/retired catalog publications and every revision of dependencies
-// with installation intent: rollback state can refer to an earlier publication
-// from another source after the operator switches registries.
+// Keep current catalog publications, current installation targets, and active
+// operation publications; old binary versions no longer pin all definitions.
 // The grace period also protects previews and concurrently prepared operations.
 func (q *Queries) PruneWorkspaceDependencyDefinitions(ctx context.Context, sourceUrl string) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneWorkspaceDependencyDefinitions, sourceUrl)

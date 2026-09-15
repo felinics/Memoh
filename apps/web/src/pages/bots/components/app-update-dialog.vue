@@ -2,7 +2,7 @@
 // Picks what to update on one App before anything runs: the release
 // (which replaces its Skills) and each dependency with a newer version.
 // Everything starts selected; the choice is emitted, the panel streams it.
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Button,
@@ -20,12 +20,19 @@ import {
   appDisplayName,
   appUpdateAvailable,
   type AppItem,
+  type AppDependencyConfirmation,
 } from '@/composables/api/useApps'
 import { dependencyDisplayName, formatDependencyVersion } from '@/utils/workspace-dependency'
+import { useAppPreparation } from '../composables/useAppPreparation'
+import AppDependencyConfirmations from './app-dependency-confirmations.vue'
+import DependencyKvList from './dependency-kv-list.vue'
 
 export interface AppUpdateChoice {
+  action: 'update' | 'resume'
   release: boolean
   dependencies: string[]
+  releaseRevision: string
+  dependencyConfirmations: AppDependencyConfirmation[]
 }
 
 interface Candidate {
@@ -35,10 +42,12 @@ interface Candidate {
   to: string
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   open: boolean
+  botId: string
   item: AppItem | null
-}>()
+  action?: 'update' | 'resume'
+}>(), { action: 'update' })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
@@ -48,6 +57,7 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const RELEASE_KEY = 'release'
 const selected = ref(new Set<string>())
+const submitting = ref(false)
 
 const name = computed(() => (props.item ? appDisplayName(props.item, locale.value) : ''))
 
@@ -75,9 +85,10 @@ const candidates = computed<Candidate[]>(() => {
   return list
 })
 
-watch(() => props.open, (open) => {
+watch([() => props.open, () => props.botId, () => props.item, () => props.action], ([open]) => {
   if (open) selected.value = new Set(candidates.value.map(candidate => candidate.key))
-})
+  submitting.value = false
+}, { immediate: true })
 
 function toggle(key: string, value: boolean | 'indeterminate') {
   const next = new Set(selected.value)
@@ -88,13 +99,41 @@ function toggle(key: string, value: boolean | 'indeterminate') {
 
 const selectedCount = computed(() => candidates.value.filter(candidate => selected.value.has(candidate.key)).length)
 
+const { prepared, preparing, error: prepareError, prepare } = useAppPreparation(() => {
+  const item = props.item
+  if (!props.open || !props.botId || !item) return null
+  if (props.action === 'resume') {
+    return item.installation_id
+      ? { botId: props.botId, request: { action: 'resume', installation_id: item.installation_id } }
+      : null
+  }
+  if (!item.registry_id || !item.app_id || !selectedCount.value) return null
+  return {
+    botId: props.botId,
+    request: {
+      action: 'update',
+      registry_id: item.registry_id,
+      app_id: item.app_id,
+      release: selected.value.has(RELEASE_KEY),
+      dependencies: candidates.value
+        .filter(candidate => candidate.key !== RELEASE_KEY && selected.value.has(candidate.key))
+        .map(candidate => candidate.key.slice('dep:'.length)),
+    },
+  }
+})
+
 function confirm() {
+  const confirmation = prepared.value
+  if (submitting.value || !confirmation?.result.revision || confirmation.request.action === 'install') return
+  submitting.value = true
   emit('confirm', {
-    release: selected.value.has(RELEASE_KEY),
-    dependencies: candidates.value
-      .filter(candidate => candidate.key !== RELEASE_KEY && selected.value.has(candidate.key))
-      .map(candidate => candidate.key.slice('dep:'.length)),
+    action: confirmation.request.action,
+    release: confirmation.request.action === 'update' && confirmation.request.release,
+    dependencies: confirmation.request.action === 'update' ? confirmation.request.dependencies : [],
+    releaseRevision: confirmation.result.revision,
+    dependencyConfirmations: confirmation.result.dependencies ?? [],
   })
+  void nextTick(() => { submitting.value = false })
 }
 </script>
 
@@ -109,22 +148,22 @@ function confirm() {
     >
       <DialogHeader class="min-w-0">
         <DialogTitle class="break-words">
-          {{ t('apps.update.title', { name }) }}
+          {{ action === 'resume' ? t('apps.prepare.resumeTitle', { name }) : t('apps.update.title', { name }) }}
         </DialogTitle>
         <DialogDescription class="break-words">
-          {{ t('apps.update.description') }}
+          {{ action === 'resume' ? t('apps.prepare.resumeDescription') : t('apps.update.description') }}
         </DialogDescription>
       </DialogHeader>
 
-      <DialogBody class="min-w-0">
+      <DialogBody class="min-w-0 space-y-4">
         <p
-          v-if="!candidates.length"
+          v-if="action === 'update' && !candidates.length"
           class="text-body text-muted-foreground"
         >
           {{ t('apps.update.none') }}
         </p>
         <ul
-          v-else
+          v-else-if="action === 'update'"
           class="divide-y divide-border rounded-lg border border-border"
         >
           <li
@@ -143,6 +182,19 @@ function confirm() {
             </label>
           </li>
         </ul>
+        <template v-if="prepared">
+          <DependencyKvList
+            :rows="[{ label: t('apps.prepare.appRevision'), value: prepared.result.revision, mono: true }]"
+          />
+          <AppDependencyConfirmations :dependencies="prepared.result.dependencies ?? []" />
+        </template>
+        <p
+          v-if="prepareError"
+          role="alert"
+          class="text-body text-destructive"
+        >
+          {{ prepareError }}
+        </p>
       </DialogBody>
 
       <DialogFooter>
@@ -153,10 +205,19 @@ function confirm() {
           {{ t('common.cancel') }}
         </Button>
         <Button
-          :disabled="!selectedCount"
+          v-if="!prepared"
+          :disabled="action === 'update' && !selectedCount"
+          :loading="preparing"
+          @click="prepare"
+        >
+          {{ t('apps.prepare.review') }}
+        </Button>
+        <Button
+          v-else
+          :disabled="submitting || !prepared.result.revision"
           @click="confirm"
         >
-          {{ t('apps.update.confirm', { count: selectedCount }, selectedCount) }}
+          {{ action === 'resume' ? t('apps.action.resume') : t('apps.update.confirm', { count: selectedCount }, selectedCount) }}
         </Button>
       </DialogFooter>
     </DialogPanel>

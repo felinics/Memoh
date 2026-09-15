@@ -358,6 +358,9 @@ const (
 
 // Launcher is a resolved CLI executable inside the bot workspace.
 type Launcher struct {
+	// LeasePath and WorkspaceEpoch fence execution across payload collection and rebuild.
+	LeasePath      string
+	WorkspaceEpoch string
 	// Path is the absolute path the driver must execute.
 	Path string
 	// Version is the observed CLI version, empty when unknown.
@@ -386,6 +389,10 @@ var ErrDependencyMissing = errors.New("workspace dependency is not installed")
 type DependencyMissingError struct {
 	DependencyID string
 	TaskID       string
+	// Repair metadata identifies durable dependency recovery, not a chat task.
+	RepairStatus      string
+	RepairOperationID string
+	DesiredVersion    string
 	// OperationInProgress distinguishes an existing administrative operation
 	// from a dependency that an administrator still needs to install.
 	OperationInProgress bool

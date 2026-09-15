@@ -4,7 +4,11 @@
 // production always uses the container's /data mount.
 package workspacedeps
 
-import "path"
+import (
+	"path"
+
+	"github.com/felinics/memoh/internal/workspace/controlpath"
+)
 
 const (
 	shimDirName     = "bin"
@@ -33,8 +37,8 @@ func ShimDir(dataRoot string) string {
 	return path.Join(DepsRoot(dataRoot), shimDirName)
 }
 
-// LocksDir holds stable per-dependency kernel lock files. Their inodes are
-// never replaced or unlinked; the OS releases ownership on process exit.
+// LocksDir names the legacy persistent lock directory, still used by Darwin.
+// Linux kernel locks use its local control directory instead.
 func LocksDir(dataRoot string) string {
 	return path.Join(DepsRoot(dataRoot), locksDirName)
 }
@@ -50,15 +54,17 @@ func VersionsDir(home string) string {
 	return path.Join(home, versionsDirName)
 }
 
-// CurrentDir returns the `current` symlink path inside a dependency home. It
-// points at the active entry below VersionsDir.
+// CurrentDir returns the stable `current` symlink to the active payload.
 func CurrentDir(home string) string {
 	return path.Join(home, currentLinkName)
 }
 
-// lockPath mirrors the kernel wrapper's stable lock file computation,
-// "$(dirname "$MEMOH_DEP_HOME")/.locks/$MEMOH_DEP_ID.lock", so the runner can
-// acquire the same lock while finalizing an operation.
+// lockPath names the legacy lock inode; executionLockPath selects the current
+// platform's kernel coordination directory.
 func lockPath(home, depID string) string {
 	return path.Join(path.Dir(home), locksDirName, depID+lockFileSuffix)
+}
+
+func executionLockPath(home, depID, osName string) string {
+	return controlpath.TransactionLock(home, depID, osName)
 }

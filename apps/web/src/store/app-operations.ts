@@ -5,7 +5,7 @@ import { toast } from '@felinic/ui'
 import i18n from '@/i18n'
 import { useRouter } from 'vue-router'
 import { getBotsByBotIdApps } from '@memohai/sdk'
-import { invalidateBotApps, appInProgress, type AppItem } from '@/composables/api/useApps'
+import { invalidateBotApps, appInProgress, type AppItem, type AppDependencyConfirmation } from '@/composables/api/useApps'
 import { invalidateBotDependencies } from '@/composables/api/useWorkspaceDependencies'
 import {
   streamAppOperation,
@@ -42,11 +42,13 @@ export interface AppOperation {
   registryId: string
   appId: string
   installationId: string
+  resumeRevision?: string
   /** Localized App name for headings and toasts. */
   name: string
   action: AppOperationAction
   install?: AppInstallTarget
   update?: AppUpdateSelection
+  dependencyConfirmations: AppDependencyConfirmation[]
   removeUnreferencedRequired: boolean
   status: DependencyProgressStatus
   /** App status the Server reported in `done` (installed, partial, removed…). */
@@ -64,10 +66,12 @@ export interface StartAppOperationInput {
   registryId: string
   appId: string
   installationId?: string
+  resumeRevision?: string
   name: string
   action: AppOperationAction
   install?: AppInstallTarget
   update?: AppUpdateSelection
+  dependencyConfirmations?: AppDependencyConfirmation[]
   removeUnreferencedRequired?: boolean
   /** Replaces the default success toast when the operation finishes unwatched. */
   onBackgroundDone?: (operation: AppOperation) => void
@@ -304,8 +308,10 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
         botId: operation.botId,
         action: operation.action,
         installationId: operation.installationId || undefined,
+        resumeRevision: operation.resumeRevision,
         install: operation.install,
         update: operation.update,
+        dependencyConfirmations: operation.dependencyConfirmations,
         registryId: operation.registryId,
         appId: operation.appId,
         removeUnreferencedRequired: operation.removeUnreferencedRequired,
@@ -398,10 +404,12 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
       registryId: input.registryId,
       appId: input.appId,
       installationId: input.installationId ?? '',
+      resumeRevision: input.resumeRevision,
       name: input.name,
       action: input.action,
-      install: input.install,
-      update: input.update,
+      install: input.install ? { ...input.install } : undefined,
+      update: input.update ? { ...input.update, dependencies: [...input.update.dependencies] } : undefined,
+      dependencyConfirmations: (input.dependencyConfirmations ?? []).map(confirmation => ({ ...confirmation })),
       removeUnreferencedRequired: input.removeUnreferencedRequired ?? false,
       status: 'running',
       result: '',

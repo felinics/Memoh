@@ -21,9 +21,8 @@ var (
 	// ErrWorkspaceMissing means the native workspace container has not been
 	// created; the caller must create it before installing anything.
 	ErrWorkspaceMissing = errors.New("workspace has not been created")
-	// ErrRollbackUnavailable means state.json records no previous version or
-	// its versions/<previous> directory is gone.
-	ErrRollbackUnavailable = errors.New("no previous version available to roll back to")
+	// ErrLegacyReinstallUnsafe requires a reviewed isolated recipe before replacing a live copy.
+	ErrLegacyReinstallUnsafe = errors.New("legacy dependency recipe cannot safely replace the current version")
 	// ErrActionUnsupported means the dependency does not support the action:
 	// image-provided dependencies have no scripts, and a
 	// manifest may leave optional actions unconfigured.

@@ -103,7 +103,7 @@ func TestDisconnectedScriptCompletionRecoversWithoutServerMemory(t *testing.T) {
 			}
 			// Acquiring the same kernel lock proves the command has finished writing
 			// its exit receipt. This waits on the owner, not on an elapsed-time guess.
-			lock := lockPath(f.home("foo"), "foo")
+			lock := executionLockPath(f.home("foo"), "foo", f.platform.OS)
 			command := "flock -w 10 " + shellQuote(lock) + " true"
 			if f.platform.OS == "darwin" {
 				command = "lockf -k -t 10 " + shellQuote(lock) + " true"

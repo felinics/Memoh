@@ -8,7 +8,7 @@
 // streaming.
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Download, FileCode, MoreHorizontal, Package, RotateCw, Undo2 } from 'lucide-vue-next'
+import { ChevronRight, Download, FileCode, MoreHorizontal, Package, RotateCw, ShieldCheck } from 'lucide-vue-next'
 import {
   Badge,
   Button,
@@ -31,6 +31,7 @@ import {
 import type { DependencyItem, DependencyWorkspaceState } from '@/composables/api/useWorkspaceDependencies'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import {
+  dependencyDesiredVersionDifference,
   dependencyMenuActions,
   dependencyPlatformUnsupported,
   dependencyPrimaryAction,
@@ -50,11 +51,13 @@ const props = withDefaults(defineProps<{
   ownsStream?: boolean
   /** Another installed App references the same dependency. */
   shared?: boolean
+  canManage?: boolean
 }>(), {
   workspaceState: undefined,
   busy: false,
   ownsStream: false,
   shared: false,
+  canManage: false,
 })
 
 const emit = defineEmits<{
@@ -71,12 +74,17 @@ const version = computed(() => formatDependencyVersion(props.item.installed_vers
 const iconUrl = computed(() => dependencyIconUrl(props.item))
 const badge = computed(() => dependencyStatusBadge(props.item))
 const unsupported = computed(() => dependencyPlatformUnsupported(props.item))
-const failed = computed(() => props.item.status === 'failed')
-const lastError = computed(() => props.item.last_error?.trim() || (props.item.last_error_code ? t(`errors.${props.item.last_error_code}`) : ''))
+const failed = computed(() => props.item.status === 'failed' || props.item.desired?.repair_status === 'manual_required')
+const desiredVersion = computed(() => dependencyDesiredVersionDifference(props.item))
+const repairError = computed(() => props.item.desired?.repair_last_error_code ? t(`errors.${props.item.desired.repair_last_error_code}`) : '')
+const lastError = computed(() => repairError.value || (props.item.last_error_code ? t(`errors.${props.item.last_error_code}`) : props.item.last_error?.trim() || ''))
 const errorOpen = ref(false)
 
-const primary = computed(() => dependencyPrimaryAction(props.item, props.workspaceState, { ownsStream: props.ownsStream }))
-const menu = computed(() => dependencyMenuActions(props.item, props.workspaceState))
+const primary = computed(() => {
+  const action = dependencyPrimaryAction(props.item, props.workspaceState, { ownsStream: props.ownsStream })
+  return props.canManage || action?.kind === 'viewProgress' ? action : null
+})
+const menu = computed(() => dependencyMenuActions(props.item, props.workspaceState).filter(action => props.canManage || action.kind === 'viewScript'))
 
 // Only the running row may be inspected while something streams; every other
 // start button waits so two scripts never race inside one workspace.
@@ -91,8 +99,8 @@ function menuIcon(kind: DependencyMenuActionKind) {
       return Download
     case 'reinstall':
       return RotateCw
-    case 'rollback':
-      return Undo2
+    case 'authorizeRepair':
+      return ShieldCheck
     default:
       return FileCode
   }
@@ -181,6 +189,19 @@ const dimClass = computed(() => (unsupported.value ? 'opacity-40' : ''))
           class="mt-0.5 text-body text-muted-foreground"
         >
           {{ description }}
+        </p>
+
+        <p
+          v-if="desiredVersion"
+          class="mt-0.5 text-body text-muted-foreground"
+        >
+          {{ t('bots.dependencies.repair.targetVersion', { version: desiredVersion }) }}
+        </p>
+        <p
+          v-if="!canManage && (item.status === 'missing' || item.desired?.repair_status === 'manual_required')"
+          class="mt-0.5 text-body text-muted-foreground"
+        >
+          {{ t('bots.dependencies.repair.managerRequired') }}
         </p>
 
         <!-- The recorded failure is a disclosure, not always-on text: a stack

@@ -7,6 +7,9 @@ import {
   postBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKey,
   postBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauth,
   postBotsByBotIdAppsCheckUpdates,
+  postBotsByBotIdAppsPrepare,
+  type HandlersAppDependencyConfirmation,
+  type HandlersAppPrepareResponse,
   type HandlersAppConnectorItem,
   type HandlersAppDependencyItem,
   type HandlersAppItem,
@@ -30,6 +33,24 @@ export type AppWorkspaceState = NonNullable<AppListResponse['workspace_state']>
 export type AppRemovalPreview = HandlersAppRemovalPreviewResponse
 export type AppCategory = HandlersSupermarketAppCategory
 export type AppTranslations = Record<string, HandlersSupermarketAppTranslation>
+export type AppDependencyConfirmation = HandlersAppDependencyConfirmation
+export type AppPreparation = HandlersAppPrepareResponse
+
+export type AppPrepareRequest =
+  | { action: 'install'; registry_id: string; app_id: string; revision: string }
+  | { action: 'resume'; installation_id: string }
+  | { action: 'update'; registry_id: string; app_id: string; release: boolean; dependencies: string[] }
+
+/** Resolves exact versions and recipes for review without starting installation. */
+export async function prepareAppOperation(botId: string, body: AppPrepareRequest, signal?: AbortSignal): Promise<AppPreparation> {
+  const { data } = await postBotsByBotIdAppsPrepare({
+    path: { bot_id: botId },
+    body,
+    signal,
+    throwOnError: true,
+  })
+  return data
+}
 
 export const BOT_APPS_QUERY_KEY = 'bot-apps'
 export const APP_CATEGORIES_QUERY_KEY = 'supermarket-categories'

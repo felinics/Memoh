@@ -146,11 +146,12 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	}
 	// A missing dependency returns as agent_dependency_missing feedback; it
 	// must not be re-wrapped into a generic runtime error.
-	launcher, err := d.resolveLauncher(ctx, botID)
+	launcher, lease, err := d.acquireLauncher(ctx, botID)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
-	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg), launcher.Path)
+	defer lease.Release()
+	proc, err := startCLI(ctx, client, projectPath, cliArgs(cfg, external.PromptInput{}, "", ""), cliEnv(cfg), launcher)
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
@@ -169,6 +170,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	if err != nil {
 		return external.ModelCatalog{}, err
 	}
+	lease.Release() // The initialized CLI now owns the inherited payload lock.
 	var response initializeResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return external.ModelCatalog{}, fmt.Errorf("decode claude initialize response: %w", err)
@@ -306,13 +308,22 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
 		return external.PromptResult{}, err
 	}
+	if err := external.PrepareDependency(ctx, d.launchers, input.BotID, dependencyID); err != nil {
+		var missing *external.DependencyMissingError
+		if errors.As(err, &missing) {
+			return external.PromptResult{}, dependencyMissingFeedback(missing)
+		}
+		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+	}
 	// Resolve the CLI copy before any session or tool work: a missing
 	// dependency ends the turn here with agent_dependency_missing feedback,
 	// already in its final user-facing shape.
-	launcher, err := d.resolveLauncher(ctx, input.BotID)
+	launcher, lease, err := d.acquireLauncher(ctx, input.BotID)
 	if err != nil {
 		return external.PromptResult{}, err
 	}
+
+	defer lease.Release()
 
 	storedSessionID := strings.TrimSpace(metadataString(input.RuntimeMetadata, metadataSessionIDKey))
 	if input.ForceFreshRuntime {
@@ -340,7 +351,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 
 	// The process must survive a caller disconnect long enough for the
 	// interrupt handshake below.
-	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, env, launcher.Path)
+	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, env, launcher)
 	if err != nil {
 		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
@@ -359,6 +370,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err != nil {
 		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
+	lease.Release() // Startup is fenced; the process lock survives turn draining.
 	var capabilities initializeResponse
 	if err := json.Unmarshal(initialized, &capabilities); err != nil {
 		return external.PromptResult{}, err

@@ -268,8 +268,7 @@ func TestWorkspaceDependencyErrorCatalog(t *testing.T) {
 		CodeWorkspaceDependencyWorkspaceNotRunning: http.StatusConflict,
 		CodeWorkspaceDependencyWorkspaceMissing:    http.StatusConflict,
 
-		CodeWorkspaceDependencyRollbackUnavailable: http.StatusConflict,
-		CodeWorkspaceDependencyOperationFailed:     http.StatusInternalServerError,
+		CodeWorkspaceDependencyOperationFailed: http.StatusInternalServerError,
 	}
 	for code, status := range cases {
 		definition, ok := Lookup(code)
