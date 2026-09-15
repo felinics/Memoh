@@ -106,7 +106,7 @@
   "computerConnect": {
     "title": "连接电脑",
     "commandLabel": "连接命令",
-    "commandDescription": "在要连接的电脑上运行，保持进程运行。",
+    "commandDescription": "在要连接的电脑上运行一次即可。它会安装后台服务，让电脑保持连接，无需一直开着终端。",
     "waiting": "等待电脑连接…",
     "finish": "完成"
   },

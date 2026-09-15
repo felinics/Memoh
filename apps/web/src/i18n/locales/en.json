@@ -106,7 +106,7 @@
   "computerConnect": {
     "title": "Connect computer",
     "commandLabel": "Connection command",
-    "commandDescription": "Run it on the computer you want to connect, and keep it running.",
+    "commandDescription": "Run it once on the computer you want to connect. It installs a background service that keeps the computer connected — no need to keep a terminal open.",
     "waiting": "Waiting for the computer to connect…",
     "finish": "Done"
   },
