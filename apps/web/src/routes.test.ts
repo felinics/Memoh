@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter, type RouteRecordRaw } from 'vue-router'
-import { createAppRoutes } from './routes'
+import { createAppRoutes, settingsPageLoaders } from './routes'
 
 vi.mock('./i18n', () => ({ i18nRef: (key: string) => ({ value: key }) }))
 
@@ -66,4 +66,23 @@ it('preserves Desktop session links through the legacy chat redirect', async () 
   await router.push('/chat/my-bot/my-session')
   expect(router.currentRoute.value.path).toBe('/bot/my-bot/my-session')
   expect(router.currentRoute.value.params.sessionId).toBe('my-session')
+})
+
+// The prefetch warmup list must stay in lockstep with the settings route table:
+// adding a settings page without adding its loader (or vice versa) fails here.
+// Plain-object components (render stubs) and redirects have nothing to warm.
+it('prefetch loaders cover exactly the settings lazy components', () => {
+  const components = new Set<unknown>()
+  const collect = (list: RouteRecordRaw[]) => {
+    for (const route of list) {
+      if (typeof route.component === 'function') components.add(route.component)
+      if (route.children) collect(route.children)
+    }
+  }
+  const routes = createAppRoutes('web')
+  const settings = routes.find(route => route.path === '/settings')
+  expect(settings).toBeTruthy()
+  if (typeof settings?.component === 'function') components.add(settings.component)
+  collect(settings?.children ?? [])
+  expect(new Set(settingsPageLoaders)).toEqual(components)
 })

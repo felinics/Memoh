@@ -15,7 +15,9 @@ const router = createRouter({
 
 // After the initial navigation settles (entry chunks had bandwidth priority),
 // warm the settings pages so first-time sidebar clicks don't wait on a chunk.
-void router.isReady().then(() => prefetchSettingsPages())
+// isReady rejects when the initial navigation errors (e.g. backend down) —
+// prefetch silently skipping then is fine, an unhandled rejection is not.
+void router.isReady().then(() => prefetchSettingsPages(), () => {})
 
 // Track the previous route so history-following back affordances work the same
 // on web and on the desktop shell's memory-history router. See useBackOr.

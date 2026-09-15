@@ -29,6 +29,22 @@ const pageSupermarketAppDetail = () => import('@/pages/supermarket/app-detail.vu
 const pageAbout = () => import('@/pages/about/index.vue')
 
 /**
+ * Settings page loaders warmed by prefetchSettingsPages, ordered sidebar
+ * destinations FIRST and drill-in sub-pages (only reachable through a list
+ * page) LAST — warming drill-ins early just competes with the pages a first
+ * click can actually hit. Exported so routes.test.ts can pin it to the route
+ * table (adding a settings page without adding its loader fails that test).
+ */
+export const settingsPageLoaders = [
+  pageSettings,
+  pageBots, pageProviders, pageRuntimes, pageWebSearch, pageMemory, pageVoice,
+  pageVideo, pageEmail, pageUsage, pagePeople, pageAppearance, pageKeyboard,
+  pageProfile, pageSupermarket, pageAbout,
+  pageBotNew, pageBotCreateProgress, pageBotDetail,
+  pageSupermarketCategory, pageSupermarketAppDetail,
+]
+
+/**
  * Warm the settings page chunks during browser idle time.
  *
  * Every settings page is a lazy route chunk, and vue-router only starts
@@ -38,24 +54,32 @@ const pageAbout = () => import('@/pages/about/index.vue')
  * the module cache instead (ES module requests dedupe by URL, so the later
  * real navigation costs nothing). Skipped under Save-Data; failures are
  * swallowed — a cold click then just pays the normal lazy-load cost.
+ *
+ * Chunks are warmed ONE AT A TIME. Firing every loader at once makes a click
+ * that lands mid-warmup queue behind the whole swarm — the module map dedupes
+ * by URL, so the click cannot be prioritized and can end up slower than the
+ * old single lazy import. Sequentially, an in-flight chunk costs a click at
+ * most one small chunk, and chunks not yet started leave the connection free
+ * for the click itself.
  */
 export function prefetchSettingsPages(): void {
   const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
   if (connection?.saveData) return
 
-  const loaders = [
-    pageSettings,
-    pageBots, pageBotNew, pageBotCreateProgress, pageBotDetail,
-    pageProviders, pageRuntimes, pageWebSearch, pageMemory, pageVoice, pageVideo,
-    pageEmail, pageUsage, pagePeople, pageAppearance, pageKeyboard, pageProfile,
-    pageSupermarket, pageSupermarketCategory, pageSupermarketAppDetail, pageAbout,
-  ]
-  const warm = () => {
-    for (const load of loaders) void load().catch(() => {})
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
   }
-  const w = window as Window & { requestIdleCallback?: (cb: () => void) => number }
-  if (w.requestIdleCallback) w.requestIdleCallback(warm)
-  else setTimeout(warm, 2000)
+  const schedule = (cb: () => void) => {
+    if (w.requestIdleCallback) w.requestIdleCallback(cb, { timeout: 3000 })
+    else setTimeout(cb, 2000)
+  }
+  const queue = [...settingsPageLoaders]
+  const warmNext = () => {
+    const load = queue.shift()
+    if (!load) return
+    void load().catch(() => {}).finally(() => schedule(warmNext))
+  }
+  schedule(warmNext)
 }
 
 /** Shared page routes; each host owns its router, history, and navigation guards. */
